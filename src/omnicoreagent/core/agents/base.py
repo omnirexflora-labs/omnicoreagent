@@ -710,6 +710,7 @@ class BaseReactAgent:
             local_tools=local_tools,
         )
 
+        tools_results = []
         obs_text = None
 
         # Early exit on tool validation failure
@@ -758,6 +759,15 @@ class BaseReactAgent:
                 f"Tool call validation failed for: {combined_tool_name} "
                 f"args={combined_tool_args} -> {obs_text}"
             )
+            # Populate tools_results for validation errors
+            for single_tool in tool_errors:
+                tools_results.append({
+                    "tool_name": getattr(single_tool, "tool_name", "unknown"),
+                    "args": getattr(single_tool, "tool_args", {}),
+                    "status": "error",
+                    "data": None,
+                    "message": getattr(single_tool, "observation", obs_text)
+                })
         else:
             tool_call_id = str(uuid.uuid4())
             combined_tool_name = "_and_".join([t.tool_name for t in tool_call_result])
@@ -912,6 +922,17 @@ class BaseReactAgent:
                         str(single_tool.tool_args),
                         obs_text,
                     )
+
+                # Populate tools_results for error
+                for single_tool in tool_call_result:
+                    tools_results.append({
+                        "tool_name": getattr(single_tool, "tool_name", "unknown"),
+                        "args": getattr(single_tool, "tool_args", {}),
+                        "status": "error",
+                        "data": None,
+                        "message": obs_text
+                    })
+
                 await add_message_to_history(
                     role="tool",
                     content=obs_text,
@@ -944,6 +965,17 @@ class BaseReactAgent:
                         str(single_tool.tool_args),
                         obs_text,
                     )
+
+                # Populate tools_results for error
+                for single_tool in tool_call_result:
+                    tools_results.append({
+                        "tool_name": getattr(single_tool, "tool_name", "unknown"),
+                        "args": getattr(single_tool, "tool_args", {}),
+                        "status": "error",
+                        "data": None,
+                        "message": obs_text
+                    })
+
                 await add_message_to_history(
                     role="tool",
                     content=obs_text,
