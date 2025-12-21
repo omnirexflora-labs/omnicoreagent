@@ -29,21 +29,6 @@ console = Console()
 logger = logging.getLogger("omnicoreagent")
 logger.setLevel(logging.INFO)
 
-# Vector database feature flag
-ENABLE_VECTOR_DB = decouple_config("ENABLE_VECTOR_DB", default=False, cast=bool)
-# Embedding API key for LLM-based embeddings
-EMBEDDING_API_KEY = decouple_config("EMBEDDING_API_KEY", default=None)
-
-
-def is_vector_db_enabled() -> bool:
-    """Check if vector database features are enabled."""
-    return ENABLE_VECTOR_DB
-
-
-def is_embedding_requirements_met() -> bool:
-    """Check if embedding requirements are met (both vector DB and API key are set)."""
-    return ENABLE_VECTOR_DB and EMBEDDING_API_KEY is not None
-
 
 # Remove any existing handlers
 for handler in logger.handlers[:]:
@@ -560,54 +545,45 @@ def json_to_smooth_text(content):
 
 def normalize_enriched_tool(enriched: str) -> str:
     """
-    Normalize enriched tool XML (<tool_document>) into a hybrid
-    natural-language + structured format optimized for embedding & retrieval.
+    Normalize and clean the enriched tool string for better BM25 retrieval.
+
+    This function performs the following operations:
+    1. Converts to lowercase for case-insensitive matching
+    2. Removes JSON structural characters (braces, brackets, quotes, colons)
+    3. Tokenizes parameter names from camelCase/snake_case
+    4. Removes special characters while preserving word boundaries
+    5. Normalizes whitespace
+
+    Args:
+        enriched: Raw enriched string containing tool name, description, and parameters
+
+    Returns:
+        Normalized string optimized for BM25 indexing and retrieval
     """
+    if not enriched:
+        return ""
 
-    try:
-        root = ET.fromstring(enriched)
-    except Exception:
-        # fallback: return as plain text if parsing fails
-        return enriched.strip()
+    # Convert to lowercase
+    text = enriched.lower()
 
-    name = root.findtext("expanded_name", default="Unnamed Tool")
-    description = root.findtext("long_description", default="").strip()
+    # Remove JSON structural characters
+    text = re.sub(r'[{}\[\]":\',]', " ", text)
 
-    parts = [f"Tool: {name}\n{description}"]
+    # Split camelCase and snake_case into separate words
+    # e.g., "userName" -> "user name", "user_name" -> "user name"
+    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
+    text = re.sub(r"_", " ", text)
 
-    params_root = root.find("argument_schema")
-    if params_root is not None:
-        params = []
-        for param in params_root.findall("parameter"):
-            pname = param.findtext("name", default="unknown")
-            ptype = param.findtext("type", default="unspecified")
-            preq = param.findtext("required", default="false")
-            pdesc = (param.findtext("description") or "").strip()
-            params.append(f"- {pname} ({ptype}, required={preq}): {pdesc}")
-        if params:
-            parts.append("Parameters:\n" + "\n".join(params))
+    # Remove special characters but keep spaces and alphanumeric
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
 
-    questions_root = root.find("synthetic_questions")
-    if questions_root is not None:
-        questions = [
-            f"- {(q.text or '').strip()}"
-            for q in questions_root.findall("question")
-            if (q.text or "").strip()
-        ]
-        if questions:
-            parts.append("Example Questions:\n" + "\n".join(questions))
+    # Normalize multiple spaces to single space
+    text = re.sub(r"\s+", " ", text)
 
-    topics_root = root.find("key_topics")
-    if topics_root is not None:
-        topics = [
-            (t.text or "").strip()
-            for t in topics_root.findall("topic")
-            if (t.text or "").strip()
-        ]
-        if topics:
-            parts.append("Key Topics: " + ", ".join(topics))
+    # Strip leading/trailing whitespace
+    normalized = text.strip()
 
-    return "\n\n".join(parts).strip()
+    return normalized
 
 
 def handle_stuck_state(original_system_prompt: str, message_stuck_prompt: bool = False):

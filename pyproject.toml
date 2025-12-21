@@ -13,7 +13,7 @@ bump = true
 [project]
 name = "omnicoreagent"
 dynamic = ["version"]
-description = "OmniCoreAgent AI Framework - Universal MCP Client with multi-transport support and LLM-powered tool routing"
+description = "OmniCoreAgent is a powerful Python AI Agent framework for building autonomous AI agents that think, reason, and execute complex tasks. Production-ready agents that use tools, manage memory, coordinate workflows, and handle real-world business logic."
 readme = "README.md"
 authors = [{ name = "Abiola Adeshina", email = "abiolaadedayo1993@gmail.com" }]
 requires-python = ">=3.10"
@@ -48,8 +48,6 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "tzlocal>=5.2",
     "psycopg2-binary>=2.9.10",
-    "qdrant-client>=1.15.0",
-    "chromadb>=1.0.15",
     "apscheduler>=3.11.0",
     "psutil>=7.0.0",
     "pymupdf>=1.26.3",
@@ -62,12 +60,11 @@ dependencies = [
 ]
 
 [project.scripts]
-omnicoreagent = "omnicoreagent.mcp_omni_connect.main:main"
-omniagent = "omnicoreagent.omni_agent.agent:OmniAgent"
+omnicoreagent= "omnicoreagent.omni_agent.agent:OmniAgent"
 
 [project.urls]
-Repository = "https://github.com/Abiorh001/mcp_omni_connect"
-Issues = "https://github.com/Abiorh001/mcp_omni_connect/issues"
+Repository = "https://github.com/omnirexflora-labs/omnicoreagent"
+Issues = "https://github.com/omnirexflora-labs/omnicoreagent/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/omnicoreagent"]

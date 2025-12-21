@@ -14,8 +14,6 @@ class ReactAgent(BaseReactAgent):
             request_limit=config.request_limit,
             total_tokens_limit=config.total_tokens_limit,
             enable_tools_knowledge_base=config.enable_tools_knowledge_base,
-            memory_results_limit=config.memory_results_limit,
-            memory_similarity_threshold=config.memory_similarity_threshold,
             tools_results_limit=config.tools_results_limit,
             tools_similarity_threshold=config.tools_similarity_threshold,
             memory_tool_backend=config.memory_tool_backend,

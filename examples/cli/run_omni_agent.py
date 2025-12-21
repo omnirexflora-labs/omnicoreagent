@@ -792,29 +792,21 @@ Provide clear, supportive, and context-aware responses that help learners grow.
                 "total_tokens_limit": 0,  # or 0 for unlimited
                 # --- Memory Retrieval Config ---
                 "memory_config": {"mode": "sliding_window", "value": 100},
-                "memory_results_limit": 5,
-                "memory_similarity_threshold": 0.5,
                 # --- Tool Retrieval Config ---
-                "enable_tools_knowledge_base": False,
+                "enable_tools_knowledge_base": True,
                 "tools_results_limit": 10,
-                "tools_similarity_threshold": 0.1,
+                "tools_similarity_threshold": 0.5,
                 "memory_tool_backend": None,
-            },
-            embedding_config={
-                "provider": "voyage",
-                "model": "voyage-3.5",
-                "dimensions": 1024,
-                "encoding_format": "base64",
             },
             memory_router=self.memory_router,
             event_router=self.event_router,
             debug=True,
         )
         await self.agent.connect_mcp_servers()
-        # Initialize background agent manager
-        self.background_manager = BackgroundAgentManager(
-            memory_router=self.memory_router, event_router=self.event_router
-        )
+        # # Initialize background agent manager
+        # self.background_manager = BackgroundAgentManager(
+        #     memory_router=self.memory_router, event_router=self.event_router
+        # )
 
         print("✅ OmniAgent CLI initialized successfully")
 

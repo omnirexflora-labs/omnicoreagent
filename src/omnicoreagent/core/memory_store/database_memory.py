@@ -54,45 +54,6 @@ class DatabaseMemory(AbstractMemoryStore):
             session_id=session_id, agent_name=agent_name
         )
 
-    async def set_last_processed_messages(
-        self, session_id: str, agent_name: str, timestamp: float, memory_type: str
-    ) -> None:
-        return await self.db_session.set_last_processed_messages(
-            session_id, agent_name, timestamp, memory_type
-        )
-
-    async def get_last_processed_messages(
-        self, session_id: str, agent_name: str, memory_type: str
-    ) -> float | None:
-        return await self.db_session.get_last_processed_messages(
-            session_id, agent_name, memory_type
-        )
-
-    async def tool_exists(self, tool_name: str, mcp_server_name: str) -> Optional[dict]:
-        """
-        Check if a tool already exists for the given server.
-        """
-        return await self.db_session.tool_exists(
-            tool_name=tool_name, mcp_server_name=mcp_server_name
-        )
-
-    async def store_tool(
-        self,
-        tool_name: str,
-        mcp_server_name: str,
-        raw_tool: dict,
-        enriched_tool: dict,
-    ) -> None:
-        """
-        Store a tool in the database.
-        """
-        await self.db_session.store_tool(
-            tool_name=tool_name,
-            mcp_server_name=mcp_server_name,
-            raw_tool=raw_tool,
-            enriched_tool=enriched_tool,
-        )
-
     async def clear_memory(
         self,
         session_id: str = None,

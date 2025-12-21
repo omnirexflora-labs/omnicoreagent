@@ -39,7 +39,6 @@ from omnicoreagent.core.utils import (
     logger,
     show_tool_response,
     track,
-    is_vector_db_enabled,
     normalize_tool_args,
     build_xml_observations_block,
     BackgroundTaskManager,
@@ -55,30 +54,12 @@ from omnicoreagent.core.events.base import (
     UserMessagePayload,
     AgentThoughtPayload,
 )
-import traceback
 from omnicoreagent.core.tools.tool_knowledge_base import (
     tools_retriever_local_tool,
 )
 from omnicoreagent.core.tools.memory_tool.memory_tool import (
     build_tool_registry_memory_tool,
 )
-from omnicoreagent.core.constants import date_time_func
-
-
-if is_vector_db_enabled():
-    logger.info("Vector database is enabled")
-    try:
-        from omnicoreagent.core.memory_store.memory_management.memory_manager import (
-            MemoryManagerFactory,
-        )
-        from omnicoreagent.core.memory_store.memory_management.background_memory_management import (
-            fire_and_forget_memory_processing,
-        )
-    except Exception as e:
-        logger.warning(f"Failed to import memory manager: {e}")
-        pass
-else:
-    logger.info("Vector database is disabled")
 
 
 class BaseReactAgent:
@@ -91,8 +72,6 @@ class BaseReactAgent:
         tool_call_timeout: int,
         request_limit: int = 0,
         total_tokens_limit: int = 0,
-        memory_results_limit: int = 5,
-        memory_similarity_threshold: float = 0.5,
         enable_tools_knowledge_base: bool = False,
         tools_results_limit: int = 10,
         tools_similarity_threshold: float = 0.5,
@@ -120,10 +99,6 @@ class BaseReactAgent:
         else:
             logger.info("Usage limits disabled (production mode)")
 
-        # Memory retrieval configuration with sensible defaults
-        self.memory_results_limit = memory_results_limit
-        self.memory_similarity_threshold = memory_similarity_threshold
-
         self.tools_results_limit = tools_results_limit
         self.tools_similarity_threshold = tools_similarity_threshold
 
@@ -146,85 +121,6 @@ class BaseReactAgent:
                 pending_tool_responses=[],
             )
         return self._session_states[key]
-
-    @track("memory_retrieval")
-    async def get_long_episodic_memory(
-        self,
-        query: str,
-        session_id: str,
-        llm_connection: Callable = None,
-    ):
-        """Get long-term and episodic memory for a given query and session ID using optimized single query
-
-        Args:
-            query: The search query for memory retrieval
-            session_id: The session ID to search within
-            llm_connection: LLM connection for vector operations
-            results_limit: Number of results to retrieve (overrides default if provided)
-            similarity_threshold: Similarity threshold for filtering (overrides default if provided)
-        """
-        try:
-            # Check if vector database is enabled
-            if not is_vector_db_enabled():
-                logger.debug("Vector database disabled - skipping memory retrieval")
-                return [], []
-
-            limit = self.memory_results_limit
-            threshold = self.memory_similarity_threshold
-
-            logger.debug(f"Memory retrieval: limit={limit}, threshold={threshold}")
-
-            try:
-                # Vector DB is enabled - load memory functions and use them
-                episodic_manager, long_term_manager = (
-                    MemoryManagerFactory.create_both_memory_managers(
-                        agent_name=self.agent_name, llm_connection=llm_connection
-                    )
-                )
-
-                async def run_queries():
-                    long_term_results, episodic_results = await asyncio.gather(
-                        asyncio.to_thread(
-                            long_term_manager.query_memory,
-                            query=query,
-                            session_id=session_id,
-                            n_results=limit,
-                            similarity_threshold=threshold,
-                        ),
-                        asyncio.to_thread(
-                            episodic_manager.query_memory,
-                            query=query,
-                            session_id=session_id,
-                            n_results=limit,
-                            similarity_threshold=threshold,
-                        ),
-                    )
-
-                    return long_term_results, episodic_results
-
-                # Enforce timeout (10 seconds)
-                long_term_results, episodic_results = await asyncio.wait_for(
-                    run_queries(), timeout=10.0
-                )
-                return long_term_results, episodic_results
-
-            except asyncio.TimeoutError:
-                logger.warning("Memory queries timed out after 10 seconds")
-                return [], []
-            except ImportError as e:
-                logger.warning(f"Memory management modules not available: {e}")
-                return [], []
-            except Exception as e:
-                logger.error(f"Error in memory retrieval: {e}")
-                return [], []
-
-        except Exception as e:
-            logger.error(f"Failed to retrieve memory for session {session_id}: {e}")
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            return (
-                "No relevant long-term memory found",
-                "No relevant episodic memory found",
-            )
 
     async def extract_action_or_answer(
         self,
@@ -369,29 +265,6 @@ class BaseReactAgent:
             Message.model_validate(msg) if isinstance(msg, dict) else msg
             for msg in short_term_memory_message_history
         ]
-        try:
-            # Memory processing when vector DB is enabled
-            if is_vector_db_enabled():
-                try:
-                    # get the name of the memory store type used
-                    memory_store_type = message_history.__self__.memory_store_type
-
-                    fire_and_forget_memory_processing(
-                        session_id=session_id,
-                        agent_name=self.agent_name,
-                        messages=validated_messages,
-                        memory_store_type=memory_store_type,
-                        llm_connection=llm_connection,
-                    )
-                    logger.debug("Memory processing initiated")
-                except ImportError as e:
-                    logger.warning(f"Memory processing modules not available: {e}")
-                except Exception as e:
-                    logger.error(f"Error in memory processing: {e}")
-            else:
-                logger.debug("Vector DB disabled - skipping memory processing")
-        except Exception as e:
-            logger.error(f"Error in memory processing: {e}")
         # get the session state to be use
         session_state = self._get_session_state(session_id=session_id, debug=debug)
         for message in validated_messages:
@@ -463,7 +336,7 @@ class BaseReactAgent:
     ) -> ToolError | list[ToolCallResult]:
         try:
             if self.enable_tools_knowledge_base:
-                mcp_tools = None
+                # mcp_tools = None
                 local_tools = tools_retriever_local_tool
                 if self.memory_tool_backend:
                     build_tool_registry_memory_tool(
@@ -479,6 +352,8 @@ class BaseReactAgent:
 
             for action in actions:
                 tool_name = action.get("tool", "").strip()
+                if tool_name == "tools_retriever":
+                    mcp_tools = None
                 tool_args = action.get("parameters", {})
 
                 if not tool_name:
@@ -762,13 +637,15 @@ class BaseReactAgent:
 
             # Populate tools_results for validation errors
             for single_tool in tool_errors:
-                tools_results.append({
-                    "tool_name": getattr(single_tool, "tool_name", "unknown"),
-                    "args": getattr(single_tool, "tool_args", {}),
-                    "status": "error",
-                    "data": None,
-                    "message": getattr(single_tool, "observation", obs_text)
-                })
+                tools_results.append(
+                    {
+                        "tool_name": getattr(single_tool, "tool_name", "unknown"),
+                        "args": getattr(single_tool, "tool_args", {}),
+                        "status": "error",
+                        "data": None,
+                        "message": getattr(single_tool, "observation", obs_text),
+                    }
+                )
         else:
             tool_call_id = str(uuid.uuid4())
             combined_tool_name = "_and_".join([t.tool_name for t in tool_call_result])
@@ -927,13 +804,15 @@ class BaseReactAgent:
 
                 # Populate tools_results for timeout
                 for single_tool in tool_call_result:
-                    tools_results.append({
-                        "tool_name": getattr(single_tool, "tool_name", "unknown"),
-                        "args": getattr(single_tool, "tool_args", {}),
-                        "status": "error",
-                        "data": None,
-                        "message": obs_text
-                    })
+                    tools_results.append(
+                        {
+                            "tool_name": getattr(single_tool, "tool_name", "unknown"),
+                            "args": getattr(single_tool, "tool_args", {}),
+                            "status": "error",
+                            "data": None,
+                            "message": obs_text,
+                        }
+                    )
 
                 await add_message_to_history(
                     role="tool",
@@ -970,13 +849,15 @@ class BaseReactAgent:
 
                 # Populate tools_results for generic exceptions
                 for single_tool in tool_call_result:
-                    tools_results.append({
-                        "tool_name": getattr(single_tool, "tool_name", "unknown"),
-                        "args": getattr(single_tool, "tool_args", {}),
-                        "status": "error",
-                        "data": None,
-                        "message": obs_text
-                    })
+                    tools_results.append(
+                        {
+                            "tool_name": getattr(single_tool, "tool_name", "unknown"),
+                            "args": getattr(single_tool, "tool_args", {}),
+                            "status": "error",
+                            "data": None,
+                            "message": obs_text,
+                        }
+                    )
 
                 await add_message_to_history(
                     role="tool",
@@ -1280,20 +1161,11 @@ class BaseReactAgent:
     ) -> None:
         """
         Prepare the full initial message list for the LLM by concurrently:
-        - Retrieving memory (if enabled)
         - Building tool registry
         - Loading prior message history
         - Injecting current user query
         """
         tasks = {}
-
-        # Memory retrieval only if vector DB enabled
-        if is_vector_db_enabled():
-            tasks["memory"] = self.get_long_episodic_memory(
-                query=query, session_id=session_id, llm_connection=llm_connection
-            )
-        else:
-            tasks["memory"] = asyncio.create_task(asyncio.sleep(0, result=([], [])))
 
         # Tool registry
         tasks["tools"] = self.get_tools_registry(
@@ -1311,7 +1183,6 @@ class BaseReactAgent:
         try:
             results = await asyncio.wait_for(
                 asyncio.gather(
-                    tasks["memory"],
                     tasks["tools"],
                     tasks["history"],
                     return_exceptions=True,
@@ -1323,27 +1194,21 @@ class BaseReactAgent:
                 "Timeout during initial message preparation (20s). Proceeding with defaults."
             )
             # fallback results on timeout
-            results = [([], []), "No tools available", None]
+            results = ["No tools available", None]
 
         for r in results:
             if isinstance(r, BaseException):
                 logger.error(f"prepare_initial_messages error: {r}", exc_info=True)
 
         # Unpack results
-        long_term_memory, episodic_memory = (
-            results[0] if not isinstance(results[0], BaseException) else ([], [])
-        )
         tools_section = (
-            results[1]
-            if not isinstance(results[1], BaseException)
+            results[0]
+            if not isinstance(results[0], BaseException)
             else "No tools available"
         )
 
         # Build system prompt
         updated_system_prompt = system_prompt
-
-        if is_vector_db_enabled():
-            updated_system_prompt += f"\n[LONG TERM MEMORY]\n{long_term_memory}\n[EPISODIC MEMORY]\n{episodic_memory}"
 
         if self.enable_tools_knowledge_base:
             updated_system_prompt += f"\n{tools_retriever_additional_prompt}"
@@ -1352,11 +1217,6 @@ class BaseReactAgent:
             updated_system_prompt += f"\n{memory_tool_additional_prompt}"
 
         updated_system_prompt += f"\n[AVAILABLE TOOLS REGISTRY]\n{tools_section}"
-
-        current_date_time = date_time_func["format_date"]()
-        updated_system_prompt += (
-            f"<current_date_time>{current_date_time}</current_date_time>"
-        )
 
         # Insert system prompt at index 0
         session_state.messages.insert(
