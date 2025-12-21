@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from omnicoreagent.core.agents.react_agent import ReactAgent
 from omnicoreagent.core.agents.types import AgentConfig as ReactAgentConfig
-from omnicoreagent.mcp_omni_connect.client import Configuration, MCPClient
+from omnicoreagent.mcp_clients_connection.client import Configuration, MCPClient
 from omnicoreagent.core.llm import LLMConnection
 from omnicoreagent.core.memory_store.memory_router import MemoryRouter
 from omnicoreagent.omni_agent.config import (
@@ -16,7 +16,7 @@ from omnicoreagent.omni_agent.config import (
 from omnicoreagent.omni_agent.prompts.prompt_builder import OmniAgentPromptBuilder
 from omnicoreagent.omni_agent.prompts.react_suffix import SYSTEM_SUFFIX
 from omnicoreagent.core.events.event_router import EventRouter
-from omnicoreagent.core.tools.semantic_tools import SemanticToolManager
+from omnicoreagent.core.tools.advance_tools.advanced_tools_use import AdvanceToolsUse
 from omnicoreagent.core.utils import logger
 
 
@@ -36,7 +36,6 @@ class OmniAgent:
         mcp_tools: List[Union[Dict[str, Any], MCPToolConfig]] = None,
         local_tools: Optional[Any] = None,  # LocalToolsIntegration instance
         agent_config: Optional[Union[Dict[str, Any], AgentConfig]] = None,
-        embedding_config: Optional[Dict[str, Any]] = None,
         memory_router: Optional[MemoryRouter] = None,
         event_router: Optional[EventRouter] = None,
         debug: bool = False,
@@ -62,7 +61,6 @@ class OmniAgent:
         self.mcp_tools = mcp_tools or []
         self.local_tools = local_tools
         self.agent_config = agent_config
-        self.embedding_config = embedding_config or {}
 
         self.debug = debug
         self.memory_router = memory_router or MemoryRouter(
@@ -86,7 +84,6 @@ class OmniAgent:
             model_config=self.model_config,
             mcp_tools=self.mcp_tools,
             agent_config=agent_config_with_name,
-            embedding_config=self.embedding_config,
         )
 
         # Save to hidden location
@@ -168,18 +165,11 @@ class OmniAgent:
             await self.mcp_client.connect_to_servers(self.mcp_client.config_filename)
             # connect all the tools to the tools knowledge base if its enabled
             if self.agent.enable_tools_knowledge_base:
-                llm_connection = self.llm_connection
-                store_tool = self.memory_router.store_tool
-                tool_exists = self.memory_router.tool_exists
                 mcp_tools = self.mcp_client.available_tools if self.mcp_client else {}
-                semantic_tools_manager = SemanticToolManager(
-                    llm_connection=llm_connection
-                )
+                advance_tools_manager = AdvanceToolsUse()
 
-                await semantic_tools_manager.batch_process_all_mcp_servers(
+                await advance_tools_manager.load_and_process_tools(
                     mcp_tools=mcp_tools,
-                    store_tool=store_tool,
-                    tool_exists=tool_exists,
                 )
 
     async def run(self, query: str, session_id: Optional[str] = None) -> Dict[str, Any]:

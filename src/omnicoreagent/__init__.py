@@ -23,7 +23,7 @@ from .omni_agent.background_agent import (
 )
 
 # MCP Client (for advanced users)
-from .mcp_omni_connect import MCPClient, Configuration, main
+from .mcp_clients_connection import MCPClient, Configuration
 
 # workflow agent interface
 from .omni_agent.workflow.parallel_agent import ParallelAgent
@@ -54,5 +54,4 @@ __all__ = [
     # MCP Client
     "MCPClient",
     "Configuration",
-    "main",
 ]

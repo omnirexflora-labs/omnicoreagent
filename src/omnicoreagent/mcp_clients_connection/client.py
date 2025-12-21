@@ -15,11 +15,11 @@ from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 
 from omnicoreagent.core.llm import LLMConnection
-from omnicoreagent.mcp_omni_connect.notifications import handle_notifications
-from omnicoreagent.mcp_omni_connect.refresh_server_capabilities import (
+from omnicoreagent.mcp_clients_connection.notifications import handle_notifications
+from omnicoreagent.mcp_clients_connection.refresh_server_capabilities import (
     refresh_capabilities,
 )
-from omnicoreagent.mcp_omni_connect.sampling import samplingCallback
+from omnicoreagent.mcp_clients_connection.sampling import samplingCallback
 from omnicoreagent.core.utils import logger
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse

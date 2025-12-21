@@ -91,48 +91,6 @@ class MemoryRouter:
             message["metadata"] = message.pop("msg_metadata", None)
         return messages
 
-    async def set_last_processed_messages(
-        self, session_id: str, agent_name: str, timestamp: float, memory_type: str
-    ) -> None:
-        await self.memory_store.set_last_processed_messages(
-            session_id=session_id,
-            agent_name=agent_name,
-            timestamp=timestamp,
-            memory_type=memory_type,
-        )
-
-    async def get_last_processed_messages(
-        self, session_id: str, agent_name: str, memory_type: str
-    ) -> Optional[float]:
-        return await self.memory_store.get_last_processed_messages(
-            session_id=session_id, agent_name=agent_name, memory_type=memory_type
-        )
-
-    async def tool_exists(self, tool_name: str, mcp_server_name: str) -> Optional[dict]:
-        """
-        Check if a tool already exists in the memory store.
-        """
-        return await self.memory_store.tool_exists(
-            tool_name=tool_name, mcp_server_name=mcp_server_name
-        )
-
-    async def store_tool(
-        self,
-        tool_name: str,
-        mcp_server_name: str,
-        raw_tool: dict,
-        enriched_tool: dict,
-    ) -> None:
-        """
-        Store a tool in the memory store.
-        """
-        await self.memory_store.store_tool(
-            tool_name=tool_name,
-            mcp_server_name=mcp_server_name,
-            raw_tool=raw_tool,
-            enriched_tool=enriched_tool,
-        )
-
     async def clear_memory(
         self, session_id: str = None, agent_name: str = None
     ) -> None:

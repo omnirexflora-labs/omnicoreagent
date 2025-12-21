@@ -1,7 +1,7 @@
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from typing import Callable
 from omnicoreagent.core.utils import logger
-from omnicoreagent.core.tools.semantic_tools import SemanticToolManager
+from omnicoreagent.core.tools.advance_tools.advanced_tools_use import AdvanceToolsUse
 
 
 tools_retriever_local_tool = ToolRegistry()
@@ -10,17 +10,17 @@ tools_retriever_local_tool = ToolRegistry()
 @tools_retriever_local_tool.register_tool(
     name="tools_retriever",
     description="""
-    Semantic Tool Discovery and Retrieval System
+   Advcance Tool Discovery and Retrieval System
 
     This is the primary tool discovery mechanism that searches through the Toolshed Knowledge Base 
-    using advanced semantic similarity matching. It employs vector embeddings to find the most 
+    using advanced semantic similarity matching. It employs BM25 to find the most 
     relevant tools based on user intent, functionality requirements, and contextual needs.
 
     MANDATORY USAGE: This tool MUST be used before claiming any functionality is unavailable. 
     It is the gateway to discovering all available capabilities in the system.
 
     Core Functionality:
-    - Searches through semantically enriched tool documents using vector similarity
+    - Searches through semantically enriched tool documents using BM25
     - Matches user queries against tool descriptions, parameters, synthetic questions, and key topics
     - Returns ranked list of most relevant tools for any given user request
     - Enables dynamic tool discovery without hardcoded tool knowledge
@@ -115,8 +115,6 @@ tools_retriever_local_tool = ToolRegistry()
 )
 async def tools_retriever(
     query: str,
-    llm_connection: Callable,
-    mcp_tools: dict,
     top_k: int,
     similarity_threshold: float,
 ):
@@ -126,7 +124,7 @@ async def tools_retriever(
     Searches the Toolshed Knowledge Base using advanced semantic similarity matching
     to discover tools that can fulfill user requests and intentions.
 
-    This function performs vector similarity search against semantically enriched
+    This function performs BM25 search against semantically enriched
     tool documents, returning ranked results based on relevance to the input query.
 
     Parameters
@@ -144,16 +142,13 @@ async def tools_retriever(
         - expanded_name: Human-readable tool name
         - description: Comprehensive functionality description
         - parameters: Detailed parameter schema and descriptions
-        - relevance_score: Semantic similarity match score (0-1)
-        - key_topics: Associated keywords and functionality areas
-        - usage_examples: Sample use cases and application scenarios
+        - relevance_score: BM25 match score (0-1)
+
 
 
     """
-    semantic_tools_manager = SemanticToolManager(llm_connection=llm_connection)
-    tool_retriever = await semantic_tools_manager.tools_retrieval(
+    tool_retriever = await AdvanceToolsUse().tools_retrieval(
         query=query,
-        mcp_tools=mcp_tools,
         top_k=top_k,
         similarity_threshold=similarity_threshold,
     )

@@ -2,7 +2,7 @@
 Core AI Agent Framework Components
 
 This package contains the core AI agent functionality including:
-- Agents (React, Orchestrator, Sequential, Tool Calling)
+- Agents (React, Sequential)
 - Memory Management (In-Memory, Redis, Database, MongoDB)
 - LLM Connections and Support
 - Event System
@@ -11,7 +11,7 @@ This package contains the core AI agent functionality including:
 - Utilities and Constants
 """
 
-from .agents import ReactAgent, OrchestratorAgent, ToolCallingAgent
+from .agents import ReactAgent
 from .memory_store import MemoryRouter
 from .llm import LLMConnection
 from .events import EventRouter
@@ -20,8 +20,6 @@ from .tools import ToolRegistry, Tool
 
 __all__ = [
     "ReactAgent",
-    "OrchestratorAgent",
-    "ToolCallingAgent",
     "MemoryRouter",
     "LLMConnection",
     "EventRouter",

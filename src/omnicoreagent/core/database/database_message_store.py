@@ -162,45 +162,6 @@ class StorageMessage(Base):
     )
 
 
-class LastProcessedMessage(Base):
-    __tablename__ = "last_processed_messages"
-    id: Mapped[str] = mapped_column(
-        String(DEFAULT_MAX_KEY_LENGTH),
-        primary_key=True,
-        default=lambda: str(uuid.uuid4()),
-    )
-    session_id: Mapped[str] = mapped_column(String(DEFAULT_MAX_KEY_LENGTH))
-    agent_name: Mapped[str] = mapped_column(String(DEFAULT_MAX_VARCHAR_LENGTH))
-    memory_type: Mapped[str] = mapped_column(String(DEFAULT_MAX_VARCHAR_LENGTH))
-    timestamp: Mapped[str] = mapped_column()
-    last_processed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-
-
-class StoredTool(Base):
-    __tablename__ = "stored_tools"
-
-    id: Mapped[str] = mapped_column(
-        String(DEFAULT_MAX_KEY_LENGTH),
-        primary_key=True,
-        default=lambda: str(uuid.uuid4()),
-    )
-    tool_name: Mapped[str] = mapped_column(
-        String(DEFAULT_MAX_VARCHAR_LENGTH), index=True
-    )
-    mcp_server_name: Mapped[str] = mapped_column(
-        String(DEFAULT_MAX_VARCHAR_LENGTH), index=True
-    )
-    raw_tool: Mapped[dict[str, Any]] = mapped_column(
-        MutableDict.as_mutable(DynamicJSON), default={}
-    )
-    enriched_tool: Mapped[str] = mapped_column(String)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-
-
 class DatabaseMessageStore:
     """
     Database-backed message store for storing, retrieving, and clearing messages by session.
@@ -224,10 +185,7 @@ class DatabaseMessageStore:
             inspector = inspect(db_engine)
             existing_tables = inspector.get_table_names()
 
-            if (
-                "messages" not in existing_tables
-                or "last_processed_messages" not in existing_tables
-            ):
+            if "messages" not in existing_tables:
                 Base.metadata.create_all(db_engine)
 
             logger.debug(f"DatabaseMessageStore initialized with: {db_url}")
@@ -249,10 +207,7 @@ class DatabaseMessageStore:
             inspector = inspect(db_engine)
             existing_tables = inspector.get_table_names()
 
-            if (
-                "messages" not in existing_tables
-                or "last_processed_messages" not in existing_tables
-            ):
+            if "messages" not in existing_tables:
                 Base.metadata.create_all(db_engine)
 
             logger.debug("DatabaseMessageStore connection initialized")
@@ -361,147 +316,6 @@ class DatabaseMessageStore:
         except Exception as e:
             logger.error(f"Failed to get messages: {e}")
             return []
-        finally:
-            self._release_session(session)
-
-    async def set_last_processed_messages(
-        self, session_id: str, agent_name: str, timestamp: float, memory_type: str
-    ) -> None:
-        # These methods are called from background processing/external threads
-        # They need fresh sessions to avoid sharing with main thread
-        session = None
-        try:
-            session = self._get_session(fresh_for_background=True)
-            existing = (
-                session.query(LastProcessedMessage)
-                .filter(
-                    LastProcessedMessage.session_id == session_id,
-                    LastProcessedMessage.agent_name == agent_name,
-                    LastProcessedMessage.memory_type == memory_type,
-                )
-                .first()
-            )
-            if existing:
-                existing.agent_name = agent_name
-                existing.memory_type = memory_type
-                existing.timestamp = timestamp
-            else:
-                new_entry = LastProcessedMessage(
-                    session_id=session_id,
-                    agent_name=agent_name,
-                    memory_type=memory_type,
-                    timestamp=timestamp,
-                )
-                session.add(new_entry)
-            session.commit()
-            logger.debug(
-                f"Set last processed timestamp for {session_id}:{agent_name}:{memory_type}"
-            )
-        except Exception as e:
-            logger.error(f"Failed to set last processed: {e}")
-        finally:
-            if session:
-                try:
-                    session.close()
-
-                except Exception as e:
-                    logger.warning(f"Error closing fresh session: {e}")
-
-    async def get_last_processed_messages(
-        self, session_id: str, agent_name: str, memory_type: str
-    ) -> Any:
-        # These methods are called from background processing/external threads
-        # They need fresh sessions to avoid sharing with main thread
-        session = None
-        try:
-            session = self._get_session(fresh_for_background=True)
-            entry = (
-                session.query(LastProcessedMessage)
-                .filter(
-                    LastProcessedMessage.session_id == session_id,
-                    LastProcessedMessage.agent_name == agent_name,
-                    LastProcessedMessage.memory_type == memory_type,
-                )
-                .first()
-            )
-            if entry:
-                return entry.timestamp
-            return None
-        except Exception as e:
-            logger.error(f"Failed to get last processed: {e}")
-            return None
-        finally:
-            if session:
-                try:
-                    session.close()
-
-                except Exception as e:
-                    logger.warning(f"Error closing fresh session: {e}")
-
-    async def store_tool(
-        self,
-        tool_name: str,
-        mcp_server_name: str,
-        raw_tool: dict,
-        enriched_tool: dict,
-    ) -> None:
-        session = None
-        try:
-            session = self._get_session(fresh_for_background=False)
-
-            # check if exists first
-            existing = (
-                session.query(StoredTool)
-                .filter(
-                    StoredTool.tool_name == tool_name,
-                    StoredTool.mcp_server_name == mcp_server_name,
-                )
-                .first()
-            )
-            if existing:
-                logger.debug(
-                    f"Tool {tool_name} already stored for {mcp_server_name}, skipping insert"
-                )
-                return
-
-            tool = StoredTool(
-                tool_name=tool_name,
-                mcp_server_name=mcp_server_name,
-                raw_tool=raw_tool,
-                enriched_tool=enriched_tool,
-            )
-            session.add(tool)
-            session.commit()
-            logger.debug(f"Stored tool {tool_name} for server {mcp_server_name}")
-
-        except Exception as e:
-            logger.error(f"Failed to store tool {tool_name}: {e}")
-        finally:
-            self._release_session(session)
-
-    async def tool_exists(self, tool_name: str, mcp_server_name: str) -> dict | None:
-        session = None
-        try:
-            session = self._get_session(fresh_for_background=False)
-            tool = (
-                session.query(StoredTool)
-                .filter(
-                    StoredTool.tool_name == tool_name,
-                    StoredTool.mcp_server_name == mcp_server_name,
-                )
-                .first()
-            )
-            if tool:
-                return {
-                    "tool_name": tool.tool_name,
-                    "mcp_server_name": tool.mcp_server_name,
-                    "raw_tool": tool.raw_tool,
-                    "enriched_tool": tool.enriched_tool,
-                }
-            return None
-        except Exception as e:
-            logger.error(f"Failed to check if tool exists {tool_name}: {e}")
-            return None
         finally:
             self._release_session(session)
 

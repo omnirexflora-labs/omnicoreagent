@@ -30,18 +30,6 @@ class ModelConfig:
 
 
 @dataclass
-class EmbeddingConfig:
-    """User-friendly embedding configuration"""
-
-    provider: str
-    model: str
-
-    dimensions: Optional[int] = None
-    encoding_format: Optional[str] = "float"
-    timeout: Optional[int] = 600
-
-
-@dataclass
 class MCPToolConfig:
     """User-friendly MCP tool configuration"""
 
@@ -77,8 +65,6 @@ class AgentConfig:
     memory_config: dict = field(
         default_factory=lambda: {"mode": "token_budget", "value": 30000}
     )
-    memory_results_limit: int = 5
-    memory_similarity_threshold: float = 0.5
     memory_tool_backend: str = None
 
 
@@ -97,19 +83,6 @@ class ConfigTransformer:
             "mistral": "mistral",
         }
 
-        self.supported_embedding_providers = {
-            "openai": "openai",
-            "cohere": "cohere",
-            "mistral": "mistral",
-            "gemini": "gemini",
-            "vertex_ai": "vertex_ai",
-            "voyage": "voyage",
-            "nebius": "nebius",
-            "nvidia_nim": "nvidia_nim",
-            "bedrock": "bedrock",
-            "huggingface": "huggingface",
-        }
-
         self.supported_transports = {
             TransportType.STDIO: self._transform_stdio_config,
             TransportType.SSE: self._transform_sse_config,
@@ -121,7 +94,6 @@ class ConfigTransformer:
         model_config: Union[Dict[str, Any], ModelConfig],
         mcp_tools: List[Union[Dict[str, Any], MCPToolConfig]],
         agent_config: Optional[Union[Dict[str, Any], AgentConfig]] = None,
-        embedding_config: Optional[Union[Dict[str, Any], EmbeddingConfig]] = None,
     ) -> Dict[str, Any]:
         """
         Transform user configuration to internal format
@@ -130,7 +102,6 @@ class ConfigTransformer:
             model_config: Model configuration (dict or ModelConfig)
             mcp_tools: List of MCP tool configurations
             agent_config: Optional agent configuration
-            embedding_config: Optional embedding configuration (dict or EmbeddingConfig)
 
         Returns:
             Internal configuration dictionary
@@ -143,27 +114,9 @@ class ConfigTransformer:
                 if agent_config
                 else AgentConfig()
             )
-            embedding = (
-                self._ensure_embedding_config(embedding_config)
-                if embedding_config
-                else None
-            )
 
             self._validate_model_config(model)
             self._validate_tools_config(tools)
-            if embedding:
-                self._validate_embedding_config(embedding)
-
-            ENABLE_VECTOR_DB = config("ENABLE_VECTOR_DB", default=False, cast=bool)
-            if ENABLE_VECTOR_DB and not embedding:
-                raise ValueError(
-                    "Vector database is enabled (ENABLE_VECTOR_DB=True) but no embedding configuration provided. "
-                    "Embedding configuration is REQUIRED when vector database is enabled."
-                )
-            elif ENABLE_VECTOR_DB and embedding:
-                logger.info(
-                    "Vector database validation passed: embedding configuration provided"
-                )
 
             internal_config = {
                 "AgentConfig": asdict(agent),
@@ -171,14 +124,8 @@ class ConfigTransformer:
                 "mcpServers": self._transform_tools_config(tools),
             }
 
-            if embedding:
-                internal_config["EMBEDDING"] = self._transform_embedding_config(
-                    embedding
-                )
-
-            embedding_info = " with embedding" if embedding else ""
             logger.info(
-                f"Successfully transformed configuration for {len(tools)} MCP tools{embedding_info}"
+                f"Successfully transformed configuration for {len(tools)} MCP tools"
             )
             return internal_config
 
@@ -291,52 +238,6 @@ class ConfigTransformer:
             "max_context_length": config.max_context_length,
             "top_p": config.top_p,
             "top_k": config.top_k,
-        }
-
-    def _ensure_embedding_config(
-        self, config: Union[Dict[str, Any], EmbeddingConfig]
-    ) -> EmbeddingConfig:
-        """Ensure embedding config is an EmbeddingConfig instance"""
-        if isinstance(config, dict):
-            return EmbeddingConfig(**config)
-        elif isinstance(config, EmbeddingConfig):
-            return config
-        else:
-            raise ValueError("embedding_config must be dict or EmbeddingConfig")
-
-    def _validate_embedding_config(self, config: EmbeddingConfig):
-        """Validate embedding configuration"""
-        if not config.provider:
-            raise ValueError("Embedding provider is required")
-
-        if config.provider not in self.supported_embedding_providers:
-            supported = ", ".join(self.supported_embedding_providers.keys())
-            raise ValueError(
-                f"Unsupported embedding provider: {config.provider}. Supported: {supported}"
-            )
-
-        if not config.model:
-            raise ValueError("Embedding model name is required")
-
-        if config.dimensions is None:
-            raise ValueError(
-                "Embedding dimensions is REQUIRED and cannot be None. This is needed for vector database index creation."
-            )
-
-        if not isinstance(config.dimensions, int) or config.dimensions <= 0:
-            raise ValueError("Embedding dimensions must be a positive integer")
-
-        if config.timeout is not None and config.timeout <= 0:
-            raise ValueError("Embedding timeout must be positive")
-
-    def _transform_embedding_config(self, config: EmbeddingConfig) -> Dict[str, Any]:
-        """Transform embedding config to internal EMBEDDING format"""
-        return {
-            "provider": self.supported_embedding_providers[config.provider],
-            "model": config.model,
-            "dimensions": config.dimensions,
-            "encoding_format": config.encoding_format,
-            "timeout": config.timeout,
         }
 
     def _transform_tools_config(self, tools: List[MCPToolConfig]) -> Dict[str, Any]:
