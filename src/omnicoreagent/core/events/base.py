@@ -15,6 +15,9 @@ class EventType(str, Enum):
     TOOL_CALL_ERROR = "tool_call_error"
     FINAL_ANSWER = "final_answer"
     AGENT_THOUGHT = "agent_thought"
+    SUB_AGENT_CALL_STARTED = "sub_agent_call_started"
+    SUB_AGENT_CALL_RESULT = "sub_agent_call_result"
+    SUB_AGENT_CALL_ERROR = "sub_agent_call_error"
     # Background agent events
     BACKGROUND_TASK_STARTED = "background_task_started"
     BACKGROUND_TASK_COMPLETED = "background_task_completed"
@@ -54,6 +57,30 @@ class FinalAnswerPayload(BaseModel):
 
 class AgentThoughtPayload(BaseModel):
     message: str
+
+
+class SubAgentCallStartedPayload(BaseModel):
+    agent_name: str
+    session_id: str
+    timestamp: str
+    run_count: int
+    kwargs: Dict[str, Any]
+
+
+class SubAgentCallResultPayload(BaseModel):
+    agent_name: str
+    session_id: str
+    timestamp: str
+    run_count: int
+    result: Any
+
+
+class SubAgentCallErrorPayload(BaseModel):
+    agent_name: str
+    session_id: str
+    timestamp: str
+    error: str
+    error_count: int
 
 
 # Background agent payload models
@@ -100,6 +127,9 @@ EventPayload = Union[
     ToolCallErrorPayload,
     FinalAnswerPayload,
     AgentThoughtPayload,
+    SubAgentCallStartedPayload,
+    SubAgentCallResultPayload,
+    SubAgentCallErrorPayload,
     BackgroundTaskStartedPayload,
     BackgroundTaskCompletedPayload,
     BackgroundTaskErrorPayload,
@@ -123,6 +153,9 @@ EVENT_PAYLOAD_MAP: dict[EventType, Type[BaseModel]] = {
     EventType.TOOL_CALL_ERROR: ToolCallErrorPayload,
     EventType.FINAL_ANSWER: FinalAnswerPayload,
     EventType.AGENT_THOUGHT: AgentThoughtPayload,
+    EventType.SUB_AGENT_CALL_STARTED: SubAgentCallStartedPayload,
+    EventType.SUB_AGENT_CALL_RESULT: SubAgentCallResultPayload,
+    EventType.SUB_AGENT_CALL_ERROR: SubAgentCallErrorPayload,
     EventType.BACKGROUND_TASK_STARTED: BackgroundTaskStartedPayload,
     EventType.BACKGROUND_TASK_COMPLETED: BackgroundTaskCompletedPayload,
     EventType.BACKGROUND_TASK_ERROR: BackgroundTaskErrorPayload,

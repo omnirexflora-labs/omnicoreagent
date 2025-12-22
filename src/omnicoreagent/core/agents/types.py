@@ -121,6 +121,8 @@ class ParsedResponse(BaseModel):
     data: str | None = None
     error: str | None = None
     answer: str | None = None
+    tool_calls: bool | None = None
+    agent_calls: bool | None = None
 
 
 class ToolCallResult(BaseModel):

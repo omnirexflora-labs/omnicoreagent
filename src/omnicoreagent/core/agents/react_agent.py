@@ -42,5 +42,6 @@ class ReactAgent(BaseReactAgent):
             mcp_tools=kwargs.get("mcp_tools"),
             local_tools=kwargs.get("local_tools"),  # Pass local tools
             session_id=kwargs.get("session_id"),
+            sub_agents=kwargs.get("sub_agents"),
         )
         return response

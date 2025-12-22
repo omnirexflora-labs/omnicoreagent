@@ -35,6 +35,7 @@ class OmniAgent:
         model_config: Union[Dict[str, Any], ModelConfig],
         mcp_tools: List[Union[Dict[str, Any], MCPToolConfig]] = None,
         local_tools: Optional[Any] = None,  # LocalToolsIntegration instance
+        sub_agents: Optional[Dict[str, Any]] = None,  # SubAgentsIntegration instance
         agent_config: Optional[Union[Dict[str, Any], AgentConfig]] = None,
         memory_router: Optional[MemoryRouter] = None,
         event_router: Optional[EventRouter] = None,
@@ -49,6 +50,7 @@ class OmniAgent:
             model_config: Model configuration (dict or ModelConfig)
             mcp_tools: List of MCP tool configurations (optional)
             local_tools: LocalToolsIntegration instance (optional)
+            sub_agents: SubAgentsIntegration instance (optional)
             agent_config: Optional agent configuration
             embedding_config: Optional embedding configuration
             memory_router: Optional memory router (MemoryRouter)
@@ -60,6 +62,7 @@ class OmniAgent:
         self.model_config = model_config
         self.mcp_tools = mcp_tools or []
         self.local_tools = local_tools
+        self.sub_agents = sub_agents
         self.agent_config = agent_config
 
         self.debug = debug
@@ -196,6 +199,7 @@ class OmniAgent:
             "mcp_tools": self.mcp_client.available_tools if self.mcp_client else {},
             "local_tools": self.local_tools,
             "session_id": session_id,
+            "sub_agents": self.sub_agents,
         }
 
         response = await self.agent._run(

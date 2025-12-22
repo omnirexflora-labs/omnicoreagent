@@ -11,6 +11,7 @@ import subprocess
 from typing import Optional
 import time
 import logging
+from all_sub_agents import weather_agent, research_agent, filesystem_agent
 
 logger = logging.getLogger("omnicoreagent")
 
@@ -76,16 +77,16 @@ MCP_TOOLS = [
     #         "Authorization": "Bearer api-key-1234567890"
     #     }
     # },
-    {
-        "name": "filesystem",
-        "command": "npx",
-        "args": [
-            "-y",
-            "@modelcontextprotocol/server-filesystem",
-            "/home/abiorh/Desktop",
-            "/home/abiorh/ai/",
-        ],
-    },
+    # {
+    #     "name": "filesystem",
+    #     "command": "npx",
+    #     "args": [
+    #         "-y",
+    #         "@modelcontextprotocol/server-filesystem",
+    #         "/home/abiorh/Desktop",
+    #         "/home/abiorh/ai/",
+    #     ],
+    # },
     # {
     #     "name": "google-maps",
     #     "command": "npx",
@@ -784,6 +785,7 @@ Provide clear, supportive, and context-aware responses that help learners grow.
             },
             mcp_tools=MCP_TOOLS,
             local_tools=tool_registry,
+            sub_agents=[weather_agent, research_agent, filesystem_agent],
             agent_config={
                 "agent_name": "OmniAgent",
                 "max_steps": 15,

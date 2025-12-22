@@ -5,11 +5,13 @@ import uuid
 from collections.abc import Callable
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from typing import Any, Tuple
+from typing import Any, Tuple, List, Dict
 from omnicoreagent.core.system_prompts import (
     tools_retriever_additional_prompt,
     memory_tool_additional_prompt,
+    sub_agents_additional_prompt,
 )
+import inspect
 from omnicoreagent.core.agents.token_usage import (
     Usage,
     UsageLimitExceeded,
@@ -42,7 +44,12 @@ from omnicoreagent.core.utils import (
     normalize_tool_args,
     build_xml_observations_block,
     BackgroundTaskManager,
+    resolve_agent,
+    build_kwargs,
+    build_sub_agents_observation_xml,
+    show_sub_agent_call_result,
 )
+from datetime import datetime
 from omnicoreagent.core.events.base import (
     Event,
     EventType,
@@ -53,6 +60,9 @@ from omnicoreagent.core.events.base import (
     AgentMessagePayload,
     UserMessagePayload,
     AgentThoughtPayload,
+    SubAgentCallStartedPayload,
+    SubAgentCallResultPayload,
+    SubAgentCallErrorPayload,
 )
 from omnicoreagent.core.tools.tool_knowledge_base import (
     tools_retriever_local_tool,
@@ -129,9 +139,9 @@ class BaseReactAgent:
         event_router: Callable,
         debug: bool = False,
     ) -> ParsedResponse:
-        """Parse LLM response to extract a final answer or a tool action using XML format only."""
+        """Parse LLM response to extract a final answer, tool call, or agent call using XML format only."""
         try:
-            # emit the agent thoughts each time
+            # Emit agent thoughts
             agent_thoughts = re.search(r"<thought>(.*?)</thought>", response, re.DOTALL)
             if agent_thoughts:
                 event = Event(
@@ -145,9 +155,13 @@ class BaseReactAgent:
                     self.background_task_manager.run_background_strict(
                         event_router(session_id=session_id, event=event)
                     )
+
+            # -----------------------
+            # Parse tool calls
+            # -----------------------
             tool_calls = []
             tool_call_blocks = []
-            # Check for XML-style tool call format first
+
             if "<tool_calls>" in response and "</tool_calls>" in response:
                 if debug:
                     logger.info("Multiple tool calls detected.")
@@ -166,10 +180,7 @@ class BaseReactAgent:
                     r"<tool_call>(.*?)</tool_call>", response, re.DOTALL
                 )
                 tool_call_blocks = [single_match.group(1)] if single_match else []
-            else:
-                tool_call_blocks = []
 
-            # Parse each <tool_call> block
             for block in tool_call_blocks:
                 name_match = re.search(
                     r"<tool_name>(.*?)</tool_name>", block, re.DOTALL
@@ -177,15 +188,12 @@ class BaseReactAgent:
                 args_match = re.search(
                     r"<parameters>(.*?)</parameters>", block, re.DOTALL
                 ) or re.search(r"<args>(.*?)</args>", block, re.DOTALL)
-
                 if not (name_match and args_match):
                     return ParsedResponse(
                         error="Invalid tool call format - missing name or parameters"
                     )
-
                 tool_name = name_match.group(1).strip()
                 args_str = args_match.group(1).strip()
-                # Parse parameters (JSON or XML)
                 args = {}
                 if args_str.startswith("{") and args_str.endswith("}"):
                     try:
@@ -197,7 +205,6 @@ class BaseReactAgent:
                         r"<(\w+)>(.*?)</\1>", args_str, re.DOTALL
                     ):
                         value = value.strip()
-                        # Try parsing as JSON if it looks like JSON
                         if (value.startswith("[") and value.endswith("]")) or (
                             value.startswith("{") and value.endswith("}")
                         ):
@@ -207,38 +214,98 @@ class BaseReactAgent:
                                 args[key] = value
                         else:
                             args[key] = value
-
                 tool_calls.append({"tool": tool_name, "parameters": args})
 
-            # Return parsed tool calls if any
             if tool_calls:
-                return ParsedResponse(action=True, data=json.dumps(tool_calls))
-
-            # Check for XML final answer format
-            if "<final_answer>" in response and "</final_answer>" in response:
-                if debug:
-                    logger.info(
-                        "XML final answer format detected in response: %s", response
-                    )
-                final_answer_match = re.search(
-                    r"<final_answer>(.*?)</final_answer>", response, re.DOTALL
-                )
-                if final_answer_match:
-                    answer = final_answer_match.group(1).strip()
-                    return ParsedResponse(answer=answer)
-                else:
-                    return ParsedResponse(error="Invalid XML final answer format")
-
-            # Check if response contains any XML tags at all
-            if "<" in response and ">" in response:
-                # Has some XML but not the required format - return error
                 return ParsedResponse(
-                    error="Response contains XML tags but not in the required format. You MUST use <thought> and <final_answer> tags for all responses."
+                    action=True, data=json.dumps(tool_calls), tool_calls=True
                 )
 
-            # No XML at all - return error
+            # -----------------------
+            # Parse agent calls
+            # -----------------------
+            agent_calls = []
+            agent_call_blocks = []
+
+            if "<agent_calls>" in response and "</agent_calls>" in response:
+                if debug:
+                    logger.info("Multiple agent calls detected.")
+                block_match = re.search(
+                    r"<agent_calls>(.*?)</agent_calls>", response, re.DOTALL
+                )
+                if block_match:
+                    agent_call_blocks = re.findall(
+                        r"<agent_call>(.*?)</agent_call>",
+                        block_match.group(1),
+                        re.DOTALL,
+                    )
+
+            elif "<agent_call>" in response and "</agent_call>" in response:
+                if debug:
+                    logger.info("Single agent call detected.")
+                single_match = re.search(
+                    r"<agent_call>(.*?)</agent_call>", response, re.DOTALL
+                )
+                agent_call_blocks = [single_match.group(1)] if single_match else []
+
+            for block in agent_call_blocks:
+                name_match = re.search(
+                    r"<agent_name>(.*?)</agent_name>", block, re.DOTALL
+                ) or re.search(r"<name>(.*?)</name>", block, re.DOTALL)
+                args_match = re.search(
+                    r"<parameters>(.*?)</parameters>", block, re.DOTALL
+                ) or re.search(r"<args>(.*?)</args>", block, re.DOTALL)
+                if not (name_match and args_match):
+                    return ParsedResponse(
+                        error="Invalid agent call format - missing name or parameters"
+                    )
+                agent_name = name_match.group(1).strip()
+                args_str = args_match.group(1).strip()
+                args = {}
+                if args_str.startswith("{") and args_str.endswith("}"):
+                    try:
+                        args = json.loads(args_str)
+                    except json.JSONDecodeError as e:
+                        return ParsedResponse(error=f"Invalid JSON in args: {str(e)}")
+                else:
+                    for key, value in re.findall(
+                        r"<(\w+)>(.*?)</\1>", args_str, re.DOTALL
+                    ):
+                        value = value.strip()
+                        if (value.startswith("[") and value.endswith("]")) or (
+                            value.startswith("{") and value.endswith("}")
+                        ):
+                            try:
+                                args[key] = json.loads(value)
+                            except json.JSONDecodeError:
+                                args[key] = value
+                        else:
+                            args[key] = value
+                agent_calls.append({"agent": agent_name, "parameters": args})
+
+            if agent_calls:
+                return ParsedResponse(
+                    action=True, data=json.dumps(agent_calls), agent_calls=True
+                )
+
+            # -----------------------
+            # Parse final answer
+            # -----------------------
+            final_answer_match = re.search(
+                r"<final_answer>(.*?)</final_answer>", response, re.DOTALL
+            )
+            if final_answer_match:
+                return ParsedResponse(answer=final_answer_match.group(1).strip())
+
+            # Check if response contains XML tags but not recognized
+            if "<" in response and ">" in response:
+                return ParsedResponse(
+                    error="Response contains XML but not in required format. Use <thought>, <tool_call>, <agent_call>, <final_answer>."
+                )
+
+            # No XML at all
             return ParsedResponse(
-                error="Response must use XML format. You MUST wrap your response in <thought> and <final_answer> tags. Example: <thought>Your reasoning here</thought><final_answer>Your answer here</final_answer>"
+                error="Response must use XML format. Wrap in <thought> and <final_answer> or call tags."
             )
 
         except Exception as e:
@@ -1158,6 +1225,7 @@ class BaseReactAgent:
         mcp_tools: dict = None,
         local_tools: Any = None,
         debug: bool = False,
+        sub_agents: list = None,
     ) -> None:
         """
         Prepare the full initial message list for the LLM by concurrently:
@@ -1210,17 +1278,290 @@ class BaseReactAgent:
         # Build system prompt
         updated_system_prompt = system_prompt
 
+        if sub_agents:
+            updated_system_prompt += f"\n{sub_agents_additional_prompt}"
+
         if self.enable_tools_knowledge_base:
             updated_system_prompt += f"\n{tools_retriever_additional_prompt}"
 
         if self.memory_tool_backend:
             updated_system_prompt += f"\n{memory_tool_additional_prompt}"
+        if sub_agents:
+            sub_agents_registry = await self.sub_agents_registry(sub_agents)
+            updated_system_prompt += (
+                f"\n[AVAILABLE SUB AGENTS REGISTRY]\n{sub_agents_registry}"
+            )
 
         updated_system_prompt += f"\n[AVAILABLE TOOLS REGISTRY]\n{tools_section}"
 
         # Insert system prompt at index 0
         session_state.messages.insert(
             0, Message(role="system", content=updated_system_prompt)
+        )
+
+    async def sub_agents_registry(self, sub_agents: List[Any]) -> str:
+        """
+        Compact JSON-based registry format.
+        More concise while maintaining all necessary information.
+        """
+        if not sub_agents:
+            return "No sub-agents available."
+
+        registry = []
+
+        for agent in sub_agents:
+            try:
+                sig = inspect.signature(agent.run)
+
+                parameters = {}
+                for param_name, param in sig.parameters.items():
+                    if param_name == "self":
+                        continue
+
+                    is_required = param.default is inspect.Parameter.empty
+                    param_type = "any"
+                    if param.annotation != inspect.Parameter.empty:
+                        param_type = (
+                            param.annotation.__name__
+                            if hasattr(param.annotation, "__name__")
+                            else str(param.annotation)
+                        )
+
+                    parameters[param_name] = {
+                        "type": param_type,
+                        "required": is_required,
+                        "default": None if is_required else param.default,
+                    }
+
+                registry.append(
+                    {
+                        "agent_name": agent.name,
+                        "description": agent.system_instruction,
+                        "parameters": parameters,
+                    }
+                )
+
+            except Exception as e:
+                logger.error(
+                    f"Error processing agent {getattr(agent, 'name', 'unknown')}: {e}"
+                )
+
+        # Format as readable JSON-like structure
+        output_lines = [
+            "════════════════════════════════════════════════════════════",
+            "AVAILABLE SUB-AGENTS REGISTRY",
+            "════════════════════════════════════════════════════════════",
+            "",
+        ]
+
+        for idx, agent_info in enumerate(registry, 1):
+            output_lines.append(f"[{idx}] {agent_info['agent_name']}")
+            output_lines.append(f"    Description: {agent_info['description']}")
+
+            if agent_info["parameters"]:
+                output_lines.append("    Parameters:")
+                for param_name, param_details in agent_info["parameters"].items():
+                    req_str = "REQUIRED" if param_details["required"] else "optional"
+                    default_str = (
+                        f", default={param_details['default']}"
+                        if not param_details["required"]
+                        else ""
+                    )
+                    output_lines.append(
+                        f"      • {param_name}: {param_details['type']} ({req_str}{default_str})"
+                    )
+            else:
+                output_lines.append("    Parameters: None")
+
+            output_lines.append("")
+
+        return "\n".join(output_lines)
+
+    async def execute_sub_agent_calls(
+        self,
+        response: str,
+        agent_calls: list,
+        sub_agents: list,
+        session_id: str,
+        session_state: Any,
+        add_message_to_history: Callable[[str, str, dict | None], Any],
+        event_router: Callable[[str, Event], Any] = None,
+        debug: bool = False,
+    ):
+        """
+        Execute multiple sub-agent calls in parallel with proper observation formatting.
+
+        This function:
+        1. Connects all MCP servers concurrently (if needed)
+        2. Executes all sub-agent runs concurrently
+        3. Formats results into proper XML observations
+        4. Adds observations to message history
+        """
+        event = Event(
+            type=EventType.SUB_AGENT_CALL_STARTED,
+            payload=SubAgentCallStartedPayload(
+                agent_name=self.agent_name,
+                session_id=session_id,
+                timestamp=str(datetime.now()),
+                run_count=0,
+                kwargs={"agent_calls": agent_calls},
+            ),
+            agent_name=self.agent_name,
+        )
+        if event_router:
+            self.background_task_manager.run_background_strict(
+                event_router(session_id=session_id, event=event)
+            )
+        # Add assistant message to history
+        metadata = {"agent_calls": agent_calls}
+        await add_message_to_history(
+            role="assistant",
+            content=response,
+            metadata=metadata,
+            session_id=session_id,
+        )
+        session_state.messages.append(Message(role="assistant", content=response))
+
+        # Parse agent calls if string
+        if isinstance(agent_calls, str):
+            agent_calls = json.loads(agent_calls)
+
+        async def execute_single_agent(call: dict) -> tuple[str, Any]:
+            """Execute a single agent, handling MCP connection if needed."""
+            agent_name = call.get("agent")
+            if not agent_name:
+                raise ValueError("agent_call missing 'agent' field")
+
+            try:
+                agent = resolve_agent(agent_name, sub_agents)
+                params = call.get("parameters", {})
+                kwargs = build_kwargs(agent, params)
+
+                # Connect MCP if needed (part of this agent's task)
+                if hasattr(agent, "mcp_tools") and agent.mcp_tools:
+                    logger.info(f"Connecting MCP servers for {agent_name}...")
+                    await agent.connect_mcp_servers()
+
+                # Run the agent
+                logger.info(f"Running sub-agent: {agent_name}")
+                result = await agent.run(**kwargs)
+                # cleaned the mcp server
+                await agent.cleanup()
+                return agent_name, result
+
+            except Exception as e:
+                logger.error(f"Error executing agent {agent_name}: {e}", exc_info=True)
+                return agent_name, e
+
+        # Execute all agents truly concurrently
+        logger.info(
+            f"Executing {len(agent_calls)} sub-agents with concurrent MCP connections..."
+        )
+        tasks = [execute_single_agent(call) for call in agent_calls]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Process results into observations
+        observations = []
+
+        for result in results:
+            if isinstance(result, Exception):
+                # Top-level exception (shouldn't happen with return_exceptions=True)
+                logger.error(f"Unexpected top-level exception: {result}")
+                obs = {
+                    "agent_name": "unknown",
+                    "status": "error",
+                    "output": str(result),
+                }
+                observations.append(obs)
+            else:
+                agent_name, obs_data = result
+
+                if isinstance(obs_data, Exception):
+                    # Agent execution failed
+                    logger.error(f"Agent {agent_name} execution failed: {obs_data}")
+                    obs = {
+                        "agent_name": agent_name,
+                        "status": "error",
+                        "output": str(obs_data),
+                    }
+                    observations.append(obs)
+                    event = Event(
+                        type=EventType.SUB_AGENT_CALL_ERROR,
+                        payload=SubAgentCallErrorPayload(
+                            agent_name=agent_name,
+                            session_id=session_id,
+                            timestamp=str(datetime.now()),
+                            error=str(obs_data),
+                            error_count=0,
+                        ),
+                        agent_name=self.agent_name,
+                    )
+                    if event_router:
+                        self.background_task_manager.run_background_strict(
+                            event_router(session_id=session_id, event=event)
+                        )
+                else:
+                    # Agent execution succeeded - extract the actual response
+                    if isinstance(obs_data, dict):
+                        # Extract response from dict (handles your sub-agent return format)
+                        agent_response = obs_data.get(
+                            "response", obs_data.get("output", str(obs_data))
+                        )
+                        obs = {
+                            "agent_name": agent_name,
+                            "status": "success",
+                            "output": agent_response,
+                        }
+                    elif isinstance(obs_data, str):
+                        obs = {
+                            "agent_name": agent_name,
+                            "status": "success",
+                            "output": obs_data,
+                        }
+                    else:
+                        # Fallback for other types
+                        obs = {
+                            "agent_name": agent_name,
+                            "status": "success",
+                            "output": str(obs_data),
+                        }
+
+                    logger.info(f"Agent {agent_name} completed successfully")
+                    observations.append(obs)
+                    event = Event(
+                        type=EventType.SUB_AGENT_CALL_RESULT,
+                        payload=SubAgentCallResultPayload(
+                            agent_name=agent_name,
+                            session_id=session_id,
+                            timestamp=str(datetime.now()),
+                            run_count=0,
+                            result=obs_data,
+                        ),
+                        agent_name=self.agent_name,
+                    )
+                    if event_router:
+                        self.background_task_manager.run_background_strict(
+                            event_router(session_id=session_id, event=event)
+                        )
+
+        # Build properly formatted XML observation block
+        xml_obs_block = build_sub_agents_observation_xml(observations)
+        agent_call_result = {
+            "agent_name": self.agent_name,
+            "agent_calls": agent_calls,
+            "output": observations,
+        }
+
+        if debug:
+            show_sub_agent_call_result(agent_call_result)
+
+        # Add observations to message history
+        session_state.messages.append(Message(role="user", content=xml_obs_block))
+        await add_message_to_history(
+            role="user",
+            content=xml_obs_block,
+            session_id=session_id,
+            metadata={"agent_name": self.agent_name, "sub_agent_results": True},
         )
 
     @track("agent_execution")
@@ -1237,6 +1578,7 @@ class BaseReactAgent:
         local_tools: Any = None,
         session_id: str = None,
         event_router: Callable[[str, Event], Any] = None,
+        sub_agents: list = None,
     ) -> str | None:
         """Execute ReAct loop with JSON communication
         kwargs: if mcp is enbale then it will be sessions and availables_tools else it will be local_tools
@@ -1277,6 +1619,7 @@ class BaseReactAgent:
             local_tools=local_tools,
             session_id=session_id,
             debug=debug,
+            sub_agents=sub_agents,
         )
         # check if the agent is in a valid state to run
         if session_state.state not in [
@@ -1437,24 +1780,42 @@ class BaseReactAgent:
 
                 # check for action
                 if parsed_response.action is not None:
-                    # Execute the action
-                    @track("action_execution")
-                    async def execute_action():
-                        await self.act(
-                            parsed_response=parsed_response,
-                            response=response,
-                            add_message_to_history=add_message_to_history,
-                            system_prompt=system_prompt,
-                            llm_connection=llm_connection,
-                            mcp_tools=mcp_tools,
-                            debug=debug,
-                            sessions=sessions,
-                            local_tools=local_tools,
-                            session_id=session_id,
-                            event_router=event_router,
-                        )
+                    # check action first to know if it is a sub-agent or tool
+                    if parsed_response.agent_calls is not None:
+                        agent_calls = parsed_response.data
 
-                    await execute_action()
+                        async def execute_sub_agent_calls():
+                            await self.execute_sub_agent_calls(
+                                response=response,
+                                agent_calls=agent_calls,
+                                sub_agents=sub_agents,
+                                session_id=session_id,
+                                session_state=session_state,
+                                add_message_to_history=add_message_to_history,
+                                event_router=event_router,
+                                debug=debug,
+                            )
+
+                        await execute_sub_agent_calls()
+                    else:
+                        # Execute the action
+                        @track("action_execution")
+                        async def execute_action():
+                            await self.act(
+                                parsed_response=parsed_response,
+                                response=response,
+                                add_message_to_history=add_message_to_history,
+                                system_prompt=system_prompt,
+                                llm_connection=llm_connection,
+                                mcp_tools=mcp_tools,
+                                debug=debug,
+                                sessions=sessions,
+                                local_tools=local_tools,
+                                session_id=session_id,
+                                event_router=event_router,
+                            )
+
+                        await execute_action()
 
                 if parsed_response.error is not None:
                     logger.error(f"Error in parsed response: {parsed_response.error}")

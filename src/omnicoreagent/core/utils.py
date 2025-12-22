@@ -23,6 +23,7 @@ import asyncio
 from typing import Any, Callable
 from html import escape
 import ast
+import inspect
 
 console = Console()
 # Configure logging
@@ -586,6 +587,80 @@ def normalize_enriched_tool(enriched: str) -> str:
     return normalized
 
 
+def resolve_agent(agent_name: str, sub_agents: list):
+    for agent in sub_agents:
+        if agent.name == agent_name:
+            return agent
+    raise ValueError(f"Sub-agent '{agent_name}' not found")
+
+
+def build_kwargs(agent, provided_params: dict):
+    sig = inspect.signature(agent.run)
+    kwargs = {}
+
+    for name, param in sig.parameters.items():
+        if name == "self":
+            continue
+
+        if name in provided_params:
+            kwargs[name] = provided_params[name]
+            continue
+
+        # REQUIRED param missing → FAIL HARD
+        if param.default is inspect.Parameter.empty:
+            raise ValueError(
+                f"Missing required parameter '{name}' for agent '{agent.name}'"
+            )
+
+        # Optional param → let default apply
+        # do nothing
+
+    # OPTIONAL: reject extra params (strict mode)
+    for extra in provided_params:
+        if extra not in sig.parameters:
+            raise ValueError(f"Unexpected parameter '{extra}' for agent '{agent.name}'")
+
+    return kwargs
+
+
+def build_sub_agents_observation_xml(observations: list[dict]) -> str:
+    """
+    Build properly formatted XML observation block for sub-agent results.
+
+    Args:
+        observations: List of dicts with keys: agent_name, status, output
+
+    Returns:
+        Formatted XML string for LLM consumption
+    """
+    xml_lines = [
+        "OBSERVATION RESULT FROM SUB-AGENTS",
+        "<observations>",
+    ]
+
+    for obs in observations:
+        agent_name = obs.get("agent_name", "unknown")
+        status = obs.get("status", "unknown")
+        output = obs.get("output", "")
+
+        xml_lines.append("  <observation>")
+        xml_lines.append(f"    <agent_name>{agent_name}</agent_name>")
+        xml_lines.append(f"    <status>{status}</status>")
+
+        # Use <o> for success, <e> for errors
+        if status == "error":
+            xml_lines.append(f"    <e>{output}</e>")
+        else:
+            xml_lines.append(f"    <o>{output}</o>")
+
+        xml_lines.append("  </observation>")
+
+    xml_lines.append("</observations>")
+    xml_lines.append("END OF OBSERVATIONS")
+
+    return "\n".join(xml_lines)
+
+
 def handle_stuck_state(original_system_prompt: str, message_stuck_prompt: bool = False):
     """
     Creates a modified system prompt that includes stuck detection guidance.
@@ -688,6 +763,50 @@ def show_tool_response(agent_name, tool_name, tool_args, observation):
     )
 
     panel = Panel.fit(content, title="🔧 TOOL CALL LOG", border_style="bright_black")
+    console.print(panel)
+
+
+def show_sub_agent_call_result(agent_call_result):
+    blocks = []
+
+    parent_agent = agent_call_result.get("agent_name", "unknown_agent")
+    agent_calls = agent_call_result.get("agent_calls", [])
+    outputs = agent_call_result.get("output", [])
+
+    blocks.append(Text(f"PARENT AGENT: {parent_agent.upper()}", style="bold magenta"))
+
+    # index outputs by agent_name for safe pairing
+    output_map = {o["agent_name"]: o for o in outputs}
+
+    for call in agent_calls:
+        agent_name = call.get("agent", "unknown_agent")
+        params = call.get("parameters", {})
+
+        result = output_map.get(agent_name, {})
+        status = result.get("status", "unknown")
+        output = result.get("output")
+
+        blocks.append(Text(""))
+        blocks.append(Text(f"→ Sub-agent: {agent_name}", style="bold blue"))
+        blocks.append(Text("→ Parameters:", style="bold yellow"))
+        blocks.append(Pretty(params))
+
+        blocks.append(
+            Text(
+                f"→ Status: {status}",
+                style="bold green" if status == "success" else "bold red",
+            )
+        )
+
+        blocks.append(Text("→ Output:", style="bold cyan"))
+        blocks.append(Pretty(output))
+
+    panel = Panel.fit(
+        Group(*blocks),
+        title="🤖 SUB-AGENT EXECUTION TRACE",
+        border_style="bright_black",
+    )
+
     console.print(panel)
 
 
