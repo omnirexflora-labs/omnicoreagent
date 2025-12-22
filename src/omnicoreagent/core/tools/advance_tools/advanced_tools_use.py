@@ -17,7 +17,12 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 import time
 
-BATCH_SIZE = 10
+
+def tokenize(text: str) -> List[str]:
+    """Tokenize text using same logic as document preparation"""
+    if not text or not isinstance(text, str):
+        return []
+    return re.findall(r"\w+", text.lower())
 
 
 @dataclass
@@ -41,13 +46,7 @@ class ToolDocument:
 
     def __post_init__(self):
         if not self.tokens:
-            self.tokens = self._tokenize(self.raw_text)
-
-    @staticmethod
-    def _tokenize(text: str) -> List[str]:
-        if not text:
-            return []
-        return re.findall(r"\w+", text.lower())
+            self.tokens = tokenize(self.raw_text)
 
 
 class ToolRetriever:
@@ -55,11 +54,6 @@ class ToolRetriever:
 
     def __init__(self):
         self.config = RetrievalConfig()
-
-    def tokenize(self, text: str) -> Tuple[str, ...]:
-        if not text or not isinstance(text, str):
-            return tuple()
-        return tuple(re.findall(r"\w+", text.lower()))
 
     def _prepare_tool_document(self, tool: Dict[str, Any]) -> Optional[ToolDocument]:
         try:
@@ -74,7 +68,7 @@ class ToolRetriever:
                 logger.warning(f"Tool missing required fields: {tool}")
                 return None
 
-            tokens = list(self.tokenize(enriched_tool))
+            tokens = list(tokenize(enriched_tool))
 
             return ToolDocument(
                 tool_name=tool_name,
@@ -156,8 +150,7 @@ class ToolRetriever:
     async def retrieve(
         self,
         query: str,
-        top_k: int,
-        similarity_threshold: float,
+        top_k: int = 5,
     ) -> List[Dict[str, Any]]:
         """Retrieve relevant tools using BM25 scoring against MCP_TOOLS_REGISTRY"""
         start_time = time.time()
@@ -184,7 +177,9 @@ class ToolRetriever:
             if not documents:
                 return []
 
-            query_tokens = list(self.tokenize(query))
+            normalized_query = normalize_enriched_tool(enriched=query)
+            query_tokens = tokenize(normalized_query)
+
             if not query_tokens:
                 return []
 
@@ -192,11 +187,6 @@ class ToolRetriever:
             if not scored_docs:
                 return []
 
-            scored_docs = [
-                (score, doc)
-                for score, doc in scored_docs
-                if score >= similarity_threshold
-            ]
             scored_docs.sort(key=lambda x: x[0], reverse=True)
             top_docs = scored_docs[:top_k]
 
@@ -205,6 +195,7 @@ class ToolRetriever:
                 results.append(
                     {
                         "mcp_server_name": doc.mcp_server_name,
+                        # "score": round(score, 4),
                         "raw_tool": {
                             "name": doc.tool_name,
                             "description": doc.tool_description,
@@ -213,8 +204,9 @@ class ToolRetriever:
                     }
                 )
 
-            logger.info(
-                f"Retrieved {len(results)} tools for query '{query}' in {time.time() - start_time:.3f}s"
+            logger.debug(
+                f"Retrieved {len(results)} tools for query '{query}' "
+                f"(normalized: '{normalized_query}') in {time.time() - start_time:.3f}s"
             )
             return results
 
@@ -282,16 +274,10 @@ class AdvanceToolsUse:
 
         logger.info(f"Loaded {len(MCP_TOOLS_REGISTRY)} tools into registry.")
 
-    async def tools_retrieval(
-        self, query: str, top_k: int = 10, similarity_threshold: float = 0.5
-    ):
+    async def tools_retrieval(self, query: str):
         """
         Retrieve tools using BM25 against the loaded registry.
         """
         retriever = ToolRetriever()
-        results = await retriever.retrieve(
-            query=query,
-            top_k=top_k,
-            similarity_threshold=similarity_threshold,
-        )
+        results = await retriever.retrieve(query=query)
         return results if results else ["No tools found"]

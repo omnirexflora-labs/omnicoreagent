@@ -313,6 +313,7 @@ class LLMConnection:
             error_message = (
                 f"Error calling LLM with model {self.llm_config.get('model')}: {e}"
             )
+            print(error_message)
             logger.error(error_message)
             return None
 

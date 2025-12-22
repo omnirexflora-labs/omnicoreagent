@@ -170,8 +170,6 @@ class ToolExecutor:
         tool_args: list[dict[str, Any]],
         tool_call_id: str,
         add_message_to_history: Callable[[str, str, dict | None], Any],
-        llm_connection: Callable,
-        mcp_tools: dict,
         session_id: str = None,
         **kwargs,
     ) -> str:
@@ -187,28 +185,11 @@ class ToolExecutor:
             tasks = []
 
             for name, args in zip(split_tool_names, tool_args):
-                # Inject extra retriever args
-                if name.lower().strip() == "tools_retriever":
-                    args["llm_connection"] = llm_connection
-                    args["mcp_tools"] = mcp_tools
-                    args["top_k"] = kwargs.get("top_k")
-                    args["similarity_threshold"] = kwargs.get("similarity_threshold")
-
                 tasks.append(self.tool_handler.call(name, args))
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for name, args, result in zip(split_tool_names, tool_args, results):
-                # Cleanup retriever args
-                if name.lower().strip() == "tools_retriever":
-                    for key in [
-                        "llm_connection",
-                        "mcp_tools",
-                        "top_k",
-                        "similarity_threshold",
-                    ]:
-                        args.pop(key, None)
-
                 if isinstance(result, Exception):
                     aggregated_results.append(
                         {

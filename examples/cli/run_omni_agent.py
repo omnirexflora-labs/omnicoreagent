@@ -38,37 +38,37 @@ from omnicoreagent import (
 tool_registry = ToolRegistry()
 
 MCP_TOOLS = [
-    # {
-    #     "name": "mysql",
-    #     "command": "uv",
-    #     "args": [
-    #         "--directory",
-    #         "/home/abiorh/ai/mcp_servers/mysql_mcp_server",
-    #         "run",
-    #         "mysql_mcp_server",
-    #     ],
-    #     "env": {
-    #         "MYSQL_HOST": "localhost",
-    #         "MYSQL_PORT": "3306",
-    #         "MYSQL_USER": "root",
-    #         "MYSQL_PASSWORD": "Lucifer_001",
-    #         "MYSQL_DATABASE": "mcp_learning",
-    #     },
-    # },
-    # {
-    #     "name": "mcp-pinecone",
-    #     "command": "uv",
-    #     "args": [
-    #         "--directory",
-    #         "/home/abiorh/ai/mcp_servers/mcp-pinecone",
-    #         "run",
-    #         "mcp-pinecone",
-    #     ],
-    #     "env": {
-    #         "PINECONE_API_KEY": "",
-    #         "PINECONE_INDEX_NAME": "ocpp-index",
-    #     },
-    # },
+    {
+        "name": "mysql",
+        "command": "uv",
+        "args": [
+            "--directory",
+            "/home/abiorh/ai/mcp_servers/mysql_mcp_server",
+            "run",
+            "mysql_mcp_server",
+        ],
+        "env": {
+            "MYSQL_HOST": "localhost",
+            "MYSQL_PORT": "3306",
+            "MYSQL_USER": "root",
+            "MYSQL_PASSWORD": "Lucifer_001",
+            "MYSQL_DATABASE": "mcp_learning",
+        },
+    },
+    {
+        "name": "mcp-pinecone",
+        "command": "uv",
+        "args": [
+            "--directory",
+            "/home/abiorh/ai/mcp_servers/mcp-pinecone",
+            "run",
+            "mcp-pinecone",
+        ],
+        "env": {
+            "PINECONE_API_KEY": "api-key-1234567890",
+            "PINECONE_INDEX_NAME": "ocpp-index",
+        },
+    },
     # {
     #     "name": "new-mcpserver",
     #    "transport_type": "streamable_http",
@@ -77,47 +77,44 @@ MCP_TOOLS = [
     #         "Authorization": "Bearer api-key-1234567890"
     #     }
     # },
-    # {
-    #     "name": "filesystem",
-    #     "command": "npx",
-    #     "args": [
-    #         "-y",
-    #         "@modelcontextprotocol/server-filesystem",
-    #         "/home/abiorh/Desktop",
-    #         "/home/abiorh/ai/",
-    #     ],
-    # },
-    # {
-    #     "name": "google-maps",
-    #     "command": "npx",
-    #     "args": [
-    #         "-y",
-    #         "@modelcontextprotocol/server-google-maps",
-    #     ],
-    #     "env": {
-    #         "GOOGLE_MAPS_API_KEY": "",
-    #     },
-    # },
-    # {
-    #     "name": "graph_memory",
-    #     "command": "docker",
-    #     "args": [
-    #         "run",
-    #         "-i",
-    #         "-v",
-    #         "claude-memory:/app/dist",
-    #         "--rm",
-    #         "mcp/memory",
-    #     ],
-    # },
-    #    {
-    #     "name": "time",
-    #     "command": "uvx",
-    #     "args": [
-    #         "mcp-server-time",
-    #         "--local-timezone=America/New_York"
-    #     ],
-    # },
+    {
+        "name": "filesystem",
+        "command": "npx",
+        "args": [
+            "-y",
+            "@modelcontextprotocol/server-filesystem",
+            "/home/abiorh/Desktop",
+            "/home/abiorh/ai/",
+        ],
+    },
+    {
+        "name": "google-maps",
+        "command": "npx",
+        "args": [
+            "-y",
+            "@modelcontextprotocol/server-google-maps",
+        ],
+        "env": {
+            "GOOGLE_MAPS_API_KEY": "",
+        },
+    },
+    {
+        "name": "graph_memory",
+        "command": "docker",
+        "args": [
+            "run",
+            "-i",
+            "-v",
+            "claude-memory:/app/dist",
+            "--rm",
+            "mcp/memory",
+        ],
+    },
+    {
+        "name": "time",
+        "command": "uvx",
+        "args": ["mcp-server-time", "--local-timezone=America/New_York"],
+    },
     # {
     #     "name": "edgeone-pages-mcp-server",
     #     "command": "npx",
@@ -795,9 +792,7 @@ Provide clear, supportive, and context-aware responses that help learners grow.
                 # --- Memory Retrieval Config ---
                 "memory_config": {"mode": "sliding_window", "value": 100},
                 # --- Tool Retrieval Config ---
-                "enable_tools_knowledge_base": True,
-                "tools_results_limit": 10,
-                "tools_similarity_threshold": 0.5,
+                "enable_advanced_tool_use": True,
                 "memory_tool_backend": None,
             },
             memory_router=self.memory_router,

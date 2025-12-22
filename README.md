@@ -1,137 +1,126 @@
-# 🚀 OmniCoreAgent - Production-Ready AI Agent Framework
+<p align="center">
+  <img src="assets/IMG_5292.jpeg" alt="OmniCoreAgent Logo" width="250"/>
+</p>
 
-> **A powerful Python framework for building autonomous AI agents that think, reason, and execute complex tasks. Production-ready agents that use tools, manage memory, coordinate workflows, and handle real-world business logic.**
-
-## 🎯 TL;DR (30 Seconds)
-
-**OmniCoreAgent** = Build AI agents that:
-- 🤖 **Think and reason** (not just chatbots)
-- 🛠️ **Use tools** (APIs, databases, files)
-- 🧠 **Remember context** (across conversations)
-- 🔄 **Orchestrate workflows** (multi-agent systems)
-- 🚀 **Run in production** (monitoring, scaling, reliability)
-- 🔌 **Plug & Play** (switch memory/event backends at runtime—Redis ↔ MongoDB ↔ PostgreSQL ↔ in-memory)
-
-**Perfect for**: Developers building AI assistants, automation systems, or multi-agent applications.
-
-**Get Started**: `pip install omnicoreagent` → Set `LLM_API_KEY` → Build your first agent in 30 seconds.
-
-[![PyPI Downloads](https://static.pepy.tech/badge/omnicoreagent)](https://pepy.tech/projects/omnicoreagent)
-[![Python Version](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](https://github.com/omnirexflora-labs/omnicoreagent/actions)
-[![PyPI version](https://badge.fury.io/py/omnicoreagent.svg)](https://badge.fury.io/py/omnicoreagent)
-[![Last Commit](https://img.shields.io/github/last-commit/omnirexflora-labs/omnicoreagent)](https://github.com/omnirexflora-labs/omnicoreagent/commits/main)
-[![Open Issues](https://img.shields.io/github/issues/omnirexflora-labs/omnicoreagent)](https://github.com/omnirexflora-labs/omnicoreagent/issues)
-[![Pull Requests](https://img.shields.io/github/issues-pr/omnirexflora-labs/omnicoreagent)](https://github.com/omnirexflora-labs/omnicoreagent/pulls)
+<h1 align="center">🚀 OmniCoreAgent</h1>
 
 <p align="center">
-  <img src="assets/IMG_5292.jpeg" alt="OmniCoreAgent Logo" width="300"/>
+  <strong>Production-Ready AI Agent Framework</strong><br>
+  Build autonomous AI agents that think, reason, and execute complex tasks.
 </p>
+
+<p align="center">
+  <a href="https://pepy.tech/projects/omnicoreagent"><img src="https://static.pepy.tech/badge/omnicoreagent" alt="PyPI Downloads"></a>
+  <a href="https://badge.fury.io/py/omnicoreagent"><img src="https://badge.fury.io/py/omnicoreagent.svg" alt="PyPI version"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python Version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"></a>
+  <a href="https://github.com/omnirexflora-labs/omnicoreagent/commits/main"><img src="https://img.shields.io/github/last-commit/omnirexflora-labs/omnicoreagent" alt="Last Commit"></a>
+</p>
+
+<p align="center">
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#-core-features">Features</a> •
+  <a href="#-examples">Examples</a> •
+  <a href="#-configuration">Configuration</a> •
+  <a href="https://omnirexflora-labs.github.io/omnicoreagent">Documentation</a>
+</p>
+
+---
 
 ## 📋 Table of Contents
 
-### 🚀 **Getting Started**
-- [🎯 TL;DR (30 Seconds)](#-tldr-30-seconds)
-- [⚡ Quick Start (1 Minute)](#-quick-start-1-minute)
-- [🌟 What is OmniCoreAgent?](#-what-is-omnicoreagent)
-- [🎯 What Problem Does OmniCoreAgent Solve?](#-what-problem-does-omnicoreagent-solve)
-- [📚 Glossary](#-glossary-for-non-technical-readers)
+<details>
+<summary><strong>Click to expand</strong></summary>
+
+### Getting Started
+- [🌐 The OmniRexFlora AI Ecosystem](#-the-omnirexflora-ai-ecosystem)
+- [🎯 What is OmniCoreAgent?](#-what-is-omnicoreagent)
+- [⚡ Quick Start](#-quick-start)
 - [🏗️ Architecture Overview](#️-architecture-overview)
-- [📦 Installation & Setup](#-installation--setup)
 
-### 🎯 **Core Features**
-- [🤖 OmniAgent - The Heart of the Framework](#1--omniagent---the-heart-of-the-framework)
-- [🧠 Multi-Tier Memory System](#2--multi-tier-memory-system)
-- [📡 Event System](#3--event-system)
-- [🛠️ Local Tools System](#4--local-tools-system)
-- [💾 Memory Tool Backend](#5--memory-tool-backend)
-- [🚁 Background Agents](#6--background-agents)
-- [🔄 Workflow Agents](#7--workflow-agents)
-- [🧠 Semantic Tool Knowledge Base](#8--semantic-tool-knowledge-base)
-- [📊 Production Observability](#9--production-observability)
-- [🌐 Universal Model Support](#10--universal-model-support)
-- [🔌 Built-in MCP Client](#11--built-in-mcp-client)
+### Core Features
+1. [🤖 OmniAgent — The Heart of the Framework](#1--omniagent--the-heart-of-the-framework)
+2. [🧠 Multi-Tier Memory System](#2--multi-tier-memory-system-plug--play)
+3. [📡 Event System](#3--event-system-plug--play)
+4. [🛠️ Local Tools System](#4-️-local-tools-system)
+5. [💾 Memory Tool Backend](#5--memory-tool-backend-file-based-working-memory)
+6. [👥 Sub-Agents System](#6--sub-agents-system)
+7. [🚁 Background Agents](#7--background-agents)
+8. [🔄 Workflow Agents](#8--workflow-agents)
+9. [🧠 Advanced Tool Use (BM25)](#9--advanced-tool-use-bm25-retrieval)
+10. [📊 Production Observability](#10--production-observability)
+11. [🌐 Universal Model Support](#11--universal-model-support)
+12. [🔌 Built-in MCP Client](#12--built-in-mcp-client)
 
-### 📖 **Advanced Topics**
-- [🎯 Production Examples](#-production-examples)
-- [🚀 Advanced Features](#-advanced-features)
-- [⚙️ Configuration Guide](#-configuration-reference)
-- [🧠 Vector Database Setup](#-vector-database-integration)
-- [📊 Opik Tracing Setup](#-opik-tracing)
-
-### 🛠️ **Development & Support**
-- [🧪 Testing](#-testing)
+### Reference
+- [📚 Examples](#-examples)
+- [⚙️ Configuration](#️-configuration)
+- [🧪 Testing & Development](#-testing--development)
 - [🔍 Troubleshooting](#-troubleshooting)
 - [🤝 Contributing](#-contributing)
-- [📖 Documentation](#-documentation)
-- [🌟 Why OmniCoreAgent?](#-why-omnicoreagent)
+- [👨‍💻 Author & Credits](#-author--credits)
 
-### 🔌 **MCP Client (CLI Tool - Backward Compatibility)**
-- [🖥️ MCP Client CLI Commands](#-mcp-client-cli-commands)
-- [🚦 Transport Types & Authentication](#-transport-types--authentication)
-- [💬 Prompt Management](#-prompt-management)
-- [🎯 Operation Modes](#-operation-modes)
-- [📊 Token & Usage Management](#-token--usage-management)
+</details>
 
 ---
 
-## 🌟 What is OmniCoreAgent?
+## 🌐 The OmniRexFlora AI Ecosystem
 
-**OmniCoreAgent** is a powerful, production-ready Python framework for building autonomous AI agents that think, reason, and execute complex tasks. It provides a sophisticated yet intuitive architecture for AI agents that go beyond chatbots—agents that use tools, manage memory, coordinate workflows, and handle real-world business logic.
+**OmniCoreAgent is part of a complete "Operating System for AI Agents"** — three powerful tools that work together:
 
-## 🎯 What Problem Does OmniCoreAgent Solve?
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     🌐 OmniRexFlora AI Ecosystem                            │
+│                    "The Operating System for AI Agents"                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   🧠 OmniMemory                    🤖 OmniCoreAgent                         │
+│   ─────────────                    ─────────────────                        │
+│   The Brain                        The Worker           ⚡ OmniDaemon       │
+│                                                         ─────────────       │
+│   • Self-evolving memory      ───► • Agent building     The Runtime         │
+│   • Dual-agent synthesis           • Tool orchestration                     │
+│   • Conflict resolution            • Multi-backend      • Event-driven  ◄───┤
+│   • Composite scoring              • Workflow agents      execution         │
+│                                                         • Production        │
+│   github.com/omnirexflora-        YOU ARE HERE            deployment       │
+│   labs/omnimemory                                       • Framework-        │
+│                                                           agnostic          │
+│                                                                             │
+│                                                         github.com/         │
+│                                                         omnirexflora-labs/  │
+│                                                         OmniDaemon          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-### Before OmniCoreAgent
+| Tool | Role | Description |
+|------|------|-------------|
+| [🧠 **OmniMemory**](https://github.com/omnirexflora-labs/omnimemory) | The Brain | Self-evolving memory with dual-agent synthesis & conflict resolution |
+| [🤖 **OmniCoreAgent**](https://github.com/omnirexflora-labs/omnicoreagent) | The Worker | Agent building, tool orchestration, multi-backend flexibility |
+| [⚡ **OmniDaemon**](https://github.com/omnirexflora-labs/OmniDaemon) | The Runtime | Event-driven execution, production deployment, framework-agnostic |
 
-Building production-ready AI agents was challenging:
-- ❌ **Complex Setup**: Requires integrating multiple libraries (LLM, memory, tools, orchestration)
-- ❌ **No Built-in Memory**: Manual memory management across conversations
-- ❌ **Difficult Orchestration**: Complex code to coordinate multiple agents
-- ❌ **No Production Infrastructure**: Missing monitoring, observability, error handling
-- ❌ **Vendor Lock-in**: Hard to switch between AI providers
-- ❌ **Tool Integration Complexity**: Difficult to connect agents to external services
-
-### With OmniCoreAgent
-
-Build production-ready agents in minutes:
-- ✅ **Simple API**: `OmniAgent(...)` and you're done
-- ✅ **Built-in Memory**: Redis, PostgreSQL, MongoDB, SQLite with vector database support—**switch at runtime!**
-- ✅ **Plug & Play**: Switch memory and event backends at runtime (Redis ↔ MongoDB ↔ PostgreSQL ↔ in-memory)
-- ✅ **Workflow Orchestration**: Sequential, Parallel, and Router agents out of the box
-- ✅ **Production-Ready**: Monitoring, observability, error handling built-in
-- ✅ **Model Agnostic**: Switch between OpenAI, Anthropic, Groq, Ollama, and 100+ models
-- ✅ **Easy Tool Integration**: Connect to MCP servers or register Python functions as tools
-
-### Core Philosophy
-
-OmniCoreAgent is designed for **production applications**, not experiments. It's a complete framework that handles everything from memory management and tool orchestration to background automation and real-time event streaming. Build agents that plan multi-step workflows, use tools to gather information, validate results, and adapt their approach based on outcomes.
-
-### Key Differentiators
-
-- **🏗️ Complete Agent Framework**: Full framework with built-in infrastructure—not just a library
-- **🧠 Multi-Tier Memory System**: In-memory, Redis, PostgreSQL, MySQL, SQLite, MongoDB with vector database support—**switch at runtime!**
-- **📡 Real-Time Event System**: Event router with in-memory and Redis Streams backends—**switch at runtime!**
-- **🛠️ Local Tools System**: Register any Python function as an AI tool with simple decorators
-- **🚁 Background Agents**: Autonomous task execution with intelligent scheduling
-- **🔄 Workflow Orchestration**: Sequential, Parallel, and Router agents for complex multi-agent systems
-- **💾 Memory Tool Backend**: Persistent agent working memory for long-running tasks
-- **📊 Production Observability**: Opik tracing, metrics, and comprehensive monitoring
-- **🌐 Universal Model Support**: Model-agnostic through LiteLLM—use any LLM provider
-- **🔌 Built-in MCP Client**: Seamless integration with Model Context Protocol servers—connect to filesystems, databases, APIs, and more
+> 💡 **Like how Linux runs applications, OmniRexFlora runs AI agents** — reliably, at scale, in production.
 
 ---
 
-## ⚡ Quick Start (1 Minute)
+## 🎯 What is OmniCoreAgent?
 
-### Prerequisites Checklist
+**OmniCoreAgent** is a production-ready Python framework for building autonomous AI agents that:
 
-Before you begin, make sure you have:
-- [ ] **Python 3.10+** installed (check with `python --version`)
-- [ ] **LLM API Key** from OpenAI, Anthropic, or Groq
-- [ ] **Terminal/Command prompt** ready
+| Capability | Description |
+|------------|-------------|
+| 🤖 **Think & Reason** | Not just chatbots — agents that plan multi-step workflows |
+| 🛠️ **Use Tools** | Connect to APIs, databases, files, MCP servers, with Advanced Tool Use |
+| 🧠 **Remember Context** | Multi-tier memory: Redis, PostgreSQL, MongoDB, SQLite |
+| 🔄 **Orchestrate Workflows** | Sequential, Parallel, and Router agents |
+| 🚀 **Run in Production** | Monitoring, observability, error handling built-in |
+| 🔌 **Plug & Play** | Switch backends at runtime (Redis ↔ MongoDB ↔ PostgreSQL) |
 
-### Step 1: Install (10 seconds)
+---
+
+## ⚡ Quick Start
+
+### 1. Install (10 seconds)
 
 ```bash
 # Using uv (recommended)
@@ -141,281 +130,139 @@ uv add omnicoreagent
 pip install omnicoreagent
 ```
 
-### Step 2: Set API Key (10 seconds)
+### 2. Set API Key (10 seconds)
 
 ```bash
-# Create .env file in your project directory
 echo "LLM_API_KEY=your_openai_api_key_here" > .env
-
-# Or manually create .env file with:
-# LLM_API_KEY=sk-your-actual-api-key-here
 ```
 
-> **💡 Tip**: Get your API key from [OpenAI](https://platform.openai.com/api-keys), [Anthropic](https://console.anthropic.com/), or [Groq](https://console.groq.com/)
+> 💡 Get your key from [OpenAI](https://platform.openai.com/api-keys), [Anthropic](https://console.anthropic.com/), or [Groq](https://console.groq.com/)
 
-### Step 3: Create Your First Agent (30 seconds)
-
-Create a file `my_first_agent.py`:
+### 3. Create Your First Agent (30 seconds)
 
 ```python
 import asyncio
 from omnicoreagent import OmniAgent
 
 async def main():
-    # Create your agent
     agent = OmniAgent(
         name="my_agent",
         system_instruction="You are a helpful assistant.",
         model_config={"provider": "openai", "model": "gpt-4o"}
     )
     
-    # Run your agent
     result = await agent.run("Hello, world!")
     print(result['response'])
     
-    # Clean up
     await agent.cleanup()
 
 if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-Run it:
-```bash
-python my_first_agent.py
-```
+**✅ That's it!** You just built an AI agent with session management, memory persistence, event streaming, and error handling.
 
-**✅ Success!** You just built an AI agent with:
-- ✅ Session management
-- ✅ Memory persistence
-- ✅ Event streaming
-- ✅ Tool orchestration
-- ✅ Error handling
-- ✅ Production-ready infrastructure
+<details>
+<summary><strong>🚨 Common Errors & Fixes</strong></summary>
 
-### 🚨 Common First Errors & Fixes
+| Error | Fix |
+|-------|-----|
+| `Invalid API key` | Check `.env` file: `LLM_API_KEY=sk-...` (no quotes) |
+| `ModuleNotFoundError` | Run: `pip install omnicoreagent` |
+| `Event loop is closed` | Use `asyncio.run(main())` |
 
-| **Error** | **Fix** |
-|-----------|---------|
-| `Invalid API key` | Check `.env` file: `LLM_API_KEY=sk-...` (no quotes, no spaces) |
-| `ModuleNotFoundError: omnicoreagent` | Run: `pip install omnicoreagent` |
-| `RuntimeError: Event loop is closed` | Make sure you use `asyncio.run(main())` |
-| `AttributeError: 'coroutine' object has no attribute 'response'` | Make sure you `await agent.run()` |
-
-### Next Steps
-
-- 📖 **Learn More**: See [Core Features](#-core-features) for advanced capabilities
-- 🎯 **See Examples**: Check [Examples](#-examples) for real-world use cases
-- 🚀 **Production Ready**: See [Production Examples](#-production-examples) for full setups
+</details>
 
 ---
 
 ## 🏗️ Architecture Overview
 
-OmniCoreAgent is built on a modular, production-ready architecture:
-
 ```
 OmniCoreAgent Framework
 ├── 🤖 Core Agent System
-│   ├── OmniAgent (Main Agent Class)
+│   ├── OmniAgent (Main Class)
 │   ├── ReactAgent (Reasoning Engine)
-│   ├── Tool Orchestration
-│   └── Session Management
+│   └── Tool Orchestration
 │
-├── 🧠 Memory System (Multi-Backend)
-│   ├── InMemoryStore (Fast Development)
-│   ├── RedisMemoryStore (Production Persistence)
+├── 🧠 Memory System (5 Backends)
+│   ├── InMemoryStore (Fast Dev)
+│   ├── RedisMemoryStore (Production)
 │   ├── DatabaseMemory (PostgreSQL/MySQL/SQLite)
-│   ├── MongoDBMemory (Document Storage)
-│   ├── Vector Database Integration (Qdrant/ChromaDB/MongoDB Atlas)
-│   └── Memory Management (Episodic, Long-term, Working Memory)
+│   └── MongoDBMemory (Document Storage)
 │
 ├── 📡 Event System
 │   ├── InMemoryEventStore (Development)
-│   ├── RedisStreamEventStore (Production)
-│   └── Real-Time Event Streaming
+│   └── RedisStreamEventStore (Production)
 │
 ├── 🛠️ Tool System
-│   ├── Local Tools Registry (Python Functions)
-│   ├── MCP Tools Integration (Built-in Client)
-│   ├── Semantic Tool Knowledge Base
-│   └── Memory Tool Backend (Persistent Working Memory)
+│   ├── Local Tools Registry
+│   ├── MCP Integration
+│   ├── Advanced Tool Use (BM25)
+│   └── Memory Tool Backend
 │
-├── 🚁 Background Agent System
-│   ├── Background Agent Manager
-│   ├── Task Registry
-│   ├── APScheduler Backend
-│   └── Lifecycle Management
+├── 🚁 Background Agents
+│   └── Autonomous Scheduled Tasks
 │
 ├── 🔄 Workflow Agents
-│   ├── SequentialAgent (Step-by-step chaining)
-│   ├── ParallelAgent (Concurrent execution)
-│   └── RouterAgent (Intelligent routing)
+│   ├── SequentialAgent
+│   ├── ParallelAgent
+│   └── RouterAgent
 │
 └── 🔌 Built-in MCP Client
-    ├── Model Context Protocol server support
-    ├── Multiple transport protocols (stdio, Streamable_HTTP, SSE)
-    └── Seamless tool integration
+    ├── stdio, SSE, HTTP transports
+    └── OAuth & Bearer auth
 ```
-
----
-
-## 📚 Glossary (For Non-Technical Readers)
-
-Understanding key terms helps you get the most out of OmniCoreAgent:
-
-- **AI Agent**: A program that can think, make decisions, and use tools (like APIs or databases) to complete tasks autonomously. Unlike simple chatbots, agents can plan multi-step workflows and adapt based on results.
-
-- **LLM (Large Language Model)**: The "brain" of your agent. Examples include GPT-4, Claude, Gemini. These models understand language and can reason about tasks.
-
-- **Tool**: A function your agent can call to perform actions. Examples: "get weather", "send email", "query database", "read file". Tools extend what your agent can do beyond just talking.
-
-- **Memory**: How your agent remembers past conversations and context. OmniCoreAgent supports multiple memory backends (in-memory, Redis, databases) for different use cases.
-
-- **Session**: A single conversation with your agent. Sessions help maintain context and separate different user interactions.
-
-- **MCP (Model Context Protocol)**: A standard protocol for connecting AI agents to external tools and services. OmniCoreAgent has built-in MCP client support.
-
-- **Vector Database**: A special database that stores information in a way that allows semantic search (finding information by meaning, not exact text). Used for long-term memory.
-
-- **Background Agent**: An agent that runs automatically on a schedule, without human interaction. Perfect for monitoring, periodic tasks, or automation.
-
-- **Workflow Agent**: A system that coordinates multiple agents to work together. Examples: Sequential (one after another), Parallel (at the same time), Router (intelligent routing).
-
-- **Observability**: Tools and metrics that help you monitor, debug, and optimize your agents in production. Includes tracing, logging, and performance metrics.
 
 ---
 
 ## 🎯 Core Features
 
-### 1. 🤖 OmniAgent - The Heart of the Framework
+### 1. 🤖 OmniAgent — The Heart of the Framework
 
-**OmniAgent** is the main class that powers everything. It's a sophisticated agent with enterprise-grade capabilities:
-
-#### Common Workflows
-
-**Basic Agent**:
 ```python
+from omnicoreagent import OmniAgent, ToolRegistry, MemoryRouter, EventRouter
+
+# Basic Agent
 agent = OmniAgent(
     name="assistant",
     system_instruction="You are a helpful assistant.",
     model_config={"provider": "openai", "model": "gpt-4o"}
 )
-result = await agent.run("What is Python?")
-```
 
-**Agent with Custom Tools**:
-```python
-from omnicoreagent import OmniAgent, ToolRegistry
-
-tools = ToolRegistry()
-@tools.register_tool("get_weather")
-def get_weather(city: str) -> str:
-    return f"Weather in {city}: Sunny, 25°C"
-
-agent = OmniAgent(
-    name="weather_agent",
-    system_instruction="You help with weather information.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    local_tools=tools
-)
-```
-
-**Production Agent with Memory & Events**:
-```python
-from omnicoreagent import OmniAgent, MemoryRouter, EventRouter
-
+# Production Agent with All Features
 agent = OmniAgent(
     name="production_agent",
     system_instruction="You are a production agent.",
     model_config={"provider": "openai", "model": "gpt-4o"},
+    local_tools=tool_registry,
+    mcp_tools=[...],
     memory_router=MemoryRouter("redis"),
     event_router=EventRouter("redis_stream"),
     agent_config={
         "max_steps": 20,
-        "memory_tool_backend": "local"
-    }
-)
-```
-
-#### Key Methods
-
-```python
-from omnicoreagent import OmniAgent
-
-agent = OmniAgent(
-    name="my_agent",
-    system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    local_tools=tool_registry,  # Your custom tools
-    mcp_tools=[...],  # MCP server connections
-    memory_router=MemoryRouter("redis"),
-    event_router=EventRouter("redis_stream"),
-    agent_config={
-        "max_steps": 15,
-        "tool_call_timeout": 30,
-        "memory_results_limit": 5,
-        "enable_tools_knowledge_base": True,
+        "enable_advanced_tool_use": True,
         "memory_tool_backend": "local"
     }
 )
 
-# Core Methods
-await agent.run(query)                          # Execute agent task (session_id auto-generated)
-await agent.run(query, session_id="user_123")   # Execute with specific session_id for context
-await agent.connect_mcp_servers()                # Connect to MCP servers
-await agent.list_all_available_tools()           # Get all tools (MCP + local)
+# Key Methods
+await agent.run(query)                      # Execute task
+await agent.run(query, session_id="user_1") # With session context
+await agent.connect_mcp_servers()           # Connect MCP tools
+await agent.list_all_available_tools()      # List all tools
+await agent.swith_memory_store("mongodb")         # Switch backend at runtime!
 await agent.get_session_history(session_id)      # Retrieve conversation history
 await agent.clear_session_history(session_id)     # Clear history (session_id optional, clears all if None)
-await agent.stream_events(session_id)           # Stream real-time events
 await agent.get_events(session_id)               # Get event history
-agent.get_memory_store_type()                    # Get current memory backend
-agent.get_event_store_type()                    # Get current event backend
-agent.switch_event_store("redis_stream")         # Switch event backend at runtime (in_memory ↔ redis_stream)
-agent.swith_memory_store("redis")                # Switch memory backend at runtime (redis, mongodb, database, in_memory)
-agent.swith_memory_store("mongodb")              # Switch to MongoDB
-agent.swith_memory_store("database")             # Switch to PostgreSQL/MySQL/SQLite
-agent.swith_memory_store("in_memory")            # Switch to in-memory
-await agent.cleanup()                            # Clean up resources
+await agent.get_memory_store_type()              # Get current memory router type
+await agent.cleanup()                       # Clean up resources
 ```
 
-#### Agent Configuration
+> 💡 **When to Use**: OmniAgent is your go-to for any AI task — from simple Q&A to complex multi-step workflows. Start here for any agent project.
 
-```python
-agent_config = {
-    # Execution Limits
-    "max_steps": 15,                    # Maximum reasoning steps
-    "tool_call_timeout": 30,            # Tool execution timeout (seconds)
-    "request_limit": 0,                 # 0 = unlimited, >0 for limits
-    "total_tokens_limit": 0,            # 0 = unlimited, >0 for token cap
-    
-    # Memory Configuration
-    "memory_config": {
-        "mode": "sliding_window",       # or "token_budget"
-        "value": 10000                  # Window size or token limit
-    },
-    "memory_results_limit": 5,          # Memory retrieval limit (1-100)
-    "memory_similarity_threshold": 0.5,  # Similarity threshold (0.0-1.0)
-    
-    # Tool Knowledge Base
-    "enable_tools_knowledge_base": True,  # Semantic tool retrieval
-    "tools_results_limit": 10,           # Max tools per query
-    "tools_similarity_threshold": 0.1,    # Tool similarity threshold
-    
-    # Memory Tool Backend for filesystem persistance storage
-    "memory_tool_backend": "local"       # "local", or None
-}
-```
+### 2. 🧠 Multi-Tier Memory System (Plug & Play)
 
----
-
-### 2. 🧠 Multi-Tier Memory System
-
-OmniCoreAgent provides **5 memory backends** with intelligent routing and **runtime switching**—truly plug and play!
-
-#### 🎯 Runtime Switching (Plug & Play)
-
-**The Beauty of OmniCoreAgent**: Switch memory backends at runtime without restarting or losing data. Start with Redis, switch to MongoDB, then to PostgreSQL—all on the fly!
+**5 backends with runtime switching** — start with Redis, switch to MongoDB, then PostgreSQL — all on the fly!
 
 ```python
 from omnicoreagent import OmniAgent, MemoryRouter
@@ -427,222 +274,46 @@ agent = OmniAgent(
     model_config={"provider": "openai", "model": "gpt-4o"}
 )
 
-# Use Redis for a while...
-result = await agent.run("Store this information")
-
-# Switch to MongoDB at runtime - no restart needed!
-agent.swith_memory_store("mongodb")
-result = await agent.run("Now using MongoDB backend")
-
-# Switch to PostgreSQL
-agent.swith_memory_store("database")  # Uses DATABASE_URL env var
-
-# Switch to in-memory for testing
-agent.swith_memory_store("in_memory")
-
-# Switch back to Redis
-agent.swith_memory_store("redis")
+# Switch at runtime — no restart needed!
+agent.swith_memory_store("mongodb")     # Switch to MongoDB
+agent.swith_memory_store("database")    # Switch to PostgreSQL/MySQL/SQLite
+agent.swith_memory_store("in_memory")   # Switch to in-memory
+agent.swith_memory_store("redis")       # Back to Redis
 ```
 
-**Use Cases**:
-- **Development → Production**: Start with `in_memory`, switch to `redis` when ready
-- **Migration**: Switch from one backend to another without downtime
-- **Testing**: Quickly switch between backends for testing
-- **Cost Optimization**: Use cheaper backends for development, premium for production
-- **A/B Testing**: Test different backends with the same agent
+| Backend | Use Case | Environment Variable |
+|---------|----------|---------------------|
+| `in_memory` | Fast development | — |
+| `redis` | Production persistence | `REDIS_URL` |
+| `database` | PostgreSQL/MySQL/SQLite | `DATABASE_URL` |
+| `mongodb` | Document storage | `MONGODB_URI` |
 
-#### Memory Router
+> 💡 **When to Use**: Use `in_memory` for development/testing, `redis` for production with fast access, `database` for SQL-based systems, `mongodb` for document-heavy applications.
 
-```python
-from omnicoreagent import MemoryRouter
+### 3. 📡 Event System (Plug & Play)
 
-# In-Memory (Fast Development)
-memory = MemoryRouter("in_memory")
-
-# Redis (Production Persistence)
-memory = MemoryRouter("redis")  # Uses REDIS_URL env var
-
-# Database (PostgreSQL/MySQL/SQLite)
-memory = MemoryRouter("database")  # Uses DATABASE_URL env var
-# Supports: postgresql://, mysql://, sqlite://
-
-# MongoDB (Document Storage)
-memory = MemoryRouter("mongodb")  # Uses MONGODB_URI env var
-
-# Runtime Switching - Works with any backend!
-memory.swith_memory_store("redis")      # Switch to Redis
-memory.swith_memory_store("mongodb")    # Switch to MongoDB
-memory.swith_memory_store("database")   # Switch to PostgreSQL/MySQL/SQLite
-memory.swith_memory_store("in_memory")  # Switch to in-memory
-```
-
-#### Memory Strategies
-
-```python
-# Sliding Window - Keep last N messages
-memory.set_memory_config(mode="sliding_window", value=100)
-
-# Token Budget - Keep under token limit
-memory.set_memory_config(mode="token_budget", value=5000)
-```
-
-#### Vector Database Integration
-
-Enable semantic search and long-term memory:
-
-```bash
-# .env
-ENABLE_VECTOR_DB=true
-OMNI_MEMORY_PROVIDER=qdrant-remote  # or chroma-remote, mongodb-remote
-QDRANT_HOST=localhost
-QDRANT_PORT=6333
-EMBEDDING_API_KEY=your_embedding_key  # REQUIRED when ENABLE_VECTOR_DB=true
-```
-
-**Supported Providers:**
-
-1. **Qdrant Remote** (Recommended)
-   ```bash
-   # Install and run Qdrant
-   docker run -p 6333:6333 qdrant/qdrant
-   
-   # Configure
-   ENABLE_VECTOR_DB=true
-   OMNI_MEMORY_PROVIDER=qdrant-remote
-   QDRANT_HOST=localhost
-   QDRANT_PORT=6333
-   ```
-
-2. **ChromaDB Remote**
-   ```bash
-   # Install and run ChromaDB server
-   docker run -p 8000:8000 chromadb/chroma
-   
-   # Configure
-   ENABLE_VECTOR_DB=true
-   OMNI_MEMORY_PROVIDER=chroma-remote
-   CHROMA_HOST=localhost
-   CHROMA_PORT=8000
-   ```
-
-3. **ChromaDB Cloud**
-   ```bash
-   ENABLE_VECTOR_DB=true
-   OMNI_MEMORY_PROVIDER=chroma-cloud
-   CHROMA_TENANT=your_tenant
-   CHROMA_DATABASE=your_database
-   CHROMA_API_KEY=your_api_key
-   ```
-
-4. **MongoDB Atlas**
-   ```bash
-   ENABLE_VECTOR_DB=true
-   OMNI_MEMORY_PROVIDER=mongodb-remote
-   MONGODB_URI="your_mongodb_connection_string"
-   MONGODB_DB_NAME="db name"
-   ```
-
-**Memory Types:**
-- **Episodic Memory**: Conversation history with semantic search
-- **Long-term Memory**: Persistent knowledge storage
-- **Working Memory**: Active task state (via Memory Tool Backend)
-
-**What You Get:**
-- **Long-term Memory**: Persistent storage across sessions
-- **Episodic Memory**: Context-aware conversation history
-- **Semantic Search**: Find relevant information by meaning, not exact text
-- **Multi-session Context**: Remember information across different conversations
-- **Automatic Summarization**: Intelligent memory compression for efficiency
-
-- **Embedding API key is REQUIRED** when `ENABLE_VECTOR_DB=true`
-- **Dimensions parameter is mandatory** in embedding configuration
-
----
-
-### 3. 📡 Event System
-
-Real-time event streaming for monitoring and debugging with **runtime switching**—plug and play!
-
-#### 🎯 Runtime Switching (Plug & Play)
-
-**The Beauty of OmniCoreAgent**: Switch event router at runtime. Start with `in_memory` for development, switch to `redis_stream` for production—all without restarting!
-
-```python
-from omnicoreagent import OmniAgent, EventRouter
-
-# Start with in-memory events (fast for development)
-agent = OmniAgent(
-    name="my_agent",
-    event_router=EventRouter("in_memory"),
-    model_config={"provider": "openai", "model": "gpt-4o"}
-)
-
-# Use in-memory for development...
-result = await agent.run("Test query")
-
-# Switch to Redis Streams at runtime for production persistence!
-agent.switch_event_store("redis_stream")
-result = await agent.run("Now events are persisted in Redis")
-
-# Switch back to in-memory if needed
-agent.switch_event_store("in_memory")
-```
-
-**Use Cases**:
-- **Development → Production**: Start with `in_memory`, switch to `redis_stream` when deploying
-- **Testing**: Quickly switch between backends for testing
-- **Performance Tuning**: Use in-memory for speed, Redis for persistence
-- **Cost Management**: Use in-memory for development, Redis for production
-
-#### Event Backends
+Real-time event streaming with runtime switching:
 
 ```python
 from omnicoreagent import EventRouter
 
-# In-Memory Events (Development - Fast)
-events = EventRouter("in_memory")
+# Start with in-memory
+agent = OmniAgent(
+    event_router=EventRouter("in_memory"),
+    ...
+)
 
-# Redis Streams (Production - Persistent)
-events = EventRouter("redis_stream")  # Uses REDIS_URL env var
-
-# Runtime Switching - Works seamlessly!
-events.switch_event_store("redis_stream")  # Switch to Redis Streams
-events.switch_event_store("in_memory")     # Switch back to in-memory
-```
-
-#### Event Types
-
-```python
-# Event Types Available:
-# - user_message
-# - agent_message
-# - tool_call_started
-# - tool_call_result
-# - tool_call_error
-# - final_answer
-# - agent_thought
-# - background_task_started
-# - background_task_completed
-# - background_task_error
-```
-
-#### Usage Examples
-
-```python
+# Switch to Redis Streams for production
+agent.switch_event_store("redis_stream")
+agent.get_event_store_type()                    # Get current event router type
 # Stream events in real-time
 async for event in agent.stream_events(session_id):
     print(f"{event.type}: {event.payload}")
-
-# Get event history
-history = await agent.get_events(session_id)
-
-# Switch event backend and continue streaming
-agent.switch_event_store("redis_stream")
-async for event in agent.stream_events(session_id):
-    print(f"Persisted: {event.type}")
 ```
 
----
+**Event Types**: `user_message`, `agent_message`, `tool_call_started`, `tool_call_result`, `final_answer`, `agent_thought`, `sub_agent_started`, `sub_agent_error`, `sub_agent_result`
+
+> 💡 **When to Use**: Enable events when you need real-time monitoring, debugging, or building UIs that show agent progress. Essential for production observability.
 
 ### 4. 🛠️ Local Tools System
 
@@ -651,990 +322,396 @@ Register any Python function as an AI tool:
 ```python
 from omnicoreagent import ToolRegistry
 
-tool_registry = ToolRegistry()
+tools = ToolRegistry()
 
-@tool_registry.register_tool("calculate_area")
+@tools.register_tool("get_weather")
+def get_weather(city: str) -> str:
+    """Get weather for a city."""
+    return f"Weather in {city}: Sunny, 25°C"
+
+@tools.register_tool("calculate_area")
 def calculate_area(length: float, width: float) -> str:
-    """Calculate the area of a rectangle."""
-    area = length * width
-    return f"Area: {area} square units"
+    """Calculate rectangle area."""
+    return f"Area: {length * width} square units"
 
-@tool_registry.register_tool(
-    name="analyze_data",
-    description="Analyze data and return insights",
-    inputSchema={
-        "type": "object",
-        "properties": {
-            "data": {"type": "string", "description": "Data to analyze"}
-        },
-        "required": ["data"]
-    }
-)
-def analyze_data(data: str) -> str:
-    """Analyze data and return insights."""
-    return f"Analysis: {len(data)} characters processed"
-
-# Use with OmniAgent
 agent = OmniAgent(
-    name="my_agent",
-    system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    local_tools=tool_registry  # Your custom tools!
+    name="tool_agent",
+    local_tools=tools,  # Your custom tools!
+    ...
 )
 ```
 
-**The agent automatically:**
-- ✅ Discovers all registered tools
-- ✅ Generates tool schemas
-- ✅ Handles tool execution
-- ✅ Manages errors gracefully
-- ✅ Combines with MCP tools seamlessly
+> 💡 **When to Use**: Use Local Tools when you need custom business logic, internal APIs, or any Python functionality that isn't available via MCP servers.
 
----
+### 5. 💾 Memory Tool Backend (File-Based Working Memory)
 
-### 5. 💾 Memory Tool Backend
-
-Persistent working memory for long-running tasks. **When to use**: Enable this when your agent needs to save intermediate work, track progress across multiple steps, or resume tasks after interruption.
+A **file-based persistent storage system** that gives your agent a local workspace to save and manage files during long-running tasks. Files are stored in a `./memories/` directory with safe concurrent access and path traversal protection.
 
 ```python
 agent_config = {
-    "memory_tool_backend": "local"  # Enable persistent memory
+    "memory_tool_backend": "local"  # Enable file-based memory
 }
 
-# Agent automatically gets access to memory_* tools:
-# - memory_view: Inspect memory contents
-# - memory_create_update: Create/append/overwrite files
-# - memory_str_replace: Replace strings in files
-# - memory_insert: Insert text at specific line
-# - memory_delete: Delete files
-# - memory_rename: Rename/move files
-# - memory_clear_all: Clear all memory
-
-# Files stored in ./memories/ directory
-# Safe, concurrent access with file locks
-# Path traversal protection
+# Agent automatically gets these tools:
+# - memory_view: View/list files in memory directory
+# - memory_create_update: Create new files or append/overwrite existing ones
+# - memory_str_replace: Find and replace text within files
+# - memory_insert: Insert text at specific line numbers
+# - memory_delete: Delete files from memory
+# - memory_rename: Rename or move files
+# - memory_clear_all: Clear entire memory directory
 ```
 
-**Use Cases:**
-- **Long-running workflows**: Save progress as agent works through complex tasks
-- **Resumable tasks**: Agent can continue where it left off after interruption
-- **Progress tracking**: Monitor multi-step processes
-- **Intermediate state storage**: Store data between agent reasoning steps
-- **Multi-step planning**: Agent can plan, save plan, execute, and update
+**How It Works**:
+- Files stored in `./memories/` directory (auto-created)
+- Thread-safe with file locking for concurrent access
+- Path traversal protection for security
+- Persists across agent restarts
 
-**Example**: A code generation agent can save its plan, write code incrementally, and resume if interrupted.
+**Use Cases**:
+| Use Case | Description |
+|----------|-------------|
+| **Long-running workflows** | Save progress as agent works through complex tasks |
+| **Resumable tasks** | Continue where you left off after interruption |
+| **Multi-step planning** | Agent can save plans, execute, and update |
+| **Code generation** | Save code incrementally, run tests, iterate |
+| **Data processing** | Store intermediate results between steps |
+
+**Example**: A code generation agent can save its plan to memory, write code incrementally, run tests, and resume if interrupted.
 
 ---
 
-### 6. 🚁 Background Agents
+### 6. 👥 Sub-Agents System
 
-Autonomous agents that run independently:
+Delegate tasks to specialized child agents:
 
 ```python
-from omnicoreagent import (
-    OmniAgent,
-    BackgroundAgentService,
-    MemoryRouter,
-    EventRouter,
-    ToolRegistry
-)
+weather_agent = OmniAgent(name="weather_agent", ...)
+filesystem_agent = OmniAgent(name="filesystem_agent", mcp_tools=MCP_TOOLS, ...)
 
-# Initialize background service
-memory_router = MemoryRouter("redis")
-event_router = EventRouter("redis_stream")
-bg_service = BackgroundAgentService(memory_router, event_router)
+parent_agent = OmniAgent(
+    name="parent_agent",
+    sub_agents=[weather_agent, filesystem_agent],
+    ...
+)
+```
+
+> 💡 **When to Use**: Use Sub-Agents when you have specialized agents (e.g., weather, code, data) and want a parent agent to delegate tasks intelligently. Great for building modular, reusable agent architectures.
+
+### 7. 🚁 Background Agents
+
+Autonomous agents that run on schedule:
+
+```python
+from omnicoreagent import BackgroundAgentService, MemoryRouter, EventRouter
+
+bg_service = BackgroundAgentService(
+    MemoryRouter("redis"),
+    EventRouter("redis_stream")
+)
 bg_service.start_manager()
 
-# Create tool registry
-tool_registry = ToolRegistry()
-
-@tool_registry.register_tool("monitor_system")
-def monitor_system() -> str:
-    """Monitor system resources."""
-    import psutil
-    return f"CPU: {psutil.cpu_percent()}%, Memory: {psutil.virtual_memory().percent}%"
-
-# Create background agent
 agent_config = {
     "agent_id": "system_monitor",
-    "system_instruction": "You are a system monitoring agent.",
-    "model_config": {
-        "provider": "openai",
-        "model": "gpt-4o-mini",
-        "temperature": 0.3
-    },
-    "agent_config": {
-        "max_steps": 10,
-        "tool_call_timeout": 60
-    },
+    "system_instruction": "Monitor system resources.",
+    "model_config": {"provider": "openai", "model": "gpt-4o-mini"},
     "interval": 300,  # Run every 5 minutes
     "task_config": {
-        "query": "Monitor system resources and alert if CPU > 80%",
-        "schedule": "every 5 minutes",
-        "interval": 300,
-        "max_retries": 2,
-        "retry_delay": 30
-    },
-    "local_tools": tool_registry
+        "query": "Monitor CPU and alert if > 80%",
+        "max_retries": 2
+    }
 }
 
-result = await bg_service.create(agent_config)
-
-# Agent Management
+await bg_service.create(agent_config)
 bg_service.start_agent("system_monitor")
-bg_service.pause_agent("system_monitor")
-bg_service.resume_agent("system_monitor")
-bg_service.stop_agent("system_monitor")
-bg_service.remove_task("system_monitor")
-
-# Status Monitoring
-status = bg_service.get_agent_status("system_monitor")
-agents = bg_service.list()  # List all agents
 ```
 
-**Features:**
-- ✅ Flexible scheduling (interval-based, cron support planned)
-- ✅ Lifecycle management (create, pause, resume, delete)
-- ✅ Health monitoring
-- ✅ Automatic retries
-- ✅ Event broadcasting
-- ✅ Full OmniAgent capabilities
+**Management**: `start_agent()`, `pause_agent()`, `resume_agent()`, `stop_agent()`, `get_agent_status()`
 
----
+> 💡 **When to Use**: Perfect for scheduled tasks like system monitoring, periodic reports, data syncing, or any automation that runs independently without user interaction.
 
-### 7. 🔄 Workflow Agents
+### 8. 🔄 Workflow Agents
 
 Orchestrate multiple agents for complex tasks:
 
-#### SequentialAgent
-
-Chain agents step-by-step:
-
 ```python
-from omnicoreagent import OmniAgent, SequentialAgent
+from omnicoreagent import SequentialAgent, ParallelAgent, RouterAgent
 
-# Create agents
-agent1 = OmniAgent(name="analyzer", ...)
-agent2 = OmniAgent(name="processor", ...)
-agent3 = OmniAgent(name="reporter", ...)
-
-# Chain them
+# Sequential: Chain agents step-by-step
 seq_agent = SequentialAgent(sub_agents=[agent1, agent2, agent3])
-await seq_agent.initialize()
+result = await seq_agent.run(initial_task="Analyze and report")
 
-result = await seq_agent.run(
-    initial_task="Analyze this data and generate a report"
-)
-# Output from agent1 → input to agent2 → input to agent3
-```
-
-#### ParallelAgent
-
-Run agents concurrently:
-
-```python
-from omnicoreagent import ParallelAgent
-
+# Parallel: Run agents concurrently
 par_agent = ParallelAgent(sub_agents=[agent1, agent2, agent3])
-await par_agent.initialize()
+results = await par_agent.run(agent_tasks={
+    "analyzer": "Analyze data",
+    "processor": "Process results"
+})
 
-results = await par_agent.run(
-    agent_tasks={
-        "analyzer": "Analyze the data",
-        "processor": "Process the results",
-        "reporter": None  # Uses system instruction
-    }
-)
-# All agents run simultaneously
-```
-
-#### RouterAgent
-
-Intelligent task routing:
-
-```python
-from omnicoreagent import RouterAgent
-
+# Router: Intelligent task routing
 router = RouterAgent(
     sub_agents=[code_agent, data_agent, research_agent],
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    agent_config={"max_steps": 10},
-    memory_router=MemoryRouter("redis"),
-    event_router=EventRouter("redis_stream")
+    model_config={"provider": "openai", "model": "gpt-4o"}
 )
-
-await router.initialize()
-result = await router.run(task="Find and summarize recent AI research")
-# RouterAgent analyzes task and routes to best agent
+result = await router.run(task="Find and summarize AI research")
 ```
 
----
+> 💡 **When to Use**:
+> - **SequentialAgent**: When tasks depend on each other (output of one → input of next)
+> - **ParallelAgent**: When tasks are independent and can run simultaneously for speed
+> - **RouterAgent**: When you need intelligent task routing to specialized agents
 
-### 8. 🧠 Semantic Tool Knowledge Base
+### 9. 🧠 Advanced Tool Use (BM25 Retrieval)
 
-Automatically discover and retrieve relevant tools using semantic search. **The Problem**: When you have hundreds of tools, manually selecting which ones to use is impossible. **The Solution**: OmniCoreAgent automatically finds the right tools based on what the agent needs to do.
+Automatically discover relevant tools at runtime using BM25 lexical search:
 
-**Before (Manual Tool Selection)**:
 ```python
-# ❌ You have to manually specify which tools to use
-# ❌ Doesn't scale with 100+ tools
-# ❌ Agent might miss relevant tools
-tools = [tool1, tool2, tool3]  # Limited selection
-```
-
-**After (Semantic Tool Knowledge Base)**:
-```python
-# ✅ Agent automatically finds relevant tools
-# ✅ Scales to unlimited tools
-# ✅ Context-aware selection
 agent_config = {
-    "enable_tools_knowledge_base": True,
-    "tools_results_limit": 10,
-    "tools_similarity_threshold": 0.1
+    "enable_advanced_tool_use": True  # Enable BM25 retrieval
 }
-
-# All MCP tools are automatically embedded into vector DB
-# Agent uses semantic search to find relevant tools
-# Falls back to keyword (BM25) search if needed
 ```
 
-**How It Works:**
-1. All tools are automatically embedded into a vector database
-2. When agent needs tools, it searches semantically (by meaning)
-3. Returns most relevant tools for the current task
-4. Falls back to keyword search if semantic search finds nothing
+**How It Works**:
+1. All MCP tools loaded into in-memory registry
+2. BM25 index built over tool names, descriptions, parameters
+3. User task used as search query
+4. Top 5 relevant tools dynamically injected
 
-**Benefits:**
-- ✅ **Scales to unlimited tools**: Works with 10 or 10,000 tools
-- ✅ **Context-aware tool selection**: Finds tools based on task meaning
-- ✅ **No manual registry management**: Automatic tool discovery
-- ✅ **Automatic tool indexing**: New tools are automatically available
+**Benefits**: Scales to 1000+ tools, zero network I/O, deterministic, container-friendly.
 
----
+> 💡 **When to Use**: Enable when you have many MCP tools (10+) and want the agent to automatically discover the right tools for each task without manual selection.
 
-### 9. 📊 Production Observability
+### 10. 📊 Production Observability
 
-#### Opik Tracing & Observability Setup
+**Opik Tracing** — Monitor and optimize your agents:
 
-**Monitor and optimize your AI agents with production-grade observability:**
+```bash
+# Add to .env
+OPIK_API_KEY=your_opik_api_key
+OPIK_WORKSPACE=your_workspace
+```
 
-**🚀 Quick Setup:**
-
-1. **Sign up for Opik** (Free & Open Source):
-   - Visit: **[https://www.comet.com/signup?from=llm](https://www.comet.com/signup?from=llm)**
-   - Create your account and get your API key and workspace name
-
-2. **Add to your `.env` file:**
-   ```bash
-   OPIK_API_KEY=your_opik_api_key_here
-   OPIK_WORKSPACE=your_opik_workspace_name
-   ```
-
-**✨ What You Get Automatically:**
-
-Once configured, OmniCoreAgent automatically tracks:
-- **🔥 LLM Call Performance**: Execution time, token usage, response quality
-- **🛠️ Tool Execution Traces**: Which tools were used and how long they took
-- **🧠 Memory Operations**: Vector DB queries, memory retrieval performance
-- **🤖 Agent Workflow**: Complete trace of multi-step agent reasoning
-- **📊 System Bottlenecks**: Identify exactly where time is spent
-
-**📈 Benefits:**
-- **Performance Optimization**: See which LLM calls or tools are slow
-- **Cost Monitoring**: Track token usage and API costs
-- **Debugging**: Understand agent decision-making processes
-- **Production Monitoring**: Real-time observability for deployed agents
-- **Zero Code Changes**: Works automatically with existing agents
-
-**🔍 Example: What You'll See**
+**What's Tracked**: LLM call performance, tool execution traces, memory operations, agent workflow, bottlenecks.
 
 ```
 Agent Execution Trace:
 ├── agent_execution: 4.6s
 │   ├── tools_registry_retrieval: 0.02s ✅
 │   ├── memory_retrieval_step: 0.08s ✅
-│   ├── llm_call: 4.5s ⚠️ (bottleneck identified!)
-│   ├── response_parsing: 0.01s ✅
+│   ├── llm_call: 4.5s ⚠️ (bottleneck!)
 │   └── action_execution: 0.03s ✅
 ```
 
-**💡 Pro Tip**: Opik is completely optional. If you don't set the credentials, OmniCoreAgent works normally without tracing.
+> 💡 **When to Use**: Essential for production deployments. Use Opik to identify bottlenecks, optimize costs, debug agent behavior, and monitor performance in real-time.
 
-#### Metrics & Monitoring
+### 11. 🌐 Universal Model Support
 
-OmniCoreAgent provides built-in metrics collection for production monitoring:
-
-```python
-# Metrics are automatically collected when using production examples
-# See examples/devops_copilot_agent/ for Prometheus integration
-# See examples/deep_code_agent/ for comprehensive monitoring
-
-# Key Metrics Tracked:
-# - Request count and latency
-# - Token usage per request
-# - Tool execution time
-# - Memory operations
-# - Error rates
-# - Agent step counts
-```
-
-**Production Examples Include**:
-- **Prometheus-compatible endpoints**: `/metrics` endpoint for scraping
-- **Real-time performance tracking**: Monitor agent performance live
-- **Custom metrics**: Add your own business metrics
-- **Alerting**: Set up alerts based on metrics
-
-See [Production Examples](#-production-examples) for complete implementations.
-
----
-
-## 🎯 Production Examples
-
-### 1. DevOps Copilot Agent
-
-A production-ready DevOps assistant with:
-- ✅ Safe bash command execution
-- ✅ Rate limiting
-- ✅ Audit logging
-- ✅ Prometheus metrics
-- ✅ Health checks
-- ✅ Redis persistence
-
-**Location:** `examples/devops_copilot_agent/`
-
-**How to Run**:
-```bash
-cd examples/devops_copilot_agent
-# Follow the README in that directory for setup instructions
-```
-
-**Prerequisites**:
-- Redis running (for persistence)
-- LLM API key configured
-- Docker (for deployment)
-
-**Features**:
-- Configuration management
-- Observability (metrics, logging, audit)
-- Security (rate limiting, command filtering)
-- Health checks
-- Docker deployment
-
-### 2. Deep Code Agent
-
-An advanced coding agent with:
-- ✅ Sandbox code execution
-- ✅ Memory tool backend
-- ✅ Session workspaces
-- ✅ Code analysis tools
-- ✅ Test execution
-- ✅ Production observability
-
-**Location:** `examples/deep_code_agent/`
-
-**How to Run**:
-```bash
-cd examples/deep_code_agent
-# Follow the README in that directory for setup instructions
-```
-
-**Prerequisites**:
-- LLM API key configured
-- Optional: Vector database for enhanced memory
-
-**Features**:
-- Secure sandbox execution
-- Persistent working memory
-- Code generation and testing
-- Full observability stack
-
----
-
-### 10. 🌐 Universal Model Support
-
-OmniCoreAgent is **model-agnostic by design** through LiteLLM integration. Use OpenAI, Anthropic Claude, Google Gemini, Ollama, or any LLM provider. Switch models without changing agent code. Your logic stays consistent regardless of the underlying model.
-
-#### Multi-Provider LLM Support
-
-OmniCoreAgent uses **LiteLLM** for unified access to 100+ models:
+Model-agnostic through LiteLLM — use any provider:
 
 ```python
-model_config = {
-    # OpenAI
-    "provider": "openai",
-    "model": "gpt-4o",
-    
-    # Anthropic
-    "provider": "anthropic",
-    "model": "claude-3-5-sonnet-20241022",
-    
-    # Groq (Ultra-fast)
-    "provider": "groq",
-    "model": "llama-3.1-8b-instant",
-    
-    # Azure OpenAI
-    "provider": "azureopenai",
-    "model": "gpt-4",
-    "azure_endpoint": "https://your-resource.openai.azure.com",
-    
-    # Ollama (Local)
-    "provider": "ollama",
-    "model": "llama3.1:8b",
-    "ollama_host": "http://localhost:11434",
-    
-    # OpenRouter (200+ models)
-    "provider": "openrouter",
-    "model": "anthropic/claude-3.5-sonnet"
-}
+# OpenAI
+model_config = {"provider": "openai", "model": "gpt-4o"}
+
+# Anthropic
+model_config = {"provider": "anthropic", "model": "claude-3-5-sonnet-20241022"}
+
+# Groq (Ultra-fast)
+model_config = {"provider": "groq", "model": "llama-3.1-8b-instant"}
+
+# Ollama (Local)
+model_config = {"provider": "ollama", "model": "llama3.1:8b", "ollama_host": "http://localhost:11434"}
+
+# OpenRouter (200+ models)
+model_config = {"provider": "openrouter", "model": "anthropic/claude-3.5-sonnet"}
+
+#mistral ai
+model_config = {"provider": "mistral", "model": "mistral-7b-instruct"}
+
+#deepseek
+model_config = {"provider": "deepseek", "model": "deepseek-chat"}
+
+#google gemini
+model_config = {"provider": "google", "model": "gemini-2.0-flash-exp"}
+
+#azure openai
+model_config = {"provider": "azure_openai", "model": "gpt-4o"}
+
+
 ```
 
-**Supported Providers:**
-- OpenAI (GPT-4, GPT-3.5, etc.)
-- Anthropic (Claude 3.5 Sonnet, Claude 3 Haiku, etc.)
-- Google (Gemini Pro, Gemini Flash)
-- Groq (Llama, Mixtral, Gemma)
-- DeepSeek (DeepSeek-V3, DeepSeek-Coder)
-- Mistral
-- Azure OpenAI
-- OpenRouter (200+ models)
-- Ollama (local models)
+**Supported**: OpenAI, Anthropic, Google Gemini, Groq, DeepSeek, Mistral, Azure OpenAI, OpenRouter, Ollama
 
-**Why This Matters:**
-- **Cost Optimization**: Use cheaper models for simple tasks, powerful models for complex reasoning
-- **Flexibility**: Switch providers without code changes
-- **Consistency**: Same agent logic works across all providers
-- **Future-Proof**: New models automatically supported through LiteLLM
+> 💡 **When to Use**: Switch providers based on your needs — use cheaper models (Groq, DeepSeek) for simple tasks, powerful models (GPT-4o, Claude) for complex reasoning, and local models (Ollama) for privacy-sensitive applications.
 
-### Embedding Support
+### 12. 🔌 Built-in MCP Client
 
-OmniCoreAgent supports multiple embedding providers for vector database operations:
+Connect to any MCP-compatible service with support for multiple transport protocols and authentication methods.
 
-```bash
-# .env
-EMBEDDING_API_KEY=your_key  # Works with OpenAI, Cohere, HuggingFace, Mistral, Voyage, etc.
-```
+#### Transport Types
 
-**Supported Embedding Providers:**
-- **OpenAI**: `text-embedding-3-small`, `text-embedding-3-large`, `text-embedding-ada-002`
-- **Cohere**: `embed-english-v3.0`, `embed-multilingual-v3.0`
-- **HuggingFace**: Various models via HuggingFace API
-- **Mistral**: `mistral-embed`
-- **Voyage**: `voyage-large-2`, `voyage-code-2`
-- **Azure OpenAI**: Azure-hosted OpenAI embeddings
-- **Google**: Vertex AI embeddings
-
-**Embedding Configuration:**
-```python
-embedding_config = {
-    "provider": "openai",              # Provider name
-    "model": "text-embedding-3-small",  # Model name
-    "dimensions": 1536,                 # REQUIRED: Vector dimensions
-    "encoding_format": "float",         # Encoding format
-    "timeout": 30                       # Optional timeout
-}
-```
-
-**Important**: When `ENABLE_VECTOR_DB=true`, embedding configuration is **REQUIRED**. The `dimensions` parameter is mandatory for vector database index creation.
-
----
-
-### 11. 🔌 Built-in MCP Client
-
-OmniCoreAgent includes **built-in support for Model Context Protocol (MCP) servers**, allowing your agents to seamlessly connect to external tools and services without additional setup. This is a core feature that enables your agents to interact with filesystems, databases, APIs, and any MCP-compatible service.
-
-#### Quick Integration
+**1. stdio** — Local MCP servers (process communication)
 
 ```python
-agent = OmniAgent(
-    name="my_agent",
-    system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    mcp_tools=[
-        # stdio Transport - Local MCP servers
-        {
-            "name": "filesystem",
-            "transport_type": "stdio",
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home"]
-        },
-        # HTTP Transport - Remote MCP servers
-        {
-            "name": "github",
-            "transport_type": "streamable_http",
-            "url": "http://localhost:8080/mcp",
-            "headers": {"Authorization": "Bearer your-token"}
-        }
-    ]
-)
-
-await agent.connect_mcp_servers()  # Connect to all servers
-tools = await agent.list_all_available_tools()  # Get all tools (MCP + local)
-```
-
-#### Supported Transports
-
-- **stdio**: Direct process communication (local MCP servers)
-- **sse**: Server-Sent Events (HTTP-based streaming)
-- **streamable_http**: HTTP with streaming support
-- **docker**: Container-based servers
-- **npx**: NPX package execution
-
-#### Authentication Methods
-
-- **OAuth 2.0**: Automatic callback server (starts on `localhost:3000`)
-- **Bearer Tokens**: Simple token-based authentication
-- **Custom Headers**: Flexible header configuration
-
-#### Key Benefits
-
-- ✅ **No Additional Setup**: Built directly into OmniAgent
-- ✅ **Seamless Integration**: MCP tools work alongside local tools
-- ✅ **Multiple Transports**: Support for stdio, HTTP, SSE, Docker, NPX
-- ✅ **Automatic Discovery**: All MCP tools automatically available to agent
-- ✅ **Unified Tool Access**: Use `list_all_available_tools()` to see MCP + local tools
-- ✅ **Production Ready**: Handles connection errors, retries, and cleanup
-
-#### Example: Agent with Filesystem Access
-
-```python
-agent = OmniAgent(
-    name="file_agent",
-    system_instruction="You can read and write files.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    mcp_tools=[{
-        "name": "filesystem",
-        "transport_type": "stdio",
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"]
-    }]
-)
-
-await agent.connect_mcp_servers()
-result = await agent.run("List all Python files in the current directory")
-# Agent can now use filesystem tools from MCP server
-```
-
-#### Example: Agent with Multiple MCP Servers
-
-```python
-agent = OmniAgent(
-    name="multi_tool_agent",
-    system_instruction="You have access to filesystem and GitHub.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    mcp_tools=[
-        {
-            "name": "filesystem",
-            "transport_type": "stdio",
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home"]
-        },
-        {
-            "name": "github",
-            "transport_type": "streamable_http",
-            "url": "http://localhost:8080/mcp",
-            "headers": {"Authorization": "Bearer github-token"}
-        }
-    ]
-)
-
-await agent.connect_mcp_servers()
-# Agent now has access to both filesystem and GitHub tools
-```
-
-**Note**: For standalone MCP client usage (CLI tool), see the [MCP Client CLI](#-mcp-client-cli-commands) section at the end of this document.
-
----
-
-## 🚀 Advanced Features
-
-### Advanced MCP Server Management
-
-For dynamic server management and advanced MCP client features, see the [MCP Client CLI](#-mcp-client-cli-commands) section below. The built-in MCP client in OmniAgent (documented in [Core Features - Built-in MCP Client](#11--built-in-mcp-client)) handles most use cases, while the CLI provides additional capabilities for:
-
-- Dynamic server addition/removal at runtime
-- Interactive MCP server management
-- Advanced prompt and resource management
-- Standalone MCP client usage
-
-### Dynamic Server Configuration (CLI)
-
-#### Add New Servers
-
-```bash
-# Add one or more servers from a configuration file
-/add_servers:path/to/config.json
-```
-
-The configuration file can include multiple servers with different authentication methods:
-
-```json
 {
-  "new-server": {
+    "name": "filesystem",
+    "transport_type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home"]
+}
+```
+
+**2. streamable_http** — Remote servers with HTTP streaming
+
+```python
+# With Bearer Token
+{
+    "name": "github",
+    "transport_type": "streamable_http",
+    "url": "http://localhost:8080/mcp",
+    "headers": {
+        "Authorization": "Bearer your-token" # optional
+    },
+    "timeout": 60 # optional
+}
+
+# With OAuth 2.0 (auto-starts callback server on localhost:3000)
+{
+    "name": "oauth_server",
     "transport_type": "streamable_http",
     "auth": {
-      "method": "oauth"
+        "method": "oauth"
     },
     "url": "http://localhost:8000/mcp"
-  },
-  "another-server": {
-    "transport_type": "sse",
-    "headers": {
-      "Authorization": "Bearer token"
-    },
-    "url": "http://localhost:3000/sse"
-  }
 }
 ```
 
-#### Remove Servers
-
-```bash
-# Remove a server by its name
-/remove_server:server_name
-```
-
-#### Programmatic Configuration
+**3. sse** — Server-Sent Events
 
 ```python
-# Add servers at runtime
-await client.add_servers("path/to/config.json")
-
-# Remove servers
-await client.remove_server("server_name")
+{
+    "name": "sse_server",
+    "transport_type": "sse",
+    "url": "http://localhost:3000/sse",
+    "headers": {
+        "Authorization": "Bearer token" # optional
+    },
+    "timeout": 60, # optional
+    "sse_read_timeout": 120 # optional
+}
 ```
 
----
+#### Complete Example with All 3 Transport Types
 
-## 📦 Installation & Setup
+```python
+agent = OmniAgent(
+    name="multi_mcp_agent",
+    system_instruction="You have access to filesystem, GitHub, and live data.",
+    model_config={"provider": "openai", "model": "gpt-4o"},
+    mcp_tools=[
+        # 1. stdio - Local filesystem
+        {
+            "name": "filesystem",
+            "transport_type": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home"]
+        },
+        # 2. streamable_http - Remote API (supports Bearer token or OAuth)
+        {
+            "name": "github",
+            "transport_type": "streamable_http",
+            "url": "http://localhost:8080/mcp",
+            "headers": {"Authorization": "Bearer github-token"},
+            "timeout": 60
+        },
+        # 3. sse - Real-time streaming
+        {
+            "name": "live_data",
+            "transport_type": "sse",
+            "url": "http://localhost:3000/sse",
+            "headers": {"Authorization": "Bearer token"},
+            "sse_read_timeout": 120
+        }
+    ]
+)
 
-### Requirements
-
-- Python 3.10+
-- LLM API key (OpenAI, Anthropic, Groq, etc.)
-
-### Optional Dependencies (For Advanced Features)
-
-- **Redis**: For persistent memory and events (`memory_store_type="redis"`, `event_store_type="redis_stream"`)
-- **PostgreSQL/MySQL**: For database memory (`memory_store_type="database"`)
-- **MongoDB**: For document storage (`memory_store_type="mongodb"`)
-- **Qdrant/ChromaDB**: For vector database (semantic search and long-term memory)
-- **Opik**: For tracing and observability (production monitoring)
-
-### Installation
-
-```bash
-# Using uv (recommended)
-uv add omnicoreagent
-
-# Or with pip
-pip install omnicoreagent
+await agent.connect_mcp_servers()
+tools = await agent.list_all_available_tools()  # All MCP + local tools
+result = await agent.run("List all Python files and get latest commits")
 ```
 
-### Environment Variables
+#### Transport Comparison
 
-```bash
-# ===============================================
-# REQUIRED: AI Model API Key (Choose one provider)
-# ===============================================
-LLM_API_KEY=your_openai_api_key_here
-# OR for other providers:
-# LLM_API_KEY=your_anthropic_api_key_here
-# LLM_API_KEY=your_groq_api_key_here
-# LLM_API_KEY=your_azure_openai_api_key_here
+| Transport | Use Case | Auth Methods |
+|-----------|----------|-------------|
+| `stdio` | Local MCP servers, CLI tools | None (local process) |
+| `streamable_http` | Remote APIs, cloud services | Bearer token, OAuth 2.0 |
+| `sse` | Real-time data, streaming | Bearer token, custom headers |
 
-# ===============================================
-# OPTIONAL: Embeddings (For Vector Database)
-# ===============================================
-# REQUIRED when ENABLE_VECTOR_DB=true
-EMBEDDING_API_KEY=your_embedding_api_key_here
-# Works with OpenAI, Cohere, HuggingFace, Mistral, Voyage, etc.
-
-# ===============================================
-# OPTIONAL: Vector Database (Smart Memory)
-# ===============================================
-# ⚠️ Warning: 30-60s startup time for sentence transformer
-# ⚠️ IMPORTANT: You MUST choose a provider - no local fallback
-ENABLE_VECTOR_DB=true  # Default: false
-
-# Choose ONE provider (required if ENABLE_VECTOR_DB=true):
-# Option 1: Qdrant Remote (RECOMMENDED)
-OMNI_MEMORY_PROVIDER=qdrant-remote
-QDRANT_HOST=localhost
-QDRANT_PORT=6333
-
-# Option 2: ChromaDB Remote
-# OMNI_MEMORY_PROVIDER=chroma-remote
-# CHROMA_HOST=localhost
-# CHROMA_PORT=8000
-
-# Option 3: ChromaDB Cloud
-# OMNI_MEMORY_PROVIDER=chroma-cloud
-# CHROMA_TENANT=your_tenant
-# CHROMA_DATABASE=your_database
-# CHROMA_API_KEY=your_api_key
-
-# Option 4: MongoDB Atlas
-# OMNI_MEMORY_PROVIDER=mongodb-remote
-# MONGODB_URI="your_mongodb_connection_string"
-# MONGODB_DB_NAME="db name"
-
-# ===============================================
-# OPTIONAL: Persistent Memory Storage
-# ===============================================
-# Redis - for memory_store_type="redis" (defaults to: redis://localhost:6379/0)
-# REDIS_URL=redis://your-remote-redis:6379/0
-# REDIS_URL=redis://:password@localhost:6379/0  # With password
-
-# Database - for memory_store_type="database"
-# DATABASE_URL=sqlite:///omnicoreagent_memory.db
-# DATABASE_URL=postgresql://user:password@localhost:5432/omnicoreagent
-# DATABASE_URL=mysql://user:password@localhost:3306/omnicoreagent
-
-# MongoDB - for memory_store_type="mongodb" (defaults to: mongodb://localhost:27017/omnicoreagent)
-# MONGODB_URI="your_mongodb_connection_string"
-# MONGODB_DB_NAME="db name"
-
-# ===============================================
-# OPTIONAL: Tracing & Observability
-# ===============================================
-# For advanced monitoring and performance optimization
-# 🔗 Sign up: https://www.comet.com/signup?from=llm
-OPIK_API_KEY=your_opik_api_key_here
-OPIK_WORKSPACE=your_opik_workspace_name
-```
-
-> **💡 Quick Start**: Just set `LLM_API_KEY` and you're ready to go! Add other variables only when you need advanced features.
-
----
+> 💡 **When to Use**: Use MCP when you need to connect to external tools and services. Choose `stdio` for local CLI tools, `streamable_http` for REST APIs, and `sse` for real-time streaming data.
 
 ## 📚 Examples
 
-### Basic Agent
+### Basic Examples
 
-```python
-import asyncio
-from omnicoreagent import OmniAgent
-
-async def main():
-    agent = OmniAgent(
-        name="assistant",
-        system_instruction="You are a helpful assistant.",
-        model_config={"provider": "openai", "model": "gpt-4o"}
-    )
-    
-    # Run without session_id (auto-generated)
-    result = await agent.run("What is the capital of France?")
-    print(result["response"])
-    print(f"Session ID: {result['session_id']}")
-    
-    # Run with same session_id for context continuity
-    result2 = await agent.run("What is its population?", session_id=result["session_id"])
-    print(result2["response"])
-    
-    await agent.cleanup()
-
-asyncio.run(main())
-```
-
-**Note**: `session_id` is optional. If omitted, a new session is created automatically. Use the same `session_id` across multiple calls to maintain conversation context.
-
-### Agent with Custom Tools
-
-```python
-from omnicoreagent import OmniAgent, ToolRegistry
-
-tool_registry = ToolRegistry()
-
-@tool_registry.register_tool("get_weather")
-def get_weather(city: str) -> str:
-    """Get weather for a city."""
-    return f"Weather in {city}: Sunny, 25°C"
-
-agent = OmniAgent(
-    name="weather_agent",
-    system_instruction="You help users with weather information.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    local_tools=tool_registry
-)
-
-result = await agent.run("What's the weather in Tokyo?")
-```
-
-### Agent with MCP Servers
-
-```python
-agent = OmniAgent(
-    name="mcp_agent",
-    system_instruction="You have access to filesystem and GitHub tools.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    mcp_tools=[
-        {
-            "name": "filesystem",
-            "transport_type": "stdio",
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home"]
-        }
-    ]
-)
-
-await agent.connect_mcp_servers()
-result = await agent.run("List files in /home directory")
-```
-
-### Production Agent with All Features
-
-```python
-from omnicoreagent import (
-    OmniAgent,
-    ToolRegistry,
-    MemoryRouter,
-    EventRouter
-)
-
-# Memory & Events
-memory = MemoryRouter("redis")
-events = EventRouter("redis_stream")
-
-# Custom Tools
-tools = ToolRegistry()
-@tools.register_tool("analyze")
-def analyze(data: str) -> str:
-    return f"Analyzed: {len(data)} chars"
-
-# Agent
-agent = OmniAgent(
-    name="production_agent",
-    system_instruction="You are a production agent.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    local_tools=tools,
-    mcp_tools=[...],
-    memory_router=memory,
-    event_router=events,
-    agent_config={
-        "max_steps": 20,
-        "enable_tools_knowledge_base": True,
-        "memory_tool_backend": "local",
-        "memory_results_limit": 10
-    }
-)
-
-await agent.connect_mcp_servers()
-result = await agent.run("Process this data", session_id="user_123")
-```
-
----
-
-## 🎓 Learning Resources
-
-### Example Projects
-
-#### Basic Examples
 ```bash
-# Simple introduction
-python examples/cli/basic.py
-
-# Complete OmniAgent demo - All features showcase
-python examples/cli/run_omni_agent.py
-
-# Advanced MCP CLI
-python examples/cli/run_mcp.py
+python examples/cli/basic.py                    # Simple introduction
+python examples/cli/run_omni_agent.py          # All features demo
 ```
 
-#### Custom Agents
-```bash
-# Background agents
-python examples/background_agent_example.py
+### Custom Agents
 
-# Custom agent implementations
+```bash
 python examples/custom_agents/e_commerce_personal_shopper_agent.py
 python examples/custom_agents/flightBooking_agent.py
 python examples/custom_agents/real_time_customer_support_agent.py
 ```
 
-#### Workflow Agents
+### Workflow Agents
+
 ```bash
-# Sequential agent chaining
 python examples/workflow_agents/sequential_agent.py
-
-# Parallel agent execution
 python examples/workflow_agents/parallel_agent.py
-
-# Router agent (intelligent routing)
 python examples/workflow_agents/router_agent.py
 ```
 
-#### Web Applications
-```bash
-# FastAPI integration
-python examples/fast_api_iml.py
+### Production Examples
 
-# Full web interface
-python examples/enhanced_web_server.py
-# Open http://localhost:8000
-```
-
-#### Production Examples
-- **DevOps Copilot Agent**: `examples/devops_copilot_agent/`
-  - Production-ready DevOps assistant
-  - Safe bash command execution
-  - Rate limiting, audit logging, Prometheus metrics
-  - Health checks, Redis persistence
-  
-- **Deep Code Agent**: `examples/deep_code_agent/`
-  - Advanced coding agent
-  - Sandbox code execution
-  - Memory tool backend
-  - Session workspaces
-  - Code analysis and test execution
-
-### Documentation
-
-- **Getting Started**: See examples above
-- **API Reference**: Check source code docstrings
-- **Architecture**: See `docs/advanced/architecture.md`
-- **Complete Documentation**: [OmniCoreAgent Docs](https://omnirexflora-labs.github.io/omnicoreagent)
-
-### Build Documentation Locally
-
-```bash
-# Install documentation dependencies
-pip install mkdocs mkdocs-material
-
-# Serve documentation locally
-mkdocs serve
-# Open http://127.0.0.1:8000
-
-# Build static documentation
-mkdocs build
-```
+| Example | Description | Location |
+|---------|-------------|----------|
+| **DevOps Copilot** | Safe bash execution, rate limiting, Prometheus metrics | `examples/devops_copilot_agent/` |
+| **Deep Code Agent** | Sandbox execution, memory backend, code analysis | `examples/deep_code_agent/` |
 
 ---
 
-## 🔧 Configuration Reference
+## ⚙️ Configuration
+
+### Environment Variables
+
+```bash
+# Required
+LLM_API_KEY=your_api_key
+
+# Optional: Memory backends
+REDIS_URL=redis://localhost:6379/0
+DATABASE_URL=postgresql://user:pass@localhost:5432/db
+MONGODB_URI=mongodb://localhost:27017/omnicoreagent
+
+# Optional: Observability
+OPIK_API_KEY=your_opik_key
+OPIK_WORKSPACE=your_workspace
+```
 
 ### Agent Configuration
 
 ```python
 agent_config = {
-    # Execution
-    "agent_name": "my_agent",
-    "max_steps": 15,
-    "tool_call_timeout": 30,
-    "request_limit": 0,  # 0 = unlimited
-    "total_tokens_limit": 0,  # 0 = unlimited
-    
-    # Memory
+    "max_steps": 15,                    # Max reasoning steps
+    "tool_call_timeout": 30,            # Tool timeout (seconds)
+    "request_limit": 0,                 # 0 = unlimited
+    "total_tokens_limit": 0,            # 0 = unlimited
     "memory_config": {"mode": "sliding_window", "value": 10000},
-    "memory_results_limit": 5,
-    "memory_similarity_threshold": 0.5,
-    
-    # Tools
-    "enable_tools_knowledge_base": True,
-    "tools_results_limit": 10,
-    "tools_similarity_threshold": 0.1,
-    
-    # Memory Tool
-    "memory_tool_backend": "local"  # or "s3", "db", None
+    "enable_advanced_tool_use": True,   # BM25 tool retrieval
+    "memory_tool_backend": "local"      # Persistent working memory
 }
 ```
 
@@ -1642,507 +719,99 @@ agent_config = {
 
 ```python
 model_config = {
-    "provider": "openai",  # or anthropic, groq, etc.
-    "model": "gpt-4o",
-    "temperature": 0.7,
-    "max_tokens": 2000,
-    "top_p": 0.95
-}
-```
-
-### MCP Tool Configuration
-
-#### Basic stdio Configuration
-
-```python
-mcp_tools = [
-    {
-        "name": "filesystem",
-        "transport_type": "stdio",
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home"]
-    }
-]
-```
-
-#### HTTP Configuration with Bearer Token
-
-```python
-mcp_tools = [
-    {
-        "name": "github",
-        "transport_type": "streamable_http",
-        "url": "http://localhost:8080/mcp",
-        "headers": {
-            "Authorization": "Bearer your-token"
-        },
-        "timeout": 60
-    }
-]
-```
-
-#### HTTP Configuration with OAuth
-
-```python
-mcp_tools = [
-    {
-        "name": "oauth_server",
-        "transport_type": "streamable_http",
-        "auth": {
-            "method": "oauth"
-        },
-        "url": "http://localhost:8000/mcp"
-    }
-]
-```
-
-#### SSE Configuration
-
-```python
-mcp_tools = [
-    {
-        "name": "sse_server",
-        "transport_type": "sse",
-        "url": "http://localhost:3000/sse",
-        "headers": {
-            "Authorization": "Bearer token"
-        },
-        "timeout": 60,
-        "sse_read_timeout": 120
-    }
-]
-```
-
-### Server Configuration JSON Examples
-
-#### Complete Configuration with Multiple Providers
-
-```json
-{
-  "AgentConfig": {
-    "tool_call_timeout": 30,
-    "max_steps": 15,
-    "request_limit": 0,
-    "total_tokens_limit": 0,
-    "memory_results_limit": 5,
-    "memory_similarity_threshold": 0.5,
-    "enable_tools_knowledge_base": true,
-    "tools_results_limit": 10,
-    "tools_similarity_threshold": 0.1,
-    "memory_tool_backend": "local"
-  },
-  "LLM": {
     "provider": "openai",
     "model": "gpt-4o",
     "temperature": 0.7,
     "max_tokens": 2000,
-    "max_context_length": 30000,
     "top_p": 0.95
-  },
-  "Embedding": {
-    "provider": "openai",
-    "model": "text-embedding-3-small",
-    "dimensions": 1536,
-    "encoding_format": "float"
-  },
-  "mcpServers": {
-    "filesystem": {
-      "transport_type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home"]
-    },
-    "github": {
-      "transport_type": "streamable_http",
-      "url": "http://localhost:8080/mcp",
-      "headers": {
-        "Authorization": "Bearer your-token"
-      }
-    }
-  }
 }
 ```
 
-#### Anthropic Claude Configuration
+<details>
+<summary><strong>📋 Additional Model Configurations</strong></summary>
 
-```json
-{
-  "LLM": {
-    "provider": "anthropic",
-    "model": "claude-3-5-sonnet-20241022",
-    "temperature": 0.7,
-    "max_tokens": 4000,
-    "max_context_length": 200000,
-    "top_p": 0.95
-  }
-}
-```
-
-#### Groq Configuration (Ultra-Fast)
-
-```json
-{
-  "LLM": {
-    "provider": "groq",
-    "model": "llama-3.1-8b-instant",
-    "temperature": 0.5,
-    "max_tokens": 2000,
-    "max_context_length": 8000,
-    "top_p": 0.9
-  }
-}
-```
-
-#### Azure OpenAI Configuration
-
-```json
-{
-  "LLM": {
+```python
+# Azure OpenAI
+model_config = {
     "provider": "azureopenai",
     "model": "gpt-4",
-    "temperature": 0.7,
-    "max_tokens": 2000,
-    "max_context_length": 100000,
-    "top_p": 0.95,
     "azure_endpoint": "https://your-resource.openai.azure.com",
-    "azure_api_version": "2024-02-01",
-    "azure_deployment": "your-deployment-name"
-  }
+    "azure_api_version": "2024-02-01"
 }
-```
 
-#### Ollama Local Model Configuration
-
-```json
-{
-  "LLM": {
+# Ollama (Local)
+model_config = {
     "provider": "ollama",
     "model": "llama3.1:8b",
-    "temperature": 0.5,
-    "max_tokens": 5000,
-    "max_context_length": 100000,
-    "top_p": 0.7,
     "ollama_host": "http://localhost:11434"
-  }
 }
 ```
 
-#### OpenRouter Configuration (200+ Models)
-
-```json
-{
-  "LLM": {
-    "provider": "openrouter",
-    "model": "anthropic/claude-3.5-sonnet",
-    "temperature": 0.7,
-    "max_tokens": 4000,
-    "max_context_length": 200000,
-    "top_p": 0.95
-  }
-}
-```
-
-### Configuration Examples by Use Case
-
-#### Local Development (stdio)
-
-```json
-{
-  "mcpServers": {
-    "local-tools": {
-      "transport_type": "stdio",
-      "command": "uvx",
-      "args": ["mcp-server-tools"]
-    }
-  }
-}
-```
-
-#### Remote Server with Token
-
-```json
-{
-  "mcpServers": {
-    "remote-api": {
-      "transport_type": "streamable_http",
-      "url": "http://api.example.com:8080/mcp",
-      "headers": {
-        "Authorization": "Bearer abc123token"
-      }
-    }
-  }
-}
-```
-
-#### Remote Server with OAuth
-
-```json
-{
-  "mcpServers": {
-    "oauth-server": {
-      "transport_type": "streamable_http",
-      "auth": {
-        "method": "oauth"
-      },
-      "url": "http://oauth-server.com:8080/mcp"
-    }
-  }
-}
-```
+</details>
 
 ---
 
-## 🧪 Testing
-
-### Running Tests
+## 🧪 Testing & Development
 
 ```bash
-# Run all tests with verbose output
+# Clone
+git clone https://github.com/omnirexflora-labs/omnicoreagent.git
+cd omnicoreagent
+
+# Setup
+uv venv && source .venv/bin/activate
+uv sync --dev
+
+# Test
 pytest tests/ -v
-
-# Run specific test file
-pytest tests/test_specific_file.py -v
-
-# Run tests with coverage report
 pytest tests/ --cov=src --cov-report=term-missing
 ```
-
-### Test Structure
-
-```
-tests/
-├── unit/           # Unit tests for individual components
-├── omni_agent/     # OmniAgent system tests
-├── mcp_client/     # MCPOmni Connect system tests
-└── integration/    # Integration tests for both systems
-```
-
-### Development Quick Start
-
-1. **Installation**
-
-   ```bash
-   # Clone the repository
-   git clone https://github.com/omnirexflora-labs/omnicoreagent.git
-   cd omnicoreagent
-
-   # Create and activate virtual environment
-   uv venv
-   source .venv/bin/activate
-
-   # Install dependencies
-   uv sync --dev
-   ```
-
-2. **Configuration**
-
-   ```bash
-   # Set up environment variables
-   echo "LLM_API_KEY=your_api_key_here" > .env
-
-   # Configure your servers in servers_config.json
-   ```
-
-3. **Start Systems**
-
-   ```bash
-   # Try OmniAgent
-   python examples/cli/run_omni_agent.py
-
-   # Or try MCPOmni Connect
-   python examples/cli/run_mcp.py
-   ```
 
 ---
 
 ## 🔍 Troubleshooting
 
-> **🚨 Most Common Issues**: Check [Quick Fixes](#-quick-fixes-common-issues) below first!
+| Error | Fix |
+|-------|-----|
+| `Invalid API key` | Check `.env`: `LLM_API_KEY=your_key` |
+| `ModuleNotFoundError` | `pip install omnicoreagent` |
+| `Redis connection failed` | Start Redis or use `MemoryRouter("in_memory")` |
+| `MCP connection refused` | Ensure MCP server is running |
 
-### 🚨 **Quick Fixes (Common Issues)**
+<details>
+<summary><strong>📋 More Troubleshooting</strong></summary>
 
-| **Error** | **Quick Fix** |
-|-----------|---------------|
-| `Error: Invalid API key` | Check your `.env` file: `LLM_API_KEY=your_actual_key` |
-| `ModuleNotFoundError: omnicoreagent` | Run: `uv add omnicoreagent` or `pip install omnicoreagent` |
-| `Connection refused` | Ensure MCP server is running before connecting |
-| `ChromaDB not available` | Install: `pip install chromadb` - [See Vector DB Setup](#-vector-database-integration) |
-| `Redis connection failed` | Install Redis or use in-memory mode (default) |
-| `Tool execution failed` | Check tool permissions and arguments |
-| `Vector database connection failed` | Check `ENABLE_VECTOR_DB` and provider settings in `.env` |
-| `Embedding configuration required` | Set `EMBEDDING_API_KEY` and configure `embedding_config` when using vector DB |
+**OAuth Server Starts**: Normal when using `"auth": {"method": "oauth"}`. Remove if not needed.
 
-### Detailed Issues and Solutions
+**Debug Mode**: `agent = OmniAgent(..., debug=True)`
 
-#### 1. Connection Issues
+**Help**: Check [GitHub Issues](https://github.com/omnirexflora-labs/omnicoreagent/issues)
 
-```bash
-Error: Could not connect to MCP server
-```
-
-**Solutions:**
-- Check if the server is running
-- Verify server configuration in `servers_config.json` or `mcp_tools` parameter
-- Ensure network connectivity
-- Check server logs for errors
-- **See [Transport Types & Authentication](#-transport-types--authentication) for detailed setup**
-
-#### 2. API Key Issues
-
-```bash
-Error: Invalid API key
-```
-
-**Solutions:**
-- Verify API key is correctly set in `.env`
-- Check if API key has required permissions
-- Ensure API key is for correct environment (production/development)
-- For Azure OpenAI, verify `azure_endpoint`, `azure_api_version`, and `azure_deployment`
-- **See [Configuration Guide](#-configuration-reference) for correct setup**
-
-#### 3. Redis Connection
-
-```bash
-Error: Could not connect to Redis
-```
-
-**Solutions:**
-- Verify Redis server is running: `redis-cli ping`
-- Check Redis connection settings in `.env`: `REDIS_URL=redis://localhost:6379/0`
-- Ensure Redis password is correct (if configured)
-- Use in-memory mode as fallback: `MemoryRouter("in_memory")`
-
-#### 4. Tool Execution Failures
-
-```bash
-Error: Tool execution failed
-```
-
-**Solutions:**
-- Check tool availability on connected servers: `/tools` command
-- Verify tool permissions
-- Review tool arguments for correctness
-- Check tool timeout settings in `agent_config`
-
-#### 5. Vector Database Issues
-
-```bash
-Error: Vector database connection failed
-```
-
-**Solutions:**
-- Ensure chosen provider (Qdrant, ChromaDB, MongoDB) is running
-- Check connection settings in `.env`
-- Verify API keys for cloud providers
-- Ensure `ENABLE_VECTOR_DB=true` is set
-- Verify `EMBEDDING_API_KEY` is set when using vector DB
-- **See [Vector Database Setup](#-vector-database-integration) for detailed configuration**
-
-#### 6. Import Errors
-
-```bash
-ImportError: cannot import name 'OmniAgent'
-```
-
-**Solutions:**
-- Check package installation: `pip show omnicoreagent`
-- Verify Python version compatibility (3.10+)
-- Try reinstalling: `pip uninstall omnicoreagent && pip install omnicoreagent`
-- Check virtual environment is activated
-
-#### 7. OAuth Server Behavior
-
-**Question**: "Started callback server on http://localhost:3000" - Is This Normal?
-
-**Answer**: **Yes, this is completely normal** when:
-- You have `"auth": {"method": "oauth"}` in any server configuration
-- The OAuth server handles authentication tokens automatically
-- You cannot and should not try to change this address
-
-**If you don't want the OAuth server:**
-- Remove `"auth": {"method": "oauth"}` from all server configurations
-- Use alternative authentication methods like Bearer tokens
-
-#### 8. Memory Tool Backend Issues
-
-```bash
-Error: Memory tool backend not available
-```
-
-**Solutions:**
-- Verify `memory_tool_backend` is set correctly: `"local"`, `"s3"`, `"db"`, or `None`
-- For local backend, ensure write permissions in project directory
-- Check that `./memories/` directory can be created
-
-### Debug Mode
-
-Enable debug mode for detailed logging:
-
-```bash
-# In MCPOmni Connect CLI
-/debug
-
-# In OmniAgent
-agent = OmniAgent(..., debug=True)
-```
-
-### Getting Help
-
-1. **First**: Check the [Quick Fixes](#-quick-fixes-common-issues) above
-2. **Examples**: Study working examples in the `examples/` directory
-3. **Issues**: Search [GitHub Issues](https://github.com/omnirexflora-labs/omnicoreagent/issues) for similar problems
-4. **New Issue**: [Create a new issue](https://github.com/omnirexflora-labs/omnicoreagent/issues/new) with detailed information
+</details>
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Development Setup
-
 ```bash
-# Fork and clone the repository
+# Fork & clone
 git clone https://github.com/omnirexflora-labs/omnicoreagent.git
-cd omnicoreagent
 
-# Set up development environment
-uv venv
-source .venv/bin/activate
+# Setup
+uv venv && source .venv/bin/activate
 uv sync --dev
-
-# Install pre-commit hooks
 pre-commit install
+
+# Submit PR
 ```
 
-### Contribution Areas
-
-- **OmniAgent System**: Custom agents, local tools, background processing
-- **MCPOmni Connect**: MCP client features, transport protocols, authentication
-- **Shared Infrastructure**: Memory systems, vector databases, event handling
-- **Documentation**: Examples, tutorials, API documentation
-- **Testing**: Unit tests, integration tests, performance tests
-
-### Pull Request Process
-
-1. Create a feature branch from `main`
-2. Make your changes with tests
-3. Run the test suite: `pytest tests/ -v`
-4. Update documentation as needed
-5. Submit a pull request with a clear description
-
-### Code Standards
-
-- Python 3.10+ compatibility
-- Type hints for all public APIs
-- Comprehensive docstrings
-- Unit tests for new functionality
-- Follow existing code style
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
 ## 📄 License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE)
 
 ---
 
@@ -2150,406 +819,31 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 **Created by [Abiola Adeshina](https://github.com/Abiorh001)**
 
-OmniCoreAgent is built by the **OmniCoreAgent Team** - the same team behind powerful AI agent frameworks and event-driven systems.
-
-**🌟 Related Projects:**
-
-- **[OmniCoreAgent](https://github.com/omnirexflora-labs/omnicoreagent)** - Production-ready AI agent framework with built-in MCP client, multi-tier memory, and workflow orchestration (this project)
-
-- **[OmniDaemon](https://github.com/omnirexflora-labs/OmniDaemon)** - Universal event-driven runtime engine for AI agents
-
-> 💡 OmniCoreAgent and OmniDaemon are designed to work seamlessly together, providing a complete AI agent development ecosystem!
-
-**Connect with the creator:**
-
 - **GitHub**: [@Abiorh001](https://github.com/Abiorh001)
 - **X (Twitter)**: [@abiorhmangana](https://x.com/abiorhmangana)
-- **Website**: [mintify.com](https://mintify.com)
 - **Email**: abiolaadedayo1993@gmail.com
-- **Documentation**: [omnirexflora-labs.github.io/omnicoreagent](https://omnirexflora-labs.github.io/omnicoreagent)
+
+### 🌟 The OmniRexFlora Ecosystem
+
+| Project | Description |
+|---------|-------------|
+| [🧠 OmniMemory](https://github.com/omnirexflora-labs/omnimemory) | Self-evolving memory for autonomous agents |
+| [🤖 OmniCoreAgent](https://github.com/omnirexflora-labs/omnicoreagent) | Production-ready AI agent framework (this project) |
+| [⚡ OmniDaemon](https://github.com/omnirexflora-labs/OmniDaemon) | Event-driven runtime engine for AI agents |
+
+### 🙏 Acknowledgments
+
+Built on: [LiteLLM](https://github.com/BerriAI/litellm), [FastAPI](https://fastapi.tiangolo.com/), [Redis](https://redis.io/), [Opik](https://opik.ai/), [Pydantic](https://pydantic-docs.helpmanual.io/), [APScheduler](https://apscheduler.readthedocs.io/)
 
 ---
 
-## 🙏 Acknowledgments
-
-OmniCoreAgent is built on the shoulders of giants:
-
-- **[LiteLLM](https://github.com/BerriAI/litellm)** - Unified LLM interface for 100+ models
-- **[FastAPI](https://fastapi.tiangolo.com/)** - Modern Python web framework
-- **[Redis](https://redis.io/)** - In-memory data store and message broker
-- **[Qdrant](https://qdrant.tech/)** - Vector database for semantic search
-- **[ChromaDB](https://www.trychroma.com/)** - Embedding database
-- **[Opik](https://opik.ai/)** - Production observability and tracing
-- **[Pydantic](https://pydantic-docs.helpmanual.io/)** - Data validation
-- **[APScheduler](https://apscheduler.readthedocs.io/)** - Advanced Python scheduler
-
-And all the amazing open-source projects that make OmniCoreAgent possible!
-
----
-
-## 🌟 Why OmniCoreAgent?
-
-### What Sets It Apart
-
-**True Autonomy**: Agents don't just respond—they plan multi-step workflows, use tools to gather information, validate results, and adapt their approach based on outcomes.
-
-**Composable Architecture**: Build small, focused agents and compose them into sophisticated systems. A file system agent, data analysis agent, and reporting agent work together through routing, each handling what it does best.
-
-**Full Control**: Create custom tools, define specialized routing logic, integrate any external service, and extend the framework to match your exact requirements. No black boxes.
-
-**Production-Ready**: Not an experimental framework—built for real applications. Includes proper error handling, retry logic, session management, and observability. Deploy confidently knowing agents handle edge cases gracefully.
-
-**Framework Agnostic**: Works seamlessly with FastAPI for web APIs, event-driven architectures, or any Python application. Build agents that respond to events, serve HTTP requests, or run as background services—same core agent definition.
-
-**Cost Optimized**: Smart context management and model switching reduce LLM costs. Use cheaper models for simple tasks, powerful models for complex reasoning, and maintain only necessary context in memory.
-
-**Clean Developer Experience**: Abstract away LLM orchestration complexity while staying flexible. Define agent behavior, tools, and routing in clean Python code. The framework handles prompt management, tool calling, error handling, and model interactions.
-
-### Perfect For
-
-- **Enterprise AI Applications**: Production-ready agents for business automation
-- **Intelligent Automation**: Autonomous agents that handle complex workflows
-- **Customer Service Systems**: AI-powered support with tool integration
-- **Data Analysis Workflows**: Agents that analyze, process, and report on data
-- **Development Assistants**: Code generation, testing, and DevOps automation
-- **Multi-Agent Systems**: Complex orchestration with specialized agents
-- **Any scenario requiring AI agents that think, decide, and act autonomously**
-
----
-
-## 🔌 MCP Client CLI (Backward Compatibility)
-
-> **Note**: The MCP Client CLI is available for backward compatibility and standalone MCP server management. For building AI agents, use **OmniAgent** (documented above). The MCP client functionality is also integrated into OmniAgent via the `mcp_tools` parameter.
-
-### 🖥️ MCP Client CLI Commands
-
-When using the standalone MCP client CLI (via `python examples/cli/run_mcp.py`), you have access to powerful interactive commands:
-
-#### Memory Store Management
-
-```bash
-# Switch between memory backends
-/memory_store:in_memory                    # Fast in-memory storage (default)
-/memory_store:redis                        # Redis persistent storage  
-/memory_store:database                     # SQLite database storage
-/memory_store:database:postgresql://user:pass@host/db  # PostgreSQL
-/memory_store:database:mysql://user:pass@host/db       # MySQL
-/memory_store:mongodb                      # MongoDB persistent storage
-/memory_store:mongodb:your_mongodb_connection_string   # MongoDB with custom URI
-
-# Memory strategy configuration
-/memory_mode:sliding_window:10             # Keep last 10 messages
-/memory_mode:token_budget:5000             # Keep under 5000 tokens
-```
-
-#### Event Store Management
-
-```bash
-# Switch between event backends
-/event_store:in_memory                     # Fast in-memory events (default)
-/event_store:redis_stream                  # Redis Streams for persistence
-```
-
-#### Core MCP Operations
-
-```bash
-/tools                                    # List all available tools
-/prompts                                  # List all available prompts  
-/resources                               # List all available resources
-/prompt:<name>                           # Execute a specific prompt
-/resource:<uri>                          # Read a specific resource
-/subscribe:<uri>                         # Subscribe to resource updates
-/query <your_question>                   # Ask questions using tools
-```
-
-#### Enhanced Commands
-
-```bash
-# Memory operations
-/history                                   # Show conversation history
-/clear_history                            # Clear conversation history
-/save_history <file>                      # Save history to file
-/load_history <file>                      # Load history from file
-
-# Server management
-/add_servers:<config.json>                # Add servers from config
-/remove_server:<server_name>              # Remove specific server
-/refresh                                  # Refresh server capabilities
-
-# Agentic modes
-/mode:auto                              # Switch to autonomous agentic mode
-/mode:orchestrator                      # Switch to multi-server orchestration
-/mode:chat                              # Switch to interactive chat mode
-
-# Debugging and monitoring
-/debug                                    # Toggle debug mode
-/api_stats                               # Show API usage statistics
-```
-
----
-
-### 🚦 Transport Types & Authentication
-
-The MCP Client supports multiple transport protocols for connecting to MCP servers:
-
-#### 1. **stdio** - Direct Process Communication
-
-**Use when**: Connecting to local MCP servers that run as separate processes
-
-```json
-{
-  "server-name": {
-    "transport_type": "stdio",
-    "command": "uvx",
-    "args": ["mcp-server-package"]
-  }
-}
-```
-
-- **No authentication needed**
-- **No OAuth server started**
-- Most common for local development
-
-#### 2. **sse** - Server-Sent Events
-
-**Use when**: Connecting to HTTP-based MCP servers using Server-Sent Events
-
-```json
-{
-  "server-name": {
-    "transport_type": "sse",
-    "url": "http://your-server.com:4010/sse",
-    "headers": {
-      "Authorization": "Bearer your-token"
-    },
-    "timeout": 60,
-    "sse_read_timeout": 120
-  }
-}
-```
-
-- **Uses Bearer token or custom headers**
-- **No OAuth server started**
-
-#### 3. **streamable_http** - HTTP with Optional OAuth
-
-**Use when**: Connecting to HTTP-based MCP servers with or without OAuth
-
-**Without OAuth (Bearer Token):**
-```json
-{
-  "server-name": {
-    "transport_type": "streamable_http",
-    "url": "http://your-server.com:4010/mcp",
-    "headers": {
-      "Authorization": "Bearer your-token"
-    },
-    "timeout": 60
-  }
-}
-```
-
-- **Uses Bearer token or custom headers**
-- **No OAuth server started**
-
-**With OAuth:**
-```json
-{
-  "server-name": {
-    "transport_type": "streamable_http",
-    "auth": {
-      "method": "oauth"
-    },
-    "url": "http://your-server.com:4010/mcp"
-  }
-}
-```
-
-- **OAuth callback server automatically starts on `http://localhost:3000`**
-- **This is hardcoded and cannot be changed**
-- **Required for OAuth flow to work properly**
-
-#### 🔐 OAuth Server Behavior
-
-**Important**: When using OAuth authentication, the MCP Client automatically starts an OAuth callback server.
-
-**What You'll See:**
-```
-🖥️  Started callback server on http://localhost:3000
-```
-
-**Key Points:**
-- **This is normal behavior** - not an error
-- **The address `http://localhost:3000` is hardcoded** and cannot be changed
-- **The server only starts when** you have `"auth": {"method": "oauth"}` in your config
-- **The server stops** when the application shuts down
-- **Only used for OAuth token handling** - no other purpose
-
-**When OAuth is NOT Used:**
-- Remove the entire `"auth"` section from your server configuration
-- Use `"headers"` with `"Authorization": "Bearer token"` instead
-- No OAuth server will start
-
----
-
-### 💬 Prompt Management
-
-The MCP Client provides advanced prompt handling with flexible argument parsing:
-
-#### Basic Prompt Usage
-
-```bash
-# List all available prompts
-/prompts
-
-# Basic prompt usage
-/prompt:weather/location=tokyo
-
-# Prompt with multiple arguments
-/prompt:travel-planner/from=london/to=paris/date=2024-03-25
-```
-
-#### JSON Format for Complex Arguments
-
-```bash
-# JSON format for complex arguments
-/prompt:analyze-data/{
-    "dataset": "sales_2024",
-    "metrics": ["revenue", "growth"],
-    "filters": {
-        "region": "europe",
-        "period": "q1"
-    }
-}
-
-# Nested argument structures
-/prompt:market-research/target=smartphones/criteria={
-    "price_range": {"min": 500, "max": 1000},
-    "features": ["5G", "wireless-charging"],
-    "markets": ["US", "EU", "Asia"]
-}
-```
-
-#### Advanced Prompt Features
-
-- **Argument Validation**: Automatic type checking and validation
-- **Default Values**: Smart handling of optional arguments
-- **Context Awareness**: Prompts can access previous conversation context
-- **Cross-Server Execution**: Seamless execution across multiple MCP servers
-- **Error Handling**: Graceful handling of invalid arguments with helpful messages
-- **Dynamic Help**: Detailed usage information for each prompt
-
----
-
-### 🎯 Operation Modes
-
-The MCP Client supports three distinct operation modes for different use cases:
-
-#### Chat Mode (Default)
-
-**Characteristics:**
-- Requires explicit approval for tool execution
-- Interactive conversation style
-- Step-by-step task execution
-- Detailed explanations of actions
-- Best for: Learning, debugging, controlled execution
-
-**Usage:**
-```bash
-/mode:chat
-```
-
-#### Autonomous Mode
-
-**Characteristics:**
-- Independent task execution
-- Self-guided decision making
-- Automatic tool selection and chaining
-- Progress updates and final results
-- Complex task decomposition
-- Error handling and recovery
-- Best for: Production automation, batch processing
-
-**Usage:**
-```bash
-/mode:auto
-```
-
-#### Orchestrator Mode
-
-**Characteristics:**
-- Advanced planning for complex multi-step tasks
-- Strategic delegation across multiple MCP servers
-- Intelligent agent coordination and communication
-- Parallel task execution when possible
-- Dynamic resource allocation
-- Sophisticated workflow management
-- Real-time progress monitoring across agents
-- Adaptive task prioritization
-- Best for: Complex multi-server workflows, enterprise automation
-
-**Usage:**
-```bash
-/mode:orchestrator
-```
-
----
-
-### 📊 Token & Usage Management
-
-The MCP Client provides advanced controls and visibility over your API usage and resource limits.
-
-#### View API Usage Stats
-
-Use the `/api_stats` command to see your current usage:
-
-```bash
-/api_stats
-```
-
-This displays:
-- **Total tokens used**
-- **Total requests made**
-- **Total response tokens**
-- **Number of requests**
-
-#### Set Usage Limits
-
-You can set limits to automatically stop execution when thresholds are reached:
-
-- **Total Request Limit**: Set the maximum number of requests allowed in a session
-- **Total Token Usage Limit**: Set the maximum number of tokens that can be used
-- **Tool Call Timeout**: Set the maximum time (in seconds) a tool call can take before being terminated
-- **Max Steps**: Set the maximum number of steps the agent can take before stopping
-
-**Configuration:**
-```json
-{
-  "AgentConfig": {
-    "tool_call_timeout": 30,                // Tool call timeout in seconds
-    "max_steps": 15,                        // Max number of reasoning/tool steps
-    "request_limit": 0,                     // 0 = unlimited, set > 0 to enable limits
-    "total_tokens_limit": 0,                // 0 = unlimited, set > 0 for hard cap on tokens
-    "memory_results_limit": 5,              // Number of memory results to retrieve (1-100)
-    "memory_similarity_threshold": 0.5,     // Similarity threshold for memory filtering (0.0-1.0)
-    "enable_tools_knowledge_base": false,   // Enable semantic tool retrieval
-    "tools_results_limit": 10,              // Max number of tools to retrieve
-    "tools_similarity_threshold": 0.1,      // Similarity threshold for tool retrieval
-    "memory_tool_backend": "None"           // Backend for memory tool: "None", "local", "s3", or "db"
-  }
-}
-```
-
-**Note**: When any of these limits are reached, the agent will automatically stop running and notify you.
-
----
-
-<div align="center">
-
-**Created by [Abiola Adeshina](https://github.com/Abiorh001) and the OmniCoreAgent Team**
-
-*Building the future of production-ready AI agent frameworks*
-
-[⭐ Star us on GitHub](https://github.com/omnirexflora-labs/omnicoreagent) | [🐛 Report Bug](https://github.com/omnirexflora-labs/omnicoreagent/issues) | [💡 Request Feature](https://github.com/omnirexflora-labs/omnicoreagent/issues) | [📖 Documentation](https://omnirexflora-labs.github.io/omnicoreagent) | [💬 Discussions](https://github.com/omnirexflora-labs/omnicoreagent/discussions)
-
-</div>
+<p align="center">
+  <strong>Building the future of production-ready AI agent frameworks</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/omnirexflora-labs/omnicoreagent">⭐ Star us on GitHub</a> •
+  <a href="https://github.com/omnirexflora-labs/omnicoreagent/issues">🐛 Report Bug</a> •
+  <a href="https://github.com/omnirexflora-labs/omnicoreagent/issues">💡 Request Feature</a> •
+  <a href="https://omnirexflora-labs.github.io/omnicoreagent">📖 Documentation</a>
+</p>

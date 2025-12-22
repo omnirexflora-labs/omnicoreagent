@@ -112,7 +112,7 @@ class OmniAgent:
                 "max_steps": 15,
                 "request_limit": 0,
                 "total_tokens_limit": 0,
-                "enable_tools_knowledge_base": False,
+                "enable_advanced_tool_use": False,
                 "memory_config": {"mode": "token_budget", "value": 30000},
             }
 
@@ -167,7 +167,7 @@ class OmniAgent:
         if self.mcp_client and self.mcp_tools:
             await self.mcp_client.connect_to_servers(self.mcp_client.config_filename)
             # connect all the tools to the tools knowledge base if its enabled
-            if self.agent.enable_tools_knowledge_base:
+            if self.agent.enable_advanced_tool_use:
                 mcp_tools = self.mcp_client.available_tools if self.mcp_client else {}
                 advance_tools_manager = AdvanceToolsUse()
 

@@ -13,9 +13,7 @@ class ReactAgent(BaseReactAgent):
             tool_call_timeout=config.tool_call_timeout,
             request_limit=config.request_limit,
             total_tokens_limit=config.total_tokens_limit,
-            enable_tools_knowledge_base=config.enable_tools_knowledge_base,
-            tools_results_limit=config.tools_results_limit,
-            tools_similarity_threshold=config.tools_similarity_threshold,
+            enable_advanced_tool_use=config.enable_advanced_tool_use,
             memory_tool_backend=config.memory_tool_backend,
         )
 
@@ -40,7 +38,7 @@ class ReactAgent(BaseReactAgent):
             debug=debug,
             sessions=kwargs.get("sessions"),
             mcp_tools=kwargs.get("mcp_tools"),
-            local_tools=kwargs.get("local_tools"),  # Pass local tools
+            local_tools=kwargs.get("local_tools"),
             session_id=kwargs.get("session_id"),
             sub_agents=kwargs.get("sub_agents"),
         )

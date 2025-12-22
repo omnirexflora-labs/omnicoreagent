@@ -64,7 +64,7 @@ from omnicoreagent.core.events.base import (
     SubAgentCallResultPayload,
     SubAgentCallErrorPayload,
 )
-from omnicoreagent.core.tools.tool_knowledge_base import (
+from omnicoreagent.core.tools.advance_tools_use import (
     tools_retriever_local_tool,
 )
 from omnicoreagent.core.tools.memory_tool.memory_tool import (
@@ -82,9 +82,7 @@ class BaseReactAgent:
         tool_call_timeout: int,
         request_limit: int = 0,
         total_tokens_limit: int = 0,
-        enable_tools_knowledge_base: bool = False,
-        tools_results_limit: int = 10,
-        tools_similarity_threshold: float = 0.5,
+        enable_advanced_tool_use: bool = False,
         memory_tool_backend: str = None,
     ):
         self.agent_name = agent_name
@@ -100,7 +98,7 @@ class BaseReactAgent:
         self.request_limit = request_limit
         self.total_tokens_limit = total_tokens_limit
         self._limits_enabled = request_limit > 0 or total_tokens_limit > 0
-        self.enable_tools_knowledge_base = enable_tools_knowledge_base
+        self.enable_advanced_tool_use = enable_advanced_tool_use
 
         if self._limits_enabled:
             logger.info(
@@ -108,9 +106,6 @@ class BaseReactAgent:
             )
         else:
             logger.info("Usage limits disabled (production mode)")
-
-        self.tools_results_limit = tools_results_limit
-        self.tools_similarity_threshold = tools_similarity_threshold
 
         self.memory_tool_backend = memory_tool_backend
         self.usage_limits = UsageLimits(
@@ -300,12 +295,12 @@ class BaseReactAgent:
             # Check if response contains XML tags but not recognized
             if "<" in response and ">" in response:
                 return ParsedResponse(
-                    error="Response contains XML but not in required format. Use <thought>, <tool_call>, <agent_call>, <final_answer>."
+                    error="Response contains XML but not in required format. Use <thought>, <final_answer> or during tool calls use <tool_call> tag or <agent_call> tag during agent calls."
                 )
 
             # No XML at all
             return ParsedResponse(
-                error="Response must use XML format. Wrap in <thought> and <final_answer> or call tags."
+                error="Response must use XML format. Wrap in <thought> and <final_answer> or call  pigment tag or <agent_call> tag during agent calls. or <tool_calls> tag during tool calls."
             )
 
         except Exception as e:
@@ -402,7 +397,7 @@ class BaseReactAgent:
         local_tools: Any = None,
     ) -> ToolError | list[ToolCallResult]:
         try:
-            if self.enable_tools_knowledge_base:
+            if self.enable_advanced_tool_use:
                 # mcp_tools = None
                 local_tools = tools_retriever_local_tool
                 if self.memory_tool_backend:
@@ -633,7 +628,6 @@ class BaseReactAgent:
         parsed_response: ParsedResponse,
         response: str,
         add_message_to_history: Callable[[str, str, dict | None], Any],
-        llm_connection: Callable,
         system_prompt: str,
         debug: bool = False,
         sessions: dict = None,
@@ -759,11 +753,6 @@ class BaseReactAgent:
             tools_results = []
             try:
                 async with asyncio.timeout(self.tool_call_timeout):
-                    metadata = {
-                        "top_k": self.tools_results_limit,
-                        "similarity_threshold": self.tools_similarity_threshold,
-                    }
-
                     first_executor = tool_call_result[0].tool_executor
                     tool_output = await first_executor.execute(
                         agent_name=self.agent_name,
@@ -771,10 +760,7 @@ class BaseReactAgent:
                         tool_name=combined_tool_name,
                         tool_call_id=tool_call_id,
                         add_message_to_history=add_message_to_history,
-                        llm_connection=llm_connection,
-                        mcp_tools=mcp_tools,
                         session_id=session_id,
-                        **metadata,
                     )
 
                 # Parse tool output into structured observation
@@ -1147,7 +1133,7 @@ class BaseReactAgent:
 
         try:
             # Process local tools
-            if self.enable_tools_knowledge_base:
+            if self.enable_advanced_tool_use:
                 local_tools = tools_retriever_local_tool
             if self.memory_tool_backend:
                 build_tool_registry_memory_tool(
@@ -1155,7 +1141,7 @@ class BaseReactAgent:
                     registry=local_tools,
                 )
             if local_tools:
-                if self.memory_tool_backend and not self.enable_tools_knowledge_base:
+                if self.memory_tool_backend and not self.enable_advanced_tool_use:
                     build_tool_registry_memory_tool(
                         memory_tool_backend=self.memory_tool_backend,
                         registry=local_tools,
@@ -1184,7 +1170,7 @@ class BaseReactAgent:
                                     )
 
             # Process MCP tools
-            if mcp_tools and not self.enable_tools_knowledge_base:
+            if mcp_tools and not self.enable_advanced_tool_use:
                 for server_name, tools in mcp_tools.items():
                     if not tools:
                         continue
@@ -1218,7 +1204,6 @@ class BaseReactAgent:
         self,
         session_state,
         system_prompt: str,
-        query: str,
         session_id: str,
         llm_connection: Callable,
         message_history: Callable[[], Any],
@@ -1281,7 +1266,7 @@ class BaseReactAgent:
         if sub_agents:
             updated_system_prompt += f"\n{sub_agents_additional_prompt}"
 
-        if self.enable_tools_knowledge_base:
+        if self.enable_advanced_tool_use:
             updated_system_prompt += f"\n{tools_retriever_additional_prompt}"
 
         if self.memory_tool_backend:
@@ -1611,7 +1596,6 @@ class BaseReactAgent:
         )
         await self.prepare_initial_messages(
             system_prompt=system_prompt,
-            query=query,
             session_state=session_state,
             llm_connection=llm_connection,
             message_history=message_history,
@@ -1784,6 +1768,7 @@ class BaseReactAgent:
                     if parsed_response.agent_calls is not None:
                         agent_calls = parsed_response.data
 
+                        @track("sub_agent_action_execution")
                         async def execute_sub_agent_calls():
                             await self.execute_sub_agent_calls(
                                 response=response,
@@ -1806,7 +1791,6 @@ class BaseReactAgent:
                                 response=response,
                                 add_message_to_history=add_message_to_history,
                                 system_prompt=system_prompt,
-                                llm_connection=llm_connection,
                                 mcp_tools=mcp_tools,
                                 debug=debug,
                                 sessions=sessions,

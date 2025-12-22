@@ -17,8 +17,6 @@ from rich.text import Text
 from datetime import datetime, timezone
 from decouple import config as decouple_config
 import xml.etree.ElementTree as ET
-from omnicoreagent.core.constants import AGENTS_REGISTRY
-from omnicoreagent.core.system_prompts import generate_react_agent_role_prompt
 import asyncio
 from typing import Any, Callable
 from html import escape
@@ -175,60 +173,6 @@ def clean_json_response(json_response):
                 json_response,
                 0,
             )
-
-
-async def generate_react_agent_role_prompt_func(
-    mcp_server_tools: dict[str, Any],
-    llm_connection: Callable,
-) -> str:
-    """Generate the react agent role prompt for a specific server."""
-    react_agent_role_prompt = generate_react_agent_role_prompt(
-        mcp_server_tools=mcp_server_tools,
-    )
-    messages = [
-        {"role": "system", "content": react_agent_role_prompt},
-        {"role": "user", "content": "Generate the agent role prompt"},
-    ]
-    response = await llm_connection.llm_call(messages)
-    if response:
-        if hasattr(response, "choices"):
-            return response.choices[0].message.content.strip()
-        elif hasattr(response, "message"):
-            return response.message.content.strip()
-    return ""
-
-
-async def ensure_agent_registry(
-    available_tools: dict[str, Any],
-    llm_connection: Callable,
-) -> dict[str, str]:
-    """
-    Ensure that agent registry entries exist for all servers in available_tools.
-    Missing entries will be generated concurrently.
-    """
-    tasks = []
-    missing_servers = []
-
-    for server_name in available_tools.keys():
-        if server_name not in AGENTS_REGISTRY:
-            missing_servers.append(server_name)
-            tasks.append(
-                asyncio.create_task(
-                    generate_react_agent_role_prompt_func(
-                        mcp_server_tools=available_tools[server_name],
-                        llm_connection=llm_connection,
-                    )
-                )
-            )
-
-    if tasks:
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for server_name, result in zip(missing_servers, results):
-            if isinstance(result, Exception):
-                continue
-            AGENTS_REGISTRY[server_name] = result
-
-    return AGENTS_REGISTRY
 
 
 def hash_text(text: str) -> str:

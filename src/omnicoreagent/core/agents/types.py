@@ -15,35 +15,12 @@ class AgentConfig(BaseModel):
     )
     max_steps: int = Field(gt=0, le=1000)
     tool_call_timeout: int = Field(gt=1, le=1000)
-    enable_tools_knowledge_base: bool = Field(
-        default=False, description="enable_tools_knowledge_base"
+    enable_advanced_tool_use: bool = Field(
+        default=False, description="enable_advanced_tool_use"
     )
 
     # --- Memory Retrieval Config ---
     memory_config: dict = {"mode": "sliding_window", "value": 10000}
-    memory_results_limit: int = Field(
-        default=5, ge=1, le=100, description="Number of memory results to retrieve"
-    )
-    memory_similarity_threshold: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=1.0,
-        description="Similarity threshold for memory filtering",
-    )
-
-    # --- Tool Retrieval Config ---
-    tools_results_limit: int = Field(
-        default=10,
-        ge=1,
-        le=100,
-        description="Number of tools to retrieve",
-    )
-    tools_similarity_threshold: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=1.0,
-        description="Similarity threshold for tool retrieval",
-    )
 
     # --- Memory Tool Backend ---
     memory_tool_backend: str | None = Field(

@@ -59,9 +59,7 @@ class AgentConfig:
     max_steps: int = 15
     request_limit: int = 0
     total_tokens_limit: int = 0
-    enable_tools_knowledge_base: bool = False
-    tools_results_limit: int = 10
-    tools_similarity_threshold: float = 0.5
+    enable_advanced_tool_use: bool = False
     memory_config: dict = field(
         default_factory=lambda: {"mode": "token_budget", "value": 30000}
     )
