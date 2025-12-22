@@ -110,13 +110,10 @@ MCP_TOOLS = [
             "mcp/memory",
         ],
     },
-       {
+    {
         "name": "time",
         "command": "uvx",
-        "args": [
-            "mcp-server-time",
-            "--local-timezone=America/New_York"
-        ],
+        "args": ["mcp-server-time", "--local-timezone=America/New_York"],
     },
     # {
     #     "name": "edgeone-pages-mcp-server",

@@ -38,7 +38,7 @@ class ReactAgent(BaseReactAgent):
             debug=debug,
             sessions=kwargs.get("sessions"),
             mcp_tools=kwargs.get("mcp_tools"),
-            local_tools=kwargs.get("local_tools"),  # Pass local tools
+            local_tools=kwargs.get("local_tools"),
             session_id=kwargs.get("session_id"),
             sub_agents=kwargs.get("sub_agents"),
         )

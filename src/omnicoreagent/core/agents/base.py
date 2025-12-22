@@ -295,12 +295,12 @@ class BaseReactAgent:
             # Check if response contains XML tags but not recognized
             if "<" in response and ">" in response:
                 return ParsedResponse(
-                    error="Response contains XML but not in required format. Use <thought>, <tool_call>, <agent_call>, <final_answer>."
+                    error="Response contains XML but not in required format. Use <thought>, <final_answer> or during tool calls use <tool_call> tag or <agent_call> tag during agent calls."
                 )
 
             # No XML at all
             return ParsedResponse(
-                error="Response must use XML format. Wrap in <thought> and <final_answer> or call tags."
+                error="Response must use XML format. Wrap in <thought> and <final_answer> or call  pigment tag or <agent_call> tag during agent calls. or <tool_calls> tag during tool calls."
             )
 
         except Exception as e:
@@ -1263,6 +1263,9 @@ class BaseReactAgent:
         # Build system prompt
         updated_system_prompt = system_prompt
 
+        if sub_agents:
+            updated_system_prompt += f"\n{sub_agents_additional_prompt}"
+
         if self.enable_advanced_tool_use:
             updated_system_prompt += f"\n{tools_retriever_additional_prompt}"
 
@@ -1765,6 +1768,7 @@ class BaseReactAgent:
                     if parsed_response.agent_calls is not None:
                         agent_calls = parsed_response.data
 
+                        @track("sub_agent_action_execution")
                         async def execute_sub_agent_calls():
                             await self.execute_sub_agent_calls(
                                 response=response,
@@ -1787,7 +1791,6 @@ class BaseReactAgent:
                                 response=response,
                                 add_message_to_history=add_message_to_history,
                                 system_prompt=system_prompt,
-                                llm_connection=llm_connection,
                                 mcp_tools=mcp_tools,
                                 debug=debug,
                                 sessions=sessions,
