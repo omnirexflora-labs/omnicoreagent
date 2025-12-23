@@ -60,6 +60,7 @@ class AgentConfig:
     request_limit: int = 0
     total_tokens_limit: int = 0
     enable_advanced_tool_use: bool = False
+    enable_agent_skills: bool = False
     memory_config: dict = field(
         default_factory=lambda: {"mode": "token_budget", "value": 30000}
     )

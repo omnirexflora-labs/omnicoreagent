@@ -23,3 +23,6 @@ site/
 *.db
 venv/
 memories/
+.omniagent_config/*
+.agents/skills/*
+

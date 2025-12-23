@@ -793,7 +793,8 @@ Provide clear, supportive, and context-aware responses that help learners grow.
                 "memory_config": {"mode": "sliding_window", "value": 100},
                 # --- Tool Retrieval Config ---
                 "enable_advanced_tool_use": True,
-                "memory_tool_backend": None,
+                "enable_agent_skills": True,
+                "memory_tool_backend": "local",
             },
             memory_router=self.memory_router,
             event_router=self.event_router,

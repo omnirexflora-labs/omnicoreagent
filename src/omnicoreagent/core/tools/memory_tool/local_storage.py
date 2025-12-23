@@ -27,10 +27,12 @@ class LocalMemoryBackend(AbstractMemoryBackend):
             return self.base_dir
 
         decoded = urllib.parse.unquote(path).strip()
+        decoded = decoded.lstrip("/")
 
         if decoded.startswith("memories/"):
             decoded = decoded[len("memories/") :]
-        decoded = decoded.lstrip("/")
+        elif decoded == "memories":
+            decoded = ""
 
         candidate = (self.base_dir / decoded).resolve()
 

@@ -10,6 +10,7 @@ from omnicoreagent.core.system_prompts import (
     tools_retriever_additional_prompt,
     memory_tool_additional_prompt,
     sub_agents_additional_prompt,
+    agent_skills_additional_prompt,
 )
 import inspect
 from omnicoreagent.core.agents.token_usage import (
@@ -35,6 +36,7 @@ from omnicoreagent.core.agents.types import (
     ToolFunction,
     SessionState,
 )
+from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.utils import (
     RobustLoopDetector,
     handle_stuck_state,
@@ -65,12 +67,12 @@ from omnicoreagent.core.events.base import (
     SubAgentCallErrorPayload,
 )
 from omnicoreagent.core.tools.advance_tools_use import (
-    tools_retriever_local_tool,
+    build_tool_registry_advance_tools_use,
 )
 from omnicoreagent.core.tools.memory_tool.memory_tool import (
     build_tool_registry_memory_tool,
 )
-
+from omnicoreagent.core.skills.tools import build_skill_tools
 
 class BaseReactAgent:
     """Autonomous agent implementing the ReAct paradigm for task solving through iterative reasoning and tool usage."""
@@ -84,6 +86,7 @@ class BaseReactAgent:
         total_tokens_limit: int = 0,
         enable_advanced_tool_use: bool = False,
         memory_tool_backend: str = None,
+        enable_agent_skills: bool = False,
     ):
         self.agent_name = agent_name
         # Enforce minimum 5 steps to allow proper tool usage and reasoning
@@ -108,12 +111,26 @@ class BaseReactAgent:
             logger.info("Usage limits disabled (production mode)")
 
         self.memory_tool_backend = memory_tool_backend
+        self.enable_agent_skills = enable_agent_skills
+        self.skill_manager = None
         self.usage_limits = UsageLimits(
             request_limit=self.request_limit, total_tokens_limit=self.total_tokens_limit
         )
 
         self._session_states: dict[Tuple[str, str], SessionState] = {}
         self.background_task_manager = BackgroundTaskManager()
+        self.init_skills()
+        self.register_internal_tool = ToolRegistry()
+
+    def init_skills(self):
+        if self.enable_agent_skills:
+            from omnicoreagent.core.skills.manager import SkillManager
+
+            self.skill_manager = SkillManager()
+            self.skill_manager.discover_skills()
+            logger.info(
+                f"Agent Skills enabled: found {len(self.skill_manager.skills)} skills"
+            )
 
     def _get_session_state(self, session_id: str, debug: bool) -> SessionState:
         key = (session_id, self.agent_name)
@@ -395,17 +412,10 @@ class BaseReactAgent:
         sessions: dict,
         mcp_tools: dict,
         local_tools: Any = None,
+        sub_agents: list = None,
     ) -> ToolError | list[ToolCallResult]:
         try:
-            if self.enable_advanced_tool_use:
-                # mcp_tools = None
-                local_tools = tools_retriever_local_tool
-                if self.memory_tool_backend:
-                    build_tool_registry_memory_tool(
-                        memory_tool_backend=self.memory_tool_backend,
-                        registry=local_tools,
-                    )
-
+            local_tools = await self.process_local_tools(local_tools=local_tools, local_tool_verification=True)
             actions = json.loads(parsed_response.data)
             if not isinstance(actions, list):
                 actions = [actions]
@@ -417,6 +427,27 @@ class BaseReactAgent:
                 if tool_name == "tools_retriever":
                     mcp_tools = None
                 tool_args = action.get("parameters", {})
+                # helps redirect the agent if it treid to call sub agent using tool calling format
+                if sub_agents:
+                   sub_agent_names = [sub_agent.name for sub_agent in sub_agents]
+                   if tool_name in sub_agent_names:
+                        return ToolError(
+                            observation=(
+                            f"INVOCATION ERROR: '{tool_name}' is a sub-agent, not a tool.\n\n"
+                            f"❌ You used (WRONG):\n"
+                            f"   <tool_call><tool_name>{tool_name}</tool_name><parameters>...</parameters></tool_call>\n\n"
+                            f"✓ Must use (CORRECT):\n"
+                            f"   <agent_call><agent_name>{tool_name}</agent_name><parameters>...</parameters></agent_call>\n\n"
+                            f"ACTION REQUIRED:\n"
+                            f"1. Check AVAILABLE SUB AGENT REGISTRY for '{tool_name}' parameter requirements\n"
+                            f"2. Retry using <agent_call> with <agent_name> tags\n"
+                            f"3. Ensure parameters match registry definition exactly"
+                        ),
+                            tool_name="N/A",
+                            tool_args=tool_args,
+                        )
+                        
+                       
 
                 if not tool_name:
                     return ToolError(
@@ -635,6 +666,7 @@ class BaseReactAgent:
         local_tools: Any = None,
         session_id: str = None,
         event_router: Callable[[str, Event], Any] = None,
+        sub_agents: list = None,
     ):
         # get the session state to be use
         session_state = self._get_session_state(session_id=session_id, debug=debug)
@@ -644,6 +676,7 @@ class BaseReactAgent:
             mcp_tools=mcp_tools,
             sessions=sessions,
             local_tools=local_tools,
+            sub_agents=sub_agents,
         )
 
         tools_results = []
@@ -1057,6 +1090,46 @@ class BaseReactAgent:
         finally:
             session_state.state = previous_state
 
+    async def process_local_tools(self, local_tools: Any = None, local_tool_verification: bool = False):
+        # Process local tools
+        if self.enable_advanced_tool_use:
+            if not local_tool_verification:
+                local_tools = self.register_internal_tool
+                await build_tool_registry_advance_tools_use(
+                    registry=local_tools,
+                )
+            else:
+                if local_tools and local_tool_verification:
+                    await build_tool_registry_advance_tools_use(
+                        registry=local_tools,
+                    )
+                
+        if self.memory_tool_backend:
+            if local_tools:
+                build_tool_registry_memory_tool(
+                    memory_tool_backend=self.memory_tool_backend,
+                    registry=local_tools,
+                )
+            else:
+                local_tools = self.register_internal_tool
+                build_tool_registry_memory_tool(
+                    memory_tool_backend=self.memory_tool_backend,
+                    registry=local_tools,
+                )
+        if self.enable_agent_skills and self.skill_manager:
+            if local_tools:
+                build_skill_tools(
+                    skill_manager=self.skill_manager,
+                    registry=local_tools,
+                )
+            else:
+                local_tools = self.register_internal_tool
+                build_skill_tools(
+                    skill_manager=self.skill_manager,
+                    registry=local_tools,
+                )
+        return local_tools
+    
     async def get_tools_registry(
         self, mcp_tools: dict = None, local_tools: Any = None
     ) -> str:
@@ -1132,20 +1205,10 @@ class BaseReactAgent:
             return p_desc if p_desc else "No description"
 
         try:
-            # Process local tools
-            if self.enable_advanced_tool_use:
-                local_tools = tools_retriever_local_tool
-            if self.memory_tool_backend:
-                build_tool_registry_memory_tool(
-                    memory_tool_backend=self.memory_tool_backend,
-                    registry=local_tools,
-                )
+            local_tools = await self.process_local_tools(
+                local_tools=local_tools
+            )
             if local_tools:
-                if self.memory_tool_backend and not self.enable_advanced_tool_use:
-                    build_tool_registry_memory_tool(
-                        memory_tool_backend=self.memory_tool_backend,
-                        registry=local_tools,
-                    )
                 local_tools_list = local_tools.get_available_tools()
                 if local_tools_list:
                     for tool in local_tools_list:
@@ -1260,23 +1323,39 @@ class BaseReactAgent:
             else "No tools available"
         )
 
-        # Build system prompt
-        updated_system_prompt = system_prompt
+        # Build system prompt with logical layering
+        updated_system_prompt = system_prompt  # Base identity and behavior
 
-        if sub_agents:
-            updated_system_prompt += f"\n{sub_agents_additional_prompt}"
-
+        # Layer 1: Core Cognitive Capabilities (HOW the agent thinks/operates)
         if self.enable_advanced_tool_use:
             updated_system_prompt += f"\n{tools_retriever_additional_prompt}"
 
+        if self.enable_agent_skills and self.skill_manager:
+            updated_system_prompt += f"\n{agent_skills_additional_prompt}"
+
+        # Layer 2: Team Structure (WHO the agent can work with)
+        if sub_agents:
+            updated_system_prompt += f"\n{sub_agents_additional_prompt}"
+
+        # Layer 3: Available Resources (WHAT tools are available)
+        # Memory tool (just another tool, like file storage)
         if self.memory_tool_backend:
             updated_system_prompt += f"\n{memory_tool_additional_prompt}"
+
+        # Skills registry (individual capabilities)
+        if self.enable_agent_skills and self.skill_manager:
+            skills_context = self.skill_manager.get_skills_context_xml()
+            if skills_context:
+                updated_system_prompt += f"\n[AVAILABLE SKILLS]\n{skills_context}"
+
+        # Sub-agents registry (team members)
         if sub_agents:
             sub_agents_registry = await self.sub_agents_registry(sub_agents)
             updated_system_prompt += (
                 f"\n[AVAILABLE SUB AGENTS REGISTRY]\n{sub_agents_registry}"
             )
 
+        # Tools registry (external integrations including memory file access)
         updated_system_prompt += f"\n[AVAILABLE TOOLS REGISTRY]\n{tools_section}"
 
         # Insert system prompt at index 0
@@ -1431,7 +1510,7 @@ class BaseReactAgent:
                 logger.info(f"Running sub-agent: {agent_name}")
                 result = await agent.run(**kwargs)
                 # cleaned the mcp server
-                await agent.cleanup()
+                await agent.cleanup_mcp_servers()
                 return agent_name, result
 
             except Exception as e:
@@ -1797,6 +1876,7 @@ class BaseReactAgent:
                                 local_tools=local_tools,
                                 session_id=session_id,
                                 event_router=event_router,
+                                sub_agents=sub_agents,
                             )
 
                         await execute_action()

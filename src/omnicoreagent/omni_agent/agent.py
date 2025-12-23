@@ -113,6 +113,7 @@ class OmniAgent:
                 "request_limit": 0,
                 "total_tokens_limit": 0,
                 "enable_advanced_tool_use": False,
+                "enable_agent_skills": False,
                 "memory_config": {"mode": "token_budget", "value": 30000},
             }
 
@@ -157,6 +158,10 @@ class OmniAgent:
             )
 
         self.agent = ReactAgent(config=agent_settings)
+        if self.local_tools:
+            if self.agent.enable_advanced_tool_use:
+                advance_tools_manager = AdvanceToolsUse()
+                advance_tools_manager.load_and_process_tools(local_tools=self.local_tools)
 
     def generate_session_id(self) -> str:
         """Generate a new session ID for the session"""
@@ -171,8 +176,9 @@ class OmniAgent:
                 mcp_tools = self.mcp_client.available_tools if self.mcp_client else {}
                 advance_tools_manager = AdvanceToolsUse()
 
-                await advance_tools_manager.load_and_process_tools(
+                advance_tools_manager.load_and_process_tools(
                     mcp_tools=mcp_tools,
+                    local_tools=self.local_tools,
                 )
 
     async def run(self, query: str, session_id: Optional[str] = None) -> Dict[str, Any]:
@@ -272,27 +278,27 @@ class OmniAgent:
     async def get_events(self, session_id: str):
         return await self.event_router.get_events(session_id=session_id)
 
-    def get_event_store_type(self) -> str:
+    async def get_event_store_type(self) -> str:
         """Get the current event store type."""
         return self.event_router.get_event_store_type()
 
-    def is_event_store_available(self) -> bool:
+    async def is_event_store_available(self) -> bool:
         """Check if the event store is available."""
         return self.event_router.is_available()
 
-    def get_event_store_info(self) -> Dict[str, Any]:
+    async def get_event_store_info(self) -> Dict[str, Any]:
         """Get information about the current event store."""
         return self.event_router.get_event_store_info()
 
-    def switch_event_store(self, event_store_type: str):
+    async def switch_event_store(self, event_store_type: str):
         """Switch to a different event store type."""
         self.event_router.switch_event_store(event_store_type)
 
-    def get_memory_store_type(self) -> str:
+    async def get_memory_store_type(self) -> str:
         """Get the current memory store type."""
         return self.memory_router.memory_store_type
 
-    def swith_memory_store(self, memory_store_type: str):
+    async def swith_memory_store(self, memory_store_type: str):
         """Switch to a different memory store type."""
         self.memory_router.swith_memory_store(memory_store_type)
 
@@ -301,9 +307,9 @@ class OmniAgent:
         if self.mcp_client:
             await self.mcp_client.cleanup()
 
-        self._cleanup_config()
+        await self._cleanup_config()
 
-    def _cleanup_config(self):
+    async def _cleanup_config(self):
         """Clean up the agent-specific config file"""
         try:
             if hasattr(self, "_config_file_path") and self._config_file_path.exists():
@@ -314,3 +320,8 @@ class OmniAgent:
                 hidden_dir.rmdir()
         except Exception:
             pass
+    
+    async def cleanup_mcp_servers(self):
+        """Clean up MCP servers without removing the agent and the config"""
+        if self.mcp_client:
+            await self.mcp_client.cleanup()

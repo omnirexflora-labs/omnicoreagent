@@ -42,15 +42,16 @@
 1. [🤖 OmniAgent — The Heart of the Framework](#1--omniagent--the-heart-of-the-framework)
 2. [🧠 Multi-Tier Memory System](#2--multi-tier-memory-system-plug--play)
 3. [📡 Event System](#3--event-system-plug--play)
-4. [🛠️ Local Tools System](#4-️-local-tools-system)
-5. [💾 Memory Tool Backend](#5--memory-tool-backend-file-based-working-memory)
-6. [👥 Sub-Agents System](#6--sub-agents-system)
-7. [🚁 Background Agents](#7--background-agents)
-8. [🔄 Workflow Agents](#8--workflow-agents)
-9. [🧠 Advanced Tool Use (BM25)](#9--advanced-tool-use-bm25-retrieval)
-10. [📊 Production Observability](#10--production-observability)
-11. [🌐 Universal Model Support](#11--universal-model-support)
-12. [🔌 Built-in MCP Client](#12--built-in-mcp-client)
+4. [🔌 Built-in MCP Client](#4--built-in-mcp-client)
+5. [🛠️ Local Tools System](#5-️-local-tools-system)
+6. [🧩 Agent Skills System](#6--agent-skills-system-packaged-capabilities)
+7. [💾 Memory Tool Backend](#7--memory-tool-backend-file-based-working-memory)
+8. [👥 Sub-Agents System](#8--sub-agents-system)
+9. [🚁 Background Agents](#9--background-agents)
+10. [🔄 Workflow Agents](#10--workflow-agents)
+11. [🧠 Advanced Tool Use (BM25)](#11--advanced-tool-use-bm25-retrieval)
+12. [📊 Production Observability](#12--production-observability)
+13. [🌐 Universal Model Support](#13--universal-model-support)
 
 ### Reference
 - [📚 Examples](#-examples)
@@ -208,6 +209,11 @@ OmniCoreAgent Framework
 │   ├── ParallelAgent
 │   └── RouterAgent
 │
+├── 🧩 Agent Skills System
+│   ├── SkillManager (Discovery)
+│   ├── Multi-language Script Dispatcher
+│   └── agentskills.io Spec Alignment
+│
 └── 🔌 Built-in MCP Client
     ├── stdio, SSE, HTTP transports
     └── OAuth & Bearer auth
@@ -240,7 +246,8 @@ agent = OmniAgent(
     event_router=EventRouter("redis_stream"),
     agent_config={
         "max_steps": 20,
-        "enable_advanced_tool_use": True,
+        "enable_advanced_tool_use": True,   # Enable Advanced tool use
+        "enable_agent_skills": True,        # Enable Agent Skills
         "memory_tool_backend": "local"
     }
 )
@@ -255,7 +262,8 @@ await agent.get_session_history(session_id)      # Retrieve conversation history
 await agent.clear_session_history(session_id)     # Clear history (session_id optional, clears all if None)
 await agent.get_events(session_id)               # Get event history
 await agent.get_memory_store_type()              # Get current memory router type
-await agent.cleanup()                       # Clean up resources
+await agent.cleanup()                       # Clean up resources and remove the agent and the config
+await agent.cleanup_mcp_servers()               # Clean up MCP servers without removing the agent and the config
 ```
 
 > 💡 **When to Use**: OmniAgent is your go-to for any AI task — from simple Q&A to complex multi-step workflows. Start here for any agent project.
@@ -315,235 +323,7 @@ async for event in agent.stream_events(session_id):
 
 > 💡 **When to Use**: Enable events when you need real-time monitoring, debugging, or building UIs that show agent progress. Essential for production observability.
 
-### 4. 🛠️ Local Tools System
-
-Register any Python function as an AI tool:
-
-```python
-from omnicoreagent import ToolRegistry
-
-tools = ToolRegistry()
-
-@tools.register_tool("get_weather")
-def get_weather(city: str) -> str:
-    """Get weather for a city."""
-    return f"Weather in {city}: Sunny, 25°C"
-
-@tools.register_tool("calculate_area")
-def calculate_area(length: float, width: float) -> str:
-    """Calculate rectangle area."""
-    return f"Area: {length * width} square units"
-
-agent = OmniAgent(
-    name="tool_agent",
-    local_tools=tools,  # Your custom tools!
-    ...
-)
-```
-
-> 💡 **When to Use**: Use Local Tools when you need custom business logic, internal APIs, or any Python functionality that isn't available via MCP servers.
-
-### 5. 💾 Memory Tool Backend (File-Based Working Memory)
-
-A **file-based persistent storage system** that gives your agent a local workspace to save and manage files during long-running tasks. Files are stored in a `./memories/` directory with safe concurrent access and path traversal protection.
-
-```python
-agent_config = {
-    "memory_tool_backend": "local"  # Enable file-based memory
-}
-
-# Agent automatically gets these tools:
-# - memory_view: View/list files in memory directory
-# - memory_create_update: Create new files or append/overwrite existing ones
-# - memory_str_replace: Find and replace text within files
-# - memory_insert: Insert text at specific line numbers
-# - memory_delete: Delete files from memory
-# - memory_rename: Rename or move files
-# - memory_clear_all: Clear entire memory directory
-```
-
-**How It Works**:
-- Files stored in `./memories/` directory (auto-created)
-- Thread-safe with file locking for concurrent access
-- Path traversal protection for security
-- Persists across agent restarts
-
-**Use Cases**:
-| Use Case | Description |
-|----------|-------------|
-| **Long-running workflows** | Save progress as agent works through complex tasks |
-| **Resumable tasks** | Continue where you left off after interruption |
-| **Multi-step planning** | Agent can save plans, execute, and update |
-| **Code generation** | Save code incrementally, run tests, iterate |
-| **Data processing** | Store intermediate results between steps |
-
-**Example**: A code generation agent can save its plan to memory, write code incrementally, run tests, and resume if interrupted.
-
----
-
-### 6. 👥 Sub-Agents System
-
-Delegate tasks to specialized child agents:
-
-```python
-weather_agent = OmniAgent(name="weather_agent", ...)
-filesystem_agent = OmniAgent(name="filesystem_agent", mcp_tools=MCP_TOOLS, ...)
-
-parent_agent = OmniAgent(
-    name="parent_agent",
-    sub_agents=[weather_agent, filesystem_agent],
-    ...
-)
-```
-
-> 💡 **When to Use**: Use Sub-Agents when you have specialized agents (e.g., weather, code, data) and want a parent agent to delegate tasks intelligently. Great for building modular, reusable agent architectures.
-
-### 7. 🚁 Background Agents
-
-Autonomous agents that run on schedule:
-
-```python
-from omnicoreagent import BackgroundAgentService, MemoryRouter, EventRouter
-
-bg_service = BackgroundAgentService(
-    MemoryRouter("redis"),
-    EventRouter("redis_stream")
-)
-bg_service.start_manager()
-
-agent_config = {
-    "agent_id": "system_monitor",
-    "system_instruction": "Monitor system resources.",
-    "model_config": {"provider": "openai", "model": "gpt-4o-mini"},
-    "interval": 300,  # Run every 5 minutes
-    "task_config": {
-        "query": "Monitor CPU and alert if > 80%",
-        "max_retries": 2
-    }
-}
-
-await bg_service.create(agent_config)
-bg_service.start_agent("system_monitor")
-```
-
-**Management**: `start_agent()`, `pause_agent()`, `resume_agent()`, `stop_agent()`, `get_agent_status()`
-
-> 💡 **When to Use**: Perfect for scheduled tasks like system monitoring, periodic reports, data syncing, or any automation that runs independently without user interaction.
-
-### 8. 🔄 Workflow Agents
-
-Orchestrate multiple agents for complex tasks:
-
-```python
-from omnicoreagent import SequentialAgent, ParallelAgent, RouterAgent
-
-# Sequential: Chain agents step-by-step
-seq_agent = SequentialAgent(sub_agents=[agent1, agent2, agent3])
-result = await seq_agent.run(initial_task="Analyze and report")
-
-# Parallel: Run agents concurrently
-par_agent = ParallelAgent(sub_agents=[agent1, agent2, agent3])
-results = await par_agent.run(agent_tasks={
-    "analyzer": "Analyze data",
-    "processor": "Process results"
-})
-
-# Router: Intelligent task routing
-router = RouterAgent(
-    sub_agents=[code_agent, data_agent, research_agent],
-    model_config={"provider": "openai", "model": "gpt-4o"}
-)
-result = await router.run(task="Find and summarize AI research")
-```
-
-> 💡 **When to Use**:
-> - **SequentialAgent**: When tasks depend on each other (output of one → input of next)
-> - **ParallelAgent**: When tasks are independent and can run simultaneously for speed
-> - **RouterAgent**: When you need intelligent task routing to specialized agents
-
-### 9. 🧠 Advanced Tool Use (BM25 Retrieval)
-
-Automatically discover relevant tools at runtime using BM25 lexical search:
-
-```python
-agent_config = {
-    "enable_advanced_tool_use": True  # Enable BM25 retrieval
-}
-```
-
-**How It Works**:
-1. All MCP tools loaded into in-memory registry
-2. BM25 index built over tool names, descriptions, parameters
-3. User task used as search query
-4. Top 5 relevant tools dynamically injected
-
-**Benefits**: Scales to 1000+ tools, zero network I/O, deterministic, container-friendly.
-
-> 💡 **When to Use**: Enable when you have many MCP tools (10+) and want the agent to automatically discover the right tools for each task without manual selection.
-
-### 10. 📊 Production Observability
-
-**Opik Tracing** — Monitor and optimize your agents:
-
-```bash
-# Add to .env
-OPIK_API_KEY=your_opik_api_key
-OPIK_WORKSPACE=your_workspace
-```
-
-**What's Tracked**: LLM call performance, tool execution traces, memory operations, agent workflow, bottlenecks.
-
-```
-Agent Execution Trace:
-├── agent_execution: 4.6s
-│   ├── tools_registry_retrieval: 0.02s ✅
-│   ├── memory_retrieval_step: 0.08s ✅
-│   ├── llm_call: 4.5s ⚠️ (bottleneck!)
-│   └── action_execution: 0.03s ✅
-```
-
-> 💡 **When to Use**: Essential for production deployments. Use Opik to identify bottlenecks, optimize costs, debug agent behavior, and monitor performance in real-time.
-
-### 11. 🌐 Universal Model Support
-
-Model-agnostic through LiteLLM — use any provider:
-
-```python
-# OpenAI
-model_config = {"provider": "openai", "model": "gpt-4o"}
-
-# Anthropic
-model_config = {"provider": "anthropic", "model": "claude-3-5-sonnet-20241022"}
-
-# Groq (Ultra-fast)
-model_config = {"provider": "groq", "model": "llama-3.1-8b-instant"}
-
-# Ollama (Local)
-model_config = {"provider": "ollama", "model": "llama3.1:8b", "ollama_host": "http://localhost:11434"}
-
-# OpenRouter (200+ models)
-model_config = {"provider": "openrouter", "model": "anthropic/claude-3.5-sonnet"}
-
-#mistral ai
-model_config = {"provider": "mistral", "model": "mistral-7b-instruct"}
-
-#deepseek
-model_config = {"provider": "deepseek", "model": "deepseek-chat"}
-
-#google gemini
-model_config = {"provider": "google", "model": "gemini-2.0-flash-exp"}
-
-#azure openai
-model_config = {"provider": "azure_openai", "model": "gpt-4o"}
-
-
-```
-
-**Supported**: OpenAI, Anthropic, Google Gemini, Groq, DeepSeek, Mistral, Azure OpenAI, OpenRouter, Ollama
-
-> 💡 **When to Use**: Switch providers based on your needs — use cheaper models (Groq, DeepSeek) for simple tasks, powerful models (GPT-4o, Claude) for complex reasoning, and local models (Ollama) for privacy-sensitive applications.
-
-### 12. 🔌 Built-in MCP Client
+### 4. 🔌 Built-in MCP Client
 
 Connect to any MCP-compatible service with support for multiple transport protocols and authentication methods.
 
@@ -649,6 +429,278 @@ result = await agent.run("List all Python files and get latest commits")
 
 > 💡 **When to Use**: Use MCP when you need to connect to external tools and services. Choose `stdio` for local CLI tools, `streamable_http` for REST APIs, and `sse` for real-time streaming data.
 
+---
+
+### 5. 🛠️ Local Tools System
+
+Register any Python function as an AI tool:
+
+```python
+from omnicoreagent import ToolRegistry
+
+tools = ToolRegistry()
+
+@tools.register_tool("get_weather")
+def get_weather(city: str) -> str:
+    """Get weather for a city."""
+    return f"Weather in {city}: Sunny, 25°C"
+
+@tools.register_tool("calculate_area")
+def calculate_area(length: float, width: float) -> str:
+    """Calculate rectangle area."""
+    return f"Area: {length * width} square units"
+
+agent = OmniAgent(
+    name="tool_agent",
+    local_tools=tools,  # Your custom tools!
+    ...
+)
+```
+
+> 💡 **When to Use**: Use Local Tools when you need custom business logic, internal APIs, or any Python functionality that isn't available via MCP servers.
+
+---
+
+### 6. 🧩 Agent Skills System (Packaged Capabilities)
+
+OmniCoreAgent supports the **Agent Skills** specification — self-contained capability packages that provide specialized knowledge, executable scripts, and documentation.
+
+```python
+agent_config = {
+    "enable_agent_skills": True  # Enable discovery and tools for skills
+}
+```
+
+**Key Concepts**:
+- **Discovery**: Agents automatically discover skills installed in `.agents/skills/[skill-name]`.
+- **Activation (`SKILL.md`)**: Agents are instructed to read the "Activation Document" first to understand how to use the skill's specific capabilities.
+- **Polyglot Execution**: The `run_skill_script` tool handles scripts in **Python, JavaScript/Node, TypeScript, Ruby, Perl, and Shell** (bash/sh).
+
+**Directory Structure**:
+```text
+.agents/skills/my-skill-name/
+├── SKILL.md        # The "Activation" document (instructions + metadata)
+├── scripts/        # Multi-language executable scripts
+├── references/     # Deep-dive documentation
+└── assets/         # Templates, examples, and resources
+```
+
+**Skill Tools**:
+- `read_skill_file(skill_name, file_path)`: Access any file within a skill (start with `SKILL.md`).
+- `run_skill_script(skill_name, script_name, args?)`: Execute bundled scripts with automatic interpreter detection.
+
+> 📚 **Learn More**: To learn how to create your own agent skills, visit [agentskills.io](https://agentskills.io/).
+
+---
+
+### 7. 💾 Memory Tool Backend (File-Based Working Memory)
+
+A **file-based persistent storage system** that gives your agent a local workspace to save and manage files during long-running tasks. Files are stored in a `./memories/` directory with safe concurrent access and path traversal protection.
+
+```python
+agent_config = {
+    "memory_tool_backend": "local"  # Enable file-based memory
+}
+
+# Agent automatically gets these tools:
+# - memory_view: View/list files in memory directory
+# - memory_create_update: Create new files or append/overwrite existing ones
+# - memory_str_replace: Find and replace text within files
+# - memory_insert: Insert text at specific line numbers
+# - memory_delete: Delete files from memory
+# - memory_rename: Rename or move files
+# - memory_clear_all: Clear entire memory directory
+```
+
+**How It Works**:
+- Files stored in `./memories/` directory (auto-created)
+- Thread-safe with file locking for concurrent access
+- Path traversal protection for security
+- Persists across agent restarts
+
+**Use Cases**:
+| Use Case | Description |
+|----------|-------------|
+| **Long-running workflows** | Save progress as agent works through complex tasks |
+| **Resumable tasks** | Continue where you left off after interruption |
+| **Multi-step planning** | Agent can save plans, execute, and update |
+| **Code generation** | Save code incrementally, run tests, iterate |
+| **Data processing** | Store intermediate results between steps |
+
+**Example**: A code generation agent can save its plan to memory, write code incrementally, run tests, and resume if interrupted.
+
+---
+
+### 8. 👥 Sub-Agents System
+
+Delegate tasks to specialized child agents:
+
+```python
+weather_agent = OmniAgent(name="weather_agent", ...)
+filesystem_agent = OmniAgent(name="filesystem_agent", mcp_tools=MCP_TOOLS, ...)
+
+parent_agent = OmniAgent(
+    name="parent_agent",
+    sub_agents=[weather_agent, filesystem_agent],
+    ...
+)
+```
+
+> 💡 **When to Use**: Use Sub-Agents when you have specialized agents (e.g., weather, code, data) and want a parent agent to delegate tasks intelligently. Great for building modular, reusable agent architectures.
+
+---
+
+### 9. 🚁 Background Agents
+
+Autonomous agents that run on schedule:
+
+```python
+from omnicoreagent import BackgroundAgentService, MemoryRouter, EventRouter
+
+bg_service = BackgroundAgentService(
+    MemoryRouter("redis"),
+    EventRouter("redis_stream")
+)
+bg_service.start_manager()
+
+agent_config = {
+    "agent_id": "system_monitor",
+    "system_instruction": "Monitor system resources.",
+    "model_config": {"provider": "openai", "model": "gpt-4o-mini"},
+    "interval": 300,  # Run every 5 minutes
+    "task_config": {
+        "query": "Monitor CPU and alert if > 80%",
+        "max_retries": 2
+    }
+}
+
+await bg_service.create(agent_config)
+bg_service.start_agent("system_monitor")
+```
+
+**Management**: `start_agent()`, `pause_agent()`, `resume_agent()`, `stop_agent()`, `get_agent_status()`
+
+> 💡 **When to Use**: Perfect for scheduled tasks like system monitoring, periodic reports, data syncing, or any automation that runs independently without user interaction.
+
+---
+
+### 10. 🔄 Workflow Agents
+
+Orchestrate multiple agents for complex tasks:
+
+```python
+from omnicoreagent import SequentialAgent, ParallelAgent, RouterAgent
+
+# Sequential: Chain agents step-by-step
+seq_agent = SequentialAgent(sub_agents=[agent1, agent2, agent3])
+result = await seq_agent.run(initial_task="Analyze and report")
+
+# Parallel: Run agents concurrently
+par_agent = ParallelAgent(sub_agents=[agent1, agent2, agent3])
+results = await par_agent.run(agent_tasks={
+    "analyzer": "Analyze data",
+    "processor": "Process results"
+})
+
+# Router: Intelligent task routing
+router = RouterAgent(
+    sub_agents=[code_agent, data_agent, research_agent],
+    model_config={"provider": "openai", "model": "gpt-4o"}
+)
+result = await router.run(task="Find and summarize AI research")
+```
+
+> 💡 **When to Use**:
+> - **SequentialAgent**: When tasks depend on each other (output of one → input of next)
+> - **ParallelAgent**: When tasks are independent and can run simultaneously for speed
+> - **RouterAgent**: When you need intelligent task routing to specialized agents
+
+---
+
+### 11. 🧠 Advanced Tool Use (BM25 Retrieval)
+
+Automatically discover relevant tools at runtime using BM25 lexical search:
+
+```python
+agent_config = {
+    "enable_advanced_tool_use": True  # Enable BM25 retrieval
+}
+```
+
+**How It Works**:
+1. All MCP tools loaded into in-memory registry
+2. BM25 index built over tool names, descriptions, parameters
+3. User task used as search query
+4. Top 5 relevant tools dynamically injected
+
+**Benefits**: Scales to 1000+ tools, zero network I/O, deterministic, container-friendly.
+
+> 💡 **When to Use**: Enable when you have many MCP tools (10+) and want the agent to automatically discover the right tools for each task without manual selection.
+
+---
+
+### 12. 📊 Production Observability
+
+**Opik Tracing** — Monitor and optimize your agents:
+
+```bash
+# Add to .env
+OPIK_API_KEY=your_opik_api_key
+OPIK_WORKSPACE=your_workspace
+```
+
+**What's Tracked**: LLM call performance, tool execution traces, memory operations, agent workflow, bottlenecks.
+
+```
+Agent Execution Trace:
+├── agent_execution: 4.6s
+    ├── tools_registry_retrieval: 0.02s ✅
+    ├── memory_retrieval_step: 0.08s ✅
+    ├── llm_call: 4.5s ⚠️ (bottleneck!)
+    └── action_execution: 0.03s ✅
+```
+
+> 💡 **When to Use**: Essential for production deployments. Use Opik to identify bottlenecks, optimize costs, debug agent behavior, and monitor performance in real-time.
+
+---
+
+### 13. 🌐 Universal Model Support
+
+Model-agnostic through LiteLLM — use any provider:
+
+```python
+# OpenAI
+model_config = {"provider": "openai", "model": "gpt-4o"}
+
+# Anthropic
+model_config = {"provider": "anthropic", "model": "claude-3-5-sonnet-20241022"}
+
+# Groq (Ultra-fast)
+model_config = {"provider": "groq", "model": "llama-3.1-8b-instant"}
+
+# Ollama (Local)
+model_config = {"provider": "ollama", "model": "llama3.1:8b", "ollama_host": "http://localhost:11434"}
+
+# OpenRouter (200+ models)
+model_config = {"provider": "openrouter", "model": "anthropic/claude-3.5-sonnet"}
+
+#mistral ai
+model_config = {"provider": "mistral", "model": "mistral-7b-instruct"}
+
+#deepseek
+model_config = {"provider": "deepseek", "model": "deepseek-chat"}
+
+#google gemini
+model_config = {"provider": "google", "model": "gemini-2.0-flash-exp"}
+
+#azure openai
+model_config = {"provider": "azure_openai", "model": "gpt-4o"}
+```
+
+**Supported**: OpenAI, Anthropic, Google Gemini, Groq, DeepSeek, Mistral, Azure OpenAI, OpenRouter, Ollama
+
+> 💡 **When to Use**: Switch providers based on your needs — use cheaper models (Groq, DeepSeek) for simple tasks, powerful models (GPT-4o, Claude) for complex reasoning, and local models (Ollama) for privacy-sensitive applications.
+
 ## 📚 Examples
 
 ### Basic Examples
@@ -711,6 +763,7 @@ agent_config = {
     "total_tokens_limit": 0,            # 0 = unlimited
     "memory_config": {"mode": "sliding_window", "value": 10000},
     "enable_advanced_tool_use": True,   # BM25 tool retrieval
+    "enable_agent_skills": True,        # Specialized packaged skills
     "memory_tool_backend": "local"      # Persistent working memory
 }
 ```

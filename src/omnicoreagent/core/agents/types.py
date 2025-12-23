@@ -28,6 +28,12 @@ class AgentConfig(BaseModel):
         description="Backend for memory tool. Options: 'local', 's3', 'db'",
     )
 
+    # --- Agent Skills ---
+    enable_agent_skills: bool = Field(
+        default=False,
+        description="Enable Agent Skills feature for specialized capabilities",
+    )
+
     @field_validator("memory_tool_backend")
     @classmethod
     def validate_backend(cls, v):

@@ -15,6 +15,7 @@ class ReactAgent(BaseReactAgent):
             total_tokens_limit=config.total_tokens_limit,
             enable_advanced_tool_use=config.enable_advanced_tool_use,
             memory_tool_backend=config.memory_tool_backend,
+            enable_agent_skills=config.enable_agent_skills,
         )
 
     async def _run(
