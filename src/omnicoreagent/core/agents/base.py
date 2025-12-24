@@ -1,4 +1,6 @@
 import asyncio
+import time
+
 import json
 import re
 import uuid
@@ -101,13 +103,6 @@ class BaseReactAgent:
         self.total_tokens_limit = total_tokens_limit
         self._limits_enabled = request_limit > 0 or total_tokens_limit > 0
         self.enable_advanced_tool_use = enable_advanced_tool_use
-
-        if self._limits_enabled:
-            logger.info(
-                f"Usage limits enabled: {request_limit} requests, {total_tokens_limit} tokens"
-            )
-        else:
-            logger.info("Usage limits disabled (production mode)")
 
         self.memory_tool_backend = memory_tool_backend
         self.enable_agent_skills = enable_agent_skills
@@ -1389,6 +1384,7 @@ class BaseReactAgent:
         session_id: str,
         session_state: Any,
         add_message_to_history: Callable[[str, str, dict | None], Any],
+        run_usage: Usage,
         event_router: Callable[[str, Event], Any] = None,
         debug: bool = False,
     ):
@@ -1437,6 +1433,7 @@ class BaseReactAgent:
             try:
                 agent = resolve_agent(agent_name, sub_agents)
                 params = call.get("parameters", {})
+                params["session_id"] = session_id
                 kwargs = build_kwargs(agent, params)
 
                 if hasattr(agent, "mcp_tools") and agent.mcp_tools:
@@ -1520,6 +1517,12 @@ class BaseReactAgent:
 
                     logger.info(f"Agent {agent_name} completed successfully")
                     observations.append(obs)
+                    if isinstance(obs_data, dict):
+                        sub_usage = obs_data.get("metric")
+                        if sub_usage and isinstance(sub_usage, Usage):
+                            run_usage.incr(sub_usage)
+                            usage.incr(sub_usage)
+
                     event = Event(
                         type=EventType.SUB_AGENT_CALL_RESULT,
                         payload=SubAgentCallResultPayload(
@@ -1569,7 +1572,7 @@ class BaseReactAgent:
         session_id: str = None,
         event_router: Callable[[str, Event], Any] = None,
         sub_agents: list = None,
-    ) -> str | None:
+    ) -> Any:
         """Execute ReAct loop with JSON communication
         kwargs: if mcp is enbale then it will be sessions and availables_tools else it will be local_tools
         """
@@ -1578,6 +1581,8 @@ class BaseReactAgent:
         session_state.assistant_with_tool_calls = None
         session_state.pending_tool_responses = []
         session_state.loop_detector.reset()
+        start_time = time.perf_counter()
+        run_usage = Usage()
 
         event = Event(
             type=EventType.USER_MESSAGE,
@@ -1656,12 +1661,13 @@ class BaseReactAgent:
 
                         if hasattr(response, "usage"):
                             request_usage = Usage(
-                                requests=current_steps,
+                                requests=1,
                                 request_tokens=response.usage.prompt_tokens,
                                 response_tokens=response.usage.completion_tokens,
                                 total_tokens=response.usage.total_tokens,
                             )
                             usage.incr(request_usage)
+                            run_usage.incr(request_usage)
 
                             if self._limits_enabled:
                                 self.usage_limits.check_tokens(usage)
@@ -1692,15 +1698,6 @@ class BaseReactAgent:
                                         f"Remaining Requests: {remaining_requests}, "
                                         f"Remaining Tokens: {remaining_tokens}"
                                     )
-                            else:
-                                if debug:
-                                    logger.info(
-                                        f"Usage recorded (limits disabled): "
-                                        f"Request Tokens: {request_usage.request_tokens}, "
-                                        f"Response Tokens: {request_usage.response_tokens}, "
-                                        f"Total Tokens: {request_usage.total_tokens}"
-                                    )
-
                         if hasattr(response, "choices"):
                             response = response.choices[0].message.content.strip()
                         elif hasattr(response, "message"):
@@ -1710,11 +1707,12 @@ class BaseReactAgent:
                 except UsageLimitExceeded as e:
                     error_message = f"Usage limit error: {e}"
                     logger.error(error_message)
-                    return error_message
+                    return {"answer": error_message, "usage": run_usage}
+
                 except Exception as e:
                     error_message = f"LLM error: {e}"
                     logger.error(e)
-                    return error_message
+                    return {"answer": error_message, "usage": run_usage}
 
                 parsed_response = await self.extract_action_or_answer(
                     response=response,
@@ -1753,7 +1751,8 @@ class BaseReactAgent:
                     )
 
                     session_state.state = AgentState.FINISHED
-                    return parsed_response.answer
+                    run_usage.total_time = time.perf_counter() - start_time
+                    return {"answer": parsed_response.answer, "usage": run_usage}
 
                 if parsed_response.action is not None:
                     if parsed_response.agent_calls is not None:
@@ -1768,6 +1767,7 @@ class BaseReactAgent:
                                 session_id=session_id,
                                 session_state=session_state,
                                 add_message_to_history=add_message_to_history,
+                                run_usage=run_usage,
                                 event_router=event_router,
                                 debug=debug,
                             )
@@ -1810,9 +1810,16 @@ class BaseReactAgent:
                     session_state.state = AgentState.STUCK
                     if last_valid_response:
                         max_steps_context = f"[SYSTEM_CONTEXT: MAX_STEPS_REACHED - Agent hit {self.max_steps} step limit]\n\n"
-                        return max_steps_context + last_valid_response
+                        return {
+                            "answer": max_steps_context + last_valid_response,
+                            "usage": run_usage,
+                        }
+
                     else:
-                        return f"[SYSTEM_CONTEXT: MAX_STEPS_REACHED - Agent hit {self.max_steps} step limit without valid response]"
+                        return {
+                            "answer": f"[SYSTEM_CONTEXT: MAX_STEPS_REACHED - Agent hit {self.max_steps} step limit without valid response]",
+                            "usage": run_usage,
+                        }
 
         if session_state.state == AgentState.STUCK and last_valid_response:
             loop_context = (
@@ -1820,4 +1827,5 @@ class BaseReactAgent:
             )
             return loop_context + last_valid_response
 
-        return None
+        run_usage.total_time = time.perf_counter() - start_time
+        return {"answer": last_valid_response, "usage": run_usage}

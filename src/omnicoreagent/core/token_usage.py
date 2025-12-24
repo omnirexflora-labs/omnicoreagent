@@ -25,7 +25,10 @@ class Usage:
     """Tokens used in generating responses."""
     total_tokens: int | None = None
     """Total tokens used in the whole run, should generally be equal to `request_tokens + response_tokens`."""
+    total_time: float | None = 0.0
+    """Total time taken for the whole run in seconds."""
     details: dict[str, int] | None = field(default_factory=dict)
+
     """Any extra details returned by the model."""
 
     def __post_init__(self) -> None:
@@ -59,6 +62,9 @@ class Usage:
             self.total_tokens = (self.total_tokens or 0) + incr_usage.total_tokens
         elif self.request_tokens is not None and self.response_tokens is not None:
             self.total_tokens = self.request_tokens + self.response_tokens
+
+        if incr_usage.total_time is not None:
+            self.total_time = (self.total_time or 0.0) + incr_usage.total_time
 
         if incr_usage.details:
             for key, value in incr_usage.details.items():

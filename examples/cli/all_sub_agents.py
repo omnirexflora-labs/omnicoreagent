@@ -162,11 +162,11 @@ class ResearchAgent(OmniCoreAgent):
         )
 
     @override
-    async def run(self, query, number_of_iterations: int):
+    async def run(self, query, number_of_iterations: int, session_id: str = None):
         print(f"number_of_iterations: {number_of_iterations}")
         for i in range(int(number_of_iterations)):
             print(f"Iteration {i + 1}")
-            response = await super().run(query)
+            response = await super().run(query=query, session_id=session_id)
             print(f"Response: {response}")
         return response
 

@@ -18,6 +18,12 @@ from omnicoreagent.omni_agent.prompts.react_suffix import SYSTEM_SUFFIX
 from omnicoreagent.core.events.event_router import EventRouter
 from omnicoreagent.core.tools.advance_tools.advanced_tools_use import AdvanceToolsUse
 from omnicoreagent.core.utils import logger
+from omnicoreagent.core.token_usage import Usage
+from omnicoreagent.core.guardrails import (
+    PromptInjectionGuard,
+    DetectionConfig,
+    ThreatLevel,
+)
 
 
 class OmniCoreAgent:
@@ -66,6 +72,8 @@ class OmniCoreAgent:
         self.agent_config = agent_config
 
         self.debug = debug
+        self._cumulative_usage = Usage()
+
         self.memory_router = memory_router or MemoryRouter(
             memory_store_type="in_memory"
         )
@@ -77,6 +85,14 @@ class OmniCoreAgent:
         self.llm_connection = None
 
         self.internal_config = self._create_internal_config()
+
+        self.guardrail = None
+        agent_cfg = self.internal_config.get("AgentConfig", {})
+        if agent_cfg.get("guardrail_config"):
+            logger.info(f"Guardrail enabled for agent: {self.name}")
+            g_config = DetectionConfig(**agent_cfg["guardrail_config"])
+            self.guardrail = PromptInjectionGuard(g_config)
+
         self._create_agent()
 
     def _create_internal_config(self) -> Dict[str, Any]:
@@ -191,6 +207,17 @@ class OmniCoreAgent:
         Returns:
             Dict containing response and session_id
         """
+        if self.guardrail:
+            result = self.guardrail.check(query)
+            if not result.is_safe:
+                logger.warning(f"Query blocked by guardrail: {result.message}")
+                return {
+                    "response": f"I'm sorry, but I cannot process this request due to safety concerns: {result.message}",
+                    "session_id": session_id,
+                    "agent_name": self.name,
+                    "guardrail_result": result.to_dict(),
+                }
+
         if not session_id:
             session_id = self.generate_session_id()
 
@@ -217,7 +244,35 @@ class OmniCoreAgent:
             **extra_kwargs,
         )
 
+        if isinstance(response, dict) and "usage" in response:
+            self._cumulative_usage.incr(response["usage"])
+            return {
+                "response": response["answer"],
+                "session_id": session_id,
+                "agent_name": self.name,
+                "metric": response["usage"],
+            }
+
         return {"response": response, "session_id": session_id, "agent_name": self.name}
+
+    async def get_metrics(self) -> Dict[str, Any]:
+        """
+        Get the cumulative metrics for the lifecycle of the agent.
+
+        Returns:
+            Dict containing total requests, tokens, and time.
+        """
+        average_time = (
+            self._cumulative_usage.total_time / self._cumulative_usage.requests
+        )
+        return {
+            "total_requests": self._cumulative_usage.requests,
+            "total_request_tokens": self._cumulative_usage.request_tokens,
+            "total_response_tokens": self._cumulative_usage.response_tokens,
+            "total_tokens": self._cumulative_usage.total_tokens,
+            "total_time": self._cumulative_usage.total_time,
+            "average_time": average_time,
+        }
 
     async def list_all_available_tools(self):
         """List all available tools (MCP and local)"""

@@ -512,7 +512,7 @@ def build_kwargs(agent, provided_params: dict):
 
     for extra in provided_params:
         if extra not in sig.parameters:
-            raise ValueError(f"Unexpected parameter '{extra}' for agent '{agent.name}'")
+            del provided_params[extra]
 
     return kwargs
 

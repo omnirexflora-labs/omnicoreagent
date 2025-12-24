@@ -795,6 +795,15 @@ Provide clear, supportive, and context-aware responses that help learners grow.
                 "enable_advanced_tool_use": True,
                 "enable_agent_skills": True,
                 "memory_tool_backend": "local",
+                "guardrail_config": {
+                    "strict_mode": True,
+                    "sensitivity": 1.0,
+                    "enable_encoding_detection": True,
+                    "enable_heuristic_analysis": True,
+                    "enable_sequential_analysis": True,
+                    "enable_entropy_analysis": True,
+                    "max_input_length": 10000,
+                },
             },
             memory_router=self.memory_router,
             event_router=self.event_router,
@@ -876,6 +885,7 @@ Provide clear, supportive, and context-aware responses that help learners grow.
 
             # Extract response text
             response = result.get("response", "No response received")
+            metrics = result.get("metric", {})
 
             # Log timing and response
             logger.info(f"[CHAT] Total message processing time: {total_time:.3f}s")
@@ -886,10 +896,21 @@ Provide clear, supportive, and context-aware responses that help learners grow.
 
             print(f"🤖 Response: {response}")
             print(f"⏱️ Total time: {total_time:.3f}s")
+            print(f"📊 Metrics: {metrics}")
+            await self.handle_metrics()
 
         except Exception as e:
             logger.error(f"[CHAT] Error while processing message: {e}")
             print(f"❌ Error: {e}")
+
+    async def handle_metrics(self):
+        """Get agent metrics."""
+        if not self.agent:
+            print("❌ Agent not initialized")
+            return
+
+        metrics = await self.agent.get_metrics()
+        print("📊 Total Metrics:", metrics)
 
     async def handle_tools(self):
         """List available tools."""

@@ -50,8 +50,10 @@
 9. [🚁 Background Agents](#9--background-agents)
 10. [🔄 Workflow Agents](#10--workflow-agents)
 11. [🧠 Advanced Tool Use (BM25)](#11--advanced-tool-use-bm25-retrieval)
-12. [📊 Production Observability](#12--production-observability)
-13. [🌐 Universal Model Support](#13--universal-model-support)
+12. [📊 Production Observability & Metrics](#12--production-observability--metrics)
+13. [🛡️ Prompt Injection Guardrails](#13--prompt-injection-guardrails)
+14. [🌐 Universal Model Support](#14--universal-model-support)
+
 
 ### Reference
 - [📚 Examples](#-examples)
@@ -246,11 +248,13 @@ agent = OmniCoreAgent(
     event_router=EventRouter("redis_stream"),
     agent_config={
         "max_steps": 20,
-        "enable_advanced_tool_use": True,   # Enable Advanced tool use
-        "enable_agent_skills": True,        # Enable Agent Skills
-        "memory_tool_backend": "local"
+        "enable_advanced_tool_use": True,
+        "enable_agent_skills": True,
+        "memory_tool_backend": "local",
+        "guardrail_config": {"strict_mode": True}  # Enable Safety Guardrails
     }
 )
+
 
 # Key Methods
 await agent.run(query)                      # Execute task
@@ -264,7 +268,12 @@ await agent.get_events(session_id)               # Get event history
 await agent.get_memory_store_type()              # Get current memory router type
 await agent.cleanup()                       # Clean up resources and remove the agent and the config
 await agent.cleanup_mcp_servers()               # Clean up MCP servers without removing the agent and the config
+await agent.get_metrics()                       # Get cumulative usage (tokens, requests, time)
 ```
+
+> [!TIP]
+> Each `agent.run()` call now returns a `metric` field containing fine-grained usage for that specific request.
+
 
 > 💡 **When to Use**: OmniCoreAgent is your go-to for any AI task — from simple Q&A to complex multi-step workflows. Start here for any agent project.
 
@@ -639,9 +648,24 @@ agent_config = {
 
 ---
 
-### 12. 📊 Production Observability
+### 12. 📊 Production Observability & Metrics
 
-**Opik Tracing** — Monitor and optimize your agents:
+#### 📈 Real-time Usage Metrics
+OmniCoreAgent tracks every token, request, and millisecond. Each `run()` returns a `metric` object, and you can get cumulative stats anytime.
+
+```python
+result = await agent.run("Analyze this data")
+print(f"Request Tokens: {result['metric'].request_tokens}")
+print(f"Time Taken: {result['metric'].total_time:.2f}s")
+
+# Get aggregated metrics for the agent's lifecycle
+stats = await agent.get_metrics()
+print(f"Avg Response Time: {stats['average_time']:.2f}s")
+```
+
+#### 🔍 Opik Tracing
+Monitor and optimize your agents with deep traces:
+
 
 ```bash
 # Add to .env
@@ -660,11 +684,59 @@ Agent Execution Trace:
     └── action_execution: 0.03s ✅
 ```
 
-> 💡 **When to Use**: Essential for production deployments. Use Opik to identify bottlenecks, optimize costs, debug agent behavior, and monitor performance in real-time.
+> 💡 **When to Use**: Essential for production. Use Metrics for cost/performance monitoring, and Opik for identifying bottlenecks and debugging complex agent logic.
 
 ---
 
-### 13. 🌐 Universal Model Support
+
+### 13. 🛡️ Prompt Injection Guardrails
+
+Protect your agents against malicious inputs, jailbreaks, and instruction overrides before they reach the LLM.
+
+```python
+agent_config = {
+    "guardrail_config": {
+        "strict_mode": True,      # Block all suspicious inputs
+        "sensitivity": 0.85,      # 0.0 to 1.0 (higher = more sensitive)
+        "enable_pattern_matching": True,
+        "enable_heuristic_analysis": True
+    }
+}
+
+agent = OmniCoreAgent(..., agent_config=agent_config)
+
+# If a threat is detected:
+# result['response'] -> "I'm sorry, but I cannot process this request due to safety concerns..."
+# result['guardrail_result'] -> Full metadata about the detected threat
+```
+
+**Key Protections**:
+- **Instruction Overrides**: "Ignore previous instructions..."
+- **Jailbreaks**: DAN mode, roleplay escapes, etc.
+- **Toxicity & Abuse**: Built-in pattern recognition.
+- **Payload Splitting**: Detects fragmented attack attempts.
+
+#### ⚙️ Configuration Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `strict_mode` | `bool` | `False` | When `True`, any detection (even low confidence) blocks the request. |
+| `sensitivity` | `float` | `1.0` | Scaling factor for threat scores (0.0 to 1.0). Higher = more sensitive. |
+| `max_input_length` | `int` | `10000` | Maximum allowed query length before blocking. |
+| `enable_encoding_detection` | `bool` | `True` | Detects base64, hex, and other obfuscation attempts. |
+| `enable_heuristic_analysis` | `bool` | `True` | Analyzes prompt structure for typical attack patterns. |
+| `enable_sequential_analysis` | `bool` | `True` | Checks for phased attacks across multiple tokens. |
+| `enable_entropy_analysis` | `bool` | `True` | Detects high-entropy payloads common in injections. |
+| `allowlist_patterns` | `list` | `[]` | List of regex patterns that bypass safety checks. |
+| `blocklist_patterns` | `list` | `[]` | Custom regex patterns to always block. |
+
+> 💡 **When to Use**: Always enable in user-facing applications to prevent prompt injection attacks and ensure agent reliability.
+
+
+---
+
+### 14. 🌐 Universal Model Support
+
 
 Model-agnostic through LiteLLM — use any provider:
 

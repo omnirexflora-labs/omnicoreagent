@@ -66,6 +66,7 @@ class AgentConfig:
         default_factory=lambda: {"mode": "token_budget", "value": 30000}
     )
     memory_tool_backend: str = None
+    guardrail_config: Optional[Dict[str, Any]] = None
 
 
 class ConfigTransformer:
