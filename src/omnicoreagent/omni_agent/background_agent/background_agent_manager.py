@@ -34,8 +34,8 @@ class BackgroundAgentManager:
             memory_router: Optional shared memory router for all agents
             event_router: Optional shared event router for all agents
         """
-        self.memory_router = memory_router or MemoryRouter(memory_store_type="memory")
-        self.event_router = event_router or EventRouter(event_store_type="memory")
+        self.memory_router = memory_router or MemoryRouter(memory_store_type="in_memory")
+        self.event_router = event_router or EventRouter(event_store_type="in_memory")
 
         self.task_registry = TaskRegistry()
         self.scheduler = APSchedulerBackend()
@@ -91,6 +91,9 @@ class BackgroundAgentManager:
                     "Auto-starting BackgroundAgentManager for immediate scheduling"
                 )
                 await self.start()
+            else:
+                # If manager is already running, start the worker for this new agent
+                await agent.start_worker()
 
             await self._schedule_agent(agent_id, agent)
 
@@ -173,6 +176,41 @@ class BackgroundAgentManager:
         """List all registered task agent IDs."""
         return self.task_registry.get_agent_ids()
 
+    async def run_task_now(self, agent_id: str, **kwargs) -> bool:
+        """
+        Run a task for an agent immediately (on-the-fly).
+        
+        Args:
+            agent_id: The agent ID
+            **kwargs: Arguments to pass to the task
+            
+        Returns:
+            True if task was submitted successfully
+        """
+        if agent_id not in self.agents:
+            logger.error(f"Agent {agent_id} not found")
+            return False
+        
+        agent = self.agents[agent_id]
+        await agent.submit_task(**kwargs)
+        logger.info(f"Submitted on-the-fly task for agent {agent_id}")
+        return True
+
+    async def register_and_run(self, agent_id: str, task_config: Dict[str, Any]) -> bool:
+        """
+        Register a task and run it immediately.
+        
+        Args:
+            agent_id: The agent ID
+            task_config: Task configuration
+            
+        Returns:
+            True if registered and run successfully
+        """
+        if await self.register_task(agent_id, task_config):
+            return await self.run_task_now(agent_id)
+        return False
+
     async def _schedule_agent(self, agent_id: str, agent: BackgroundOmniCoreAgent):
         """Schedule an agent for execution."""
         try:
@@ -196,8 +234,9 @@ class BackgroundAgentManager:
                 return
 
             self.scheduler.start()
-
+            
             for agent_id, agent in self.agents.items():
+                await agent.start_worker()
                 await self._schedule_agent(agent_id, agent)
 
             self.is_running = True
