@@ -13,8 +13,6 @@ import sys
 from abc import ABC, abstractmethod
 
 
-
-
 class ThreatLevel(Enum):
     SAFE = "safe"
     LOW_RISK = "low_risk"
@@ -76,8 +74,6 @@ class DetectionResult:
     def to_json(self) -> str:
         """Serialize to JSON"""
         return json.dumps(self.to_dict())
-
-
 
 
 class PatternManager:
@@ -292,8 +288,6 @@ class PatternManager:
             self.patterns[group]["patterns"].append((compiled, requires_target))
         except re.error as e:
             logging.error(f"Failed to add pattern {pattern}: {e}")
-
-
 
 
 class DetectionEngine:
@@ -991,8 +985,6 @@ class DetectionEngine:
             )
 
 
-
-
 class PromptInjectionGuard:
     """
     Production-ready prompt injection guardrail.
@@ -1054,8 +1046,6 @@ class PromptInjectionGuard:
     def add_custom_pattern(self, group: str, pattern: str, **kwargs):
         """Add custom detection pattern"""
         self.detection_engine.pattern_manager.add_pattern(group, pattern, **kwargs)
-
-
 
 
 def create_guard(
