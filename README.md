@@ -566,33 +566,101 @@ parent_agent = OmniCoreAgent(
 
 ### 9. 🚁 Background Agents
 
-Autonomous agents that run on schedule:
+Autonomous agents that run on schedule or process tasks from a persistent queue.
 
 ```python
-from omnicoreagent import BackgroundAgentService, MemoryRouter, EventRouter
+from omnicoreagent import BackgroundAgentManager, MemoryRouter, EventRouter
 
-bg_service = BackgroundAgentService(
-    MemoryRouter("redis"),
-    EventRouter("redis_stream")
+# Initialize the manager
+manager = BackgroundAgentManager(
+    memory_router=MemoryRouter("redis"),
+    event_router=EventRouter("redis_stream")
 )
-bg_service.start_manager()
 
-agent_config = {
+# Create a background agent
+background_agent_config = {
     "agent_id": "system_monitor",
     "system_instruction": "Monitor system resources.",
     "model_config": {"provider": "openai", "model": "gpt-4o-mini"},
-    "interval": 300,  # Run every 5 minutes
+    "agent_config": {},
     "task_config": {
         "query": "Monitor CPU and alert if > 80%",
-        "max_retries": 2
+        "interval": 300,        # Run every 5 minutes
+        "max_retries": 2,
+        "retry_delay": 60,
     }
 }
+await manager.create_agent(background_agent_config)
 
-await bg_service.create(agent_config)
-bg_service.start_agent("system_monitor")
+# Start/Resume the manager if not already running
+await manager.start()
 ```
 
-**Management**: `start_agent()`, `pause_agent()`, `resume_agent()`, `stop_agent()`, `get_agent_status()`
+#### 🛠️ Comprehensive API Reference
+
+**BackgroundAgentManager (Orchestrator)**
+
+_Lifecycle Management_
+- `await manager.create_agent(config: Dict) -> Dict`: Create, register, and schedule a new background agent.
+- `await manager.start()`: Start the manager and all scheduled agents.
+- `await manager.shutdown()`: Gracefully stop the manager and all agents.
+- `await manager.start_agent(agent_id)`: Start (schedule) a specific agent.
+- `await manager.stop_agent(agent_id)`: Stop (unschedule) a specific agent.
+- `await manager.pause_agent(agent_id)`: Pause an agent's schedule without stopping its worker.
+- `await manager.resume_agent(agent_id)`: Resume a paused agent's schedule.
+- `await manager.delete_agent(agent_id)`: Stop, cleanup, and remove an agent completely.
+
+_Task Management_
+- `await manager.register_task(agent_id, task_config)`: Register or update a task for an agent.
+- `await manager.run_task_now(agent_id, task_config)`: Trigger an immediate execution outside the schedule.
+- `await manager.register_and_run(agent_id, task_config)`: Register a task and run it immediately.
+- `await manager.update_task_config(agent_id, task_config)`: Update an existing task configuration.
+- `await manager.remove_task(agent_id)`: Remove a task configuration.
+- `await manager.list_tasks()`: List all agents with registered tasks.
+
+_Status & Monitoring_
+- `await manager.get_agent_status(agent_id)`: Get comprehensive status (running, scheduled, last run, errors).
+- `await manager.get_manager_status()`: Get overall system status (total agents, running count, resource usage).
+- `await manager.list_agents()`: List all registered agent IDs.
+- `await manager.is_agent_running(agent_id)`: Check if an agent is currently executing a task.
+- `await manager.get_running_agents()`: List all currently executing agents.
+- `await manager.get_agent_metrics(agent_id)`: Get performance metrics (run count, errors, timestamps).
+- `await manager.get_all_metrics()`: Get metrics for all agents.
+
+_Configuration & Information_
+- `await manager.update_agent_config(agent_id, new_config)`: Update agent settings (including model/tools).
+- `await manager.get_task_config(agent_id)`: Retrieve current task configuration.
+- `await manager.get_agent(agent_id)`: Access the raw `BackgroundOmniCoreAgent` instance.
+- `await manager.get_agent_event_info(agent_id)`: Get event stream connection details.
+- `await manager.get_all_event_info()`: Get event info for all agents and shared stores.
+- `await manager.get_agent_session_id(agent_id)`: Get the persistent session ID.
+- `await manager.get_all_session_ids()`: Get a map of all agent session IDs.
+
+---
+
+**BackgroundOmniCoreAgent (The Workers)**
+
+_Execution & Control_
+- `await agent.submit_task(task_config)`: Queue a task for reliable execution.
+- `await agent.run_task(task_config)`: Interface for scheduler/manual triggers.
+- `await agent.start_worker()`: Start the background task processing loop.
+- `await agent.stop_worker()`: Gracefully stop the background worker.
+- `property agent.is_worker_running`: Check if the worker loop is active.
+- `await agent.connect_mcp_servers()`: Establish connections to configured MCP tools.
+- `await agent.cleanup()`: comprehensive cleanup of resources, connections, and tasks.
+
+_State & Visibility_
+- `await agent.get_status()`: Get health, configuration, and execution state.
+- `await agent.get_session_id()`: Get the persistent session ID.
+- `await agent.has_task()`: Check if a valid task is registered.
+- `await agent.get_task_query()`: Get the current query/instruction being executed.
+- `await agent.get_task_config()`: Get the full task configuration dict.
+
+_Events & Streaming_
+- `await agent.stream_events(session_id)`: Real-time event generator.
+- `await agent.get_events(session_id)`: Retrieve past event history.
+- `await agent.get_event_stream_info()`: Connection details for external consumers.
+- `await agent.update_config(new_config)`: Hot-reload agent configuration.
 
 > 💡 **When to Use**: Perfect for scheduled tasks like system monitoring, periodic reports, data syncing, or any automation that runs independently without user interaction.
 

@@ -18,7 +18,6 @@ logger = logging.getLogger("omnicoreagent")
 # TOP-LEVEL IMPORTS (Recommended for most use cases)
 from omnicoreagent import (
     OmniCoreAgent,
-    
     MemoryRouter,
     EventRouter,
     BackgroundAgentManager,
