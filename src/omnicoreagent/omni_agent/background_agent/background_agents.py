@@ -79,6 +79,11 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
         self.run_count = 0
         self.error_count = 0
 
+        # Task Queue for reliable execution
+        self._task_queue = asyncio.Queue()
+        self._worker_task = None
+        self._shutdown_event = asyncio.Event()
+
         logger.info(
             f"Initialized BackgroundOmniCoreAgent: {self.agent_id} with session_id: {self.session_id}"
         )
@@ -138,13 +143,58 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
 
         logger.info(f"Using task config from TaskRegistry for agent {self.agent_id}")
         return task_config
+    async def start_worker(self):
+        """Start the background worker loop."""
+        if self._worker_task is not None:
+            logger.warning(f"Worker for agent {self.agent_id} is already running")
+            return
 
-    def has_task(self) -> bool:
-        """Check if the agent has a task registered."""
-        return self.task_registry.exists(self.agent_id)
+        self._shutdown_event.clear()
+        self._worker_task = asyncio.create_task(self._worker_loop())
+        logger.info(f"Started worker for agent {self.agent_id}")
+
+    async def _worker_loop(self):
+        """Background worker loop that processes tasks from the queue."""
+        logger.info(f"Worker loop started for agent {self.agent_id}")
+        while not self._shutdown_event.is_set():
+            try:
+                # Use wait_for to check shutdown_event periodically
+                try:
+                    task_data = await asyncio.wait_for(self._task_queue.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+
+                logger.info(f"Worker for {self.agent_id} picked up a task")
+                kwargs = task_data.get("kwargs", {})
+                
+                try:
+                    await self._internal_run_task(**kwargs)
+                finally:
+                    self._task_queue.task_done()
+                    
+            except asyncio.CancelledError:
+                logger.info(f"Worker for {self.agent_id} cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in worker loop for {self.agent_id}: {e}")
+                await asyncio.sleep(1)  # Prevent tight error loop
+
+        logger.info(f"Worker loop exited for agent {self.agent_id}")
+
+    async def submit_task(self, **kwargs):
+        """Submit a task to the queue for execution."""
+        await self._task_queue.put({"kwargs": kwargs, "timestamp": datetime.now().isoformat()})
+        logger.info(f"Task submitted for agent {self.agent_id}")
 
     async def run_task(self, **kwargs):
-        """Execute the background task."""
+        """
+        Trigger for APScheduler or manual calls. 
+        Puts a task in the queue instead of running immediately.
+        """
+        await self.submit_task(**kwargs)
+
+    async def _internal_run_task(self, **kwargs):
+        """The actual task execution logic."""
         if self.is_running:
             logger.warning(
                 f"Agent {self.agent_id} is already running, skipping execution"
@@ -349,8 +399,18 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
     async def cleanup(self):
         """Clean up background agent resources."""
         try:
-            if self.is_running:
-                logger.info(f"Stopping running task for agent {self.agent_id}")
+            logger.info(f"Cleaning up background agent {self.agent_id}")
+            
+            self._shutdown_event.set()
+            if self._worker_task:
+                self._worker_task.cancel()
+                try:
+                    await self._worker_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.error(f"Error while canceling worker for {self.agent_id}: {e}")
+                self._worker_task = None
 
             await super().cleanup()
 
@@ -359,3 +419,7 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
         except Exception as e:
             logger.error(f"Failed to cleanup background agent {self.agent_id}: {e}")
             raise
+
+    def has_task(self) -> bool:
+        """Check if the agent has a task registered."""
+        return self.task_registry.exists(self.agent_id)
