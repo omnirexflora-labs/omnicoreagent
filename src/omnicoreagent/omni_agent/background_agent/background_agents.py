@@ -78,7 +78,9 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
         self._worker_task = None
         self._shutdown_event = asyncio.Event()
 
-        logger.info(f"Initialized BackgroundOmniCoreAgent: {self.agent_id}")
+        logger.info(
+            f"Initialized BackgroundOmniCoreAgent: {self.agent_id} with session_id: {self.session_id}"
+        )
 
     async def connect_mcp_servers(self):
         """Connect to MCP servers if not already connected."""
@@ -136,39 +138,15 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
 
         logger.info(f"Using task config from TaskRegistry for agent {self.agent_id}")
         return task_config
-
-    @property
-    def is_worker_running(self) -> bool:
-        """Check if the background worker loop is running."""
-        return self._worker_task is not None and not self._worker_task.done()
-
     async def start_worker(self):
         """Start the background worker loop."""
-        if self.is_worker_running:
+        if self._worker_task is not None:
             logger.warning(f"Worker for agent {self.agent_id} is already running")
             return
 
         self._shutdown_event.clear()
         self._worker_task = asyncio.create_task(self._worker_loop())
         logger.info(f"Started worker for agent {self.agent_id}")
-
-    async def stop_worker(self):
-        """Stop the background worker loop."""
-        if not self.is_worker_running:
-            logger.warning(f"Worker for agent {self.agent_id} is not running")
-            return
-
-        logger.info(f"Stopping worker for agent {self.agent_id}")
-        self._shutdown_event.set()
-        if self._worker_task:
-            self._worker_task.cancel()
-            try:
-                await self._worker_task
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logger.error(f"Error while stopping worker for {self.agent_id}: {e}")
-            self._worker_task = None
 
     async def _worker_loop(self):
         """Background worker loop that processes tasks from the queue."""
@@ -177,20 +155,18 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
             try:
                 # Use wait_for to check shutdown_event periodically
                 try:
-                    task_data = await asyncio.wait_for(
-                        self._task_queue.get(), timeout=1.0
-                    )
+                    task_data = await asyncio.wait_for(self._task_queue.get(), timeout=1.0)
                 except asyncio.TimeoutError:
                     continue
 
                 logger.info(f"Worker for {self.agent_id} picked up a task")
-                task_config = task_data.get("kwargs", {})
-
+                kwargs = task_data.get("kwargs", {})
+                
                 try:
-                    await self._internal_run_task(task_config=task_config)
+                    await self._internal_run_task(**kwargs)
                 finally:
                     self._task_queue.task_done()
-
+                    
             except asyncio.CancelledError:
                 logger.info(f"Worker for {self.agent_id} cancelled")
                 break
@@ -200,21 +176,19 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
 
         logger.info(f"Worker loop exited for agent {self.agent_id}")
 
-    async def submit_task(self, task_config: Dict[str, Any]):
+    async def submit_task(self, **kwargs):
         """Submit a task to the queue for execution."""
-        await self._task_queue.put(
-            {"kwargs": task_config, "timestamp": datetime.now().isoformat()}
-        )
+        await self._task_queue.put({"kwargs": kwargs, "timestamp": datetime.now().isoformat()})
         logger.info(f"Task submitted for agent {self.agent_id}")
 
-    async def run_task(self, task_config: Dict[str, Any]):
+    async def run_task(self, **kwargs):
         """
-        Trigger for APScheduler or manual calls.
+        Trigger for APScheduler or manual calls. 
         Puts a task in the queue instead of running immediately.
         """
-        await self.submit_task(task_config)
+        await self.submit_task(**kwargs)
 
-    async def _internal_run_task(self, task_config: Dict[str, Any]):
+    async def _internal_run_task(self, **kwargs):
         """The actual task execution logic."""
         if self.is_running:
             logger.warning(
@@ -437,8 +411,17 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
         """Clean up background agent resources."""
         try:
             logger.info(f"Cleaning up background agent {self.agent_id}")
-
-            await self.stop_worker()
+            
+            self._shutdown_event.set()
+            if self._worker_task:
+                self._worker_task.cancel()
+                try:
+                    await self._worker_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.error(f"Error while canceling worker for {self.agent_id}: {e}")
+                self._worker_task = None
 
             await super().cleanup()
 
@@ -448,6 +431,6 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
             logger.error(f"Failed to cleanup background agent {self.agent_id}: {e}")
             raise
 
-    async def has_task(self) -> bool:
+    def has_task(self) -> bool:
         """Check if the agent has a task registered."""
         return self.task_registry.exists(self.agent_id)
