@@ -1,6 +1,6 @@
-# Contributing to MCPOmni Connect
+# Contributing to OmmiCoreAgent
 
-First off, thank you for considering contributing to MCPOmni Connect! It's people like you that make MCPOmni Connect such a great tool. 👏
+First off, thank you for considering contributing to OmniCoreAgent! It's people like you that make OmniCoreAgent such a great tool. 👏
 
 ## 📋 Table of Contents
 
@@ -23,8 +23,8 @@ This project and everyone participating in it is governed by our Code of Conduct
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/your-username/mcp_omni_connect.git
-   cd mcp_omni_connect
+   git https://github.com/omnirexflora-labs/omnicoreagent.git
+   cd ommicoreagent
    ```
 3. Create a virtual environment:
    ```bash
@@ -166,21 +166,15 @@ When filing an issue, please include:
 
 ## 👥 Community
 
-- Join our [Discord server](https://discord.gg/abiorh)
-- Follow us on [Twitter](https://twitter.com/abiorhmangana)
+- Follow us on [Twitter](https://x.com/omnirexflolabs)
 
-## 📚 Additional Resources
-
-- [Project Documentation](https://in-progress)
-- [Development Guide](https://dev.your-project.com)
 
 ## ❓ Questions?
 
 Feel free to reach out:
 - Open an issue
-- Email: abioladedayo1993@gmail.com
-- Discord: [Your Discord handle]
+- Email: contact@omnirexfloralabs.com
 
 ---
 
-Thank you for contributing to MCPOmni Connect! 🎉
+Thank you for contributing to OmniCoreAgent! 🎉
