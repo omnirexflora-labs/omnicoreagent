@@ -381,6 +381,7 @@ class OmniCoreAgent:
         if self.mcp_client:
             await self.mcp_client.cleanup()
 
+
 class OmniAgent(OmniCoreAgent):
     """
     Deprecated: Use OmniCoreAgent instead.

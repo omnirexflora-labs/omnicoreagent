@@ -56,7 +56,7 @@ class MemoryRouter:
                     uri=uri, db_name=db_name, collection=collection
                 )
         else:
-            raise ValueError(f"Invalid memory store type: {memory_store_type}")
+            raise ValueError(f"Invalid memory store type: {self.memory_store_type}")
 
     def swith_memory_store(self, memory_store_type: str):
         if memory_store_type != self.memory_store_type:
