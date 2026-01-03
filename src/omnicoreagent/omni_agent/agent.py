@@ -353,9 +353,9 @@ class OmniCoreAgent:
         """Get the current memory store type."""
         return self.memory_router.memory_store_type
 
-    async def swith_memory_store(self, memory_store_type: str):
+    async def switch_memory_store(self, memory_store_type: str):
         """Switch to a different memory store type."""
-        self.memory_router.swith_memory_store(memory_store_type)
+        self.memory_router.switch_memory_store(memory_store_type)
 
     async def cleanup(self):
         """Clean up resources"""
