@@ -8,12 +8,12 @@ Welcome to the **OmniCoreAgent** learning path. This guide takes you from writin
 
 ## 📚 The Learning Path
 
+
 | # | File | Key Concepts |
 |---|------|--------------|
 | 1 | [first_agent.py](./first_agent.py) | **The Basics**: Initialize `OmniCoreAgent` and run a simple query |
 | 2 | [agent_with_models.py](./agent_with_models.py) | **Models**: Switch providers (OpenAI, Anthropic, Gemini, Groq, Ollama) |
 | 3 | [agent_with_local_tools.py](./agent_with_local_tools.py) | **Local Tools**: Register Python functions as agent tools |
-| 4 | [agent_with_mcp_tools.py](./agent_with_mcp_tools.py) | **MCP Integration**: Connect to external MCP servers |
 | 5 | [agent_with_all_tools.py](./agent_with_all_tools.py) | **Hybrid Architecture**: Combine local + MCP tools |
 | 6 | [agent_with_memory.py](./agent_with_memory.py) | **Persistence**: Store conversations in Redis, Postgres, MongoDB |
 | 7 | [agent_with_memory_switching.py](./agent_with_memory_switching.py) | **Runtime Switching**: Change memory backends on the fly |
@@ -24,12 +24,12 @@ Welcome to the **OmniCoreAgent** learning path. This guide takes you from writin
 | 12 | [agent_with_metrics.py](./agent_with_metrics.py) | **🆕 Metrics**: Track tokens, requests, and costs |
 | 13 | [agent_with_sub_agents.py](./agent_with_sub_agents.py) | **🆕 Sub-Agents**: Build multi-agent systems |
 | 14 | [agent_configuration.py](./agent_configuration.py) | **Advanced Config**: All settings in one place |
-
----
-
-## 🚀 Quick Start
-
-```bash
+=======
+| # | File | Key Concepts Learned |
+|---|------|----------------------|
+| 1 | [first_agent.py](./first_agent.py) | **The Basics**: Initializing `OmniCoreAgent` and running a simple query. |
+| 2 | [agent_with_models.py](./agent_with_models.py) | **Models**: Switching providers (OpenAI, Anthropic, Gemini, Groq, Ollama). |
+| 3 | [agent_with_local_tools.py](./agent_with_local_tools.py) | **Local Tools**: registering Python functions as tools, type hinting, and returning structured data (`dict`). |
 # 1. Install
 pip install omnicoreagent
 
