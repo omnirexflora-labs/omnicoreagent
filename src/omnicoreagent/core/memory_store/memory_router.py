@@ -58,7 +58,7 @@ class MemoryRouter:
         else:
             raise ValueError(f"Invalid memory store type: {memory_store_type}")
 
-    def swith_memory_store(self, memory_store_type: str):
+    def switch_memory_store(self, memory_store_type: str):
         if memory_store_type != self.memory_store_type:
             self.memory_store_type = memory_store_type
             self.initialize_memory_store()
