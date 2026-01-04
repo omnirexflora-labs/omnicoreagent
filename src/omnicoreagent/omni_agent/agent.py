@@ -22,7 +22,6 @@ from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.guardrails import (
     PromptInjectionGuard,
     DetectionConfig,
-    ThreatLevel,
 )
 
 
@@ -380,6 +379,7 @@ class OmniCoreAgent:
         """Clean up MCP servers without removing the agent and the config"""
         if self.mcp_client:
             await self.mcp_client.cleanup()
+
 
 class OmniAgent(OmniCoreAgent):
     """

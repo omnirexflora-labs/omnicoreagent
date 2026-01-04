@@ -5,7 +5,6 @@ from enum import Enum
 import uuid
 from omnicoreagent.core.utils import logger
 from omnicoreagent.core.constants import SUPPORTED_MODELS_PROVIDERS
-from decouple import config
 
 
 class TransportType(str, Enum):

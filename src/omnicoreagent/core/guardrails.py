@@ -1,6 +1,6 @@
 import re
 import logging
-from typing import Dict, List, Tuple, Optional, Set, Any
+from typing import Dict, List, Tuple, Optional, Any
 from enum import Enum
 import unicodedata
 import json
@@ -8,11 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import hashlib
 from collections import defaultdict
-from functools import lru_cache
 import sys
-from abc import ABC, abstractmethod
-
-
 
 
 class ThreatLevel(Enum):
@@ -76,8 +72,6 @@ class DetectionResult:
     def to_json(self) -> str:
         """Serialize to JSON"""
         return json.dumps(self.to_dict())
-
-
 
 
 class PatternManager:
@@ -292,8 +286,6 @@ class PatternManager:
             self.patterns[group]["patterns"].append((compiled, requires_target))
         except re.error as e:
             logging.error(f"Failed to add pattern {pattern}: {e}")
-
-
 
 
 class DetectionEngine:
@@ -991,8 +983,6 @@ class DetectionEngine:
             )
 
 
-
-
 class PromptInjectionGuard:
     """
     Production-ready prompt injection guardrail.
@@ -1054,8 +1044,6 @@ class PromptInjectionGuard:
     def add_custom_pattern(self, group: str, pattern: str, **kwargs):
         """Add custom detection pattern"""
         self.detection_engine.pattern_manager.add_pattern(group, pattern, **kwargs)
-
-
 
 
 def create_guard(

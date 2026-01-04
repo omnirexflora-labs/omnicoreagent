@@ -10,6 +10,7 @@ SUPPORTED_MODELS_PROVIDERS = {
     "deepseek": "deepseek",
     "mistral": "mistral",
     "openrouter": "openrouter",
+    "cencori": "cencori",
 }
 
 AGENTS_REGISTRY = {}

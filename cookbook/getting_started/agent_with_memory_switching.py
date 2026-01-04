@@ -19,8 +19,6 @@ from omnicoreagent import OmniCoreAgent, MemoryRouter
 
 
 async def main():
-
-
     print("=" * 50)
     print("RUNTIME MEMORY SWITCHING")
     print("=" * 50)
@@ -32,7 +30,7 @@ async def main():
         name="switching_agent",
         system_instruction="You are a helpful assistant.",
         model_config={"provider": "openai", "model": "gpt-4o"},
-        memory_router=memory_router
+        memory_router=memory_router,
     )
 
     # Check current memory type

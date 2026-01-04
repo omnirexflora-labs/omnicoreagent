@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Callable
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from typing import Any, Tuple, List, Dict
+from typing import Any, Tuple, List
 from omnicoreagent.core.system_prompts import (
     tools_retriever_additional_prompt,
     memory_tool_additional_prompt,
@@ -1698,12 +1698,24 @@ class BaseReactAgent:
                                         f"Remaining Requests: {remaining_requests}, "
                                         f"Remaining Tokens: {remaining_tokens}"
                                     )
-                        if hasattr(response, "choices"):
+                        if hasattr(response, "choices") and response.choices:
                             response = response.choices[0].message.content.strip()
                         elif hasattr(response, "message"):
                             response = response.message.content.strip()
-                    else:
-                        raise Exception("No response from LLM")
+                        elif hasattr(response, "text"):
+                            response = response.text.strip()
+                        elif hasattr(response, "content"):
+                            response = response.content.strip()
+                        elif isinstance(response, dict) and "choices" in response:
+                            response = response["choices"][0]["message"][
+                                "content"
+                            ].strip()
+                        elif isinstance(response, str):
+                            pass
+                        else:
+                            raise Exception(
+                                f"No valid response content found in LLM response: {type(response)}"
+                            )
                 except UsageLimitExceeded as e:
                     error_message = f"Usage limit error: {e}"
                     logger.error(error_message)

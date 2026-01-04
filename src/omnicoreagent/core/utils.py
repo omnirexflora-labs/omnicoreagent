@@ -16,9 +16,8 @@ from rich.pretty import Pretty
 from rich.text import Text
 from datetime import datetime, timezone
 from decouple import config as decouple_config
-import xml.etree.ElementTree as ET
 import asyncio
-from typing import Any, Callable
+from typing import Callable
 from html import escape
 import ast
 import inspect
@@ -56,11 +55,9 @@ logger.addHandler(file_handler)
 
 console_handler.flush = sys.stdout.flush
 file_handler.flush = lambda: file_handler.stream.flush()
-import asyncio
-import inspect
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, Coroutine, Any
+from typing import Coroutine
 
 
 class BackgroundTaskManager:

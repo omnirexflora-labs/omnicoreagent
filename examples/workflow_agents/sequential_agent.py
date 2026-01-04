@@ -6,7 +6,6 @@ from omnicoreagent import (
     ToolRegistry,
     logger,
 )
-from typing import Optional
 
 # using low level import
 # from omnicoreagent.omni_agent.workflow.sequential_agent import SequentialAgent
@@ -19,7 +18,8 @@ def build_tool_registry_system_monitor_agent() -> ToolRegistry:
     @registry.register_tool("system_info")
     def system_info() -> str:
         """Get basic system information of the server"""
-        import platform, time
+        import platform
+        import time
 
         return (
             "System Information:\n"

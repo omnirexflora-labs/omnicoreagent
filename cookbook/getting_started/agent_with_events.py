@@ -19,8 +19,6 @@ from omnicoreagent import OmniCoreAgent, MemoryRouter, EventRouter
 
 
 async def main():
-
-
     print("=" * 50)
     print("AGENT WITH EVENT STREAMING")
     print("=" * 50)
@@ -33,13 +31,15 @@ async def main():
         system_instruction="You are a helpful assistant.",
         model_config={"provider": "openai", "model": "gpt-4o"},
         memory_router=MemoryRouter("in_memory"),
-        event_router=event_router  # <- Add event router
+        event_router=event_router,  # <- Add event router
     )
 
     # Run a query
     session_id = "event_demo_session"
     print(f"\nRunning query with session: {session_id}")
-    result = await agent.run("What is 2 + 2? Explain step by step.", session_id=session_id)
+    result = await agent.run(
+        "What is 2 + 2? Explain step by step.", session_id=session_id
+    )
     print(f"Response: {result['response'][:200]}...")
 
     # Get events after the query
@@ -60,7 +60,6 @@ async def demo_streaming():
     This shows how to build UIs that display agent progress.
     """
 
-
     print("\n" + "=" * 50)
     print("REAL-TIME EVENT STREAMING")
     print("=" * 50)
@@ -72,7 +71,7 @@ async def demo_streaming():
         system_instruction="You are a helpful assistant.",
         model_config={"provider": "openai", "model": "gpt-4o"},
         memory_router=MemoryRouter("in_memory"),
-        event_router=event_router
+        event_router=event_router,
     )
 
     session_id = "streaming_session"

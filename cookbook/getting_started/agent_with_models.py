@@ -26,7 +26,6 @@ Run:
 
 import asyncio
 import os
-import sys
 
 from omnicoreagent import OmniCoreAgent
 
@@ -45,8 +44,8 @@ async def demo_anthropic():
                 "provider": "anthropic",
                 "model": "claude-3-5-sonnet-20240620",
                 "max_tokens": 1024,
-                "temperature": 0.7
-            }
+                "temperature": 0.7,
+            },
         )
 
         result = await agent.run("Introduce yourself in one sentence.")
@@ -70,8 +69,8 @@ async def demo_gemini():
             model_config={
                 "provider": "gemini",
                 "model": "gemini-1.5-flash",
-                "temperature": 0.5
-            }
+                "temperature": 0.5,
+            },
         )
 
         result = await agent.run("What is special about the Gemini model?")
@@ -95,8 +94,8 @@ async def demo_groq():
             model_config={
                 "provider": "groq",
                 "model": "llama3-70b-8192",
-                "max_tokens": 512
-            }
+                "max_tokens": 512,
+            },
         )
 
         result = await agent.run("Why is Groq so fast?")
@@ -115,7 +114,7 @@ async def demo_ollama():
 
     # Ollama doesn't usually need an API key, but the agent framework
     # expects LLM_API_KEY to be present for initialization checks.
-    
+
     print("Note: Ensure you have pulled the model first: `ollama pull llama3`")
 
     try:
@@ -125,8 +124,8 @@ async def demo_ollama():
             model_config={
                 "provider": "ollama",
                 "model": "llama3",  # Must match a pulled model
-                "ollama_host": "http://localhost:11434" # Optional, defaults to env var or standard
-            }
+                "ollama_host": "http://localhost:11434",  # Optional, defaults to env var or standard
+            },
         )
 
         result = await agent.run("Are you running locally?")
@@ -154,11 +153,7 @@ async def main():
         agent = OmniCoreAgent(
             name="openai_agent",
             system_instruction="You are GPT-4o.",
-            model_config={
-                "provider": "openai",
-                "model": "gpt-4o",
-                "temperature": 0.0
-            }
+            model_config={"provider": "openai", "model": "gpt-4o", "temperature": 0.0},
         )
         result = await agent.run("Hello from OpenAI!")
         print(f"Response: {result['response']}")
@@ -167,17 +162,17 @@ async def main():
         print(f"Skipping OpenAI: {e}")
 
     # Run other demos
-    # NOTE: These will likely fail if your LLM_API_KEY is for OpenAI 
-    # and you try to call Anthropic, unless you have a unified key 
+    # NOTE: These will likely fail if your LLM_API_KEY is for OpenAI
+    # and you try to call Anthropic, unless you have a unified key
     # or are changing the env var between runs.
     # But the code shows HOW to configure them.
-    
+
     print("\n--- Demonstrating other providers (requires valid keys) ---")
     await demo_anthropic()
     await demo_gemini()
     await demo_groq()
     await demo_ollama()
-    
+
     print("\n" + "=" * 50)
     print("SUMMARY")
     print("=" * 50)

@@ -26,32 +26,51 @@ def create_tools() -> ToolRegistry:
     def get_weather(city: str) -> str:
         """Get the current weather for a city."""
         # In production, call a real weather API
-        return {"status": "success", "data": {"city": city, "weather": "Sunny, 22°C"}, "message": "Weather data retrieved successfully"}
+        return {
+            "status": "success",
+            "data": {"city": city, "weather": "Sunny, 22°C"},
+            "message": "Weather data retrieved successfully",
+        }
 
     @tools.register_tool("calculate_area")
     def calculate_area(length: float, width: float) -> str:
         """Calculate the area of a rectangle."""
         try:
             area = length * width
-            return {"status": "success", "data": {"length": length, "width": width, "area": area}, "message": "Area calculated successfully"}
+            return {
+                "status": "success",
+                "data": {"length": length, "width": width, "area": area},
+                "message": "Area calculated successfully",
+            }
         except Exception as e:
-            return {"status": "error", "data": None, "message": "Failed to calculate area: " + str(e)}
+            return {
+                "status": "error",
+                "data": None,
+                "message": "Failed to calculate area: " + str(e),
+            }
 
     @tools.register_tool("get_time")
     def get_time() -> str:
         """Get the current time."""
         import time
+
         try:
-            return {"status": "success", "data": {"time": time.strftime('%Y-%m-%d %H:%M:%S')}, "message": "Current time retrieved successfully"}
+            return {
+                "status": "success",
+                "data": {"time": time.strftime("%Y-%m-%d %H:%M:%S")},
+                "message": "Current time retrieved successfully",
+            }
         except Exception as e:
-            return {"status": "error", "data": None, "message": "Failed to retrieve current time: " + str(e)}
+            return {
+                "status": "error",
+                "data": None,
+                "message": "Failed to retrieve current time: " + str(e),
+            }
 
     return tools
 
 
 async def main():
-
-
     # Create tools registry
     tools = create_tools()
 
@@ -60,7 +79,7 @@ async def main():
         name="local_tools_agent",
         system_instruction="You are a helpful assistant with access to weather, math, and time tools.",
         model_config={"provider": "openai", "model": "gpt-4o"},
-        local_tools=tools  # <- Attach local tools here
+        local_tools=tools,  # <- Attach local tools here
     )
 
     # Agent automatically uses appropriate tools
@@ -77,7 +96,9 @@ async def main():
     print(f"Response: {result['response']}\n")
 
     print("Query 2: Math")
-    result = await agent.run("Calculate the area of a room that's 5.5 meters by 4 meters")
+    result = await agent.run(
+        "Calculate the area of a room that's 5.5 meters by 4 meters"
+    )
     print(f"Response: {result['response']}\n")
 
     print("Query 3: Time")

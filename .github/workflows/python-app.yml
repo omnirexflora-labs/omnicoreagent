@@ -64,9 +64,4 @@ jobs:
 
     - name: Run unit tests with pytest
       run: |
-        cp test.servers_config.json servers_config.json
         uv run pytest -v tests
-
-    # - name: Run integration tests with OpenAIIntegration
-    #   run: |
-    #     uv run pytest -m "OpenAIIntegration" -v

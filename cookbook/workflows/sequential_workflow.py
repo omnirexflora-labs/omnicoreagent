@@ -30,6 +30,7 @@ def create_collector_tools() -> ToolRegistry:
         """Get current system information."""
         import platform
         import time
+
         return (
             f"OS: {platform.system()} {platform.release()}\n"
             f"Python: {platform.python_version()}\n"
@@ -87,9 +88,7 @@ reporter = OmniCoreAgent(
 )
 
 # Create the sequential workflow
-workflow = SequentialAgent(
-    sub_agents=[data_collector, text_formatter, reporter]
-)
+workflow = SequentialAgent(sub_agents=[data_collector, text_formatter, reporter])
 
 
 async def main():
@@ -104,7 +103,7 @@ async def main():
         print("\nRunning sequential workflow...")
         result = await workflow.run(
             initial_task="Get system information and create a formatted report",
-            session_id="demo_session"
+            session_id="demo_session",
         )
 
         print(f"\nFinal Result:\n{result}")

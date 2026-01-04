@@ -6,7 +6,6 @@ Clean FastAPI app using lifespan with separate main agent and background agent s
 
 import asyncio
 import json
-import uuid
 import os
 from datetime import datetime
 from typing import AsyncGenerator, Optional
@@ -110,7 +109,8 @@ def build_tool_registry() -> ToolRegistry:
     @registry.register_tool("system_info")
     def system_info() -> str:
         """Get basic system information of the server"""
-        import platform, time
+        import platform
+        import time
 
         return (
             "System Information:\n"
@@ -321,7 +321,7 @@ async def index(request: Request):
 async def chat_endpoint(payload: ChatRequest, request: Request):
     if not hasattr(request.app.state, "main_service"):
         raise HTTPException(status_code=503, detail="Service not initialized")
-    session_id = payload.session_id or f"web_session_001"
+    session_id = payload.session_id or "web_session_001"
 
     async def generate_response() -> AsyncGenerator[str, None]:
         try:

@@ -19,8 +19,6 @@ from omnicoreagent import OmniCoreAgent, MemoryRouter, EventRouter
 
 
 async def main():
-
-
     print("=" * 50)
     print("RUNTIME EVENT ROUTER SWITCHING")
     print("=" * 50)
@@ -33,7 +31,7 @@ async def main():
         system_instruction="You are a helpful assistant.",
         model_config={"provider": "openai", "model": "gpt-4o"},
         memory_router=MemoryRouter("in_memory"),
-        event_router=event_router
+        event_router=event_router,
     )
 
     # Check current event store type
@@ -108,7 +106,7 @@ async def demo_complete_setup():
         agent_config={
             "max_steps": 15,
             "tool_call_timeout": 60,
-        }
+        },
     )
 
     print("\nAgent configured with:")
