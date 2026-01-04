@@ -1,7 +1,6 @@
 from devops_copilot_agent import DevOpsCopilotRunner, log, metrics, health, CONFIG
 import sys
 import signal
-import sys
 import json
 import asyncio
 

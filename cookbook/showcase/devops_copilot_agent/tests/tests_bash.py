@@ -4,12 +4,8 @@ Covers unit tests, integration tests, and security tests.
 """
 
 import pytest
-import asyncio
 import tempfile
 import shutil
-from pathlib import Path
-from typing import Dict, Any
-import subprocess
 
 
 class TestBashAgent:
@@ -369,7 +365,6 @@ class TestPerformance:
 @pytest.fixture(scope="session")
 def bash_agent():
     """Session-scoped bash agent."""
-    import tempfile
     from bash_agent import Bash
 
     tmpdir = tempfile.mkdtemp()

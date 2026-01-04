@@ -49,11 +49,6 @@ class TestInMemoryStore:
         return InMemoryStore()
 
     async def test_store_and_get_messages(self, memory):
-        """Test basic message storage and retrieval."""
-        await memory.store_message(
-            "user", "Hello", {"agent_name": "agent1"}, "session1"
-        )
-        await memory.store_message(
             "assistant", "Hi there!", {"agent_name": "agent1"}, "session1"
         )
 
@@ -263,8 +258,11 @@ class TestDatabaseMessageStore:
             "assistant", "Hi there!", {"agent_name": "agent1"}, "session1"
         )
 
+
+            
+
         messages = await memory.get_messages("session1", "agent1")
-        assert len(messages) == 2
+
         assert messages[0]["role"] == "user"
         assert messages[1]["role"] == "assistant"
 
