@@ -1,7 +1,9 @@
 import os
-from typing import Any, Union, List
+from typing import Any
 import time
 import random
+
+import openai
 
 from dotenv import load_dotenv
 import litellm
@@ -17,7 +19,6 @@ load_dotenv()
 
 
 import logging
-import os
 
 os.environ["LITELLM_LOG"] = "CRITICAL"
 
@@ -163,6 +164,7 @@ class LLMConnection:
                 return None
 
             provider_model_map = {
+                "cencori": f"{model}",
                 "openai": f"openai/{model}",
                 "anthropic": f"anthropic/{model}",
                 "groq": f"groq/{model}",
@@ -237,6 +239,8 @@ class LLMConnection:
             os.environ["OPENROUTER_API_KEY"] = api_key
         elif provider == "azure" or provider == "azureopenai":
             os.environ["AZURE_API_KEY"] = api_key
+        elif provider == "cencori":
+            os.environ["CENCORI_API_KEY"] = api_key
 
         logger.debug(f"Set environment variable for LLM provider: {provider}")
 
@@ -300,6 +304,31 @@ class LLMConnection:
 
             litellm.drop_params = True
 
+            if self.llm_config["provider"].lower() == "cencori":
+                client = openai.AsyncOpenAI(
+                    base_url="https://api.cencori.com/v1",
+                    api_key=self.config.llm_api_key,
+                )
+
+                model_name = self.llm_config["model"]
+
+                kwargs = {
+                    "model": model_name,
+                    "messages": messages_dicts,
+                }
+                if self.llm_config.get("temperature") is not None:
+                    kwargs["temperature"] = self.llm_config.get("temperature")
+                if self.llm_config.get("max_tokens") is not None:
+                    kwargs["max_tokens"] = self.llm_config.get("max_tokens")
+                if self.llm_config.get("top_p") is not None:
+                    kwargs["top_p"] = self.llm_config.get("top_p")
+                if tools:
+                    kwargs["tools"] = tools
+                    kwargs["tool_choice"] = "auto"
+
+                response = await client.chat.completions.create(**kwargs)
+                return response
+
             response = await litellm.acompletion(**params)
             return response
 
@@ -348,6 +377,32 @@ class LLMConnection:
                     params["stop"] = ["\n\nObservation:"]
 
             litellm.drop_params = True
+
+            if self.llm_config["provider"].lower() == "cencori":
+                client = openai.OpenAI(
+                    base_url="https://api.cencori.com/v1",
+                    api_key=self.config.llm_api_key,
+                )
+
+                # Direct SDK usage - Pass model name exactly as configured
+                model_name = self.llm_config["model"]
+
+                kwargs = {
+                    "model": model_name,
+                    "messages": messages_dicts,
+                }
+                if self.llm_config.get("temperature") is not None:
+                    kwargs["temperature"] = self.llm_config.get("temperature")
+                if self.llm_config.get("max_tokens") is not None:
+                    kwargs["max_tokens"] = self.llm_config.get("max_tokens")
+                if self.llm_config.get("top_p") is not None:
+                    kwargs["top_p"] = self.llm_config.get("top_p")
+                if tools:
+                    kwargs["tools"] = tools
+                    kwargs["tool_choice"] = "auto"
+
+                response = client.chat.completions.create(**kwargs)
+                return response
 
             response = litellm.completion(**params)
             return response

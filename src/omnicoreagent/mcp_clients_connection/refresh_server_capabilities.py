@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from typing import Any
 from omnicoreagent.core.utils import logger
 

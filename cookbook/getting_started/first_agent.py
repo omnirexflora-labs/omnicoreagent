@@ -15,15 +15,11 @@ from omnicoreagent import OmniCoreAgent
 
 
 async def main():
-    
     # Create a minimal agent
     agent = OmniCoreAgent(
         name="my_first_agent",
         system_instruction="You are a helpful assistant.",
-        model_config={
-            "provider": "openai",
-            "model": "gpt-4o"
-        }
+        model_config={"provider": "cencori", "model": "gpt-4o-mini"},
     )
 
     # Run a query

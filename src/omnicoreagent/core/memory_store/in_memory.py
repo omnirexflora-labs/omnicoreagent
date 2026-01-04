@@ -1,10 +1,8 @@
-from typing import Any, Optional
+from typing import Any
 import threading
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
 from omnicoreagent.core.utils import logger, utc_now_str
 import copy
-import os
-import json
 
 
 class InMemoryStore(AbstractMemoryStore):

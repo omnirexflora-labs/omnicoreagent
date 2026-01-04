@@ -1,8 +1,6 @@
-import os
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.memory_tool.base import AbstractMemoryBackend
 from omnicoreagent.core.tools.memory_tool.local_storage import LocalMemoryBackend
-from pathlib import Path
 
 
 class MemoryTool:

@@ -9,7 +9,6 @@ import asyncio
 import hashlib
 from datetime import datetime
 from omnicoreagent import (
-    OmniCoreAgent,
     MemoryRouter,
     EventRouter,
     BackgroundAgentManager,
@@ -86,7 +85,7 @@ def scan_directory_for_new_content(directory: str) -> str:
                         elif previous_state[filepath]["hash"] != file_hash:
                             modified_files.append(file_info)
 
-                    except Exception as e:
+                    except Exception:
                         continue
 
         # Save current state
@@ -197,7 +196,7 @@ def analyze_content_file(filepath: str) -> str:
 
         # Build report
         report = f"Content Analysis: {os.path.basename(filepath)}\n\n"
-        report += f"Statistics:\n"
+        report += "Statistics:\n"
         report += f"  Words: {word_count}\n"
         report += f"  Characters: {char_count}\n"
         report += f"  Lines: {line_count}\n\n"
@@ -713,8 +712,8 @@ async def setup_and_run_agent():
     # Step 5: Show monitoring status
     print("Step 5: Monitoring configuration:")
     print(f"  Directory: {test_dir}")
-    print(f"  Files to monitor: *.txt, *.md, *.json, *.py, *.js, *.html")
-    print(f"  Database: ~/.OmniCoreAgent/moderation.db")
+    print("  Files to monitor: *.txt, *.md, *.json, *.py, *.js, *.html")
+    print("  Database: ~/.OmniCoreAgent/moderation.db")
     print()
 
     print("=" * 80)

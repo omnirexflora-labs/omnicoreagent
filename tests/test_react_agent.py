@@ -3,14 +3,14 @@ from unittest.mock import AsyncMock
 import pytest
 
 from omnicoreagent.core.agents.react_agent import ReactAgent
-from omnicoreagent.core.agents.types import AgentConfig
+from omnicoreagent.core.types import AgentConfig
 
 
 @pytest.fixture
 def agent_config():
     return AgentConfig(
         agent_name="test_agent",
-        max_steps=3,
+        max_steps=5,
         tool_call_timeout=5,
         request_limit=100,
         total_tokens_limit=1000,
@@ -27,11 +27,10 @@ def test_react_agent_initialization(agent_config):
     agent = ReactAgent(config=agent_config)
 
     assert agent.agent_name == "test_agent"
-    assert agent.max_steps == 3
+    assert agent.max_steps == 5
     assert agent.tool_call_timeout == 5
     assert agent.request_limit == 100
     assert agent.total_tokens_limit == 1000
-    assert agent.mcp_enabled is True
 
 
 @pytest.mark.asyncio
@@ -52,6 +51,7 @@ async def test_react_agent_run_executes_run(react_agent, monkeypatch):
         tools_registry={},
         is_generic_agent=False,
         chat_id="chat123",
+        event_router=AsyncMock(),
     )
 
     mock_run.assert_awaited_once()
@@ -68,6 +68,7 @@ async def test_react_agent_run_with_minimal_kwargs(react_agent, monkeypatch):
         llm_connection=AsyncMock(),
         add_message_to_history=AsyncMock(),
         message_history=AsyncMock(),
+        event_router=AsyncMock(),
     )
 
     assert result["result"] == "ok"

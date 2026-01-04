@@ -3,11 +3,9 @@ from omnicoreagent import (
     MemoryRouter,
     EventRouter,
     ToolRegistry,
-    logger,
     RouterAgent,
 )
 import asyncio
-import uuid
 
 # this is for low level import
 # from omnicoreagent.omni_agent.workflow.router_agent import RouterAgent

@@ -23,8 +23,8 @@ def make_mock_config(provider="openai", model="gpt-4"):
 
 @pytest.fixture
 def mock_llm_connection():
-    with patch("omnicoreagent.llm.litellm"):
-        return LLMConnection(Mock(**make_mock_config()))
+    with patch("omnicoreagent.core.llm.litellm"):
+        return LLMConnection(Mock(**make_mock_config()), "test_config.yaml")
 
 
 class TestLLMConnection:
@@ -50,11 +50,13 @@ class TestLLMConnection:
         tools = [{"name": "tool", "description": "desc"}]
 
         with patch(
-            "omnicoreagent.llm.litellm.acompletion", new_callable=AsyncMock
+            "omnicoreagent.core.llm.litellm.acompletion", new_callable=AsyncMock
         ) as mock_completion:
             mock_completion.return_value = {"mocked": "response"}
 
-            conn = LLMConnection(Mock(**make_mock_config("groq", "llama-3")))
+            conn = LLMConnection(
+                Mock(**make_mock_config("groq", "llama-3")), "test_config.yaml"
+            )
 
             # With tools
             resp1 = await conn.llm_call(messages, tools)
@@ -79,11 +81,13 @@ class TestLLMConnection:
         messages = [{"role": "user", "content": "Fail please"}]
 
         with patch(
-            "omnicoreagent.llm.litellm.acompletion", new_callable=AsyncMock
+            "omnicoreagent.core.llm.litellm.acompletion", new_callable=AsyncMock
         ) as mock_completion:
             mock_completion.side_effect = Exception("Boom")
 
-            conn = LLMConnection(Mock(**make_mock_config("gemini", "gemini-pro")))
+            conn = LLMConnection(
+                Mock(**make_mock_config("gemini", "gemini-pro")), "test_config.yaml"
+            )
             response = await conn.llm_call(messages)
             assert response is None
 

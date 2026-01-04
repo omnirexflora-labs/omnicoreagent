@@ -6,11 +6,9 @@ Real integrations with Shopify, WooCommerce, and inventory systems
 
 import os
 import requests
-import json
-import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
-from omnicoreagent import OmniCoreAgent, MemoryRouter, EventRouter, ToolRegistry
+from datetime import datetime
+from typing import Dict, List
+from omnicoreagent import OmniCoreAgent, ToolRegistry
 
 
 class ProductionEcommerceAgent:
@@ -460,7 +458,7 @@ class ProductionEcommerceAgent:
                             f"• {product['name']} - ${product['price']} ({product['brand']}) ⭐ {product['rating']}"
                         )
 
-                    return f"🎯 Personalized Recommendations for you:\n" + "\n".join(
+                    return "🎯 Personalized Recommendations for you:\n" + "\n".join(
                         results
                     )
                 else:

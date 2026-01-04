@@ -13,7 +13,6 @@ import sys
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.core.utils import logger
 
 if TYPE_CHECKING:
     from omnicoreagent.core.skills.manager import SkillManager

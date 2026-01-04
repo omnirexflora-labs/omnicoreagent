@@ -8,7 +8,6 @@ import os
 import asyncio
 from datetime import datetime
 from omnicoreagent import (
-    OmniCoreAgent,
     MemoryRouter,
     EventRouter,
     BackgroundAgentManager,
@@ -29,7 +28,6 @@ def create_support_ticket(
 ) -> str:
     """Create a new support ticket in the system."""
     import sqlite3
-    import json
 
     try:
         db_path = os.path.expanduser("~/.omni_core_agent/support.db")
@@ -330,7 +328,7 @@ Support Team""",
     }
 
     if response_type not in templates:
-        return f"Invalid response type. Use: acknowledgment, resolution, or followup"
+        return "Invalid response type. Use: acknowledgment, resolution, or followup"
 
     # In production, this would actually send an email
     # For now, we log it

@@ -1,14 +1,11 @@
 import os
 from unittest.mock import AsyncMock, Mock, patch
 
-from omnicoreagent.mcp_omni_connect.client import Configuration  # noqa: E402
-from omnicoreagent.core.llm import LLMConnection  # noqa: E402
-from omnicoreagent.mcp_omni_connect.refresh_server_capabilities import (
+from omnicoreagent.mcp_clients_connection.client import Configuration  # noqa: E402
+from omnicoreagent.mcp_clients_connection.refresh_server_capabilities import (
     refresh_capabilities,  # noqa: E402
 )
-from omnicoreagent.core.system_prompts import (
-    generate_react_agent_role_prompt,  # noqa: E402
-)
+
 import pytest
 from dotenv import load_dotenv
 
@@ -126,8 +123,6 @@ async def test_refresh_capabilities_success(mock_sessions, mock_available_dicts)
         available_prompts=mock_available_dicts["prompts"],
         available_tools=mock_available_dicts["tools"],
         debug=False,
-        llm_connection=LLMConnection(MOCK_LLM_CONFIG),
-        generate_react_agent_role_prompt=generate_react_agent_role_prompt,
     )
 
     # Check server1 capabilities
@@ -179,8 +174,6 @@ async def test_refresh_capabilities_not_connected():
             {},
             {},
             debug=False,
-            llm_connection=LLMConnection(MOCK_LLM_CONFIG),
-            generate_react_agent_role_prompt=generate_react_agent_role_prompt,
         )
 
 
@@ -189,7 +182,9 @@ async def test_refresh_capabilities_with_debug(mock_sessions, mock_available_dic
     """Test refresh with debug logging"""
     server_names = ["server1", "server2"]
 
-    with patch("omnicoreagent.refresh_server_capabilities.logger") as mock_logger:
+    with patch(
+        "omnicoreagent.mcp_clients_connection.refresh_server_capabilities.logger"
+    ) as mock_logger:
         await refresh_capabilities(
             mock_sessions,
             server_names,
@@ -197,8 +192,6 @@ async def test_refresh_capabilities_with_debug(mock_sessions, mock_available_dic
             available_prompts=mock_available_dicts["prompts"],
             available_tools=mock_available_dicts["tools"],
             debug=True,
-            llm_connection=LLMConnection(MOCK_LLM_CONFIG),
-            generate_react_agent_role_prompt=generate_react_agent_role_prompt,
         )
 
         # Verify debug logging

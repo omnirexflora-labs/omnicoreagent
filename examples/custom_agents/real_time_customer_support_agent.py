@@ -6,15 +6,10 @@ Real integrations with Zendesk, Intercom, or custom systems
 
 import os
 import requests
-import json
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from datetime import datetime
 from omnicoreagent import (
     OmniCoreAgent,
-    MemoryRouter,
-    EventRouter,
     ToolRegistry,
-    BackgroundAgentManager,
 )
 import asyncio
 
