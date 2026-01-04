@@ -1,5 +1,5 @@
 import json
-from typing import Any, List, Optional
+from typing import Any, List
 import redis.asyncio as redis
 from decouple import config
 import threading

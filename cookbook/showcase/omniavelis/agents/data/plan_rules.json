@@ -1,0 +1,150 @@
+{
+  "version": "2.0",
+  "last_updated": "2025-11-06",
+  "global_rules": [
+    {
+      "rule_id": "RULE_001",
+      "name": "Duplicate Claim Detection",
+      "description": "A claim is considered a duplicate if the same patient_id, provider_id, service_date, and CPT/HCPCS code combination exists in a previously paid claim within the same benefit year.",
+      "severity": "high",
+      "recommended_action": "Deny as duplicate unless accompanied by new medical documentation justifying repeat service.",
+      "requires_history": true,
+      "evidence_keys": ["patient_id", "provider_id", "service_date", "procedure_code"]
+    },
+    {
+      "rule_id": "RULE_002",
+      "name": "Service Frequency Limit Exceeded",
+      "description": "Certain procedures have annual or rolling-period utilization limits. Billing beyond the allowed frequency without prior authorization triggers a violation.",
+      "severity": "high",
+      "recommended_action": "Request utilization management review; deny excess units.",
+      "requires_history": true,
+      "evidence_keys": ["member_id", "procedure_code", "service_date"]
+    },
+    {
+      "rule_id": "RULE_003",
+      "name": "Missing Required Diagnosis Code",
+      "description": "Every procedure line must include at least one valid ICD-10-CM diagnosis code that supports medical necessity per CMS guidelines.",
+      "severity": "medium",
+      "recommended_action": "Return to provider for correction within 10 business days.",
+      "requires_history": false
+    },
+    {
+      "rule_id": "RULE_004",
+      "name": "Ineligible Member",
+      "description": "Coverage is only active for services rendered while the member’s policy status is 'active'. Claims with service dates outside active coverage are ineligible.",
+      "severity": "high",
+      "recommended_action": "Deny claim in full.",
+      "requires_history": false
+    },
+    {
+      "rule_id": "RULE_005",
+      "name": "Service Not Covered by Plan",
+      "description": "The billed CPT/HCPCS code is explicitly excluded from the member’s benefit plan and is not reimbursable under any circumstance unless a valid prior authorization is on file.",
+      "severity": "medium",
+      "recommended_action": "Deny unless PA reference number is provided and validated.",
+      "requires_history": false
+    },
+    {
+      "rule_id": "RULE_006",
+      "name": "Claim Amount Exceeds Plan Threshold",
+      "description": "The total billed amount for a single claim exceeds the plan-specific maximum allowable threshold for non-itemized submissions.",
+      "severity": "medium",
+      "recommended_action": "Escalate to financial review team; may require itemized breakdown.",
+      "requires_history": false,
+      "params": {
+        "default_threshold": 1000.0
+      }
+    },
+    {
+      "rule_id": "RULE_007",
+      "name": "Missing Place of Service (POS)",
+      "description": "All professional claims must include a valid Place of Service code (e.g., 11 for office, 21 for inpatient).",
+      "severity": "medium",
+      "recommended_action": "Return to provider for correction.",
+      "requires_history": false
+    },
+    {
+  "rule_id": "RULE_008",
+  "name": "501(r) Charity Care Eligibility Not Applied",
+  "description": "Patient meets income eligibility for charity care under plan rules, but claim was not adjusted to reflect financial assistance.",
+  "severity": "medium",
+  "recommended_action": "Adjust claim to $0 or apply sliding-scale discount per charity care policy.",
+  "requires_history": false
+}
+  ],
+  "plans": {
+    "PLAN_A": {
+      "plan_name": "Plan A - Comprehensive Commercial PPO",
+      "plan_type": "PPO",
+      "non_covered_codes": ["80050", "80048", "X9999", "G0101"],
+      "allowed_amounts": {
+        "99213": 85.0,
+        "99214": 125.0,
+        "99215": 180.0,
+        "70450": 210.0,
+        "80050": 0.0,
+        "G0101": 0.0
+      },
+      "claim_threshold": 1500.0,
+      "charity_care": {
+        "enabled": true,
+        "income_threshold_fpl_pct": 250,
+        "application_required": true
+      },
+      "frequency_limits": {
+        "99213": { "max_per_year": 6, "unit": "calendar_year", "description": "Office visits, established patient" },
+        "99214": { "max_per_year": 4, "unit": "calendar_year" },
+        "70450": { "max_per_year": 1, "unit": "rolling_12_months", "description": "CT head without contrast" },
+        "G0101": { "max_per_year": 1, "unit": "calendar_year", "description": "Cervical cancer screening" }
+      },
+      "required_fields": ["place_of_service"],
+      "notes": "Standard commercial PPO with preventive care coverage. Excludes general health panels and non-FDA-approved services."
+    },
+    "PLAN_B": {
+      "plan_name": "Plan B - High-Deductible Health Plan (HDHP)",
+      "plan_type": "HDHP",
+      "non_covered_codes": ["80050", "80047", "S9999"],
+      "allowed_amounts": {
+        "99213": 90.0,
+        "99214": 135.0,
+        "99215": 190.0,
+        "70450": 220.0
+      },
+      "claim_threshold": 1000.0,
+      "charity_care": {
+        "enabled": false
+      },
+      "frequency_limits": {
+        "99213": { "max_per_year": 4, "unit": "calendar_year" },
+        "70450": { "max_per_year": 1, "unit": "calendar_year" }
+      },
+      "required_fields": ["place_of_service", "referring_provider_npi"],
+      "notes": "HSA-eligible HDHP. Lower thresholds to encourage cost-conscious billing."
+    },
+    "PLAN_C": {
+      "plan_name": "Plan C - Medicaid Managed Care",
+      "plan_type": "Medicaid",
+      "non_covered_codes": ["S9999", "X9999"],
+      "allowed_amounts": {
+        "99213": 65.0,
+        "99214": 95.0,
+        "70450": 180.0
+      },
+      "claim_threshold": 2000.0,
+      "charity_care": {
+        "enabled": false
+      },
+      "frequency_limits": {
+        "99213": { "max_per_year": 12, "unit": "calendar_year" }
+      },
+      "required_fields": ["place_of_service", "medicaid_eligibility_code"],
+      "notes": "State Medicaid plan with higher visit allowances. Requires state-specific eligibility verification."
+    }
+  },
+  "history_requirements": {
+    "enabled": true,
+    "required_for_rules": ["RULE_001", "RULE_002"],
+    "lookback_period_days": 365,
+    "note": "Historical claims must cover at least the past 365 days for accurate duplicate and frequency checks."
+  }
+}

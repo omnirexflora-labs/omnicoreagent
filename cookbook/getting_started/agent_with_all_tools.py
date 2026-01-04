@@ -28,13 +28,29 @@ def create_local_tools() -> ToolRegistry:
         """Analyze the number of files in a directory."""
         try:
             if count < 10:
-                return {"status": "success", "data": {"count": count}, "message": "This directory has {count} files - very clean and organized!"}
+                return {
+                    "status": "success",
+                    "data": {"count": count},
+                    "message": "This directory has {count} files - very clean and organized!",
+                }
             elif count < 50:
-                return {"status": "success", "data": {"count": count}, "message": "This directory has {count} files - moderate amount."}
+                return {
+                    "status": "success",
+                    "data": {"count": count},
+                    "message": "This directory has {count} files - moderate amount.",
+                }
             else:
-                return {"status": "success", "data": {"count": count}, "message": "This directory has {count} files - consider organizing!"}
+                return {
+                    "status": "success",
+                    "data": {"count": count},
+                    "message": "This directory has {count} files - consider organizing!",
+                }
         except Exception as e:
-            return {"status": "error", "data": None, "message": "Failed to analyze file count: " + str(e)}
+            return {
+                "status": "error",
+                "data": None,
+                "message": "Failed to analyze file count: " + str(e),
+            }
 
     @tools.register_tool("recommend_action")
     def recommend_action(file_type: str, description: str) -> dict:
@@ -44,14 +60,16 @@ def create_local_tools() -> ToolRegistry:
             "javascript": "Check for npm vulnerabilities",
             "config": "Back up configuration files regularly",
         }
-        return {"status": "success", "data": recommendations.get(file_type, "Review and organize as needed"), "message": "Recommendation provided successfully"}
+        return {
+            "status": "success",
+            "data": recommendations.get(file_type, "Review and organize as needed"),
+            "message": "Recommendation provided successfully",
+        }
 
     return tools
 
 
 async def main():
-
-
     # Local tools (custom Python functions)
     local_tools = create_local_tools()
 
@@ -65,7 +83,7 @@ async def main():
                 "-y",
                 "@modelcontextprotocol/server-filesystem",
                 str(Path.home()),
-            ]
+            ],
         }
     ]
 
@@ -79,7 +97,7 @@ async def main():
         Use the filesystem tools to get information, then use local tools to analyze it.""",
         model_config={"provider": "openai", "model": "gpt-4o"},
         local_tools=local_tools,  # <- Local Python tools
-        mcp_tools=mcp_tools       # <- MCP server tools
+        mcp_tools=mcp_tools,  # <- MCP server tools
     )
 
     # Connect to MCP servers

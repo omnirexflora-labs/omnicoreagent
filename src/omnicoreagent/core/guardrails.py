@@ -1,6 +1,6 @@
 import re
 import logging
-from typing import Dict, List, Tuple, Optional, Set, Any
+from typing import Dict, List, Tuple, Optional, Any
 from enum import Enum
 import unicodedata
 import json
@@ -8,9 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import hashlib
 from collections import defaultdict
-from functools import lru_cache
 import sys
-from abc import ABC, abstractmethod
 
 
 class ThreatLevel(Enum):

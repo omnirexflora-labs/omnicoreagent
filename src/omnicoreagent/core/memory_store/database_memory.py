@@ -1,7 +1,5 @@
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
 from omnicoreagent.core.database.database_message_store import DatabaseMessageStore
-from omnicoreagent.core.utils import logger
-from typing import Optional
 
 
 class DatabaseMemory(AbstractMemoryStore):

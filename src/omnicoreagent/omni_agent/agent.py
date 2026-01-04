@@ -22,7 +22,6 @@ from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.guardrails import (
     PromptInjectionGuard,
     DetectionConfig,
-    ThreatLevel,
 )
 
 

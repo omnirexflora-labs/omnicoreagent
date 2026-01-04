@@ -1,9 +1,7 @@
 import subprocess
 import shlex
-import logging
 from typing import Dict, Any, Optional, List, Set, Tuple, Union
 from pathlib import Path
-import sys
 from config import ProductionConfig
 from observability import (
     get_metrics_collector,
@@ -11,7 +9,6 @@ from observability import (
     AuditLogger,
     HealthChecker,
     RateLimiter,
-    perf,
 )
 
 # --------------------------------------------------------------

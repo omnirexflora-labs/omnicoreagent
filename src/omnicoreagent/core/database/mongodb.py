@@ -1,7 +1,6 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import errors, IndexModel
 from datetime import datetime
-from typing import Any, Optional
 
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
 from omnicoreagent.core.utils import logger, utc_now_str

@@ -21,7 +21,6 @@ from omnicoreagent import OmniCoreAgent, MemoryRouter
 async def demo_in_memory():
     """Demo with in-memory storage (fastest, but not persistent)."""
 
-
     print("=" * 50)
     print("1. IN-MEMORY STORAGE (Development)")
     print("=" * 50)
@@ -33,14 +32,16 @@ async def demo_in_memory():
         name="memory_agent",
         system_instruction="You are a helpful assistant with memory.",
         model_config={"provider": "openai", "model": "gpt-4o"},
-        memory_router=memory_router  # <- Add memory router
+        memory_router=memory_router,  # <- Add memory router
     )
 
     # Conversation with memory
     session_id = "user_123"
 
     print("\nConversation 1: Tell agent my name")
-    result = await agent.run("My name is Alice and I'm a software engineer.", session_id=session_id)
+    result = await agent.run(
+        "My name is Alice and I'm a software engineer.", session_id=session_id
+    )
     print(f"Response: {result['response']}")
 
     print("\nConversation 2: Agent remembers!")
@@ -69,11 +70,13 @@ async def demo_redis():
         name="redis_agent",
         system_instruction="You are a helpful assistant with Redis memory.",
         model_config={"provider": "openai", "model": "gpt-4o"},
-        memory_router=memory_router
+        memory_router=memory_router,
     )
 
     session_id = "redis_session"
-    result = await agent.run("Remember this: my favorite color is blue.", session_id=session_id)
+    result = await agent.run(
+        "Remember this: my favorite color is blue.", session_id=session_id
+    )
     print(f"Response: {result['response']}")
 
     print("\nConversation 2: Agent remembers!")
@@ -85,7 +88,6 @@ async def demo_redis():
 
 async def demo_sql_database():
     """Demo with database storage (PostgreSQL/MySQL/SQLite)."""
-
 
     print("\n" + "=" * 50)
     print("3. DATABASE STORAGE (PostgreSQL/SQLite/MySQL)")
@@ -102,11 +104,13 @@ async def demo_sql_database():
         name="db_agent",
         system_instruction="You are a helpful assistant with database memory.",
         model_config={"provider": "openai", "model": "gpt-4o"},
-        memory_router=memory_router
+        memory_router=memory_router,
     )
 
     session_id = "db_session"
-    result = await agent.run("Store this note: meeting at 3pm tomorrow.", session_id=session_id)
+    result = await agent.run(
+        "Store this note: meeting at 3pm tomorrow.", session_id=session_id
+    )
     print(f"Response: {result['response']}")
 
     print("\nConversation 2: Agent remembers!")
@@ -114,6 +118,7 @@ async def demo_sql_database():
     print(f"Response: {result['response']}")
 
     await agent.cleanup()
+
 
 async def demo_mongodb():
     """Demo with MongoDB storage (Document Store)."""
@@ -130,7 +135,7 @@ async def demo_mongodb():
         name="mongo_agent",
         system_instruction="You are a helpful assistant with MongoDB memory.",
         model_config={"provider": "openai", "model": "gpt-4o"},
-        memory_router=memory_router
+        memory_router=memory_router,
     )
 
     session_id = "mongo_session"

@@ -8,7 +8,6 @@ import os
 import asyncio
 from datetime import datetime, timedelta
 from omnicoreagent import (
-    OmniCoreAgent,
     MemoryRouter,
     EventRouter,
     BackgroundAgentManager,
@@ -64,13 +63,13 @@ def query_sales_data(days: int = 30) -> str:
         total_revenue = sum(r[2] for r in results)
         total_transactions = sum(r[1] for r in results)
 
-        report += f"SUMMARY:\n"
+        report += "SUMMARY:\n"
         report += f"  Total Revenue: ${total_revenue:,.2f}\n"
         report += f"  Total Transactions: {total_transactions}\n"
         report += f"  Average Daily Revenue: ${total_revenue / len(results):,.2f}\n"
         report += f"  Average Transaction Value: ${total_revenue / total_transactions:,.2f}\n\n"
 
-        report += f"DAILY BREAKDOWN (Last 7 Days):\n"
+        report += "DAILY BREAKDOWN (Last 7 Days):\n"
         for row in results[:7]:
             report += f"  {row[0]}: {row[1]} sales, ${row[2]:,.2f} revenue (avg ${row[3]:.2f})\n"
 
@@ -121,18 +120,18 @@ def analyze_customer_behavior() -> str:
 
         conn.close()
 
-        report = f"Customer Behavior Analysis:\n\n"
-        report += f"CUSTOMER SEGMENTATION:\n"
+        report = "Customer Behavior Analysis:\n\n"
+        report += "CUSTOMER SEGMENTATION:\n"
         report += f"  Total Unique Customers: {len(customers)}\n"
         report += f"  High Value (>$1000): {len(high_value)} customers\n"
         report += f"  Medium Value ($500-$1000): {len(medium_value)} customers\n"
         report += f"  Low Value (<$500): {len(low_value)} customers\n\n"
 
-        report += f"LOYALTY METRICS:\n"
+        report += "LOYALTY METRICS:\n"
         report += f"  Repeat Customers (>3 purchases): {len(repeat_customers)} ({len(repeat_customers) / len(customers) * 100:.1f}%)\n"
         report += f"  Average Purchases per Customer: {sum(c[1] for c in customers) / len(customers):.1f}\n\n"
 
-        report += f"TOP 5 CUSTOMERS:\n"
+        report += "TOP 5 CUSTOMERS:\n"
         for i, customer in enumerate(customers[:5], 1):
             report += f"  {i}. Customer #{customer[0]}: ${customer[2]:,.2f} total ({customer[1]} purchases)\n"
 
@@ -175,18 +174,18 @@ def analyze_product_performance() -> str:
         total_revenue = sum(p[2] for p in products)
         total_units = sum(p[1] for p in products)
 
-        report = f"Product Performance Analysis:\n\n"
-        report += f"OVERVIEW:\n"
+        report = "Product Performance Analysis:\n\n"
+        report += "OVERVIEW:\n"
         report += f"  Total Products: {len(products)}\n"
         report += f"  Total Units Sold: {total_units}\n"
         report += f"  Total Revenue: ${total_revenue:,.2f}\n\n"
 
-        report += f"TOP PERFORMERS:\n"
+        report += "TOP PERFORMERS:\n"
         for i, product in enumerate(products[:5], 1):
             revenue_share = (product[2] / total_revenue) * 100
             report += f"  {i}. Product #{product[0]}: ${product[2]:,.2f} ({product[1]} units, {revenue_share:.1f}% of revenue)\n"
 
-        report += f"\nLOWEST PERFORMERS:\n"
+        report += "\nLOWEST PERFORMERS:\n"
         for i, product in enumerate(products[-3:], 1):
             report += f"  {i}. Product #{product[0]}: ${product[2]:,.2f} ({product[1]} units)\n"
 
@@ -261,17 +260,17 @@ def detect_trends(metric: str = "revenue") -> str:
         report += f"  Last Week Average: ${last_week_avg:,.2f}\n"
         report += f"  Change: {change_percent:+.1f}%\n\n"
 
-        report += f"OVERALL METRICS:\n"
+        report += "OVERALL METRICS:\n"
         report += f"  Period Average: ${overall_avg:,.2f}\n"
         report += f"  Highest: ${max(values):,.2f}\n"
         report += f"  Lowest: ${min(values):,.2f}\n\n"
 
         if anomalies:
-            report += f"ANOMALIES DETECTED:\n"
+            report += "ANOMALIES DETECTED:\n"
             for anomaly in anomalies[:5]:
                 report += f"  • {anomaly}\n"
         else:
-            report += f"NO SIGNIFICANT ANOMALIES DETECTED\n"
+            report += "NO SIGNIFICANT ANOMALIES DETECTED\n"
 
         return report
 
@@ -347,35 +346,35 @@ def calculate_kpis() -> str:
         # Customer Lifetime Value (simplified)
         clv = current_period[0] / current_customers if current_customers else 0
 
-        report = f"Key Performance Indicators (KPIs):\n\n"
-        report += f"REVENUE METRICS (Last 30 Days):\n"
+        report = "Key Performance Indicators (KPIs):\n\n"
+        report += "REVENUE METRICS (Last 30 Days):\n"
         report += f"  Total Revenue: ${current_period[0]:,.2f} ({revenue_change:+.1f}% vs previous period)\n"
         report += (
             f"  Average Order Value: ${current_period[1]:.2f} ({aov_change:+.1f}%)\n"
         )
         report += f"  Total Orders: {current_period[2]}\n\n"
 
-        report += f"CUSTOMER METRICS:\n"
+        report += "CUSTOMER METRICS:\n"
         report += f"  Active Customers: {current_customers} ({customer_change:+.1f}%)\n"
         report += f"  Customer Lifetime Value: ${clv:.2f}\n"
         report += (
             f"  Orders per Customer: {current_period[2] / current_customers:.2f}\n\n"
         )
 
-        report += f"PERFORMANCE INDICATORS:\n"
+        report += "PERFORMANCE INDICATORS:\n"
         if revenue_change > 10:
-            report += f"  ✓ Strong revenue growth\n"
+            report += "  ✓ Strong revenue growth\n"
         elif revenue_change < -10:
-            report += f"  ⚠ Revenue decline - needs attention\n"
+            report += "  ⚠ Revenue decline - needs attention\n"
         else:
-            report += f"  • Stable revenue\n"
+            report += "  • Stable revenue\n"
 
         if customer_change > 5:
-            report += f"  ✓ Growing customer base\n"
+            report += "  ✓ Growing customer base\n"
         elif customer_change < -5:
-            report += f"  ⚠ Declining customers - retention issue\n"
+            report += "  ⚠ Declining customers - retention issue\n"
         else:
-            report += f"  • Stable customer base\n"
+            report += "  • Stable customer base\n"
 
         return report
 
@@ -438,7 +437,7 @@ def seed_analytics_data() -> str:
     """Seed the database with sample analytics data."""
     import sqlite3
     import random
-    from datetime import datetime, timedelta
+    from datetime import datetime
 
     try:
         db_path = os.path.expanduser("~/.OmniCoreAgent/analytics.db")

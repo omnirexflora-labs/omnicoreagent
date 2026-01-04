@@ -2,7 +2,6 @@ import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
-from omnicoreagent.core.utils import logger
 import asyncio
 
 

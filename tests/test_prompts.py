@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from omnicoreagent.mcp_omni_connect.prompts import (
+from omnicoreagent.mcp_clients_connection.prompts import (
     find_prompt_server,
     get_prompt,
     get_prompt_with_react_agent,

@@ -20,8 +20,6 @@ from omnicoreagent import OmniCoreAgent
 
 
 async def main():
-
-
     # Define MCP server configurations
     # Using stdio transport (local process communication)
     mcp_tools = [
@@ -33,7 +31,7 @@ async def main():
                 "-y",
                 "@modelcontextprotocol/server-filesystem",
                 str(Path.home()),  # Access home directory
-            ]
+            ],
         }
     ]
 
@@ -41,8 +39,8 @@ async def main():
     agent = OmniCoreAgent(
         name="mcp_tools_agent",
         system_instruction="You are a helpful assistant with access to filesystem tools.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
-        mcp_tools=mcp_tools  # <- Attach MCP tools here
+        model_config={"provider": "cencori", "model": "gpt-4o"},
+        mcp_tools=mcp_tools,  # <- Attach MCP tools here
     )
 
     # Connect to MCP servers (required before using MCP tools)
@@ -75,7 +73,7 @@ async def demo_other_transports():
         "transport_type": "streamable_http",
         "url": "http://localhost:8080/mcp",
         "headers": {"Authorization": "Bearer your-token"},
-        "timeout": 60
+        "timeout": 60,
     }
 
     # SSE Transport (Server-Sent Events)
@@ -84,7 +82,7 @@ async def demo_other_transports():
         "transport_type": "sse",
         "url": "http://localhost:3000/sse",
         "headers": {"Authorization": "Bearer token"},
-        "sse_read_timeout": 120
+        "sse_read_timeout": 120,
     }
 
     # OAuth Transport (auto-handles OAuth flow)
@@ -92,7 +90,7 @@ async def demo_other_transports():
         "name": "oauth_server",
         "transport_type": "streamable_http",
         "auth": {"method": "oauth"},
-        "url": "http://localhost:8000/mcp"
+        "url": "http://localhost:8000/mcp",
     }
 
     print("\nOther transport configurations available:")

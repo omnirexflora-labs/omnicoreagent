@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from omnicoreagent.mcp_omni_connect.sampling import samplingCallback
+from omnicoreagent.mcp_clients_connection.sampling import samplingCallback
 from omnicoreagent.core.types import ContextInclusion
 
 
