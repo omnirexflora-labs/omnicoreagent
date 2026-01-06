@@ -39,7 +39,7 @@ async def main():
     agent = OmniCoreAgent(
         name="mcp_tools_agent",
         system_instruction="You are a helpful assistant with access to filesystem tools.",
-        model_config={"provider": "cencori", "model": "gpt-4o"},
+        model_config={"provider": "openai", "model": "gpt-4o"},
         mcp_tools=mcp_tools,  # <- Attach MCP tools here
     )
 
