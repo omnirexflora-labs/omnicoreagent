@@ -17,10 +17,10 @@ class SequentialAgent:
         self._initialized = False
 
     async def initialize(self):
-        """Connect MCP servers for RouterCore and all sub-agents."""
+        """Connect MCP servers for all sub-agents."""
         if self._initialized:
             return
-        logger.info("RouterAgent: Initializing MCP servers for router and sub-agents")
+        logger.info("SequentialAgent: Initializing MCP servers for sub-agents")
         for agent in self.sub_agents:
             if getattr(agent, "mcp_tools", None):
                 try:
