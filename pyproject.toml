@@ -57,6 +57,7 @@ dependencies = [
     "cryptography>=45.0.6",
     "motor>=3.7.1",
     "pymongo>=4.15.1",
+    "tiktoken>=0.8.0",
 ]
 
 [project.scripts]

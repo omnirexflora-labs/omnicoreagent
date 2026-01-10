@@ -12,13 +12,15 @@ This package provides different memory storage backends:
 from .base import AbstractMemoryStore
 from .in_memory import InMemoryStore
 from .redis_memory import RedisMemoryStore
-from .database_memory import DatabaseMemory
+from .sql_db_memory import DatabaseMessageStore
 from .memory_router import MemoryRouter
+from .mongodb import MongoDb
 
 __all__ = [
     "AbstractMemoryStore",
     "InMemoryStore",
     "RedisMemoryStore",
-    "DatabaseMemory",
+    "DatabaseMessageStore",
+    "MongoDb",
     "MemoryRouter",
 ]

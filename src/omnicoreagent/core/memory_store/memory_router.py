@@ -1,11 +1,11 @@
-from typing import Any, Optional
+from typing import Any, Optional, Callable
 from decouple import config as decouple_config
 from omnicoreagent.core.memory_store.in_memory import InMemoryStore
-from omnicoreagent.core.memory_store.database_memory import DatabaseMemory
+from omnicoreagent.core.memory_store.sql_db_memory import DatabaseMessageStore
 from omnicoreagent.core.memory_store.redis_memory import RedisMemoryStore
 from omnicoreagent.core.utils import logger
 from omnicoreagent.core.utils import normalize_metadata
-from omnicoreagent.core.database.mongodb import MongoDb
+from omnicoreagent.core.memory_store.mongodb import MongoDb
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
 from omnicoreagent.core.utils import normalize_content
 
@@ -24,8 +24,14 @@ class MemoryRouter:
         """Return a detailed representation of the MemoryRouter."""
         return self.__str__()
 
-    def set_memory_config(self, mode: str, value: int = None) -> None:
-        self.memory_store.set_memory_config(mode, value)
+    def set_memory_config(
+        self,
+        mode: str,
+        value: int = None,
+        summary_config: dict = None,
+        summarize_fn: Callable = None,
+    ) -> None:
+        self.memory_store.set_memory_config(mode, value, summary_config, summarize_fn)
 
     def initialize_memory_store(self):
         if self.memory_store_type == "in_memory":
@@ -36,7 +42,7 @@ class MemoryRouter:
                 logger.info("Database not configured, using in_memory")
                 self.memory_store = InMemoryStore()
             else:
-                self.memory_store = DatabaseMemory(db_url=db_url)
+                self.memory_store = DatabaseMessageStore(db_url=db_url)
         elif self.memory_store_type == "redis":
             redis_url = decouple_config("REDIS_URL", default=None)
             if redis_url is None:
@@ -102,48 +108,3 @@ class MemoryRouter:
             "available": True,
             "store_class": type(self.memory_store).__name__,
         }
-
-    async def save_message_history_to_file(self, file_path: str) -> None:
-        """Save message history to a file.
-
-        Args:
-            file_path: Path to save the message history
-        """
-        try:
-            import json
-
-            all_messages = {}
-            for session_id in self.memory_store.sessions_history.keys():
-                messages = await self.get_messages(session_id)
-                if messages:
-                    all_messages[session_id] = messages
-
-            with open(file_path, "w") as f:
-                json.dump(all_messages, f, indent=2)
-            logger.info(f"Message history saved to {file_path}")
-        except Exception as e:
-            logger.error(f"Failed to save message history: {e}")
-
-    async def load_message_history_from_file(self, file_path: str) -> None:
-        """Load message history from a file.
-
-        Args:
-            file_path: Path to load the message history from
-        """
-        try:
-            import json
-
-            with open(file_path, "r") as f:
-                all_messages = json.load(f)
-
-            for session_id, messages in all_messages.items():
-                for message in messages:
-                    await self.store_message(
-                        role=message["role"],
-                        content=message["content"],
-                        metadata=message.get("metadata", {}),
-                        session_id=session_id,
-                    )
-            logger.info(f"Message history loaded from {file_path}")
-        except Exception as e:
-            logger.error(f"Failed to load message history: {e}")

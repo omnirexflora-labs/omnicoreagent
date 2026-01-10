@@ -1,10 +1,16 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Callable, Any
 
 
 class AbstractMemoryStore(ABC):
     @abstractmethod
-    def set_memory_config(self, mode: str, value: int = None) -> None:
+    def set_memory_config(
+        self,
+        mode: str,
+        value: int = None,
+        summary_config: dict = None,
+        summarize_fn: Callable = None,
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -28,3 +34,14 @@ class AbstractMemoryStore(ABC):
         self, session_id: str = None, agent_name: str = None
     ) -> None:
         raise NotImplementedError
+
+    @abstractmethod
+    async def mark_messages_summarized(
+        self,
+        message_ids: list[str],
+        summary_id: str,
+        retention_policy: str = "keep",
+    ) -> None:
+        """Mark messages as summarized (inactive or delete based on policy)."""
+        raise NotImplementedError
+

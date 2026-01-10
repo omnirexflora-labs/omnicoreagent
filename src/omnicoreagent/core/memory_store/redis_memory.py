@@ -1,11 +1,18 @@
 import json
-from typing import Any, List
+import uuid
+from typing import Any, List, Callable
 import redis.asyncio as redis
 from decouple import config
 import threading
+import asyncio
 
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
 from omnicoreagent.core.utils import logger
+from omnicoreagent.core.summarizer.tokenizer import count_message_tokens
+from omnicoreagent.core.summarizer.summarizer_engine import (
+    apply_summarization_logic,
+)
+from omnicoreagent.core.summarizer.summarizer_types import SummaryConfig
 from datetime import datetime, timezone
 
 REDIS_URL = config("REDIS_URL", default=None)
@@ -113,6 +120,8 @@ class RedisMemoryStore(AbstractMemoryStore):
         self._connection_manager = get_redis_manager()
         self._redis_client = None
         self.memory_config: dict[str, Any] = {}
+        self.summary_config: dict[str, Any] = {}
+        self.summarize_fn: Callable = None
         logger.debug(f"Initialized RedisMemoryStore with redis_url: {redis_url}")
 
     async def _get_client(self) -> redis.Redis:
@@ -124,19 +133,30 @@ class RedisMemoryStore(AbstractMemoryStore):
         else:
             raise RuntimeError("Redis not configured - REDIS_URL not set")
 
-    def set_memory_config(self, mode: str, value: int = None) -> None:
-        """Set memory configuration.
+    async def _scan_keys(self, client: redis.Redis, match: str) -> List[str]:
+        """Scan keys using non-blocking SCAN command."""
+        keys = []
+        async for key in client.scan_iter(match=match):
+            keys.append(key)
+        return keys
 
-        Args:
-            mode: Memory mode ('sliding_window', 'token_budget')
-            value: Optional value (e.g., window size or token limit)
-        """
+    def set_memory_config(
+        self,
+        mode: str,
+        value: int = None,
+        summary_config: dict = None,
+        summarize_fn: Callable = None,
+    ) -> None:
         valid_modes = {"sliding_window", "token_budget"}
         if mode.lower() not in valid_modes:
             raise ValueError(
                 f"Invalid memory mode: {mode}. Must be one of {valid_modes}."
             )
         self.memory_config = {"mode": mode, "value": value}
+        if summary_config:
+            self.summary_config = SummaryConfig(**summary_config)
+        if summarize_fn:
+            self.summarize_fn = summarize_fn
 
     async def store_message(
         self,
@@ -165,11 +185,15 @@ class RedisMemoryStore(AbstractMemoryStore):
             timestamp_score = dt.timestamp()
 
             message = {
+                "id": str(uuid.uuid4()),
                 "role": role,
                 "content": str(content),
                 "session_id": session_id,
                 "msg_metadata": metadata,
                 "timestamp": timestamp_iso,
+                "status": "active",
+                "inactive_reason": None,
+                "summary_id": None,
             }
 
             await client.zadd(key, {json.dumps(message): timestamp_score})
@@ -207,6 +231,8 @@ class RedisMemoryStore(AbstractMemoryStore):
             for msg_json in raw_messages:
                 try:
                     msg = json.loads(msg_json)
+                    if msg.get("status", "active") != "active":
+                        continue
                     if (
                         agent_name
                         and msg.get("msg_metadata", {}).get("agent_name") != agent_name
@@ -217,18 +243,58 @@ class RedisMemoryStore(AbstractMemoryStore):
                     logger.warning(f"Failed to parse message JSON: {msg_json}")
                     continue
 
-            mode = self.memory_config.get("mode", "token_budget")
-            value = self.memory_config.get("value")
+            result, summary_msg, summarized_ids = await apply_summarization_logic(
+                messages=result,
+                memory_config=self.memory_config,
+                summary_config=self.summary_config,
+                summarize_fn=self.summarize_fn,
+                agent_name=agent_name,
+            )
 
-            if mode.lower() == "sliding_window" and value is not None:
-                result = result[-value:]
-            elif mode.lower() == "token_budget" and value is not None:
-                total_tokens = sum(len(str(msg["content"]).split()) for msg in result)
-                while total_tokens > value and result:
-                    result.pop(0)
-                    total_tokens = sum(
-                        len(str(msg["content"]).split()) for msg in result
-                    )
+            if summarized_ids and summary_msg:
+                summary_id = str(uuid.uuid4())
+                summary_msg["id"] = summary_id
+                
+                dt = datetime.now(timezone.utc)
+                timestamp_iso = dt.isoformat()
+                timestamp_score = dt.timestamp()
+                
+                summary_redis_msg = {
+                    "id": summary_id,
+                    "role": summary_msg["role"],
+                    "content": summary_msg["content"],
+                    "session_id": session_id,
+                    "msg_metadata": summary_msg["msg_metadata"],
+                    "timestamp": timestamp_iso,
+                    "status": "active",
+                    "inactive_reason": None,
+                    "summary_id": None,
+                }
+
+                async def _background_persist_summary():
+                    client = None
+                    try:
+                        client = await self._get_client()
+                        key = f"omnicoreagent_memory:{session_id}"
+                        
+                        await client.zadd(key, {json.dumps(summary_redis_msg): timestamp_score})
+                        
+                        await self.mark_messages_summarized(
+                            message_ids=summarized_ids,
+                            summary_id=summary_id,
+                            retention_policy=getattr(
+                                self.summary_config.retention_policy,
+                                "value",
+                                self.summary_config.retention_policy,
+                            ),
+                        )
+                    except Exception as e:
+                        logger.error(f"Background Redis persistence failed: {e}")
+                    finally:
+                        if self._connection_manager and client:
+                             self._connection_manager.release_client()
+
+                asyncio.create_task(_background_persist_summary())
 
             return result
 
@@ -265,7 +331,7 @@ class RedisMemoryStore(AbstractMemoryStore):
 
             else:
                 pattern = "omnicoreagent_memory:*"
-                keys = await client.keys(pattern)
+                keys = await self._scan_keys(client, pattern)
                 if keys:
                     await client.delete(*keys)
                     logger.debug(f"Cleared all memory ({len(keys)} sessions)")
@@ -315,7 +381,7 @@ class RedisMemoryStore(AbstractMemoryStore):
     ) -> None:
         """Clear messages for a specific agent across all sessions efficiently."""
         pattern = "omnicoreagent_memory:*"
-        keys = await client.keys(pattern)
+        keys = await self._scan_keys(client, pattern)
 
         if not keys:
             logger.debug("No session keys found")
@@ -370,3 +436,69 @@ class RedisMemoryStore(AbstractMemoryStore):
         except Exception as e:
             logger.error(f"Deserialization failed: {e}")
             return data
+
+    async def mark_messages_summarized(
+        self,
+        message_ids: list[str],
+        summary_id: str,
+        retention_policy: str = "keep",
+    ) -> None:
+        """Mark messages as summarized (inactive or delete based on policy).
+
+        Args:
+            message_ids: List of message IDs to mark as summarized
+            summary_id: ID of the summary message that replaces these
+            retention_policy: 'keep' to mark inactive, 'delete' to remove
+        """
+        if not message_ids:
+            return
+
+        client = None
+        message_ids_set = set(message_ids)
+
+        try:
+            client = await self._get_client()
+            pattern = "omnicoreagent_memory:*"
+            keys = await self._scan_keys(client, pattern)
+
+            for key in keys:
+                raw_messages = await client.zrange(key, 0, -1, withscores=True)
+                if not raw_messages:
+                    continue
+
+                to_remove = []
+                to_add = []
+
+                for msg_json, score in raw_messages:
+                    try:
+                        msg = json.loads(msg_json)
+                        if msg.get("id") in message_ids_set:
+                            if retention_policy == "delete":
+                                to_remove.append(msg_json)
+                            else:
+                                to_remove.append(msg_json)
+                                msg["status"] = "inactive"
+                                msg["inactive_reason"] = "summarized"
+                                msg["summary_id"] = summary_id
+                                to_add.append((json.dumps(msg), score))
+                    except json.JSONDecodeError:
+                        continue
+
+                if to_remove or to_add:
+                    async with client.pipeline(transaction=False) as pipe:
+                        for msg_json in to_remove:
+                            pipe.zrem(key, msg_json)
+                        for msg_json, score in to_add:
+                            pipe.zadd(key, {msg_json: score})
+                        await pipe.execute()
+
+            logger.debug(
+                f"{'Deleted' if retention_policy == 'delete' else 'Marked inactive'} "
+                f"{len(message_ids)} summarized messages in Redis"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to mark messages as summarized: {e}")
+        finally:
+            if self._connection_manager and client:
+                self._connection_manager.release_client()
