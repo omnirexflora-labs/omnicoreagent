@@ -257,6 +257,21 @@ class TestDatabaseMessageStore:
         await memory.store_message(
             "assistant", "Hi there!", {"agent_name": "agent1"}, "session1"
         )
+        
+        await memory.store_message("user", "Msg1", {"agent_name": "a"}, "s1")
+        await memory.store_message("user", "Msg2", {"agent_name": "a"}, "s1")
+        await memory.store_message("user", "Msg3", {"agent_name": "a"}, "s1")
+        await memory.store_message("user", "Msg4", {"agent_name": "a"}, "s1")
+        
+        messages = await memory.get_messages("s1", "a")
+        
+        # Should have window_size messages (1 summary + 2 recent)
+        assert len(messages) == 3
+        # First message should be the summary
+        assert messages[0].get("msg_metadata", {}).get("type") == "history_summary"
+        
+        # Wait for background persistence
+        await asyncio.sleep(0.5)
 
 
             

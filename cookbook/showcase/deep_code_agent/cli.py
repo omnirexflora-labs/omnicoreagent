@@ -1,8 +1,10 @@
 # deep_coder/cli.py
 import asyncio
+import json
 import signal
 import sys
 from pathlib import Path
+from typing import Optional
 
 from rich.console import Console
 from rich.live import Live
@@ -12,11 +14,13 @@ from rich.markdown import Markdown
 from rich.syntax import Syntax
 from rich.text import Text
 from rich.table import Table
+from rich.progress import SpinnerColumn, TextColumn, Progress
+from rich.layout import Layout
 from rich.align import Align
 from rich import box
 
 from code_agent_runner import DeepCodingAgentRunner
-from observability_globals import log, metrics, health, CONFIG
+from observability_globals import log, metrics, health, audit, CONFIG
 
 
 console = Console()
@@ -146,7 +150,7 @@ class DeepCodeAgentCLI:
             return False
 
         elif cmd == "/help":
-            help_md = """
+            help_md = f"""
 # 🧠 Deep Code Agent — Help
 
 ## Natural Language
@@ -275,7 +279,7 @@ Ask anything:
         while not self._shutdown:
             try:
                 user_input = Prompt.ask(
-                    "\n[bold blue][[/bold blue][bold #00FFA3]DeepCodeAgent[/bold #00FFA3][bold blue]][/bold blue]"
+                    f"\n[bold blue][[/bold blue][bold #00FFA3]DeepCodeAgent[/bold #00FFA3][bold blue]][/bold blue]"
                 ).strip()
             except (EOFError, KeyboardInterrupt):
                 break

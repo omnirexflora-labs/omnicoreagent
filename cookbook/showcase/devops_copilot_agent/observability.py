@@ -167,7 +167,7 @@ class MetricsCollector:
             try:
                 result = func(*args, **kwargs)
                 return result
-            except Exception:
+            except Exception as e:
                 status = "error"
                 raise
             finally:
@@ -187,7 +187,7 @@ class MetricsCollector:
             try:
                 result = await func(*args, **kwargs)
                 return result
-            except Exception:
+            except Exception as e:
                 status = "error"
                 raise
             finally:
