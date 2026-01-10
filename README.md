@@ -133,7 +133,7 @@ print(result["response"])
 [MCP Client](#5--built-in-mcp-client) •
 [Local Tools](#6-️-local-tools-system) •
 [Agent Skills](#7--agent-skills-system-packaged-capabilities) •
-[Memory Tool Backend](#8--memory-tool-backend-file-based-working-memory)
+[Memory Tool Backend](#8--workspace-memory-file-based-persistence)
 
 **Multi-Agent**:
 [Sub-Agents](#9--sub-agents-system) •
@@ -155,59 +155,54 @@ print(result["response"])
 ## 🏗 Architecture Overview
 
 ```mermaid
-flowchart TB
-    subgraph Core["🤖 Core Agent System"]
-        OCA[OmniCoreAgent]
-        React[ReactAgent]
-        Tools[Tool Orchestration]
-        OCA --> React --> Tools
+graph LR
+    User([👤 User / App]) --> Input[Input Request]
+    Clock([⏰ Scheduler]) --> BG[Background Agent]
+    
+    subgraph Orchestration["🎼 Orchestration Layer"]
+        Input --> WF[Workflow Engine]
+        Workflow[Workflow Agents]
     end
 
-    subgraph Memory["🧠 Memory System"]
-        direction LR
-        InMem[InMemory]
-        Redis[Redis]
-        DB[PostgreSQL/MySQL]
-        Mongo[MongoDB]
+    subgraph Security["🛡️ Security Layer"]
+        Input --> Guard[Guardrails]
+        WF --> Guard
     end
 
-    subgraph Context["🔄 Context Engineering"]
-        direction LR
-        CM[Context Management]
-        TO[Tool Offloading]
+    subgraph Core["🧠 OmniCore Engine"]
+        Guard --> OCA[OmniCoreAgent]
+        BG --> OCA
+        OCA --> Context[Context Engine]
+        Context --> React[ReAct Loop]
+        React --> TO[Tool Orchestration]
     end
 
-    subgraph Events["📡 Event System"]
-        direction LR
-        IME[InMemory Events]
-        RSE[Redis Streams]
+    subgraph Capabilities["🛠️ Capability Layer"]
+        TO --> Local[Local Tools]
+        TO --> MCP[MCP Client]
+        TO --> RAG[BM25 RAG]
+        TO --> Sub[Sub-Agents]
     end
 
-    subgraph ToolSystem["🛠️ Tool System"]
-        Local[Local Tools]
-        MCP[MCP Client]
-        BM25[BM25 Retrieval]
-        MemTool[Memory Backend]
+    subgraph Infrastructure["💾 Persistence Layer"]
+        OCA -.->|State| Memory[Memory Router]
+        OCA -.->|Stream| Events[Event Router]
+        TO -.->|Files| Workspace[Workspace Memory]
     end
 
-    subgraph Agents["🤖 Multi-Agent"]
-        Sub[Sub-Agents]
-        BG[Background Agents]
-        WF[Workflows]
+    subgraph Backends["Storage Backends"]
+        Memory --> Redis[(Redis)]
+        Memory --> DB[(SQL/Mongo)]
+        Events --> Streams[Redis Streams]
+        Workspace --> FS[File System]
     end
 
-    Core --> Memory
-    Core --> Context
-    Core --> Events
-    Core --> ToolSystem
-    Core --> Agents
-
-    style Core fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Memory fill:#0f3460,stroke:#16213e,color:#fff
-    style Context fill:#e94560,stroke:#16213e,color:#fff
-    style Events fill:#533483,stroke:#16213e,color:#fff
-    style ToolSystem fill:#0f3460,stroke:#16213e,color:#fff
-    style Agents fill:#1a1a2e,stroke:#16213e,color:#fff
+    style Orchestration fill:#d35400,stroke:#e67e22,color:#fff
+    style Security fill:#e74c3c,stroke:#c0392b,color:#fff
+    style Core fill:#2c3e50,stroke:#34495e,color:#fff
+    style Capabilities fill:#2980b9,stroke:#2980b9,color:#fff
+    style Infrastructure fill:#8e44ad,stroke:#8e44ad,color:#fff
+    style Backends fill:#95a5a6,stroke:#7f8c8d,color:#fff
 ```
 
 ---
@@ -641,7 +636,7 @@ agent_config = {
 
 ---
 
-### 8. 💾 Memory Tool Backend (File-Based Working Memory)
+### 8. 💾 Workspace Memory (File-Based Persistence)
 
 A **file-based persistent storage system** that gives your agent a local workspace to save and manage files during long-running tasks. Files are stored in a `./memories/` directory with safe concurrent access and path traversal protection.
 
@@ -699,36 +694,44 @@ parent_agent = OmniCoreAgent(
 ---
 
 ### 10. 🚁 Background Agents
-
-Autonomous agents that run on schedule or process tasks from a persistent queue.
-
+    
+Autonomous agents that run on varying schedules (Interval or Cron) or process tasks from a persistent queue.
+    
 ```python
 from omnicoreagent import BackgroundAgentManager, MemoryRouter, EventRouter
-
+    
 # Initialize the manager
 manager = BackgroundAgentManager(
     memory_router=MemoryRouter("redis"),
     event_router=EventRouter("redis_stream")
 )
-
+    
 # Create a background agent
 background_agent_config = {
     "agent_id": "system_monitor",
-    "system_instruction": "Monitor system resources.",
+    "system_instruction": "Monitor system resources and report anomalies.",
     "model_config": {"provider": "openai", "model": "gpt-4o-mini"},
-    "agent_config": {},
+    "queue_size": 10,  # Max pending tasks
+    # Schedule options:
+    "interval": 300,        # Integer = seconds (every 5 mins)
+    # "interval": "* * * * *", # String = Cron expression (every minute)
     "task_config": {
-        "query": "Monitor CPU and alert if > 80%",
-        "interval": 300,        # Run every 5 minutes
-        "max_retries": 2,
-        "retry_delay": 60,
+        "query": "Check metrics and alert if CPU > 80%",
+        "timeout": 60,      # Kill task if it hangs
+        "max_retries": 3,
+        "retry_delay": 10
     }
 }
 await manager.create_agent(background_agent_config)
-
-# Start/Resume the manager if not already running
+    
+# Start the system
 await manager.start()
+
+# Trigger manually if needed
+await manager.run_task_now("system_monitor", {"query": "Immediate check!"})
 ```
+
+> 📚 **Deep Dive**: Check out the [Background Agents Cookbook](./cookbook/background_agents) for full "Kitchen Sink" examples including lifecycle management (pause/resume/delete) and advanced configuration.
 
 #### 🛠️ Comprehensive API Reference
 

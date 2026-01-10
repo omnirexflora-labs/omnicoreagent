@@ -502,15 +502,16 @@ class BackgroundAgentManager:
             return None
 
         agent = self.agents[agent_id]
+        task_config = await agent.get_task_config()
         return {
             "agent_id": agent_id,
             "run_count": agent.run_count,
             "error_count": agent.error_count,
             "last_run": agent.last_run.isoformat() if agent.last_run else None,
             "is_running": agent.is_running,
-            "interval": agent.interval,
-            "max_retries": agent.max_retries,
-            "retry_delay": agent.retry_delay,
+            "interval": task_config.get("interval"),
+            "max_retries": task_config.get("max_retries"),
+            "retry_delay": task_config.get("retry_delay"),
             "has_task": await agent.has_task(),
             "task_query": await agent.get_task_query()
             if await agent.has_task()

@@ -15,6 +15,8 @@ class TaskConfig(BaseModel):
     interval: int = 3600
     max_retries: int = 3
     retry_delay: int = 60
+    timeout: Optional[int] = 300
+    queue_size: int = 100
     session_id: str = str(uuid.uuid4())
 
 

@@ -1,7 +1,7 @@
 import pytest
 import asyncio
 from unittest.mock import MagicMock, AsyncMock, patch
-from datetime import datetime
+from datetime import datetime, timezone
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 
@@ -279,6 +279,78 @@ class TestBackgroundOmniCoreAgent:
         assert result == {"response": "success"}
         assert agent.run_count == 1
         assert agent.run.call_count == 2
+        
+    @pytest.mark.asyncio
+    async def test_task_timeout(self, mock_omni_agent, task_registry):
+        config = {
+            "agent_id": "test_agent",
+            "model_config": {"provider": "openai", "model": "gpt-4"},
+        }
+        task_registry.register("test_agent", {"query": "timeout task", "timeout": 0.1})
+
+        mock_event_router = AsyncMock()
+        agent = BackgroundOmniCoreAgent(
+            config, task_registry, event_router=mock_event_router
+        )
+
+        async def slow_run(**kwargs):
+            await asyncio.sleep(0.5)
+            return {"response": "too late"}
+
+        agent.run = AsyncMock(side_effect=slow_run)
+
+        # Should raise TimeoutError
+        with pytest.raises(TimeoutError, match="timed out"):
+            await agent._internal_run_task(
+                task_config={
+                    "query": "timeout task",
+                    "timeout": 0.1,
+                    "max_retries": 0,
+                    "session_id": "test_session",
+                }
+            )
+    
+    @pytest.mark.asyncio
+    async def test_queue_full(self, mock_omni_agent, task_registry):
+        config = {
+            "agent_id": "test_agent",
+            "queue_size": 1,
+            "model_config": {"provider": "openai", "model": "gpt-4"},
+        }
+        agent = BackgroundOmniCoreAgent(config, task_registry)
+        
+        # Fill queue
+        await agent.submit_task({"query": "task 1"})
+        
+        # Next one should fail if we don't consume it
+        with pytest.raises(asyncio.TimeoutError):
+             # Force small queue_timeout for test speed
+             await agent.submit_task({"query": "task 2", "queue_timeout": 0.1})
+
+    @pytest.mark.asyncio
+    async def test_timezone_aware_execution(self, mock_omni_agent, task_registry):
+        config = {
+            "agent_id": "test_agent",
+            "model_config": {"provider": "openai", "model": "gpt-4"},
+        }
+        task_registry.register("test_agent", {"query": "timezone task"})
+        
+        mock_event_router = AsyncMock()
+        agent = BackgroundOmniCoreAgent(
+            config, task_registry, event_router=mock_event_router
+        )
+        agent.run = AsyncMock(return_value={"response": "success"})
+        
+        await agent._internal_run_task(
+            task_config={
+                "query": "timezone task",
+                "max_retries": 0,
+                "session_id": "test_session",
+            }
+        )
+        
+        # Check if last_run is timezone aware (has tzinfo)
+        assert agent.last_run.tzinfo == timezone.utc
 
 
 class TestBackgroundAgentManager:
