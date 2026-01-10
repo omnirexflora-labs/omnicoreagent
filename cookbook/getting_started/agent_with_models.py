@@ -114,7 +114,10 @@ async def demo_ollama():
 
     # Ollama doesn't usually need an API key, but the agent framework
     # expects LLM_API_KEY to be present for initialization checks.
+<<<<<<< HEAD
+=======
 
+>>>>>>> 5d48e69 (support cencori)
     print("Note: Ensure you have pulled the model first: `ollama pull llama3`")
 
     try:
@@ -172,7 +175,6 @@ async def main():
     await demo_gemini()
     await demo_groq()
     await demo_ollama()
-
     print("\n" + "=" * 50)
     print("SUMMARY")
     print("=" * 50)

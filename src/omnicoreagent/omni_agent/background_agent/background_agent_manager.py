@@ -17,6 +17,7 @@ from omnicoreagent.omni_agent.background_agent.scheduler_backend import (
 from omnicoreagent.core.memory_store.memory_router import MemoryRouter
 from omnicoreagent.core.events.event_router import EventRouter
 from omnicoreagent.core.utils import logger
+from omnicoreagent.omni_agent.background_agent.task_registry import TaskConfig
 
 
 class BackgroundAgentManager:
@@ -34,8 +35,10 @@ class BackgroundAgentManager:
             memory_router: Optional shared memory router for all agents
             event_router: Optional shared event router for all agents
         """
-        self.memory_router = memory_router or MemoryRouter(memory_store_type="memory")
-        self.event_router = event_router or EventRouter(event_store_type="memory")
+        self.memory_router = memory_router or MemoryRouter(
+            memory_store_type="in_memory"
+        )
+        self.event_router = event_router or EventRouter(event_store_type="in_memory")
 
         self.task_registry = TaskRegistry()
         self.scheduler = APSchedulerBackend()
@@ -79,7 +82,7 @@ class BackgroundAgentManager:
                 event_router=self.event_router,
                 task_registry=self.task_registry,
             )
-            mcp_tools = config.get("mcp_tools", False)
+            mcp_tools = config.get("mcp_tools", [])
             if mcp_tools:
                 await agent.connect_mcp_servers()
 
@@ -91,21 +94,24 @@ class BackgroundAgentManager:
                     "Auto-starting BackgroundAgentManager for immediate scheduling"
                 )
                 await self.start()
+            else:
+                # If manager is already running, start the worker for this new agent
+                await agent.start_worker()
 
             await self._schedule_agent(agent_id, agent)
 
-            event_stream_info = agent.get_event_stream_info()
+            event_stream_info = await agent.get_event_stream_info()
 
             logger.info(f"Created background agent: {agent_id}")
 
             return {
                 "agent_id": agent_id,
-                "session_id": agent.get_session_id(),
+                "session_id": await agent.get_session_id(),
                 "event_stream_info": event_stream_info,
                 "task_registered": True,
-                "task_query": agent.get_task_query(),
+                "task_query": await agent.get_task_query(),
                 "status": "created_and_scheduled",
-                "message": f"Agent {agent_id} created and scheduled successfully. Use session_id '{agent.get_session_id()}' for event streaming.",
+                "message": f"Agent {agent_id} created and scheduled successfully. Use session_id '{await agent.get_session_id()}' for event streaming.",
             }
 
         except Exception as e:
@@ -125,12 +131,7 @@ class BackgroundAgentManager:
         """
         try:
             self.task_registry.register(agent_id, task_config)
-
-            if agent_id in self.agents:
-                self.agents[agent_id]
-                logger.info(f"Updated task for existing agent {agent_id}")
-
-            logger.info(f"Registered task for agent {agent_id}")
+            logger.info(f"Registered/Updated task for agent {agent_id}")
             return True
 
         except Exception as e:
@@ -147,11 +148,7 @@ class BackgroundAgentManager:
         """Update task configuration for an agent."""
         try:
             self.task_registry.update(agent_id, task_config)
-
-            if agent_id in self.agents:
-                self.agents[agent_id]
-                logger.info(f"Updated task for agent {agent_id}")
-
+            logger.info(f"Updated task configuration for agent {agent_id}")
             return True
 
         except Exception as e:
@@ -173,16 +170,58 @@ class BackgroundAgentManager:
         """List all registered task agent IDs."""
         return self.task_registry.get_agent_ids()
 
+    async def run_task_now(self, agent_id: str, task_config: Dict[str, Any]) -> bool:
+        """
+        Run a task for an agent immediately (on-the-fly).
+
+        Args:
+            agent_id: The agent ID
+            **kwargs: Arguments to pass to the task
+
+        Returns:
+            True if task was submitted successfully
+        """
+        if agent_id not in self.agents:
+            logger.error(f"Agent {agent_id} not found")
+            return False
+
+        agent = self.agents[agent_id]
+        await agent.submit_task(task_config)
+        logger.info(f"Submitted on-the-fly task for agent {agent_id}")
+        return True
+
+    async def register_and_run(
+        self, agent_id: str, task_config: Dict[str, Any]
+    ) -> bool:
+        """
+        Register a task and run it immediately.
+
+        Args:
+            agent_id: The agent ID
+            task_config: Task configuration
+            **kwargs: Arguments to pass to the task
+
+        Returns:
+            True if registered and run successfully
+        """
+        if await self.register_task(agent_id, task_config):
+            return await self.run_task_now(agent_id, task_config)
+        return False
+
     async def _schedule_agent(self, agent_id: str, agent: BackgroundOmniCoreAgent):
         """Schedule an agent for execution."""
         try:
+            task_config = await agent.get_task_config()
+
+            interval = task_config.get("interval")
+
             self.scheduler.schedule_task(
                 agent_id=agent_id,
-                interval=agent.interval,
+                interval=interval,
                 task_fn=agent.run_task,
-                max_instances=1,
+                task_config=task_config,
             )
-            logger.info(f"Scheduled agent {agent_id} with interval {agent.interval}s")
+            logger.info(f"Scheduled agent {agent_id} with interval {interval}s")
 
         except Exception as e:
             logger.error(f"Failed to schedule agent {agent_id}: {e}")
@@ -198,6 +237,8 @@ class BackgroundAgentManager:
             self.scheduler.start()
 
             for agent_id, agent in self.agents.items():
+                if not agent.is_worker_running:
+                    await agent.start_worker()
                 await self._schedule_agent(agent_id, agent)
 
             self.is_running = True
@@ -218,7 +259,7 @@ class BackgroundAgentManager:
 
             for agent_id, agent in self.agents.items():
                 try:
-                    asyncio.create_task(agent.cleanup())
+                    await agent.cleanup()
                     logger.info(f"Cleaned up agent {agent_id}")
                 except Exception as e:
                     logger.error(f"Failed to cleanup agent {agent_id}: {e}")
@@ -236,7 +277,7 @@ class BackgroundAgentManager:
             return None
 
         agent = self.agents[agent_id]
-        status = agent.get_status()
+        status = await agent.get_status()
 
         status.update(
             {
@@ -259,7 +300,7 @@ class BackgroundAgentManager:
         paused_count = 0
 
         for agent_id in self.agents:
-            status = self.get_agent_status(agent_id)
+            status = await self.get_agent_status(agent_id)
             if status:
                 agent_statuses[agent_id] = status
                 if status.get("is_running"):
@@ -313,7 +354,7 @@ class BackgroundAgentManager:
             raise
 
     async def stop_agent(self, agent_id: str):
-        """Stop a specific agent: unschedule and cleanup its resources."""
+        """Stop a specific agent: unschedule and stop its worker loop."""
         if agent_id not in self.agents:
             raise ValueError(f"Agent {agent_id} not found")
 
@@ -322,8 +363,8 @@ class BackgroundAgentManager:
                 self.scheduler.remove_task(agent_id)
 
             agent = self.agents[agent_id]
-            asyncio.create_task(agent.cleanup())
-            logger.info(f"Stopped agent {agent_id}")
+            await agent.stop_worker()
+            logger.info(f"Stopped worker for agent {agent_id}")
 
         except Exception as e:
             logger.error(f"Failed to stop agent {agent_id}: {e}")
@@ -336,9 +377,14 @@ class BackgroundAgentManager:
 
         try:
             if not self.is_running:
-                self.start()
+                await self.start()
 
             agent = self.agents[agent_id]
+
+            # Ensure worker is running
+            if not agent.is_worker_running:
+                await agent.start_worker()
+
             if self.scheduler.is_task_scheduled(agent_id):
                 self.scheduler.remove_task(agent_id)
             await self._schedule_agent(agent_id, agent)
@@ -382,7 +428,7 @@ class BackgroundAgentManager:
                 self.task_registry.remove(agent_id)
 
             agent = self.agents[agent_id]
-            asyncio.create_task(agent.cleanup())
+            await agent.cleanup()
 
             del self.agents[agent_id]
             del self.agent_configs[agent_id]
@@ -393,19 +439,19 @@ class BackgroundAgentManager:
             logger.error(f"Failed to delete agent {agent_id}: {e}")
             raise
 
-    def get_agent_event_info(self, agent_id: str) -> Optional[Dict[str, Any]]:
+    async def get_agent_event_info(self, agent_id: str) -> Optional[Dict[str, Any]]:
         """Get event streaming information for an agent."""
         if agent_id not in self.agents:
             return None
 
         agent = self.agents[agent_id]
-        return agent.get_event_stream_info()
+        return await agent.get_event_stream_info()
 
-    def get_all_event_info(self) -> Dict[str, Any]:
+    async def get_all_event_info(self) -> Dict[str, Any]:
         """Get event streaming information for all agents."""
         event_info = {}
         for agent_id, agent in self.agents.items():
-            event_info[agent_id] = agent.get_event_stream_info()
+            event_info[agent_id] = await agent.get_event_stream_info()
 
         return {
             "agents": event_info,
@@ -413,27 +459,27 @@ class BackgroundAgentManager:
             "shared_memory_store": self.memory_router.get_memory_store_info(),
         }
 
-    def get_agent(self, agent_id: str) -> Optional[BackgroundOmniCoreAgent]:
+    async def get_agent(self, agent_id: str) -> Optional[BackgroundOmniCoreAgent]:
         """Get a specific agent instance."""
         return self.agents.get(agent_id)
 
-    def get_agent_session_id(self, agent_id: str) -> Optional[str]:
+    async def get_agent_session_id(self, agent_id: str) -> Optional[str]:
         """Get the session ID for a specific agent."""
         if agent_id not in self.agents:
             return None
 
         agent = self.agents[agent_id]
-        return agent.get_session_id()
+        return await agent.get_session_id()
 
-    def get_all_session_ids(self) -> Dict[str, str]:
+    async def get_all_session_ids(self) -> Dict[str, str]:
         """Get session IDs for all agents."""
         session_ids = {}
         for agent_id, agent in self.agents.items():
-            session_ids[agent_id] = agent.get_session_id()
+            session_ids[agent_id] = await agent.get_session_id()
 
         return session_ids
 
-    def is_agent_running(self, agent_id: str) -> bool:
+    async def is_agent_running(self, agent_id: str) -> bool:
         """Check if a specific agent is currently running."""
         if agent_id not in self.agents:
             return False
@@ -441,7 +487,7 @@ class BackgroundAgentManager:
         agent = self.agents[agent_id]
         return agent.is_running
 
-    def get_running_agents(self) -> List[str]:
+    async def get_running_agents(self) -> List[str]:
         """Get list of currently running agents."""
         running_agents = []
         for agent_id, agent in self.agents.items():
@@ -450,30 +496,33 @@ class BackgroundAgentManager:
 
         return running_agents
 
-    def get_agent_metrics(self, agent_id: str) -> Optional[Dict[str, Any]]:
+    async def get_agent_metrics(self, agent_id: str) -> Optional[Dict[str, Any]]:
         """Get metrics for a specific agent."""
         if agent_id not in self.agents:
             return None
 
         agent = self.agents[agent_id]
+        task_config = await agent.get_task_config()
         return {
             "agent_id": agent_id,
             "run_count": agent.run_count,
             "error_count": agent.error_count,
             "last_run": agent.last_run.isoformat() if agent.last_run else None,
             "is_running": agent.is_running,
-            "interval": agent.interval,
-            "max_retries": agent.max_retries,
-            "retry_delay": agent.retry_delay,
-            "has_task": agent.has_task(),
-            "task_query": agent.get_task_query() if agent.has_task() else None,
+            "interval": task_config.get("interval"),
+            "max_retries": task_config.get("max_retries"),
+            "retry_delay": task_config.get("retry_delay"),
+            "has_task": await agent.has_task(),
+            "task_query": await agent.get_task_query()
+            if await agent.has_task()
+            else None,
         }
 
-    def get_all_metrics(self) -> Dict[str, Dict[str, Any]]:
+    async def get_all_metrics(self) -> Dict[str, Dict[str, Any]]:
         """Get metrics for all agents."""
         metrics = {}
         for agent_id in self.agents:
-            agent_metrics = self.get_agent_metrics(agent_id)
+            agent_metrics = await self.get_agent_metrics(agent_id)
             if agent_metrics:
                 metrics[agent_id] = agent_metrics
 

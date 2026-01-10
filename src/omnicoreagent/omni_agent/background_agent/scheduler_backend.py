@@ -70,16 +70,34 @@ class APSchedulerBackend(BackgroundTaskScheduler):
     def start(self):
         """Start the scheduler."""
         if not self._running:
-            self.scheduler.start()
-            self._running = True
-            logger.info("APScheduler backend started")
+            try:
+                # If scheduler was previously shut down, we might need to recreate it
+                # as APScheduler doesn't always support restarting after shutdown(wait=True)
+                try:
+                    self.scheduler.start()
+                except RuntimeError:
+                    logger.info(
+                        "Re-initializing APScheduler as it was likely shut down"
+                    )
+                    self.scheduler = AsyncIOScheduler()
+                    self.scheduler.start()
 
-    def shutdown(self):
+                self._running = True
+                logger.info("APScheduler backend started")
+            except Exception as e:
+                logger.error(f"Failed to start APScheduler: {e}")
+                raise
+
+    def shutdown(self, wait: bool = True):
         """Shutdown the scheduler."""
         if self._running:
-            self.scheduler.shutdown()
-            self._running = False
-            logger.info("APScheduler backend shutdown")
+            try:
+                self.scheduler.shutdown(wait=wait)
+                self._running = False
+                logger.info("APScheduler backend shutdown")
+            except Exception as e:
+                logger.error(f"Error during APScheduler shutdown: {e}")
+                self._running = False
 
     def is_running(self) -> bool:
         """Check if the scheduler is running."""
@@ -113,9 +131,8 @@ class APSchedulerBackend(BackgroundTaskScheduler):
         if job:
             return {
                 "id": job.id,
-                "next_run_time": job.next_run_time,
+                "next_run_time": getattr(job, "next_run_time", None),
                 "trigger": str(job.trigger),
-                "active": job.active,
             }
         return {}
 

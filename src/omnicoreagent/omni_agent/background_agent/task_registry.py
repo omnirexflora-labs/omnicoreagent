@@ -4,6 +4,20 @@ Task registry for managing background agent task definitions.
 
 from typing import Dict, List, Optional
 from omnicoreagent.core.utils import logger
+from pydantic import BaseModel
+import uuid
+
+
+class TaskConfig(BaseModel):
+    """Task configuration."""
+
+    query: str
+    interval: int = 3600
+    max_retries: int = 3
+    retry_delay: int = 60
+    timeout: Optional[int] = 300
+    queue_size: int = 100
+    session_id: str = str(uuid.uuid4())
 
 
 class TaskRegistry:
@@ -15,6 +29,15 @@ class TaskRegistry:
     def register(self, agent_id: str, config: Dict):
         """Register a new task configuration."""
         try:
+            # Validate with TaskConfig if needed, or simply store dict
+            # user wants dict mostly.
+            if not isinstance(config, dict):
+                # fallback if somehow passed object
+                if hasattr(config, "model_dump"):
+                    config = config.model_dump()
+                else:
+                    config = dict(config)
+
             self._tasks[agent_id] = config
             logger.info(f"Registered task for agent: {agent_id}")
         except Exception as e:
@@ -46,10 +69,19 @@ class TaskRegistry:
     def update(self, agent_id: str, config: Dict):
         """Update an existing task configuration."""
         if agent_id in self._tasks:
+            # Ensure config is dict
+            if not isinstance(config, dict):
+                if hasattr(config, "model_dump"):
+                    config = config.model_dump()
+                else:
+                    config = dict(config)
+
             self._tasks[agent_id].update(config)
             logger.info(f"Updated task for agent: {agent_id}")
         else:
-            raise KeyError(f"Task for agent {agent_id} not found")
+            # If it doesn't exist, we should probably just register it instead of erroring,
+            # or keep it strict. Let's keep it strict for now but make it explicit.
+            raise KeyError(f"Task for agent '{agent_id}' not found in registry")
 
     def get_agent_ids(self) -> List[str]:
         """Get all registered agent IDs."""

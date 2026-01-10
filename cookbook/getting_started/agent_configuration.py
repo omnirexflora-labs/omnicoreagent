@@ -11,6 +11,9 @@ Features covered:
 - Token usage limits
 - Agent Skills
 - Advanced Tool Use
+- Memory with Summarization
+- Context Management
+- Guardrails
 
 Build on: agent_with_event_switching.py
 This is a reference for advanced usage.
