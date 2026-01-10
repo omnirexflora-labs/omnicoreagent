@@ -467,6 +467,97 @@ agent = OmniCoreAgent(
 
 OmniCoreAgent implements **state-of-the-art context engineering** inspired by patterns from Anthropic and Cursor. This dual-layer approach ensures your agents never hit token limits — even during marathon coding sessions or multi-step research tasks.
 
+```mermaid
+flowchart TB
+    subgraph Input["📥 Incoming Context"]
+        MSG["Messages<br/>(User + Assistant + Tool)"]
+        TOOL_RESP["Tool Responses<br/>(Web Search, APIs, Files)"]
+    end
+
+    subgraph Layer1["🧠 Layer 1: Agent Loop Context Management"]
+        direction TB
+        MONITOR["Context Monitor<br/>━━━━━━━━━━━━━━<br/>• Token counting<br/>• Message counting"]
+        
+        subgraph Modes["Management Modes"]
+            direction LR
+            TOKEN["token_budget<br/>━━━━━━━━━━<br/>Max total tokens"]
+            SLIDE["sliding_window<br/>━━━━━━━━━━<br/>Max message count"]
+        end
+        
+        subgraph Strategies["Overflow Strategies"]
+            direction LR
+            TRUNC["truncate<br/>━━━━━━━━<br/>Drop oldest<br/>(fast)"]
+            SUMTRUNC["summarize_and_truncate<br/>━━━━━━━━━━━━━━<br/>Condense → Drop<br/>(preserves context)"]
+        end
+        
+        RECENT["preserve_recent<br/>━━━━━━━━━━━━━━<br/>Always keep last N<br/>messages protected"]
+    end
+
+    subgraph Layer2["💾 Layer 2: Tool Response Offloading"]
+        direction TB
+        CHECK["Size Check<br/>━━━━━━━━━━━━━━<br/>threshold_tokens: 500<br/>threshold_bytes: 2000"]
+        
+        subgraph Offload["Offload Process"]
+            direction LR
+            SAVE["Save to File<br/>(.omnicoreagent_artifacts/)"]
+            PREVIEW["Generate Preview<br/>(first ~150 tokens)"]
+        end
+        
+        subgraph Tools["Built-in Artifact Tools"]
+            direction LR
+            READ["read_artifact()"]
+            TAIL["tail_artifact()"]
+            SEARCH["search_artifact()"]
+            LIST["list_artifacts()"]
+        end
+    end
+
+    subgraph Output["📤 Optimized Context"]
+        CLEAN["Lean Context<br/>━━━━━━━━━━━━━━<br/>• System prompt<br/>• Recent messages<br/>• Summaries<br/>• Tool previews"]
+    end
+
+    %% Flow
+    MSG --> MONITOR
+    TOOL_RESP --> CHECK
+    
+    MONITOR --> TOKEN
+    MONITOR --> SLIDE
+    TOKEN --> TRUNC
+    TOKEN --> SUMTRUNC
+    SLIDE --> TRUNC
+    SLIDE --> SUMTRUNC
+    TRUNC --> RECENT
+    SUMTRUNC --> RECENT
+    
+    CHECK -->|"> threshold"| SAVE
+    CHECK -->|"≤ threshold"| Output
+    SAVE --> PREVIEW
+    PREVIEW --> Tools
+    Tools -.->|"On demand"| Output
+    
+    RECENT --> CLEAN
+    PREVIEW --> CLEAN
+
+    %% Styling
+    style Input fill:#3498db,stroke:#2980b9,color:#fff
+    style Layer1 fill:#2c3e50,stroke:#34495e,color:#fff
+    style Modes fill:#34495e,stroke:#2c3e50,color:#fff
+    style Strategies fill:#34495e,stroke:#2c3e50,color:#fff
+    style Layer2 fill:#8e44ad,stroke:#9b59b6,color:#fff
+    style Offload fill:#9b59b6,stroke:#8e44ad,color:#fff
+    style Tools fill:#9b59b6,stroke:#8e44ad,color:#fff
+    style Output fill:#27ae60,stroke:#2ecc71,color:#fff
+```
+
+#### How the Two Layers Work Together
+
+| Layer | Scope | What It Manages | When It Triggers |
+|-------|-------|-----------------|------------------|
+| **Context Management** | Agent loop messages | User/Assistant conversation, tool call history | When context exceeds `threshold_percent` of limit |
+| **Tool Offloading** | Individual tool responses | Large API responses, file contents, search results | When response exceeds `threshold_tokens` |
+
+---
+
 #### 3.1 Agent Loop Context Management
 
 Prevent token exhaustion during long-running tasks with automatic context management. When enabled, the agent monitors context size and applies truncation or summarization when thresholds are exceeded.
@@ -498,6 +589,8 @@ agent_config = {
 | `truncate` | Drop oldest messages | Fast, no extra LLM calls |
 | `summarize_and_truncate` | Summarize then drop | Preserves context, adds latency |
 
+---
+
 #### 3.2 Tool Response Offloading
 
 Large tool responses are automatically saved to files, with only a **preview** in context. The agent can retrieve full content on demand using built-in tools.
@@ -521,11 +614,16 @@ agent_config = {
 | Large API response | ~5,000 tokens | ~150 tokens | **97%** |
 | File read (1000 lines) | ~8,000 tokens | ~200 tokens | **97%** |
 
-**Built-in Tools** (automatically available when offloading is enabled):
-- `read_artifact(artifact_id)` — Read full content when needed
-- `tail_artifact(artifact_id, lines)` — Read last N lines (great for logs)
-- `search_artifact(artifact_id, query)` — Search within large responses
-- `list_artifacts()` — See all offloaded data in current session
+**Built-in Artifact Tools** (automatically available when offloading is enabled):
+
+| Tool | Purpose |
+|------|---------|
+| `read_artifact(artifact_id)` | Read full content when needed |
+| `tail_artifact(artifact_id, lines)` | Read last N lines (great for logs) |
+| `search_artifact(artifact_id, query)` | Search within large responses |
+| `list_artifacts()` | See all offloaded data in current session |
+
+---
 
 #### Combined Power
 
@@ -543,6 +641,7 @@ agent = OmniCoreAgent(
 ```
 
 > 💡 **When to Use**: Enable for long-running tasks (research, multi-step workflows) where context or tool responses can grow unbounded.
+
 
 ### 4. 📡 Event System (Plug & Play)
 
