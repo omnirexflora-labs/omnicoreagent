@@ -1,0 +1,29 @@
+{
+  "AgentConfig": {
+    "agent_name": "OmniDevOpsCopilot",
+    "tool_call_timeout": 30,
+    "max_steps": 20,
+    "request_limit": 0,
+    "total_tokens_limit": 0,
+    "enable_tools_knowledge_base": false,
+    "tools_results_limit": 10,
+    "tools_similarity_threshold": 0.1,
+    "memory_config": {
+      "mode": "sliding_window",
+      "value": 100
+    },
+    "memory_results_limit": 5,
+    "memory_similarity_threshold": 0.5,
+    "memory_tool_backend": null
+  },
+  "LLM": {
+    "provider": "openai",
+    "model": "gpt-4.1",
+    "temperature": 0.0,
+    "max_tokens": 5000,
+    "max_context_length": 2000,
+    "top_p": 0.8,
+    "top_k": "N/A"
+  },
+  "mcpServers": {}
+}

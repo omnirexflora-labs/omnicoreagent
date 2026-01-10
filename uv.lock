@@ -1678,6 +1678,7 @@ dependencies = [
     { name = "redis" },
     { name = "rich" },
     { name = "sqlalchemy" },
+    { name = "tiktoken" },
     { name = "tzlocal" },
     { name = "websockets" },
 ]
@@ -1725,6 +1726,7 @@ requires-dist = [
     { name = "redis", specifier = ">=5.2.1" },
     { name = "rich", specifier = ">=13.9.4" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
+    { name = "tiktoken", specifier = ">=0.8.0" },
     { name = "tzlocal", specifier = ">=5.2" },
     { name = "websockets", specifier = ">=15.0.1" },
 ]

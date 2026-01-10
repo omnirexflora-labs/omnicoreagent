@@ -40,10 +40,28 @@ async def main():
         # === FEATURE FLAGS ===
         "enable_advanced_tool_use": True,  # Enable smarter tool selection logic
         "enable_agent_skills": True,  # Enable specialized agent skills system
-        # === MEMORY SETTINGS ===
+        # === MEMORY WITH SUMMARIZATION ===
         "memory_config": {
-            "mode": "sliding_window",  # How to manage context window
-            "value": 10,  # Number of messages to keep
+            "mode": "sliding_window",  # or "token_budget"
+            "value": 10,  # messages to keep (sliding_window) or tokens (token_budget)
+            "summary": {
+                "enabled": True,  # Summarize evicted messages
+                "retention_policy": "summarize",  # or "keep" to save originals
+            },
+        },
+        # === CONTEXT MANAGEMENT (for long conversations) ===
+        "context_management": {
+            "enabled": True,
+            "mode": "token_budget",  # or "sliding_window"
+            "value": 100000,  # Max tokens before triggering
+            "threshold_percent": 75,  # Trigger at 75% of limit
+            "strategy": "summarize_and_truncate",  # or "truncate"
+            "preserve_recent": 6,  # Always keep last N messages
+        },
+        # === GUARDRAILS (prompt injection protection) ===
+        "guardrail_config": {
+            "enabled": True,
+            "strict_mode": True,  # Block suspicious inputs
         },
     }
 

@@ -384,7 +384,6 @@ class LLMConnection:
                     api_key=self.config.llm_api_key,
                 )
 
-                # Direct SDK usage - Pass model name exactly as configured
                 model_name = self.llm_config["model"]
 
                 kwargs = {
