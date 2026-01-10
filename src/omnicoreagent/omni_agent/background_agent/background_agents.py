@@ -5,7 +5,7 @@ Background OmniCoreAgent for self-flying automation.
 import asyncio
 import uuid
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from omnicoreagent.omni_agent.agent import OmniCoreAgent
 
@@ -74,7 +74,8 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
         self.error_count = 0
 
         # Task Queue for reliable execution
-        self._task_queue = asyncio.Queue()
+        queue_size = config.get("queue_size", 100)
+        self._task_queue = asyncio.Queue(maxsize=queue_size)
         self._worker_task = None
         self._shutdown_event = asyncio.Event()
 
@@ -163,7 +164,14 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
         if self._worker_task:
             self._worker_task.cancel()
             try:
+                # Wait for worker to finish current task or cancelled
                 await self._worker_task
+                
+                # Wait for queue to process if possible (graceful shutdown)
+                if not self._task_queue.empty():
+                    logger.warning(
+                        f"Agent {self.agent_id} stopping with {self._task_queue.qsize()} pending tasks"
+                    )
             except asyncio.CancelledError:
                 pass
             except Exception as e:
@@ -202,10 +210,28 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
 
     async def submit_task(self, task_config: Dict[str, Any]):
         """Submit a task to the queue for execution."""
-        await self._task_queue.put(
-            {"kwargs": task_config, "timestamp": datetime.now().isoformat()}
-        )
-        logger.info(f"Task submitted for agent {self.agent_id}")
+        try:
+            timestamp = datetime.now(timezone.utc).isoformat()
+            # Non-blocking put if queue is full, or wait with timeout?
+            # Background tasks usually want to be non-blocking to the caller.
+            # Using wait_for to allow small backpressure but fail if overloaded.
+            
+            queue_timeout = task_config.get("queue_timeout", 5.0)
+            
+            await asyncio.wait_for(
+                self._task_queue.put(
+                    {"kwargs": task_config, "timestamp": timestamp}
+                ),
+                timeout=queue_timeout
+            )
+            logger.info(f"Task submitted for agent {self.agent_id}")
+            
+        except asyncio.TimeoutError:
+            logger.error(f"Task queue full for agent {self.agent_id}, dropping task")
+            raise  # Re-raise so caller knows it failed
+        except Exception as e:
+            logger.error(f"Failed to submit task for agent {self.agent_id}: {e}")
+            raise
 
     async def run_task(self, task_config: Dict[str, Any]):
         """
@@ -228,7 +254,7 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
             )
 
         self.is_running = True
-        task_session_id = task_config.get("session_id")
+        task_session_id = task_config.get("session_id") or str(uuid.uuid4())
 
         try:
             task_started_event = Event(
@@ -236,7 +262,7 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
                 payload=BackgroundTaskStartedPayload(
                     agent_id=self.agent_id,
                     session_id=task_session_id,
-                    timestamp=datetime.now().isoformat(),
+                    timestamp=datetime.now(timezone.utc).isoformat(),
                     run_count=self.run_count + 1,
                     kwargs=task_config,
                 ),
@@ -252,7 +278,7 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
                     agent_id=self.agent_id,
                     status="running",
                     session_id=task_session_id,
-                    timestamp=datetime.now().isoformat(),
+                    timestamp=datetime.now(timezone.utc).isoformat(),
                 ),
                 agent_name=self.agent_id,
             )
@@ -260,17 +286,27 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
                 session_id=task_session_id, event=status_event
             )
 
-            result = await self._execute_with_retries(task_config)
+            # Get timeout from task config
+            timeout = task_config.get("timeout", 300)  # Default 5 minutes
+            
+            # Execute with timeout
+            try:
+                result = await asyncio.wait_for(
+                    self._execute_with_retries(task_config),
+                    timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                raise TimeoutError(f"Task execution timed out after {timeout} seconds")
 
             self.run_count += 1
-            self.last_run = datetime.now()
+            self.last_run = datetime.now(timezone.utc)
 
             task_completed_event = Event(
                 type=EventType.BACKGROUND_TASK_COMPLETED,
                 payload=BackgroundTaskCompletedPayload(
                     agent_id=self.agent_id,
                     session_id=task_session_id,
-                    timestamp=datetime.now().isoformat(),
+                    timestamp=datetime.now(timezone.utc).isoformat(),
                     run_count=self.run_count,
                     result=result,
                 ),
@@ -287,7 +323,7 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
                     status="idle",
                     last_run=self.last_run.isoformat(),
                     run_count=self.run_count,
-                    timestamp=datetime.now().isoformat(),
+                    timestamp=datetime.now(timezone.utc).isoformat(),
                 ),
                 agent_name=self.agent_id,
             )
@@ -306,7 +342,7 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
                 payload=BackgroundTaskErrorPayload(
                     agent_id=self.agent_id,
                     session_id=task_session_id,
-                    timestamp=datetime.now().isoformat(),
+                    timestamp=datetime.now(timezone.utc).isoformat(),
                     error=str(e),
                     error_count=self.error_count,
                 ),
@@ -324,7 +360,7 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
                     last_run=self.last_run.isoformat() if self.last_run else None,
                     run_count=self.run_count,
                     error_count=self.error_count,
-                    timestamp=datetime.now().isoformat(),
+                    timestamp=datetime.now(timezone.utc).isoformat(),
                 ),
                 agent_name=self.agent_id,
             )
@@ -341,7 +377,7 @@ class BackgroundOmniCoreAgent(OmniCoreAgent):
     async def _execute_with_retries(self, task_config: Dict[str, Any]):
         """Execute task with retry logic."""
         last_error = None
-        max_retries = task_config.get("max_retries")
+        max_retries = task_config.get("max_retries", 3)
 
         for attempt in range(max_retries + 1):
             try:
