@@ -154,58 +154,161 @@ print(result["response"])
 
 ## 🏗 Architecture Overview
 
+OmniCoreAgent follows a **layered architecture** that separates concerns while enabling rich integrations between components. Here's how it all fits together:
+
 ```mermaid
-graph LR
-    User([👤 User / App]) --> Input[Input Request]
-    Clock([⏰ Scheduler]) --> BG[Background Agent]
-    
-    subgraph Orchestration["🎼 Orchestration Layer"]
-        Input --> WF[Workflow Engine]
-        Workflow[Workflow Agents]
+flowchart TB
+    %% Entry Points
+    subgraph Entry["🚀 Entry Points"]
+        User([👤 User / App])
+        Clock([⏰ Scheduler])
+        API([🌐 External API])
     end
 
+    %% Security Layer - First Line of Defense
     subgraph Security["🛡️ Security Layer"]
-        Input --> Guard[Guardrails]
-        WF --> Guard
+        Guard["Guardrails Engine<br/>━━━━━━━━━━━━━━<br/>• Pattern Matching<br/>• Heuristic Analysis<br/>• Entropy Detection<br/>• Encoding Detection"]
     end
 
+    %% Orchestration Layer
+    subgraph Orchestration["🎼 Orchestration Layer"]
+        direction LR
+        WF["Workflow Engine"]
+        SEQ["Sequential<br/>Agent"]
+        PAR["Parallel<br/>Agent"]
+        RTR["Router<br/>Agent"]
+        BG["Background<br/>Agent"]
+
+        WF --> SEQ
+        WF --> PAR
+        WF --> RTR
+    end
+
+    %% Core Engine - The Heart
     subgraph Core["🧠 OmniCore Engine"]
-        Guard --> OCA[OmniCoreAgent]
-        BG --> OCA
-        OCA --> Context[Context Engine]
-        Context --> React[ReAct Loop]
-        React --> TO[Tool Orchestration]
+        direction TB
+        OCA["OmniCoreAgent<br/>━━━━━━━━━━━━━━<br/>• System Instructions<br/>• Model Config<br/>• Agent Config"]
+        
+        subgraph Processing["Processing Pipeline"]
+            direction LR
+            CTX["Context<br/>Manager"]
+            SUM["Conversation<br/>Summarizer"]
+            REACT["ReAct<br/>Loop"]
+            OFF["Tool Response<br/>Offloader"]
+        end
+        
+        LLM["LLM Layer<br/>━━━━━━━━━━━━━━<br/>OpenAI • Anthropic<br/>Gemini • Groq • Ollama<br/>Mistral • DeepSeek"]
     end
 
-    subgraph Capabilities["🛠️ Capability Layer"]
-        TO --> Local[Local Tools]
-        TO --> MCP[MCP Client]
-        TO --> RAG[BM25 RAG]
-        TO --> Sub[Sub-Agents]
+    %% Capabilities Layer
+    subgraph Capabilities["🛠️ Capabilities Layer"]
+        direction TB
+        TOOLS["Tool Orchestration<br/>━━━━━━━━━━━━━━<br/>• Validation<br/>• Execution<br/>• Error Handling"]
+        
+        subgraph ToolTypes["Tool Types"]
+            direction LR
+            LOCAL["Local Tools<br/>(ToolRegistry)"]
+            MCP["MCP Client<br/>(stdio/http/sse)"]
+            BM25["BM25 RAG<br/>(Dynamic Discovery)"]
+            SKILLS["Agent Skills<br/>(Polyglot Scripts)"]
+            SUB["Sub-Agents<br/>(Delegation)"]
+        end
     end
 
-    subgraph Infrastructure["💾 Persistence Layer"]
-        OCA -.->|State| Memory[Memory Router]
-        OCA -.->|Stream| Events[Event Router]
-        TO -.->|Files| Workspace[Workspace Memory]
+    %% Infrastructure Layer
+    subgraph Infrastructure["💾 Infrastructure Layer"]
+        direction TB
+        
+        subgraph Routers["Routers (Hot-Swappable)"]
+            direction LR
+            MEM["Memory Router<br/>━━━━━━━━━━━━━━<br/>Session State<br/>Conversation History"]
+            EVT["Event Router<br/>━━━━━━━━━━━━━━<br/>Real-time Streaming<br/>Audit Trail"]
+        end
+        
+        subgraph Storage["Storage Backends"]
+            direction LR
+            REDIS[("Redis")]
+            POSTGRES[("PostgreSQL")]
+            MONGO[("MongoDB")]
+            MEM_STORE[("In-Memory")]
+            FS[("File System")]
+        end
+        
+        OBS["Observability<br/>━━━━━━━━━━━━━━<br/>Metrics • Tracing<br/>Token Usage • Opik"]
     end
 
-    subgraph Backends["Storage Backends"]
-        Memory --> Redis[(Redis)]
-        Memory --> DB[(SQL/Mongo)]
-        Events --> Streams[Redis Streams]
-        Workspace --> FS[File System]
-    end
+    %% Connections - Main Flow
+    User --> Guard
+    API --> Guard
+    Clock --> BG
+    
+    Guard -->|"✓ Safe"| OCA
+    Guard -->|"✗ Blocked"| User
+    
+    BG --> OCA
+    WF --> OCA
+    SEQ --> OCA
+    PAR --> OCA
+    RTR --> OCA
+    
+    OCA --> CTX
+    CTX <--> SUM
+    CTX --> REACT
+    REACT <--> LLM
+    REACT --> TOOLS
+    TOOLS --> OFF
+    
+    TOOLS --> LOCAL
+    TOOLS --> MCP
+    TOOLS --> BM25
+    TOOLS --> SKILLS
+    TOOLS --> SUB
+    SUB -.->|"Recursive"| OCA
+    
+    %% Infrastructure Connections
+    OCA <-.->|"State"| MEM
+    OCA <-.->|"Events"| EVT
+    OFF <-.->|"Artifacts"| FS
+    
+    MEM --> REDIS
+    MEM --> POSTGRES
+    MEM --> MONGO
+    MEM --> MEM_STORE
+    EVT --> REDIS
+    
+    OCA <-.->|"Metrics"| OBS
 
-    style Orchestration fill:#d35400,stroke:#e67e22,color:#fff
+    %% Styling
+    style Entry fill:#1abc9c,stroke:#16a085,color:#fff
     style Security fill:#e74c3c,stroke:#c0392b,color:#fff
+    style Orchestration fill:#d35400,stroke:#e67e22,color:#fff
     style Core fill:#2c3e50,stroke:#34495e,color:#fff
-    style Capabilities fill:#2980b9,stroke:#2980b9,color:#fff
-    style Infrastructure fill:#8e44ad,stroke:#8e44ad,color:#fff
-    style Backends fill:#95a5a6,stroke:#7f8c8d,color:#fff
+    style Processing fill:#34495e,stroke:#2c3e50,color:#fff
+    style Capabilities fill:#2980b9,stroke:#3498db,color:#fff
+    style ToolTypes fill:#3498db,stroke:#2980b9,color:#fff
+    style Infrastructure fill:#8e44ad,stroke:#9b59b6,color:#fff
+    style Routers fill:#9b59b6,stroke:#8e44ad,color:#fff
+    style Storage fill:#95a5a6,stroke:#7f8c8d,color:#fff
 ```
 
----
+### Layer Responsibilities
+
+| Layer | Purpose | Key Components |
+|-------|---------|----------------|
+| **🚀 Entry** | Request sources | User Apps, Schedulers, External APIs |
+| **🛡️ Security** | Threat protection | Guardrails (injection detection, encoding checks) |
+| **🎼 Orchestration** | Multi-agent coordination | Sequential, Parallel, Router, Background agents |
+| **🧠 Core Engine** | Agent execution | ReAct loop, Context Management, Summarization, LLM calls |
+| **🛠️ Capabilities** | Tool execution | Local tools, MCP, BM25 discovery, Skills, Sub-agents |
+| **💾 Infrastructure** | Persistence & observability | Memory/Event routers, Storage backends, Metrics |
+
+### Data Flow Highlights
+
+1. **Request Path**: Entry → Security (guardrails) → Core → Capabilities → Response
+2. **Memory Persistence**: State flows bidirectionally between agent and storage backends
+3. **Tool Offloading**: Large responses saved to file system, only previews in context
+4. **Event Streaming**: Real-time events pushed to Redis Streams for monitoring
+
 
 ## 🎯 Core Features
 
