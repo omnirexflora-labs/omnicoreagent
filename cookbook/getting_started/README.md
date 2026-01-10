@@ -1,128 +1,182 @@
 # Getting Started with OmniCoreAgent
 
-Welcome to the **OmniCoreAgent** learning path. This guide is designed to take you from writing your first line of code to building production-ready, autonomous agents with persistent memory and event streaming.
+Welcome to the **OmniCoreAgent** learning path. This guide takes you from writing your first line of code to building production-ready, autonomous agents with persistent memory, context management, and guardrails.
 
-Typically, you should follow these examples in order, as each one introduces new concepts that build upon the last.
+**Follow the examples in order** — each one builds on the concepts from the previous.
 
 ---
 
 ## 📚 The Learning Path
 
-| # | File | Key Concepts Learned |
-|---|------|----------------------|
-| 1 | [first_agent.py](./first_agent.py) | **The Basics**: Initializing `OmniCoreAgent` and running a simple query. |
-| 2 | [agent_with_models.py](./agent_with_models.py) | **Models**: Switching providers (OpenAI, Anthropic, Gemini, Groq, Ollama). |
-| 3 | [agent_with_local_tools.py](./agent_with_local_tools.py) | **Local Tools**: registering Python functions as tools, type hinting, and returning structured data (`dict`). |
-| 4 | [agent_with_mcp_tools.py](./agent_with_mcp_tools.py) | **MCP Integration**: Connecting to external **Model Context Protocol** servers (e.g., filesystem, git). |
-| 5 | [agent_with_all_tools.py](./agent_with_all_tools.py) | **Hybrid Architecture**: Combining fast local business logic with powerful external MCP tools. |
-| 6 | [agent_with_memory.py](./agent_with_memory.py) | **Persistence**: Using `MemoryRouter` to store conversation history in Redis, Postgres, MongoDB, or SQLite. |
-| 7 | [agent_with_memory_switching.py](./agent_with_memory_switching.py) | **Runtime Agility**: Switching memory backends on the fly (e.g., dev -> prod) without restarting the agent. |
-| 8 | [agent_with_events.py](./agent_with_events.py) | **Observability**: Using `EventRouter` to stream real-time events (thoughts, tool calls) to a UI or log. |
-| 9 | [agent_with_event_switching.py](./agent_with_event_switching.py) | **Scale**: Switching event backends at runtime (e.g., In-Memory -> Redis Streams). |
-| 10| [agent_configuration.py](./agent_configuration.py) | **Advanced Config**: Setting timeouts, limits, and safety guardrails. |
+| # | File | Key Concepts |
+|---|------|--------------|
+| 1 | [first_agent.py](./first_agent.py) | **The Basics**: Initialize `OmniCoreAgent` and run a simple query |
+| 2 | [agent_with_models.py](./agent_with_models.py) | **Models**: Switch providers (OpenAI, Anthropic, Gemini, Groq, Ollama) |
+| 3 | [agent_with_local_tools.py](./agent_with_local_tools.py) | **Local Tools**: Register Python functions as agent tools |
+| 4 | [agent_with_mcp_tools.py](./agent_with_mcp_tools.py) | **MCP Integration**: Connect to external MCP servers |
+| 5 | [agent_with_all_tools.py](./agent_with_all_tools.py) | **Hybrid Architecture**: Combine local + MCP tools |
+| 6 | [agent_with_memory.py](./agent_with_memory.py) | **Persistence**: Store conversations in Redis, Postgres, MongoDB |
+| 7 | [agent_with_memory_switching.py](./agent_with_memory_switching.py) | **Runtime Switching**: Change memory backends on the fly |
+| 8 | [agent_with_events.py](./agent_with_events.py) | **Observability**: Stream real-time events to UI |
+| 9 | [agent_with_event_switching.py](./agent_with_event_switching.py) | **Scale**: Switch event backends at runtime |
+| 10 | [agent_with_context_management.py](./agent_with_context_management.py) | **🆕 Context Management**: Handle infinitely long conversations |
+| 11 | [agent_with_guardrails.py](./agent_with_guardrails.py) | **🆕 Guardrails**: Protect against prompt injection |
+| 12 | [agent_with_metrics.py](./agent_with_metrics.py) | **🆕 Metrics**: Track tokens, requests, and costs |
+| 13 | [agent_with_sub_agents.py](./agent_with_sub_agents.py) | **🆕 Sub-Agents**: Build multi-agent systems |
+| 14 | [agent_configuration.py](./agent_configuration.py) | **Advanced Config**: All settings in one place |
 
 ---
 
 ## 🚀 Quick Start
 
 ```bash
-# Start from the beginning
+# 1. Install
+pip install omnicoreagent
+
+# 2. Set your API key
+echo "LLM_API_KEY=your_key" > .env
+
+# 3. Run your first agent
 python cookbook/getting_started/first_agent.py
-
-# Switch models
-python cookbook/getting_started/agent_with_models.py
-
-# Progress through the tools examples
-python cookbook/getting_started/agent_with_local_tools.py
 ```
+
+---
+
+## 🎯 "I just want to..."
+
+| Goal | Example |
+|------|---------|
+| Build my first agent | [first_agent.py](./first_agent.py) |
+| Use a different LLM (Claude, Gemini, etc.) | [agent_with_models.py](./agent_with_models.py) |
+| Give my agent tools | [agent_with_local_tools.py](./agent_with_local_tools.py) |
+| Connect to MCP servers | [agent_with_mcp_tools.py](./agent_with_mcp_tools.py) |
+| Save conversation history | [agent_with_memory.py](./agent_with_memory.py) |
+| Handle long conversations | [agent_with_context_management.py](./agent_with_context_management.py) |
+| Protect against attacks | [agent_with_guardrails.py](./agent_with_guardrails.py) |
+| Track usage and costs | [agent_with_metrics.py](./agent_with_metrics.py) |
+| Build multi-agent systems | [agent_with_sub_agents.py](./agent_with_sub_agents.py) |
 
 ---
 
 ## 🛠️ Prerequisites
 
-Before running the examples, ensure you have the environment set up.
+```bash
+# Required
+pip install omnicoreagent
 
-1.  **Install the Package**:
-    ```bash
-    pip install omnicoreagent
-    ```
+# Create .env file
+LLM_API_KEY=your_key_here
 
-2.  **Environment Variables**:
-    Create a `.env` file in your project root. The agent strictly requires `LLM_API_KEY`.
-    ```bash
-    # Required (works for OpenAI, Anthropic, Gemini, Groq, etc.)
-    LLM_API_KEY=your_key_here
-
-    # Optional (for persistence examples)
-    REDIS_URL=redis://localhost:6379/0
-    DATABASE_URL=postgresql://user:pass@localhost:5432/db
-    MONGODB_URI=mongodb://localhost:27017/omnicoreagent
-    ```
-
-3.  **MCP Requirements** (Step 4+):
-    You need Node.js installed to run the standard MCP filesystem server.
-    ```bash
-    npm install -g npx
-    ```
+# Optional (for persistence examples)
+REDIS_URL=redis://localhost:6379/0
+DATABASE_URL=postgresql://user:pass@localhost:5432/db
+MONGODB_URI=mongodb://localhost:27017/omnicoreagent
+```
 
 ---
 
-## 📖 Deep Dive into the Examples
+## 📖 Key Concepts
 
-### 1. Your First Agent (`first_agent.py`)
-This is the atomic unit of the framework. You initialize an `OmniCoreAgent` with a name, system instruction, and model configuration.
-- **Why**: Understand the minimal viable setup.
-- **Note**: The `.env` file is loaded automatically by the framework.
+### Memory with Summarization
+```python
+"memory_config": {
+    "mode": "sliding_window",
+    "value": 50,
+    "summary": {
+        "enabled": True,
+        "retention_policy": "summarize"
+    }
+}
+```
+Old messages are summarized, not lost.
 
-### 2. Multi-Model Support (`agent_with_models.py`)
-OmniCoreAgent isn't tied to OpenAI. You can swap models just by changing the config.
-- **Providers**: Supports OpenAI, Anthropic, Gemini, Groq, Mistral, Ollama (local), and more.
-- **Abstraction**: The agent code remains the same; only the `model_config` dict changes.
+### Context Management
+```python
+"context_management": {
+    "enabled": True,
+    "mode": "token_budget",  # or "sliding_window"
+    "value": 100000,
+    "threshold_percent": 75,
+    "strategy": "summarize_and_truncate",
+    "preserve_recent": 6
+}
+```
+Conversations can run forever without hitting token limits.
 
-### 3. Local Tools (`agent_with_local_tools.py`)
-Agents become powerful when they can *do* things. Here, you register your own Python functions using the `@tool.register_tool` decorator.
-- **Crucial**: Use Python type hints! The LLM uses these to understand inputs.
-- **Best Practice**: Return a dictionary (e.g., `{"status": "success", "data": ...}`) so the agent can check for errors deterministically.
+#### Choosing the Right Mode
 
-### 4. MCP Tools (`agent_with_mcp_tools.py`)
-The [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is a standard for connecting AI to systems.
-- **Concept**: Instead of writing a wrapper for every API, you connect to an MCP server.
-- **Transport**: This example uses `stdio` to run a local Node.js process (the filesystem server) and communicate with it directly.
+| Mode | Triggers When | Best For |
+|------|---------------|----------|
+| `sliding_window` | Message count exceeds `value` | Conversational agents with short messages |
+| `token_budget` | Token count exceeds `value × threshold%` | Tool-heavy agents with large responses |
 
-### 5. Hybrid Tools (`agent_with_all_tools.py`)
-Real-world agents need both.
-- **Pattern**: Use MCP for generic capabilities (reading files, querying DBs) and Local Tools for specific business logic (analyzing that data, formatting reports).
+**Trade-offs:**
 
-### 6. Persistent Memory (`agent_with_memory.py`)
-By default, memory is `in_memory` (lost on restart). This example introduces the `MemoryRouter`.
-- **Backends**:
-    - `redis`: Fast, key-value storage. Best for production chat cache.
-    - `database`: SQL (Postgres, SQLite). Best for structured, long-term logs.
-    - `mongodb`: Document store. Flexible schema.
+| | `sliding_window` | `token_budget` |
+|--|------------------|----------------|
+| **Token efficiency** | ✅ Better (smaller contexts) | ⚠️ Larger contexts per call |
+| **Predictability** | ✅ Consistent behavior | Depends on message size |
+| **Large messages** | ⚠️ Can exceed limits | ✅ Handles safely |
+| **Cost** | ✅ Lower cumulative | Higher cumulative |
 
-### 7. Runtime Memory Switching (`agent_with_memory_switching.py`)
-A unique feature of OmniCoreAgent. You can switch the storage backend while the agent is running.
-- **Use Case**: Start in "fast mode" (in-memory) for a quick calculation, then switch to "audit mode" (Postgres) to save the final report.
+**Recommendations:**
+- **Chatbots / Q&A agents**: Use `sliding_window` with `value: 10-20`
+- **Tool-heavy agents** (APIs, web scraping): Use `token_budget` with `value: 8000-16000`
+- **Mixed workloads**: Use `token_budget` with lower threshold (50-60%)
 
-### 8. Event Streaming (`agent_with_events.py`)
-Don't just wait for the final answer. Watch the agent "think."
-- **EventRouter**: Captures every step—thought, tool call, result, message.
-- **Usage**: Use `async for event in agent.stream_events()` to build real-time UIs (like ChatGPT's typing effect).
+### Tool Response Offloading
+```python
+"tool_offload": {
+    "enabled": True,
+    "threshold_tokens": 500,  # Offload if response > 500 tokens
+    "max_preview_tokens": 150,  # Show first 150 tokens in context
+    "storage_dir": ".omnicoreagent_artifacts"
+}
+```
+Large tool responses are automatically saved to files, with only a preview in context.
 
-### 9. Event Switching (`agent_with_event_switching.py`)
-Similar to memory, you can route events dynamically.
-- **Use Case**:
-    - **Development**: Use `in_memory` to print events to the console.
-    - **Production**: Switch to `redis_stream` to broadcast events to a monitoring dashboard or external service.
+**How it works:**
+1. Tool returns large response (e.g., web search with 50 results)
+2. Response saved to `.omnicoreagent_artifacts/` 
+3. Agent sees preview + file reference in context
+4. Agent uses `read_artifact()` tool to get full content when needed
 
-### 10. Advanced Configuration (`agent_configuration.py`)
-Production agents need limits.
-- **Cost Control**: `total_tokens_limit` stops runaways.
-- **Safety**: `max_steps` prevents infinite thinking loops.
-- **Reliability**: `tool_call_timeout` ensures your agent doesn't hang waiting for an API.
+**Token savings example:**
+| Tool Response | Without Offloading | With Offloading |
+|---------------|-------------------|-----------------|
+| Web search (50 results) | ~10,000 tokens | ~200 tokens |
+| Large API response | ~5,000 tokens | ~150 tokens |
+| File read (1000 lines) | ~8,000 tokens | ~200 tokens |
+
+**Agent gets 4 built-in tools:**
+- `read_artifact(artifact_id)` - Read full content
+- `tail_artifact(artifact_id, lines)` - Read last N lines
+- `search_artifact(artifact_id, query)` - Search within artifact
+- `list_artifacts()` - List all offloaded artifacts
+
+> 💡 *Inspired by Cursor's "dynamic context discovery" and Anthropic's context engineering patterns*
+
+### Guardrails
+```python
+"guardrail_config": {
+    "enabled": True,
+    "strict_mode": True
+}
+```
+Built-in protection against prompt injection attacks.
+
+### Metrics
+```python
+metrics = await agent.get_metrics()
+# Returns: total_requests, total_tokens, total_input_tokens, total_output_tokens
+```
+Track usage for cost control and monitoring.
 
 ---
 
 ## 🚀 Next Steps
 
-Once you've mastered these basics, explore the **Workflows** directory to see how to chain multiple agents together, or **Production** for guardrails and metrics.
+- **[Workflows](../workflows)**: Chain agents together (Sequential, Parallel, Router)
+- **[Background Agents](../background_agents)**: Scheduled autonomous tasks
+- **[Production](../production)**: Prometheus metrics and observability
+- **[Showcase](../showcase)**: Full production applications

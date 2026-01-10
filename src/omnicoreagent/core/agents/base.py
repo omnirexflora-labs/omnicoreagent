@@ -13,6 +13,8 @@ from omnicoreagent.core.system_prompts import (
     memory_tool_additional_prompt,
     sub_agents_additional_prompt,
     agent_skills_additional_prompt,
+    artifact_tool_additional_prompt,
+    FAST_CONVERSATION_SUMMARY_PROMPT
 )
 import inspect
 from omnicoreagent.core.token_usage import (
@@ -74,7 +76,18 @@ from omnicoreagent.core.tools.advance_tools_use import (
 from omnicoreagent.core.tools.memory_tool.memory_tool import (
     build_tool_registry_memory_tool,
 )
+from omnicoreagent.core.tools.artifact_tool import (
+    build_tool_registry_artifact_tool,
+)
 from omnicoreagent.core.skills.tools import build_skill_tools
+from omnicoreagent.core.context_manager import (
+    AgentLoopContextManager,
+    ContextManagementConfig,
+)
+from omnicoreagent.core.tool_response_offloader import (
+    ToolResponseOffloader,
+    OffloadConfig,
+)
 
 
 class BaseReactAgent:
@@ -90,6 +103,8 @@ class BaseReactAgent:
         enable_advanced_tool_use: bool = False,
         memory_tool_backend: str = None,
         enable_agent_skills: bool = False,
+        context_management_config: dict = None,
+        tool_offload_config: dict = None,
     ):
         self.agent_name = agent_name
         self.max_steps = max(max_steps, 5)
@@ -115,6 +130,14 @@ class BaseReactAgent:
         self.background_task_manager = BackgroundTaskManager()
         self.init_skills()
         self.register_internal_tool = ToolRegistry()
+        
+        self.context_manager = AgentLoopContextManager(
+            ContextManagementConfig.from_dict(context_management_config or {})
+        )
+        
+        self.tool_offloader = ToolResponseOffloader(
+            config=OffloadConfig.from_dict(tool_offload_config or {})
+        )
 
     def init_skills(self):
         if self.enable_agent_skills:
@@ -785,6 +808,22 @@ class BaseReactAgent:
                     status = result.get("status", "unknown")
                     data = result.get("data")
                     message = result.get("message", "")
+                    
+                    SKIP_OFFLOAD_TOOLS = {"read_artifact", "tail_artifact", "search_artifact", "list_artifacts"}
+                    
+                    if (data is not None 
+                        and self.tool_offloader.config.enabled 
+                        and tool_name not in SKIP_OFFLOAD_TOOLS):
+                        data_str = str(data) if not isinstance(data, str) else data
+                        if self.tool_offloader.should_offload(data_str):
+                            offloaded = self.tool_offloader.offload(
+                                tool_name=tool_name,
+                                response=data_str,
+                                metadata={"args": args, "session_id": session_id}
+                            )
+                            data = offloaded.context_message
+                            result["data"] = data
+                    
                     tool_counter[tool_name] += 1
                     tool_call_generated_id = f"{tool_name}#{tool_counter[tool_name]}"
                     display_value = data if data is not None else message
@@ -1073,6 +1112,18 @@ class BaseReactAgent:
                     memory_tool_backend=self.memory_tool_backend,
                     registry=local_tools,
                 )
+        if self.tool_offloader.config.enabled:
+            if local_tools:
+                build_tool_registry_artifact_tool(
+                    offloader=self.tool_offloader,
+                    registry=local_tools,
+                )
+            else:
+                local_tools = self.register_internal_tool
+                build_tool_registry_artifact_tool(
+                    offloader=self.tool_offloader,
+                    registry=local_tools,
+                )
         if self.enable_agent_skills and self.skill_manager:
             if local_tools:
                 build_skill_tools(
@@ -1281,6 +1332,9 @@ class BaseReactAgent:
 
         if self.memory_tool_backend:
             updated_system_prompt += f"\n{memory_tool_additional_prompt}"
+
+        if self.tool_offloader.config.enabled:
+            updated_system_prompt += f"\n{artifact_tool_additional_prompt}"
 
         if self.enable_agent_skills and self.skill_manager:
             skills_context = self.skill_manager.get_skills_context_xml()
@@ -1639,9 +1693,50 @@ class BaseReactAgent:
                     self.usage_limits.check_before_request(usage=usage)
 
                 try:
+                    if self.context_manager.should_trigger(session_state.messages):
+                        async def _summarize_for_context(msgs):
+                            """Summarize messages for context management."""
+                            history_text = "\n".join([
+                                f"{m.role if hasattr(m, 'role') else m.get('role', 'unknown')}: "
+                                f"{m.content if hasattr(m, 'content') else m.get('content', '')}"
+                                for m in msgs
+                            ])
+                            summary_msgs = [
+                                {"role": "system", "content": FAST_CONVERSATION_SUMMARY_PROMPT},
+                                {"role": "user", "content": f"Here is the conversation history: {history_text}"}
+                            ]
+                            response = await llm_connection.llm_call(summary_msgs)
+                            if hasattr(response, "choices") and response.choices:
+                                response = response.choices[0].message.content.strip()
+                            elif hasattr(response, "message"):
+                                response = response.message.content.strip()
+                            elif hasattr(response, "text"):
+                                response = response.text.strip()
+                            elif hasattr(response, "content"):
+                                response = response.content.strip()
+                            elif isinstance(response, dict) and "choices" in response:
+                                response = response["choices"][0]["message"][
+                                    "content"
+                                ].strip()
+                            elif isinstance(response, str):
+                                pass
+                            else:
+                                response = ""
+                            
+                            return response
+                        
+                        session_state.messages = await self.context_manager.manage_context(
+                            messages=session_state.messages,
+                            summarize_fn=_summarize_for_context,
+                        )
+                        if debug:
+                            logger.info(
+                                f"Context managed: now {len(session_state.messages)} messages"
+                            )
 
                     @track("llm_call")
                     async def make_llm_call():
+                        logger.info(f"Sending {(session_state.messages[1:])} messages to LLM")
                         return await llm_connection.llm_call(session_state.messages)
 
                     response = await make_llm_call()

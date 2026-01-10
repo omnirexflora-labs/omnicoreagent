@@ -23,6 +23,7 @@ from omnicoreagent.core.guardrails import (
     PromptInjectionGuard,
     DetectionConfig,
 )
+from omnicoreagent.core.system_prompts import FAST_CONVERSATION_SUMMARY_PROMPT
 
 
 class OmniCoreAgent:
@@ -128,7 +129,27 @@ class OmniCoreAgent:
                 "total_tokens_limit": 0,
                 "enable_advanced_tool_use": False,
                 "enable_agent_skills": False,
-                "memory_config": {"mode": "token_budget", "value": 30000},
+                "memory_config": {"mode": "sliding_window",
+        "value": 10000,
+        "summary": {
+            "enabled": False,
+            "retention_policy": "keep"
+        }},
+                "context_management": {
+                    "enabled": False,
+                    "mode": "token_budget",
+                    "value": 100000,
+                    "threshold_percent": 75,
+                    "strategy": "truncate",
+                    "preserve_recent": 4,
+                },
+                "tool_offload": {
+                    "enabled": False,
+                    "threshold_tokens": 500,
+                    "threshold_bytes": 2000,
+                    "max_preview_tokens": 150,
+                    "storage_dir": ".omnicoreagent_artifacts",
+                },
             }
 
     def _save_config_hidden(self, config: Dict[str, Any]):
@@ -165,9 +186,12 @@ class OmniCoreAgent:
         agent_settings = ReactAgentConfig(**agent_config_dict)
 
         if self.memory_router:
+            summary_config = agent_settings.memory_config.get("summary")
             self.memory_router.set_memory_config(
                 mode=agent_settings.memory_config["mode"],
                 value=agent_settings.memory_config["value"],
+                summary_config=summary_config,
+                summarize_fn=self._summarize_history if summary_config and summary_config.get("enabled") else None,
             )
 
         self.agent = ReactAgent(config=agent_settings)
@@ -177,6 +201,68 @@ class OmniCoreAgent:
                 advance_tools_manager.load_and_process_tools(
                     local_tools=self.local_tools
                 )
+
+    async def _summarize_history(
+        self, messages: list[Dict[str, Any]], max_tokens: int = None
+    ) -> str:
+        """
+        Callback for memory router to summarize message history using the agent's LLM.
+
+        Args:
+            messages: List of messages to summarize
+            max_tokens: Optional token budget hint
+
+        Returns:
+            String summary of the messages
+        """
+        if not self.llm_connection:
+            logger.warning("No LLM connection available for summarization")
+            return ""
+
+        instruction = FAST_CONVERSATION_SUMMARY_PROMPT
+        if max_tokens:
+            instruction += f" Keep the summary roughly under {max_tokens} tokens."
+
+        history_text = ""
+        for msg in messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            history_text += f"{role}: {content}\n"
+
+        prompt_messages = [
+            {
+                "role": "system",
+                "content": instruction,
+            },
+            {
+                "role": "user",
+                "content": f"Here is the conversation history to summarize:\n\n{history_text}",
+            }
+        ]
+
+        try:
+            response = await self.llm_connection.llm_call(messages=prompt_messages)
+            if response:
+                if hasattr(response, "choices") and response.choices:
+                    response = response.choices[0].message.content.strip()
+                elif hasattr(response, "message"):
+                    response = response.message.content.strip()
+                elif hasattr(response, "text"):
+                    response = response.text.strip()
+                elif hasattr(response, "content"):
+                    response = response.content.strip()
+                elif isinstance(response, dict) and "choices" in response:
+                    response = response["choices"][0]["message"]["content"].strip()
+                elif isinstance(response, str):
+                    pass
+                else:
+                    logger.error(f"No valid response content found in LLM response: {type(response)}")
+                    return ""
+                return response
+            return ""
+        except Exception as e:
+            logger.error(f"Summarization callback failed: {e}")
+            return ""
 
     def generate_session_id(self) -> str:
         """Generate a new session ID for the session"""

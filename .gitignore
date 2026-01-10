@@ -19,5 +19,6 @@ site/
 venv/
 memories/
 .omnicoreagent_config/*
+.omnicoreagent_artifacts/*
 .agents/skills/*
 

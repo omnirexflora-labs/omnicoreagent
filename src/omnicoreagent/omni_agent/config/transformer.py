@@ -62,10 +62,35 @@ class AgentConfig:
     enable_advanced_tool_use: bool = False
     enable_agent_skills: bool = False
     memory_config: dict = field(
-        default_factory=lambda: {"mode": "token_budget", "value": 30000}
+        default_factory=lambda: {"mode": "sliding_window",
+        "value": 10000,
+        "summary": {
+            "enabled": False,
+            "retention_policy": "keep"
+        }}
     )
     memory_tool_backend: str = None
     guardrail_config: Optional[Dict[str, Any]] = None
+    context_management: dict = field(
+        default_factory=lambda: {
+            "enabled": False,
+            "mode": "token_budget",
+            "value": 100000,
+            "threshold_percent": 75,
+            "strategy": "truncate",
+            "preserve_recent": 4,
+        }
+    )
+    tool_offload: dict = field(
+        default_factory=lambda: {
+            "enabled": False,
+            "threshold_tokens": 500,
+            "threshold_bytes": 2000,
+            "max_preview_tokens": 150,
+            "max_preview_lines": 10,
+            "storage_dir": ".omnicoreagent_artifacts",
+        }
+    )
 
 
 class ConfigTransformer:

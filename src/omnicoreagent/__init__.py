@@ -8,7 +8,7 @@ from .core.agents import ReactAgent
 from .core.memory_store import MemoryRouter
 from .core.llm import LLMConnection
 from .core.events import EventRouter
-from .core.database import DatabaseMessageStore
+from .core.memory_store import DatabaseMessageStore
 from .core.tools import ToolRegistry, Tool
 from .core.utils import logger
 
