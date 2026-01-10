@@ -1736,7 +1736,6 @@ class BaseReactAgent:
 
                     @track("llm_call")
                     async def make_llm_call():
-                        logger.info(f"Sending {(session_state.messages[1:])} messages to LLM")
                         return await llm_connection.llm_call(session_state.messages)
 
                     response = await make_llm_call()
