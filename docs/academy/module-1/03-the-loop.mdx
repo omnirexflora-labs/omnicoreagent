@@ -1,0 +1,52 @@
+---
+title: "The Agent Loop"
+description: "Understanding the ReAct loop: Think, Act, Observe."
+---
+
+# The Agent Loop
+
+Now that we have a running agent and understand the XML protocol, let's look at the **Loop** itself.
+
+## The ReAct Cycle
+
+`ReAct` stands for **Reasoning + Acting**.
+
+1.  **Reasoning**: The agent "thinks" about the user's query (`<thought>`).
+2.  **Acting**: The agent calls a tool (`<tool_call>`).
+3.  **Observing**: The agent sees the tool output (`<observation>`).
+4.  **Repeat**: If needed, it loops back to step 1.
+
+## Visualizing the Loop
+
+This loop runs inside `agent.run()`. It manages the state, tool execution, and error handling.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Agent as Agent Runner
+    participant LLM
+    participant Tool as Tool Executor
+
+    User->>Agent: "What is 2 + 2?"
+    Agent->>LLM: System Prompt + "What is 2 + 2?"
+    LLM-->>Agent: <thought>Need calculator</thought><tool_call>calculator(2+2)</tool_call>
+    Agent->>Tool: Execute calculator(2+2)
+    Tool-->>Agent: 4
+    Agent->>LLM: <observation>4</observation>
+    LLM-->>Agent: <final_answer>The answer is 4.</final_answer>
+    Agent->>User: "The answer is 4."
+```
+
+## Configuring the Loop
+
+You control the loop with `AgentConfig`:
+
+*   **max_steps**: Prevents infinite loops (default: 10). If hit, the agent stops and returns `AgentState.ERROR`.
+*   **tool_call_timeout**: Limits how long a tool can run (default: 30s).
+*   **loop_detector**: Detects if the agent is stuck repeating the same tool call with the same arguments.
+
+## Handling Errors
+
+If a tool fails (e.g., `ZeroDivisionError`), the `AgentRunner` catches it, logs it, and feeds the error back to the LLM as an `<observation>`.
+
+This allows the agent to **Self-Heal**: "Oh, I made a mistake. Let me try again with valid arguments."

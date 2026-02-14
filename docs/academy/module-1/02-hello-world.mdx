@@ -1,0 +1,89 @@
+---
+title: "Hello World: Your First Agent"
+description: "Building your first OmniCoreAgent ReactAgent with a simple calculator tool."
+---
+
+# Hello World: Your First Agent
+
+Let's build a **Real Agent**.
+
+<Note>
+This lesson assumes you have installed `omnicoreagent` and set up your API keys.
+</Note>
+
+## The Code
+
+Create a file `hello_agent.py`:
+
+```python
+import asyncio
+from omnicoreagent.core.agents.react_agent import ReactAgent, AgentConfig
+from omnicoreagent.core.llm import LLMConnection
+
+# 1. Define a Simple Tool
+def calculator(expression: str) -> float:
+    """Evaluates a mathematical expression."""
+    try:
+        return float(eval(expression))
+    except Exception as e:
+        return f"Error: {e}"
+
+async def main():
+    # 2. Configure the Agent
+    config = AgentConfig(
+        agent_name="MathBot",
+        max_steps=5,  # Stop after 5 loops
+        tool_call_timeout=10,
+    )
+    
+    # 3. Initialize the Runner
+    agent = ReactAgent(config=config)
+    
+    # 4. Register the Tool
+    agent.register_tool(calculator)
+    
+    # 5. Connect to the LLM (Using environment variables)
+    llm = LLMConnection()
+    
+    # 6. Run the Loop
+    print("Running Agent...")
+    response = await agent.run(
+        system_prompt="You are a helpful math assistant. Use the calculator tool for complex calculations.",
+        query="What is 153 * 24 + 10?",
+        llm_connection=llm.llm_call
+    )
+    
+    print(f"\nFinal Answer: {response.final_answer}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Running It
+
+Execute the script:
+
+```bash
+python hello_agent.py
+```
+
+You should see:
+
+```
+Running Agent...
+...
+Thinking: I need to calculate 153 * 24 + 10.
+Calling Tool: calculator(153 * 24 + 10)
+Observation: 3682.0
+Final Answer: The result is 3682.
+```
+
+## What Just Happened?
+
+1.  **Tool Registration**: We passed the `calculator` function to the agent. OmniCoreAgent automatically inspects the function signature and docstring to create the schema.
+2.  **The Loop**: The agent "thought" about the problem, called the tool, got the result, and formulated the answer.
+3.  **Strict Typing**: Because we typed `expression: str -> float`, the agent knew exactly what to pass.
+
+## Next Steps
+
+Now that you have a basic agent, let's explore **Module 2: The Body** to give it persistent file storage and safe execution.

@@ -1,0 +1,70 @@
+---
+title: "The XML Protocol"
+description: "Why we use strict XML tags (<thought>, <tool_call>) over JSON for robust agent actions."
+---
+
+# The XML Protocol
+
+Most agent frameworks (LangGraph, AutoGen) rely on **JSON Tool Calls** for execution.
+
+OmniCoreAgent takes a different approach: **Strict XML**.
+
+## Why XML?
+
+JSON is great for data, but terrible for generative models.
+
+1.  **Parsing Errors**: LLMs often generate invalid JSON (trailing commas, unescaped quotes).
+2.  **Schema Drift**: Models hallucinate new fields or types.
+3.  **Ambiguity**: It's hard to distinguish "thinking" from "acting" inside a JSON blob.
+
+## The OmniCore Structure
+
+We force the model to output distinct **semantic blocks**:
+
+### 1. The Thought (`<thought>`)
+The agent explicitly reasons *before* taking action. This is called **Chain of Thought (CoT)**.
+
+```xml
+<thought>
+The user wants to calculate 2 + 2.
+I should use the calculator tool.
+</thought>
+```
+
+### 2. The Action (`<tool_call>`)
+The execution request. This is parsed by the `AgentRunner` and executed safely.
+
+```xml
+<tool_call>
+    <tool_name>calculator</tool_name>
+    <parameters>
+        <expression>2 + 2</expression>
+    </parameters>
+</tool_call>
+```
+
+### 3. The Observation (`<observation>`)
+The result of the tool execution, injected back into the prompt.
+
+```xml
+<observation>
+4
+</observation>
+```
+
+### 4. The Answer (`<final_answer>`)
+The final response to the user.
+
+```xml
+<final_answer>
+The result is 4.
+</final_answer>
+```
+
+## The Parser (How It Works)
+
+The `AgentRunner` uses a regex-based parser (`OmniCoreAgent/core/llm.py`) to extract these blocks.
+
+If the model hallucinates a tool name or outputs invalid XML, the parser catches it and returns a **ToolError** event, which the agent can then fix in the next loop iteration.
+
+This **Self-Healing** capability makes OmniCoreAgent far more robust in production than fragile JSON chains.
