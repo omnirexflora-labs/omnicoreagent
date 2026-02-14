@@ -1,0 +1,78 @@
+---
+title: "The Agent Runtime"
+description: "Understanding the core primitives of OmniCoreAgent: The Runner, The Prompt, and The Loop."
+---
+
+# The Agent Runtime
+
+<Note>
+This lesson assumes you have installed OmniCoreAgent and set up your environment variables.
+</Note>
+
+## The "Hello World" of Agents
+
+At its core, an **OmniCoreAgent** is a loop. It takes a user query, thinks about it, acts on it, and repeats until it has an answer.
+
+Unlike simple LLM wrappers, **OmniCoreAgent** enforces a strict **XML Protocol** to ensure reliability.
+
+### The Code
+
+Here is the minimal code to run your first agent:
+
+```python
+import asyncio
+from omnicoreagent.core.agents.react_agent import ReactAgent, AgentConfig
+from omnicoreagent.core.llm import LLMConnection
+
+async def main():
+    # 1. Configure the Agent
+    config = AgentConfig(
+        agent_name="FirstAgent",
+        max_steps=5,  # Limit the loop to prevent infinite runs
+        tool_call_timeout=10,
+    )
+    
+    # 2. Initialize the Runner
+    agent = ReactAgent(config=config)
+    
+    # 3. Connect to the LLM (Using environment variables)
+    llm = LLMConnection()
+    
+    # 4. Run the Loop
+    response = await agent.run(
+        system_prompt="You are a helpful assistant.",
+        query="What is 2 + 2?",
+        llm_connection=llm.llm_call
+    )
+    
+    print(f"Final Answer: {response.final_answer}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### What Just Happened?
+
+1.  **Initialization**: The `ReactAgent` sets up the memory and context manager.
+2.  **The Prompt**: It injects a System Prompt that forces the LLM to reply in XML (`<thought>`, `<final_answer>`).
+3.  **The Loop**: It sends the query to the LLM.
+4.  **The Parse**: It parses the XML response.
+5.  **The Result**: It returns a `ParsedResponse` object, not just raw text.
+
+## The XML Protocol
+
+Why do we use XML tags?
+
+*   **Robustness**: JSON is prone to syntax errors (trailing commas, nested quotes). XML is cleaner for LLMs to generate.
+*   **Safety**: We can explicitly validate `<tool_call>` blocks before executing them.
+*   **Separation**: Thoughts are separated from Actions.
+
+<Warning>
+**Never** try to parse the raw LLM output yourself. Always use the `ParsedResponse` object provided by the framework.
+</Warning>
+
+## Next Steps
+
+Now that you have a running agent, let's give it some **Tools** so it can actually *do* something.
+
+[Next Lesson: Tools as API Functions](./02-tools-as-api)
