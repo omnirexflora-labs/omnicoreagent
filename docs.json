@@ -26,6 +26,22 @@
     "navigation": {
         "dropdowns": [
             {
+                "dropdown": "Academy",
+                "icon": "graduation-cap",
+                "description": "Learn how to build production agents step-by-step",
+                "groups": [
+                    {
+                        "group": "Module 1: The Mind",
+                        "pages": [
+                            "docs/academy/module-1/01-introduction",
+                            "docs/academy/module-1/02-hello-world",
+                            "docs/academy/module-1/03-the-loop",
+                            "docs/academy/module-1/04-xml-protocol"
+                        ]
+                    }
+                ]
+            },
+            {
                 "dropdown": "Documentation",
                 "icon": "book",
                 "description": "Learn how to use OmniCoreAgent",
