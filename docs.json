@@ -38,6 +38,15 @@
                             "docs/academy/module-1/03-the-loop",
                             "docs/academy/module-1/04-xml-protocol"
                         ]
+                    },
+                    {
+                        "group": "Module 2: The Body",
+                        "pages": [
+                            "docs/academy/module-2/01-introduction",
+                            "docs/academy/module-2/02-mcp-integration",
+                            "docs/academy/module-2/03-realtime-perception",
+                            "docs/academy/module-2/04-autonomous-actions"
+                        ]
                     }
                 ]
             },

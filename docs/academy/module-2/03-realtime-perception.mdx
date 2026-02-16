@@ -1,0 +1,79 @@
+---
+title: "Real-Time Perception"
+description: "Moving from reactive 'chat' to active 'observation' using streams."
+---
+
+# Real-Time Perception
+
+A standard chatbot waits for a user message:
+`User: "Check the price of BTC."` -> `Agent: "It is $95k."`
+
+An **Autonomous Entity** observes the world:
+`Agent (Thinking): "I see BTC dropped 5%. I should wake up."`
+
+## The "Observer" Pattern
+
+In OmniCoreAgent, perception is handled via **Event Streams**, not just function calls.
+We use the `<observation>` XML block effectively, but how does that data get there?
+
+### The "Eye" Loop
+
+Instead of a simple `while True` loop that blocks on `input()`, the OmniCore **Body** runs an async event loop.
+
+*(Note: This is an advanced pattern that requires extending the base runner)*
+
+```python
+async def body_loop(agent, session_id):
+    # Connect to the Nervous System (Redis/Event Bus)
+    pubsub = redis.pubsub()
+    await pubsub.subscribe("market_data")
+
+    while True:
+        # 1. Check for sensory input (Non-blocking)
+        message = await pubsub.get_message(ignore_subscribe_messages=True)
+        
+        if message:
+            # 2. Inject perception into the Mind
+            # We treat the sensor as a "System User"
+            perception = f"MARKET_EVENT: {message['data']}"
+            
+            # Add to agent's message history
+            await agent.add_message(
+                role="user", 
+                content=f"SYSTEM OBSERVATION: {perception}", 
+                session_id=session_id
+            )
+            
+            # Trigger a thought cycle
+            await agent.run_step(session_id=session_id)
+            
+        # 3. Check for internal bio-clock (Heartbeat)
+        # ...
+             
+        # 4. Sleep briefly to save energy (CPU)
+        await asyncio.sleep(0.1)
+```
+
+## Passive vs. Active Perception
+
+1.  **Active Perception (Tool Call):**
+    *   The Mind decides: "I need to check the weather."
+    *   Action: `<tool_call>get_weather</tool_call>`
+    *   Cost: Tokens + Latency.
+
+2.  **Passive Perception (Push):**
+    *   The Body (Sensor) sees: \"Rain detected.\"
+    *   Action: Pushes `UserMessage(content="ALERT: Rain detected")` into the context.
+    *   Cost: Free until the event happens.
+
+## The "Interrupt"
+
+What if the agent is in the middle of a thought when a critical event happens?
+
+*   **Standard:** Agent finishes thinking, then checks queue. (Too slow).
+*   **OmniCore (2026):** **Signal Interrupt.**
+    *   The Body can *cancel* the current LLM generation request.
+    *   It injects the new observation immediately.
+    *   The Mind re-evaluates the situation with the new data.
+
+This mimics biological survival instincts. You stop doing math if you see a tiger.

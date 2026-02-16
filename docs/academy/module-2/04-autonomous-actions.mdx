@@ -1,0 +1,56 @@
+---
+title: "Autonomous Action (The Actuator)"
+description: "Designing actions that have real-world consequences."
+---
+
+# Autonomous Action (The Actuator)
+
+Giving an agent "Hands" (Write access) is dangerous.
+A chatbot that hallucinates a wrong fact is annoying.
+An agent that hallucinates a `DELETE /prod/db` command is catastrophic.
+
+## The "Safety Valve" Architecture
+
+In OmniCoreAgent, every **Actuator** (Tool with side effects) is wrapped in a **Safety Valve**.
+
+### 1. The "Human-in-the-Loop" (HITL) Mode
+By default, dangerous tools (Shell, API Write) require explicit approval.
+
+```xml
+<tool_call>
+  <tool_name>deploy_to_prod</tool_name>
+  <parameters>...</parameters>
+</tool_call>
+```
+
+**OmniCore Runtime:**
+`[SYSTEM] Agent wants to run 'deploy_to_prod'. Allow? (y/n)`
+
+### 2. The "Judge" Model (AI-in-the-Loop)
+For autonomous runs (cron jobs), we can't wait for a human.
+We use a **Judge Model**—a smaller, cheaper, specialized model that only validates safety.
+
+*   **Agent (Proposer):** "I will delete these files to free up space."
+*   **Judge (Reviewer):** "Reviewing deletion list... APPROVED. No system files detected."
+*   **Actuator:** Executes `rm -rf ...`.
+
+## Idempotency is King
+
+Autonomous agents *will* retry things. They *will* get stuck in loops.
+Your actions must be **Idempotent**.
+
+*   **Bad:** `charge_credit_card(100)` -> If run twice, user pays $200.
+*   **Good:** `charge_credit_card(100, idempotency_key="tx_123")` -> If run twice, second one is ignored.
+
+**Rule of Thumb:**
+If an action cannot be run 10 times safely, it should not be given to an autonomous agent.
+
+## The "Undo" Button (Reversibility)
+
+Where possible, Actuators should return a **Rollback Token**.
+*   Agent: "Update website header."
+*   Tool Output: `Success. Rollback Token: undo_8823`
+*   Agent (later): "Oh no, it looks ugly."
+*   Agent: `<tool_call>undo(undo_8823)</tool_call>`
+
+This is how we build confident agents. They know they can fix their mistakes.

@@ -1,0 +1,63 @@
+---
+title: "The Universal Adapter (MCP)"
+description: "Why we use the Model Context Protocol (MCP) as the standard for all agent interactions."
+---
+
+# The Universal Adapter (MCP)
+
+In the early days of agents (2023-2024), every framework had its own way of defining tools.
+*   LangChain had `BaseTool`.
+*   AutoGen had `register_function`.
+*   OpenAI had `function_calling`.
+
+This was a mess. It meant you had to rewrite your "Stripe Integration" five times.
+
+## Enter MCP (Model Context Protocol)
+
+**OmniCoreAgent** is "MCP-Native". We do not encourage writing custom tool wrappers anymore.
+If you want your agent to use a tool, you should point it to an **MCP Server**.
+
+### Why MCP Wins in 2026
+
+1.  **Portability:** An MCP server written for Claude Desktop works for OmniCoreAgent, Nanobot, and OpenClaw instantly.
+2.  **Security:** The tool runs in its own process/container. If the tool crashes or gets hacked, your agent's memory is safe.
+3.  **Statefulness:** MCP servers can maintain their own connections (e.g., a persistent database connection) without the agent needing to manage it.
+
+## Connecting OmniCore to MCP
+
+It's shockingly simple. You don't import code. You just provide the config.
+
+```python
+from omnicoreagent import OmniAgent
+
+# We don't import "StripeTool". We connect to the "Stripe Server".
+agent = OmniAgent(
+    name="FinanceBot",
+    mcp_servers={
+        "stripe": {
+            "command": "uvx",
+            "args": ["mcp-stripe"]
+        },
+        "github": {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "mcp/github"]
+        }
+    }
+)
+```
+
+### The "Client" Architecture
+
+Under the hood, OmniCoreAgent acts as an **MCP Client**.
+1.  It spawns the MCP Server as a subprocess.
+2.  It performs a handshake (JSON-RPC).
+3.  It asks: "What tools do you have?"
+4.  It automatically converts those tools into the **XML Protocol** we learned in Module 1.
+
+This means your agent automatically "learns" how to use the tool just by connecting to it.
+
+## Exercise: The "Filesystem" Hand
+
+Let's give your agent its first hand: Access to the local filesystem via MCP.
+
+*(Tutorial steps to be implemented in the lab...)*
