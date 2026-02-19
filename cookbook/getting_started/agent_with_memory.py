@@ -149,9 +149,51 @@ async def demo_mongodb():
     await agent.cleanup()
 
 
+async def demo_session_lifecycle():
+    """Demo session lifecycle events (/new command with callback)."""
+
+    print("\n" + "=" * 50)
+    print("5. SESSION LIFECYCLE (Callbacks)")
+    print("=" * 50)
+
+    # Callback to handle session end (e.g. save to file)
+    async def save_wisdom(session_id: str, history: list):
+        print(f"\n[Callback] Saving session {session_id} with {len(history)} messages...")
+        # Simulating saving to a file
+        print(f"[Callback] Archive complete. Wisdom stored.")
+
+    memory_router = MemoryRouter("in_memory")
+    agent = OmniCoreAgent(
+        name="lifecycle_agent",
+        system_instruction="You are a helpful assistant.",
+        model_config={"provider": "openai", "model": "gpt-4o"},
+        memory_router=memory_router,
+        on_session_end=save_wisdom,  # <- Register callback
+    )
+
+    session_id = "lifecycle_session"
+    
+    # 1. Start conversation
+    print("\n1. Chatting...")
+    await agent.run("My project is called Project X.", session_id=session_id)
+    
+    # 2. Trigger /new command
+    print("\n2. User types /new ...")
+    result = await agent.run("/new", session_id=session_id)
+    print(f"Agent says: {result['response']}")
+
+    # 3. Verify memory is cleared
+    print("\n3. Verifying memory reset...")
+    history = await agent.get_session_history(session_id)
+    print(f"Session history length: {len(history)} (Expected: 0)")
+
+    await agent.cleanup()
+
+
 async def main():
     """Run in-memory demo (works without external dependencies)."""
     await demo_in_memory()
+    await demo_session_lifecycle()
 
     # Uncomment these if you have the backends configured:
     # await demo_redis()

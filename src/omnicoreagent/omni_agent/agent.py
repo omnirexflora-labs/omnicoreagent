@@ -47,6 +47,7 @@ class OmniCoreAgent:
         event_router: Optional[EventRouter] = None,
         prompt_builder: Optional[Any] = None,
         debug: bool = False,
+        on_session_end: Optional[Callable[[str, List[Dict[str, Any]]], Awaitable[None]]] = None,
     ):
         """
         Initialize the OmniCoreAgent with user-friendly configuration.
@@ -63,6 +64,8 @@ class OmniCoreAgent:
             memory_router: Optional memory router (MemoryRouter)
             event_router: Optional event router (EventRouter)
             debug: Enable debug logging
+            on_session_end: Optional callback function triggered when a session ends (e.g. /new).
+                          Receives (session_id, message_history) and returns Awaitable[None].
         """
         self.name = name
         self.system_instruction = system_instruction
@@ -74,6 +77,7 @@ class OmniCoreAgent:
 
         self.debug = debug
         self._cumulative_usage = Usage()
+        self.on_session_end = on_session_end
 
         self.memory_router = memory_router
         self.event_router = event_router
@@ -319,6 +323,30 @@ class OmniCoreAgent:
 
         if not session_id:
             session_id = self.generate_session_id()
+
+        # Handle slash commands similar to the main loop
+        cmd = query.strip().lower()
+        if cmd == "/new":
+            if self.on_session_end and self.memory_router:
+                history = await self.memory_router.get_messages(session_id, agent_name=self.name)
+                try:
+                    await self.on_session_end(session_id, history)
+                except Exception as e:
+                    logger.error(f"Error in on_session_end callback: {e}")
+            
+            await self.clear_session_history(session_id)
+            return {
+                "response": "New session started. History archived and cleared.",
+                "session_id": session_id,
+                "agent_name": self.name
+            }
+        
+        if cmd == "/help":
+             return {
+                "response": "🐈 OmniCoreAgent commands:\n/new — Start a new conversation\n/help — Show available commands",
+                "session_id": session_id,
+                "agent_name": self.name
+            }
 
         omni_agent_prompt = self.prompt_builder.build(
             system_instruction=self.system_instruction
