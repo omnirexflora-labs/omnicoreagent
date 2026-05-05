@@ -587,6 +587,102 @@ class BaseReactAgent:
             )
             return obs_text, tools_results
 
+    async def _append_tool_observations(
+        self,
+        tools_results: list[dict[str, Any]],
+        session_state: SessionState,
+        add_message_to_history: Callable[[str, str, dict | None], Any],
+        session_id: str | None,
+        debug: bool,
+    ) -> str:
+        scrubbed_results = self._scrub_tool_results(tools_results)
+        xml_obs_block = build_xml_observations_block(scrubbed_results)
+        session_state.messages.append(
+            Message(
+                role="user",
+                content=xml_obs_block,
+            )
+        )
+        await add_message_to_history(
+            role="user",
+            content=xml_obs_block,
+            session_id=session_id,
+            metadata={"agent_name": self.agent_name},
+        )
+
+        if debug:
+            logger.info(
+                f"Agent state changed from {session_state.state} to {AgentState.OBSERVING}"
+            )
+        session_state.state = AgentState.OBSERVING
+        return xml_obs_block
+
+    async def _handle_tool_loop_state(
+        self,
+        tool_call_results: list[Any],
+        session_state: SessionState,
+        system_prompt: str,
+        session_id: str | None,
+        event_router: Callable[[str, Event], Any] | None,
+        debug: bool,
+    ) -> None:
+        for single_tool in tool_call_results:
+            tool_name = getattr(single_tool, "tool_name", None)
+            if not tool_name:
+                if isinstance(single_tool, (list, tuple)) and len(single_tool) >= 1:
+                    tool_name = single_tool[0]
+                else:
+                    logger.warning(
+                        "Skipping malformed tool_call_result item: %s", single_tool
+                    )
+                    continue
+
+            if not session_state.loop_detector.is_looping(tool_name):
+                continue
+
+            loop_type = session_state.loop_detector.get_loop_type(tool_name)
+            logger.warning(f"Tool call loop detected for '{tool_name}': {loop_type}")
+
+            new_system_prompt = handle_stuck_state(system_prompt)
+            session_state.messages = await self.reset_system_prompt(
+                messages=session_state.messages,
+                system_prompt=new_system_prompt,
+            )
+
+            loop_message = (
+                f"Observation:\n"
+                f"⚠️ Tool call loop detected for '{tool_name}': {loop_type}\n\n"
+                "Current approach is not working. You MUST now provide a final answer to the user.\n"
+                "Please:\n"
+                "1. Stop trying the same approach\n"
+                "2. Provide your best response to the user based on what you know\n"
+                "3. Use <final_answer>Your response here</final_answer> format\n"
+                "4. Be helpful and explain any limitations if needed\n"
+                "5. Do NOT continue with more tool calls\n"
+                "\nYou MUST respond with <final_answer> tags now.\n"
+            )
+
+            event = Event(
+                type=EventType.TOOL_CALL_ERROR,
+                payload=ToolCallErrorPayload(
+                    tool_name=tool_name,
+                    error_message=loop_message,
+                ),
+                agent_name=self.agent_name,
+            )
+            if event_router:
+                await event_router(session_id=session_id, event=event)
+
+            session_state.messages.append(Message(role="user", content=loop_message))
+
+            if debug:
+                logger.info(
+                    f"Agent state changed from {session_state.state} to {AgentState.STUCK}"
+                )
+
+            session_state.state = AgentState.STUCK
+            session_state.loop_detector.reset(tool_name)
+
     async def extract_action_or_answer(
         self,
         response: str,
@@ -1002,90 +1098,27 @@ class BaseReactAgent:
                 observation=obs_text,
             )
 
-        tools_results = self._scrub_tool_results(tools_results)
-        xml_obs_block = build_xml_observations_block(tools_results)
-        session_state.messages.append(
-            Message(
-                role="user",
-                content=xml_obs_block,
-            )
-        )
-        await add_message_to_history(
-            role="user",
-            content=xml_obs_block,
+        await self._append_tool_observations(
+            tools_results=tools_results,
+            session_state=session_state,
+            add_message_to_history=add_message_to_history,
             session_id=session_id,
-            metadata={"agent_name": self.agent_name},
+            debug=debug,
         )
-
-        if debug:
-            logger.info(
-                f"Agent state changed from {session_state.state} to {AgentState.OBSERVING}"
-            )
-        session_state.state = AgentState.OBSERVING
 
         if isinstance(tool_call_result, (list, tuple)):
             tool_call_results = list(tool_call_result)
         else:
             tool_call_results = [tool_call_result]
 
-        for single_tool in tool_call_results:
-            tool_name = getattr(single_tool, "tool_name", None)
-            if not tool_name:
-                if isinstance(single_tool, (list, tuple)) and len(single_tool) >= 1:
-                    tool_name = single_tool[0]
-                else:
-                    logger.warning(
-                        "Skipping malformed tool_call_result item: %s", single_tool
-                    )
-                    continue
-
-            if session_state.loop_detector.is_looping(tool_name):
-                loop_type = session_state.loop_detector.get_loop_type(tool_name)
-                logger.warning(
-                    f"Tool call loop detected for '{tool_name}': {loop_type}"
-                )
-
-                new_system_prompt = handle_stuck_state(system_prompt)
-                session_state.messages = await self.reset_system_prompt(
-                    messages=session_state.messages,
-                    system_prompt=new_system_prompt,
-                )
-
-                loop_message = (
-                    f"Observation:\n"
-                    f"⚠️ Tool call loop detected for '{tool_name}': {loop_type}\n\n"
-                    "Current approach is not working. You MUST now provide a final answer to the user.\n"
-                    "Please:\n"
-                    "1. Stop trying the same approach\n"
-                    "2. Provide your best response to the user based on what you know\n"
-                    "3. Use <final_answer>Your response here</final_answer> format\n"
-                    "4. Be helpful and explain any limitations if needed\n"
-                    "5. Do NOT continue with more tool calls\n"
-                    "\nYou MUST respond with <final_answer> tags now.\n"
-                )
-
-                event = Event(
-                    type=EventType.TOOL_CALL_ERROR,
-                    payload=ToolCallErrorPayload(
-                        tool_name=tool_name,
-                        error_message=loop_message,
-                    ),
-                    agent_name=self.agent_name,
-                )
-                if event_router:
-                    await event_router(session_id=session_id, event=event)
-
-                session_state.messages.append(
-                    Message(role="user", content=loop_message)
-                )
-
-                if debug:
-                    logger.info(
-                        f"Agent state changed from {session_state.state} to {AgentState.STUCK}"
-                    )
-
-                session_state.state = AgentState.STUCK
-                session_state.loop_detector.reset(tool_name)
+        await self._handle_tool_loop_state(
+            tool_call_results=tool_call_results,
+            session_state=session_state,
+            system_prompt=system_prompt,
+            session_id=session_id,
+            event_router=event_router,
+            debug=debug,
+        )
 
     async def reset_system_prompt(self, messages: list, system_prompt: str):
         old_messages = messages[1:]
