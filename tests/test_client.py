@@ -81,15 +81,12 @@ class TestMCPClient:
                 "omnicoreagent.mcp_clients_connection.client.AsyncExitStack",
                 return_value=mock_stack,
             ) as mock_exit_stack:
-                server_info = {
-                    "name": "server1",
-                    "srv_config": {k: v for k, v in MOCK_MCP_SERVERS[0].items() if k != "name"},
-                }
+                server_info = MOCK_MCP_SERVERS[0]
                 result = await mock_client._connect_to_single_server(
                     server_info, "server1"
                 )
 
-                assert result == "test_server connected succesfully"
+                assert result == "test_server connected successfully"
                 mock_exit_stack.assert_called_once()
                 mock_stack.enter_async_context.assert_called()
                 mock_refresh.assert_awaited_once()
@@ -117,15 +114,12 @@ class TestMCPClient:
                 "omnicoreagent.mcp_clients_connection.client.AsyncExitStack",
                 return_value=mock_stack,
             ) as mock_exit_stack:
-                server_info = {
-                    "name": "server2",
-                    "srv_config": {k: v for k, v in MOCK_MCP_SERVERS[1].items() if k != "name"},
-                }
+                server_info = MOCK_MCP_SERVERS[1]
                 result = await mock_client._connect_to_single_server(
                     server_info, "server2"
                 )
 
-                assert result == "test_server connected succesfully"
+                assert result == "test_server connected successfully"
                 mock_exit_stack.assert_called_once()
                 mock_exit_stack.assert_called_once()
                 mock_stack.enter_async_context.assert_called()
@@ -182,7 +176,7 @@ class TestMCPClient:
         )
         result = await mock_client.add_servers(MOCK_MCP_SERVERS)
 
-        assert "server1 connected succesfully" in result
+        assert "server1 connected successfully" in result
         mock_client._connect_to_single_server.assert_awaited()
 
     @pytest.mark.asyncio
@@ -210,6 +204,6 @@ class TestMCPClient:
 
         result = await mock_client.remove_server("added_server")
 
-        assert "diconnected succesfully" in result
+        assert "disconnected successfully" in result
         mock_stack.aclose.assert_awaited_once()
         assert "test_server" not in mock_client.sessions

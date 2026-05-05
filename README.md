@@ -139,7 +139,7 @@ print(result["response"])
 | 2 | **Multi-Tier Memory** | 5 backends (Redis, MongoDB, PostgreSQL, SQLite, in-memory) with runtime switching | [Memory →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/memory) |
 | 3 | **Context Engineering** | Dual-layer system: agent loop context management + tool response offloading | [Context →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/context-engineering) |
 | 4 | **Event System** | Real-time event streaming with runtime switching | [Events →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/events) |
-| 5 | **MCP Client** | Connect to any MCP server (stdio, streamable_http, SSE) with OAuth | [MCP →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/mcp) |
+| 5 | **MCP Tools** | Connect external MCP tool servers (stdio, streamable_http, SSE) with OAuth | [MCP →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/mcp) |
 | 6 | **DeepAgent** | Multi-agent orchestration with automatic task decomposition | [DeepAgent →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/deep-agent) |
 | 7 | **Local Tools** | Register any Python function as an AI tool via ToolRegistry | [Local Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/local-tools) |
 | 8 | **Agent Skills** | Polyglot packaged capabilities (Python, Bash, Node.js) | [Skills →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/skills) |
