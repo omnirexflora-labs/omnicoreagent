@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Union, AsyncGenerator
 from omnicoreagent.core.utils import logger
 
 if TYPE_CHECKING:
-    from omnicoreagent.omni_agent.agent import OmniCoreAgent
-    from omnicoreagent.omni_agent.deep_agent import DeepAgent
+    from omnicoreagent.agent import OmniCoreAgent
+    from omnicoreagent.deep_agent import DeepAgent
 
 AgentType = Union["OmniCoreAgent", "DeepAgent"]
 

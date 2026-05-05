@@ -28,8 +28,8 @@ from .models import (
 from .sse import run_agent_stream, stream_session_events
 
 if TYPE_CHECKING:
-    from omnicoreagent.omni_agent.agent import OmniCoreAgent
-    from omnicoreagent.omni_agent.deep_agent import DeepAgent
+    from omnicoreagent.agent import OmniCoreAgent
+    from omnicoreagent.deep_agent import DeepAgent
 
 AgentType = Union["OmniCoreAgent", "DeepAgent"]
 

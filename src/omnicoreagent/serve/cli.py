@@ -248,7 +248,7 @@ def config_cmd(show: bool, env_example: bool):
         omniserve config --show
         omniserve config --env-example > .env
     """
-    from omnicoreagent.omni_agent.omni_serve import OmniServeConfig
+    from omnicoreagent.serve import OmniServeConfig
 
     if env_example:
         click.echo("""# OmniServe Configuration

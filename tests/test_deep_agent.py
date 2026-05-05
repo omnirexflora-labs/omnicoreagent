@@ -8,12 +8,12 @@ Works for any domain based on user's system_instruction and tools.
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from omnicoreagent.omni_agent.deep_agent import DeepAgent
-from omnicoreagent.omni_agent.deep_agent.prompts import (
+from omnicoreagent.deep_agent import DeepAgent
+from omnicoreagent.deep_agent.prompts import (
     DeepAgentPromptBuilder,
     DEEP_AGENT_ORCHESTRATION_PROMPT,
 )
-from omnicoreagent.omni_agent.deep_agent.subagent_factory import (
+from omnicoreagent.deep_agent.subagent_factory import (
     SubagentFactory,
     build_subagent_tools,
 )

@@ -7,7 +7,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 
-from omnicoreagent.omni_agent.agent import OmniCoreAgent
+from omnicoreagent.agent import OmniCoreAgent
 
 from omnicoreagent.core.memory_store.memory_router import MemoryRouter
 
@@ -21,7 +21,7 @@ from omnicoreagent.core.events.base import (
     BackgroundTaskErrorPayload,
     BackgroundAgentStatusPayload,
 )
-from omnicoreagent.omni_agent.background_agent.task_registry import TaskRegistry
+from omnicoreagent.background.task_registry import TaskRegistry
 
 
 class BackgroundOmniCoreAgent(OmniCoreAgent):

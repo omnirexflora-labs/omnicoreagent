@@ -72,8 +72,8 @@ all = [
 ]
 
 [project.scripts]
-omnicoreagent= "omnicoreagent.omni_agent.agent:OmniCoreAgent"
-omniserve = "omnicoreagent.omni_agent.omni_serve.cli:main"
+omnicoreagent= "omnicoreagent.agent:OmniCoreAgent"
+omniserve = "omnicoreagent.serve.cli:main"
 
 [project.urls]
 Repository = "https://github.com/omnirexflora-labs/omnicoreagent"

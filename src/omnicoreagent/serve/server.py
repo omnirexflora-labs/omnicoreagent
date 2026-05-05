@@ -18,8 +18,8 @@ from .middleware import setup_all_middleware
 from .routes import create_agent_router
 
 if TYPE_CHECKING:
-    from omnicoreagent.omni_agent.agent import OmniCoreAgent
-    from omnicoreagent.omni_agent.deep_agent import DeepAgent
+    from omnicoreagent.agent import OmniCoreAgent
+    from omnicoreagent.deep_agent import DeepAgent
 
 AgentType = Union["OmniCoreAgent", "DeepAgent"]
 

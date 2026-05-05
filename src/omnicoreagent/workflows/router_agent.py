@@ -1,4 +1,4 @@
-from omnicoreagent.omni_agent.agent import OmniCoreAgent
+from omnicoreagent.agent import OmniCoreAgent
 from omnicoreagent.core.utils import logger
 from typing import List, Optional
 import asyncio

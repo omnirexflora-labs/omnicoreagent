@@ -1,4 +1,4 @@
-from omnicoreagent.omni_agent.agent import OmniCoreAgent
+from omnicoreagent.agent import OmniCoreAgent
 from typing import List, Optional
 from omnicoreagent.core.utils import logger
 import uuid

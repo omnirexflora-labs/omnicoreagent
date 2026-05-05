@@ -20,7 +20,7 @@ NOTE: Task paths are chosen dynamically by the lead agent when spawning subagent
 from typing import Optional, List, Dict, Any
 import uuid
 
-from omnicoreagent.omni_agent.agent import OmniCoreAgent
+from omnicoreagent.agent import OmniCoreAgent
 from omnicoreagent.core.memory_store.memory_router import MemoryRouter
 from omnicoreagent.core.events.event_router import EventRouter
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
