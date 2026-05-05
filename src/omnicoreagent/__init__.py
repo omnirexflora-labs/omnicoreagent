@@ -13,7 +13,7 @@ from .core.utils import logger
 
 from .omni_agent.agent import OmniCoreAgent, OmniAgent
 
-from .mcp_clients_connection import MCPClient, Configuration
+from .mcp_clients_connection import MCPClient
 
 from .omni_agent.workflow.parallel_agent import ParallelAgent
 from .omni_agent.workflow.sequential_agent import SequentialAgent
@@ -45,7 +45,6 @@ __all__ = [
     "DeepAgent",
     # MCP
     "MCPClient",
-    "Configuration",
     # OmniServe
     "OmniServe",
     "OmniServeConfig",

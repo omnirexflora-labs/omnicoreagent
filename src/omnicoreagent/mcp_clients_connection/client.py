@@ -1,25 +1,18 @@
 import asyncio
-import json
 import os
 from contextlib import AsyncExitStack
-from dataclasses import dataclass, field
 from datetime import timedelta
-from pathlib import Path
 from typing import Any
 import anyio
-from dotenv import load_dotenv
-from decouple import config as decouple_config
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 
 from omnicoreagent.core.llm import LLMConnection
-from omnicoreagent.mcp_clients_connection.notifications import handle_notifications
 from omnicoreagent.mcp_clients_connection.refresh_server_capabilities import (
     refresh_capabilities,
 )
-from omnicoreagent.mcp_clients_connection.sampling import samplingCallback
 from omnicoreagent.core.utils import logger
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -154,98 +147,41 @@ class CallbackServer:
         return self.callback_data["state"]
 
 
-@dataclass
-class Configuration:
-    """Manages configuration and environment variables for the MCP client."""
-
-    llm_api_key: str = field(init=False)
-    embedding_api_key: str = field(init=False)
-
-    def __post_init__(self) -> None:
-        """Initialize configuration with environment variables."""
-        self.load_env()
-        self.llm_api_key = decouple_config("LLM_API_KEY", default=None)
-
-        if not self.llm_api_key:
-            raise ValueError("LLM_API_KEY not found in environment variables")
-
-    @staticmethod
-    def load_env() -> None:
-        """Load environment variables from .env file."""
-        load_dotenv()
-
-    def load_config(self, file_path: str) -> dict:
-        """Load server configuration from JSON file."""
-        config_path = Path(file_path)
-        logger.info(f"Loading configuration from: {config_path.name}")
-
-        if not config_path.name.startswith("servers_config"):
-            raise ValueError("Config file name must start with 'servers_config'")
-
-        if config_path.is_absolute() or config_path.parent != Path("."):
-            if config_path.exists():
-                with open(config_path, encoding="utf-8") as f:
-                    return json.load(f)
-            else:
-                raise FileNotFoundError(f"Configuration file not found: {config_path}")
-
-        if config_path.exists():
-            with open(config_path, encoding="utf-8") as f:
-                return json.load(f)
-
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-
-
 class MCPClient:
     def __init__(
         self,
-        config: dict[str, Any],
+        servers: list[dict[str, Any]] | None = None,
+        model_config: dict[str, Any] | None = None,
+        api_key: str | None = None,
         debug: bool = False,
-        config_filename: str = "servers_config.json",
-        loaded_config: dict[str, Any] = None,
     ):
-        self.config = config
-        self.config_filename = config_filename
-        self._loaded_config = loaded_config
+        self.servers = self._normalize_servers(servers or [])
         self.sessions = {}
         self._cleanup_lock = asyncio.Lock()
         self.available_tools = {}
-        self.available_resources = {}
-        self.available_prompts = {}
         self.server_names = []
         self.added_servers_names = {}
         self.debug = debug
-        self.system_prompt = None
-        self.llm_connection = None
-        if self.config and hasattr(self.config, "llm_api_key"):
-            try:
-                self.llm_connection = LLMConnection(
-                    self.config, self.config_filename, loaded_config=self._loaded_config
-                )
-                if self.llm_connection and self.llm_connection.llm_config:
-                    logger.debug("LLM connection initialized successfully")
-                else:
-                    logger.debug(
-                        "LLM configuration not available, LLM features will be disabled"
-                    )
-                    self.llm_connection = None
-            except Exception as e:
-                logger.warning(f"Failed to initialize LLM connection: {e}")
-                self.llm_connection = None
-        self.sampling_callback = samplingCallback()
+        self.llm_connection = (
+            LLMConnection(model_config=model_config, api_key=api_key)
+            if model_config
+            else None
+        )
         self.tasks = {}
         self.server_count = 0
 
-    async def connect_to_servers(self, config_filename: str = "servers_config.json"):
-        """Connect to an MCP server"""
-        if self._loaded_config:
-            server_config = self._loaded_config
-        else:
-            server_config = self.config.load_config(config_filename)
-        servers = [
-            {"name": name, "srv_config": srv_config}
-            for name, srv_config in server_config["mcpServers"].items()
-        ]
+    def _normalize_servers(self, servers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        normalized = []
+        for server in servers:
+            server_config = dict(server)
+            if not server_config.get("name"):
+                raise ValueError("Each MCP server config requires a name")
+            normalized.append(server_config)
+        return normalized
+
+    async def connect_to_servers(self):
+        """Connect to configured MCP servers."""
+        servers = self.servers
         try:
             connect_tasks = [
                 self._connect_to_single_server(server, server["name"])
@@ -259,29 +195,17 @@ class MCPClient:
                 logger.info(f"Server connection result: {result}")
         except Exception as e:
             logger.info(f"start servers task error: {e}")
-        asyncio.create_task(
-            handle_notifications(
-                sessions=self.sessions,
-                debug=self.debug,
-                server_names=self.server_names,
-                available_tools=self.available_tools,
-                available_resources=self.available_resources,
-                available_prompts=self.available_prompts,
-                refresh_capabilities=refresh_capabilities,
-            )
-        )
-
     async def _connect_to_single_server(self, server, server_added_name):
         try:
             stack = AsyncExitStack()
-            transport_type = server["srv_config"].get("transport_type", "stdio")
+            transport_type = server.get("transport_type", "stdio")
             read_stream = None
             write_stream = None
-            url = server["srv_config"].get("url", "")
-            headers = server["srv_config"].get("headers", {})
-            timeout = server["srv_config"].get("timeout", 60)
-            sse_read_timeout = server["srv_config"].get("sse_read_timeout", 120)
-            auth_config = server["srv_config"].get("auth", None)
+            url = server.get("url", "")
+            headers = server.get("headers", {})
+            timeout = server.get("timeout", 60)
+            sse_read_timeout = server.get("sse_read_timeout", 120)
+            auth_config = server.get("auth", None)
             use_oauth = auth_config and auth_config.get("method") == "oauth"
 
             self.server_count += 1
@@ -357,11 +281,11 @@ class MCPClient:
                 )
                 read_stream, write_stream, _ = transport
             else:
-                args = server["srv_config"]["args"]
-                command = server["srv_config"]["command"]
+                args = server["args"]
+                command = server["command"]
                 env = (
-                    {**os.environ, **server["srv_config"]["env"]}
-                    if server["srv_config"].get("env")
+                    {**os.environ, **server["env"]}
+                    if server.get("env")
                     else None
                 )
                 server_params = StdioServerParameters(
@@ -375,7 +299,6 @@ class MCPClient:
                 ClientSession(
                     read_stream,
                     write_stream,
-                    sampling_callback=self.sampling_callback._sampling,
                     read_timeout_seconds=timedelta(seconds=300),
                 )
             )
@@ -384,7 +307,7 @@ class MCPClient:
             capabilities = init_result.capabilities
             if server_name in self.server_names:
                 error_message = (
-                    f"{server_name} is already connected. disconnect it and try again"
+                    f"{server_name} is already connected. Disconnect it and try again."
                 )
                 if self.debug:
                     logger.error(error_message)
@@ -410,26 +333,18 @@ class MCPClient:
                 sessions=self.sessions,
                 server_names=self.server_names,
                 available_tools=self.available_tools,
-                available_resources=self.available_resources,
-                available_prompts=self.available_prompts,
                 debug=self.debug,
             )
 
-            return f"{server_name} connected succesfully"
+            return f"{server_name} connected successfully"
         except Exception as e:
             error_message = f"Failed to connect to server: {str(e)}"
             logger.error(error_message)
             return error_message
 
-    async def add_servers(self, config_file: Path) -> None:
+    async def add_servers(self, servers: list[dict[str, Any]]) -> None:
         """Dynamically add servers at runtime."""
-        with open(config_file, "r") as f:
-            server_config = json.load(f)
-
-        servers = [
-            {"name": name, "srv_config": srv_config}
-            for name, srv_config in server_config["mcpServers"].items()
-        ]
+        servers = self._normalize_servers(servers)
         errors = []
         servers_connected_response = []
         try:
@@ -441,7 +356,7 @@ class MCPClient:
                         self._connect_to_single_server, server, server_added_name
                     )
                     servers_connected_response.append(
-                        f"{server_added_name} connected succesfully"
+                        f"{server_added_name} connected successfully"
                     )
         except Exception as e:
             logger.error(f"Failed to add server '{server_added_name}': {e}")
@@ -464,7 +379,7 @@ class MCPClient:
                 if name.lower() == server_added_name.lower():
                     name = server_name
             session_info = self.sessions[name]
-            await self._close_session_resources(
+            await self._close_session(
                 server_name=old_name, session_info=session_info
             )
         except ValueError as e:
@@ -482,14 +397,11 @@ class MCPClient:
             k: v for k, v in self.added_servers_names.items() if v != name
         }
         self.available_tools.pop(name, None)
-        self.available_resources.pop(name, None)
-        self.available_prompts.pop(name, None)
-
-        return f"{name} diconnected succesfully"
 
         logger.info(f"Server '{name}' removed successfully.")
+        return f"{name} disconnected successfully"
 
-    async def _close_session_resources(self, server_name: str, session_info: dict):
+    async def _close_session(self, server_name: str, session_info: dict):
         """Tear down the per-server context stack, which closes streams and session."""
 
         stack: AsyncExitStack = session_info.get("stack")
@@ -520,7 +432,7 @@ class MCPClient:
                     and self.sessions[server_name]["connected"]
                 ):
                     session_info = self.sessions[server_name]
-                    await self._close_session_resources(server_name, session_info)
+                    await self._close_session(server_name, session_info)
 
                     if self.debug:
                         logger.info(f"Cleaned up server: {server_name}")
@@ -529,7 +441,7 @@ class MCPClient:
                 logger.error(f"Error cleaning up server {server_name}: {e}")
 
     async def cleanup(self):
-        """Clean up all resources"""
+        """Clean up all MCP connections."""
         try:
             logger.info("Starting client shutdown...")
             try:
@@ -544,9 +456,7 @@ class MCPClient:
             self.added_servers_names.clear()
             self.sessions.clear()
             self.available_tools.clear()
-            self.available_resources.clear()
-            self.available_prompts.clear()
 
-            logger.info("All resources cleared")
+            logger.info("All MCP connections cleared")
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")

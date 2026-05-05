@@ -127,7 +127,7 @@ tools = await agent.list_all_available_tools()
 
 ### `cleanup()`
 
-Cleans up resources, closes MCP connections, and removes temporary config files.
+Closes MCP connections and releases agent runtime state.
 
 ```python
 await agent.cleanup()

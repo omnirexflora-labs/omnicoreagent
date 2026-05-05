@@ -1,17 +1,18 @@
 import uuid
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from omnicoreagent.core.agents.react_agent import ReactAgent
 from omnicoreagent.core.types import AgentConfig as ReactAgentConfig
-from omnicoreagent.mcp_clients_connection.client import Configuration, MCPClient
+from omnicoreagent.mcp_clients_connection.client import MCPClient
 from omnicoreagent.core.llm import LLMConnection
 from omnicoreagent.core.memory_store.memory_router import MemoryRouter
 from omnicoreagent.omni_agent.config import (
-    config_transformer,
     ModelConfig,
     MCPToolConfig,
     AgentConfig,
+    normalize_agent_config,
+    normalize_mcp_tools,
+    normalize_model_config,
 )
 from omnicoreagent.omni_agent.prompts.prompt_builder import OmniCoreAgentPromptBuilder
 from omnicoreagent.omni_agent.prompts.react_suffix import SYSTEM_SUFFIX
@@ -66,8 +67,8 @@ class OmniCoreAgent:
         """
         self.name = name
         self.system_instruction = system_instruction
-        self.model_config = model_config
-        self.mcp_tools = mcp_tools or []
+        self.model_config = normalize_model_config(model_config)
+        self.mcp_tools = normalize_mcp_tools(mcp_tools)
 
         # Handle local_tools: optionally convert list to ToolRegistry
         if isinstance(local_tools, list):
@@ -81,21 +82,19 @@ class OmniCoreAgent:
             self.local_tools = local_tools
 
         self.sub_agents = sub_agents
-        self.agent_config = agent_config
+        self.agent_config = normalize_agent_config(name, agent_config)
 
         self.debug = debug
         self._cumulative_usage = Usage()
 
         self.memory_router = memory_router
         self.event_router = event_router
-        self.config_transformer = config_transformer
         self.prompt_builder = prompt_builder or OmniCoreAgentPromptBuilder(
             SYSTEM_SUFFIX
         )
         self.agent = None
         self.mcp_client = None
         self.llm_connection = None
-        self.internal_config = None
         self.guardrail = None
         self.guardrail_mode = "full"  # Default: full protection
 
@@ -112,9 +111,7 @@ class OmniCoreAgent:
         if not self.event_router:
             self.event_router = EventRouter(event_store_type="in_memory")
 
-        self.internal_config = self._create_internal_config()
-
-        agent_cfg = self.internal_config.get("AgentConfig", {})
+        agent_cfg = self.agent_config
 
         # Guardrail mode: "full" (default), "input_only", or "off"
         # "full" = check user input + tool outputs + MCP responses
@@ -136,86 +133,24 @@ class OmniCoreAgent:
         self._create_agent()
         self._initialized = True
 
-    def _create_internal_config(self) -> Dict[str, Any]:
-        """Transform user configuration to internal format"""
-        agent_config_with_name = self._prepare_agent_config()
-
-        internal_config = config_transformer.transform_config(
-            model_config=self.model_config,
-            mcp_tools=self.mcp_tools,
-            agent_config=agent_config_with_name,
-        )
-
-        return internal_config
-
-    def _prepare_agent_config(self) -> Dict[str, Any]:
-        """Prepare agent config with the agent name included"""
-        if self.agent_config:
-            if isinstance(self.agent_config, dict):
-                agent_config_dict = self.agent_config.copy()
-                agent_config_dict["agent_name"] = self.name
-                return agent_config_dict
-            else:
-                agent_config_dict = self.agent_config.__dict__.copy()
-                agent_config_dict["agent_name"] = self.name
-                return agent_config_dict
-        else:
-            return {
-                "agent_name": self.name,
-                "tool_call_timeout": 30,
-                "max_steps": 15,
-                "request_limit": 0,
-                "total_tokens_limit": 0,
-                "enable_advanced_tool_use": False,
-                "enable_agent_skills": False,
-                "memory_config": {
-                    "mode": "sliding_window",
-                    "value": 10000,
-                    "summary": {"enabled": False, "retention_policy": "keep"},
-                },
-                "context_management": {
-                    "enabled": False,
-                    "mode": "token_budget",
-                    "value": 100000,
-                    "threshold_percent": 75,
-                    "strategy": "truncate",
-                    "preserve_recent": 4,
-                },
-                "tool_offload": {
-                    "enabled": False,
-                    "threshold_tokens": 500,
-                    "threshold_bytes": 2000,
-                    "max_preview_tokens": 150,
-                    "storage_dir": "workspace/artifacts",
-                },
-            }
-
     def _create_agent(self):
         """Create the appropriate agent based on configuration"""
-        shared_config = Configuration()
-
         if self.mcp_tools:
             self.mcp_client = MCPClient(
-                config=shared_config,
+                servers=self.mcp_tools,
+                model_config=self.model_config,
+                api_key=self.model_config.get("api_key"),
                 debug=self.debug,
-                config_filename=str(self._config_file_path)
-                if hasattr(self, "_config_file_path")
-                else "servers_config.json",
-                loaded_config=self.internal_config,
             )
             self.llm_connection = self.mcp_client.llm_connection
         else:
             self.mcp_client = None
             self.llm_connection = LLMConnection(
-                shared_config,
-                config_filename=str(self._config_file_path)
-                if hasattr(self, "_config_file_path")
-                else "servers_config.json",
-                loaded_config=self.internal_config,
+                model_config=self.model_config,
+                api_key=self.model_config.get("api_key"),
             )
 
-        agent_config_dict = self.internal_config["AgentConfig"]
-        agent_settings = ReactAgentConfig(**agent_config_dict)
+        agent_settings = ReactAgentConfig(**self.agent_config)
 
         if self.memory_router:
             summary_config = agent_settings.memory_config.get("summary")
@@ -314,7 +249,7 @@ class OmniCoreAgent:
             await self.initialize()
 
         if self.mcp_client and self.mcp_tools:
-            await self.mcp_client.connect_to_servers(self.mcp_client.config_filename)
+            await self.mcp_client.connect_to_servers()
             if self.agent.enable_advanced_tool_use:
                 mcp_tools = self.mcp_client.available_tools if self.mcp_client else {}
                 advance_tools_manager = AdvanceToolsUse()
@@ -495,20 +430,6 @@ class OmniCoreAgent:
         """Clean up resources"""
         if self.mcp_client:
             await self.mcp_client.cleanup()
-
-        await self._cleanup_config()
-
-    async def _cleanup_config(self):
-        """Clean up the agent-specific config file"""
-        try:
-            if hasattr(self, "_config_file_path") and self._config_file_path.exists():
-                self._config_file_path.unlink()
-
-            hidden_dir = Path("workspace/config")
-            if hidden_dir.exists() and not list(hidden_dir.glob("*.json")):
-                hidden_dir.rmdir()
-        except Exception:
-            pass
 
     async def cleanup_mcp_servers(self):
         """Clean up MCP servers without removing the agent and the config"""
