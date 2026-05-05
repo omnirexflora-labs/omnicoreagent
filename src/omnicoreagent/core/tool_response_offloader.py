@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from omnicoreagent.core.summarizer.tokenizer import count_tokens
 from omnicoreagent.core.utils import logger
 from omnicoreagent.core.workspace import get_artifacts_dir
+from omnicoreagent.core.workspace_storage import LocalWorkspaceStorage
 
 
 @dataclass
@@ -108,6 +109,7 @@ class ToolResponseOffloader:
 
         self.base_dir = base_dir or os.getcwd()
         self.storage_path = Path(self.base_dir) / self.config.storage_dir
+        self.storage = LocalWorkspaceStorage(self.storage_path)
 
         if self.config.enabled:
             self._ensure_storage_dir()
@@ -119,11 +121,11 @@ class ToolResponseOffloader:
 
     def _ensure_storage_dir(self):
         """Create storage directory if it doesn't exist."""
-        self.storage_path.mkdir(parents=True, exist_ok=True)
+        self.storage.ensure_root()
 
         gitignore_path = self.storage_path / ".gitignore"
         if not gitignore_path.exists():
-            gitignore_path.write_text("*\n!.gitignore\n")
+            self.storage.write_text(".gitignore", "*\n!.gitignore\n")
 
     def _generate_artifact_id(self, tool_name: str, content: str) -> str:
         """Generate a unique but readable artifact ID."""
@@ -219,7 +221,7 @@ class ToolResponseOffloader:
         preview = self.get_preview(response)
         preview_tokens = count_tokens(preview)
 
-        artifact_path.write_text(response, encoding="utf-8")
+        self.storage.write_text(filename, response)
 
         timestamp = datetime.now().isoformat()
         if self.config.include_metadata:
@@ -232,7 +234,10 @@ class ToolResponseOffloader:
                 "custom": metadata or {},
             }
             meta_path = self.storage_path / f"{artifact_id}.meta.json"
-            meta_path.write_text(json.dumps(meta, indent=2))
+            self.storage.write_text(
+                meta_path.relative_to(self.storage_path),
+                json.dumps(meta, indent=2),
+            )
 
         offloaded = OffloadedResponse(
             artifact_id=artifact_id,
@@ -290,7 +295,7 @@ class ToolResponseOffloader:
         for ext in [".txt", ".json", ".xml"]:
             path = self.storage_path / f"{artifact_id}{ext}"
             if path.exists():
-                return path.read_text(encoding="utf-8")
+                return self.storage.read_text(path.relative_to(self.storage_path))
 
         return None
 

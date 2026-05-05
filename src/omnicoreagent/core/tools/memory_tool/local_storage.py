@@ -1,9 +1,9 @@
 from pathlib import Path
-import urllib.parse
 import shutil
 from filelock import FileLock
 from omnicoreagent.core.tools.memory_tool.base import AbstractMemoryBackend
 from omnicoreagent.core.workspace import get_memories_dir
+from omnicoreagent.core.workspace_storage import LocalWorkspaceStorage
 import json
 from typing import Any
 
@@ -15,65 +15,29 @@ class LocalMemoryBackend(AbstractMemoryBackend):
     """
 
     def __init__(self, base_dir=None):
-        self.base_dir = Path(base_dir or get_memories_dir()).resolve()
-        self._ensure_base_dir()
+        self.storage = LocalWorkspaceStorage(base_dir or get_memories_dir())
+        self.base_dir = self.storage.root
 
     def _ensure_base_dir(self):
         """Ensure the base directory exists."""
-        self.base_dir.mkdir(parents=True, exist_ok=True)
+        self.storage.ensure_root()
 
     def _resolve_path(self, path: str | None) -> Path:
         """Resolve a relative path safely inside the base directory."""
-        self._ensure_base_dir()
-        if not path or path.strip() == "":
-            return self.base_dir
-
-        decoded = urllib.parse.unquote(path).strip()
-        decoded = decoded.lstrip("/")
-
-        if decoded.startswith("memories/"):
-            decoded = decoded[len("memories/") :]
-        elif decoded == "memories":
-            decoded = ""
-
-        candidate = (self.base_dir / decoded).resolve()
-
-        try:
-            candidate.relative_to(self.base_dir)
-        except ValueError:
-            raise ValueError(
-                f"Invalid path '{path}' → resolved outside base directory.\n"
-                f"Path traversal detected.\nAll paths must stay inside: {self.base_dir}"
-            )
-        return candidate
+        return self.storage.resolve(path, strip_prefixes=("memories",))
 
     def _describe_dir(self) -> str:
-        self._ensure_base_dir()
-        contents = list(self.base_dir.iterdir())
-        if not contents:
-            return "(empty)"
-        return "\n".join(p.name for p in contents)
+        return self.storage.describe_root()
 
     def _write_atomic(self, abs_path: Path, content: str):
         """Write to a file atomically with a lock."""
-        lock_path = abs_path.with_suffix(".lock")
-        with FileLock(lock_path):
-            tmp_path = abs_path.with_suffix(".tmp")
-            tmp_path.write_text(content, encoding="utf-8")
-            tmp_path.rename(abs_path)
+        relative_path = abs_path.relative_to(self.base_dir)
+        self.storage.write_text(relative_path, content)
 
     def _append_atomic(self, abs_path: Path, content: str):
         """Append to a file safely with a lock."""
-        lock_path = abs_path.with_suffix(".lock")
-        with FileLock(lock_path):
-            if abs_path.exists():
-                existing = abs_path.read_text(encoding="utf-8")
-                combined = existing.rstrip("\n") + "\n" + content
-            else:
-                combined = content
-            tmp_path = abs_path.with_suffix(".tmp")
-            tmp_path.write_text(combined, encoding="utf-8")
-            tmp_path.rename(abs_path)
+        relative_path = abs_path.relative_to(self.base_dir)
+        self.storage.append_text(relative_path, content)
 
     def view(self, path: str | None = None) -> str:
         try:
@@ -87,8 +51,8 @@ class LocalMemoryBackend(AbstractMemoryBackend):
                 "\n".join(p.name for p in contents) if contents else "(empty)"
             )
         elif abs_path.is_file():
-            with FileLock(abs_path.with_suffix(".lock")):
-                return f"Contents of file {abs_path}:\n{abs_path.read_text(encoding='utf-8')}"
+            content = self.storage.read_text(abs_path.relative_to(self.base_dir))
+            return f"Contents of file {abs_path}:\n{content}"
         else:
             return f"Path not found: {path}\nBase directory: {self.base_dir}\nCurrent contents:\n{self._describe_dir()}"
 
@@ -212,11 +176,10 @@ class LocalMemoryBackend(AbstractMemoryBackend):
         if not abs_old.exists():
             return f"Path not found: {old_path}"
 
-        abs_new.parent.mkdir(parents=True, exist_ok=True)
-        lock_old = abs_old.with_suffix(".lock")
-        lock_new = abs_new.with_suffix(".lock")
-        with FileLock(lock_old), FileLock(lock_new):
-            abs_old.rename(abs_new)
+        self.storage.rename(
+            abs_old.relative_to(self.base_dir),
+            abs_new.relative_to(self.base_dir),
+        )
         return f"Renamed {abs_old} → {abs_new}"
 
     def clear_all_memory(self) -> str:
