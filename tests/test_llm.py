@@ -1,33 +1,24 @@
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import patch, AsyncMock
 import pytest
 from omnicoreagent.core.llm import LLMConnection
 
 
-# Shared mock config loader
-def make_mock_config(provider="openai", model="gpt-4"):
+def make_model_config(provider="openai", model="gpt-4"):
     return {
-        "llm_api_key": "test-api-key",
-        "load_config": Mock(
-            return_value={
-                "LLM": {
-                    "provider": provider,
-                    "model": model,
-                    "temperature": 0.7,
-                    "max_tokens": 1000,
-                    "top_p": 0.9,
-                }
-            }
-        ),
+        "provider": provider,
+        "model": model,
+        "temperature": 0.7,
+        "max_tokens": 1000,
+        "top_p": 0.9,
     }
 
 
 @pytest.fixture
 def mock_llm_connection():
     with patch("omnicoreagent.core.llm.litellm"):
-        return LLMConnection(Mock(**make_mock_config()), "test_config.yaml")
+        return LLMConnection(make_model_config(), api_key="test-api-key")
 
 
-@pytest.mark.broken_upstream
 class TestLLMConnection:
     def test_initialization(self, mock_llm_connection):
         cfg = mock_llm_connection.llm_config
@@ -36,7 +27,7 @@ class TestLLMConnection:
         assert cfg["temperature"] == 0.7
 
     def test_llm_configuration_returns_expected_keys(self, mock_llm_connection):
-        config = mock_llm_connection.llm_configuration()
+        config = mock_llm_connection.llm_config
         assert set(config) >= {
             "provider",
             "model",
@@ -56,7 +47,8 @@ class TestLLMConnection:
             mock_completion.return_value = {"mocked": "response"}
 
             conn = LLMConnection(
-                Mock(**make_mock_config("groq", "llama-3")), "test_config.yaml"
+                make_model_config("groq", "llama-3"),
+                api_key="test-api-key",
             )
 
             # With tools
@@ -87,7 +79,8 @@ class TestLLMConnection:
             mock_completion.side_effect = Exception("Boom")
 
             conn = LLMConnection(
-                Mock(**make_mock_config("gemini", "gemini-pro")), "test_config.yaml"
+                make_model_config("gemini", "gemini-pro"),
+                api_key="test-api-key",
             )
             response = await conn.llm_call(messages)
             assert response is None

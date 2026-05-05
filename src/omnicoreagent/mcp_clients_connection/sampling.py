@@ -1,5 +1,3 @@
-import json
-from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
@@ -84,20 +82,25 @@ class LLMConnection:
 
 
 class samplingCallback:
-    def __init__(self):
+    def __init__(
+        self,
+        model_config: dict[str, Any] | None = None,
+        api_key: str | None = None,
+    ):
+        self.model_config = dict(model_config or {})
+        if api_key:
+            self.model_config["api_key"] = api_key
         self.llm_connection = LLMConnection()
 
     async def load_model(self):
-        config_path = Path("servers_config.json")
-        with open(config_path, encoding="utf-8") as f:
-            config = json.load(f)
-            llm_config = config.get("LLM", {})
-            available_models = []
-            models = llm_config.get("model", [])
-            if not isinstance(models, list):
-                models = [models]
-            available_models.extend(models)
-            provider = llm_config.get("provider").lower()
+        if not self.model_config:
+            return [], None
+        models = self.model_config.get("model", [])
+        if not isinstance(models, list):
+            models = [models]
+        provider = self.model_config.get("provider")
+        provider = provider.lower() if isinstance(provider, str) else None
+        available_models = list(models)
         return available_models, provider
 
     async def _select_model(self, preferences, available_models: list[str]) -> str:
@@ -160,6 +163,11 @@ class samplingCallback:
                 )
 
             available_models, provider = await self.load_model()
+            if not available_models or not provider:
+                return ErrorData(
+                    code="INVALID_REQUEST",
+                    message="No sampling model configured for this MCP client",
+                )
 
             model = await self._select_model(params.modelPreferences, available_models)
 

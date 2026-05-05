@@ -1,6 +1,3 @@
-import json
-from unittest.mock import MagicMock, patch
-
 import pytest
 
 from omnicoreagent.mcp_clients_connection.sampling import samplingCallback
@@ -9,22 +6,14 @@ from omnicoreagent.core.types import ContextInclusion
 
 @pytest.mark.asyncio
 async def test_load_model():
-    # Create an instance of the samplingCallback class
-    callback = samplingCallback()
-
-    # Mock the file content for config
-    mock_config = {
-        "LLM": {
+    callback = samplingCallback(
+        model_config={
             "provider": "openai",
             "model": ["gpt-3.5-turbo", "gpt-4"],
         }
-    }
-    with patch("builtins.open", new_callable=MagicMock) as mock_open:
-        mock_open.return_value.__enter__.return_value.read.return_value = json.dumps(
-            mock_config
-        )
+    )
 
-        available_models, provider = await callback.load_model()
+    available_models, provider = await callback.load_model()
 
     # Validate that models and provider are correctly loaded
     assert available_models == ["gpt-3.5-turbo", "gpt-4"]

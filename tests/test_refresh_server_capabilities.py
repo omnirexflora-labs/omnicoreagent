@@ -1,7 +1,6 @@
 import os
 from unittest.mock import AsyncMock, Mock, patch
 
-from omnicoreagent.mcp_clients_connection.client import Configuration  # noqa: E402
 from omnicoreagent.mcp_clients_connection.refresh_server_capabilities import (
     refresh_capabilities,  # noqa: E402
 )
@@ -18,9 +17,6 @@ if not llm_api_key:
 openai_api_key = os.getenv("OPENAI_API_KEY")
 if not openai_api_key:
     os.environ["OPENAI_API_KEY"] = "SKU456"
-
-
-MOCK_LLM_CONFIG = Configuration()
 
 
 # Mock data

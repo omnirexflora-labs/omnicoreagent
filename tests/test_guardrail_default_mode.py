@@ -20,49 +20,6 @@ from omnicoreagent.omni_agent.agent import OmniCoreAgent
 # ---------------------------------------------------------------------------
 
 
-def _make_internal_config(guardrail_mode: str = "full") -> dict[str, Any]:
-    """Build a minimal internal config dict with the given guardrail_mode."""
-    return {
-        "AgentConfig": {
-            "agent_name": "test",
-            "max_steps": 10,
-            "tool_call_timeout": 30,
-            "guardrail_mode": guardrail_mode,
-            "memory_config": {
-                "mode": "sliding_window",
-                "value": 10000,
-                "summary": {"enabled": False, "retention_policy": "keep"},
-            },
-            "context_management": {
-                "enabled": False,
-                "mode": "token_budget",
-                "value": 100000,
-                "threshold_percent": 75,
-                "strategy": "truncate",
-                "preserve_recent": 4,
-            },
-            "tool_offload": {
-                "enabled": False,
-                "threshold_tokens": 500,
-                "threshold_bytes": 2000,
-                "max_preview_tokens": 150,
-                "storage_dir": "workspace/artifacts",
-            },
-        },
-        "LLMConfig": {"model": "test", "api_key": "test", "provider": "openai"},
-        "LLM": {
-            "provider": "openai",
-            "model": "gpt-4o-mini",
-            "temperature": 0.5,
-            "max_tokens": 5000,
-            "max_context_length": 100000,
-            "top_p": 0.7,
-            "top_k": "N/A",
-        },
-        "mcpServers": {},
-    }
-
-
 def _make_agent(agent_config: dict[str, Any] | None = None) -> OmniCoreAgent:
     """Create an OmniCoreAgent with minimal construction params."""
     return OmniCoreAgent(
@@ -99,10 +56,8 @@ class TestGuardrailModeDefault:
     async def test_default_mode_is_full(self, mock_react_agent: MagicMock) -> None:
         """Contract: omitting guardrail_mode in agent_config produces mode='full'."""
         agent = _make_agent(agent_config=None)
-        internal_cfg = _make_internal_config("full")
 
         with (
-            patch.object(agent, "_create_internal_config", return_value=internal_cfg),
             patch.object(agent, "_create_agent") as mock_create,
             patch("omnicoreagent.omni_agent.agent.MemoryRouter"),
             patch("omnicoreagent.omni_agent.agent.EventRouter"),
@@ -120,10 +75,8 @@ class TestGuardrailModeDefault:
     ) -> None:
         """Contract: when guardrail_mode defaults to 'full', self.guardrail is created."""
         agent = _make_agent(agent_config=None)
-        internal_cfg = _make_internal_config("full")
 
         with (
-            patch.object(agent, "_create_internal_config", return_value=internal_cfg),
             patch.object(agent, "_create_agent") as mock_create,
             patch("omnicoreagent.omni_agent.agent.MemoryRouter"),
             patch("omnicoreagent.omni_agent.agent.EventRouter"),
@@ -148,10 +101,8 @@ class TestGuardrailModeFullExplicit:
     ) -> None:
         """Contract: guardrail_mode='full' sets self.guardrail_mode to 'full'."""
         agent = _make_agent(agent_config={"guardrail_mode": "full"})
-        internal_cfg = _make_internal_config("full")
 
         with (
-            patch.object(agent, "_create_internal_config", return_value=internal_cfg),
             patch.object(agent, "_create_agent") as mock_create,
             patch("omnicoreagent.omni_agent.agent.MemoryRouter"),
             patch("omnicoreagent.omni_agent.agent.EventRouter"),
@@ -167,10 +118,8 @@ class TestGuardrailModeFullExplicit:
     ) -> None:
         """Contract: guardrail_mode='full' results in self.guardrail being non-None."""
         agent = _make_agent(agent_config={"guardrail_mode": "full"})
-        internal_cfg = _make_internal_config("full")
 
         with (
-            patch.object(agent, "_create_internal_config", return_value=internal_cfg),
             patch.object(agent, "_create_agent") as mock_create,
             patch("omnicoreagent.omni_agent.agent.MemoryRouter"),
             patch("omnicoreagent.omni_agent.agent.EventRouter"),
@@ -184,7 +133,6 @@ class TestGuardrailModeFullExplicit:
     async def test_full_mode_passes_guardrail_to_react_agent(self) -> None:
         """Contract: in 'full' mode the guardrail is passed to ReactAgent constructor."""
         agent = _make_agent(agent_config={"guardrail_mode": "full"})
-        internal_cfg = _make_internal_config("full")
 
         captured: dict[str, Any] = {}
 
@@ -196,12 +144,8 @@ class TestGuardrailModeFullExplicit:
             return m
 
         with (
-            patch.object(agent, "_create_internal_config", return_value=internal_cfg),
             patch("omnicoreagent.omni_agent.agent.MemoryRouter"),
             patch("omnicoreagent.omni_agent.agent.EventRouter"),
-            patch(
-                "omnicoreagent.omni_agent.agent.Configuration", return_value=MagicMock()
-            ),
             patch(
                 "omnicoreagent.omni_agent.agent.LLMConnection", return_value=MagicMock()
             ),
@@ -230,10 +174,8 @@ class TestGuardrailModeInputOnly:
     ) -> None:
         """Contract: guardrail_mode='input_only' sets self.guardrail_mode correctly."""
         agent = _make_agent(agent_config={"guardrail_mode": "input_only"})
-        internal_cfg = _make_internal_config("input_only")
 
         with (
-            patch.object(agent, "_create_internal_config", return_value=internal_cfg),
             patch.object(agent, "_create_agent") as mock_create,
             patch("omnicoreagent.omni_agent.agent.MemoryRouter"),
             patch("omnicoreagent.omni_agent.agent.EventRouter"),
@@ -249,10 +191,8 @@ class TestGuardrailModeInputOnly:
     ) -> None:
         """Contract: guardrail_mode='input_only' still creates self.guardrail (non-None)."""
         agent = _make_agent(agent_config={"guardrail_mode": "input_only"})
-        internal_cfg = _make_internal_config("input_only")
 
         with (
-            patch.object(agent, "_create_internal_config", return_value=internal_cfg),
             patch.object(agent, "_create_agent") as mock_create,
             patch("omnicoreagent.omni_agent.agent.MemoryRouter"),
             patch("omnicoreagent.omni_agent.agent.EventRouter"),
@@ -268,7 +208,6 @@ class TestGuardrailModeInputOnly:
     ) -> None:
         """Contract: in 'input_only' mode ReactAgent receives guardrail=None."""
         agent = _make_agent(agent_config={"guardrail_mode": "input_only"})
-        internal_cfg = _make_internal_config("input_only")
 
         captured: dict[str, Any] = {}
 
@@ -280,12 +219,8 @@ class TestGuardrailModeInputOnly:
             return m
 
         with (
-            patch.object(agent, "_create_internal_config", return_value=internal_cfg),
             patch("omnicoreagent.omni_agent.agent.MemoryRouter"),
             patch("omnicoreagent.omni_agent.agent.EventRouter"),
-            patch(
-                "omnicoreagent.omni_agent.agent.Configuration", return_value=MagicMock()
-            ),
             patch(
                 "omnicoreagent.omni_agent.agent.LLMConnection", return_value=MagicMock()
             ),
@@ -314,10 +249,8 @@ class TestGuardrailModeOff:
     async def test_off_mode_sets_attribute(self, mock_react_agent: MagicMock) -> None:
         """Contract: guardrail_mode='off' sets self.guardrail_mode to 'off'."""
         agent = _make_agent(agent_config={"guardrail_mode": "off"})
-        internal_cfg = _make_internal_config("off")
 
         with (
-            patch.object(agent, "_create_internal_config", return_value=internal_cfg),
             patch.object(agent, "_create_agent") as mock_create,
             patch("omnicoreagent.omni_agent.agent.MemoryRouter"),
             patch("omnicoreagent.omni_agent.agent.EventRouter"),
@@ -333,10 +266,8 @@ class TestGuardrailModeOff:
     ) -> None:
         """Contract: guardrail_mode='off' leaves self.guardrail as None."""
         agent = _make_agent(agent_config={"guardrail_mode": "off"})
-        internal_cfg = _make_internal_config("off")
 
         with (
-            patch.object(agent, "_create_internal_config", return_value=internal_cfg),
             patch.object(agent, "_create_agent") as mock_create,
             patch("omnicoreagent.omni_agent.agent.MemoryRouter"),
             patch("omnicoreagent.omni_agent.agent.EventRouter"),
@@ -350,7 +281,6 @@ class TestGuardrailModeOff:
     async def test_off_mode_react_agent_gets_no_guardrail(self) -> None:
         """Contract: in 'off' mode ReactAgent receives guardrail=None."""
         agent = _make_agent(agent_config={"guardrail_mode": "off"})
-        internal_cfg = _make_internal_config("off")
 
         captured: dict[str, Any] = {}
 
@@ -362,12 +292,8 @@ class TestGuardrailModeOff:
             return m
 
         with (
-            patch.object(agent, "_create_internal_config", return_value=internal_cfg),
             patch("omnicoreagent.omni_agent.agent.MemoryRouter"),
             patch("omnicoreagent.omni_agent.agent.EventRouter"),
-            patch(
-                "omnicoreagent.omni_agent.agent.Configuration", return_value=MagicMock()
-            ),
             patch(
                 "omnicoreagent.omni_agent.agent.LLMConnection", return_value=MagicMock()
             ),
@@ -398,9 +324,6 @@ class TestCustomGuardrailConfig:
                 "guardrail_config": {"strict_mode": True},
             }
         )
-        # Build internal config that carries guardrail_config inside AgentConfig
-        internal_cfg = _make_internal_config("full")
-        internal_cfg["AgentConfig"]["guardrail_config"] = {"strict_mode": True}
 
         from omnicoreagent.core.guardrails import DetectionConfig
 
@@ -416,7 +339,6 @@ class TestCustomGuardrailConfig:
         mock_react.enable_advanced_tool_use = False
 
         with (
-            patch.object(agent, "_create_internal_config", return_value=internal_cfg),
             patch.object(agent, "_create_agent") as mock_create,
             patch("omnicoreagent.omni_agent.agent.MemoryRouter"),
             patch("omnicoreagent.omni_agent.agent.EventRouter"),
@@ -437,8 +359,6 @@ class TestCustomGuardrailConfig:
                 "guardrail_config": {"strict_mode": True},
             }
         )
-        internal_cfg = _make_internal_config("input_only")
-        internal_cfg["AgentConfig"]["guardrail_config"] = {"strict_mode": True}
 
         from omnicoreagent.core.guardrails import DetectionConfig
 
@@ -453,7 +373,6 @@ class TestCustomGuardrailConfig:
         mock_react.enable_advanced_tool_use = False
 
         with (
-            patch.object(agent, "_create_internal_config", return_value=internal_cfg),
             patch.object(agent, "_create_agent") as mock_create,
             patch("omnicoreagent.omni_agent.agent.MemoryRouter"),
             patch("omnicoreagent.omni_agent.agent.EventRouter"),
@@ -471,8 +390,6 @@ class TestCustomGuardrailConfig:
     ) -> None:
         """Contract: omitting guardrail_config uses DetectionConfig defaults."""
         agent = _make_agent(agent_config={"guardrail_mode": "full"})
-        internal_cfg = _make_internal_config("full")
-        # No guardrail_config key — should default to empty dict
 
         from omnicoreagent.core.guardrails import DetectionConfig
 
@@ -484,7 +401,6 @@ class TestCustomGuardrailConfig:
             created_configs.append(self_dc)
 
         with (
-            patch.object(agent, "_create_internal_config", return_value=internal_cfg),
             patch.object(agent, "_create_agent") as mock_create,
             patch("omnicoreagent.omni_agent.agent.MemoryRouter"),
             patch("omnicoreagent.omni_agent.agent.EventRouter"),
@@ -656,12 +572,10 @@ class TestInitializeIdempotency:
     async def test_initialize_twice_does_not_create_second_guardrail(self) -> None:
         """Contract: second call to initialize() is a no-op when already initialized."""
         agent = _make_agent(agent_config={"guardrail_mode": "full"})
-        internal_cfg = _make_internal_config("full")
         mock_react = MagicMock()
         mock_react.enable_advanced_tool_use = False
 
         with (
-            patch.object(agent, "_create_internal_config", return_value=internal_cfg),
             patch.object(agent, "_create_agent") as mock_create,
             patch("omnicoreagent.omni_agent.agent.MemoryRouter"),
             patch("omnicoreagent.omni_agent.agent.EventRouter"),

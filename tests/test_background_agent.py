@@ -155,24 +155,11 @@ def mock_omni_agent():
             return_value={"type": "in_memory"}
         )
         mock.return_value.cleanup = AsyncMock()
-        # Mocking the internal methods that cause trouble during inheritance init
         with patch(
-            "omnicoreagent.omni_agent.agent.OmniCoreAgent._create_internal_config",
-            return_value={},
+            "omnicoreagent.omni_agent.agent.OmniCoreAgent._create_agent",
+            return_value=None,
         ):
-            with patch(
-                "omnicoreagent.omni_agent.agent.OmniCoreAgent._prepare_agent_config",
-                return_value={},
-            ):
-                with patch(
-                    "omnicoreagent.omni_agent.agent.OmniCoreAgent._save_config_hidden",
-                    return_value=None,
-                ):
-                    with patch(
-                        "omnicoreagent.omni_agent.agent.OmniCoreAgent._create_agent",
-                        return_value=None,
-                    ):
-                        yield mock
+            yield mock
 
 
 @pytest.mark.broken_upstream

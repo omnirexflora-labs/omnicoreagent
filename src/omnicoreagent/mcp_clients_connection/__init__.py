@@ -10,7 +10,7 @@ This package provides MCP client functionality including:
 - Notifications and sampling
 """
 
-from .client import MCPClient, Configuration
+from .client import MCPClient
 from .resources import (
     list_resources,
     read_resource,
@@ -22,7 +22,6 @@ from .prompts import get_prompt, get_prompt_with_react_agent, list_prompts
 
 __all__ = [
     "MCPClient",
-    "Configuration",
     "list_resources",
     "read_resource",
     "subscribe_resource",

@@ -1,116 +1,48 @@
-import json
-import os
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from omnicoreagent.mcp_clients_connection.client import (
-    Configuration,
-    MCPClient,
-)
+from omnicoreagent.mcp_clients_connection.client import MCPClient
 
 # Mock data for testing
-MOCK_SERVER_CONFIG = {
-    "LLM": {
-        "provider": "openai",
-        "model": "gpt-4o-mini",
-        "max_tokens": 1000,
-        "temperature": 0.5,
-        "max_input_tokens": 1000,
-        "top_p": 1,
-    },
-    "mcpServers": {
-        "server1": {
-            "transport_type": "stdio",
-            "command": "mock_command",
-            "args": ["arg1", "arg2"],
-            "env": {"TEST_ENV": "test"},
-        },
-        "server2": {
-            "transport_type": "sse",
-            "url": "http://test.com",
-            "headers": {"Authorization": "Bearer test"},
-            "timeout": 5,
-            "sse_read_timeout": 300,
-        },
-    },
+MOCK_MODEL_CONFIG = {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "max_tokens": 1000,
+    "temperature": 0.5,
+    "max_input_tokens": 1000,
+    "top_p": 1,
 }
 
-
-@pytest.fixture
-def mock_env():
-    """Fixture to set up mock environment variables"""
-    with (
-        patch.dict(
-            os.environ,
-            {
-                "LLM_API_KEY": "test_llm_key",
-            },
-        ),
-        patch("dotenv.load_dotenv"),
-    ):
-        yield
-
-
-@pytest.fixture
-def mock_config_file(tmp_path):
-    """Fixture to create a mock config file"""
-    config_file = tmp_path / "servers_config.json"
-    config_file.write_text(json.dumps(MOCK_SERVER_CONFIG))
-    return str(config_file)
-
-
-class TestConfiguration:
-    def test_init(self, mock_env):
-        """Test Configuration initialization"""
-        config = Configuration()
-        assert config.llm_api_key == "test_llm_key"
-
-    def test_load_config(self, mock_env, mock_config_file):
-        """Test loading configuration from file"""
-        config = Configuration()
-        loaded_config = config.load_config(mock_config_file)
-        assert loaded_config == MOCK_SERVER_CONFIG
-
-    def test_load_config_invalid_filename(self, mock_env, tmp_path):
-        """Test loading configuration with incorrect filename"""
-        config = Configuration()
-        invalid_file = tmp_path / "invalid.json"
-        invalid_file.write_text(json.dumps(MOCK_SERVER_CONFIG))
-        with pytest.raises(ValueError):
-            config.load_config(str(invalid_file))
-
-    def test_load_config_invalid_json(self, mock_env, tmp_path):
-        """Test loading invalid JSON from correct filename"""
-        config = Configuration()
-        invalid_file = tmp_path / "servers_config.json"
-        invalid_file.write_text("invalid json")
-        with pytest.raises(json.JSONDecodeError):
-            config.load_config(str(invalid_file))
-
-    def test_llm_api_key_missing(self):
-        """Test missing LLM_API_KEY"""
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            patch("dotenv.load_dotenv"),
-            patch(
-                "omnicoreagent.mcp_clients_connection.client.decouple_config",
-                return_value=None,
-            ),
-            pytest.raises(ValueError) as exc_info,
-        ):
-            Configuration()
-        assert "LLM_API_KEY not found in environment variables" in str(exc_info.value)
+MOCK_MCP_SERVERS = [
+    {
+        "name": "server1",
+        "transport_type": "stdio",
+        "command": "mock_command",
+        "args": ["arg1", "arg2"],
+        "env": {"TEST_ENV": "test"},
+    },
+    {
+        "name": "server2",
+        "transport_type": "sse",
+        "url": "http://test.com",
+        "headers": {"Authorization": "Bearer test"},
+        "timeout": 5,
+        "sse_read_timeout": 300,
+    },
+]
 
 
 class TestMCPClient:
     @pytest.fixture
-    def mock_client(self, mock_env, mock_config_file):
+    def mock_client(self):
         """Fixture to create a mock MCP client"""
-        config = Configuration()
-        config.load_config = MagicMock(return_value=MOCK_SERVER_CONFIG)
-        return MCPClient(config, debug=True)
+        return MCPClient(
+            servers=MOCK_MCP_SERVERS,
+            model_config=MOCK_MODEL_CONFIG,
+            api_key="test_llm_key",
+            debug=True,
+        )
 
     @pytest.fixture
     def mock_session(self):
@@ -151,7 +83,7 @@ class TestMCPClient:
             ) as mock_exit_stack:
                 server_info = {
                     "name": "server1",
-                    "srv_config": MOCK_SERVER_CONFIG["mcpServers"]["server1"],
+                    "srv_config": {k: v for k, v in MOCK_MCP_SERVERS[0].items() if k != "name"},
                 }
                 result = await mock_client._connect_to_single_server(
                     server_info, "server1"
@@ -187,7 +119,7 @@ class TestMCPClient:
             ) as mock_exit_stack:
                 server_info = {
                     "name": "server2",
-                    "srv_config": MOCK_SERVER_CONFIG["mcpServers"]["server2"],
+                    "srv_config": {k: v for k, v in MOCK_MCP_SERVERS[1].items() if k != "name"},
                 }
                 result = await mock_client._connect_to_single_server(
                     server_info, "server2"
@@ -248,14 +180,8 @@ class TestMCPClient:
         mock_client._connect_to_single_server = AsyncMock(
             return_value="new_server connected successfully"
         )
-        config_file = Path("dummy_config.json")
+        result = await mock_client.add_servers(MOCK_MCP_SERVERS)
 
-        with patch(
-            "builtins.open", mock_open(read_data=json.dumps(MOCK_SERVER_CONFIG))
-        ):
-            result = await mock_client.add_servers(config_file)
-
-        # The real implementation iterates over MOCK_SERVER_CONFIG keys
         assert "server1 connected succesfully" in result
         mock_client._connect_to_single_server.assert_awaited()
 
