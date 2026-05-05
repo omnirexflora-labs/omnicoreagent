@@ -1038,7 +1038,7 @@ class BaseReactAgent:
 
         if self.memory_tool_backend:
             build_tool_registry_memory_tool(
-                memory_tool_backend=self.memory_tool_backend,
+                memory_tool_backend=None,
                 registry=registry,
             )
 

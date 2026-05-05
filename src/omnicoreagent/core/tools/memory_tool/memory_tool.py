@@ -3,10 +3,8 @@ Memory Tool that delegates all operations to a backend
 implementing AbstractMemoryBackend.
 """
 
-from typing import Union
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.memory_tool.base import AbstractMemoryBackend
-from omnicoreagent.core.tools.memory_tool.local_storage import LocalMemoryBackend
 from omnicoreagent.core.tools.memory_tool.factory import create_memory_backend
 
 
@@ -15,32 +13,25 @@ class MemoryTool:
     Memory Tool that delegates all operations to a backend.
     
     Usage:
-        # From string (uses environment variables for cloud backends)
-        memory_tool = MemoryTool(backend="local")
-        memory_tool = MemoryTool(backend="s3")
-        memory_tool = MemoryTool(backend="r2")
-        
-        # Direct backend injection
+        # Uses the configured workspace backend
+        memory_tool = MemoryTool()
+
+        # Direct backend injection for tests/custom storage
         memory_tool = MemoryTool(backend=my_custom_backend)
     """
 
-    def __init__(self, backend: Union[AbstractMemoryBackend, str] = None):
+    def __init__(self, backend: AbstractMemoryBackend | None = None):
         """
         Initialize MemoryTool with a backend.
         
         Args:
-            backend: Either:
-                - A string ("local", "s3", "r2") - creates backend from env vars
-                - An AbstractMemoryBackend instance (direct injection)
-                - None - defaults to local backend
+            backend: Optional AbstractMemoryBackend instance for direct injection.
+                None uses the active workspace backend.
         """
-        if isinstance(backend, str):
-            self.backend = create_memory_backend(backend)
-        elif isinstance(backend, AbstractMemoryBackend):
+        if isinstance(backend, AbstractMemoryBackend):
             self.backend = backend
         else:
-            # Default to local
-            self.backend = LocalMemoryBackend()
+            self.backend = create_memory_backend()
 
     def view(self, path: str | None = None) -> str:
         """Show directory listing or file contents."""
@@ -72,14 +63,14 @@ class MemoryTool:
 
 
 def build_tool_registry_memory_tool(
-    memory_tool_backend: Union[AbstractMemoryBackend, str],
+    memory_tool_backend: AbstractMemoryBackend | None,
     registry: ToolRegistry,
 ) -> ToolRegistry:
     """
     Register memory tool commands in a ToolRegistry.
 
     Args:
-        memory_tool_backend: Either a string ("local", "s3", "r2") or backend instance
+        memory_tool_backend: Optional backend instance. None uses workspace storage.
         registry: ToolRegistry to register commands with
     """
     memory_tool = MemoryTool(backend=memory_tool_backend)

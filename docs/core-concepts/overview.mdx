@@ -60,7 +60,7 @@ agent = OmniCoreAgent(
         "max_steps": 20,
         "enable_advanced_tool_use": True,
         "enable_agent_skills": True,
-        "memory_tool_backend": "local",
+        "memory_tool_backend": "workspace",
         # Memory with summarization
         "memory_config": {
             "mode": "sliding_window",
@@ -162,7 +162,7 @@ await agent.clear_session_history()
 Switch memory and event backends at runtime without restarting:
 
 ```python
-# Switch memory backends
+# Switch conversation memory stores
 await agent.switch_memory_store("mongodb")
 await agent.switch_memory_store("database")  # PostgreSQL/MySQL/SQLite
 await agent.switch_memory_store("redis")

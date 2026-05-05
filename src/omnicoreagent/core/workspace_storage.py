@@ -16,6 +16,7 @@ class WorkspaceFile:
     path: str
     name: str
     modified_at: datetime
+    is_dir: bool = False
 
 
 class WorkspaceStorage(Protocol):
@@ -30,7 +31,7 @@ class WorkspaceStorage(Protocol):
     def location(self, path: str | Path, *, strip_prefixes: Iterable[str] = ()) -> str:
         ...
 
-    def list_files(self) -> list[WorkspaceFile]: ...
+    def list_files(self, path: str | Path | None = None) -> list[WorkspaceFile]: ...
 
     def write_text(
         self,
@@ -104,11 +105,12 @@ class LocalWorkspaceStorage:
         return candidate
 
     def describe_root(self) -> str:
-        self.ensure_root()
-        contents = list(self.root.iterdir())
+        contents = self.list_files()
         if not contents:
             return "(empty)"
-        return "\n".join(path.name for path in contents)
+        return "\n".join(
+            f"{item.name}/" if item.is_dir else item.name for item in contents
+        )
 
     def read_text(self, path: str | Path, *, strip_prefixes: Iterable[str] = ()) -> str:
         resolved = self.resolve(path, strip_prefixes=strip_prefixes)
@@ -121,17 +123,19 @@ class LocalWorkspaceStorage:
     def location(self, path: str | Path, *, strip_prefixes: Iterable[str] = ()) -> str:
         return str(self.resolve(path, strip_prefixes=strip_prefixes))
 
-    def list_files(self) -> list[WorkspaceFile]:
-        self.ensure_root()
+    def list_files(self, path: str | Path | None = None) -> list[WorkspaceFile]:
+        target = self.resolve(path)
+        if not target.exists() or not target.is_dir():
+            return []
+
         files = []
-        for path in self.root.iterdir():
-            if not path.is_file():
-                continue
+        for child in target.iterdir():
             files.append(
                 WorkspaceFile(
-                    path=path.name,
-                    name=path.name,
-                    modified_at=datetime.fromtimestamp(path.stat().st_mtime),
+                    path=str(child.relative_to(self.root)),
+                    name=child.name,
+                    modified_at=datetime.fromtimestamp(child.stat().st_mtime),
+                    is_dir=child.is_dir(),
                 )
             )
         return files
@@ -306,19 +310,39 @@ class S3WorkspaceStorage:
         key = self._normalize_key(path, strip_prefixes=strip_prefixes)
         return f"s3://{self.bucket}/{key}"
 
-    def list_files(self) -> list[WorkspaceFile]:
-        response = self.s3.list_objects_v2(Bucket=self.bucket, Prefix=self.prefix)
+    def list_files(self, path: str | Path | None = None) -> list[WorkspaceFile]:
+        prefix = self._normalize_key(path)
+        if prefix and not prefix.endswith("/"):
+            prefix += "/"
+        response = self.s3.list_objects_v2(
+            Bucket=self.bucket,
+            Prefix=prefix,
+            Delimiter="/",
+        )
         files = []
+        for item in response.get("CommonPrefixes", []):
+            key = item["Prefix"]
+            name = key[len(prefix) :].rstrip("/")
+            if not name:
+                continue
+            files.append(
+                WorkspaceFile(
+                    path=key[len(self.prefix) :].rstrip("/"),
+                    name=name,
+                    modified_at=datetime.fromtimestamp(0),
+                    is_dir=True,
+                )
+            )
         for item in response.get("Contents", []):
             key = item["Key"]
-            if key == self.prefix or key.endswith("/"):
+            if key == prefix or key.endswith("/"):
                 continue
-            name = key[len(self.prefix) :]
+            name = key[len(prefix) :]
             if "/" in name:
                 continue
             files.append(
                 WorkspaceFile(
-                    path=name,
+                    path=key[len(self.prefix) :],
                     name=name,
                     modified_at=item["LastModified"],
                 )
@@ -359,6 +383,17 @@ class S3WorkspaceStorage:
 
     def delete(self, path: str | Path, *, strip_prefixes: Iterable[str] = ()) -> str:
         key = self._normalize_key(path, strip_prefixes=strip_prefixes)
+        if self.exists(path, strip_prefixes=strip_prefixes):
+            self.s3.delete_object(Bucket=self.bucket, Key=key)
+            return f"File deleted: s3://{self.bucket}/{key}"
+
+        prefix = key if key.endswith("/") else f"{key}/"
+        response = self.s3.list_objects_v2(Bucket=self.bucket, Prefix=prefix)
+        objects = [{"Key": item["Key"]} for item in response.get("Contents", [])]
+        if objects:
+            self.s3.delete_objects(Bucket=self.bucket, Delete={"Objects": objects})
+            return f"Directory deleted: s3://{self.bucket}/{prefix}"
+
         self.s3.delete_object(Bucket=self.bucket, Key=key)
         return f"File deleted: s3://{self.bucket}/{key}"
 

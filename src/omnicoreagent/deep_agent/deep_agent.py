@@ -33,7 +33,7 @@ from .subagent_factory import SubagentFactory, build_subagent_tools
 DEFAULT_DEEP_AGENT_CONFIG = {
     "tool_call_timeout": 600,
     "max_steps": 50,
-    "memory_tool_backend": "local",
+    "memory_tool_backend": "workspace",
     "memory_config": {
         "mode": "sliding_window",
         "value": 15000,
@@ -123,7 +123,7 @@ class DeepAgent:
         """
         Build agent config by merging user config with good defaults.
 
-        User can override most settings, but memory_tool_backend is always "local".
+        User can override most settings. Memory uses the active workspace backend.
         """
         config = DEFAULT_DEEP_AGENT_CONFIG.copy()
 
@@ -138,9 +138,8 @@ class DeepAgent:
                 else:
                     config[key] = value
 
-        # config["memory_tool_backend"] = "local"
         if "memory_tool_backend" not in config:
-            config["memory_tool_backend"] = "local"
+            config["memory_tool_backend"] = "workspace"
 
         return config
 

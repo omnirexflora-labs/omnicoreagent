@@ -140,7 +140,7 @@ flowchart TB
 |---------|---------------|-----------|
 | **Domain** | User-defined | User-defined (same) |
 | **Tools** | User-provided | User-provided + orchestration tools |
-| **Memory Backend** | Optional | **Always `"local"`** (enforcement) |
+| **Memory Files** | Optional workspace tools | Workspace-backed by default |
 | **Orchestration** | No | Automatic subagent spawning |
 | **Config Inheritance** | N/A | Subagents inherit parent config |
 | **Best For** | Single-agent tasks | Complex multi-step research/analysis |
@@ -160,7 +160,7 @@ agent = DeepAgent(
         # These are the defaults (you can override):
         "max_steps": 50,  # More steps for orchestration
         "tool_call_timeout": 600,  # 10 min (subagents do deep work)
-        "memory_tool_backend": "local",  # ENFORCED (cannot override)
+        "memory_tool_backend": "workspace",
         "context_management": {"enabled": True},
         "tool_offload": {"enabled": True},
     }
@@ -169,7 +169,7 @@ agent = DeepAgent(
 
 ### Key Config Notes
 
-- **`memory_tool_backend`**: Always `"local"` (required for orchestration) - cannot be overridden
+- **`memory_tool_backend`**: Use `"workspace"` so memory files live inside the active workspace backend
 - **`max_steps`**: Increased to `50` to allow for multi-agent coordination
 - **`tool_call_timeout`**: Set to `600s` because subagents may do research, API calls, etc.
 
@@ -249,7 +249,7 @@ Spawn subagents to:
 
 ### ❌ DON'T
 
-- **Override `memory_tool_backend`** - DeepAgent requires `"local"` memory for orchestration
+- **Configure memory separately from workspace** - memory follows the active workspace backend
 - **Use for simple tasks** - For single-step tasks, use OmniCoreAgent instead
 - **Hardcode subagent specs** - Let the lead agent decide what specialists to spawn based on the query
 
@@ -312,8 +312,8 @@ A: Use DeepAgent when your task has multiple independent subtasks that can benef
 **Q: Can I nest DeepAgents?**
 A: Technically yes (subagents are OmniCoreAgents), but it's rarely needed. The lead DeepAgent is usually sufficient for 2-3 levels of delegation.
 
-**Q: What if I want to use Redis memory?**
-A: DeepAgent enforces `"local"` memory backend for orchestration. If you need Redis for session persistence, use OmniCoreAgent instead or implement custom memory logic.
+**Q: What if I want memory in S3 or R2?**
+A: Set `OMNICOREAGENT_WORKSPACE_BACKEND=s3` or `r2`. DeepAgent memory uses the same workspace backend.
 
 **Q: How do I monitor subagent progress?**
 A: Enable event streaming and filter for `sub_agent_started`, `sub_agent_result`, and `sub_agent_error` events.

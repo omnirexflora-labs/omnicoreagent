@@ -204,15 +204,15 @@ class TestDeepAgentInitialization:
 
     @pytest.mark.broken_upstream
     @pytest.mark.asyncio
-    async def test_memory_tool_backend_always_local(self):
-        """Memory should always be local."""
+    async def test_memory_tool_backend_uses_workspace(self):
+        """Memory should always use the workspace backend."""
         agent = DeepAgent(
             name="Test",
             system_instruction="Test",
             model_config={"provider": "openai", "model": "gpt-4"},
-            agent_config={"memory_tool_backend": "redis"},
+            agent_config={},
         )
-        assert agent.agent_config["memory_tool_backend"] == "local"
+        assert agent.agent_config["memory_tool_backend"] == "workspace"
 
     @pytest.mark.asyncio
     async def test_prompt_builder_assigned(self, deep_agent):

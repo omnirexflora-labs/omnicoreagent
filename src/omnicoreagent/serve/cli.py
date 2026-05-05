@@ -342,15 +342,15 @@ def generate_dockerfile(file_path: str, output_dir: str):
     except ValueError:
         rel_path = os.path.basename(file_path)
 
-    # Inspect agent to detect memory backend
-    memory_backend = None  # None means no memory tools detected
+    # Inspect agent to detect workspace memory tools
+    memory_enabled = False
     try:
         loaded_agent = _load_agent_from_file(file_path)
         if loaded_agent.agent_config and isinstance(loaded_agent.agent_config, dict):
-            memory_backend = loaded_agent.agent_config.get("memory_tool_backend")
+            memory_enabled = bool(loaded_agent.agent_config.get("memory_tool_backend"))
         console.print(f"[green]✓ Detected agent: {loaded_agent.name}[/green]")
-        if memory_backend:
-            console.print(f"[dim]Memory backend: {memory_backend}[/dim]")
+        if memory_enabled:
+            console.print("[dim]Workspace memory tools enabled[/dim]")
         else:
             console.print("[dim]No memory tools configured[/dim]")
     except Exception as e:
@@ -366,21 +366,11 @@ def generate_dockerfile(file_path: str, output_dir: str):
         "# Agent path",
         f"ENV AGENT_PATH=/app/{rel_path}",
         "",
-        "# Artifacts storage (always ephemeral)",
+        "# Workspace storage for artifacts and memory files",
+        "ENV OMNICOREAGENT_WORKSPACE_BACKEND=local",
         "ENV OMNICOREAGENT_WORKSPACE_DIR=/tmp/workspace",
         "ENV OMNICOREAGENT_ARTIFACTS_DIR=/tmp/workspace/artifacts",
     ]
-
-    # Only local memory needs /tmp path in Dockerfile
-    if memory_backend == "local":
-        env_lines.extend(
-            [
-                "",
-                "# Local memory (ephemeral on cloud)",
-                "ENV OMNICOREAGENT_MEMORY_DIR=/tmp/workspace/memories",
-            ]
-        )
-    # S3/R2 credentials are passed at runtime, not in Dockerfile
 
     env_block = "\n".join(env_lines)
 
@@ -407,40 +397,25 @@ CMD ["sh", "-c", "omniserve run --agent $AGENT_PATH"]
 
     console.print(f"\n[bold green]✓ Generated {dockerfile_path}[/bold green]")
 
-    # Build the docker run command based on backend
     console.print("\n[bold]Next Steps:[/bold]")
     console.print("1. Build the image:")
     console.print("   docker build -t omniserver .")
 
-    console.print("\n2. Run (pass secrets at runtime):")
-    if memory_backend == "s3":
-        console.print("   docker run -p 8000:8000 \\")
-        console.print("     -e LLM_API_KEY=$LLM_API_KEY \\")
-        console.print("     -e AWS_S3_BUCKET=your-bucket \\")
-        console.print("     -e AWS_ACCESS_KEY_ID=... \\")
-        console.print("     -e AWS_SECRET_ACCESS_KEY=... \\")
-        console.print("     -e AWS_REGION=us-east-1 \\")
-        console.print("     omniserver")
-    elif memory_backend == "r2":
-        console.print("   docker run -p 8000:8000 \\")
-        console.print("     -e LLM_API_KEY=$LLM_API_KEY \\")
-        console.print("     -e R2_BUCKET_NAME=your-bucket \\")
-        console.print("     -e R2_ACCOUNT_ID=... \\")
-        console.print("     -e R2_ACCESS_KEY_ID=... \\")
-        console.print("     -e R2_SECRET_ACCESS_KEY=... \\")
-        console.print("     omniserver")
-    else:
-        console.print(
-            "   docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omniserver"
-        )
+    console.print("\n2. Run with local workspace:")
+    console.print("   docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omniserver")
 
-    if memory_backend == "local":
-        console.print(
-            "\n[yellow]⚠ Local memory is EPHEMERAL - data lost on restart.[/yellow]"
-        )
-        console.print(
-            "[dim]For persistent memory, configure S3 or R2 in your agent.[/dim]"
-        )
+    console.print("\n   Or run with S3/R2 workspace persistence:")
+    console.print("   docker run -p 8000:8000 \\")
+    console.print("     -e LLM_API_KEY=$LLM_API_KEY \\")
+    console.print("     -e OMNICOREAGENT_WORKSPACE_BACKEND=s3 \\")
+    console.print("     -e AWS_S3_BUCKET=your-bucket \\")
+    console.print("     -e AWS_ACCESS_KEY_ID=... \\")
+    console.print("     -e AWS_SECRET_ACCESS_KEY=... \\")
+    console.print("     omniserver")
+
+    console.print(
+        "\n[yellow]⚠ Local workspace is ephemeral unless you mount a volume.[/yellow]"
+    )
 
 
 def main():
