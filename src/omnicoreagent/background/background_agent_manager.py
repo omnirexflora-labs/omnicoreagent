@@ -5,11 +5,11 @@ Background Agent Manager for orchestrating multiple background agents.
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
-from omnicoreagent.omni_agent.background_agent.background_agents import (
+from omnicoreagent.background.background_agents import (
     BackgroundOmniCoreAgent,
 )
-from omnicoreagent.omni_agent.background_agent.task_registry import TaskRegistry
-from omnicoreagent.omni_agent.background_agent.scheduler_backend import (
+from omnicoreagent.background.task_registry import TaskRegistry
+from omnicoreagent.background.scheduler_backend import (
     APSchedulerBackend,
 )
 from omnicoreagent.core.memory_store.memory_router import MemoryRouter

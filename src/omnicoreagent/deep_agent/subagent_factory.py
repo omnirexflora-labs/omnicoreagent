@@ -12,7 +12,7 @@ Subagents inherit:
 import asyncio
 import json
 from typing import Any, Dict, List, Optional
-from omnicoreagent.omni_agent.agent import OmniCoreAgent
+from omnicoreagent.agent import OmniCoreAgent
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.utils import logger
 

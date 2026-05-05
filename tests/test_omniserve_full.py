@@ -5,7 +5,7 @@ import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
 from fastapi.testclient import TestClient
 from omnicoreagent import OmniCoreAgent, OmniServe, OmniServeConfig
-from omnicoreagent.omni_agent.omni_serve.resilience import CircuitBreaker, CircuitBreakerConfig, CircuitBreakerOpenError
+from omnicoreagent.serve.resilience import CircuitBreaker, CircuitBreakerConfig, CircuitBreakerOpenError
 
 # =============================================================================
 # Test Configuration

@@ -3,14 +3,14 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 from datetime import timezone
 
-from omnicoreagent.omni_agent.background_agent.task_registry import TaskRegistry
-from omnicoreagent.omni_agent.background_agent.scheduler_backend import (
+from omnicoreagent.background.task_registry import TaskRegistry
+from omnicoreagent.background.scheduler_backend import (
     APSchedulerBackend,
 )
-from omnicoreagent.omni_agent.background_agent.background_agents import (
+from omnicoreagent.background.background_agents import (
     BackgroundOmniCoreAgent,
 )
-from omnicoreagent.omni_agent.background_agent.background_agent_manager import (
+from omnicoreagent.background.background_agent_manager import (
     BackgroundAgentManager,
 )
 
@@ -141,9 +141,9 @@ class TestAPSchedulerBackend:
 
 
 @pytest.fixture
-def mock_omni_agent():
+def mock_runtime_agent():
     with patch(
-        "omnicoreagent.omni_agent.background_agent.background_agents.OmniCoreAgent"
+        "omnicoreagent.background.background_agents.OmniCoreAgent"
     ) as mock:
         mock.return_value.run = AsyncMock(
             return_value={"response": "success", "session_id": "test_session"}
@@ -156,7 +156,7 @@ def mock_omni_agent():
         )
         mock.return_value.cleanup = AsyncMock()
         with patch(
-            "omnicoreagent.omni_agent.agent.OmniCoreAgent._create_agent",
+            "omnicoreagent.agent.OmniCoreAgent._create_agent",
             return_value=None,
         ):
             yield mock
@@ -165,7 +165,7 @@ def mock_omni_agent():
 @pytest.mark.broken_upstream
 class TestBackgroundOmniCoreAgent:
     @pytest.mark.asyncio
-    async def test_init(self, mock_omni_agent, task_registry):
+    async def test_init(self, mock_runtime_agent, task_registry):
         config = {
             "agent_id": "test_agent",
             "interval": 60,
@@ -176,7 +176,7 @@ class TestBackgroundOmniCoreAgent:
         assert agent.task_registry == task_registry
 
     @pytest.mark.asyncio
-    async def test_run_task_submits_to_queue(self, mock_omni_agent, task_registry):
+    async def test_run_task_submits_to_queue(self, mock_runtime_agent, task_registry):
         config = {
             "agent_id": "test_agent",
             "model_config": {"provider": "openai", "model": "gpt-4"},
@@ -186,7 +186,7 @@ class TestBackgroundOmniCoreAgent:
         assert agent._task_queue.qsize() == 1
 
     @pytest.mark.asyncio
-    async def test_worker_loop_processes_task(self, mock_omni_agent, task_registry):
+    async def test_worker_loop_processes_task(self, mock_runtime_agent, task_registry):
         config = {
             "agent_id": "test_agent",
             "model_config": {"provider": "openai", "model": "gpt-4"},
@@ -208,7 +208,7 @@ class TestBackgroundOmniCoreAgent:
             await agent.cleanup()
 
     @pytest.mark.asyncio
-    async def test_internal_run_task_success(self, mock_omni_agent, task_registry):
+    async def test_internal_run_task_success(self, mock_runtime_agent, task_registry):
         config = {
             "agent_id": "test_agent",
             "model_config": {"provider": "openai", "model": "gpt-4"},
@@ -237,7 +237,7 @@ class TestBackgroundOmniCoreAgent:
 
     @pytest.mark.asyncio
     async def test_internal_run_task_failure_with_retry(
-        self, mock_omni_agent, task_registry
+        self, mock_runtime_agent, task_registry
     ):
         config = {
             "agent_id": "test_agent",
@@ -267,7 +267,7 @@ class TestBackgroundOmniCoreAgent:
         assert agent.run.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_task_timeout(self, mock_omni_agent, task_registry):
+    async def test_task_timeout(self, mock_runtime_agent, task_registry):
         config = {
             "agent_id": "test_agent",
             "model_config": {"provider": "openai", "model": "gpt-4"},
@@ -297,7 +297,7 @@ class TestBackgroundOmniCoreAgent:
             )
 
     @pytest.mark.asyncio
-    async def test_queue_full(self, mock_omni_agent, task_registry):
+    async def test_queue_full(self, mock_runtime_agent, task_registry):
         config = {
             "agent_id": "test_agent",
             "queue_size": 1,
@@ -314,7 +314,7 @@ class TestBackgroundOmniCoreAgent:
             await agent.submit_task({"query": "task 2", "queue_timeout": 0.1})
 
     @pytest.mark.asyncio
-    async def test_timezone_aware_execution(self, mock_omni_agent, task_registry):
+    async def test_timezone_aware_execution(self, mock_runtime_agent, task_registry):
         config = {
             "agent_id": "test_agent",
             "model_config": {"provider": "openai", "model": "gpt-4"},
@@ -342,7 +342,7 @@ class TestBackgroundOmniCoreAgent:
 @pytest.mark.broken_upstream
 class TestBackgroundAgentManager:
     @pytest.mark.asyncio
-    async def test_create_agent(self, mock_omni_agent):
+    async def test_create_agent(self, mock_runtime_agent):
         manager = BackgroundAgentManager()
         config = {
             "agent_id": "manager_agent",
@@ -358,7 +358,7 @@ class TestBackgroundAgentManager:
         assert manager.scheduler.is_task_scheduled("manager_agent") is True
 
     @pytest.mark.asyncio
-    async def test_run_task_now(self, mock_omni_agent):
+    async def test_run_task_now(self, mock_runtime_agent):
         manager = BackgroundAgentManager()
         config = {
             "agent_id": "test_agent",
@@ -373,7 +373,7 @@ class TestBackgroundAgentManager:
             mock_submit.assert_called_once_with({"query": "now"})
 
     @pytest.mark.asyncio
-    async def test_pause_resume_agent(self, mock_omni_agent):
+    async def test_pause_resume_agent(self, mock_runtime_agent):
         manager = BackgroundAgentManager()
         config = {
             "agent_id": "test_agent",
@@ -389,7 +389,7 @@ class TestBackgroundAgentManager:
         assert manager.scheduler.is_task_scheduled("test_agent") is True
 
     @pytest.mark.asyncio
-    async def test_delete_agent(self, mock_omni_agent):
+    async def test_delete_agent(self, mock_runtime_agent):
         manager = BackgroundAgentManager()
         config = {
             "agent_id": "test_agent",
@@ -404,7 +404,7 @@ class TestBackgroundAgentManager:
         assert manager.scheduler.is_task_scheduled("test_agent") is False
 
     @pytest.mark.asyncio
-    async def test_get_manager_status(self, mock_omni_agent):
+    async def test_get_manager_status(self, mock_runtime_agent):
         manager = BackgroundAgentManager()
         config = {
             "agent_id": "test_agent",

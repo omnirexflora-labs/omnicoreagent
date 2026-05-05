@@ -9,7 +9,7 @@ Clean prompt structure:
 NOTE: task_id is for when SPAWNING subagents, not part of base prompt.
 """
 
-from omnicoreagent.omni_agent.prompts.react_suffix import SYSTEM_SUFFIX
+from omnicoreagent.prompts.react_suffix import SYSTEM_SUFFIX
 
 
 DEEP_AGENT_ORCHESTRATION_PROMPT = """

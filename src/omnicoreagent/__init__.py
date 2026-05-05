@@ -11,15 +11,15 @@ from .core.events import EventRouter
 from .core.tools import ToolRegistry, Tool
 from .core.utils import logger
 
-from .omni_agent.agent import OmniCoreAgent, OmniAgent
+from .agent import OmniCoreAgent
 
 from .mcp_clients_connection import MCPClient
 
-from .omni_agent.workflow.parallel_agent import ParallelAgent
-from .omni_agent.workflow.sequential_agent import SequentialAgent
-from .omni_agent.workflow.router_agent import RouterAgent
+from .workflows.parallel_agent import ParallelAgent
+from .workflows.sequential_agent import SequentialAgent
+from .workflows.router_agent import RouterAgent
 
-from .omni_agent.deep_agent import DeepAgent
+from .deep_agent import DeepAgent
 
 __all__ = [
     # Core
@@ -33,7 +33,6 @@ __all__ = [
     "logger",
     # Agents
     "OmniCoreAgent",
-    "OmniAgent",
     "BackgroundOmniCoreAgent",
     "BackgroundAgentManager",
     "TaskRegistry",
@@ -61,34 +60,34 @@ __all__ = [
 _OPTIONAL_EXPORTS = {
     "DatabaseMessageStore": ("omnicoreagent.core.memory_store", "postgres"),
     "BackgroundOmniCoreAgent": (
-        "omnicoreagent.omni_agent.background_agent",
+        "omnicoreagent.background",
         "background",
     ),
     "BackgroundAgentManager": (
-        "omnicoreagent.omni_agent.background_agent",
+        "omnicoreagent.background",
         "background",
     ),
-    "TaskRegistry": ("omnicoreagent.omni_agent.background_agent", "background"),
+    "TaskRegistry": ("omnicoreagent.background", "background"),
     "APSchedulerBackend": (
-        "omnicoreagent.omni_agent.background_agent",
+        "omnicoreagent.background",
         "background",
     ),
     "BackgroundTaskScheduler": (
-        "omnicoreagent.omni_agent.background_agent",
+        "omnicoreagent.background",
         "background",
     ),
-    "OmniServe": ("omnicoreagent.omni_agent.omni_serve", "serve"),
-    "OmniServeConfig": ("omnicoreagent.omni_agent.omni_serve", "serve"),
-    "RetryConfig": ("omnicoreagent.omni_agent.omni_serve.resilience", "serve"),
-    "RetryStrategy": ("omnicoreagent.omni_agent.omni_serve.resilience", "serve"),
-    "CircuitBreaker": ("omnicoreagent.omni_agent.omni_serve.resilience", "serve"),
+    "OmniServe": ("omnicoreagent.serve", "serve"),
+    "OmniServeConfig": ("omnicoreagent.serve", "serve"),
+    "RetryConfig": ("omnicoreagent.serve.resilience", "serve"),
+    "RetryStrategy": ("omnicoreagent.serve.resilience", "serve"),
+    "CircuitBreaker": ("omnicoreagent.serve.resilience", "serve"),
     "CircuitBreakerConfig": (
-        "omnicoreagent.omni_agent.omni_serve.resilience",
+        "omnicoreagent.serve.resilience",
         "serve",
     ),
-    "with_retry": ("omnicoreagent.omni_agent.omni_serve.resilience", "serve"),
-    "retry_async": ("omnicoreagent.omni_agent.omni_serve.resilience", "serve"),
-    "get_metrics": ("omnicoreagent.omni_agent.omni_serve.observability", "serve"),
+    "with_retry": ("omnicoreagent.serve.resilience", "serve"),
+    "retry_async": ("omnicoreagent.serve.resilience", "serve"),
+    "get_metrics": ("omnicoreagent.serve.observability", "serve"),
 }
 
 

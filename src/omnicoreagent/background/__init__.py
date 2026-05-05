@@ -29,7 +29,7 @@ def __getattr__(name: str):
         "APScheduler background scheduling",
         "background",
         lambda: __import__(
-            "omnicoreagent.omni_agent.background_agent.scheduler_backend",
+            "omnicoreagent.background.scheduler_backend",
             fromlist=["APSchedulerBackend"],
         ).APSchedulerBackend,
     )

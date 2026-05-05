@@ -6,7 +6,7 @@ from omnicoreagent.core.types import AgentConfig as ReactAgentConfig
 from omnicoreagent.mcp_clients_connection.client import MCPClient
 from omnicoreagent.core.llm import LLMConnection
 from omnicoreagent.core.memory_store.memory_router import MemoryRouter
-from omnicoreagent.omni_agent.config import (
+from omnicoreagent.runtime_config import (
     ModelConfig,
     MCPToolConfig,
     AgentConfig,
@@ -14,8 +14,8 @@ from omnicoreagent.omni_agent.config import (
     normalize_mcp_tools,
     normalize_model_config,
 )
-from omnicoreagent.omni_agent.prompts.prompt_builder import OmniCoreAgentPromptBuilder
-from omnicoreagent.omni_agent.prompts.react_suffix import SYSTEM_SUFFIX
+from omnicoreagent.prompts.prompt_builder import OmniCoreAgentPromptBuilder
+from omnicoreagent.prompts.react_suffix import SYSTEM_SUFFIX
 from omnicoreagent.core.events.event_router import EventRouter
 from omnicoreagent.core.tools.advance_tools.advanced_tools_use import AdvanceToolsUse
 from omnicoreagent.core.utils import logger
@@ -165,7 +165,7 @@ class OmniCoreAgent:
 
         # Pass guardrail to ReactAgent only in "full" mode
         # In "full" mode, tool outputs and MCP responses are scrubbed
-        # In "input_only" mode, only user input is checked (at OmniAgent.run level)
+        # In "input_only" mode, only user input is checked at the public run boundary.
         tool_guardrail = self.guardrail if self.guardrail_mode == "full" else None
         self.agent = ReactAgent(config=agent_settings, guardrail=tool_guardrail)
         if self.local_tools:
@@ -287,7 +287,7 @@ class OmniCoreAgent:
         if not session_id:
             session_id = self.generate_session_id()
 
-        omni_agent_prompt = self.prompt_builder.build(
+        runtime_prompt = self.prompt_builder.build(
             system_instruction=self.system_instruction
         )
 
@@ -299,8 +299,8 @@ class OmniCoreAgent:
             "sub_agents": self.sub_agents,
         }
 
-        response = await self.agent._run(
-            system_prompt=omni_agent_prompt,
+        response = await self.agent.run(
+            system_prompt=runtime_prompt,
             query=query,
             llm_connection=self.llm_connection,
             add_message_to_history=self.memory_router.store_message,
@@ -435,20 +435,3 @@ class OmniCoreAgent:
         """Clean up MCP servers without removing the agent and the config"""
         if self.mcp_client:
             await self.mcp_client.cleanup()
-
-
-class OmniAgent(OmniCoreAgent):
-    """
-    Deprecated: Use OmniCoreAgent instead.
-    """
-
-    def __init__(self, *args, **kwargs):
-        import warnings
-
-        warnings.warn(
-            "OmniAgent is deprecated and has been renamed to OmniCoreAgent. "
-            "Please update your imports and class usage.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
