@@ -1,12 +1,14 @@
 ---
 title: DeepAgent
-description: 'Multi-agent orchestration with the RPI+ workflow for complex tasks'
+description: 'Compatibility preset for OmniCoreAgent harness defaults'
 icon: 'layer-group'
 ---
 
-# DeepAgent - Multi-Agent Orchestration
+# DeepAgent
 
-**DeepAgent** extends OmniCoreAgent with **autonomous multi-agent orchestration**. It automatically breaks down complex tasks and delegates them to specialized subagents running in parallel.
+**DeepAgent** is a compatibility preset on top of OmniCoreAgent. The dynamic
+subagent harness now lives in OmniCoreAgent itself; DeepAgent turns on the
+multi-agent defaults for existing users.
 
 ## Quick Start
 
@@ -20,7 +22,7 @@ agent = DeepAgent(
     model_config={"provider": "openai", "model": "gpt-4o"},
 )
 
-# Initialize (registers subagent spawning tools)
+# Initialize (registers OmniCoreAgent dynamic subagent tools)
 await agent.initialize()
 
 # Run a complex task - it will spawn subagents automatically
@@ -37,23 +39,11 @@ await agent.cleanup()
 
 ## How It Works
 
-DeepAgent extends OmniCoreAgent with two specialized tools:
+DeepAgent enables OmniCoreAgent's dynamic subagent harness defaults.
 
-### 1. `spawn_subagent`
-Spawns a single focused subagent.
-
-```python
-# The lead agent can call this tool
-{
-    "name": "performance_researcher",
-    "role": "Performance benchmarking specialist",
-    "task": "Research runtime performance of Rust vs Go for web services",
-    "output_path": "/memories/research/performance"
-}
-```
-
-### 2. `spawn_parallel_subagents`
-Spawns multiple subagents that run in parallel.
+### `spawn_subagents`
+Spawns one or more focused subagents. Pass a JSON array with one spec for a
+single worker, or multiple specs to run independent workers in parallel.
 
 ```python
 # The lead agent can call this tool
@@ -139,11 +129,11 @@ flowchart TB
 | Feature | OmniCoreAgent | DeepAgent |
 |---------|---------------|-----------|
 | **Domain** | User-defined | User-defined (same) |
-| **Tools** | User-provided | User-provided + orchestration tools |
+| **Tools** | User-provided + optional harness tools | Same, enabled by defaults |
 | **Memory Files** | Optional workspace tools | Workspace-backed by default |
-| **Orchestration** | No | Automatic subagent spawning |
+| **Orchestration** | Optional with `enable_subagents` | Enabled by default |
 | **Config Inheritance** | N/A | Subagents inherit parent config |
-| **Best For** | Single-agent tasks | Complex multi-step research/analysis |
+| **Best For** | Direct control over runtime config | Existing DeepAgent workflows |
 
 ---
 
@@ -160,6 +150,7 @@ agent = DeepAgent(
         # These are the defaults (you can override):
         "max_steps": 50,  # More steps for orchestration
         "tool_call_timeout": 600,  # 10 min (subagents do deep work)
+        "enable_subagents": True,
         "enable_workspace_memory": True,
         "context_management": {"enabled": True},
         "tool_offload": {"enabled": True},
@@ -307,7 +298,7 @@ Compare with API data from our CRM system.
 ## FAQ
 
 **Q: When should I use DeepAgent vs OmniCoreAgent?**
-A: Use DeepAgent when your task has multiple independent subtasks that can benefit from parallel execution. Use OmniCoreAgent for single-agent workflows.
+A: Prefer OmniCoreAgent with `enable_subagents=True` for new work. DeepAgent remains for existing workflows that want these defaults pre-enabled.
 
 **Q: Can I nest DeepAgents?**
 A: Technically yes (subagents are OmniCoreAgents), but it's rarely needed. The lead DeepAgent is usually sufficient for 2-3 levels of delegation.

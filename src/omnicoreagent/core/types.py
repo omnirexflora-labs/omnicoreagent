@@ -16,6 +16,10 @@ class AgentConfig(BaseModel):
     enable_advanced_tool_use: bool = Field(
         default=False, description="enable_advanced_tool_use"
     )
+    enable_subagents: bool = Field(
+        default=False,
+        description="Enable dynamic subagent spawning tools.",
+    )
 
     memory_config: dict = {
         "mode": "sliding_window",

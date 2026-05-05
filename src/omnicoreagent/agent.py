@@ -20,6 +20,7 @@ from omnicoreagent.core.agents.prompting import (
 )
 from omnicoreagent.core.events.event_router import EventRouter
 from omnicoreagent.core.tools.advance_tools.advanced_tools_use import AdvanceToolsUse
+from omnicoreagent.core.subagents import SubagentFactory, build_subagent_tools
 from omnicoreagent.core.utils import logger
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.guardrails import (
@@ -98,6 +99,7 @@ class OmniCoreAgent:
         self.mcp_client = None
         self.llm_connection = None
         self.guardrail = None
+        self._subagent_factory = None
         self.guardrail_mode = "full"  # Default: full protection
 
         self._initialized = False
@@ -170,12 +172,37 @@ class OmniCoreAgent:
         # In "input_only" mode, only user input is checked at the public run boundary.
         tool_guardrail = self.guardrail if self.guardrail_mode == "full" else None
         self.agent = ReactAgent(config=agent_settings, guardrail=tool_guardrail)
+        self._prepare_dynamic_subagents()
         if self.local_tools:
             if self.agent.enable_advanced_tool_use:
                 advance_tools_manager = AdvanceToolsUse()
                 advance_tools_manager.load_and_process_tools(
                     local_tools=self.local_tools
                 )
+
+    def _prepare_dynamic_subagents(self):
+        """Register dynamic subagent spawning tools when enabled."""
+        if not self.agent_config.get("enable_subagents"):
+            return
+        if self._subagent_factory is not None:
+            return
+
+        from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
+
+        if self.local_tools is None:
+            self.local_tools = ToolRegistry()
+
+        self._subagent_factory = SubagentFactory(
+            base_model_config=self.model_config,
+            mcp_tools=self.mcp_tools,
+            local_tools=self.local_tools,
+            agent_config=self.agent_config,
+            prompt_builder=self.prompt_builder,
+            event_router=self.event_router,
+            memory_router=self.memory_router,
+            debug=self.debug,
+        )
+        build_subagent_tools(self._subagent_factory, self.local_tools)
 
     async def _summarize_history(
         self, messages: list[Dict[str, Any]], max_tokens: int = None
@@ -430,6 +457,9 @@ class OmniCoreAgent:
 
     async def cleanup(self):
         """Clean up resources"""
+        if self._subagent_factory:
+            await self._subagent_factory.cleanup()
+            self._subagent_factory = None
         if self.mcp_client:
             await self.mcp_client.cleanup()
 

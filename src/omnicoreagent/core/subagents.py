@@ -12,7 +12,6 @@ Subagents inherit:
 import asyncio
 import json
 from typing import Any, Dict, List, Optional
-from omnicoreagent.agent import OmniCoreAgent
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.utils import logger
 
@@ -46,7 +45,7 @@ class SubagentFactory:
             mcp_tools: MCP tools subagents can use
             local_tools: Local tools subagents can use
             agent_config: Full agent config (context_management, tool_offload, etc.)
-            prompt_builder: DeepAgentPromptBuilder instance
+            prompt_builder: Optional prompt builder with build_subagent_prompt support
             event_router: EventRouter instance
             memory_router: MemoryRouter instance
             debug: Debug mode
@@ -59,7 +58,7 @@ class SubagentFactory:
         self.debug = debug
         self.agent_config = agent_config or {}
         self.prompt_builder = prompt_builder
-        self._active_subagents: Dict[str, OmniCoreAgent] = {}
+        self._active_subagents: Dict[str, Any] = {}
 
     def _build_subagent_config(self) -> Dict[str, Any]:
         """
@@ -67,16 +66,70 @@ class SubagentFactory:
 
         Subagents get full config but with some adjustments:
         - Fewer max_steps (focused task)
-        - Use workspace-backed memory when memory tools are enabled
+        - Workspace-backed memory is always enabled for writing findings
+        - Dynamic delegation stays on the lead agent only
         """
         config = self.agent_config.copy()
 
         config["max_steps"] = min(config.get("max_steps", 15), 15)
-
-        if "enable_workspace_memory" not in config:
-            config["enable_workspace_memory"] = True
+        config["enable_subagents"] = False
+        config["enable_workspace_memory"] = True
 
         return config
+
+    def _build_subagent_instruction(
+        self,
+        *,
+        role: str,
+        task: str,
+        output_path: str,
+    ) -> str:
+        """Build the focused system instruction for a spawned worker."""
+        if self.prompt_builder and hasattr(self.prompt_builder, "build_subagent_prompt"):
+            return self.prompt_builder.build_subagent_prompt(
+                role=role,
+                task=task,
+                output_path=output_path,
+            )
+
+        return f"""
+You are a specialized subagent with a focused task.
+
+ROLE: {role}
+
+TASK: {task}
+
+OUTPUT REQUIREMENTS:
+- Write your findings to: {output_path}
+- Use memory_create_update tool to save your findings
+- Be thorough but focused on YOUR specific task only
+- Do not duplicate work assigned to other subagents
+- Structure your findings clearly with headers
+
+When you have completed your investigation:
+1. Save findings to the output_path using memory_create_update
+2. Confirm you saved the findings
+3. Return a brief summary of what you found
+"""
+
+    def _build_subagent_local_tools(self) -> Optional[ToolRegistry]:
+        """
+        Give subagents inherited tools without the parent delegation tool.
+
+        The lead agent owns dynamic delegation. Spawned workers stay focused and
+        should not recursively spawn more workers through the shared registry.
+        """
+        if self.local_tools is None:
+            return None
+        if not isinstance(self.local_tools, ToolRegistry):
+            return self.local_tools
+
+        registry = ToolRegistry()
+        for tool in self.local_tools.list_tools():
+            if tool.name == "spawn_subagents":
+                continue
+            registry.register(tool)
+        return registry
 
     def create_subagent(
         self,
@@ -84,7 +137,7 @@ class SubagentFactory:
         role: str,
         task: str,
         output_path: str,
-    ) -> OmniCoreAgent:
+    ):
         """
         Create a focused subagent.
 
@@ -97,27 +150,15 @@ class SubagentFactory:
         Returns:
             Configured OmniCoreAgent ready to run
         """
-        instruction = f"""
-You are a specialized subagent with a focused task.
-
-ROLE: {role}
-
-TASK: {task}
-
-OUTPUT REQUIREMENTS:
-- Write your findings to: {output_path}
-- Use memory_create_update tool to save your findings
-- Be thorough but focused on YOUR specific task only
-- Do NOT duplicate work of other subagents
-- Structure your findings clearly with headers
-
-When you have completed your investigation:
-1. Save findings to the output_path using memory_create_update
-2. Confirm you saved the findings
-3. Return a brief summary of what you found
-"""
+        instruction = self._build_subagent_instruction(
+            role=role,
+            task=task,
+            output_path=output_path,
+        )
 
         subagent_config = self._build_subagent_config()
+
+        from omnicoreagent.agent import OmniCoreAgent
 
         agent = OmniCoreAgent(
             name=f"subagent_{name}",
@@ -125,7 +166,7 @@ When you have completed your investigation:
             model_config=self.base_model_config,
             agent_config=subagent_config,
             mcp_tools=self.mcp_tools,
-            local_tools=self.local_tools,
+            local_tools=self._build_subagent_local_tools(),
             event_router=self.event_router,
             memory_router=self.memory_router,
             debug=self.debug,
@@ -300,124 +341,21 @@ def build_subagent_tools(
     """
 
     @registry.register_tool(
-        name="spawn_subagent",
+        name="spawn_subagents",
         description="""
-    Spawns a specialized subagent to work on a focused task independently.
+    Spawns one or more subagents to work on focused tasks.
     
-    Use this to delegate specific pieces of work to specialized workers.
-    The subagent will investigate the task and write findings to the specified memory path.
-    After completion, read the findings from memory using memory_view.
-    
-    When to use:
-    - Task has a specific, focused scope
-    - You need specialized expertise on a subtopic
-    - You want to parallelize work (use spawn_parallel_subagents for multiple)
-        """,
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": """
-    Unique identifier for this subagent. Use lowercase with underscores.
-    
-    Examples:
-    - "aws_analyst" for AWS research
-    - "competitor_researcher" for competitor analysis
-    - "pricing_expert" for pricing investigation
-                    """,
-                },
-                "role": {
-                    "type": "string",
-                    "description": """
-    What this subagent specializes in. Describes their expertise.
-    
-    Examples:
-    - "AWS cloud infrastructure expert"
-    - "Market research analyst specializing in fintech"
-    - "Security vulnerability specialist"
-                    """,
-                },
-                "task": {
-                    "type": "string",
-                    "description": """
-    The specific task for the subagent to complete. Be clear and focused.
-    
-    Include:
-    - What to investigate/produce
-    - What format for findings
-    - Any specific constraints or focus areas
-    
-    Example: "Research AWS AI/ML services including SageMaker, Bedrock. 
-    Document pricing, key features, and ideal use cases. Compare to competitors."
-                    """,
-                },
-                "output_path": {
-                    "type": "string",
-                    "description": """
-    Memory path where subagent writes findings. Use descriptive paths.
-    
-    Format: /memories/{task_name}/subagent_{name}/findings.md
-    
-    Examples:
-    - "/memories/cloud_comparison/subagent_aws/findings.md"
-    - "/memories/market_research/subagent_competitors/findings.md"
-                    """,
-                },
-            },
-            "required": ["name", "role", "task", "output_path"],
-            "additionalProperties": False,
-        },
-    )
-    async def spawn_subagent(
-        name: str,
-        role: str,
-        task: str,
-        output_path: str,
-    ) -> Dict[str, Any]:
-        """
-        Spawn a specialized subagent to work on a focused task.
-
-        Parameters
-        ----------
-        name : str
-            Unique identifier for this subagent
-        role : str
-            What this subagent specializes in
-        task : str
-            The specific task to complete
-        output_path : str
-            Memory path where subagent writes findings
-
-        Returns
-        -------
-        dict
-            {
-                "status": "success" | "error",
-                "data": {"subagent_name", "output_path", "summary"},
-                "message": Completion message
-            }
-        """
-        return await factory.run_subagent(
-            name=name,
-            role=role,
-            task=task,
-            output_path=output_path,
-        )
-
-    @registry.register_tool(
-        name="spawn_parallel_subagents",
-        description="""
-    Spawns multiple subagents to work in parallel on independent tasks.
-    
-    Use this when you have multiple independent subtasks that can be investigated 
-    simultaneously. Each subagent works on its own task and writes findings to memory.
-    After completion, read all findings from memory to synthesize.
+    Always pass a JSON array of subagent specs. If you only need one subagent,
+    pass an array with one item. Multiple specs run in parallel.
+    Each subagent writes findings to workspace memory. After completion, read
+    all output paths with memory_view before synthesizing.
     
     When to use:
     - Task has multiple independent components
     - Research needed across different domains
     - Parallel exploration would be more efficient
+    - One focused worker is enough, but keeping one array-based tool avoids
+      choosing between single and parallel spawn modes
     
     Example use case: Comparing 3 cloud providers
     - Spawn 3 subagents: aws_analyst, azure_analyst, gcp_analyst
@@ -448,11 +386,11 @@ def build_subagent_tools(
             "additionalProperties": False,
         },
     )
-    async def spawn_parallel_subagents(
+    async def spawn_subagents(
         subagents_json: str,
     ) -> Dict[str, Any]:
         """
-        Spawn multiple subagents to work in parallel.
+        Spawn one or more subagents.
 
         Parameters
         ----------

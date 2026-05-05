@@ -1,61 +1,109 @@
 ---
-title: Sub-Agents
-description: 'Build hierarchical agent architectures with intelligent task delegation'
+title: Subagents
+description: 'Dynamic and explicit task delegation inside OmniCoreAgent'
 icon: 'users'
 ---
 
-# Sub-Agents System
+# Subagents
 
-Complexity in AI tasks often requires specialization. The **Sub-Agents System** allows you to build a hierarchical architecture where a "Parent" agent can intelligently delegate tasks to specialized "Child" agents.
+OmniCoreAgent supports subagents as part of the core harness. A lead agent can
+spawn focused workers dynamically with `spawn_subagents`, or you can attach
+explicit subagents when you want a fixed team.
 
 ## Why Use Sub-Agents?
 
 - **Modular Design**: Build and test small, expert agents individually before integrating them.
 - **Improved Accuracy**: Specialized agents (e.g., a "Math Expert" or "Code Auditor") are less likely to hallucinate in their specific domain.
 - **Tool Management**: Avoid cluttering a single agent's prompt with hundreds of tools. Instead, give each sub-agent only the tools it needs.
+- **Parallel Work**: Use one `spawn_subagents` call with multiple specs when independent tasks can run at the same time.
+- **Workspace Continuity**: Dynamic subagents write findings to workspace memory, so outputs survive context compression and tool offloading.
 
 ---
 
-## Configuration
+## Dynamic Subagents
 
-To use sub-agents, create them individually and then pass them as a list to the parent agent.
+Enable dynamic subagents directly on OmniCoreAgent:
 
 ```python
 from omnicoreagent import OmniCoreAgent
 
-# 1. Create specialized child agents
+agent = OmniCoreAgent(
+    name="research_manager",
+    system_instruction="You coordinate deep research and synthesize findings.",
+    model_config={"provider": "openai", "model": "gpt-4o"},
+    agent_config={
+        "enable_subagents": True,
+        "context_management": {"enabled": True},
+        "tool_offload": {"enabled": True},
+    },
+)
+```
+
+When `enable_subagents` is true, OmniCoreAgent also enables workspace memory.
+Dynamic workers are expected to save findings with `memory_create_update`, and
+the lead agent reads those paths with `memory_view` before synthesizing.
+
+### `spawn_subagents`
+
+`spawn_subagents` accepts one JSON array. Use one item for one worker, or many
+items for parallel workers.
+
+```json
+[
+  {
+    "name": "market",
+    "role": "Market analyst",
+    "task": "Research market size, growth, competitors, and risks.",
+    "output_path": "/memories/market_entry/subagent_market/findings.md"
+  },
+  {
+    "name": "technical",
+    "role": "Technical analyst",
+    "task": "Assess architecture, integration cost, and implementation risks.",
+    "output_path": "/memories/market_entry/subagent_technical/findings.md"
+  }
+]
+```
+
+Spawned workers inherit the parent's model, MCP tools, user local tools,
+workspace memory, context management, and tool offloading. They do not inherit
+the lead agent's `spawn_subagents` tool, which keeps delegation controlled by
+the lead agent.
+
+---
+
+## Explicit Subagents
+
+Use explicit subagents when the team is known upfront and each child agent has a
+stable role or custom tool set.
+
+```python
 research_agent = OmniCoreAgent(
     name="researcher",
     system_instruction="You specialize in web research and summarization.",
-    ...
+    model_config={"provider": "openai", "model": "gpt-4o"},
 )
 
 code_agent = OmniCoreAgent(
     name="coder",
     system_instruction="You are an expert Python developer.",
-    ...
+    model_config={"provider": "openai", "model": "gpt-4o"},
 )
 
-# 2. Integrate them into the parent agent
 parent_agent = OmniCoreAgent(
     name="manager",
-    system_instruction="You manage a team of specialists to complete complex requests.",
+    system_instruction="You manage a team of specialists.",
+    model_config={"provider": "openai", "model": "gpt-4o"},
     sub_agents=[research_agent, code_agent],
-    ...
 )
 ```
 
----
-
-## How Delegation Works
-
-When a parent agent has sub-agents, it is automatically given tools to communicate with them:
+When a parent agent has explicit subagents, it is given tools to communicate
+with them:
 
 | Tool | Action |
 |------|--------|
 | `call_sub_agent` | Send a specific task to a child agent and wait for the result. |
-
-The parent agent decides *when* a task is too complex or specific and *which* sub-agent is best suited to handle it. The conversation history of the sub-agent is managed independently but can be accessed by the parent.
 
 ---
 
@@ -63,7 +111,7 @@ The parent agent decides *when* a task is too complex or specific and *which* su
 
 1. **User Query**: "Research the latest AI news and write a Python script for a news aggregator."
 2. **Manager (Parent)**: Recognizes this requires research and coding.
-3. **Manager**: Calls `research_agent` with the task "Get latest AI news summaries".
+3. **Manager**: Calls `spawn_subagents` with research and coding workers, or calls explicit child agents.
 4. **Researcher (Sub)**: Performs web search, returns summaries.
 5. **Manager**: Receives summaries, then calls `code_agent` with "Write a Python aggregator using this data: [summaries]".
 6. **Coder (Sub)**: Writes the code, returns it.
@@ -73,6 +121,9 @@ The parent agent decides *when* a task is too complex or specific and *which* su
 
 ## Best Practices
 
-- **Explicit Instructions**: In the parent agent's system instruction, briefly describe the expertise of each sub-agent so it knows who to turn to.
+- **Use One Spawn Call**: When tasks are independent, put every worker spec in one `spawn_subagents` array so they run in parallel.
+- **Write to Memory**: Give each worker a clear `output_path` under `/memories/{task_name}/...`.
+- **Read Before Synthesis**: After workers finish, read every output path before producing the final answer.
+- **Explicit Instructions**: For fixed subagents, briefly describe each subagent's expertise in the parent instruction.
 - **Limit Depth**: While hierarchical agents are powerful, avoid nesting agents too deep (e.g., Parent -> Child -> Grandchild) to prevent excessive latency and token usage.
-- **Shared Session IDs**: Use the same `session_id` for both parent and child calls if you want them to share context indirectly through the memory store.
+- **Keep Workers Focused**: Do not give one worker the whole task. Give it a bounded role and output contract.
