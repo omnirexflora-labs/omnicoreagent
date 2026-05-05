@@ -2,7 +2,6 @@ import uuid
 from typing import Any, Dict, List, Optional, Union
 
 from omnicoreagent.core.agents.react_agent import ReactAgent
-from omnicoreagent.core.types import AgentConfig as ReactAgentConfig
 from omnicoreagent.mcp_clients_connection.client import MCPClient
 from omnicoreagent.core.llm import LLMConnection
 from omnicoreagent.core.memory_store.memory_router import MemoryRouter
@@ -154,7 +153,7 @@ class OmniCoreAgent:
                 api_key=self.model_config.get("api_key"),
             )
 
-        agent_settings = ReactAgentConfig(**self.agent_config)
+        agent_settings = AgentConfig(**self.agent_config)
 
         if self.memory_router:
             summary_config = agent_settings.memory_config.get("summary")

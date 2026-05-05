@@ -14,8 +14,9 @@ This package contains the core AI agent functionality including:
 from .agents import ReactAgent
 from .memory_store import MemoryRouter
 from .tools import ToolRegistry, Tool
-from .types import AgentConfig, ParsedResponse, ToolCall
+from .types import ParsedResponse, ToolCall
 from .token_usage import UsageLimits, Usage, UsageLimitExceeded
+from omnicoreagent.runtime_config import AgentConfig
 
 __all__ = [
     "ReactAgent",

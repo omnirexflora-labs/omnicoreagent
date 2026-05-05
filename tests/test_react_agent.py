@@ -1,7 +1,7 @@
 import pytest
 
 from omnicoreagent.core.agents.react_agent import ReactAgent
-from omnicoreagent.core.types import AgentConfig
+from omnicoreagent.runtime_config import AgentConfig
 
 
 @pytest.fixture
