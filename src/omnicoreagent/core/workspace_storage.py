@@ -1,9 +1,18 @@
 import shutil
 import urllib.parse
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
 from filelock import FileLock
+
+
+@dataclass(frozen=True)
+class WorkspaceFile:
+    path: str
+    name: str
+    modified_at: datetime
 
 
 class LocalWorkspaceStorage:
@@ -57,6 +66,27 @@ class LocalWorkspaceStorage:
         resolved = self.resolve(path, strip_prefixes=strip_prefixes)
         with FileLock(resolved.with_suffix(".lock")):
             return resolved.read_text(encoding="utf-8")
+
+    def exists(self, path: str | Path, *, strip_prefixes: Iterable[str] = ()) -> bool:
+        return self.resolve(path, strip_prefixes=strip_prefixes).exists()
+
+    def location(self, path: str | Path, *, strip_prefixes: Iterable[str] = ()) -> str:
+        return str(self.resolve(path, strip_prefixes=strip_prefixes))
+
+    def list_files(self) -> list[WorkspaceFile]:
+        self.ensure_root()
+        files = []
+        for path in self.root.iterdir():
+            if not path.is_file():
+                continue
+            files.append(
+                WorkspaceFile(
+                    path=path.name,
+                    name=path.name,
+                    modified_at=datetime.fromtimestamp(path.stat().st_mtime),
+                )
+            )
+        return files
 
     def write_text(
         self,

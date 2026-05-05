@@ -71,6 +71,7 @@ class OffloadedResponse:
     preview_tokens: int
     tool_name: str
     timestamp: str
+    storage_key: str | None = None
 
     @property
     def context_message(self) -> str:
@@ -215,7 +216,7 @@ class ToolResponseOffloader:
 
         extension = self._detect_extension(response)
         filename = f"{artifact_id}{extension}"
-        artifact_path = self.storage_path / filename
+        artifact_path = self.storage.location(filename)
 
         original_tokens = count_tokens(response)
         preview = self.get_preview(response)
@@ -233,9 +234,8 @@ class ToolResponseOffloader:
                 "timestamp": timestamp,
                 "custom": metadata or {},
             }
-            meta_path = self.storage_path / f"{artifact_id}.meta.json"
             self.storage.write_text(
-                meta_path.relative_to(self.storage_path),
+                f"{artifact_id}.meta.json",
                 json.dumps(meta, indent=2),
             )
 
@@ -247,6 +247,7 @@ class ToolResponseOffloader:
             preview_tokens=preview_tokens,
             tool_name=tool_name,
             timestamp=timestamp,
+            storage_key=filename,
         )
 
         self._artifacts[artifact_id] = offloaded
@@ -288,14 +289,14 @@ class ToolResponseOffloader:
         """
         if artifact_id in self._artifacts:
             artifact = self._artifacts[artifact_id]
-            artifact_path = Path(artifact.artifact_path)
-            if artifact_path.exists():
-                return artifact_path.read_text(encoding="utf-8")
+            storage_key = artifact.storage_key
+            if storage_key and self.storage.exists(storage_key):
+                return self.storage.read_text(storage_key)
 
         for ext in [".txt", ".json", ".xml"]:
-            path = self.storage_path / f"{artifact_id}{ext}"
-            if path.exists():
-                return self.storage.read_text(path.relative_to(self.storage_path))
+            storage_key = f"{artifact_id}{ext}"
+            if self.storage.exists(storage_key):
+                return self.storage.read_text(storage_key)
 
         return None
 
@@ -362,23 +363,19 @@ class ToolResponseOffloader:
 
     def cleanup_old_artifacts(self):
         """Remove artifacts older than retention period."""
-        if not self.storage_path.exists():
-            return
-
         cutoff = datetime.now() - timedelta(days=self.config.retention_days)
         removed_count = 0
 
-        for path in self.storage_path.iterdir():
-            if path.name == ".gitignore":
+        for file in self.storage.list_files():
+            if file.name == ".gitignore":
                 continue
 
             try:
-                mtime = datetime.fromtimestamp(path.stat().st_mtime)
-                if mtime < cutoff:
-                    path.unlink()
+                if file.modified_at < cutoff:
+                    self.storage.delete(file.path)
                     removed_count += 1
             except Exception as e:
-                logger.warning(f"Failed to cleanup artifact {path}: {e}")
+                logger.warning(f"Failed to cleanup artifact {file.path}: {e}")
 
         if removed_count > 0:
             logger.info(f"Cleaned up {removed_count} old artifacts")
