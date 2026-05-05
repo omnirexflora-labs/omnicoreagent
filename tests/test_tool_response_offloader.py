@@ -384,6 +384,16 @@ class TestOffload:
 
         assert result.artifact_path.endswith(".txt")
 
+    def test_offload_uses_workspace_storage_for_location(self):
+        """Test artifact paths come from the workspace storage boundary."""
+        content = "Storage boundary content " * 50
+        result = self.offloader.offload("storage_tool", content)
+
+        assert result.storage_key.endswith(".txt")
+        assert result.artifact_path == self.offloader.storage.location(
+            result.storage_key
+        )
+
 
 # ============================================================================
 # Artifact Retrieval Tests

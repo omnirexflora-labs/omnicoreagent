@@ -18,10 +18,15 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 
+from decouple import config as decouple_config
+
 from omnicoreagent.core.summarizer.tokenizer import count_tokens
 from omnicoreagent.core.utils import logger
 from omnicoreagent.core.workspace import get_artifacts_dir
-from omnicoreagent.core.workspace_storage import LocalWorkspaceStorage
+from omnicoreagent.core.workspace_storage import (
+    LocalWorkspaceStorage,
+    create_workspace_storage,
+)
 
 
 @dataclass
@@ -110,7 +115,16 @@ class ToolResponseOffloader:
 
         self.base_dir = base_dir or os.getcwd()
         self.storage_path = Path(self.base_dir) / self.config.storage_dir
-        self.storage = LocalWorkspaceStorage(self.storage_path)
+        workspace_backend = decouple_config(
+            "OMNICOREAGENT_WORKSPACE_BACKEND", default="local"
+        ).lower()
+        if workspace_backend == "local":
+            self.storage = LocalWorkspaceStorage(self.storage_path)
+        else:
+            self.storage = create_workspace_storage(
+                backend=workspace_backend,
+                namespace="artifacts",
+            )
 
         if self.config.enabled:
             self._ensure_storage_dir()
@@ -124,8 +138,7 @@ class ToolResponseOffloader:
         """Create storage directory if it doesn't exist."""
         self.storage.ensure_root()
 
-        gitignore_path = self.storage_path / ".gitignore"
-        if not gitignore_path.exists():
+        if not self.storage.exists(".gitignore"):
             self.storage.write_text(".gitignore", "*\n!.gitignore\n")
 
     def _generate_artifact_id(self, tool_name: str, content: str) -> str:
