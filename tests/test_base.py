@@ -5,7 +5,7 @@ from omnicoreagent.core.agents.base import BaseReactAgent, TOOL_CALL_TIMEOUT_MES
 from omnicoreagent.core.events.base import EventType
 from omnicoreagent.core.tool_response_offloader import ToolResponseOffloader
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.core.types import ParsedResponse, ToolCallResult, ToolError
+from omnicoreagent.core.types import AgentState, Message, ParsedResponse, ToolCallResult, ToolError
 
 
 @pytest.fixture
@@ -588,3 +588,98 @@ async def test_execute_tool_call_batch_returns_observation_and_result_event(agen
     assert len(events) == 1
     assert events[0]["event"].type == EventType.TOOL_CALL_RESULT
     assert events[0]["event"].payload.tool_name == "alpha, beta"
+
+
+@pytest.mark.asyncio
+async def test_append_tool_observations_writes_history_and_sets_observing(agent):
+    history = []
+    session_state = agent._get_session_state(session_id="chat799", debug=False)
+
+    async def add_message_to_history(role, content, metadata=None, session_id=None):
+        history.append(
+            {
+                "role": role,
+                "content": content,
+                "metadata": metadata or {},
+                "session_id": session_id,
+            }
+        )
+
+    xml_obs_block = await agent._append_tool_observations(
+        tools_results=[
+            {
+                "tool_name": "alpha",
+                "args": {},
+                "status": "success",
+                "data": "alpha result",
+                "message": None,
+            }
+        ],
+        session_state=session_state,
+        add_message_to_history=add_message_to_history,
+        session_id="chat799",
+        debug=False,
+    )
+
+    assert 'tool_name="alpha#1"' in xml_obs_block
+    assert session_state.messages[-1].role == "user"
+    assert session_state.messages[-1].content == xml_obs_block
+    assert session_state.state == AgentState.OBSERVING
+    assert history == [
+        {
+            "role": "user",
+            "content": xml_obs_block,
+            "metadata": {"agent_name": "test_agent"},
+            "session_id": "chat799",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_handle_tool_loop_state_marks_session_stuck(agent):
+    events = []
+    session_state = agent._get_session_state(session_id="chat800", debug=False)
+    session_state.messages = [Message(role="system", content="system")]
+
+    class FakeLoopDetector:
+        def __init__(self):
+            self.reset_tool_name = None
+
+        def is_looping(self, tool_name):
+            return tool_name == "alpha"
+
+        def get_loop_type(self, tool_name):
+            return ["consecutive_calls"]
+
+        def reset(self, tool_name=None):
+            self.reset_tool_name = tool_name
+
+    session_state.loop_detector = FakeLoopDetector()
+
+    async def event_router(session_id, event):
+        events.append({"session_id": session_id, "event": event})
+
+    await agent._handle_tool_loop_state(
+        tool_call_results=[
+            ToolCallResult(
+                tool_executor=None,
+                tool_name="alpha",
+                tool_args={},
+                tool_call_id="tool-call-alpha",
+            )
+        ],
+        session_state=session_state,
+        system_prompt="system",
+        session_id="chat800",
+        event_router=event_router,
+        debug=False,
+    )
+
+    assert session_state.state == AgentState.STUCK
+    assert session_state.loop_detector.reset_tool_name == "alpha"
+    assert session_state.messages[0].role == "system"
+    assert "Tool call loop detected" in session_state.messages[-1].content
+    assert len(events) == 1
+    assert events[0]["session_id"] == "chat800"
+    assert events[0]["event"].type == EventType.TOOL_CALL_ERROR
+    assert events[0]["event"].payload.tool_name == "alpha"
