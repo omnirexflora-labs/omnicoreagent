@@ -93,13 +93,19 @@ SYSTEM_SUFFIX = """
   </single_tool>
 
   <multiple_tools>
+    <when_to_use>
+      <rule>Prefer <tool_calls> when you need multiple independent tool results and none of the calls depends on another call's output</rule>
+      <rule>Use this more often than single sequential calls for independent lookups, reads, searches, status checks, or data gathering</rule>
+      <rule>Only use one tool call at a time when the next tool needs the previous observation or batching would make results hard to interpret</rule>
+      <rule>Batching independent tools speeds up the task and reduces unnecessary reasoning turns</rule>
+    </when_to_use>
     <tool_calls>
       <tool_call>
         <tool_name>first_tool</tool_name>
         <parameters>
           <param>value</param>
         </parameters>
-      <tool_call>
+      </tool_call>
       <tool_call>
         <tool_name>second_tool</tool_name>
         <parameters>
@@ -112,6 +118,8 @@ SYSTEM_SUFFIX = """
   <rules>
     <rule>Only use tools from AVAILABLE TOOLS REGISTRY</rule>
     <rule>Match parameter types and structures exactly as shown in registry</rule>
+    <rule>When independent tools can run without waiting on each other's results, call them together inside <tool_calls></rule>
+    <rule>Do not batch tools when one call depends on another call's observation</rule>
     <rule>Use exact field names from registry - do not create alternatives</rule>
     <rule>Never assume success - wait for confirmation</rule>
     <rule>Report errors exactly as returned</rule>
@@ -140,20 +148,20 @@ SYSTEM_SUFFIX = """
   </example>
 
   <example name="multiple_tools">
-    <thought>Need weather and recommendations.</thought>
+    <thought>Need two independent facts. Calling both together.</thought>
     <tool_calls>
       <tool_call>
         <tool_name>weather_check</tool_name>
         <parameters>
           <location>New York</location>
         </parameters>
-      <tool_call>
+      </tool_call>
       <tool_call>
         <tool_name>get_recommendations</tool_name>
         <parameters>
           <context>outdoor_activities</context>
         </parameters>
-      <tool_call>
+      </tool_call>
     </tool_calls>
     <!-- System returns observations -->
     <thought>Weather: 72°F sunny. Activities ready.</thought>
@@ -180,7 +188,7 @@ SYSTEM_SUFFIX = """
       <parameters>
         <paths>["/path/file1.txt", "/path/file2.txt"]</paths>
       </parameters>
-    <tool_call>
+    </tool_call>
     <!-- System returns observation -->
     <thought>Files read successfully.</thought>
     <final_answer>Retrieved contents from both files.</final_answer>

@@ -2,7 +2,6 @@ import asyncio
 import time
 
 import json
-import re
 import uuid
 from collections.abc import Callable
 from collections import defaultdict
@@ -89,6 +88,10 @@ from omnicoreagent.core.tool_response_offloader import (
     OffloadConfig,
 )
 from omnicoreagent.core.guardrails import PromptInjectionGuard
+from omnicoreagent.core.agents.xml_parser import (
+    extract_thought,
+    parse_action_or_answer,
+)
 
 
 class BaseReactAgent:
@@ -220,199 +223,17 @@ class BaseReactAgent:
         debug: bool = False,
     ) -> ParsedResponse:
         """Parse LLM response to extract a final answer, tool call, or agent call using XML format only."""
-        try:
-            agent_thoughts = re.search(r"<thought>(.*?)</thought>", response, re.DOTALL)
-            if agent_thoughts:
-                event = Event(
-                    type=EventType.AGENT_THOUGHT,
-                    payload=AgentThoughtPayload(
-                        message=str(agent_thoughts.group(1).strip()),
-                    ),
-                    agent_name=self.agent_name,
-                )
-                if event_router:
-                    await event_router(session_id=session_id, event=event)
-
-            tool_calls = []
-            tool_call_blocks = []
-
-            if "<tool_calls>" in response and "</tool_calls>" in response:
-                if debug:
-                    logger.info("Multiple tool calls detected.")
-                block_match = re.search(
-                    r"<tool_calls>(.*?)</tool_calls>", response, re.DOTALL
-                )
-                if block_match:
-                    tool_call_blocks = re.findall(
-                        r"<tool_call>(.*?)</tool_call>", block_match.group(1), re.DOTALL
-                    )
-
-            elif "<tool_call>" in response and "</tool_call>" in response:
-                if debug:
-                    logger.info("Single tool call detected.")
-                single_match = re.search(
-                    r"<tool_call>(.*?)</tool_call>", response, re.DOTALL
-                )
-                tool_call_blocks = [single_match.group(1)] if single_match else []
-
-            for block in tool_call_blocks:
-                name_match = re.search(
-                    r"<tool_name>(.*?)</tool_name>", block, re.DOTALL
-                ) or re.search(r"<name>(.*?)</name>", block, re.DOTALL)
-                args_match = re.search(
-                    r"<parameters>(.*?)</parameters>", block, re.DOTALL
-                ) or re.search(r"<args>(.*?)</args>", block, re.DOTALL)
-                if not (name_match and args_match):
-                    return ParsedResponse(
-                        error="Invalid tool call format - missing name or parameters"
-                    )
-                tool_name = name_match.group(1).strip()
-                args_str = args_match.group(1).strip()
-                args = {}
-                if args_str.startswith("{") and args_str.endswith("}"):
-                    try:
-                        args = json.loads(args_str)
-                    except json.JSONDecodeError as e:
-                        return ParsedResponse(error=f"Invalid JSON in args: {str(e)}")
-                else:
-                    for key, value in re.findall(
-                        r"<(\w+)>(.*?)</\1>", args_str, re.DOTALL
-                    ):
-                        value = value.strip()
-                        if (value.startswith("[") and value.endswith("]")) or (
-                            value.startswith("{") and value.endswith("}")
-                        ):
-                            try:
-                                args[key] = json.loads(value)
-                            except json.JSONDecodeError:
-                                args[key] = value
-                        else:
-                            args[key] = value
-                tool_calls.append({"tool": tool_name, "parameters": args})
-
-            if tool_calls:
-                return ParsedResponse(
-                    action=True, data=json.dumps(tool_calls), tool_calls=True
-                )
-
-            agent_calls = []
-            agent_call_blocks = []
-
-            if "<agent_calls>" in response and "</agent_calls>" in response:
-                if debug:
-                    logger.info("Multiple agent calls detected.")
-                block_match = re.search(
-                    r"<agent_calls>(.*?)</agent_calls>", response, re.DOTALL
-                )
-                if block_match:
-                    agent_call_blocks = re.findall(
-                        r"<agent_call>(.*?)</agent_call>",
-                        block_match.group(1),
-                        re.DOTALL,
-                    )
-
-            elif "<agent_call>" in response and "</agent_call>" in response:
-                if debug:
-                    logger.info("Single agent call detected.")
-                single_match = re.search(
-                    r"<agent_call>(.*?)</agent_call>", response, re.DOTALL
-                )
-                agent_call_blocks = [single_match.group(1)] if single_match else []
-
-            for block in agent_call_blocks:
-                name_match = re.search(
-                    r"<agent_name>(.*?)</agent_name>", block, re.DOTALL
-                ) or re.search(r"<name>(.*?)</name>", block, re.DOTALL)
-                args_match = re.search(
-                    r"<parameters>(.*?)</parameters>", block, re.DOTALL
-                ) or re.search(r"<args>(.*?)</args>", block, re.DOTALL)
-                if not (name_match and args_match):
-                    return ParsedResponse(
-                        error="Invalid agent call format - missing name or parameters"
-                    )
-                agent_name = name_match.group(1).strip()
-                args_str = args_match.group(1).strip()
-                args = {}
-                if args_str.startswith("{") and args_str.endswith("}"):
-                    try:
-                        args = json.loads(args_str)
-                    except json.JSONDecodeError as e:
-                        return ParsedResponse(error=f"Invalid JSON in args: {str(e)}")
-                else:
-                    for key, value in re.findall(
-                        r"<(\w+)>(.*?)</\1>", args_str, re.DOTALL
-                    ):
-                        value = value.strip()
-                        if (value.startswith("[") and value.endswith("]")) or (
-                            value.startswith("{") and value.endswith("}")
-                        ):
-                            try:
-                                args[key] = json.loads(value)
-                            except json.JSONDecodeError:
-                                args[key] = value
-                        else:
-                            args[key] = value
-                agent_calls.append({"agent": agent_name, "parameters": args})
-
-            if agent_calls:
-                return ParsedResponse(
-                    action=True, data=json.dumps(agent_calls), agent_calls=True
-                )
-
-            final_answer_match = re.search(
-                r"<final_answer>(.*?)</final_answer>", response, re.DOTALL
+        thought = extract_thought(response)
+        if thought:
+            event = Event(
+                type=EventType.AGENT_THOUGHT,
+                payload=AgentThoughtPayload(message=thought),
+                agent_name=self.agent_name,
             )
-            if final_answer_match:
-                return ParsedResponse(answer=final_answer_match.group(1).strip())
+            if event_router:
+                await event_router(session_id=session_id, event=event)
 
-            if "<" in response and ">" in response:
-                return ParsedResponse(
-                    error=(
-                        f"PARSE ERROR: Response contains XML but violates the required format.\n\n"
-                        f"❌ You used (WRONG):\n"
-                        f"   {response[:200]}...\n\n"
-                        f"✓ You Must use one of these structured blocks based on your intent (CORRECT):\n"
-                        f"   • IF you want to Think/Reason:\n"
-                        f"     <thought>I will analyze...</thought>\n\n"
-                        f"   • IF you want to provide the Final Answer:\n"
-                        f"     <final_answer>The finding is...</final_answer>\n\n"
-                        f"   • IF you want to Call a Tool:\n"
-                        f"     <tool_call>\n"
-                        f"       <tool_name>tool_name</tool_name>\n"
-                        f"       <parameters><param>value</param></parameters>\n"
-                        f"     </tool_call>\n\n"
-                        f"ACTION REQUIRED:\n"
-                        f"- Decide your intent (Reasoning, Answer, or Tool Call).\n"
-                        f"- Retry using ONLY the specific valid tag for that intent.\n"
-                        f"- Do not use markdown code blocks ```xml ... ``` around the tags."
-                    )
-                )
-
-            return ParsedResponse(
-                error=(
-                    f"PARSE ERROR: Response does not use required XML format.\n\n"
-                    f"❌ You used (WRONG):\n"
-                    f"   {response[:200]}...\n\n"
-                    f"✓ You Must use one of these structured blocks based on your intent (CORRECT):\n"
-                    f"   • IF you want to Think/Reason:\n"
-                    f"     <thought>I will analyze...</thought>\n\n"
-                    f"   • IF you want to provide the Final Answer:\n"
-                    f"     <final_answer>The finding is...</final_answer>\n\n"
-                    f"   • IF you want to Call a Tool:\n"
-                    f"     <tool_call>\n"
-                    f"       <tool_name>tool_name</tool_name>\n"
-                    f"       <parameters><param>value</param></parameters>\n"
-                    f"     </tool_call>\n\n"
-                    f"ACTION REQUIRED:\n"
-                    f"- Decide your intent (Reasoning, Answer, or Tool Call).\n"
-                    f"- Retry using ONLY the specific valid tag for that intent.\n"
-                    f"- Do not output plain text outside tags."
-                )
-            )
-
-        except Exception as e:
-            logger.error("Error parsing model response: %s", str(e))
-            return ParsedResponse(error=str(e))
+        return parse_action_or_answer(response, debug=debug)
 
     @track("memory_processing")
     async def update_llm_working_memory(
