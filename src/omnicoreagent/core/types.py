@@ -215,6 +215,7 @@ class ToolCallResult(BaseModel):
     tool_executor: Any
     tool_name: str
     tool_args: dict
+    tool_call_id: str | None = None
 
 
 class ToolError(BaseModel):
