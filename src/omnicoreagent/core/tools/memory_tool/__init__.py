@@ -15,8 +15,6 @@ Usage:
 
 from omnicoreagent.core.tools.memory_tool.base import AbstractMemoryBackend
 from omnicoreagent.core.tools.memory_tool.local_storage import LocalMemoryBackend
-from omnicoreagent.core.tools.memory_tool.s3_storage import S3MemoryBackend
-from omnicoreagent.core.tools.memory_tool.r2_storage import R2MemoryBackend
 from omnicoreagent.core.tools.memory_tool.factory import create_memory_backend
 from omnicoreagent.core.tools.memory_tool.memory_tool import MemoryTool, build_tool_registry_memory_tool
 
@@ -33,3 +31,21 @@ __all__ = [
     "MemoryTool",
     "build_tool_registry_memory_tool",
 ]
+
+_OPTIONAL_EXPORTS = {
+    "S3MemoryBackend": "omnicoreagent.core.tools.memory_tool.s3_storage",
+    "R2MemoryBackend": "omnicoreagent.core.tools.memory_tool.r2_storage",
+}
+
+
+def __getattr__(name: str):
+    if name not in _OPTIONAL_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    from omnicoreagent._optional import load_optional
+
+    return load_optional(
+        name,
+        "s3",
+        lambda: getattr(__import__(_OPTIONAL_EXPORTS[name], fromlist=[name]), name),
+    )

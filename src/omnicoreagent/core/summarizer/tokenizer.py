@@ -1,11 +1,10 @@
 """
-Tiktoken-based token counting for accurate context management.
+Token counting helpers for context management.
 
-This module provides proper token counting using tiktoken instead of
-simple word splitting, ensuring accurate token budget management.
+Uses tiktoken when installed, with a lightweight word-count fallback for core
+installations.
 """
 
-import tiktoken
 from functools import lru_cache
 from typing import Any
 
@@ -16,7 +15,7 @@ DEFAULT_SUMMARY_RATIO = 0.2
 
 
 @lru_cache(maxsize=8)
-def get_encoding(model: str = "gpt-4") -> tiktoken.Encoding:
+def get_encoding(model: str = "gpt-4") -> Any:
     """
     Get tiktoken encoding for a model with caching.
 
@@ -27,8 +26,14 @@ def get_encoding(model: str = "gpt-4") -> tiktoken.Encoding:
         tiktoken.Encoding: The appropriate encoding for the model
     """
     try:
+        import tiktoken
+
         return tiktoken.encoding_for_model(model)
+    except ModuleNotFoundError:
+        return None
     except KeyError:
+        import tiktoken
+
         return tiktoken.get_encoding(DEFAULT_ENCODING)
 
 
@@ -46,6 +51,8 @@ def count_tokens(text: str, model: str = "gpt-4") -> int:
     if not text:
         return 0
     encoding = get_encoding(model)
+    if encoding is None:
+        return estimate_tokens_simple(text)
     return len(encoding.encode(text))
 
 

@@ -3,10 +3,10 @@ Event Router for dynamic event store selection.
 """
 
 from typing import Optional, Dict, Any, List
+from omnicoreagent._optional import load_optional
 from omnicoreagent.core.utils import logger
 from omnicoreagent.core.events.base import BaseEventStore, Event
 from omnicoreagent.core.events.in_memory import InMemoryEventStore
-from omnicoreagent.core.events.redis_stream import RedisStreamEventStore
 
 
 class EventRouter:
@@ -38,6 +38,14 @@ class EventRouter:
         """Initialize the event store based on type."""
         try:
             if self.event_store_type == "redis_stream":
+                RedisStreamEventStore = load_optional(
+                    "Redis stream events",
+                    "redis",
+                    lambda: __import__(
+                        "omnicoreagent.core.events.redis_stream",
+                        fromlist=["RedisStreamEventStore"],
+                    ).RedisStreamEventStore,
+                )
                 self._event_store = RedisStreamEventStore()
                 logger.info("Initialized Redis Stream Event Store")
             elif self.event_store_type == "in_memory":

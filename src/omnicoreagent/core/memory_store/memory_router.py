@@ -1,11 +1,9 @@
 from typing import Any, Optional, Callable
 from decouple import config as decouple_config
 from omnicoreagent.core.memory_store.in_memory import InMemoryStore
-from omnicoreagent.core.memory_store.sql_db_memory import DatabaseMessageStore
-from omnicoreagent.core.memory_store.redis_memory import RedisMemoryStore
+from omnicoreagent._optional import load_optional
 from omnicoreagent.core.utils import logger
 from omnicoreagent.core.utils import normalize_metadata
-from omnicoreagent.core.memory_store.mongodb import MongoDb
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
 from omnicoreagent.core.utils import normalize_content
 
@@ -42,6 +40,14 @@ class MemoryRouter:
                 logger.info("Database not configured, using in_memory")
                 self.memory_store = InMemoryStore()
             else:
+                DatabaseMessageStore = load_optional(
+                    "SQL database memory",
+                    "postgres",
+                    lambda: __import__(
+                        "omnicoreagent.core.memory_store.sql_db_memory",
+                        fromlist=["DatabaseMessageStore"],
+                    ).DatabaseMessageStore,
+                )
                 self.memory_store = DatabaseMessageStore(db_url=db_url)
         elif self.memory_store_type == "redis":
             redis_url = decouple_config("REDIS_URL", default=None)
@@ -49,6 +55,14 @@ class MemoryRouter:
                 logger.info("Redis not configured, using in_memory")
                 self.memory_store = InMemoryStore()
             else:
+                RedisMemoryStore = load_optional(
+                    "Redis memory",
+                    "redis",
+                    lambda: __import__(
+                        "omnicoreagent.core.memory_store.redis_memory",
+                        fromlist=["RedisMemoryStore"],
+                    ).RedisMemoryStore,
+                )
                 self.memory_store = RedisMemoryStore(redis_url=redis_url)
         elif self.memory_store_type == "mongodb":
             uri = decouple_config("MONGODB_URI", default=None)
@@ -58,6 +72,14 @@ class MemoryRouter:
             else:
                 db_name = decouple_config("MONGODB_DB_NAME", default="omnicoreagent")
                 collection = decouple_config("MONGODB_COLLECTION", default="messages")
+                MongoDb = load_optional(
+                    "MongoDB memory",
+                    "mongodb",
+                    lambda: __import__(
+                        "omnicoreagent.core.memory_store.mongodb",
+                        fromlist=["MongoDb"],
+                    ).MongoDb,
+                )
                 self.memory_store = MongoDb(
                     uri=uri, db_name=db_name, collection=collection
                 )

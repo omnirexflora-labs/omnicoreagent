@@ -5,8 +5,8 @@
 <h1 align="center">🚀 OmniCoreAgent</h1>
 
 <p align="center">
-  <strong>The AI Agent Framework Built for Production</strong><br>
-  <em>Switch memory backends at runtime. Manage context automatically. Deploy with confidence.</em>
+  <strong>The Open Agent Harness Built for Production</strong><br>
+  <em>Run autonomous agents with tools, memory, context management, guardrails, and deployment paths.</em>
 </p>
 
 <p align="center">
@@ -46,7 +46,7 @@ agent = OmniCoreAgent(
     system_instruction="You are a helpful assistant with access to weather data.",
     model_config={"provider": "openai", "model": "gpt-4o"},
     local_tools=tools,
-    memory_router=MemoryRouter("redis"),  # Start with Redis
+    memory_router=MemoryRouter("in_memory"),
     agent_config={
         "context_management": {"enabled": True},  # Auto-manage long conversations
         "guardrail_config": {"strict_mode": True},  # Block prompt injections
@@ -58,21 +58,17 @@ async def main():
     result = await agent.run("What's the weather in Tokyo?")
     print(result["response"])
     
-    # Switch to MongoDB at runtime — no restart needed
-    await agent.switch_memory_store("mongodb")
-    
-    # Keep running with a different backend
-    result = await agent.run("How about Paris?")
-    print(result["response"])
+    # Production backends such as Redis, MongoDB, and Postgres are optional extras.
+    # Install only the backend you use, then switch at runtime when configured.
 
 asyncio.run(main())
 ```
 
 **What just happened?**
 - ✅ Registered a custom tool with type hints
-- ✅ Built an agent with memory persistence
+- ✅ Built an agent with memory
 - ✅ Enabled automatic context management
-- ✅ Switched from Redis to MongoDB *while running*
+- ✅ Kept production backends optional until you need them
 
 ---
 
@@ -80,6 +76,17 @@ asyncio.run(main())
 
 ```bash
 pip install omnicoreagent
+```
+
+Install production extras only when you need them:
+
+```bash
+pip install "omnicoreagent[redis]"       # Redis memory and event streams
+pip install "omnicoreagent[postgres]"    # PostgreSQL / SQL memory
+pip install "omnicoreagent[mongodb]"     # MongoDB memory
+pip install "omnicoreagent[s3]"          # S3 / R2 workspace memory
+pip install "omnicoreagent[serve]"       # OmniServe REST/SSE API server
+pip install "omnicoreagent[all]"         # Everything
 ```
 
 ```bash
@@ -109,6 +116,7 @@ print(result["response"])
 
 | Feature | What It Means For You |
 |---------|----------------------|
+| **Agent Harness Runtime** | Tool loop, memory, context management, guardrails, skills, sub-agents, and serving in one open package |
 | **Runtime Backend Switching** | Switch Redis ↔ MongoDB ↔ PostgreSQL without restarting |
 | **Cloud Workspace Storage** | Agent files persist in AWS S3 or Cloudflare R2 ⚡ NEW |
 | **Context Engineering** | Session memory + agent loop context + tool offloading = no token exhaustion |
@@ -229,7 +237,7 @@ pytest tests/ --cov=src --cov-report=term-missing
 | Error | Fix |
 |-------|-----|
 | `Invalid API key` | Check `.env`: `LLM_API_KEY=your_key` |
-| `ModuleNotFoundError` | `pip install omnicoreagent` |
+| `ModuleNotFoundError` for Redis/Postgres/Mongo/S3/OmniServe | Install the matching extra, e.g. `pip install "omnicoreagent[redis]"` |
 | `Redis connection failed` | Start Redis or use `MemoryRouter("in_memory")` |
 | `MCP connection refused` | Ensure MCP server is running |
 

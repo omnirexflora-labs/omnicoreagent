@@ -4,10 +4,9 @@ Creates backends from string type ("local", "s3", "r2") using environment variab
 Caches backends to avoid re-initializing connections.
 """
 
+from omnicoreagent._optional import load_optional
 from omnicoreagent.core.tools.memory_tool.base import AbstractMemoryBackend
 from omnicoreagent.core.tools.memory_tool.local_storage import LocalMemoryBackend
-from omnicoreagent.core.tools.memory_tool.s3_storage import S3MemoryBackend
-from omnicoreagent.core.tools.memory_tool.r2_storage import R2MemoryBackend
 from decouple import config
 from omnicoreagent.core.utils import logger
 from omnicoreagent.core.workspace import get_memories_dir
@@ -82,6 +81,14 @@ def _create_backend_instance(backend_type: str) -> AbstractMemoryBackend:
             )
         
         logger.info(f"Creating S3 memory backend for bucket: {bucket_name}")
+        S3MemoryBackend = load_optional(
+            "S3 memory backend",
+            "s3",
+            lambda: __import__(
+                "omnicoreagent.core.tools.memory_tool.s3_storage",
+                fromlist=["S3MemoryBackend"],
+            ).S3MemoryBackend,
+        )
         return S3MemoryBackend(
             bucket_name=bucket_name,
             prefix="memories/",
@@ -113,6 +120,14 @@ def _create_backend_instance(backend_type: str) -> AbstractMemoryBackend:
             )
         
         logger.info(f"Creating R2 memory backend for bucket: {bucket_name}")
+        R2MemoryBackend = load_optional(
+            "R2 memory backend",
+            "s3",
+            lambda: __import__(
+                "omnicoreagent.core.tools.memory_tool.r2_storage",
+                fromlist=["R2MemoryBackend"],
+            ).R2MemoryBackend,
+        )
         return R2MemoryBackend(
             bucket_name=bucket_name,
             account_id=account_id,

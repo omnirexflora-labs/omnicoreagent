@@ -1,6 +1,6 @@
 ---
 title: OmniCoreAgent
-description: 'The AI Agent Framework Built for Production'
+description: 'The Open Agent Harness Built for Production'
 mode: 'wide'
 ---
 
@@ -15,12 +15,20 @@ mode: 'wide'
   alt="OmniCoreAgent Dark"
 />
 
-## The Cognitive Runtime for ASI
+## The Open Agent Harness for Production AI
 
-**OmniCoreAgent** is a production-grade framework for building autonomous AI agents that persist, reason, and scale. Unlike other frameworks that treat memory as an afterthought, OmniCoreAgent puts **State Management** at the center.
+**OmniCoreAgent** is a production-grade agent harness for building autonomous AI agents that persist, reason, use tools, manage context, and scale. Unlike frameworks that treat memory as an afterthought, OmniCoreAgent puts **State Management** at the center.
 
 ```bash
 pip install omnicoreagent
+```
+
+Add only the production extras you need:
+
+```bash
+pip install "omnicoreagent[redis]"
+pip install "omnicoreagent[serve]"
+pip install "omnicoreagent[all]"
 ```
 
 ---
