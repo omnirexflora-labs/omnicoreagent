@@ -35,7 +35,7 @@ print(result["response"])
 | `system_instruction` | `str` | The high-level objective or persona for the agent. |
 | `model_config` | `dict` or `ModelConfig` | Configuration for the LLM provider and model. |
 | `mcp_tools` | `list` | (Optional) List of MCP tool configurations. |
-| `local_tools` | `ToolRegistry` or `list` | (Optional) Custom Python functions or community tools. |
+| `local_tools` | `ToolRegistry` or `list` | (Optional) Custom Python functions or application-owned tools. |
 | `sub_agents` | `list` | (Optional) Specialized agents the parent can delegate to. |
 | `agent_config` | `dict` or `AgentConfig` | (Optional) Settings for reasoning steps, timeouts, etc. |
 | `memory_router` | `MemoryRouter` | (Optional) Custom memory backend (defaults to in-memory). |

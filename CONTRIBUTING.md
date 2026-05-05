@@ -12,7 +12,7 @@ First off, thank you for considering contributing to OmniCoreAgent! It's people 
 - [Style Guidelines](#style-guidelines)
 - [Adding New Features](#adding-new-features)
 - [Bug Reports](#bug-reports)
-- [Community](#community)
+- [Project Links](#project-links)
 
 ## 📜 Code of Conduct
 
@@ -164,7 +164,7 @@ When filing an issue, please include:
    - [ ] CHANGELOG.md updated
    ```
 
-## 👥 Community
+## 👥 Project Links
 
 - Follow us on [Twitter](https://x.com/omnirexflolabs)
 

@@ -134,17 +134,16 @@ print(result["response"])
 | 5 | **MCP Client** | Connect to any MCP server (stdio, streamable_http, SSE) with OAuth | [MCP →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/mcp) |
 | 6 | **DeepAgent** | Multi-agent orchestration with automatic task decomposition | [DeepAgent →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/deep-agent) |
 | 7 | **Local Tools** | Register any Python function as an AI tool via ToolRegistry | [Local Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/local-tools) |
-| 8 | **Community Tools** | 100+ pre-built tools (search, AI, comms, databases, DevOps, finance) | [Community Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/community-tools) |
-| 9 | **Agent Skills** | Polyglot packaged capabilities (Python, Bash, Node.js) | [Skills →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/skills) |
-| 10 | **Workspace Memory** | Persistent file storage with S3/R2/Local backends | [Workspace →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workspace-memory) |
-| 11 | **Sub-Agents** | Delegate tasks to specialized agents | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
-| 12 | **Background Agents** | Schedule autonomous tasks on intervals | [Background →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/background-agents) |
-| 13 | **Workflows** | Sequential, Parallel, and Router agent orchestration | [Workflows →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workflows) |
-| 14 | **BM25 Tool Retrieval** | Auto-discover relevant tools from 1000+ using BM25 search | [Advanced Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/advanced-tools) |
-| 15 | **Guardrails** | Prompt injection protection with configurable sensitivity | [Guardrails →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/guardrails) |
-| 16 | **Observability** | Per-request metrics + Opik distributed tracing | [Observability →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/observability) |
-| 17 | **Universal Models** | 9 providers via LiteLLM (OpenAI, Anthropic, Gemini, Groq, Ollama, etc.) | [Models →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/models) |
-| 18 | **OmniServe** | Turn any agent into a production REST/SSE API with one command | [OmniServe →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/omniserve) |
+| 8 | **Agent Skills** | Polyglot packaged capabilities (Python, Bash, Node.js) | [Skills →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/skills) |
+| 9 | **Workspace Memory** | Persistent file storage with S3/R2/Local backends | [Workspace →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workspace-memory) |
+| 10 | **Sub-Agents** | Delegate tasks to specialized agents | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
+| 11 | **Background Agents** | Schedule autonomous tasks on intervals | [Background →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/background-agents) |
+| 12 | **Workflows** | Sequential, Parallel, and Router agent orchestration | [Workflows →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workflows) |
+| 13 | **BM25 Tool Retrieval** | Auto-discover relevant tools from 1000+ using BM25 search | [Advanced Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/advanced-tools) |
+| 14 | **Guardrails** | Prompt injection protection with configurable sensitivity | [Guardrails →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/guardrails) |
+| 15 | **Observability** | Per-request metrics + Opik distributed tracing | [Observability →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/observability) |
+| 16 | **Universal Models** | 9 providers via LiteLLM (OpenAI, Anthropic, Gemini, Groq, Ollama, etc.) | [Models →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/models) |
+| 17 | **OmniServe** | Turn any agent into a production REST/SSE API with one command | [OmniServe →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/omniserve) |
 
 ---
 

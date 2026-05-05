@@ -88,6 +88,11 @@ include = [
 ]
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "-m",
+    "not broken_upstream",
+]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "asyncio: marks tests that use asyncio",
