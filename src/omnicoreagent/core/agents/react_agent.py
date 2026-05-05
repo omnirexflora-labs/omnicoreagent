@@ -1,6 +1,6 @@
 from omnicoreagent.core.agents.base import BaseReactAgent
 from omnicoreagent.core.guardrails import PromptInjectionGuard
-from omnicoreagent.core.types import AgentConfig
+from omnicoreagent.runtime_config import AgentConfig
 
 
 class ReactAgent(BaseReactAgent):

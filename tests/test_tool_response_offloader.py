@@ -27,7 +27,7 @@ from omnicoreagent.core.tool_response_offloader import (
 )
 from omnicoreagent.core.tools.artifact_tool import build_tool_registry_artifact_tool
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.core.types import AgentConfig as TypesAgentConfig
+from omnicoreagent.runtime_config import AgentConfig
 from pydantic import ValidationError
 
 
@@ -101,7 +101,7 @@ class TestAgentConfigToolOffloadValidation:
 
     def test_valid_tool_offload_accepted(self):
         """Test valid tool_offload config is accepted."""
-        config = TypesAgentConfig(
+        config = AgentConfig(
             agent_name="test",
             max_steps=10,
             tool_call_timeout=30,
@@ -112,7 +112,7 @@ class TestAgentConfigToolOffloadValidation:
     def test_invalid_threshold_tokens_rejected(self):
         """Test negative threshold_tokens raises ValidationError."""
         with pytest.raises(ValidationError) as exc_info:
-            TypesAgentConfig(
+            AgentConfig(
                 agent_name="test",
                 max_steps=10,
                 tool_call_timeout=30,
@@ -123,7 +123,7 @@ class TestAgentConfigToolOffloadValidation:
     def test_invalid_threshold_bytes_rejected(self):
         """Test negative threshold_bytes raises ValidationError."""
         with pytest.raises(ValidationError) as exc_info:
-            TypesAgentConfig(
+            AgentConfig(
                 agent_name="test",
                 max_steps=10,
                 tool_call_timeout=30,
@@ -134,7 +134,7 @@ class TestAgentConfigToolOffloadValidation:
     def test_invalid_max_preview_tokens_rejected(self):
         """Test negative max_preview_tokens raises ValidationError."""
         with pytest.raises(ValidationError) as exc_info:
-            TypesAgentConfig(
+            AgentConfig(
                 agent_name="test",
                 max_steps=10,
                 tool_call_timeout=30,
@@ -145,7 +145,7 @@ class TestAgentConfigToolOffloadValidation:
     def test_invalid_retention_days_rejected(self):
         """Test negative retention_days raises ValidationError."""
         with pytest.raises(ValidationError) as exc_info:
-            TypesAgentConfig(
+            AgentConfig(
                 agent_name="test",
                 max_steps=10,
                 tool_call_timeout=30,

@@ -1,7 +1,9 @@
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any
 import uuid
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from omnicoreagent.core.constants import SUPPORTED_MODELS_PROVIDERS
 
@@ -48,17 +50,16 @@ class MCPToolConfig:
             self.name = f"{base}_{uuid.uuid4().hex[:6]}"
 
 
-@dataclass
-class AgentConfig:
+class AgentConfig(BaseModel):
     agent_name: str = "OmniCoreAgent"
-    tool_call_timeout: int = 30
-    max_steps: int = 15
-    request_limit: int = 0
-    total_tokens_limit: int = 0
+    request_limit: int = Field(default=0, description="0 = unlimited")
+    total_tokens_limit: int = Field(default=0, description="0 = unlimited")
+    max_steps: int = Field(default=15, gt=0, le=1000)
+    tool_call_timeout: int = Field(default=30, gt=1, le=1000)
     enable_advanced_tool_use: bool = False
     enable_subagents: bool = False
     enable_agent_skills: bool = False
-    memory_config: dict[str, Any] = field(
+    memory_config: dict[str, Any] = Field(
         default_factory=lambda: {
             "mode": "sliding_window",
             "value": 10000,
@@ -66,9 +67,9 @@ class AgentConfig:
         }
     )
     enable_workspace_memory: bool = False
-    guardrail_config: dict[str, Any] | None = None
+    guardrail_config: dict[str, Any] = Field(default_factory=dict)
     guardrail_mode: str = "full"
-    context_management: dict[str, Any] = field(
+    context_management: dict[str, Any] = Field(
         default_factory=lambda: {
             "enabled": False,
             "mode": "token_budget",
@@ -78,7 +79,7 @@ class AgentConfig:
             "preserve_recent": 4,
         }
     )
-    tool_offload: dict[str, Any] = field(
+    tool_offload: dict[str, Any] = Field(
         default_factory=lambda: {
             "enabled": False,
             "threshold_tokens": 500,
@@ -87,6 +88,100 @@ class AgentConfig:
             "max_preview_lines": 10,
         }
     )
+
+    @field_validator("request_limit", "total_tokens_limit", mode="before")
+    @classmethod
+    def convert_none_to_zero(cls, value):
+        return 0 if value is None else value
+
+    @field_validator("guardrail_config", mode="before")
+    @classmethod
+    def default_guardrail_config(cls, value):
+        return {} if value is None else value
+
+    @field_validator("context_management")
+    @classmethod
+    def validate_context_management(cls, value):
+        if value is None:
+            return {}
+
+        preserve_recent = value.get("preserve_recent", 4)
+        if preserve_recent < 4:
+            raise ValueError(
+                f"context_management.preserve_recent must be at least 4, got {preserve_recent}"
+            )
+
+        allowed_modes = {"sliding_window", "token_budget"}
+        mode = value.get("mode", "token_budget")
+        if mode not in allowed_modes:
+            raise ValueError(
+                f"context_management.mode must be one of {allowed_modes}, got '{mode}'"
+            )
+
+        allowed_strategies = {"truncate", "summarize_and_truncate"}
+        strategy = value.get("strategy", "truncate")
+        if strategy not in allowed_strategies:
+            raise ValueError(
+                f"context_management.strategy must be one of {allowed_strategies}, got '{strategy}'"
+            )
+
+        threshold = value.get("threshold_percent", 75)
+        if not (1 <= threshold <= 100):
+            raise ValueError(
+                f"context_management.threshold_percent must be between 1 and 100, got {threshold}"
+            )
+
+        context_value = value.get("value", 100000)
+        if context_value <= 0:
+            raise ValueError(
+                f"context_management.value must be positive, got {context_value}"
+            )
+
+        return value
+
+    @field_validator("tool_offload")
+    @classmethod
+    def validate_tool_offload(cls, value):
+        if value is None:
+            return {}
+
+        threshold_tokens = value.get("threshold_tokens", 500)
+        if threshold_tokens <= 0:
+            raise ValueError(
+                f"tool_offload.threshold_tokens must be positive, got {threshold_tokens}"
+            )
+
+        threshold_bytes = value.get("threshold_bytes", 2000)
+        if threshold_bytes <= 0:
+            raise ValueError(
+                f"tool_offload.threshold_bytes must be positive, got {threshold_bytes}"
+            )
+
+        max_preview_tokens = value.get("max_preview_tokens", 150)
+        if max_preview_tokens <= 0:
+            raise ValueError(
+                f"tool_offload.max_preview_tokens must be positive, got {max_preview_tokens}"
+            )
+
+        max_preview_lines = value.get("max_preview_lines", 10)
+        if max_preview_lines <= 0:
+            raise ValueError(
+                f"tool_offload.max_preview_lines must be positive, got {max_preview_lines}"
+            )
+
+        retention_days = value.get("retention_days")
+        if retention_days is not None and retention_days < 0:
+            raise ValueError(
+                f"tool_offload.retention_days must be non-negative, got {retention_days}"
+            )
+
+        return value
+
+    @model_validator(mode="after")
+    def enable_required_harness_defaults(self):
+        if self.enable_subagents:
+            self.enable_workspace_memory = True
+        return self
 
 
 def normalize_model_config(config: dict[str, Any] | ModelConfig) -> dict[str, Any]:
@@ -140,22 +235,11 @@ def normalize_agent_config(
     name: str, config: dict[str, Any] | AgentConfig | None = None
 ) -> dict[str, Any]:
     if isinstance(config, AgentConfig):
-        data = asdict(config)
+        data = config.model_copy(update={"agent_name": name}).model_dump()
     elif isinstance(config, dict):
-        data = asdict(AgentConfig())
-        data.update(config)
+        data = AgentConfig(**{**config, "agent_name": name}).model_dump()
     elif config is None:
-        data = asdict(AgentConfig())
+        data = AgentConfig(agent_name=name).model_dump()
     else:
         raise ValueError("agent_config must be a dict or AgentConfig")
-
-    data["agent_name"] = name
-    if data.get("request_limit") is None:
-        data["request_limit"] = 0
-    if data.get("total_tokens_limit") is None:
-        data["total_tokens_limit"] = 0
-    if data.get("guardrail_config") is None:
-        data["guardrail_config"] = {}
-    if data.get("enable_subagents"):
-        data["enable_workspace_memory"] = True
     return data
