@@ -67,15 +67,14 @@ class SubagentFactory:
 
         Subagents get full config but with some adjustments:
         - Fewer max_steps (focused task)
-        - Inherit parent's memory_tool_backend
+        - Use workspace-backed memory when memory tools are enabled
         """
         config = self.agent_config.copy()
 
         config["max_steps"] = min(config.get("max_steps", 15), 15)
 
-        # Inherit parent's memory_tool_backend (default to local if not set)
         if "memory_tool_backend" not in config:
-            config["memory_tool_backend"] = "local"
+            config["memory_tool_backend"] = "workspace"
 
         return config
 

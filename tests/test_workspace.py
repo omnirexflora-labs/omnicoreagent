@@ -78,10 +78,10 @@ def test_local_memory_backend_cache_respects_workspace_changes(monkeypatch, tmp_
     clear_backend_cache()
 
     monkeypatch.setenv("OMNICOREAGENT_WORKSPACE_DIR", str(first_workspace))
-    first = create_memory_backend("local")
+    first = create_memory_backend()
 
     monkeypatch.setenv("OMNICOREAGENT_WORKSPACE_DIR", str(second_workspace))
-    second = create_memory_backend("local")
+    second = create_memory_backend()
 
     assert first is not second
     assert first.base_dir == (first_workspace / "memories").resolve()
@@ -148,7 +148,7 @@ class FakeS3Client:
             raise KeyError(Key)
         return {}
 
-    def list_objects_v2(self, Bucket, Prefix):
+    def list_objects_v2(self, Bucket, Prefix, **kwargs):
         contents = []
         for (bucket, key), item in self.objects.items():
             if bucket == Bucket and key.startswith(Prefix):

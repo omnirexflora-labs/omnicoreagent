@@ -185,10 +185,11 @@ All examples are in the **[Cookbook](./cookbook)** — organized by use case wit
 # Required
 LLM_API_KEY=your_api_key
 
-# Optional: Memory backends
-REDIS_URL=redis://localhost:6379/0
-DATABASE_URL=postgresql://user:pass@localhost:5432/db
-MONGODB_URI=mongodb://localhost:27017/omnicoreagent
+# Optional: workspace backend for artifacts and memory files
+OMNICOREAGENT_WORKSPACE_BACKEND=local  # local, s3, or r2
+OMNICOREAGENT_WORKSPACE_DIR=.omnicoreagent/workspace
+AWS_S3_BUCKET=your-s3-bucket           # when backend=s3
+R2_BUCKET_NAME=your-r2-bucket          # when backend=r2
 
 # Optional: Observability
 OPIK_API_KEY=your_opik_key
@@ -206,7 +207,7 @@ agent_config = {
     "memory_config": {"mode": "sliding_window", "value": 10000},
     "enable_advanced_tool_use": True,   # BM25 tool retrieval
     "enable_agent_skills": True,        # Specialized packaged skills
-    "memory_tool_backend": "local"      # Persistent working memory
+    "memory_tool_backend": "workspace"  # Memory files live in workspace
 }
 ```
 
