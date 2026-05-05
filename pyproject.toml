@@ -13,12 +13,12 @@ bump = true
 [project]
 name = "omnicoreagent"
 dynamic = ["version"]
-description = "OmniCoreAgent is a powerful Python AI Agent framework for building autonomous AI agents that think, reason, and execute complex tasks. Production-ready agents that use tools, manage memory, coordinate workflows, and handle real-world business logic."
+description = "OmniCoreAgent is an open Python agent harness for building autonomous AI agents that use tools, manage memory and context, coordinate workflows, and handle production business logic."
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [{ name = "Abiola Adeshina", email = "abiolaadedayo1993@gmail.com" }]
 requires-python = ">=3.10"
 
-keywords = ["git", "mcp", "llm", "automation", "agent", "ai", "framework"]
+keywords = ["git", "mcp", "llm", "automation", "agent", "ai", "framework", "agent-harness"]
 license = { text = "MIT" }
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -34,38 +34,41 @@ dependencies = [
     "colorlog>=6.9.0",
     "python-dotenv>=1.0.1",
     "rich>=13.9.4",
-    "websockets>=15.0.1",
     "httpx>=0.26.0",
     "httpx-sse>=0.4.0",
     "pydantic[email]>=2.6.0",
     "anyio>=4.2.0",
-    "redis>=5.2.1",
     "python-decouple>=3.8",
-    "fastapi>=0.115.12",
-    "python-multipart>=0.0.20",
-    "colorama>=0.4.6",
     "mcp[cli]>=1.9.1",
-    "sqlalchemy>=2.0.0",
-    "tzlocal>=5.2",
-    "psycopg2-binary>=2.9.10",
-    "apscheduler>=3.11.0",
-    "psutil>=7.0.0",
-    "pymupdf>=1.26.3",
     "litellm>=1.75.2",
-    "fastapi-sso>=0.18.0",
-    "opik>=1.8.19",
-    "cryptography>=45.0.6",
-    "motor>=3.7.1",
-    "pymongo>=4.15.1",
-    "tiktoken>=0.8.0",
-    "textual>=7.3.0",
-    "boto3>=1.42.37",
     "click>=8.1.7",
-    "uvicorn>=0.34.1",
-    "pytest-asyncio>=1.2.0",
     "docstring_parser>=0.16",
     "packaging>=23.0",
-    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+redis = ["redis>=5.2.1"]
+postgres = ["sqlalchemy>=2.0.0", "psycopg2-binary>=2.9.10"]
+mongodb = ["motor>=3.7.1", "pymongo>=4.15.1"]
+s3 = ["boto3>=1.42.37"]
+serve = ["fastapi>=0.115.12", "uvicorn>=0.34.1", "python-multipart>=0.0.20"]
+background = ["apscheduler>=3.11.0", "tzlocal>=5.2"]
+observability = ["opik>=1.8.19"]
+tokenizer = ["tiktoken>=0.8.0"]
+all = [
+    "redis>=5.2.1",
+    "sqlalchemy>=2.0.0",
+    "psycopg2-binary>=2.9.10",
+    "motor>=3.7.1",
+    "pymongo>=4.15.1",
+    "boto3>=1.42.37",
+    "fastapi>=0.115.12",
+    "uvicorn>=0.34.1",
+    "python-multipart>=0.0.20",
+    "apscheduler>=3.11.0",
+    "tzlocal>=5.2",
+    "opik>=1.8.19",
+    "tiktoken>=0.8.0",
 ]
 
 [project.scripts]
@@ -107,10 +110,23 @@ omnicoreagent = { workspace = true }
 
 [dependency-groups]
 dev = [
+    "apscheduler>=3.11.0",
+    "boto3>=1.42.37",
+    "fastapi>=0.115.12",
     "pre-commit>=4.2.0",
+    "motor>=3.7.1",
+    "opik>=1.8.19",
+    "psycopg2-binary>=2.9.10",
     "pytest>=8.3.5",
     "pytest-asyncio>=0.26.0",
+    "python-multipart>=0.0.20",
+    "pymongo>=4.15.1",
+    "redis>=5.2.1",
     "ruff>=0.11.7",
+    "sqlalchemy>=2.0.0",
+    "tiktoken>=0.8.0",
+    "tzlocal>=5.2",
+    "uvicorn>=0.34.1",
     "hatch>=1.14.1",
     "twine>=6.1.0",
 ]

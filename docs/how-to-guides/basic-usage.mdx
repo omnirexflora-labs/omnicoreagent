@@ -199,7 +199,7 @@ except MCPConnectionError as e:
 | Error | Fix |
 |-------|-----|
 | `Invalid API key` | Check `.env`: `LLM_API_KEY=your_key` |
-| `ModuleNotFoundError` | `pip install omnicoreagent` |
+| `ModuleNotFoundError` for an optional backend | Install the matching extra, e.g. `pip install "omnicoreagent[redis]"` |
 | `Redis connection failed` | Start Redis or use `MemoryRouter("in_memory")` |
 | `MCP connection refused` | Ensure MCP server is running and path is correct |
 | `Token limit exceeded` | Increase `total_tokens_limit` or enable context management |

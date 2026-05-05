@@ -73,6 +73,36 @@ UV is faster than pip and handles dependencies more reliably:
 
 ---
 
+## Optional Production Extras
+
+The base install stays focused on the core agent harness. Add heavier production integrations only when your agent uses them:
+
+| Extra | Installs |
+|-------|----------|
+| `redis` | Redis memory and Redis Stream events |
+| `postgres` | SQLAlchemy and PostgreSQL driver |
+| `mongodb` | MongoDB async and sync drivers |
+| `s3` | AWS S3 and Cloudflare R2 workspace storage |
+| `serve` | OmniServe REST/SSE API server |
+| `background` | APScheduler background task execution |
+| `observability` | Opik tracing |
+| `tokenizer` | tiktoken token counting |
+| `all` | Every optional integration |
+
+```bash
+pip install "omnicoreagent[redis]"
+pip install "omnicoreagent[serve]"
+pip install "omnicoreagent[all]"
+```
+
+With UV:
+
+```bash
+uv add "omnicoreagent[redis]"
+```
+
+---
+
 ## Verify Installation
 
 After installation, verify that you can import the package:
@@ -106,6 +136,16 @@ python -c "import omnicoreagent; print(omnicoreagent.__version__)"
     ```bash
     pip install --user omnicoreagent
     ```
+  </Accordion>
+  <Accordion title="Missing Optional Backend">
+    **Error**: `ImportError: Redis memory requires optional dependency 'redis'`
+
+    **Solution**: Install the matching extra:
+    ```bash
+    pip install "omnicoreagent[redis]"
+    ```
+
+    Use `postgres`, `mongodb`, `s3`, `serve`, `background`, `observability`, or `all` for other optional integrations.
   </Accordion>
   <Accordion title="Getting Help">
     If you encounter issues:

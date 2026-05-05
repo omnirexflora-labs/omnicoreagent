@@ -12,6 +12,14 @@ icon: 'database'
 
 ## Quick Start
 
+Install the backend extra before using a production store:
+
+```bash
+pip install "omnicoreagent[redis]"
+pip install "omnicoreagent[mongodb]"
+pip install "omnicoreagent[postgres]"
+```
+
 ```python
 from omnicoreagent import OmniCoreAgent, MemoryRouter
 
