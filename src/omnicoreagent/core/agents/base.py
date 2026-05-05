@@ -324,10 +324,6 @@ class BaseReactAgent:
         sub_agents: list = None,
     ) -> ToolError | list[ToolCallResult]:
         try:
-            local_tools = await self.process_local_tools(
-                local_tools=local_tools, local_tool_verification=True
-            )
-
             if not parsed_response.data:
                 return ToolError(
                     observation="Invalid tool call request: No data provided",
@@ -1022,58 +1018,43 @@ class BaseReactAgent:
         finally:
             session_state.state = previous_state
 
-    async def process_local_tools(
-        self, local_tools: Any = None, local_tool_verification: bool = False
-    ):
+    async def prepare_runtime_tools(self, local_tools: Any = None):
+        registry = local_tools
+        needs_internal_registry = (
+            self.enable_advanced_tool_use
+            or self.memory_tool_backend
+            or self.tool_offloader.config.enabled
+            or (self.enable_agent_skills and self.skill_manager)
+        )
+
+        if registry is None and needs_internal_registry:
+            registry = self.register_internal_tool
+
+        if registry is None:
+            return None
+
         if self.enable_advanced_tool_use:
-            if not local_tool_verification:
-                local_tools = self.register_internal_tool
-                await build_tool_registry_advance_tools_use(
-                    registry=local_tools,
-                )
-            else:
-                if local_tools and local_tool_verification:
-                    await build_tool_registry_advance_tools_use(
-                        registry=local_tools,
-                    )
+            await build_tool_registry_advance_tools_use(registry=registry)
 
         if self.memory_tool_backend:
-            if local_tools:
-                build_tool_registry_memory_tool(
-                    memory_tool_backend=self.memory_tool_backend,
-                    registry=local_tools,
-                )
-            else:
-                local_tools = self.register_internal_tool
-                build_tool_registry_memory_tool(
-                    memory_tool_backend=self.memory_tool_backend,
-                    registry=local_tools,
-                )
+            build_tool_registry_memory_tool(
+                memory_tool_backend=self.memory_tool_backend,
+                registry=registry,
+            )
+
         if self.tool_offloader.config.enabled:
-            if local_tools:
-                build_tool_registry_artifact_tool(
-                    offloader=self.tool_offloader,
-                    registry=local_tools,
-                )
-            else:
-                local_tools = self.register_internal_tool
-                build_tool_registry_artifact_tool(
-                    offloader=self.tool_offloader,
-                    registry=local_tools,
-                )
+            build_tool_registry_artifact_tool(
+                offloader=self.tool_offloader,
+                registry=registry,
+            )
+
         if self.enable_agent_skills and self.skill_manager:
-            if local_tools:
-                build_skill_tools(
-                    skill_manager=self.skill_manager,
-                    registry=local_tools,
-                )
-            else:
-                local_tools = self.register_internal_tool
-                build_skill_tools(
-                    skill_manager=self.skill_manager,
-                    registry=local_tools,
-                )
-        return local_tools
+            build_skill_tools(
+                skill_manager=self.skill_manager,
+                registry=registry,
+            )
+
+        return registry
 
     async def get_tools_registry(
         self, mcp_tools: dict = None, local_tools: Any = None
@@ -1145,7 +1126,6 @@ class BaseReactAgent:
             return p_desc if p_desc else "No description"
 
         try:
-            local_tools = await self.process_local_tools(local_tools=local_tools)
             if local_tools:
                 local_tools_list = local_tools.get_available_tools()
                 if local_tools_list:
@@ -1596,13 +1576,14 @@ class BaseReactAgent:
             session_id=session_id,
             metadata={"agent_name": self.agent_name},
         )
+        runtime_local_tools = await self.prepare_runtime_tools(local_tools=local_tools)
         await self.prepare_initial_messages(
             system_prompt=system_prompt,
             session_state=session_state,
             llm_connection=llm_connection,
             message_history=message_history,
             mcp_tools=mcp_tools,
-            local_tools=local_tools,
+            local_tools=runtime_local_tools,
             session_id=session_id,
             debug=debug,
             sub_agents=sub_agents,
@@ -1849,7 +1830,7 @@ class BaseReactAgent:
                                 mcp_tools=mcp_tools,
                                 debug=debug,
                                 sessions=sessions,
-                                local_tools=local_tools,
+                                local_tools=runtime_local_tools,
                                 session_id=session_id,
                                 event_router=event_router,
                                 sub_agents=sub_agents,
