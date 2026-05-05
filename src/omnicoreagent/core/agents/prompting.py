@@ -1,4 +1,20 @@
-SYSTEM_SUFFIX = """
+class OmniCoreAgentPromptBuilder:
+    def __init__(self, react_prompt: str):
+        self.react_prompt = react_prompt.strip()
+
+    def build(self, *, system_instruction: str) -> str:
+        if not system_instruction.strip():
+            raise ValueError("System instruction is required.")
+
+        return f"""<system_instruction>
+{system_instruction.strip()}
+</system_instruction>
+
+{self.react_prompt}
+""".strip()
+
+
+REACT_AGENT_PROMPT = """
 <core_principles>
   <response_format_requirements>
     <critical>Response structure uses XML tags. Content format depends on the tag type.</critical>

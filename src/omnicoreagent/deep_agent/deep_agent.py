@@ -12,7 +12,7 @@ Key Features:
 Prompt Structure:
 1. <system_instruction> - User's domain instruction (pure)
 2. <deep_agent_capabilities> - Multi-agent orchestration
-3. {SYSTEM_SUFFIX} - ReAct pattern, tool usage, etc.
+3. {REACT_AGENT_PROMPT} - ReAct pattern, tool usage, etc.
 
 NOTE: Task paths are chosen dynamically by the lead agent when spawning subagents.
 """
@@ -361,4 +361,3 @@ class DeepAgent:
     async def switch_memory_store(self, memory_store_type: str):
         """Switch to a different memory store type."""
         self.memory_router.switch_memory_store(memory_store_type)
-

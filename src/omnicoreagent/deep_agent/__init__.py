@@ -15,7 +15,7 @@ DeepAgent adds:
 Prompt Structure:
 1. <system_instruction> - User's domain instruction
 2. <deep_agent_capabilities> - Orchestration capabilities
-3. {SYSTEM_SUFFIX} - ReAct pattern, tools, etc.
+3. {REACT_AGENT_PROMPT} - ReAct pattern, tools, etc.
 """
 
 from .deep_agent import DeepAgent

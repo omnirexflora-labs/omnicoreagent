@@ -14,8 +14,10 @@ from omnicoreagent.runtime_config import (
     normalize_mcp_tools,
     normalize_model_config,
 )
-from omnicoreagent.prompts.prompt_builder import OmniCoreAgentPromptBuilder
-from omnicoreagent.prompts.react_suffix import SYSTEM_SUFFIX
+from omnicoreagent.core.agents.prompting import (
+    OmniCoreAgentPromptBuilder,
+    REACT_AGENT_PROMPT,
+)
 from omnicoreagent.core.events.event_router import EventRouter
 from omnicoreagent.core.tools.advance_tools.advanced_tools_use import AdvanceToolsUse
 from omnicoreagent.core.utils import logger
@@ -90,7 +92,7 @@ class OmniCoreAgent:
         self.memory_router = memory_router
         self.event_router = event_router
         self.prompt_builder = prompt_builder or OmniCoreAgentPromptBuilder(
-            SYSTEM_SUFFIX
+            REACT_AGENT_PROMPT
         )
         self.agent = None
         self.mcp_client = None
