@@ -188,3 +188,86 @@ async def test_act_records_one_tool_call_id_per_parallel_tool(agent):
     assert {call["id"] for call in tool_calls} == {
         item["metadata"]["tool_call_id"] for item in tool_messages
     }
+
+
+@pytest.mark.asyncio
+async def test_run_prepares_internal_tools_once_for_prompt_and_execution(monkeypatch):
+    agent = BaseReactAgent(
+        agent_name="test_agent",
+        max_steps=5,
+        tool_call_timeout=10,
+        enable_advanced_tool_use=True,
+    )
+    build_count = 0
+    history = []
+
+    async def fake_build_internal_tools(registry):
+        nonlocal build_count
+        build_count += 1
+
+        @registry.register_tool(
+            name="internal_ping",
+            inputSchema={
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+            },
+            description="Internal ping tool.",
+        )
+        async def internal_ping(value: str):
+            return {"status": "success", "data": f"pong:{value}"}
+
+        return registry
+
+    monkeypatch.setattr(
+        "omnicoreagent.core.agents.base.build_tool_registry_advance_tools_use",
+        fake_build_internal_tools,
+    )
+
+    class FakeLLMConnection:
+        def __init__(self):
+            self.calls = 0
+
+        async def llm_call(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                assert "internal_ping" in messages[0].content
+                return """
+<thought>Need internal tool.</thought>
+<tool_call>
+  <tool_name>internal_ping</tool_name>
+  <parameters>
+    <value>runtime</value>
+  </parameters>
+</tool_call>
+"""
+            return "<final_answer>done</final_answer>"
+
+    async def add_message_to_history(role, content, metadata=None, session_id=None):
+        history.append(
+            {
+                "role": role,
+                "content": content,
+                "metadata": metadata or {},
+                "session_id": session_id,
+            }
+        )
+
+    async def message_history(agent_name, session_id):
+        return history
+
+    result = await agent.run(
+        system_prompt="system",
+        query="run internal ping",
+        llm_connection=FakeLLMConnection(),
+        add_message_to_history=add_message_to_history,
+        message_history=message_history,
+        session_id="chat791",
+    )
+
+    tool_messages = [item for item in history if item["role"] == "tool"]
+    assert result["answer"] == "done"
+    assert build_count == 1
+    assert len(tool_messages) == 1
+    assert tool_messages[0]["metadata"]["tool"] == "internal_ping"
+    assert "pong:runtime" in tool_messages[0]["content"]
