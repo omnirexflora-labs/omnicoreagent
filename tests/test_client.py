@@ -33,6 +33,18 @@ MOCK_MCP_SERVERS = [
 ]
 
 
+class MockTool:
+    def __init__(self, name, description):
+        self.name = name
+        self.description = description
+
+
+MOCK_TOOLS = [
+    MockTool("tool1", "Test tool 1"),
+    MockTool("tool2", "Test tool 2"),
+]
+
+
 class TestMCPClient:
     @pytest.fixture
     def mock_client(self):
@@ -53,19 +65,13 @@ class TestMCPClient:
         session.initialize = AsyncMock(
             return_value=MagicMock(
                 serverInfo=server_info,
-                capabilities={"tools": [], "resources": [], "prompts": []},
             )
         )
+        session.list_tools = AsyncMock(return_value=MagicMock(tools=MOCK_TOOLS))
         return session
 
     @pytest.mark.asyncio
-    @patch(
-        "omnicoreagent.mcp_clients_connection.client.refresh_capabilities",
-        new_callable=AsyncMock,
-    )
-    async def test_connect_to_single_server_stdio(
-        self, mock_refresh, mock_client, mock_session
-    ):
+    async def test_connect_to_single_server_stdio(self, mock_client, mock_session):
         """Test connecting to a stdio server"""
         with patch(
             "omnicoreagent.mcp_clients_connection.client.stdio_client"
@@ -89,16 +95,11 @@ class TestMCPClient:
                 assert result == "test_server connected successfully"
                 mock_exit_stack.assert_called_once()
                 mock_stack.enter_async_context.assert_called()
-                mock_refresh.assert_awaited_once()
+                mock_session.list_tools.assert_awaited_once()
+                assert mock_client.available_tools["test_server"] == MOCK_TOOLS
 
     @pytest.mark.asyncio
-    @patch(
-        "omnicoreagent.mcp_clients_connection.client.refresh_capabilities",
-        new_callable=AsyncMock,
-    )
-    async def test_connect_to_single_server_sse(
-        self, mock_refresh, mock_client, mock_session
-    ):
+    async def test_connect_to_single_server_sse(self, mock_client, mock_session):
         """Test connecting to an SSE server"""
         with patch(
             "omnicoreagent.mcp_clients_connection.client.sse_client"
@@ -123,7 +124,31 @@ class TestMCPClient:
                 mock_exit_stack.assert_called_once()
                 mock_exit_stack.assert_called_once()
                 mock_stack.enter_async_context.assert_called()
-                mock_refresh.assert_awaited_once()
+                mock_session.list_tools.assert_awaited_once()
+                assert mock_client.available_tools["test_server"] == MOCK_TOOLS
+
+    @pytest.mark.asyncio
+    async def test_load_server_tools_not_connected(self, mock_client):
+        """Test loading tools requires a connected MCP session."""
+        with pytest.raises(ValueError, match="Not connected to server: missing"):
+            await mock_client._load_server_tools("missing")
+
+    @pytest.mark.asyncio
+    async def test_load_server_tools_handles_unsupported_tools(self, mock_client):
+        """Test a server without tools is represented as an empty tool list."""
+        session = AsyncMock()
+        session.list_tools = AsyncMock(side_effect=Exception("not supported"))
+        mock_client.sessions = {
+            "server_without_tools": {
+                "session": session,
+                "connected": True,
+            }
+        }
+
+        tools = await mock_client._load_server_tools("server_without_tools")
+
+        assert tools == []
+        assert mock_client.available_tools["server_without_tools"] == []
 
     @pytest.mark.asyncio
     async def test_clean_up_server(self, mock_client):

@@ -10,9 +10,6 @@ from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 
 from omnicoreagent.core.llm import LLMConnection
-from omnicoreagent.mcp_clients_connection.refresh_server_capabilities import (
-    refresh_capabilities,
-)
 from omnicoreagent.core.utils import logger
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -304,7 +301,6 @@ class MCPClient:
             )
             init_result = await session.initialize()
             server_name = init_result.serverInfo.name
-            capabilities = init_result.capabilities
             if server_name in self.server_names:
                 error_message = (
                     f"{server_name} is already connected. Disconnect it and try again."
@@ -321,7 +317,6 @@ class MCPClient:
                 "read_stream": read_stream,
                 "write_stream": write_stream,
                 "connected": True,
-                "capabilities": capabilities,
                 "transport_type": transport_type,
                 "stack": stack,
             }
@@ -329,18 +324,39 @@ class MCPClient:
                 logger.info(
                     f"Successfully connected to {server_name} via {transport_type}"
                 )
-            await refresh_capabilities(
-                sessions=self.sessions,
-                server_names=self.server_names,
-                available_tools=self.available_tools,
-                debug=self.debug,
-            )
+            await self._load_server_tools(server_name)
 
             return f"{server_name} connected successfully"
         except Exception as e:
             error_message = f"Failed to connect to server: {str(e)}"
             logger.error(error_message)
             return error_message
+
+    async def _load_server_tools(self, server_name: str) -> list[Any]:
+        """Load MCP tools for one connected server."""
+        session_info = self.sessions.get(server_name)
+        if not session_info or not session_info.get("connected", False):
+            raise ValueError(f"Not connected to server: {server_name}")
+
+        session = session_info.get("session")
+        if not session:
+            logger.warning(f"No session found for server: {server_name}")
+            self.available_tools[server_name] = []
+            return []
+
+        try:
+            tools_response = await session.list_tools()
+            tools = tools_response.tools if tools_response else []
+        except Exception as e:
+            logger.info(f"{server_name} does not support tools: {e}")
+            tools = []
+
+        self.available_tools[server_name] = tools
+        if self.debug:
+            logger.info(f"Loaded {len(tools)} MCP tools from {server_name}")
+            for tool in tools:
+                logger.info(f"  - {tool.name}")
+        return tools
 
     async def add_servers(self, servers: list[dict[str, Any]]) -> None:
         """Dynamically add servers at runtime."""
