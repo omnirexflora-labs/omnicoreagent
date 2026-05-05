@@ -1,18 +1,15 @@
 """
-DeepAgent - General-purpose agent with multi-agent orchestration.
-
-DeepAgent = OmniCoreAgent + Multi-Agent Orchestration
+DeepAgent - compatibility wrapper around OmniCoreAgent harness defaults.
 
 Key Features:
-1. Custom DeepAgentPromptBuilder for clean prompt structure
-2. Subagent spawning tools
+1. OmniCoreAgent dynamic subagent spawning
+2. Workspace-backed memory tools
 3. Full agent_config inheritance (context_management, tool_offload, etc.)
-4. Memory-first workflow
+4. Tool offloading defaults
 
 Prompt Structure:
 1. <system_instruction> - User's domain instruction (pure)
-2. <deep_agent_capabilities> - Multi-agent orchestration
-3. {REACT_AGENT_PROMPT} - ReAct pattern, tool usage, etc.
+2. {REACT_AGENT_PROMPT} - ReAct pattern, tool usage, etc.
 
 NOTE: Task paths are chosen dynamically by the lead agent when spawning subagents.
 """
@@ -27,12 +24,12 @@ from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.utils import logger
 
 from .prompts import DeepAgentPromptBuilder
-from .subagent_factory import SubagentFactory, build_subagent_tools
 
 
 DEFAULT_DEEP_AGENT_CONFIG = {
     "tool_call_timeout": 600,
     "max_steps": 50,
+    "enable_subagents": True,
     "enable_workspace_memory": True,
     "memory_config": {
         "mode": "sliding_window",
@@ -61,11 +58,10 @@ class DeepAgent:
     """
     General-purpose agent with multi-agent orchestration.
 
-    Like OmniCoreAgent, but with:
-    1. Custom DeepAgentPromptBuilder (clean prompt structure)
-    2. Subagent spawning tools
-    3. Full agent_config benefits (context_management, tool_offload, etc.)
-    4. Workspace-backed memory tools enabled by default
+    Like OmniCoreAgent, but with harness-oriented defaults:
+    1. Dynamic subagent spawning enabled
+    2. Workspace-backed memory tools enabled
+    3. Context management and tool offloading enabled
 
     NOTE: Task paths for memory organization are chosen dynamically by the
     lead agent when it spawns subagents - not hardcoded in base prompt.
@@ -114,7 +110,6 @@ class DeepAgent:
         self._prompt_builder = DeepAgentPromptBuilder()
 
         self._agent: Optional[OmniCoreAgent] = None
-        self._subagent_factory: Optional[SubagentFactory] = None
         self._initialized = False
 
     def _build_agent_config(
@@ -145,9 +140,8 @@ class DeepAgent:
         Initialize the DeepAgent.
 
         Creates:
-        - SubagentFactory for spawning subagents (with full agent_config)
-        - Combined tools registry (user tools + subagent tools)
         - Lead OmniCoreAgent with DeepAgentPromptBuilder
+        - Core dynamic subagent tools through OmniCoreAgent config
         """
         if self._initialized:
             return
@@ -156,24 +150,10 @@ class DeepAgent:
 
         # Handle user_local_tools: optionally convert list to ToolRegistry
         if isinstance(self.user_local_tools, list):
-             registry = ToolRegistry()
-             for tool in self.user_local_tools:
-                 registry.register(tool)
-             self.user_local_tools = registry
-
-        self._subagent_factory = SubagentFactory(
-            base_model_config=self.model_config,
-            mcp_tools=self.mcp_tools,
-            local_tools=self.user_local_tools,
-            agent_config=self.agent_config,
-            prompt_builder=self._prompt_builder,
-            event_router=self.event_router,
-            memory_router=self.memory_router,
-            debug=self.debug,
-        )
-
-        tools = self.user_local_tools or ToolRegistry()
-        build_subagent_tools(self._subagent_factory, tools)
+            registry = ToolRegistry()
+            for tool in self.user_local_tools:
+                registry.register(tool)
+            self.user_local_tools = registry
 
         self._agent = OmniCoreAgent(
             name=self.name,
@@ -183,11 +163,13 @@ class DeepAgent:
             event_router=self.event_router,
             agent_config=self.agent_config,
             mcp_tools=self.mcp_tools,
-            local_tools=tools,
+            local_tools=self.user_local_tools,
             sub_agents=self.sub_agents,
             prompt_builder=self._prompt_builder,
             debug=self.debug,
         )
+
+        self._agent._prepare_dynamic_subagents()
 
         if self.mcp_tools:
             await self._agent.connect_mcp_servers()
@@ -219,9 +201,6 @@ class DeepAgent:
     async def cleanup(self):
         """Clean up all resources."""
         logger.info(f"DeepAgent '{self.name}': Cleaning up...")
-
-        if self._subagent_factory:
-            await self._subagent_factory.cleanup()
 
         if self._agent:
             await self._agent.cleanup()

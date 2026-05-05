@@ -11,9 +11,8 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from omnicoreagent.deep_agent import DeepAgent
 from omnicoreagent.deep_agent.prompts import (
     DeepAgentPromptBuilder,
-    DEEP_AGENT_ORCHESTRATION_PROMPT,
 )
-from omnicoreagent.deep_agent.subagent_factory import (
+from omnicoreagent.core.subagents import (
     SubagentFactory,
     build_subagent_tools,
 )
@@ -63,12 +62,11 @@ class TestDeepAgentPromptBuilder:
         assert "<system_instruction>" in result
         assert "</system_instruction>" in result
 
-    def test_build_includes_orchestration(self, prompt_builder):
-        """Orchestration should be in separate block."""
+    def test_build_keeps_orchestration_out_of_deep_agent_prompt(self, prompt_builder):
+        """Dynamic subagent orchestration is injected by OmniCoreAgent core."""
         result = prompt_builder.build(user_instruction="Base")
-        assert "<deep_agent_capabilities>" in result
-        assert "spawn_subagent" in result
-        assert "spawn_parallel_subagents" in result
+        assert "<dynamic_subagents_extension>" not in result
+        assert "spawn_subagents" not in result
 
     def test_build_no_task_id_in_base_prompt(self, prompt_builder):
         """Base prompt should NOT have task_id - it's dynamic when spawning."""
@@ -92,15 +90,6 @@ class TestDeepAgentPromptBuilder:
         assert "AWS specialist" in result
         assert "Research AWS pricing" in result
         assert "/memories/test/" in result
-
-    @pytest.mark.broken_upstream
-    def test_orchestration_prompt_structure(self):
-        """Orchestration prompt should have key sections."""
-        assert "<deep_agent_capabilities>" in DEEP_AGENT_ORCHESTRATION_PROMPT
-        assert "task_complexity_detection" in DEEP_AGENT_ORCHESTRATION_PROMPT
-        assert "scaling_rules" in DEEP_AGENT_ORCHESTRATION_PROMPT
-        assert "memory_first_workflow" in DEEP_AGENT_ORCHESTRATION_PROMPT
-
 
 # =============================================================================
 # SubagentFactory Tests
@@ -163,8 +152,7 @@ class TestSubagentFactory:
         build_subagent_tools(factory, registry)
 
         tool_names = [t.name for t in registry.list_tools()]
-        assert "spawn_subagent" in tool_names
-        assert "spawn_parallel_subagents" in tool_names
+        assert "spawn_subagents" in tool_names
 
     @pytest.mark.asyncio
     async def test_tool_wrapper_handles_list_input(self, factory):
@@ -172,7 +160,7 @@ class TestSubagentFactory:
         registry = ToolRegistry()
         build_subagent_tools(factory, registry)
 
-        spawn_tool = registry.get_tool("spawn_parallel_subagents")
+        spawn_tool = registry.get_tool("spawn_subagents")
 
         # Mock factory.run_parallel_subagents to avoid actual execution
         factory.run_parallel_subagents = AsyncMock(return_value={"status": "success"})
@@ -183,6 +171,37 @@ class TestSubagentFactory:
 
         # Verify it called the factory method with the list
         factory.run_parallel_subagents.assert_called_once_with(input_list)
+
+    def test_created_subagent_does_not_inherit_spawn_tool(self, model_config):
+        """Spawned workers should inherit user tools without recursive delegation."""
+        registry = ToolRegistry()
+
+        @registry.register_tool("user_tool")
+        def user_tool(value: str) -> str:
+            return value
+
+        factory = SubagentFactory(
+            base_model_config=model_config,
+            local_tools=registry,
+            agent_config={
+                "enable_subagents": True,
+                "enable_workspace_memory": False,
+            },
+        )
+        build_subagent_tools(factory, registry)
+
+        agent = factory.create_subagent(
+            name="worker",
+            role="Focused worker",
+            task="Do focused work",
+            output_path="/memories/task/worker.md",
+        )
+
+        tool_names = [tool.name for tool in agent.local_tools.list_tools()]
+        assert "user_tool" in tool_names
+        assert "spawn_subagents" not in tool_names
+        assert agent.agent_config["enable_subagents"] is False
+        assert agent.agent_config["enable_workspace_memory"] is True
 
 
 # =============================================================================
@@ -198,11 +217,10 @@ class TestDeepAgentInitialization:
 
         assert deep_agent._initialized is True
         assert deep_agent._agent is not None
-        assert deep_agent._subagent_factory is not None
+        assert deep_agent._agent._subagent_factory is not None
 
         await deep_agent.cleanup()
 
-    @pytest.mark.broken_upstream
     @pytest.mark.asyncio
     async def test_deep_agent_enables_workspace_memory(self):
         """DeepAgent should enable workspace memory tools."""
@@ -213,6 +231,22 @@ class TestDeepAgentInitialization:
             agent_config={},
         )
         assert agent.agent_config["enable_workspace_memory"] is True
+
+    def test_omnicoreagent_enable_subagents_registers_core_spawn_tool(self, model_config):
+        """OmniCoreAgent owns dynamic subagent spawning when enabled."""
+        agent = OmniCoreAgent(
+            name="CoreHarness",
+            system_instruction="Test",
+            model_config=model_config,
+            agent_config={"enable_subagents": True},
+        )
+
+        assert agent.agent_config["enable_workspace_memory"] is True
+
+        agent._prepare_dynamic_subagents()
+
+        tool_names = [tool.name for tool in agent.local_tools.list_tools()]
+        assert tool_names.count("spawn_subagents") == 1
 
     @pytest.mark.asyncio
     async def test_prompt_builder_assigned(self, deep_agent):
@@ -225,8 +259,7 @@ class TestDeepAgentInitialization:
         await deep_agent.initialize()
 
         tool_names = [t.name for t in deep_agent._agent.local_tools.list_tools()]
-        assert "spawn_subagent" in tool_names
-        assert "spawn_parallel_subagents" in tool_names
+        assert "spawn_subagents" in tool_names
 
         await deep_agent.cleanup()
 
@@ -263,7 +296,6 @@ class TestDeepAgentRun:
                 deep_agent._initialized = True
                 deep_agent._agent = MagicMock()
                 deep_agent._agent.run = AsyncMock(return_value={"response": "OK"})
-                deep_agent._subagent_factory = MagicMock()
 
             mock_init.side_effect = side_effect
             await deep_agent.run("Test")
@@ -315,7 +347,7 @@ class TestEdgeCases:
 
         tool_names = [t.name for t in agent._agent.local_tools.list_tools()]
         assert "my_custom_tool" in tool_names
-        assert "spawn_subagent" in tool_names
+        assert "spawn_subagents" in tool_names
 
         await agent.cleanup()
 

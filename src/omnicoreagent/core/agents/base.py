@@ -11,6 +11,7 @@ from omnicoreagent.core.system_prompts import (
     tools_retriever_additional_prompt,
     memory_tool_additional_prompt,
     sub_agents_additional_prompt,
+    dynamic_subagents_additional_prompt,
     agent_skills_additional_prompt,
     artifact_tool_additional_prompt,
     FAST_CONVERSATION_SUMMARY_PROMPT,
@@ -105,6 +106,7 @@ class BaseReactAgent:
         request_limit: int = 0,
         total_tokens_limit: int = 0,
         enable_advanced_tool_use: bool = False,
+        enable_subagents: bool = False,
         enable_workspace_memory: bool = False,
         enable_agent_skills: bool = False,
         context_management_config: dict = None,
@@ -123,6 +125,7 @@ class BaseReactAgent:
         self.total_tokens_limit = total_tokens_limit
         self._limits_enabled = request_limit > 0 or total_tokens_limit > 0
         self.enable_advanced_tool_use = enable_advanced_tool_use
+        self.enable_subagents = enable_subagents
 
         self.enable_workspace_memory = enable_workspace_memory
         self.enable_agent_skills = enable_agent_skills
@@ -1022,6 +1025,7 @@ class BaseReactAgent:
         registry = local_tools
         needs_internal_registry = (
             self.enable_advanced_tool_use
+            or self.enable_subagents
             or self.enable_workspace_memory
             or self.tool_offloader.config.enabled
             or (self.enable_agent_skills and self.skill_manager)
@@ -1243,6 +1247,9 @@ class BaseReactAgent:
 
         if self.enable_agent_skills and self.skill_manager:
             updated_system_prompt += f"\n{agent_skills_additional_prompt}"
+
+        if self.enable_subagents:
+            updated_system_prompt += f"\n{dynamic_subagents_additional_prompt}"
 
         if sub_agents:
             updated_system_prompt += f"\n{sub_agents_additional_prompt}"

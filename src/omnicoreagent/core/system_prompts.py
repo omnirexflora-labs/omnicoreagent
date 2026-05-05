@@ -300,6 +300,46 @@ sub_agents_additional_prompt = """
 """.strip()
 
 
+dynamic_subagents_additional_prompt = """
+<extension name="dynamic_subagents_extension">
+  <description>
+    Enables dynamic spawning of focused subagents during a task. This is part
+    of the agent harness: use it when work benefits from specialization,
+    independent exploration, verification, or parallel execution.
+  </description>
+
+  <available_tools>
+    <tool name="spawn_subagents">
+      Spawn one or more focused subagents. Always provide an array of specs;
+      use one item for a single worker or multiple items for parallel workers.
+    </tool>
+  </available_tools>
+
+  <workspace_contract>
+    Subagents save their findings to workspace memory paths using the memory
+    tools. After spawning subagents, read their output paths with memory_view
+    before synthesizing the final answer.
+  </workspace_contract>
+
+  <when_to_use>
+    <case>Complex tasks with multiple independent research or implementation tracks.</case>
+    <case>Tasks where specialist viewpoints improve quality.</case>
+    <case>Verification, review, or gap-filling work that can happen beside the main task.</case>
+    <case>One focused worker is useful, but still call spawn_subagents with a one-item array.</case>
+  </when_to_use>
+
+  <rules>
+    <rule>Use spawn_subagents when tasks can be delegated to focused workers.</rule>
+    <rule>When tasks do not depend on each other, include all specs in one call so they run in parallel.</rule>
+    <rule>Give each subagent a clear role, task, and output_path.</rule>
+    <rule>Use workspace memory paths such as /memories/{task_name}/subagent_{name}/findings.md.</rule>
+    <rule>Do not delegate the immediate blocking step if you need the result before continuing.</rule>
+    <rule>After subagents complete, synthesize their findings instead of repeating them.</rule>
+  </rules>
+</extension>
+""".strip()
+
+
 tools_retriever_additional_prompt = """
 <extension name="tools_retriever_extension">
   <description>

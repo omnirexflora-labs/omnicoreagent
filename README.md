@@ -50,6 +50,7 @@ agent = OmniCoreAgent(
     agent_config={
         "context_management": {"enabled": True},  # Auto-manage long conversations
         "guardrail_config": {"strict_mode": True},  # Block prompt injections
+        "enable_subagents": True,  # Optional dynamic worker spawning
     }
 )
 
@@ -140,11 +141,11 @@ print(result["response"])
 | 3 | **Context Engineering** | Dual-layer system: agent loop context management + tool response offloading | [Context →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/context-engineering) |
 | 4 | **Event System** | Real-time event streaming with runtime switching | [Events →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/events) |
 | 5 | **MCP Tools** | Connect external MCP tool servers (stdio, streamable_http, SSE) with OAuth | [MCP →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/mcp) |
-| 6 | **DeepAgent** | Multi-agent orchestration with automatic task decomposition | [DeepAgent →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/deep-agent) |
+| 6 | **Dynamic Subagents** | Spawn one or many focused workers from OmniCoreAgent with workspace memory | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
 | 7 | **Local Tools** | Register any Python function as an AI tool via ToolRegistry | [Local Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/local-tools) |
 | 8 | **Agent Skills** | Polyglot packaged capabilities (Python, Bash, Node.js) | [Skills →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/skills) |
 | 9 | **Workspace Memory** | Persistent file storage with S3/R2/Local backends | [Workspace →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workspace-memory) |
-| 10 | **Sub-Agents** | Delegate tasks to specialized agents | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
+| 10 | **DeepAgent Defaults** | Compatibility preset for multi-agent tasks on top of OmniCoreAgent | [DeepAgent →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/deep-agent) |
 | 11 | **Background Agents** | Schedule autonomous tasks on intervals | [Background →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/background-agents) |
 | 12 | **Workflows** | Sequential, Parallel, and Router agent orchestration | [Workflows →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workflows) |
 | 13 | **BM25 Tool Retrieval** | Auto-discover relevant tools from 1000+ using BM25 search | [Advanced Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/advanced-tools) |

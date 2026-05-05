@@ -56,6 +56,7 @@ class AgentConfig:
     request_limit: int = 0
     total_tokens_limit: int = 0
     enable_advanced_tool_use: bool = False
+    enable_subagents: bool = False
     enable_agent_skills: bool = False
     memory_config: dict[str, Any] = field(
         default_factory=lambda: {
@@ -156,4 +157,6 @@ def normalize_agent_config(
         data["total_tokens_limit"] = 0
     if data.get("guardrail_config") is None:
         data["guardrail_config"] = {}
+    if data.get("enable_subagents"):
+        data["enable_workspace_memory"] = True
     return data
