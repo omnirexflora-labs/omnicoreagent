@@ -378,6 +378,74 @@ class BaseReactAgent:
             error_message=error_message,
         )
 
+    def _build_tool_validation_error_results(
+        self,
+        tool_errors: list[ToolError],
+        fallback_message: str,
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "tool_name": getattr(single_tool, "tool_name", "unknown"),
+                "args": getattr(single_tool, "tool_args", {}),
+                "status": "error",
+                "data": None,
+                "message": getattr(single_tool, "observation", fallback_message),
+            }
+            for single_tool in tool_errors
+        ]
+
+    async def _handle_tool_validation_error(
+        self,
+        tool_error: ToolError,
+        session_state: SessionState,
+        session_id: str | None,
+        event_router: Callable[[str, Event], Any] | None,
+    ) -> tuple[str, list[dict[str, Any]], str, list[dict[str, Any]]]:
+        obs_text = tool_error.observation
+        tool_errors = [tool_error]
+
+        for single_tool in tool_errors:
+            tool_name = getattr(single_tool, "tool_name", "unknown")
+            tool_args = getattr(single_tool, "tool_args", {})
+            error_message = getattr(single_tool, "observation", obs_text)
+
+            event = Event(
+                type=EventType.TOOL_CALL_ERROR,
+                payload=ToolCallErrorPayload(
+                    tool_name=tool_name,
+                    error_message=error_message,
+                ),
+                agent_name=self.agent_name,
+            )
+
+            if event_router:
+                await event_router(session_id=session_id, event=event)
+            session_state.loop_detector.record_tool_call(
+                str(tool_name),
+                str(tool_args),
+                str(error_message),
+            )
+
+        tool_batch_name = ", ".join(
+            [getattr(t, "tool_name", "unknown") for t in tool_errors]
+        )
+        tool_batch_args = [getattr(t, "tool_args", {}) for t in tool_errors]
+
+        logger.error(
+            f"Tool call validation failed for: {tool_batch_name} "
+            f"args={tool_batch_args} -> {obs_text}"
+        )
+
+        return (
+            tool_batch_name,
+            tool_batch_args,
+            obs_text,
+            self._build_tool_validation_error_results(
+                tool_errors=tool_errors,
+                fallback_message=obs_text,
+            ),
+        )
+
     async def extract_action_or_answer(
         self,
         response: str,
@@ -754,59 +822,17 @@ class BaseReactAgent:
         obs_text = None
 
         if isinstance(tool_call_result, ToolError):
-            tool_errors = (
-                tool_call_result.errors
-                if hasattr(tool_call_result, "errors")
-                else [tool_call_result]
+            (
+                tool_batch_name,
+                tool_batch_args,
+                obs_text,
+                tools_results,
+            ) = await self._handle_tool_validation_error(
+                tool_error=tool_call_result,
+                session_state=session_state,
+                session_id=session_id,
+                event_router=event_router,
             )
-            obs_text = (
-                tool_call_result.observation
-                if hasattr(tool_call_result, "observation")
-                else str(tool_call_result)
-            )
-
-            for single_tool in tool_errors:
-                tool_name = getattr(single_tool, "tool_name", "unknown")
-                tool_args = getattr(single_tool, "tool_args", {})
-                error_message = getattr(single_tool, "observation", obs_text)
-
-                event = Event(
-                    type=EventType.TOOL_CALL_ERROR,
-                    payload=ToolCallErrorPayload(
-                        tool_name=tool_name,
-                        error_message=error_message,
-                    ),
-                    agent_name=self.agent_name,
-                )
-
-                if event_router:
-                    await event_router(session_id=session_id, event=event)
-                session_state.loop_detector.record_tool_call(
-                    str(tool_name),
-                    str(tool_args),
-                    str(error_message),
-                )
-
-            tool_batch_name = ", ".join(
-                [getattr(t, "tool_name", "unknown") for t in tool_errors]
-            )
-            tool_batch_args = [getattr(t, "tool_args", {}) for t in tool_errors]
-
-            logger.error(
-                f"Tool call validation failed for: {tool_batch_name} "
-                f"args={tool_batch_args} -> {obs_text}"
-            )
-
-            for single_tool in tool_errors:
-                tools_results.append(
-                    {
-                        "tool_name": getattr(single_tool, "tool_name", "unknown"),
-                        "args": getattr(single_tool, "tool_args", {}),
-                        "status": "error",
-                        "data": None,
-                        "message": getattr(single_tool, "observation", obs_text),
-                    }
-                )
         else:
             tool_batch_name = ", ".join([t.tool_name for t in tool_call_result])
             tool_batch_args = [t.tool_args for t in tool_call_result]

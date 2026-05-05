@@ -5,7 +5,7 @@ from omnicoreagent.core.agents.base import BaseReactAgent, TOOL_CALL_TIMEOUT_MES
 from omnicoreagent.core.events.base import EventType
 from omnicoreagent.core.tool_response_offloader import ToolResponseOffloader
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.core.types import ParsedResponse, ToolCallResult
+from omnicoreagent.core.types import ParsedResponse, ToolCallResult, ToolError
 
 
 @pytest.fixture
@@ -418,3 +418,42 @@ async def test_handle_tool_execution_error_records_history_and_event(agent):
     assert events[0]["session_id"] == "chat795"
     assert events[0]["event"].type == EventType.TOOL_CALL_ERROR
     assert events[0]["event"].payload.tool_name == "alpha, beta"
+
+
+@pytest.mark.asyncio
+async def test_handle_tool_validation_error_records_loop_and_event(agent):
+    events = []
+    session_state = agent._get_session_state(session_id="chat796", debug=False)
+
+    async def event_router(session_id, event):
+        events.append({"session_id": session_id, "event": event})
+
+    tool_batch_name, tool_batch_args, obs_text, results = (
+        await agent._handle_tool_validation_error(
+            tool_error=ToolError(
+                observation="The tool named 'missing_tool' does not exist.",
+                tool_name="missing_tool",
+                tool_args={"query": "runtime"},
+            ),
+            session_state=session_state,
+            session_id="chat796",
+            event_router=event_router,
+        )
+    )
+
+    assert tool_batch_name == "missing_tool"
+    assert tool_batch_args == [{"query": "runtime"}]
+    assert obs_text == "The tool named 'missing_tool' does not exist."
+    assert results == [
+        {
+            "tool_name": "missing_tool",
+            "args": {"query": "runtime"},
+            "status": "error",
+            "data": None,
+            "message": "The tool named 'missing_tool' does not exist.",
+        }
+    ]
+    assert len(events) == 1
+    assert events[0]["session_id"] == "chat796"
+    assert events[0]["event"].type == EventType.TOOL_CALL_ERROR
+    assert events[0]["event"].payload.tool_name == "missing_tool"
