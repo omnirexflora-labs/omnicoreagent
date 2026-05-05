@@ -628,14 +628,14 @@ class BaseReactAgent:
                     str(error_message),
                 )
 
-            combined_tool_name = "_and_".join(
+            tool_batch_name = ", ".join(
                 [getattr(t, "tool_name", "unknown") for t in tool_errors]
             )
-            combined_tool_args = [getattr(t, "tool_args", {}) for t in tool_errors]
+            tool_batch_args = [getattr(t, "tool_args", {}) for t in tool_errors]
 
             logger.error(
-                f"Tool call validation failed for: {combined_tool_name} "
-                f"args={combined_tool_args} -> {obs_text}"
+                f"Tool call validation failed for: {tool_batch_name} "
+                f"args={tool_batch_args} -> {obs_text}"
             )
 
             for single_tool in tool_errors:
@@ -649,31 +649,33 @@ class BaseReactAgent:
                     }
                 )
         else:
-            tool_call_id = str(uuid.uuid4())
-            combined_tool_name = "_and_".join([t.tool_name for t in tool_call_result])
-            combined_tool_args = [t.tool_args for t in tool_call_result]
+            tool_batch_name = ", ".join([t.tool_name for t in tool_call_result])
+            tool_batch_args = [t.tool_args for t in tool_call_result]
+            for single_tool in tool_call_result:
+                single_tool.tool_call_id = str(uuid.uuid4())
 
             tool_calls_metadata = ToolCallMetadata(
                 agent_name=self.agent_name,
                 has_tool_calls=True,
-                tool_call_id=tool_call_id,
+                tool_call_id=tool_call_result[0].tool_call_id,
                 tool_calls=[
                     ToolCall(
-                        id=tool_call_id,
+                        id=single_tool.tool_call_id,
                         function=ToolFunction(
-                            name=combined_tool_name[:60],
-                            arguments=json.dumps(combined_tool_args),
+                            name=single_tool.tool_name,
+                            arguments=json.dumps(single_tool.tool_args),
                         ),
                     )
+                    for single_tool in tool_call_result
                 ],
             )
 
             event = Event(
                 type=EventType.TOOL_CALL_STARTED,
                 payload=ToolCallStartedPayload(
-                    tool_name=combined_tool_name,
-                    tool_args=json.dumps(combined_tool_args),
-                    tool_call_id=tool_call_id,
+                    tool_name=tool_batch_name,
+                    tool_args=json.dumps(tool_batch_args),
+                    tool_call_id=tool_call_result[0].tool_call_id,
                 ),
                 agent_name=self.agent_name,
             )
@@ -691,17 +693,33 @@ class BaseReactAgent:
             tools_results = []
             try:
                 async with asyncio.timeout(self.tool_call_timeout):
-                    first_executor = tool_call_result[0].tool_executor
-                    tool_output = await first_executor.execute(
-                        agent_name=self.agent_name,
-                        tool_args=combined_tool_args,
-                        tool_name=combined_tool_name,
-                        tool_call_id=tool_call_id,
-                        add_message_to_history=add_message_to_history,
-                        session_id=session_id,
+                    tool_outputs = await asyncio.gather(
+                        *[
+                            single_tool.tool_executor.execute(
+                                agent_name=self.agent_name,
+                                tool_args=single_tool.tool_args,
+                                tool_name=single_tool.tool_name,
+                                tool_call_id=single_tool.tool_call_id,
+                                add_message_to_history=add_message_to_history,
+                                session_id=session_id,
+                            )
+                            for single_tool in tool_call_result
+                        ]
                     )
 
-                observation = await self.parse_tool_observation(tool_output)
+                observation = await self.parse_tool_observation(
+                    {
+                        "status": (
+                            "error"
+                            if any(
+                                result.get("status") == "error"
+                                for result in tool_outputs
+                            )
+                            else "success"
+                        ),
+                        "tools_results": tool_outputs,
+                    }
+                )
 
                 tools_results = observation.get("tools_results", [])
                 obs_lines = []
@@ -785,10 +803,10 @@ class BaseReactAgent:
                 event = Event(
                     type=EventType.TOOL_CALL_RESULT,
                     payload=ToolCallResultPayload(
-                        tool_name=combined_tool_name,
-                        tool_args=json.dumps(combined_tool_args),
+                        tool_name=tool_batch_name,
+                        tool_args=json.dumps(tool_batch_args),
                         result=obs_text,
-                        tool_call_id=tool_call_id,
+                        tool_call_id=tool_call_result[0].tool_call_id,
                     ),
                     agent_name=self.agent_name,
                 )
@@ -818,20 +836,23 @@ class BaseReactAgent:
                         }
                     )
 
-                await add_message_to_history(
-                    role="tool",
-                    content=obs_text,
-                    metadata={
-                        "tool_call_id": tool_call_id,
-                        "agent_name": self.agent_name,
-                    },
-                    session_id=session_id,
-                )
+                for single_tool in tool_call_result:
+                    await add_message_to_history(
+                        role="tool",
+                        content=obs_text,
+                        metadata={
+                            "tool_call_id": single_tool.tool_call_id,
+                            "tool": single_tool.tool_name,
+                            "args": single_tool.tool_args,
+                            "agent_name": self.agent_name,
+                        },
+                        session_id=session_id,
+                    )
 
                 event = Event(
                     type=EventType.TOOL_CALL_ERROR,
                     payload=ToolCallErrorPayload(
-                        tool_name=combined_tool_name,
+                        tool_name=tool_batch_name,
                         error_message=obs_text,
                     ),
                     agent_name=self.agent_name,
@@ -860,19 +881,22 @@ class BaseReactAgent:
                         }
                     )
 
-                await add_message_to_history(
-                    role="tool",
-                    content=obs_text,
-                    metadata={
-                        "tool_call_id": tool_call_id,
-                        "agent_name": self.agent_name,
-                    },
-                    session_id=session_id,
-                )
+                for single_tool in tool_call_result:
+                    await add_message_to_history(
+                        role="tool",
+                        content=obs_text,
+                        metadata={
+                            "tool_call_id": single_tool.tool_call_id,
+                            "tool": single_tool.tool_name,
+                            "args": single_tool.tool_args,
+                            "agent_name": self.agent_name,
+                        },
+                        session_id=session_id,
+                    )
                 event = Event(
                     type=EventType.TOOL_CALL_ERROR,
                     payload=ToolCallErrorPayload(
-                        tool_name=combined_tool_name,
+                        tool_name=tool_batch_name,
                         error_message=obs_text,
                     ),
                     agent_name=self.agent_name,
@@ -883,8 +907,8 @@ class BaseReactAgent:
         if debug:
             show_tool_response(
                 agent_name=self.agent_name,
-                tool_name=combined_tool_name,
-                tool_args=combined_tool_args,
+                tool_name=tool_batch_name,
+                tool_args=tool_batch_args,
                 observation=obs_text,
             )
 

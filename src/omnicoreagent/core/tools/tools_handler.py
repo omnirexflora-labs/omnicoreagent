@@ -3,7 +3,6 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
-import asyncio
 
 from omnicoreagent.core.guardrails import PromptInjectionGuard
 
@@ -212,121 +211,80 @@ class ToolExecutor:
         self,
         agent_name: str,
         tool_name: str,
-        tool_args: list[dict[str, Any]],
+        tool_args: dict[str, Any],
         tool_call_id: str,
         add_message_to_history: Callable[[str, str, dict | None], Any],
         session_id: str = None,
         **kwargs,
-    ) -> str:
+    ) -> dict[str, Any]:
         """
-        Executes one or more tools concurrently and always returns a single aggregated result object.
-        Includes both successful and failed tool results under `tools_results`.
-        Properly handles tool-level and global exceptions.
-        """
-        aggregated_results = []
+        Execute one validated tool call and normalize the result.
 
+        Multi-tool concurrency is owned by the agent loop. Keeping this executor
+        single-call avoids synthetic combined tool names and lets each call use
+        its own handler, server, and tool_call_id.
+        """
         try:
-            split_tool_names = tool_name.split("_and_")
-            tasks = []
-
-            for name, args in zip(split_tool_names, tool_args):
-                tasks.append(self.tool_handler.call(name, args))
-
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            for name, args, result in zip(split_tool_names, tool_args, results):
-                if isinstance(result, Exception):
-                    aggregated_results.append(
-                        {
-                            "tool_name": name,
-                            "args": args,
-                            "status": "error",
-                            "data": None,
-                            "message": str(result),
-                        }
-                    )
-                    continue
-
-                if isinstance(result, dict):
-                    status = result.get("status", "success")
-                    data = result.get("data")
-                    message = result.get("message")
-
-                    if status == "error" and not message:
-                        message = "Tool returned error status without message."
-
-                    if status == "success" and data is None:
-                        message = (
-                            message
-                            or "(Tool executed successfully but returned no data; This likely means the action completed or is async.)"
-                        )
-
-                elif hasattr(result, "content"):
-                    content = result.content
-                    data = content[0].text if isinstance(content, list) else content
-                    status = "success"
-                    message = None
-
-                else:
-                    data = result
-                    status = "success" if result else "error"
-                    message = (
-                        None if result else f"Tool '{name}' returned empty output."
-                    )
-
-                aggregated_results.append(
-                    {
-                        "tool_name": name,
-                        "args": args,
-                        "status": status,
-                        "data": data,
-                        "message": message,
-                    }
-                )
-
-                await add_message_to_history(
-                    role="tool",
-                    content=data if data is not None else message,
-                    metadata={
-                        "tool_call_id": tool_call_id,
-                        "tool": name,
-                        "args": args,
-                        "agent_name": agent_name,
-                    },
-                    session_id=session_id,
-                )
-
-            overall_status = (
-                "error"
-                if any(r["status"] == "error" for r in aggregated_results)
-                else "success"
-            )
-
-            return json.dumps(
-                {"status": overall_status, "tools_results": aggregated_results}
-            )
+            result = await self.tool_handler.call(tool_name, tool_args)
+            normalized = self._normalize_result(tool_name, tool_args, result)
 
         except Exception as e:
-            aggregated_results.append(
-                {
-                    "tool_name": tool_name,
-                    "args": tool_args,
-                    "status": "error",
-                    "data": None,
-                    "message": str(e),
-                }
-            )
+            normalized = {
+                "tool_name": tool_name,
+                "args": tool_args,
+                "status": "error",
+                "data": None,
+                "message": str(e),
+            }
 
-            await add_message_to_history(
-                role="tool",
-                content=str(e),
-                metadata={
-                    "tool_call_id": tool_call_id,
-                    "tool": tool_name,
-                    "args": tool_args,
-                    "agent_name": agent_name,
-                },
-                session_id=session_id,
-            )
+        await add_message_to_history(
+            role="tool",
+            content=normalized["data"]
+            if normalized["data"] is not None
+            else normalized["message"],
+            metadata={
+                "tool_call_id": tool_call_id,
+                "tool": tool_name,
+                "args": tool_args,
+                "agent_name": agent_name,
+            },
+            session_id=session_id,
+        )
 
-            return json.dumps({"status": "error", "tools_results": aggregated_results})
+        return normalized
+
+    def _normalize_result(
+        self, tool_name: str, tool_args: dict[str, Any], result: Any
+    ) -> dict[str, Any]:
+        if isinstance(result, dict):
+            status = result.get("status", "success")
+            data = result.get("data")
+            message = result.get("message")
+
+            if status == "error" and not message:
+                message = "Tool returned error status without message."
+
+            if status == "success" and data is None:
+                message = (
+                    message
+                    or "(Tool executed successfully but returned no data; This likely means the action completed or is async.)"
+                )
+
+        elif hasattr(result, "content"):
+            content = result.content
+            data = content[0].text if isinstance(content, list) else content
+            status = "success"
+            message = None
+
+        else:
+            data = result
+            status = "success" if result else "error"
+            message = None if result else f"Tool '{tool_name}' returned empty output."
+
+        return {
+            "tool_name": tool_name,
+            "args": tool_args,
+            "status": status,
+            "data": data,
+            "message": message,
+        }
