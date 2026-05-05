@@ -23,11 +23,6 @@ from omnicoreagent.core.utils import logger
 from omnicoreagent.core.workspace import get_artifacts_dir
 
 
-# Default artifacts directory - resolved from workspace module
-# Override with OMNICOREAGENT_ARTIFACTS_DIR or OMNICOREAGENT_WORKSPACE_DIR env vars
-DEFAULT_ARTIFACTS_DIR = get_artifacts_dir()
-
-
 @dataclass
 class OffloadConfig:
     """Configuration for tool response offloading."""
@@ -44,7 +39,7 @@ class OffloadConfig:
     def __post_init__(self):
         """Set defaults that depend on env vars."""
         if self.storage_dir is None:
-            self.storage_dir = DEFAULT_ARTIFACTS_DIR
+            self.storage_dir = get_artifacts_dir()
 
     @classmethod
     def from_dict(cls, config: dict) -> "OffloadConfig":
@@ -58,7 +53,7 @@ class OffloadConfig:
             threshold_bytes=config.get("threshold_bytes", 2000),
             max_preview_tokens=config.get("max_preview_tokens", 150),
             max_preview_lines=config.get("max_preview_lines", 10),
-            storage_dir=config.get("storage_dir", DEFAULT_ARTIFACTS_DIR),
+            storage_dir=config.get("storage_dir"),
             retention_days=config.get("retention_days", 7),
             include_metadata=config.get("include_metadata", True),
         )

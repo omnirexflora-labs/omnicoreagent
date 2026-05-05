@@ -9,19 +9,16 @@ from omnicoreagent.core.tools.memory_tool.base import AbstractMemoryBackend
 from omnicoreagent.core.tools.memory_tool.local_storage import LocalMemoryBackend
 from decouple import config
 from omnicoreagent.core.utils import logger
-from omnicoreagent.core.workspace import get_memories_dir
 from threading import Lock
+from omnicoreagent.core.workspace import get_memories_dir
 
-# Resolved from workspace module
-# Override with OMNICOREAGENT_MEMORY_DIR or OMNICOREAGENT_WORKSPACE_DIR env vars
-LOCAL_MEMORY_BASE_DIR = get_memories_dir()
-
-# Cache for backend instances to avoid re-initialization
 _backend_cache: dict = {}
 _cache_lock = Lock()
 
 
-def create_memory_backend(backend_type: str, use_cache: bool = True) -> AbstractMemoryBackend:
+def create_memory_backend(
+    backend_type: str, use_cache: bool = True
+) -> AbstractMemoryBackend:
     """
     Create a memory backend from a string type.
     
@@ -47,13 +44,14 @@ def create_memory_backend(backend_type: str, use_cache: bool = True) -> Abstract
             - R2_SECRET_ACCESS_KEY (required)
     """
     backend_type = backend_type.lower().strip()
+    cache_key = _backend_cache_key(backend_type)
     
     # Check cache first
     if use_cache:
         with _cache_lock:
-            if backend_type in _backend_cache:
+            if cache_key in _backend_cache:
                 logger.debug(f"Reusing cached {backend_type} memory backend")
-                return _backend_cache[backend_type]
+                return _backend_cache[cache_key]
     
     # Create new backend
     backend = _create_backend_instance(backend_type)
@@ -61,17 +59,37 @@ def create_memory_backend(backend_type: str, use_cache: bool = True) -> Abstract
     # Cache it
     if use_cache:
         with _cache_lock:
-            _backend_cache[backend_type] = backend
+            _backend_cache[cache_key] = backend
     
     return backend
+
+
+def _backend_cache_key(backend_type: str) -> tuple:
+    if backend_type == "local":
+        return (backend_type, get_memories_dir())
+    if backend_type == "s3":
+        return (
+            backend_type,
+            config("AWS_S3_BUCKET", default=None),
+            config("AWS_REGION", default=None),
+            config("AWS_ENDPOINT_URL", default=None),
+        )
+    if backend_type == "r2":
+        return (
+            backend_type,
+            config("R2_BUCKET_NAME", default=None),
+            config("R2_ACCOUNT_ID", default=None),
+        )
+    return (backend_type,)
 
 
 def _create_backend_instance(backend_type: str) -> AbstractMemoryBackend:
     """Create a new backend instance (internal, no caching)."""
     
     if backend_type == "local":
-        logger.info(f"Creating local memory backend at: {LOCAL_MEMORY_BASE_DIR}")
-        return LocalMemoryBackend(base_dir=LOCAL_MEMORY_BASE_DIR)
+        base_dir = get_memories_dir()
+        logger.info(f"Creating local memory backend at: {base_dir}")
+        return LocalMemoryBackend(base_dir=base_dir)
     
     elif backend_type == "s3":
         bucket_name = config("AWS_S3_BUCKET", default=None)
