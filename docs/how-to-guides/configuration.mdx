@@ -47,8 +47,12 @@ agent_config = {
     "max_steps": 15,                 # Max reasoning loops per run()
     "request_limit": 1000,           # Max LLM requests per session
     "total_tokens_limit": 100000,    # Max total tokens per session
+    "enable_subagents": True,        # Dynamic focused workers
+    "enable_workspace_memory": True, # File memory for notes/logs/scratchpads
     "enable_agent_skills": True,     # Enable local skill discovery
-    "enable_advanced_tool_use": True # Enable BM25 tool retrieval
+    "enable_advanced_tool_use": True,# Enable BM25 tool retrieval
+    "context_management": {"enabled": True},
+    "tool_offload": {"enabled": True}
 }
 
 agent = OmniCoreAgent(
@@ -56,6 +60,12 @@ agent = OmniCoreAgent(
     agent_config=agent_config
 )
 ```
+
+When `enable_subagents` is true, OmniCoreAgent automatically enables workspace
+memory because spawned workers write output, todos, logs, and scratchpads into
+the active workspace. For full harness-style workloads, pair dynamic subagents
+with context management and tool offloading so long-running tasks can stay fast
+and durable.
 
 ---
 

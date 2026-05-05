@@ -19,8 +19,6 @@ from .workflows.parallel_agent import ParallelAgent
 from .workflows.sequential_agent import SequentialAgent
 from .workflows.router_agent import RouterAgent
 
-from .deep_agent import DeepAgent
-
 __all__ = [
     # Core
     "ReactAgent",
@@ -41,7 +39,6 @@ __all__ = [
     "ParallelAgent",
     "SequentialAgent",
     "RouterAgent",
-    "DeepAgent",
     # MCP
     "MCPClient",
     # OmniServe

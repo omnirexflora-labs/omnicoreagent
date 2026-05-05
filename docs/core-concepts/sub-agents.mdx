@@ -8,7 +8,9 @@ icon: 'users'
 
 OmniCoreAgent supports subagents as part of the core harness. A lead agent can
 spawn focused workers dynamically with `spawn_subagents`, or you can attach
-explicit subagents when you want a fixed team.
+explicit subagents when you want a fixed team. Workers can execute any assigned
+task their tools support: research, coding, review, data work, writing,
+verification, or operational actions.
 
 ## Why Use Sub-Agents?
 
@@ -16,7 +18,7 @@ explicit subagents when you want a fixed team.
 - **Improved Accuracy**: Specialized agents (e.g., a "Math Expert" or "Code Auditor") are less likely to hallucinate in their specific domain.
 - **Tool Management**: Avoid cluttering a single agent's prompt with hundreds of tools. Instead, give each sub-agent only the tools it needs.
 - **Parallel Work**: Use one `spawn_subagents` call with multiple specs when independent tasks can run at the same time.
-- **Workspace Continuity**: Dynamic subagents write findings to workspace memory, so outputs survive context compression and tool offloading.
+- **Workspace Continuity**: Dynamic subagents write output to workspace memory, so outputs survive context compression and tool offloading.
 
 ---
 
@@ -28,20 +30,22 @@ Enable dynamic subagents directly on OmniCoreAgent:
 from omnicoreagent import OmniCoreAgent
 
 agent = OmniCoreAgent(
-    name="research_manager",
-    system_instruction="You coordinate deep research and synthesize findings.",
+    name="task_manager",
+    system_instruction="You coordinate complex work and synthesize outputs.",
     model_config={"provider": "openai", "model": "gpt-4o"},
     agent_config={
         "enable_subagents": True,
+        "enable_workspace_memory": True,
         "context_management": {"enabled": True},
         "tool_offload": {"enabled": True},
     },
 )
 ```
 
-When `enable_subagents` is true, OmniCoreAgent also enables workspace memory.
-Dynamic workers are expected to save findings with `memory_create_update`, and
-the lead agent reads those paths with `memory_view` before synthesizing.
+When `enable_subagents` is true, OmniCoreAgent also forces workspace memory on
+even if it is omitted. Keep it explicit in app configs because dynamic workers
+are expected to save output with `memory_create_update`, and the lead agent
+reads those paths with `memory_view` before synthesizing.
 
 ### `spawn_subagents`
 
@@ -51,16 +55,16 @@ items for parallel workers.
 ```json
 [
   {
-    "name": "market",
-    "role": "Market analyst",
-    "task": "Research market size, growth, competitors, and risks.",
-    "output_path": "/memories/market_entry/subagent_market/findings.md"
+    "name": "api",
+    "role": "API reviewer",
+    "task": "Review API error handling and write concrete risks.",
+    "output_path": "/memories/product_audit/subagent_api/output.md"
   },
   {
-    "name": "technical",
-    "role": "Technical analyst",
-    "task": "Assess architecture, integration cost, and implementation risks.",
-    "output_path": "/memories/market_entry/subagent_technical/findings.md"
+    "name": "tests",
+    "role": "Test reviewer",
+    "task": "Review coverage gaps and write recommended test cases.",
+    "output_path": "/memories/product_audit/subagent_tests/output.md"
   }
 ]
 ```

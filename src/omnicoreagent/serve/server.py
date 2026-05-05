@@ -1,12 +1,12 @@
 """
 OmniServe - Main Server Class.
 
-The primary entry point for turning an OmniCoreAgent or DeepAgent
-into a production-ready FastAPI server.
+The primary entry point for turning an OmniCoreAgent into a production-ready
+FastAPI server.
 """
 
 import time
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional
 
 from fastapi import FastAPI
 
@@ -18,17 +18,16 @@ from .middleware import setup_all_middleware
 from .routes import create_agent_router
 
 if TYPE_CHECKING:
-    from omnicoreagent.agent import OmniCoreAgent
-    from omnicoreagent.deep_agent import DeepAgent
-
-AgentType = Union["OmniCoreAgent", "DeepAgent"]
+    from omnicoreagent.agent import OmniCoreAgent as AgentType
+else:
+    AgentType = Any
 
 
 class OmniServe:
     """
-    Production-ready FastAPI server for OmniCoreAgent and DeepAgent.
+    Production-ready FastAPI server for OmniCoreAgent.
 
-    Transforms any OmniCoreAgent or DeepAgent into a full REST/SSE API server.
+    Transforms an OmniCoreAgent into a full REST/SSE API server.
 
     Features:
     - SSE streaming for agent responses (/run)
@@ -67,7 +66,7 @@ class OmniServe:
         Initialize OmniServe.
 
         Args:
-            agent: The agent to serve (OmniCoreAgent or DeepAgent)
+            agent: The OmniCoreAgent instance to serve
             config: Optional server configuration
             title: Optional API title (defaults to agent name)
             description: Optional API description

@@ -6,7 +6,7 @@ Defines all API endpoints for the agent server.
 
 import time
 from dataclasses import asdict, is_dataclass
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
@@ -28,10 +28,9 @@ from .models import (
 from .sse import run_agent_stream, stream_session_events
 
 if TYPE_CHECKING:
-    from omnicoreagent.agent import OmniCoreAgent
-    from omnicoreagent.deep_agent import DeepAgent
-
-AgentType = Union["OmniCoreAgent", "DeepAgent"]
+    from omnicoreagent.agent import OmniCoreAgent as AgentType
+else:
+    AgentType = Any
 
 
 def create_agent_router() -> APIRouter:
@@ -76,19 +75,12 @@ def create_agent_router() -> APIRouter:
         """Readiness check endpoint."""
         agent: AgentType = request.app.state.agent
 
-        # Check if initialized (DeepAgent) or has MCP client (OmniCoreAgent)
-        initialized = True
-        if hasattr(agent, "is_initialized"):
-            initialized = agent.is_initialized
-        elif hasattr(agent, "_agent"):
-            initialized = agent._agent is not None
+        initialized = getattr(agent, "_initialized", True)
 
         # Check MCP connection
         mcp_connected = True
         if hasattr(agent, "mcp_client"):
             mcp_connected = agent.mcp_client is not None
-        elif hasattr(agent, "_agent") and hasattr(agent._agent, "mcp_client"):
-            mcp_connected = agent._agent.mcp_client is not None
 
         return ReadinessResponse(
             ready=initialized,

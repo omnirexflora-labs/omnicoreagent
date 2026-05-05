@@ -15,7 +15,7 @@
 | Runtime Memory Switching | ✅ Shipped |
 | Context Engineering (dual-layer + tool offloading) | ✅ Shipped |
 | MCP Client (stdio, SSE, Streamable HTTP, OAuth) | ✅ Shipped |
-| DeepAgent (multi-agent orchestration) | ✅ Shipped |
+| Dynamic Subagents (core harness orchestration) | ✅ Shipped |
 | Local Tools (ToolRegistry) | ✅ Shipped |
 | Agent Skills (polyglot packages) | ✅ Shipped |
 | Workspace Memory (S3, R2, Local) | ✅ Shipped |
@@ -73,7 +73,7 @@
 - [ ] **Session status API** — `turns_remaining`, `ttl_remaining`, `session_status`
 - [ ] **OmniServe integration** — paid agents exposed via REST/SSE with built-in session flow
 - [ ] **Agent marketplace prep** — metadata schema for publishing agents (name, description, pricing)
-- [ ] **Multi-agent session propagation** — sessions flow across sub-agent and DeepAgent calls
+- [ ] **Multi-agent session propagation** — sessions flow across dynamic and explicit sub-agent calls
 
 ---
 
@@ -99,7 +99,7 @@
 ---
 
 ### Phase 4: OmniCoder — CLI Coding Agent (v0.7.x)
-> *"A coding agent powered by DeepAgent — your terminal copilot."*
+> *"A coding agent powered by OmniCoreAgent's harness runtime — your terminal copilot."*
 
 **Why it matters**: Developer tools are the highest-signal distribution channel. An open-source CLI coding agent built on OmniCoreAgent puts the framework in every developer's hands.
 
@@ -110,7 +110,7 @@
 - [ ] **Git-aware** — automatic branch creation, commits, and PR descriptions
 - [ ] **Sandboxed execution** — test changes in OmniRuntime before applying
 - [ ] **Interactive mode** — ask clarifying questions, show diffs, request approval
-- [ ] **Powered by DeepAgent** — automatic task decomposition for complex refactors
+- [ ] **Powered by OmniCoreAgent harness** — automatic task decomposition for complex refactors
 - [ ] **Language support** — Python, TypeScript, Go, Rust (extensible via skills)
 
 ---
