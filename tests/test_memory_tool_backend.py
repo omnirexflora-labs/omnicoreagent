@@ -1069,7 +1069,7 @@ class TestMemoryToolIntegration:
         from omnicoreagent.core.tools.memory_tool.memory_tool import MemoryTool
 
         factory._backend_cache.clear()
-        with patch.object(factory, "LOCAL_MEMORY_BASE_DIR", temp_dir):
+        with patch.dict(os.environ, {"OMNICOREAGENT_WORKSPACE_DIR": temp_dir}):
             tool = MemoryTool(backend="local")
 
             # Test all operations
