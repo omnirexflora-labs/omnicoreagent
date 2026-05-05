@@ -58,7 +58,7 @@ def _load_agent_from_file(path: str):
 def cli():
     """OmniServe - Production-ready API server for AI agents.
 
-    Deploy OmniCoreAgent or DeepAgent as a REST/SSE API with a single command.
+    Deploy OmniCoreAgent as a REST/SSE API with a single command.
     """
     pass
 

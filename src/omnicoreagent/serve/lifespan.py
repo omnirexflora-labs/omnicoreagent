@@ -7,17 +7,16 @@ Handles initialization, MCP server connections, and cleanup.
 
 import time
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
 
 from omnicoreagent.core.utils import logger
 
 if TYPE_CHECKING:
-    from omnicoreagent.agent import OmniCoreAgent
-    from omnicoreagent.deep_agent import DeepAgent
-
-AgentType = Union["OmniCoreAgent", "DeepAgent"]
+    from omnicoreagent.agent import OmniCoreAgent as AgentType
+else:
+    AgentType = Any
 
 
 @asynccontextmanager
@@ -26,8 +25,7 @@ async def agent_lifespan(app: FastAPI):
     Async context manager for agent lifecycle.
 
     Handles:
-    - DeepAgent initialization (if applicable)
-    - MCP server connections
+    - OmniCoreAgent MCP server connections
     - Cleanup on shutdown
 
     Usage:
@@ -43,15 +41,8 @@ async def agent_lifespan(app: FastAPI):
     app.state.start_time = time.time()
 
     try:
-        # Handle DeepAgent initialization
-        if hasattr(agent, "initialize") and hasattr(agent, "is_initialized"):
-            if not agent.is_initialized:
-                logger.info(f"OmniServe: Initializing DeepAgent '{agent_name}'...")
-                await agent.initialize()
-        else:
-            # OmniCoreAgent - just connect MCP servers
-            if hasattr(agent, "connect_mcp_servers"):
-                await agent.connect_mcp_servers()
+        if hasattr(agent, "connect_mcp_servers"):
+            await agent.connect_mcp_servers()
 
         logger.info(f"OmniServe: Agent '{agent_name}' is ready")
 

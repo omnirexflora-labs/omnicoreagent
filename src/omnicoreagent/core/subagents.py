@@ -6,7 +6,7 @@ Subagents inherit:
 - Parent's tools (MCP and local)
 - Parent's agent_config (context_management, tool_offload, etc.)
 - Focused task assignment via prompt_builder
-- Memory path for writing findings
+- Memory path for writing output
 """
 
 import asyncio
@@ -23,7 +23,7 @@ class SubagentFactory:
     Subagents:
     - Inherit parent's model config, tools, AND agent_config
     - Get focused task via prompt
-    - Write results to memory (not return through context)
+    - Write output to workspace memory instead of returning large payloads
     """
 
     def __init__(
@@ -66,7 +66,7 @@ class SubagentFactory:
 
         Subagents get full config but with some adjustments:
         - Fewer max_steps (focused task)
-        - Workspace-backed memory is always enabled for writing findings
+        - Workspace-backed memory is always enabled for writing output
         - Dynamic delegation stays on the lead agent only
         """
         config = self.agent_config.copy()
@@ -93,23 +93,23 @@ class SubagentFactory:
             )
 
         return f"""
-You are a specialized subagent with a focused task.
+You are a specialized subagent assigned to execute one focused task.
 
 ROLE: {role}
 
 TASK: {task}
 
 OUTPUT REQUIREMENTS:
-- Write your findings to: {output_path}
-- Use memory_create_update tool to save your findings
+- Write your output to: {output_path}
+- Use memory_create_update tool to save your output
 - Be thorough but focused on YOUR specific task only
 - Do not duplicate work assigned to other subagents
-- Structure your findings clearly with headers
+- Structure your output clearly with headers
 
-When you have completed your investigation:
-1. Save findings to the output_path using memory_create_update
-2. Confirm you saved the findings
-3. Return a brief summary of what you found
+When you have completed the task:
+1. Save output to the output_path using memory_create_update
+2. Confirm you saved the output
+3. Return a brief summary of the completed output
 """
 
     def _build_subagent_local_tools(self) -> Optional[ToolRegistry]:
@@ -145,7 +145,7 @@ When you have completed your investigation:
             name: Subagent identifier
             role: What this subagent specializes in
             task: Specific task to complete
-            output_path: Memory path for writing findings
+            output_path: Memory path for writing output
 
         Returns:
             Configured OmniCoreAgent ready to run
@@ -213,7 +213,7 @@ When you have completed your investigation:
             ]
             response_lower = response.lower()
             is_error = any(indicator in response_lower for indicator in error_indicators)
-            
+
             # Also check if response is empty or too short
             is_error = is_error or len(response.strip()) < 10
 
@@ -238,7 +238,7 @@ When you have completed your investigation:
                     "output_path": output_path,
                     "summary": response[:500] if len(response) > 500 else response,
                 },
-                "message": f"Subagent '{name}' completed. Findings saved to {output_path}",
+                "message": f"Subagent '{name}' completed. Output saved to {output_path}",
             }
 
         except Exception as e:
@@ -347,20 +347,20 @@ def build_subagent_tools(
     
     Always pass a JSON array of subagent specs. If you only need one subagent,
     pass an array with one item. Multiple specs run in parallel.
-    Each subagent writes findings to workspace memory. After completion, read
+    Each subagent writes output to workspace memory. After completion, read
     all output paths with memory_view before synthesizing.
     
     When to use:
     - Task has multiple independent components
-    - Research needed across different domains
-    - Parallel exploration would be more efficient
+    - Work is split across different domains, files, systems, or specialties
+    - Parallel execution would be more efficient
     - One focused worker is enough, but keeping one array-based tool avoids
       choosing between single and parallel spawn modes
     
-    Example use case: Comparing 3 cloud providers
-    - Spawn 3 subagents: aws_analyst, azure_analyst, gcp_analyst
-    - Each researches their provider independently
-    - Read all findings and synthesize comparison
+    Example use case: Coordinating a product audit
+    - Spawn subagents for API review, UI review, docs review, and test review
+    - Each worker executes its assigned task independently
+    - Read all outputs and synthesize the final result
         """,
         inputSchema={
             "type": "object",
@@ -370,14 +370,14 @@ def build_subagent_tools(
                     "description": """
     JSON array string of subagent specifications. Each spec needs:
     - name: Unique identifier (e.g., "aws_analyst")
-    - role: Expertise description (e.g., "AWS cloud expert")
+    - role: Worker role or expertise description (e.g., "API reviewer")
     - task: Specific task to complete
-    - output_path: Memory path for findings
+    - output_path: Memory path for output
     
     Example:
     '[
-        {"name": "aws", "role": "AWS expert", "task": "Research AWS ML services", "output_path": "/memories/cloud/aws.md"},
-        {"name": "azure", "role": "Azure expert", "task": "Research Azure ML services", "output_path": "/memories/cloud/azure.md"}
+        {"name": "api", "role": "API reviewer", "task": "Review API error handling and write concrete risks", "output_path": "/memories/audit/api.md"},
+        {"name": "tests", "role": "Test reviewer", "task": "Review test coverage gaps and write recommended cases", "output_path": "/memories/audit/tests.md"}
     ]'
                     """,
                 },

@@ -2,7 +2,8 @@ sub_agents_additional_prompt = """
 <extension name="sub_agents_extension">
   <description>
     Orchestration system for delegating tasks to specialized sub-agents.
-    Sub-agents handle complex reasoning, analysis, and domain-specific tasks.
+    Sub-agents are execution workers for focused tasks, including coding,
+    review, analysis, writing, data work, and domain-specific operations.
   </description>
   <activation_flag>use_sub_agents</activation_flag>
 
@@ -16,7 +17,7 @@ sub_agents_additional_prompt = """
     </meta>
 
     <core_mandate>
-      Sub-agents are specialized orchestrators for complex reasoning and analysis.
+      Sub-agents are specialized workers for delegated execution.
       Always consult AVAILABLE SUB AGENT REGISTRY to discover capabilities before
       attempting to handle complex tasks yourself or claiming inability.
     </core_mandate>
@@ -29,7 +30,7 @@ sub_agents_additional_prompt = """
         - "Analyze this sales data and provide insights"
         - "Review this document and suggest improvements"
         - "Compare these options and recommend the best one"
-        - "Research this topic and summarize findings"
+        - "Research this topic and produce a structured output"
       </complex_reasoning>
       
       <domain_expertise>
@@ -162,7 +163,7 @@ sub_agents_additional_prompt = """
         Chain multiple <agent_call>s when output of first informs second:
         
         <example>
-          <thought>First gather research, then analyze findings.</thought>
+          <thought>First gather source material, then analyze the output.</thought>
           <agent_call>
             <agent_name>research_agent</agent_name>
             <parameters>
@@ -170,7 +171,7 @@ sub_agents_additional_prompt = """
             </parameters>
           </agent_call>
           <!-- Wait for observation -->
-          <thought>Research complete, now analyze the papers found.</thought>
+          <thought>Source material collected, now analyze the papers returned.</thought>
           <agent_call>
             <agent_name>analysis_agent</agent_name>
             <parameters>
@@ -208,7 +209,7 @@ sub_agents_additional_prompt = """
       <must>Match parameters exactly to registry definitions</must>
       <must>Use <agent_calls> (plural) for concurrent independent tasks</must>
       <must>Process observations before generating final answer</must>
-      <must>Prefer sub-agents for reasoning and analysis over attempting yourself</must>
+      <must>Prefer sub-agents for delegated execution when their capabilities match the task</must>
       <must_not>Invent sub-agent names not in registry</must_not>
       <must_not>Skip registry check and claim inability without verification</must_not>
     </mandatory_behaviors>
@@ -316,14 +317,14 @@ dynamic_subagents_additional_prompt = """
   </available_tools>
 
   <workspace_contract>
-    Subagents save their findings to workspace memory paths using the memory
+    Subagents save their output to workspace memory paths using the memory
     tools. After spawning subagents, read their output paths with memory_view
     before synthesizing the final answer.
   </workspace_contract>
 
   <when_to_use>
-    <case>Complex tasks with multiple independent research or implementation tracks.</case>
-    <case>Tasks where specialist viewpoints improve quality.</case>
+    <case>Complex tasks with multiple independent work tracks.</case>
+    <case>Tasks where focused workers or specialist viewpoints improve quality.</case>
     <case>Verification, review, or gap-filling work that can happen beside the main task.</case>
     <case>One focused worker is useful, but still call spawn_subagents with a one-item array.</case>
   </when_to_use>
@@ -332,9 +333,9 @@ dynamic_subagents_additional_prompt = """
     <rule>Use spawn_subagents when tasks can be delegated to focused workers.</rule>
     <rule>When tasks do not depend on each other, include all specs in one call so they run in parallel.</rule>
     <rule>Give each subagent a clear role, task, and output_path.</rule>
-    <rule>Use workspace memory paths such as /memories/{task_name}/subagent_{name}/findings.md.</rule>
+    <rule>Use workspace memory paths such as /memories/{task_name}/subagent_{name}/output.md.</rule>
     <rule>Do not delegate the immediate blocking step if you need the result before continuing.</rule>
-    <rule>After subagents complete, synthesize their findings instead of repeating them.</rule>
+    <rule>After subagents complete, synthesize their outputs instead of repeating them.</rule>
   </rules>
 </extension>
 """.strip()
@@ -363,7 +364,7 @@ tools_retriever_additional_prompt = """
       ALL action-oriented, information-access, or functionality requests.
       
       Violation pattern to avoid: User asks → Agent says "I cannot" → (no tool search performed)
-      Correct pattern: User asks → Agent searches tools_retriever → Agent responds based on findings
+      Correct pattern: User asks → Agent searches tools_retriever → Agent responds based on returned tool results
     </core_mandate>
 
     <mandatory_tool_discovery>
@@ -468,7 +469,7 @@ tools_retriever_additional_prompt = """
             <tool_name>tools_retriever</tool_name>
             <parameters>{"query": "send transmit email message communication team group recipients subject body"}</parameters>
           </tool_call>
-          <then>Process results and use discovered email tools or explain findings</then>
+          <then>Process results and use discovered email tools or explain limitations</then>
         </example>
 
         <example name="calendar_access">
@@ -664,7 +665,7 @@ memory_tool_additional_prompt = """
 
       <phase name="active_documentation">
         <step>Write a plan before execution (create or overwrite).</step>
-        <step>Append logs or findings during work (append mode).</step>
+        <step>Append logs or output during work (append mode).</step>
         <step>Insert or replace text for structured updates.</step>
         <note>Context resets can occur anytime—save early and often.</note>
       </phase>

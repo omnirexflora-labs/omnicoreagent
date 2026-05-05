@@ -1,5 +1,5 @@
 """
-OmniServe - Production-ready FastAPI server for OmniCoreAgent and DeepAgent.
+OmniServe - Production-ready FastAPI server for OmniCoreAgent.
 
 Transforms any agent into a full REST/SSE API server with:
 - SSE streaming for agent responses
@@ -75,4 +75,3 @@ __all__ = [
     "get_metrics",
     "SimpleMetrics",
 ]
-

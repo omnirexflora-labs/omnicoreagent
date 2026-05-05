@@ -5,15 +5,14 @@ Provides utilities for streaming agent events via SSE.
 """
 
 import json
-from typing import TYPE_CHECKING, Union, AsyncGenerator
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 from omnicoreagent.core.utils import logger
 
 if TYPE_CHECKING:
-    from omnicoreagent.agent import OmniCoreAgent
-    from omnicoreagent.deep_agent import DeepAgent
-
-AgentType = Union["OmniCoreAgent", "DeepAgent"]
+    from omnicoreagent.agent import OmniCoreAgent as AgentType
+else:
+    AgentType = Any
 
 
 def format_sse_event(event_type: str, data: dict) -> str:
@@ -57,7 +56,7 @@ async def run_agent_stream(
     without intermediate event streaming, to ensure stability.
 
     Args:
-        agent: The agent to run (OmniCoreAgent or DeepAgent)
+        agent: The OmniCoreAgent instance to run
         query: The user query
         session_id: Session ID for the conversation
 
