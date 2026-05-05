@@ -17,7 +17,6 @@
 | MCP Client (stdio, SSE, Streamable HTTP, OAuth) | ✅ Shipped |
 | DeepAgent (multi-agent orchestration) | ✅ Shipped |
 | Local Tools (ToolRegistry) | ✅ Shipped |
-| 100+ Community Tools | ✅ Shipped (v0.3.8) |
 | Agent Skills (polyglot packages) | ✅ Shipped |
 | Workspace Memory (S3, R2, Local) | ✅ Shipped |
 | Sub-Agents | ✅ Shipped |
@@ -163,7 +162,6 @@
 | Runtime memory switching | ✅ | ❌ | ❌ | ❌ | ❌ |
 | 5 memory backends | ✅ | ❌ | ❌ | ❌ | ❌ |
 | MCP native (stdio + HTTP + SSE) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| 100+ community tools | ✅ | ❌ | 🔶 | ✅ | 🔶 |
 | Context engineering | ✅ | ❌ | 🔶 | ❌ | ❌ |
 | Multi-agent orchestration | ✅ | 🔶 | ✅ | ✅ | ❌ |
 | Background agents | ✅ | ❌ | ❌ | ❌ | ✅ |
@@ -200,7 +198,7 @@ We welcome contributions to any roadmap item! Check the [Contributing Guide](CON
 **High-impact areas for contributors:**
 - Sandbox execution backends (E2B, Daytona, Modal integrations)
 - Evaluation datasets and benchmarks
-- New community tools
+- MCP integrations and project-owned tool examples
 - Agent skills for personal automation
 - OmniCoder language support
 

@@ -1,5 +1,6 @@
 from pathlib import Path
 import urllib.parse
+import shutil
 from filelock import FileLock
 from omnicoreagent.core.tools.memory_tool.base import AbstractMemoryBackend
 from omnicoreagent.core.workspace import get_memories_dir
@@ -153,7 +154,9 @@ class LocalMemoryBackend(AbstractMemoryBackend):
             content = abs_path.read_text(encoding="utf-8")
             if old_str not in content:
                 return f"String '{old_str}' not found in {abs_path}."
-            self._write_atomic(abs_path, content.replace(old_str, new_str))
+            tmp_path = abs_path.with_suffix(".tmp")
+            tmp_path.write_text(content.replace(old_str, new_str), encoding="utf-8")
+            tmp_path.rename(abs_path)
         return f"Replaced '{old_str}' with '{new_str}' in {abs_path}"
 
     def insert(self, path: str, insert_line: int, insert_text: str) -> str:
@@ -170,7 +173,9 @@ class LocalMemoryBackend(AbstractMemoryBackend):
             lines = abs_path.read_text(encoding="utf-8").splitlines()
             insert_index = max(0, min(insert_line - 1, len(lines)))
             lines.insert(insert_index, insert_text)
-            self._write_atomic(abs_path, "\n".join(lines) + "\n")
+            tmp_path = abs_path.with_suffix(".tmp")
+            tmp_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            tmp_path.rename(abs_path)
         return f"Inserted text at line {insert_line} in {abs_path}"
 
     def delete(self, path: str) -> str:
@@ -215,19 +220,14 @@ class LocalMemoryBackend(AbstractMemoryBackend):
         return f"Renamed {abs_old} → {abs_new}"
 
     def clear_all_memory(self) -> str:
-        dir_lock = self.base_dir / ".lock"
+        dir_lock = self.base_dir.with_suffix(".lock")
         try:
             with FileLock(dir_lock):
-                for item in self.base_dir.iterdir():
+                for item in list(self.base_dir.iterdir()):
                     if item.is_file():
-                        with FileLock(item.with_suffix(".lock")):
-                            item.unlink()
+                        item.unlink()
                     elif item.is_dir():
-                        for sub_item in item.rglob("*"):
-                            if sub_item.is_file():
-                                with FileLock(sub_item.with_suffix(".lock")):
-                                    sub_item.unlink()
-                        item.rmdir()
+                        shutil.rmtree(item)
             return f"All memory cleared in {self.base_dir}"
         except Exception as e:
             return f"Error clearing memory: {e}"

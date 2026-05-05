@@ -40,6 +40,7 @@ import shutil
 import threading
 import time
 import json
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 import io
 
@@ -720,7 +721,7 @@ class TestS3MemoryBackendOperations:
 
     def test_create_file(self, s3_backend, mock_s3_client):
         """Test creating a file in S3."""
-        mock_s3_client.head_object.side_effect = ClientError(
+        mock_s3_client.get_object.side_effect = ClientError(
             {"Error": {"Code": "404", "Message": "Not Found"}}, "HeadObject"
         )
         mock_s3_client.put_object.return_value = {"ETag": '"abc123"'}
@@ -755,10 +756,23 @@ class TestS3MemoryBackendOperations:
 
     def test_view_directory_listing(self, s3_backend, mock_s3_client):
         """Test listing directory contents."""
+        mock_s3_client.get_object.side_effect = ClientError(
+            {"Error": {"Code": "404", "Message": "Not Found"}}, "GetObject"
+        )
         mock_s3_client.list_objects_v2.return_value = {
             "Contents": [
-                {"Key": "memories/file1.txt", "Size": 100},
-                {"Key": "memories/file2.txt", "Size": 200},
+                {
+                    "Key": "memories/file1.txt",
+                    "Size": 100,
+                    "LastModified": datetime(2024, 1, 1),
+                    "ETag": '"abc123"',
+                },
+                {
+                    "Key": "memories/file2.txt",
+                    "Size": 200,
+                    "LastModified": datetime(2024, 1, 1),
+                    "ETag": '"def456"',
+                },
             ],
             "CommonPrefixes": [{"Prefix": "memories/subdir/"}],
         }
@@ -856,12 +870,8 @@ class TestS3MemoryBackendSecurity:
 
     def test_key_normalization_prevents_traversal(self, s3_backend):
         """Test that path traversal is prevented in key generation."""
-        # Access the internal method
-        key = s3_backend._normalize_key("../../../etc/passwd")
-
-        # Should not contain parent directory references
-        assert ".." not in key
-        assert key.startswith(s3_backend.prefix)
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            s3_backend._normalize_key("../../../etc/passwd")
 
     def test_key_normalization_with_memories_prefix(self, s3_backend):
         """Test that 'memories/' prefix in path is handled correctly."""
@@ -931,7 +941,7 @@ class TestR2MemoryBackendOperations:
 
     def test_create_file(self, r2_backend, mock_r2_client):
         """Test creating a file in R2."""
-        mock_r2_client.head_object.side_effect = ClientError(
+        mock_r2_client.get_object.side_effect = ClientError(
             {"Error": {"Code": "404", "Message": "Not Found"}}, "HeadObject"
         )
         mock_r2_client.put_object.return_value = {"ETag": '"abc123"'}
@@ -1055,12 +1065,15 @@ class TestMemoryToolIntegration:
 
     def test_memory_tool_with_local_backend(self, temp_dir):
         """Test MemoryTool with local backend."""
+        from omnicoreagent.core.tools.memory_tool import factory
         from omnicoreagent.core.tools.memory_tool.memory_tool import MemoryTool
 
-        tool = MemoryTool(backend="local")
+        factory._backend_cache.clear()
+        with patch.object(factory, "LOCAL_MEMORY_BASE_DIR", temp_dir):
+            tool = MemoryTool(backend="local")
 
-        # Test all operations
-        result = tool.create_update("test.txt", "Hello", mode="create")
+            # Test all operations
+            result = tool.create_update("test.txt", "Hello", mode="create")
         assert "created" in result.lower() or "success" in result.lower()
 
     def test_memory_tool_with_direct_backend(self, local_backend):

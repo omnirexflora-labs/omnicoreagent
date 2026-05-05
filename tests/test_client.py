@@ -67,13 +67,13 @@ class TestConfiguration:
         config = Configuration()
         assert config.llm_api_key == "test_llm_key"
 
-    def test_load_config(self, mock_config_file):
+    def test_load_config(self, mock_env, mock_config_file):
         """Test loading configuration from file"""
         config = Configuration()
         loaded_config = config.load_config(mock_config_file)
         assert loaded_config == MOCK_SERVER_CONFIG
 
-    def test_load_config_invalid_filename(self, tmp_path):
+    def test_load_config_invalid_filename(self, mock_env, tmp_path):
         """Test loading configuration with incorrect filename"""
         config = Configuration()
         invalid_file = tmp_path / "invalid.json"
@@ -81,7 +81,7 @@ class TestConfiguration:
         with pytest.raises(ValueError):
             config.load_config(str(invalid_file))
 
-    def test_load_config_invalid_json(self, tmp_path):
+    def test_load_config_invalid_json(self, mock_env, tmp_path):
         """Test loading invalid JSON from correct filename"""
         config = Configuration()
         invalid_file = tmp_path / "servers_config.json"
@@ -106,7 +106,7 @@ class TestConfiguration:
 
 class TestMCPClient:
     @pytest.fixture
-    def mock_client(self, mock_config_file):
+    def mock_client(self, mock_env, mock_config_file):
         """Fixture to create a mock MCP client"""
         config = Configuration()
         config.load_config = MagicMock(return_value=MOCK_SERVER_CONFIG)

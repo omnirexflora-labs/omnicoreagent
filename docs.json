@@ -48,7 +48,6 @@
                             "docs/core-concepts/events",
                             "docs/core-concepts/mcp",
                             "docs/core-concepts/local-tools",
-                            "docs/core-concepts/community-tools",
                             "docs/core-concepts/skills",
                             "docs/core-concepts/workspace-memory",
                             "docs/core-concepts/guardrails",
@@ -104,7 +103,7 @@
                 ]
             },
             {
-                "header": "Community",
+                "header": "Project",
                 "items": [
                     {
                         "label": "GitHub Discussions",

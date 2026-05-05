@@ -95,13 +95,11 @@ registry.register(DatabaseTool(connection_string="postgresql://..."))
 
 ---
 
-## Mixing Custom + Community Tools
+## Composing Local Tools
 
 ```python
 from omnicoreagent import OmniCoreAgent, ToolRegistry
-from omnicoreagent.community import TavilySearch, CalculatorTool
 
-# Create registry with custom tools
 tools = ToolRegistry()
 
 @tools.register_tool("greet")
@@ -109,17 +107,19 @@ def greet(name: str) -> str:
     """Greet someone."""
     return f"Hello, {name}!"
 
-# Add community tools
-tools.register(TavilySearch())
-tools.register(CalculatorTool())
+@tools.register_tool("calculate_total")
+def calculate_total(price: float, quantity: int) -> float:
+    """Calculate an order total."""
+    return price * quantity
 
 agent = OmniCoreAgent(
-    name="hybrid_agent",
-    local_tools=tools,  # Custom + community tools together
+    name="local_tools_agent",
+    local_tools=tools,
     ...
 )
 ```
 
 <Tip>
-Use Local Tools when you need custom business logic, internal APIs, or any Python functionality that isn't available via MCP servers or community tools.
+Use Local Tools for custom business logic, internal APIs, or Python functionality
+that belongs to your application. Use MCP for shared external services.
 </Tip>

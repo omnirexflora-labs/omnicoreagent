@@ -138,20 +138,11 @@ agent = OmniCoreAgent(
 )
 ```
 
-### Community Tools (Pre-built)
+### External Tools
 
-Use 40+ ready-made tools without writing any code:
-
-```python
-from omnicoreagent.community import TavilySearch, WikipediaTool
-
-agent = OmniCoreAgent(
-    name="research_agent",
-    system_instruction="You are a research assistant.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    community_tools=[TavilySearch(), WikipediaTool()]
-)
-```
+Keep external integrations outside the core package. Use MCP servers for shared
+capabilities, or wrap project-owned APIs with `ToolRegistry` when the tool is
+specific to your application.
 
 ---
 
