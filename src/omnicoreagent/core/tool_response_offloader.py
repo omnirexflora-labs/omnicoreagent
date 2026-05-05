@@ -11,20 +11,15 @@ Inspired by:
 """
 
 import json
-import os
 import hashlib
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 
-from decouple import config as decouple_config
-
 from omnicoreagent.core.summarizer.tokenizer import count_tokens
 from omnicoreagent.core.utils import logger
-from omnicoreagent.core.workspace import get_artifacts_dir
 from omnicoreagent.core.workspace_storage import (
-    LocalWorkspaceStorage,
+    WorkspaceStorage,
     create_workspace_storage,
 )
 
@@ -38,14 +33,8 @@ class OffloadConfig:
     threshold_bytes: int = 2000
     max_preview_tokens: int = 150
     max_preview_lines: int = 10
-    storage_dir: str = None  # Set in __post_init__
     retention_days: int = 7
     include_metadata: bool = True
-
-    def __post_init__(self):
-        """Set defaults that depend on env vars."""
-        if self.storage_dir is None:
-            self.storage_dir = get_artifacts_dir()
 
     @classmethod
     def from_dict(cls, config: dict) -> "OffloadConfig":
@@ -59,7 +48,6 @@ class OffloadConfig:
             threshold_bytes=config.get("threshold_bytes", 2000),
             max_preview_tokens=config.get("max_preview_tokens", 150),
             max_preview_lines=config.get("max_preview_lines", 10),
-            storage_dir=config.get("storage_dir"),
             retention_days=config.get("retention_days", 7),
             include_metadata=config.get("include_metadata", True),
         )
@@ -108,23 +96,20 @@ class ToolResponseOffloader:
     The agent is given tools to read the full content on demand.
     """
 
-    def __init__(self, config: OffloadConfig | dict = None, base_dir: str = None):
+    def __init__(
+        self,
+        config: OffloadConfig | dict = None,
+        base_dir: str = None,
+        storage: WorkspaceStorage | None = None,
+    ):
         if isinstance(config, dict):
             config = OffloadConfig.from_dict(config)
         self.config = config or OffloadConfig()
 
-        self.base_dir = base_dir or os.getcwd()
-        self.storage_path = Path(self.base_dir) / self.config.storage_dir
-        workspace_backend = decouple_config(
-            "OMNICOREAGENT_WORKSPACE_BACKEND", default="local"
-        ).lower()
-        if workspace_backend == "local":
-            self.storage = LocalWorkspaceStorage(self.storage_path)
-        else:
-            self.storage = create_workspace_storage(
-                backend=workspace_backend,
-                namespace="artifacts",
-            )
+        self.storage = storage or create_workspace_storage(
+            namespace="artifacts",
+            workspace_dir=base_dir,
+        )
 
         if self.config.enabled:
             self._ensure_storage_dir()

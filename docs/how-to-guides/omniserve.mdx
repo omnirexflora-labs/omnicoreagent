@@ -292,28 +292,29 @@ docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omniserver
 
 | Your Agent Uses | Dockerfile Sets |
 |-----------------|-----------------|
-| No memory tools | `AGENT_PATH`, `OMNICOREAGENT_ARTIFACTS_DIR` |
-| Local memory | + `OMNICOREAGENT_MEMORY_DIR=/tmp/memories` |
-| S3/R2 memory | Pass credentials at runtime with `-e` |
+| Local workspace | `AGENT_PATH`, `OMNICOREAGENT_WORKSPACE_BACKEND=local`, `OMNICOREAGENT_WORKSPACE_DIR=/tmp/workspace` |
+| S3/R2 workspace | Pass workspace backend and credentials at runtime with `-e` |
 
 ### Cloud deployment examples
 
 ```bash
-# Local memory (ephemeral)
+# Local workspace (ephemeral)
 docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omniserver
 
-# AWS S3 memory (persistent)
+# AWS S3 workspace (persistent)
 docker run -p 8000:8000 \
   -e LLM_API_KEY=$LLM_API_KEY \
+  -e OMNICOREAGENT_WORKSPACE_BACKEND=s3 \
   -e AWS_S3_BUCKET=my-bucket \
   -e AWS_ACCESS_KEY_ID=... \
   -e AWS_SECRET_ACCESS_KEY=... \
   -e AWS_REGION=us-east-1 \
   omniserver
 
-# Cloudflare R2 memory (persistent)
+# Cloudflare R2 workspace (persistent)
 docker run -p 8000:8000 \
   -e LLM_API_KEY=$LLM_API_KEY \
+  -e OMNICOREAGENT_WORKSPACE_BACKEND=r2 \
   -e R2_BUCKET_NAME=my-bucket \
   -e R2_ACCOUNT_ID=... \
   -e R2_ACCESS_KEY_ID=... \

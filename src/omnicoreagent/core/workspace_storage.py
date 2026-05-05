@@ -450,6 +450,7 @@ def create_workspace_storage(
     *,
     backend: str | None = None,
     namespace: str | None = None,
+    workspace_dir: str | Path | None = None,
 ) -> WorkspaceStorage:
     backend = (backend or config("OMNICOREAGENT_WORKSPACE_BACKEND", default="local"))
     backend = backend.lower().strip()
@@ -458,7 +459,7 @@ def create_workspace_storage(
     if backend == "local":
         from omnicoreagent.core.workspace import resolve_workspace_paths
 
-        paths = resolve_workspace_paths()
+        paths = resolve_workspace_paths(workspace_dir=workspace_dir)
         root = paths.root / namespace if namespace else paths.root
         return LocalWorkspaceStorage(root)
 

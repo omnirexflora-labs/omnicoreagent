@@ -58,7 +58,6 @@ class AgentConfig(BaseModel):
             "threshold_tokens": 500,
             "threshold_bytes": 2000,
             "max_preview_tokens": 150,
-            "storage_dir": "workspace/artifacts",
         },
         description="Tool response offloading config to reduce context size from large tool outputs",
     )
@@ -135,10 +134,6 @@ class AgentConfig(BaseModel):
             raise ValueError(
                 f"tool_offload.max_preview_lines must be positive, got {max_preview_lines}"
             )
-
-        storage_dir = v.get("storage_dir", "workspace/artifacts")
-        if not isinstance(storage_dir, str) or not storage_dir:
-            raise ValueError("tool_offload.storage_dir must be a non-empty string")
 
         retention_days = v.get("retention_days")
         if retention_days is not None and retention_days < 0:

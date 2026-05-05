@@ -47,7 +47,6 @@ class TestOffloadConfig:
         assert config.threshold_bytes == 2000
         assert config.max_preview_tokens == 150
         assert config.max_preview_lines == 10
-        assert config.storage_dir == "workspace/artifacts"
         assert config.retention_days == 7
         assert config.include_metadata is True
 
@@ -65,14 +64,12 @@ class TestOffloadConfig:
                 "threshold_tokens": 1000,
                 "threshold_bytes": 5000,
                 "max_preview_tokens": 200,
-                "storage_dir": ".custom_artifacts",
             }
         )
         assert config.enabled is False
         assert config.threshold_tokens == 1000
         assert config.threshold_bytes == 5000
         assert config.max_preview_tokens == 200
-        assert config.storage_dir == ".custom_artifacts"
 
     def test_from_dict_partial(self):
         """Test partial config uses defaults for missing keys."""
@@ -144,17 +141,6 @@ class TestAgentConfigToolOffloadValidation:
                 tool_offload={"max_preview_tokens": -5},
             )
         assert "max_preview_tokens must be positive" in str(exc_info.value)
-
-    def test_empty_storage_dir_rejected(self):
-        """Test empty storage_dir raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
-            TypesAgentConfig(
-                agent_name="test",
-                max_steps=10,
-                tool_call_timeout=30,
-                tool_offload={"storage_dir": ""},
-            )
-        assert "storage_dir must be a non-empty string" in str(exc_info.value)
 
     def test_invalid_retention_days_rejected(self):
         """Test negative retention_days raises ValidationError."""
@@ -337,11 +323,7 @@ class TestOffload:
         content = "Content " * 50
         result = self.offloader.offload("test_tool", content, metadata={"key": "value"})
 
-        meta_path = (
-            Path(self.temp_dir)
-            / "workspace/artifacts"
-            / f"{result.artifact_id}.meta.json"
-        )
+        meta_path = Path(self.temp_dir) / "artifacts" / f"{result.artifact_id}.meta.json"
         assert meta_path.exists()
 
         with open(meta_path) as f:
@@ -393,6 +375,22 @@ class TestOffload:
         assert result.artifact_path == self.offloader.storage.location(
             result.storage_key
         )
+
+    def test_offload_uses_workspace_artifacts_namespace_from_env(
+        self, monkeypatch, tmp_path
+    ):
+        """Test default offload storage uses the active workspace artifacts namespace."""
+        workspace = tmp_path / "workspace"
+        monkeypatch.setenv("OMNICOREAGENT_WORKSPACE_BACKEND", "local")
+        monkeypatch.setenv("OMNICOREAGENT_WORKSPACE_DIR", str(workspace))
+
+        offloader = ToolResponseOffloader(
+            config={"enabled": True, "threshold_tokens": 10}
+        )
+        result = offloader.offload("env_tool", "Content " * 50)
+
+        assert Path(result.artifact_path).is_relative_to(workspace / "artifacts")
+        assert Path(result.artifact_path).read_text() == "Content " * 50
 
 
 # ============================================================================
@@ -599,7 +597,7 @@ class TestEdgeCases:
         """Test .gitignore is created in storage directory."""
         self.offloader.offload("test", "Content " * 50)
 
-        gitignore_path = Path(self.temp_dir) / "workspace/artifacts" / ".gitignore"
+        gitignore_path = Path(self.temp_dir) / "artifacts" / ".gitignore"
         assert gitignore_path.exists()
         assert "*" in gitignore_path.read_text()
 
@@ -715,7 +713,7 @@ class TestCleanup:
 
         self.offloader.cleanup_old_artifacts()
 
-        gitignore_path = Path(self.temp_dir) / "workspace/artifacts" / ".gitignore"
+        gitignore_path = Path(self.temp_dir) / "artifacts" / ".gitignore"
         assert gitignore_path.exists()
 
 

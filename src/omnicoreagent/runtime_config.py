@@ -85,7 +85,6 @@ class AgentConfig:
             "threshold_bytes": 2000,
             "max_preview_tokens": 150,
             "max_preview_lines": 10,
-            "storage_dir": "workspace/artifacts",
         }
     )
 

@@ -83,7 +83,7 @@ When enabled, your agent automatically gets these tools:
 | `memory_insert` | Insert text at specific line numbers |
 | `memory_delete` | Delete files from workspace memory |
 | `memory_rename` | Rename or move files |
-| `memory_clear_all` | Clear entire workspace |
+| `memory_clear_all` | Clear the workspace memory namespace |
 
 ---
 
@@ -126,8 +126,8 @@ os.environ["AWS_REGION"] = "us-east-1"
 os.environ["AWS_ENDPOINT_URL"] = "https://s3.amazonaws.com"  # Optional
 
 agent = OmniCoreAgent(
-    name="research_agent",
-    system_instruction="You are a research assistant. Save your findings to memory.",
+    name="workspace_agent",
+    system_instruction="Save durable notes, logs, task progress, and final output to memory.",
     model_config={"provider": "openai", "model": "gpt-4o"},
     agent_config={
         "enable_workspace_memory": True,
@@ -140,7 +140,7 @@ agent = OmniCoreAgent(
 # - Multiple instances
 # - Different geographic locations
 result = await agent.run(
-    "Research the latest AI developments and save a summary to /notes/ai_trends_2024.md"
+    "Research recent AI developments and save a summary to /notes/ai_trends.md"
 )
 ```
 
