@@ -1,7 +1,8 @@
 from unittest.mock import AsyncMock
 import pytest
 import json
-from omnicoreagent.core.agents.base import BaseReactAgent
+from omnicoreagent.core.agents.base import BaseReactAgent, TOOL_CALL_TIMEOUT_MESSAGE
+from omnicoreagent.core.events.base import EventType
 from omnicoreagent.core.tool_response_offloader import ToolResponseOffloader
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.types import ParsedResponse, ToolCallResult
@@ -346,3 +347,74 @@ def test_build_tool_results_observation_formats_parallel_results(agent):
     )
 
     assert observation == "Partial success:\nalpha#1: alpha result\n\nbeta#1 ERROR: beta failed"
+
+
+@pytest.mark.asyncio
+async def test_handle_tool_execution_error_records_history_and_event(agent):
+    history = []
+    events = []
+    session_state = agent._get_session_state(session_id="chat795", debug=False)
+    tool_calls = [
+        ToolCallResult(
+            tool_executor=None,
+            tool_name="alpha",
+            tool_args={"value": "one"},
+            tool_call_id="tool-call-alpha",
+        ),
+        ToolCallResult(
+            tool_executor=None,
+            tool_name="beta",
+            tool_args={"value": "two"},
+            tool_call_id="tool-call-beta",
+        ),
+    ]
+
+    async def add_message_to_history(role, content, metadata=None, session_id=None):
+        history.append(
+            {
+                "role": role,
+                "content": content,
+                "metadata": metadata or {},
+                "session_id": session_id,
+            }
+        )
+
+    async def event_router(session_id, event):
+        events.append({"session_id": session_id, "event": event})
+
+    results = await agent._handle_tool_execution_error(
+        tool_call_results=tool_calls,
+        error_message=TOOL_CALL_TIMEOUT_MESSAGE,
+        session_state=session_state,
+        add_message_to_history=add_message_to_history,
+        session_id="chat795",
+        event_router=event_router,
+        tool_batch_name="alpha, beta",
+    )
+
+    assert [item["role"] for item in history] == ["tool", "tool"]
+    assert [item["metadata"]["tool"] for item in history] == ["alpha", "beta"]
+    assert {item["metadata"]["tool_call_id"] for item in history} == {
+        "tool-call-alpha",
+        "tool-call-beta",
+    }
+    assert results == [
+        {
+            "tool_name": "alpha",
+            "args": {"value": "one"},
+            "status": "error",
+            "data": None,
+            "message": TOOL_CALL_TIMEOUT_MESSAGE,
+        },
+        {
+            "tool_name": "beta",
+            "args": {"value": "two"},
+            "status": "error",
+            "data": None,
+            "message": TOOL_CALL_TIMEOUT_MESSAGE,
+        },
+    ]
+    assert len(events) == 1
+    assert events[0]["session_id"] == "chat795"
+    assert events[0]["event"].type == EventType.TOOL_CALL_ERROR
+    assert events[0]["event"].payload.tool_name == "alpha, beta"

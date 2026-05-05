@@ -104,6 +104,9 @@ TOOL_OUTPUT_OFFLOAD_EXCLUDED_TOOLS = frozenset(
         "memory_create_update",
     }
 )
+TOOL_CALL_TIMEOUT_MESSAGE = (
+    "Tool call timed out. Please try again or use a different approach."
+)
 
 
 class BaseReactAgent:
@@ -312,6 +315,68 @@ class BaseReactAgent:
             error_details = "\n\n".join(obs_lines)
             return f"Tool execution failed completely:\n{error_details}"
         return "\n\n".join(obs_lines) or "No valid tool results."
+
+    def _build_tool_error_results(
+        self,
+        tool_call_results: list[ToolCallResult],
+        error_message: str,
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "tool_name": getattr(single_tool, "tool_name", "unknown"),
+                "args": getattr(single_tool, "tool_args", {}),
+                "status": "error",
+                "data": None,
+                "message": error_message,
+            }
+            for single_tool in tool_call_results
+        ]
+
+    async def _handle_tool_execution_error(
+        self,
+        tool_call_results: list[ToolCallResult],
+        error_message: str,
+        session_state: SessionState,
+        add_message_to_history: Callable[[str, str, dict | None], Any],
+        session_id: str | None,
+        event_router: Callable[[str, Event], Any] | None,
+        tool_batch_name: str,
+    ) -> list[dict[str, Any]]:
+        for single_tool in tool_call_results:
+            session_state.loop_detector.record_tool_call(
+                str(single_tool.tool_name),
+                str(single_tool.tool_args),
+                error_message,
+            )
+
+        for single_tool in tool_call_results:
+            await add_message_to_history(
+                role="tool",
+                content=error_message,
+                metadata={
+                    "tool_call_id": single_tool.tool_call_id,
+                    "tool": single_tool.tool_name,
+                    "args": single_tool.tool_args,
+                    "agent_name": self.agent_name,
+                },
+                session_id=session_id,
+            )
+
+        event = Event(
+            type=EventType.TOOL_CALL_ERROR,
+            payload=ToolCallErrorPayload(
+                tool_name=tool_batch_name,
+                error_message=error_message,
+            ),
+            agent_name=self.agent_name,
+        )
+        if event_router:
+            await event_router(session_id=session_id, event=event)
+
+        return self._build_tool_error_results(
+            tool_call_results=tool_call_results,
+            error_message=error_message,
+        )
 
     async def extract_action_or_answer(
         self,
@@ -841,95 +906,30 @@ class BaseReactAgent:
                     await event_router(session_id=session_id, event=event)
 
             except asyncio.TimeoutError:
-                obs_text = (
-                    "Tool call timed out. Please try again or use a different approach."
-                )
+                obs_text = TOOL_CALL_TIMEOUT_MESSAGE
                 logger.warning(obs_text)
-                for single_tool in tool_call_result:
-                    session_state.loop_detector.record_tool_call(
-                        str(single_tool.tool_name),
-                        str(single_tool.tool_args),
-                        obs_text,
-                    )
-
-                for single_tool in tool_call_result:
-                    tools_results.append(
-                        {
-                            "tool_name": getattr(single_tool, "tool_name", "unknown"),
-                            "args": getattr(single_tool, "tool_args", {}),
-                            "status": "error",
-                            "data": None,
-                            "message": obs_text,
-                        }
-                    )
-
-                for single_tool in tool_call_result:
-                    await add_message_to_history(
-                        role="tool",
-                        content=obs_text,
-                        metadata={
-                            "tool_call_id": single_tool.tool_call_id,
-                            "tool": single_tool.tool_name,
-                            "args": single_tool.tool_args,
-                            "agent_name": self.agent_name,
-                        },
-                        session_id=session_id,
-                    )
-
-                event = Event(
-                    type=EventType.TOOL_CALL_ERROR,
-                    payload=ToolCallErrorPayload(
-                        tool_name=tool_batch_name,
-                        error_message=obs_text,
-                    ),
-                    agent_name=self.agent_name,
+                tools_results = await self._handle_tool_execution_error(
+                    tool_call_results=list(tool_call_result),
+                    error_message=obs_text,
+                    session_state=session_state,
+                    add_message_to_history=add_message_to_history,
+                    session_id=session_id,
+                    event_router=event_router,
+                    tool_batch_name=tool_batch_name,
                 )
-                if event_router:
-                    await event_router(session_id=session_id, event=event)
 
             except Exception as e:
                 obs_text = f"Error executing tool: {str(e)}"
                 logger.error(obs_text)
-                for single_tool in tool_call_result:
-                    session_state.loop_detector.record_tool_call(
-                        str(single_tool.tool_name),
-                        str(single_tool.tool_args),
-                        obs_text,
-                    )
-
-                for single_tool in tool_call_result:
-                    tools_results.append(
-                        {
-                            "tool_name": getattr(single_tool, "tool_name", "unknown"),
-                            "args": getattr(single_tool, "tool_args", {}),
-                            "status": "error",
-                            "data": None,
-                            "message": obs_text,
-                        }
-                    )
-
-                for single_tool in tool_call_result:
-                    await add_message_to_history(
-                        role="tool",
-                        content=obs_text,
-                        metadata={
-                            "tool_call_id": single_tool.tool_call_id,
-                            "tool": single_tool.tool_name,
-                            "args": single_tool.tool_args,
-                            "agent_name": self.agent_name,
-                        },
-                        session_id=session_id,
-                    )
-                event = Event(
-                    type=EventType.TOOL_CALL_ERROR,
-                    payload=ToolCallErrorPayload(
-                        tool_name=tool_batch_name,
-                        error_message=obs_text,
-                    ),
-                    agent_name=self.agent_name,
+                tools_results = await self._handle_tool_execution_error(
+                    tool_call_results=list(tool_call_result),
+                    error_message=obs_text,
+                    session_state=session_state,
+                    add_message_to_history=add_message_to_history,
+                    session_id=session_id,
+                    event_router=event_router,
+                    tool_batch_name=tool_batch_name,
                 )
-                if event_router:
-                    await event_router(session_id=session_id, event=event)
 
         if debug:
             show_tool_response(
