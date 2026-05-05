@@ -1,4 +1,5 @@
 from unittest.mock import AsyncMock
+from types import SimpleNamespace
 import pytest
 import json
 from omnicoreagent.core.agents.base import BaseReactAgent, TOOL_CALL_TIMEOUT_MESSAGE
@@ -683,3 +684,73 @@ async def test_handle_tool_loop_state_marks_session_stuck(agent):
     assert events[0]["session_id"] == "chat800"
     assert events[0]["event"].type == EventType.TOOL_CALL_ERROR
     assert events[0]["event"].payload.tool_name == "alpha"
+
+
+@pytest.mark.asyncio
+async def test_resolve_single_tool_action_uses_local_registry(agent):
+    registry = ToolRegistry()
+
+    @registry.register_tool(
+        name="local_ping",
+        inputSchema={
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+            "required": ["value"],
+        },
+        description="Local ping tool.",
+    )
+    async def local_ping(value: str):
+        return {"status": "success", "data": value}
+
+    resolved = await agent._resolve_single_tool_action(
+        action={"tool": "local_ping", "parameters": {"value": "runtime"}},
+        sessions={},
+        mcp_tools=None,
+        local_tools=registry,
+    )
+
+    assert isinstance(resolved, ToolCallResult)
+    assert resolved.tool_name == "local_ping"
+    assert resolved.tool_args == {"value": "runtime"}
+
+
+@pytest.mark.asyncio
+async def test_resolve_single_tool_action_uses_mcp_tools_before_local(agent):
+    registry = ToolRegistry()
+
+    @registry.register_tool(
+        name="search",
+        inputSchema={"type": "object", "properties": {}, "required": []},
+        description="Local search fallback.",
+    )
+    async def search():
+        return {"status": "success", "data": "local"}
+
+    resolved = await agent._resolve_single_tool_action(
+        action={"tool": "search", "parameters": {"query": "runtime"}},
+        sessions={"server": {"session": object()}},
+        mcp_tools={"server": [SimpleNamespace(name="search")]},
+        local_tools=registry,
+    )
+
+    assert isinstance(resolved, ToolCallResult)
+    assert resolved.tool_name == "search"
+    assert resolved.tool_args == {"query": "runtime"}
+    assert resolved.tool_executor.tool_handler.server_name == "server"
+
+
+@pytest.mark.asyncio
+async def test_resolve_single_tool_action_rejects_tool_call_to_sub_agent(agent):
+    sub_agent = SimpleNamespace(name="research_agent")
+
+    resolved = await agent._resolve_single_tool_action(
+        action={"tool": "research_agent", "parameters": {"task": "inspect"}},
+        sessions={},
+        mcp_tools=None,
+        local_tools=None,
+        sub_agents=[sub_agent],
+    )
+
+    assert isinstance(resolved, ToolError)
+    assert resolved.tool_name == "N/A"
+    assert "is a sub-agent, not a tool" in resolved.observation
