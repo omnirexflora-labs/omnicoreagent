@@ -5,8 +5,6 @@ from pathlib import Path
 
 _DEFAULT_WORKSPACE = "./workspace"
 _WORKSPACE_ENV = "OMNICOREAGENT_WORKSPACE_DIR"
-_ARTIFACTS_ENV = "OMNICOREAGENT_ARTIFACTS_DIR"
-_MEMORY_ENV = "OMNICOREAGENT_MEMORY_DIR"
 
 
 @dataclass(frozen=True)
@@ -25,16 +23,12 @@ class WorkspacePaths:
 def resolve_workspace_paths(
     *,
     workspace_dir: str | os.PathLike | None = None,
-    artifacts_dir: str | os.PathLike | None = None,
-    memories_dir: str | os.PathLike | None = None,
 ) -> WorkspacePaths:
     root = Path(workspace_dir or os.environ.get(_WORKSPACE_ENV, _DEFAULT_WORKSPACE))
-    artifacts = Path(artifacts_dir or os.environ.get(_ARTIFACTS_ENV, root / "artifacts"))
-    memories = Path(memories_dir or os.environ.get(_MEMORY_ENV, root / "memories"))
     return WorkspacePaths(
         root=root,
-        artifacts=artifacts,
-        memories=memories,
+        artifacts=root / "artifacts",
+        memories=root / "memories",
         config=root / "config",
     )
 

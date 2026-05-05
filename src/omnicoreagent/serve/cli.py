@@ -369,7 +369,6 @@ def generate_dockerfile(file_path: str, output_dir: str):
         "# Workspace storage for artifacts and memory files",
         "ENV OMNICOREAGENT_WORKSPACE_BACKEND=local",
         "ENV OMNICOREAGENT_WORKSPACE_DIR=/tmp/workspace",
-        "ENV OMNICOREAGENT_ARTIFACTS_DIR=/tmp/workspace/artifacts",
     ]
 
     env_block = "\n".join(env_lines)
