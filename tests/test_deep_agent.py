@@ -204,15 +204,15 @@ class TestDeepAgentInitialization:
 
     @pytest.mark.broken_upstream
     @pytest.mark.asyncio
-    async def test_memory_tool_backend_uses_workspace(self):
-        """Memory should always use the workspace backend."""
+    async def test_deep_agent_enables_workspace_memory(self):
+        """DeepAgent should enable workspace memory tools."""
         agent = DeepAgent(
             name="Test",
             system_instruction="Test",
             model_config={"provider": "openai", "model": "gpt-4"},
             agent_config={},
         )
-        assert agent.agent_config["memory_tool_backend"] == "workspace"
+        assert agent.agent_config["enable_workspace_memory"] is True
 
     @pytest.mark.asyncio
     async def test_prompt_builder_assigned(self, deep_agent):

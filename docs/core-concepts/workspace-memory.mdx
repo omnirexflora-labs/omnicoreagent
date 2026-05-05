@@ -6,9 +6,9 @@ icon: 'folder-open'
 
 # Workspace Memory
 
-> Memory files live inside the same workspace backend used by artifacts and other workspace files.
+> Workspace memory is file-style agent memory for notes, scratchpads, logs, todos, task progress, generated code, and research files.
 
-Workspace memory gives agents a durable file area for notes, plans, research, and generated context. There is no separate memory storage backend: choose the workspace backend once, and memory uses `memories/` inside that workspace.
+Workspace memory gives agents a durable filesystem-like area inside the active workspace. There is no separate memory storage backend: choose the workspace backend once, and memory uses `memories/` inside that workspace.
 
 ---
 
@@ -24,7 +24,7 @@ Workspace memory gives agents a durable file area for notes, plans, research, an
 
 ## Quick Setup
 
-Enable the memory tools, then choose the workspace backend with environment variables.
+Enable workspace memory tools, then choose the workspace backend with environment variables.
 
 ```bash
 pip install "omnicoreagent[s3]"
@@ -32,7 +32,7 @@ pip install "omnicoreagent[s3]"
 
 ```python
 agent_config = {
-    "memory_tool_backend": "workspace"
+    "enable_workspace_memory": True
 }
 ```
 
@@ -71,17 +71,17 @@ R2_SECRET_ACCESS_KEY=your-r2-secret
 
 ---
 
-## Agent Memory Tools
+## Workspace Memory Tools
 
 When enabled, your agent automatically gets these tools:
 
 | Tool | Purpose |
 |------|---------|
-| `memory_view` | View/list files in memory workspace |
+| `memory_view` | View/list files in workspace memory |
 | `memory_create_update` | Create, append, or overwrite files |
 | `memory_str_replace` | Find and replace text within files |
 | `memory_insert` | Insert text at specific line numbers |
-| `memory_delete` | Delete files from workspace |
+| `memory_delete` | Delete files from workspace memory |
 | `memory_rename` | Rename or move files |
 | `memory_clear_all` | Clear entire workspace |
 
@@ -130,7 +130,7 @@ agent = OmniCoreAgent(
     system_instruction="You are a research assistant. Save your findings to memory.",
     model_config={"provider": "openai", "model": "gpt-4o"},
     agent_config={
-        "memory_tool_backend": "workspace",
+        "enable_workspace_memory": True,
         "max_steps": 50,
     }
 )

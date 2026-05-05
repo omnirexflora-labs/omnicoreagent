@@ -1,13 +1,14 @@
 """
-Memory Tool backends for OmniCoreAgent.
+Workspace memory tools for OmniCoreAgent.
 
-Provides pluggable storage backends for the memory tool:
-- WorkspaceMemoryBackend: memory files inside the active workspace storage
+Provides file-style workspace memory for notes, scratchpads, logs, todos,
+task progress, and generated files. Files live inside the active workspace
+storage under the memories namespace.
 
 Usage:
     # In agent config
     agent_config = {
-        "memory_tool_backend": "workspace",
+        "enable_workspace_memory": True,
     }
 """
 

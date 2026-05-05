@@ -105,7 +105,7 @@ class BaseReactAgent:
         request_limit: int = 0,
         total_tokens_limit: int = 0,
         enable_advanced_tool_use: bool = False,
-        memory_tool_backend: str = None,
+        enable_workspace_memory: bool = False,
         enable_agent_skills: bool = False,
         context_management_config: dict = None,
         tool_offload_config: dict = None,
@@ -124,7 +124,7 @@ class BaseReactAgent:
         self._limits_enabled = request_limit > 0 or total_tokens_limit > 0
         self.enable_advanced_tool_use = enable_advanced_tool_use
 
-        self.memory_tool_backend = memory_tool_backend
+        self.enable_workspace_memory = enable_workspace_memory
         self.enable_agent_skills = enable_agent_skills
         self.skill_manager = None
         self.usage_limits = UsageLimits(
@@ -1022,7 +1022,7 @@ class BaseReactAgent:
         registry = local_tools
         needs_internal_registry = (
             self.enable_advanced_tool_use
-            or self.memory_tool_backend
+            or self.enable_workspace_memory
             or self.tool_offloader.config.enabled
             or (self.enable_agent_skills and self.skill_manager)
         )
@@ -1036,9 +1036,9 @@ class BaseReactAgent:
         if self.enable_advanced_tool_use:
             await build_tool_registry_advance_tools_use(registry=registry)
 
-        if self.memory_tool_backend:
+        if self.enable_workspace_memory:
             build_tool_registry_memory_tool(
-                memory_tool_backend=None,
+                backend=None,
                 registry=registry,
             )
 
@@ -1247,7 +1247,7 @@ class BaseReactAgent:
         if sub_agents:
             updated_system_prompt += f"\n{sub_agents_additional_prompt}"
 
-        if self.memory_tool_backend:
+        if self.enable_workspace_memory:
             updated_system_prompt += f"\n{memory_tool_additional_prompt}"
 
         if self.tool_offloader.config.enabled:

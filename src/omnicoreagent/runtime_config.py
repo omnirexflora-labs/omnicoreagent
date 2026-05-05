@@ -64,7 +64,7 @@ class AgentConfig:
             "summary": {"enabled": False, "retention_policy": "keep"},
         }
     )
-    memory_tool_backend: str | None = None
+    enable_workspace_memory: bool = False
     guardrail_config: dict[str, Any] | None = None
     guardrail_mode: str = "full"
     context_management: dict[str, Any] = field(

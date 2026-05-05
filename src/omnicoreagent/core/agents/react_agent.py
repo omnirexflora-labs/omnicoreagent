@@ -14,7 +14,7 @@ class ReactAgent(BaseReactAgent):
             request_limit=config.request_limit,
             total_tokens_limit=config.total_tokens_limit,
             enable_advanced_tool_use=config.enable_advanced_tool_use,
-            memory_tool_backend=config.memory_tool_backend,
+            enable_workspace_memory=config.enable_workspace_memory,
             enable_agent_skills=config.enable_agent_skills,
             context_management_config=config.context_management,
             tool_offload_config=getattr(config, "tool_offload", None),

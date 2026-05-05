@@ -7,7 +7,7 @@ from omnicoreagent.core.workspace_storage import WorkspaceStorage
 
 
 class WorkspaceMemoryBackend(AbstractMemoryBackend):
-    """Memory backend backed by the active workspace storage."""
+    """File-style memory rooted inside the active workspace storage."""
 
     def __init__(self, storage: WorkspaceStorage):
         self.storage = storage

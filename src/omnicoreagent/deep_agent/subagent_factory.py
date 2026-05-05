@@ -73,8 +73,8 @@ class SubagentFactory:
 
         config["max_steps"] = min(config.get("max_steps", 15), 15)
 
-        if "memory_tool_backend" not in config:
-            config["memory_tool_backend"] = "workspace"
+        if "enable_workspace_memory" not in config:
+            config["enable_workspace_memory"] = True
 
         return config
 
