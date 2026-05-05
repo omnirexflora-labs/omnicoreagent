@@ -94,6 +94,17 @@ from omnicoreagent.core.agents.xml_parser import (
     parse_action_or_answer,
 )
 
+TOOL_OUTPUT_OFFLOAD_EXCLUDED_TOOLS = frozenset(
+    {
+        "read_artifact",
+        "tail_artifact",
+        "search_artifact",
+        "list_artifacts",
+        "memory_view",
+        "memory_create_update",
+    }
+)
+
 
 class BaseReactAgent:
     """Autonomous agent implementing the ReAct paradigm for task solving through iterative reasoning and tool usage."""
@@ -217,6 +228,90 @@ class BaseReactAgent:
                     )
 
         return tools_results
+
+    def _maybe_offload_tool_result(
+        self,
+        result: dict[str, Any],
+        session_id: str | None,
+    ) -> dict[str, Any]:
+        tool_name = result.get("tool_name", "unknown_tool")
+        data = result.get("data")
+
+        if (
+            data is None
+            or not self.tool_offloader.config.enabled
+            or tool_name in TOOL_OUTPUT_OFFLOAD_EXCLUDED_TOOLS
+        ):
+            return result
+
+        data_str = data if isinstance(data, str) else str(data)
+        if not self.tool_offloader.should_offload(data_str):
+            return result
+
+        offloaded = self.tool_offloader.offload(
+            tool_name=tool_name,
+            response=data_str,
+            metadata={"args": result.get("args", {}), "session_id": session_id},
+        )
+        result["data"] = offloaded.context_message
+        return result
+
+    def _build_tool_results_observation(
+        self,
+        tool_call_results: list[ToolCallResult],
+        tools_results: list[dict[str, Any]],
+        session_state: SessionState,
+        session_id: str | None,
+    ) -> str:
+        obs_lines = []
+        success_count = 0
+        error_count = 0
+        tool_counter = defaultdict(int)
+        seen_tools: set[str] = set()
+
+        for result in tools_results[: len(tool_call_results)]:
+            result = self._maybe_offload_tool_result(
+                result=result,
+                session_id=session_id,
+            )
+            tool_name = result.get("tool_name", "unknown_tool")
+            args = result.get("args", {})
+            status = result.get("status", "unknown")
+            data = result.get("data")
+            message = result.get("message", "")
+
+            tool_counter[tool_name] += 1
+            tool_call_generated_id = f"{tool_name}#{tool_counter[tool_name]}"
+            display_value = data if data is not None else message
+            if tool_name not in seen_tools:
+                seen_tools.add(tool_name)
+                session_state.loop_detector.record_tool_call(
+                    str(tool_name),
+                    str(args),
+                    str(display_value),
+                )
+
+            if status == "success":
+                obs_lines.append(f"{tool_call_generated_id}: {display_value}")
+                success_count += 1
+            elif status == "error":
+                reason = display_value or "Unknown error occurred."
+                obs_lines.append(f"{tool_call_generated_id} ERROR: {reason}")
+                error_count += 1
+            else:
+                obs_lines.append(
+                    f"{tool_call_generated_id}: Unexpected status '{status}'"
+                )
+                error_count += 1
+
+        if success_count == len(tools_results):
+            return "\n\n".join(obs_lines)
+        if success_count > 0 and error_count > 0:
+            return "Partial success:\n" + "\n\n".join(obs_lines)
+        if error_count == len(tools_results):
+            error_details = "\n\n".join(obs_lines)
+            return f"Tool execution failed completely:\n{error_details}"
+        return "\n\n".join(obs_lines) or "No valid tool results."
 
     async def extract_action_or_answer(
         self,
@@ -721,83 +816,16 @@ class BaseReactAgent:
                 )
 
                 tools_results = observation.get("tools_results", [])
-                obs_lines = []
-                success_count = 0
-                error_count = 0
 
                 if not isinstance(tool_call_result, (list, tuple)):
                     tool_call_result = [tool_call_result]
 
-                tool_counter = defaultdict(int)
-                seen_tools: set[str] = set()
-                for single_tool, result in zip(tool_call_result, tools_results):
-                    tool_name = result.get("tool_name", "unknown_tool")
-                    args = result.get("args", {})
-                    status = result.get("status", "unknown")
-                    data = result.get("data")
-                    message = result.get("message", "")
-
-                    SKIP_OFFLOAD_TOOLS = {
-                        "read_artifact",
-                        "tail_artifact",
-                        "search_artifact",
-                        "list_artifacts",
-                        "memory_view",
-                        "memory_create_update",
-                    }
-
-                    if (
-                        data is not None
-                        and self.tool_offloader.config.enabled
-                        and tool_name not in SKIP_OFFLOAD_TOOLS
-                    ):
-                        data_str = str(data) if not isinstance(data, str) else data
-                        if self.tool_offloader.should_offload(data_str):
-                            offloaded = self.tool_offloader.offload(
-                                tool_name=tool_name,
-                                response=data_str,
-                                metadata={"args": args, "session_id": session_id},
-                            )
-                            data = offloaded.context_message
-                            result["data"] = data
-
-                    tool_counter[tool_name] += 1
-                    tool_call_generated_id = f"{tool_name}#{tool_counter[tool_name]}"
-                    display_value = data if data is not None else message
-                    if tool_name not in seen_tools:
-                        seen_tools.add(tool_name)
-                        session_state.loop_detector.record_tool_call(
-                            str(tool_name),
-                            str(args),
-                            str(display_value),
-                        )
-
-                    if status == "success":
-                        obs_lines.append(f"{tool_call_generated_id}: {display_value}")
-                        success_count += 1
-                    elif status == "error":
-                        reason = display_value or "Unknown error occurred."
-                        obs_lines.append(f"{tool_call_generated_id} ERROR: {reason}")
-                        error_count += 1
-                    else:
-                        obs_lines.append(
-                            f"{tool_call_generated_id}: Unexpected status '{status}'"
-                        )
-                        error_count += 1
-                seen_tools.clear()
-                if success_count == len(tools_results):
-                    status = "success"
-                    obs_text = "\n\n".join(obs_lines)
-                elif success_count > 0 and error_count > 0:
-                    status = "partial"
-                    obs_text = "Partial success:\n" + "\n\n".join(obs_lines)
-                elif error_count == len(tools_results):
-                    status = "error"
-                    error_details = "\n\n".join(obs_lines)
-                    obs_text = f"Tool execution failed completely:\n{error_details}"
-                else:
-                    status = observation.get("status", "unknown")
-                    obs_text = "\n\n".join(obs_lines) or "No valid tool results."
+                obs_text = self._build_tool_results_observation(
+                    tool_call_results=list(tool_call_result),
+                    tools_results=tools_results,
+                    session_state=session_state,
+                    session_id=session_id,
+                )
 
                 event = Event(
                     type=EventType.TOOL_CALL_RESULT,
