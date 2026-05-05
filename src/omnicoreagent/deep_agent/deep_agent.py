@@ -33,7 +33,7 @@ from .subagent_factory import SubagentFactory, build_subagent_tools
 DEFAULT_DEEP_AGENT_CONFIG = {
     "tool_call_timeout": 600,
     "max_steps": 50,
-    "memory_tool_backend": "workspace",
+    "enable_workspace_memory": True,
     "memory_config": {
         "mode": "sliding_window",
         "value": 15000,
@@ -65,7 +65,7 @@ class DeepAgent:
     1. Custom DeepAgentPromptBuilder (clean prompt structure)
     2. Subagent spawning tools
     3. Full agent_config benefits (context_management, tool_offload, etc.)
-    4. Memory_tool_backend always local (required for orchestration)
+    4. Workspace-backed memory tools enabled by default
 
     NOTE: Task paths for memory organization are chosen dynamically by the
     lead agent when it spawns subagents - not hardcoded in base prompt.
@@ -137,9 +137,6 @@ class DeepAgent:
                     config[key] = {**config[key], **value}
                 else:
                     config[key] = value
-
-        if "memory_tool_backend" not in config:
-            config["memory_tool_backend"] = "workspace"
 
         return config
 

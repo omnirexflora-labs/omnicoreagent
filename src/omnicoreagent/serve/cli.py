@@ -347,7 +347,7 @@ def generate_dockerfile(file_path: str, output_dir: str):
     try:
         loaded_agent = _load_agent_from_file(file_path)
         if loaded_agent.agent_config and isinstance(loaded_agent.agent_config, dict):
-            memory_enabled = bool(loaded_agent.agent_config.get("memory_tool_backend"))
+            memory_enabled = bool(loaded_agent.agent_config.get("enable_workspace_memory"))
         console.print(f"[green]✓ Detected agent: {loaded_agent.name}[/green]")
         if memory_enabled:
             console.print("[dim]Workspace memory tools enabled[/dim]")

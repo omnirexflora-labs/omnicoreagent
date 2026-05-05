@@ -63,17 +63,17 @@ class MemoryTool:
 
 
 def build_tool_registry_memory_tool(
-    memory_tool_backend: AbstractMemoryBackend | None,
+    backend: AbstractMemoryBackend | None,
     registry: ToolRegistry,
 ) -> ToolRegistry:
     """
     Register memory tool commands in a ToolRegistry.
 
     Args:
-        memory_tool_backend: Optional backend instance. None uses workspace storage.
+        backend: Optional backend instance. None uses workspace storage.
         registry: ToolRegistry to register commands with
     """
-    memory_tool = MemoryTool(backend=memory_tool_backend)
+    memory_tool = MemoryTool(backend=backend)
 
     @registry.register_tool(
         name="memory_view",

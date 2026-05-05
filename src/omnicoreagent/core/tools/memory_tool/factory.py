@@ -15,7 +15,7 @@ def create_memory_backend(
     use_cache: bool = True,
 ) -> AbstractMemoryBackend:
     """
-    Create the memory backend from the active workspace storage.
+    Create the workspace memory backend from the active workspace storage.
 
     Args:
         use_cache: If True (default), reuse cached backend instances
@@ -29,7 +29,7 @@ def create_memory_backend(
     if use_cache:
         with _cache_lock:
             if cache_key in _backend_cache:
-                logger.debug("Reusing cached workspace memory backend")
+                logger.debug("Reusing cached workspace memory storage")
                 return _backend_cache[cache_key]
 
     # Create new backend
@@ -76,7 +76,7 @@ def _backend_cache_key() -> tuple:
 
 def _create_backend_instance(storage) -> AbstractMemoryBackend:
     """Create a new backend instance (internal, no caching)."""
-    logger.info("Creating workspace memory backend")
+    logger.info("Creating workspace memory storage")
     return WorkspaceMemoryBackend(storage=storage)
 
 
@@ -84,4 +84,4 @@ def clear_backend_cache():
     """Clear the backend cache (useful for testing or reconfiguration)."""
     with _cache_lock:
         _backend_cache.clear()
-        logger.info("Memory backend cache cleared")
+        logger.info("Workspace memory cache cleared")

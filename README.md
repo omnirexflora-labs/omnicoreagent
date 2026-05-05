@@ -207,7 +207,7 @@ agent_config = {
     "memory_config": {"mode": "sliding_window", "value": 10000},
     "enable_advanced_tool_use": True,   # BM25 tool retrieval
     "enable_agent_skills": True,        # Specialized packaged skills
-    "memory_tool_backend": "workspace"  # Memory files live in workspace
+    "enable_workspace_memory": True     # File memory: notes, logs, scratchpads
 }
 ```
 

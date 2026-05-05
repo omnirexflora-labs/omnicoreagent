@@ -160,7 +160,7 @@ agent = DeepAgent(
         # These are the defaults (you can override):
         "max_steps": 50,  # More steps for orchestration
         "tool_call_timeout": 600,  # 10 min (subagents do deep work)
-        "memory_tool_backend": "workspace",
+        "enable_workspace_memory": True,
         "context_management": {"enabled": True},
         "tool_offload": {"enabled": True},
     }
@@ -169,7 +169,7 @@ agent = DeepAgent(
 
 ### Key Config Notes
 
-- **`memory_tool_backend`**: Use `"workspace"` so memory files live inside the active workspace backend
+- **`enable_workspace_memory`**: Enabled by default for file-style notes, logs, todos, scratchpads, and task progress inside the active workspace
 - **`max_steps`**: Increased to `50` to allow for multi-agent coordination
 - **`tool_call_timeout`**: Set to `600s` because subagents may do research, API calls, etc.
 

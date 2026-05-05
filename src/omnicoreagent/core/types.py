@@ -23,9 +23,12 @@ class AgentConfig(BaseModel):
         "summary": {"enabled": False, "retention_policy": "keep"},
     }
 
-    memory_tool_backend: str | None = Field(
-        default=None,
-        description="Enable the memory tool. Memory is always stored inside the active workspace backend.",
+    enable_workspace_memory: bool = Field(
+        default=False,
+        description=(
+            "Enable file-style workspace memory tools for notes, scratchpads, "
+            "logs, todos, task progress, and generated files."
+        ),
     )
 
     enable_agent_skills: bool = Field(
@@ -55,18 +58,6 @@ class AgentConfig(BaseModel):
         },
         description="Tool response offloading config to reduce context size from large tool outputs",
     )
-
-    @field_validator("memory_tool_backend")
-    @classmethod
-    def validate_backend(cls, v):
-        if v is None:
-            return v
-        allowed = {"workspace"}
-        if v not in allowed:
-            raise ValueError(
-                f"Invalid memory_tool_backend '{v}'. Must be one of {allowed}."
-            )
-        return v
 
     @field_validator("request_limit", "total_tokens_limit", mode="before")
     @classmethod
