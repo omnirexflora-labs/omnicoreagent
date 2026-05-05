@@ -76,8 +76,8 @@ class TestDeepAgentPromptBuilder:
         # task_id should not be in base prompt anymore
         assert "<task_id>" not in result or "task_name" in result  # Only example paths
 
-    def test_build_includes_react_suffix(self, prompt_builder):
-        """React suffix should be included."""
+    def test_build_includes_react_runtime_prompt(self, prompt_builder):
+        """ReAct runtime prompt should be included."""
         result = prompt_builder.build(user_instruction="Test")
         assert "<react_pattern>" in result
         assert "<tool_usage>" in result

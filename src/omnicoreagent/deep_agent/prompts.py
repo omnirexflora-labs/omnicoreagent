@@ -4,12 +4,12 @@ DeepAgent Prompt Builder and Orchestration Prompts.
 Clean prompt structure:
 1. <system_instruction> - User's domain-specific instruction
 2. <deep_agent_capabilities> - Multi-agent orchestration
-3. {SYSTEM_SUFFIX} - ReAct pattern, tool usage, etc.
+3. {REACT_AGENT_PROMPT} - ReAct pattern, tool usage, etc.
 
 NOTE: task_id is for when SPAWNING subagents, not part of base prompt.
 """
 
-from omnicoreagent.prompts.react_suffix import SYSTEM_SUFFIX
+from omnicoreagent.core.agents.prompting import REACT_AGENT_PROMPT
 
 
 DEEP_AGENT_ORCHESTRATION_PROMPT = """
@@ -840,20 +840,20 @@ class DeepAgentPromptBuilder:
 
     1. <system_instruction> - User's domain instruction (pure)
     2. <deep_agent_capabilities> - Orchestration extension
-    3. {SYSTEM_SUFFIX} - ReAct pattern, tools, memory, etc.
+    3. {REACT_AGENT_PROMPT} - ReAct pattern, tools, memory, etc.
 
     NOTE: No task_id in base prompt. Task paths are chosen dynamically
     when the lead agent spawns subagents.
     """
 
-    def __init__(self, system_suffix: str = SYSTEM_SUFFIX):
+    def __init__(self, react_prompt: str = REACT_AGENT_PROMPT):
         """
         Initialize the prompt builder.
 
         Args:
-            system_suffix: The ReAct suffix (defaults to SYSTEM_SUFFIX)
+            react_prompt: The ReAct runtime prompt (defaults to REACT_AGENT_PROMPT)
         """
-        self.system_suffix = system_suffix.strip()
+        self.react_prompt = react_prompt.strip()
         self.orchestration_prompt = DEEP_AGENT_ORCHESTRATION_PROMPT.strip()
 
     def build(
@@ -885,7 +885,7 @@ class DeepAgentPromptBuilder:
 
 {self.orchestration_prompt}
 
-{self.system_suffix}
+{self.react_prompt}
 """.strip()
 
     def build_subagent_prompt(
@@ -934,11 +934,11 @@ When you have completed your investigation:
     <rule>Consult the AVAILABLE TOOLS REGISTRY below for valid tools and schemas.</rule>
     <rule>Do NOT hallucinate tools or parameters - use EXACTLY what is defined.</rule>
     <rule>To save your work, you MUST use the memory_create_update tool.</rule>
-    <rule>Structure your tool calls using the XML format defined in the system suffix.</rule>
+    <rule>Structure your tool calls using the XML format defined in the ReAct runtime prompt.</rule>
   </critical_rules>
 </subagent_tool_guidance>
 
-{self.system_suffix}
+{self.react_prompt}
 """.strip()
 
 
