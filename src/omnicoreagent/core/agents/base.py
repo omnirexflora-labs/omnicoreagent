@@ -60,6 +60,7 @@ from omnicoreagent.core.tool_response_offloader import (
     ToolResponseOffloader,
     OffloadConfig,
 )
+from omnicoreagent.core.agents.message_history import AgentMessageHistoryLoader
 from omnicoreagent.core.tools.tool_observation import ToolObservationHandler
 from omnicoreagent.core.guardrails import PromptInjectionGuard
 from omnicoreagent.core.agents.xml_parser import (
@@ -126,6 +127,9 @@ class BaseReactAgent:
         )
         self.tool_call_resolver = ToolCallResolver(guardrail=self.guardrail)
         self.tool_failure_handler = ToolFailureHandler(agent_name=self.agent_name)
+        self.message_history_loader = AgentMessageHistoryLoader(
+            agent_name=self.agent_name
+        )
         self.tool_batch_runner = ToolBatchRunner(
             agent_name=self.agent_name,
             tool_call_timeout=self.tool_call_timeout,
@@ -189,86 +193,6 @@ class BaseReactAgent:
                 await event_router(session_id=session_id, event=event)
 
         return parse_action_or_answer(response, debug=debug)
-
-    @track("memory_processing")
-    async def update_llm_working_memory(
-        self,
-        message_history: Callable[[], Any],
-        session_id: str,
-        llm_connection: Callable,
-        debug: bool,
-    ):
-        """Update the LLM's working memory with the current message history and process memory asynchronously"""
-
-        short_term_memory_message_history = await message_history(
-            agent_name=self.agent_name, session_id=session_id
-        )
-        if not short_term_memory_message_history:
-            return
-
-        validated_messages = [
-            Message.model_validate(msg) if isinstance(msg, dict) else msg
-            for msg in short_term_memory_message_history
-        ]
-        session_state = self._get_session_state(session_id=session_id, debug=debug)
-        for message in validated_messages:
-            role = message.role
-            metadata = message.metadata
-
-            if role == "user":
-                if not message.content.strip().startswith("<observations>"):
-                    self._try_flush_pending(session_id=session_id, debug=debug)
-                    session_state.messages.append(
-                        Message(role="user", content=message.content)
-                    )
-
-            elif role == "assistant":
-                if metadata.has_tool_calls:
-                    self._try_flush_pending(session_id=session_id, debug=debug)
-                    session_state.assistant_with_tool_calls = {
-                        "role": "assistant",
-                        "content": message.content,
-                        "tool_calls": (
-                            [tc.model_dump() for tc in metadata.tool_calls]
-                            if metadata.tool_calls
-                            else []
-                        ),
-                    }
-                    session_state.pending_tool_responses = []
-                else:
-                    self._try_flush_pending(session_id=session_id, debug=debug)
-                    session_state.messages.append(
-                        Message(role="assistant", content=message.content)
-                    )
-
-            elif role == "tool":
-                session_state.pending_tool_responses.append(
-                    {
-                        "role": "tool",
-                        "content": message.content,
-                        "tool_call_id": metadata.tool_call_id,
-                    }
-                )
-                self._try_flush_pending(session_id=session_id, debug=debug)
-
-            else:
-                logger.warning(f"Unknown message role encountered: {role}")
-
-    def _try_flush_pending(self, session_id: str, debug: bool):
-        session_state = self._get_session_state(session_id=session_id, debug=debug)
-        if session_state.assistant_with_tool_calls:
-            expected = {
-                tc["id"]
-                for tc in session_state.assistant_with_tool_calls.get("tool_calls", [])
-            }
-            actual = {
-                resp["tool_call_id"] for resp in session_state.pending_tool_responses
-            }
-            if not (expected - actual):
-                session_state.messages.append(session_state.assistant_with_tool_calls)
-                session_state.messages.extend(session_state.pending_tool_responses)
-                session_state.assistant_with_tool_calls = None
-                session_state.pending_tool_responses = []
 
     async def resolve_tool_call_request(
         self,
@@ -411,7 +335,6 @@ class BaseReactAgent:
         session_state,
         system_prompt: str,
         session_id: str,
-        llm_connection: Callable,
         message_history: Callable[[], Any],
         mcp_tools: dict = None,
         local_tools: Any = None,
@@ -430,11 +353,10 @@ class BaseReactAgent:
             mcp_tools=mcp_tools, local_tools=local_tools
         )
 
-        tasks["history"] = self.update_llm_working_memory(
+        tasks["history"] = self.message_history_loader.load(
             message_history=message_history,
             session_id=session_id,
-            llm_connection=llm_connection,
-            debug=debug,
+            session_state=session_state,
         )
 
         try:
@@ -697,7 +619,6 @@ class BaseReactAgent:
         await self.prepare_initial_messages(
             system_prompt=system_prompt,
             session_state=session_state,
-            llm_connection=llm_connection,
             message_history=message_history,
             mcp_tools=mcp_tools,
             local_tools=runtime_local_tools,

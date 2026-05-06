@@ -7,6 +7,15 @@ from fastapi.testclient import TestClient
 from omnicoreagent import OmniCoreAgent, OmniServe, OmniServeConfig
 from omnicoreagent.serve.resilience import CircuitBreaker, CircuitBreakerConfig, CircuitBreakerOpenError
 
+
+@pytest.fixture(autouse=True)
+def isolate_omniserve_env(monkeypatch):
+    """Keep local dotenv values from changing explicit test config."""
+    for key in list(os.environ):
+        if key.startswith("OMNISERVE_"):
+            monkeypatch.delenv(key, raising=False)
+
+
 # =============================================================================
 # Test Configuration
 # =============================================================================
