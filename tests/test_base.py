@@ -220,7 +220,7 @@ async def test_run_prepares_internal_tools_once_for_prompt_and_execution(monkeyp
         return registry
 
     monkeypatch.setattr(
-        "omnicoreagent.core.agents.base.build_tool_registry_advance_tools_use",
+        "omnicoreagent.core.tools.tool_runtime_registry.build_tool_registry_advance_tools_use",
         fake_build_internal_tools,
     )
 

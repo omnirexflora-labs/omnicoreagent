@@ -34,6 +34,7 @@ from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.tool_batch_runner import ToolBatchRunner
 from omnicoreagent.core.tools.tool_call_resolver import ToolCallResolver
 from omnicoreagent.core.tools.tool_failure_handler import ToolFailureHandler
+from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
 from omnicoreagent.core.utils import (
     RobustLoopDetector,
     logger,
@@ -57,16 +58,6 @@ from omnicoreagent.core.events.base import (
     SubAgentCallResultPayload,
     SubAgentCallErrorPayload,
 )
-from omnicoreagent.core.tools.advance_tools_use import (
-    build_tool_registry_advance_tools_use,
-)
-from omnicoreagent.core.tools.memory_tool.memory_tool import (
-    build_tool_registry_memory_tool,
-)
-from omnicoreagent.core.tools.artifact_tool import (
-    build_tool_registry_artifact_tool,
-)
-from omnicoreagent.core.skills.tools import build_skill_tools
 from omnicoreagent.core.context_manager import (
     AgentLoopContextManager,
     ContextManagementConfig,
@@ -144,6 +135,15 @@ class BaseReactAgent:
         self.tool_batch_runner = ToolBatchRunner(
             agent_name=self.agent_name,
             tool_call_timeout=self.tool_call_timeout,
+        )
+        self.tool_runtime_registry = ToolRuntimeRegistry(
+            register_internal_tool=self.register_internal_tool,
+            tool_offloader=self.tool_offloader,
+            enable_advanced_tool_use=self.enable_advanced_tool_use,
+            enable_subagents=self.enable_subagents,
+            enable_workspace_memory=self.enable_workspace_memory,
+            enable_agent_skills=self.enable_agent_skills,
+            skill_manager=self.skill_manager,
         )
 
     def init_skills(self):
@@ -404,169 +404,6 @@ class BaseReactAgent:
         finally:
             session_state.state = previous_state
 
-    async def prepare_runtime_tools(self, local_tools: Any = None):
-        registry = local_tools
-        needs_internal_registry = (
-            self.enable_advanced_tool_use
-            or self.enable_subagents
-            or self.enable_workspace_memory
-            or self.tool_offloader.config.enabled
-            or (self.enable_agent_skills and self.skill_manager)
-        )
-
-        if registry is None and needs_internal_registry:
-            registry = self.register_internal_tool
-
-        if registry is None:
-            return None
-
-        if self.enable_advanced_tool_use:
-            await build_tool_registry_advance_tools_use(registry=registry)
-
-        if self.enable_workspace_memory:
-            build_tool_registry_memory_tool(
-                backend=None,
-                registry=registry,
-            )
-
-        if self.tool_offloader.config.enabled:
-            build_tool_registry_artifact_tool(
-                offloader=self.tool_offloader,
-                registry=registry,
-            )
-
-        if self.enable_agent_skills and self.skill_manager:
-            build_skill_tools(
-                skill_manager=self.skill_manager,
-                registry=registry,
-            )
-
-        return registry
-
-    async def get_tools_registry(
-        self, mcp_tools: dict = None, local_tools: Any = None
-    ) -> str:
-        lines = ["Available tools:"]
-
-        def format_param_type(param_info: dict) -> str:
-            """Format parameter type with nested structure details."""
-            p_type = param_info.get("type", "any")
-
-            if p_type == "array":
-                items = param_info.get("items", {})
-                if items:
-                    item_type = items.get("type", "any")
-                    if item_type == "object":
-                        props = items.get("properties", {})
-                        if props:
-                            fields = ", ".join(
-                                [
-                                    f'"{k}": {v.get("type", "any")}'
-                                    for k, v in props.items()
-                                ]
-                            )
-                            return f"array of objects ({{{fields}}})"
-                        return "array of objects"
-                    else:
-                        return f"array of {item_type}s"
-                return "array"
-
-            elif p_type == "object":
-                props = param_info.get("properties", {})
-                if props:
-                    fields = ", ".join(
-                        [f'"{k}": {v.get("type", "any")}' for k, v in props.items()]
-                    )
-                    return f"object ({{{fields}}})"
-                return "object"
-
-            return p_type
-
-        def format_param_description(param_info: dict) -> str:
-            """Format parameter description with structure examples."""
-            p_desc = param_info.get("description", "").replace("\n", " ").strip()
-            p_type = param_info.get("type", "any")
-
-            if p_type == "array":
-                items = param_info.get("items", {})
-                if items.get("type") == "object":
-                    props = items.get("properties", {})
-                    if props:
-                        example_fields = []
-                        for k, v in props.items():
-                            v_type = v.get("type", "any")
-                            if v_type == "string":
-                                example_fields.append(f'"{k}": "..."')
-                            elif v_type == "number":
-                                example_fields.append(f'"{k}": 0')
-                            elif v_type == "boolean":
-                                example_fields.append(f'"{k}": true')
-                            else:
-                                example_fields.append(f'"{k}": ...')
-
-                        example = "{" + ", ".join(example_fields) + "}"
-                        if p_desc:
-                            p_desc += f". Example: {example}"
-                        else:
-                            p_desc = f"Example: {example}"
-
-            return p_desc if p_desc else "No description"
-
-        try:
-            if local_tools:
-                local_tools_list = local_tools.get_available_tools()
-                if local_tools_list:
-                    for tool in local_tools_list:
-                        if isinstance(tool, dict):
-                            name = tool.get("name", "unknown")
-                            desc = (
-                                tool.get("description", "").replace("\n", " ").strip()
-                            )
-                            lines.append(f"\n{name}: {desc}")
-                            input_schema = tool.get("inputSchema", {})
-                            params = input_schema.get("properties", {})
-                            required = input_schema.get("required", [])
-                            if params:
-                                for param_name, param_info in params.items():
-                                    p_type = format_param_type(param_info)
-                                    p_desc = format_param_description(param_info)
-                                    is_req = (
-                                        " (required)" if param_name in required else ""
-                                    )
-                                    lines.append(
-                                        f"  - {param_name}: {p_type}{is_req} — {p_desc}"
-                                    )
-
-            if mcp_tools and not self.enable_advanced_tool_use:
-                for server_name, tools in mcp_tools.items():
-                    if not tools:
-                        continue
-                    for tool in tools:
-                        if hasattr(tool, "name"):
-                            name = str(tool.name)
-                            desc = str(tool.description).replace("\n", " ").strip()
-                            lines.append(f"\n{name}: {desc}")
-                            if hasattr(tool, "inputSchema") and tool.inputSchema:
-                                params = tool.inputSchema.get("properties", {})
-                                required = tool.inputSchema.get("required", [])
-                                for param_name, param_info in params.items():
-                                    p_type = format_param_type(param_info)
-                                    p_desc = format_param_description(param_info)
-                                    is_req = (
-                                        " (required)" if param_name in required else ""
-                                    )
-                                    lines.append(
-                                        f"  - {param_name}: {p_type}{is_req} — {p_desc}"
-                                    )
-
-            if len(lines) == 1:
-                return "No tools available"
-        except Exception as e:
-            logger.error(f"Error building compact tool registry: {e}")
-            return "No tools available"
-
-        return "\n".join(lines)
-
     async def prepare_initial_messages(
         self,
         session_state,
@@ -587,7 +424,7 @@ class BaseReactAgent:
         """
         tasks = {}
 
-        tasks["tools"] = self.get_tools_registry(
+        tasks["tools"] = self.tool_runtime_registry.render_prompt_registry(
             mcp_tools=mcp_tools, local_tools=local_tools
         )
 
@@ -966,7 +803,9 @@ class BaseReactAgent:
             session_id=session_id,
             metadata={"agent_name": self.agent_name},
         )
-        runtime_local_tools = await self.prepare_runtime_tools(local_tools=local_tools)
+        runtime_local_tools = await self.tool_runtime_registry.prepare_tools(
+            local_tools=local_tools
+        )
         await self.prepare_initial_messages(
             system_prompt=system_prompt,
             session_state=session_state,
