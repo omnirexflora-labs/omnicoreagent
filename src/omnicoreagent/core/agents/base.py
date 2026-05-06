@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import time
 
-import json
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Tuple
@@ -37,12 +36,7 @@ from omnicoreagent.core.utils import (
     show_tool_response,
     track,
     BackgroundTaskManager,
-    resolve_agent,
-    build_kwargs,
-    build_sub_agents_observation_xml,
-    show_sub_agent_call_result,
 )
-from datetime import datetime
 from omnicoreagent.core.events.base import (
     Event,
     EventType,
@@ -50,9 +44,6 @@ from omnicoreagent.core.events.base import (
     AgentMessagePayload,
     UserMessagePayload,
     AgentThoughtPayload,
-    SubAgentCallStartedPayload,
-    SubAgentCallResultPayload,
-    SubAgentCallErrorPayload,
 )
 from omnicoreagent.core.context_manager import (
     AgentLoopContextManager,
@@ -62,7 +53,12 @@ from omnicoreagent.core.tool_response_offloader import (
     ToolResponseOffloader,
     OffloadConfig,
 )
+from omnicoreagent.core.agents.llm_response import (
+    extract_response_content,
+    extract_response_usage,
+)
 from omnicoreagent.core.agents.message_history import AgentMessageHistoryLoader
+from omnicoreagent.core.agents.subagent_runner import SubAgentCallRunner
 from omnicoreagent.core.tools.tool_observation import ToolObservationHandler
 from omnicoreagent.core.agents.xml_parser import (
     extract_thought,
@@ -134,6 +130,7 @@ class BaseReactAgent:
         self.message_history_loader = AgentMessageHistoryLoader(
             agent_name=self.agent_name
         )
+        self.subagent_runner = SubAgentCallRunner(agent_name=self.agent_name)
         self.tool_batch_runner = ToolBatchRunner(
             agent_name=self.agent_name,
             tool_call_timeout=self.tool_call_timeout,
@@ -420,158 +417,16 @@ class BaseReactAgent:
         3. Formats results into proper XML observations
         4. Adds observations to message history
         """
-        event = Event(
-            type=EventType.SUB_AGENT_CALL_STARTED,
-            payload=SubAgentCallStartedPayload(
-                agent_name=self.agent_name,
-                session_id=session_id,
-                timestamp=str(datetime.now()),
-                run_count=0,
-                kwargs={"agent_calls": agent_calls},
-            ),
-            agent_name=self.agent_name,
-        )
-        if event_router:
-            await event_router(session_id=session_id, event=event)
-        metadata = {"agent_calls": agent_calls}
-        await add_message_to_history(
-            role="assistant",
-            content=response,
-            metadata=metadata,
+        await self.subagent_runner.execute(
+            response=response,
+            agent_calls=agent_calls,
+            sub_agents=sub_agents,
             session_id=session_id,
-        )
-        session_state.messages.append(Message(role="assistant", content=response))
-
-        if isinstance(agent_calls, str):
-            agent_calls = json.loads(agent_calls)
-
-        async def execute_single_agent(call: dict) -> tuple[str, Any]:
-            """Execute a single agent, handling MCP connection if needed."""
-            agent_name = call.get("agent")
-            if not agent_name:
-                raise ValueError("agent_call missing 'agent' field")
-
-            try:
-                agent = resolve_agent(agent_name, sub_agents)
-                params = call.get("parameters", {})
-                params["session_id"] = session_id
-                kwargs = build_kwargs(agent, params)
-
-                if hasattr(agent, "mcp_tools") and agent.mcp_tools:
-                    logger.info(f"Connecting MCP servers for {agent_name}...")
-                    await agent.connect_mcp_servers()
-
-                logger.info(f"Running sub-agent: {agent_name}")
-                result = await agent.run(**kwargs)
-                await agent.cleanup_mcp_servers()
-                return agent_name, result
-
-            except Exception as e:
-                logger.error(f"Error executing agent {agent_name}: {e}", exc_info=True)
-                return agent_name, e
-
-        logger.info(
-            f"Executing {len(agent_calls)} sub-agents with concurrent MCP connections..."
-        )
-        tasks = [execute_single_agent(call) for call in agent_calls]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        observations = []
-
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error(f"Unexpected top-level exception: {result}")
-                obs = {
-                    "agent_name": "unknown",
-                    "status": "error",
-                    "output": str(result),
-                }
-                observations.append(obs)
-            else:
-                agent_name, obs_data = result
-
-                if isinstance(obs_data, Exception):
-                    logger.error(f"Agent {agent_name} execution failed: {obs_data}")
-                    obs = {
-                        "agent_name": agent_name,
-                        "status": "error",
-                        "output": str(obs_data),
-                    }
-                    observations.append(obs)
-                    event = Event(
-                        type=EventType.SUB_AGENT_CALL_ERROR,
-                        payload=SubAgentCallErrorPayload(
-                            agent_name=agent_name,
-                            session_id=session_id,
-                            timestamp=str(datetime.now()),
-                            error=str(obs_data),
-                            error_count=0,
-                        ),
-                        agent_name=self.agent_name,
-                    )
-                    if event_router:
-                        await event_router(session_id=session_id, event=event)
-                else:
-                    if isinstance(obs_data, dict):
-                        agent_response = obs_data.get(
-                            "response", obs_data.get("output", str(obs_data))
-                        )
-                        obs = {
-                            "agent_name": agent_name,
-                            "status": "success",
-                            "output": agent_response,
-                        }
-                    elif isinstance(obs_data, str):
-                        obs = {
-                            "agent_name": agent_name,
-                            "status": "success",
-                            "output": obs_data,
-                        }
-                    else:
-                        obs = {
-                            "agent_name": agent_name,
-                            "status": "success",
-                            "output": str(obs_data),
-                        }
-
-                    logger.info(f"Agent {agent_name} completed successfully")
-                    observations.append(obs)
-                    if isinstance(obs_data, dict):
-                        sub_usage = obs_data.get("metric")
-                        if sub_usage and isinstance(sub_usage, Usage):
-                            run_usage.incr(sub_usage)
-                            usage.incr(sub_usage)
-
-                    event = Event(
-                        type=EventType.SUB_AGENT_CALL_RESULT,
-                        payload=SubAgentCallResultPayload(
-                            agent_name=agent_name,
-                            session_id=session_id,
-                            timestamp=str(datetime.now()),
-                            run_count=0,
-                            result=obs_data,
-                        ),
-                        agent_name=self.agent_name,
-                    )
-                    if event_router:
-                        await event_router(session_id=session_id, event=event)
-
-        xml_obs_block = build_sub_agents_observation_xml(observations)
-        agent_call_result = {
-            "agent_name": self.agent_name,
-            "agent_calls": agent_calls,
-            "output": observations,
-        }
-
-        if debug:
-            show_sub_agent_call_result(agent_call_result)
-
-        session_state.messages.append(Message(role="user", content=xml_obs_block))
-        await add_message_to_history(
-            role="user",
-            content=xml_obs_block,
-            session_id=session_id,
-            metadata={"agent_name": self.agent_name, "sub_agent_results": True},
+            session_state=session_state,
+            add_message_to_history=add_message_to_history,
+            run_usage=run_usage,
+            event_router=event_router,
+            debug=debug,
         )
 
     @track("agent_execution")
@@ -678,24 +533,7 @@ class BaseReactAgent:
                                 },
                             ]
                             response = await llm_connection.llm_call(summary_msgs)
-                            if hasattr(response, "choices") and response.choices:
-                                response = response.choices[0].message.content.strip()
-                            elif hasattr(response, "message"):
-                                response = response.message.content.strip()
-                            elif hasattr(response, "text"):
-                                response = response.text.strip()
-                            elif hasattr(response, "content"):
-                                response = response.content.strip()
-                            elif isinstance(response, dict) and "choices" in response:
-                                response = response["choices"][0]["message"][
-                                    "content"
-                                ].strip()
-                            elif isinstance(response, str):
-                                pass
-                            else:
-                                response = ""
-
-                            return response
+                            return extract_response_content(response, default="")
 
                         session_state.messages = (
                             await self.context_manager.manage_context(
@@ -715,13 +553,10 @@ class BaseReactAgent:
                     response = await make_llm_call()
 
                     if response:
-                        # Extract the actual message content from the response
-                        if hasattr(response, "choices") and response.choices:
-                            message_content = response.choices[0].message.content
-                        elif hasattr(response, "content"):
-                            message_content = response.content
-                        else:
-                            message_content = str(response)
+                        message_content = extract_response_content(
+                            response,
+                            strip=False,
+                        )
 
                         event = Event(
                             type=EventType.AGENT_MESSAGE,
@@ -734,13 +569,8 @@ class BaseReactAgent:
                             # Await to ensure event is queued before continuing
                             await event_router(session_id=session_id, event=event)
 
-                        if hasattr(response, "usage"):
-                            request_usage = Usage(
-                                requests=1,
-                                request_tokens=response.usage.prompt_tokens,
-                                response_tokens=response.usage.completion_tokens,
-                                total_tokens=response.usage.total_tokens,
-                            )
+                        request_usage = extract_response_usage(response)
+                        if request_usage:
                             usage.incr(request_usage)
                             run_usage.incr(request_usage)
 
@@ -773,24 +603,7 @@ class BaseReactAgent:
                                         f"Remaining Requests: {remaining_requests}, "
                                         f"Remaining Tokens: {remaining_tokens}"
                                     )
-                        if hasattr(response, "choices") and response.choices:
-                            response = response.choices[0].message.content.strip()
-                        elif hasattr(response, "message"):
-                            response = response.message.content.strip()
-                        elif hasattr(response, "text"):
-                            response = response.text.strip()
-                        elif hasattr(response, "content"):
-                            response = response.content.strip()
-                        elif isinstance(response, dict) and "choices" in response:
-                            response = response["choices"][0]["message"][
-                                "content"
-                            ].strip()
-                        elif isinstance(response, str):
-                            pass
-                        else:
-                            raise Exception(
-                                f"No valid response content found in LLM response: {type(response)}"
-                            )
+                        response = extract_response_content(response)
                 except UsageLimitExceeded as e:
                     error_message = f"Usage limit error: {e}"
                     logger.error(error_message)
