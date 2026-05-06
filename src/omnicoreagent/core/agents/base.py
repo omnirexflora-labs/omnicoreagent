@@ -33,9 +33,9 @@ from omnicoreagent.core.types import (
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.tool_batch_runner import ToolBatchRunner
 from omnicoreagent.core.tools.tool_call_resolver import ToolCallResolver
+from omnicoreagent.core.tools.tool_failure_handler import ToolFailureHandler
 from omnicoreagent.core.utils import (
     RobustLoopDetector,
-    handle_stuck_state,
     logger,
     show_tool_response,
     track,
@@ -49,7 +49,6 @@ from datetime import datetime
 from omnicoreagent.core.events.base import (
     Event,
     EventType,
-    ToolCallErrorPayload,
     FinalAnswerPayload,
     AgentMessagePayload,
     UserMessagePayload,
@@ -141,6 +140,7 @@ class BaseReactAgent:
             guardrail=self.guardrail,
         )
         self.tool_call_resolver = ToolCallResolver(guardrail=self.guardrail)
+        self.tool_failure_handler = ToolFailureHandler(agent_name=self.agent_name)
         self.tool_batch_runner = ToolBatchRunner(
             agent_name=self.agent_name,
             tool_call_timeout=self.tool_call_timeout,
@@ -167,140 +167,6 @@ class BaseReactAgent:
                 pending_tool_responses=[],
             )
         return self._session_states[key]
-
-    def _build_tool_validation_error_results(
-        self,
-        tool_errors: list[ToolError],
-        fallback_message: str,
-    ) -> list[dict[str, Any]]:
-        return [
-            {
-                "tool_name": getattr(single_tool, "tool_name", "unknown"),
-                "args": getattr(single_tool, "tool_args", {}),
-                "status": "error",
-                "data": None,
-                "message": getattr(single_tool, "observation", fallback_message),
-            }
-            for single_tool in tool_errors
-        ]
-
-    async def _handle_tool_validation_error(
-        self,
-        tool_error: ToolError,
-        session_state: SessionState,
-        session_id: str | None,
-        event_router: Callable[[str, Event], Any] | None,
-    ) -> tuple[str, list[dict[str, Any]], str, list[dict[str, Any]]]:
-        obs_text = tool_error.observation
-        tool_errors = [tool_error]
-
-        for single_tool in tool_errors:
-            tool_name = getattr(single_tool, "tool_name", "unknown")
-            tool_args = getattr(single_tool, "tool_args", {})
-            error_message = getattr(single_tool, "observation", obs_text)
-
-            event = Event(
-                type=EventType.TOOL_CALL_ERROR,
-                payload=ToolCallErrorPayload(
-                    tool_name=tool_name,
-                    error_message=error_message,
-                ),
-                agent_name=self.agent_name,
-            )
-
-            if event_router:
-                await event_router(session_id=session_id, event=event)
-            session_state.loop_detector.record_tool_call(
-                str(tool_name),
-                str(tool_args),
-                str(error_message),
-            )
-
-        tool_batch_name = ", ".join(
-            [getattr(t, "tool_name", "unknown") for t in tool_errors]
-        )
-        tool_batch_args = [getattr(t, "tool_args", {}) for t in tool_errors]
-
-        logger.error(
-            f"Tool call validation failed for: {tool_batch_name} "
-            f"args={tool_batch_args} -> {obs_text}"
-        )
-
-        return (
-            tool_batch_name,
-            tool_batch_args,
-            obs_text,
-            self._build_tool_validation_error_results(
-                tool_errors=tool_errors,
-                fallback_message=obs_text,
-            ),
-        )
-
-    async def _handle_tool_loop_state(
-        self,
-        tool_call_results: list[Any],
-        session_state: SessionState,
-        system_prompt: str,
-        session_id: str | None,
-        event_router: Callable[[str, Event], Any] | None,
-        debug: bool,
-    ) -> None:
-        for single_tool in tool_call_results:
-            tool_name = getattr(single_tool, "tool_name", None)
-            if not tool_name:
-                if isinstance(single_tool, (list, tuple)) and len(single_tool) >= 1:
-                    tool_name = single_tool[0]
-                else:
-                    logger.warning(
-                        "Skipping malformed tool_call_result item: %s", single_tool
-                    )
-                    continue
-
-            if not session_state.loop_detector.is_looping(tool_name):
-                continue
-
-            loop_type = session_state.loop_detector.get_loop_type(tool_name)
-            logger.warning(f"Tool call loop detected for '{tool_name}': {loop_type}")
-
-            new_system_prompt = handle_stuck_state(system_prompt)
-            session_state.messages = await self.reset_system_prompt(
-                messages=session_state.messages,
-                system_prompt=new_system_prompt,
-            )
-
-            loop_message = (
-                f"Observation:\n"
-                f"⚠️ Tool call loop detected for '{tool_name}': {loop_type}\n\n"
-                "Current approach is not working. You MUST now provide a final answer to the user.\n"
-                "Please:\n"
-                "1. Stop trying the same approach\n"
-                "2. Provide your best response to the user based on what you know\n"
-                "3. Use <final_answer>Your response here</final_answer> format\n"
-                "4. Be helpful and explain any limitations if needed\n"
-                "5. Do NOT continue with more tool calls\n"
-                "\nYou MUST respond with <final_answer> tags now.\n"
-            )
-
-            event = Event(
-                type=EventType.TOOL_CALL_ERROR,
-                payload=ToolCallErrorPayload(
-                    tool_name=tool_name,
-                    error_message=loop_message,
-                ),
-                agent_name=self.agent_name,
-            )
-            if event_router:
-                await event_router(session_id=session_id, event=event)
-
-            session_state.messages.append(Message(role="user", content=loop_message))
-
-            if debug:
-                logger.info(
-                    f"Agent state changed from {session_state.state} to {AgentState.STUCK}"
-                )
-
-            session_state.state = AgentState.STUCK
-            session_state.loop_detector.reset(tool_name)
 
     async def extract_action_or_answer(
         self,
@@ -452,7 +318,7 @@ class BaseReactAgent:
                 tool_batch_args,
                 obs_text,
                 tools_results,
-            ) = await self._handle_tool_validation_error(
+            ) = await self.tool_failure_handler.handle_validation_error(
                 tool_error=tool_call_result,
                 session_state=session_state,
                 session_id=session_id,
@@ -503,13 +369,14 @@ class BaseReactAgent:
         else:
             tool_call_results = [tool_call_result]
 
-        await self._handle_tool_loop_state(
+        await self.tool_failure_handler.handle_loop_state(
             tool_call_results=tool_call_results,
             session_state=session_state,
             system_prompt=system_prompt,
             session_id=session_id,
             event_router=event_router,
             debug=debug,
+            reset_system_prompt=self.reset_system_prompt,
         )
 
     async def reset_system_prompt(self, messages: list, system_prompt: str):
