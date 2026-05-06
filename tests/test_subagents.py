@@ -509,7 +509,9 @@ class TestOmniCoreAgentSubagents:
         )
 
         await agent.initialize()
-        runtime_tools = await agent.agent.prepare_runtime_tools(agent.local_tools)
+        runtime_tools = await agent.agent.tool_runtime_registry.prepare_tools(
+            agent.local_tools
+        )
 
         tool_names = [tool.name for tool in runtime_tools.list_tools()]
         assert "spawn_subagents" in tool_names
