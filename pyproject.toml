@@ -125,10 +125,3 @@ dev = [
     "hatch>=1.16.5",
     "twine>=6.2.0",
 ]
-docs = [
-    "mkdocs>=1.6.1",
-    "mkdocs-git-revision-date-localized-plugin>=1.5.1",
-    "mkdocs-material>=9.7.6",
-    "mkdocs-minify-plugin>=0.8.0",
-    "pymdown-extensions>=10.21.2",
-]
