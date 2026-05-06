@@ -1,22 +1,12 @@
 """
-Core AI Agent Framework Components
+Core AI Agent Framework Components.
 
-This package contains the core AI agent functionality including:
-- Agents (React, Sequential)
-- Memory Management (In-Memory, Redis, Database, MongoDB)
-- LLM Connections and Support
-- Event System
-- Database Layer
-- Tools Management
-- Utilities and Constants
+Exports are resolved lazily to keep core package import cheap and free of
+provider/runtime side effects.
 """
 
-from .agents import ReactAgent
-from .memory_store import MemoryRouter
-from .tools import ToolRegistry, Tool
-from .types import ParsedResponse, ToolCall
-from .token_usage import UsageLimits, Usage, UsageLimitExceeded
-from omnicoreagent.runtime_config import AgentConfig
+from importlib import import_module
+from typing import Any
 
 __all__ = [
     "ReactAgent",
@@ -34,20 +24,43 @@ __all__ = [
     "UsageLimitExceeded",
 ]
 
+_EXPORTS = {
+    "ReactAgent": ("omnicoreagent.core.agents", "ReactAgent"),
+    "MemoryRouter": ("omnicoreagent.core.memory_store", "MemoryRouter"),
+    "LLMConnection": ("omnicoreagent.core.llm", "LLMConnection"),
+    "EventRouter": ("omnicoreagent.core.events", "EventRouter"),
+    "ToolRegistry": ("omnicoreagent.core.tools", "ToolRegistry"),
+    "Tool": ("omnicoreagent.core.tools", "Tool"),
+    "AgentConfig": ("omnicoreagent.runtime_config", "AgentConfig"),
+    "ParsedResponse": ("omnicoreagent.core.types", "ParsedResponse"),
+    "ToolCall": ("omnicoreagent.core.types", "ToolCall"),
+    "UsageLimits": ("omnicoreagent.core.token_usage", "UsageLimits"),
+    "Usage": ("omnicoreagent.core.token_usage", "Usage"),
+    "UsageLimitExceeded": ("omnicoreagent.core.token_usage", "UsageLimitExceeded"),
+}
+
 _OPTIONAL_EXPORTS = {
     "DatabaseMessageStore": ("omnicoreagent.core.memory_store", "postgres"),
 }
 
 
-def __getattr__(name: str):
-    if name not in _OPTIONAL_EXPORTS:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+def __getattr__(name: str) -> Any:
+    if name in _EXPORTS:
+        module_name, attr_name = _EXPORTS[name]
+        value = getattr(import_module(module_name), attr_name)
+        globals()[name] = value
+        return value
 
-    from omnicoreagent._optional import load_optional
+    if name in _OPTIONAL_EXPORTS:
+        from omnicoreagent._optional import load_optional
 
-    module_name, extra = _OPTIONAL_EXPORTS[name]
-    return load_optional(
-        name,
-        extra,
-        lambda: getattr(__import__(module_name, fromlist=[name]), name),
-    )
+        module_name, extra = _OPTIONAL_EXPORTS[name]
+        value = load_optional(
+            name,
+            extra,
+            lambda: getattr(import_module(module_name), name),
+        )
+        globals()[name] = value
+        return value
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

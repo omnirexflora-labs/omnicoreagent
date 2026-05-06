@@ -6,10 +6,7 @@ import time
 import warnings
 from typing import Any
 
-import litellm
-import openai
 from decouple import config as decouple_config
-from dotenv import load_dotenv
 
 from omnicoreagent.core.utils import logger
 
@@ -17,19 +14,34 @@ warnings.filterwarnings(
     "ignore", message="Pydantic serializer warnings", module="pydantic.main"
 )
 
-load_dotenv()
-
-os.environ["LITELLM_LOG"] = "CRITICAL"
-litellm.set_verbose = False
-litellm.callbacks = []
-litellm.success_callback = []
-litellm.failure_callback = []
+_LITELLM_CONFIGURED = False
 
 for logger_name in ["LiteLLM", "litellm", "litellm.proxy"]:
     _litellm_logger = logging.getLogger(logger_name)
-    _litellm_logger.disabled = True
     _litellm_logger.setLevel(logging.CRITICAL)
     _litellm_logger.propagate = False
+
+
+def _get_litellm():
+    global _LITELLM_CONFIGURED
+
+    import litellm
+
+    if not _LITELLM_CONFIGURED:
+        os.environ["LITELLM_LOG"] = "CRITICAL"
+        litellm.set_verbose = False
+        litellm.callbacks = []
+        litellm.success_callback = []
+        litellm.failure_callback = []
+        _LITELLM_CONFIGURED = True
+
+    return litellm
+
+
+def _get_openai():
+    import openai
+
+    return openai
 
 
 def retry_with_backoff(max_retries=3, base_delay=1, max_delay=60, backoff_factor=2):
@@ -220,11 +232,13 @@ class LLMConnection:
         try:
             params = self._completion_params(messages, tools)
             if self.llm_config["provider"].lower() == "cencori":
+                openai = _get_openai()
                 client = openai.AsyncOpenAI(
                     base_url="https://api.cencori.com/v1",
                     api_key=self.llm_api_key,
                 )
                 return await client.chat.completions.create(**params)
+            litellm = _get_litellm()
             litellm.drop_params = True
             return await litellm.acompletion(**params)
         except Exception as e:
@@ -243,11 +257,13 @@ class LLMConnection:
         try:
             params = self._completion_params(messages, tools)
             if self.llm_config["provider"].lower() == "cencori":
+                openai = _get_openai()
                 client = openai.OpenAI(
                     base_url="https://api.cencori.com/v1",
                     api_key=self.llm_api_key,
                 )
                 return client.chat.completions.create(**params)
+            litellm = _get_litellm()
             litellm.drop_params = True
             return litellm.completion(**params)
         except Exception as e:
