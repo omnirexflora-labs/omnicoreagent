@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pytest
 
-from omnicoreagent.core.agents.prompt_context import AgentPromptContextBuilder
+from omnicoreagent.core.system_prompts import AgentPromptContextBuilder
 from omnicoreagent.core.types import Message
 
 

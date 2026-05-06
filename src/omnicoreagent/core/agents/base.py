@@ -6,6 +6,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from typing import Any, Tuple
 from omnicoreagent.core.system_prompts import (
+    AgentPromptContextBuilder,
     FAST_CONVERSATION_SUMMARY_PROMPT,
 )
 from omnicoreagent.core.token_usage import (
@@ -28,7 +29,6 @@ from omnicoreagent.core.tools.tool_batch_runner import ToolBatchRunner
 from omnicoreagent.core.tools.tool_call_resolver import ToolCallResolver
 from omnicoreagent.core.tools.tool_failure_handler import ToolFailureHandler
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
-from omnicoreagent.core.agents.prompt_context import AgentPromptContextBuilder
 from omnicoreagent.core.utils import (
     RobustLoopDetector,
     logger,
