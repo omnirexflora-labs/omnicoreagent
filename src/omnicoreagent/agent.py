@@ -1,31 +1,59 @@
-import uuid
-from typing import Any, Dict, List, Optional, Union
+from __future__ import annotations
 
-from omnicoreagent.core.agents.react_agent import ReactAgent
-from omnicoreagent.core.llm import LLMConnection
-from omnicoreagent.core.memory_store.memory_router import MemoryRouter
-from omnicoreagent.runtime_config import (
-    ModelConfig,
-    MCPToolConfig,
-    AgentConfig,
-    normalize_agent_config,
-    normalize_mcp_tools,
-    normalize_model_config,
-)
-from omnicoreagent.core.system_prompts import (
-    FAST_CONVERSATION_SUMMARY_PROMPT,
-    OmniCoreAgentPromptBuilder,
-    REACT_AGENT_PROMPT,
-)
-from omnicoreagent.core.events.event_router import EventRouter
-from omnicoreagent.core.tools.advance_tools.advanced_tools_use import AdvanceToolsUse
-from omnicoreagent.core.subagents import SubagentFactory, build_subagent_tools
-from omnicoreagent.core.utils import logger
-from omnicoreagent.core.token_usage import Usage
-from omnicoreagent.core.guardrails import (
-    PromptInjectionGuard,
-    DetectionConfig,
-)
+from importlib import import_module
+import uuid
+from typing import Any, Dict, List, Optional
+
+
+_RUNTIME_EXPORTS = {
+    "AdvanceToolsUse": (
+        "omnicoreagent.core.tools.advance_tools.advanced_tools_use",
+        "AdvanceToolsUse",
+    ),
+    "DetectionConfig": ("omnicoreagent.core.guardrails", "DetectionConfig"),
+    "EventRouter": ("omnicoreagent.core.events.event_router", "EventRouter"),
+    "FAST_CONVERSATION_SUMMARY_PROMPT": (
+        "omnicoreagent.core.system_prompts",
+        "FAST_CONVERSATION_SUMMARY_PROMPT",
+    ),
+    "LLMConnection": ("omnicoreagent.core.llm", "LLMConnection"),
+    "MemoryRouter": ("omnicoreagent.core.memory_store.memory_router", "MemoryRouter"),
+    "OmniCoreAgentPromptBuilder": (
+        "omnicoreagent.core.system_prompts",
+        "OmniCoreAgentPromptBuilder",
+    ),
+    "PromptInjectionGuard": ("omnicoreagent.core.guardrails", "PromptInjectionGuard"),
+    "REACT_AGENT_PROMPT": ("omnicoreagent.core.system_prompts", "REACT_AGENT_PROMPT"),
+    "ReactAgent": ("omnicoreagent.core.agents.react_agent", "ReactAgent"),
+    "SubagentFactory": ("omnicoreagent.core.subagents", "SubagentFactory"),
+    "Usage": ("omnicoreagent.core.token_usage", "Usage"),
+    "build_subagent_tools": ("omnicoreagent.core.subagents", "build_subagent_tools"),
+    "AgentConfig": ("omnicoreagent.runtime_config", "AgentConfig"),
+    "logger": ("omnicoreagent.core.utils", "logger"),
+    "normalize_agent_config": ("omnicoreagent.runtime_config", "normalize_agent_config"),
+    "normalize_mcp_tools": ("omnicoreagent.runtime_config", "normalize_mcp_tools"),
+    "normalize_model_config": ("omnicoreagent.runtime_config", "normalize_model_config"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name not in _RUNTIME_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    module_name, attr_name = _RUNTIME_EXPORTS[name]
+    value = getattr(import_module(module_name), attr_name)
+    globals()[name] = value
+    return value
+
+
+def _runtime(name: str) -> Any:
+    if name in globals():
+        return globals()[name]
+    return __getattr__(name)
+
+
+def _logger() -> Any:
+    return _runtime("logger")
 
 
 class OmniCoreAgent:
@@ -40,13 +68,13 @@ class OmniCoreAgent:
         self,
         name: str,
         system_instruction: str,
-        model_config: Union[Dict[str, Any], ModelConfig],
-        mcp_tools: List[Union[Dict[str, Any], MCPToolConfig]] = None,
+        model_config: Any,
+        mcp_tools: Optional[List[Any]] = None,
         local_tools: Optional[Any] = None,
         sub_agents: Optional[Dict[str, Any]] = None,
-        agent_config: Optional[Union[Dict[str, Any], AgentConfig]] = None,
-        memory_router: Optional[MemoryRouter] = None,
-        event_router: Optional[EventRouter] = None,
+        agent_config: Optional[Any] = None,
+        memory_router: Optional[Any] = None,
+        event_router: Optional[Any] = None,
         prompt_builder: Optional[Any] = None,
         debug: bool = False,
     ):
@@ -68,8 +96,8 @@ class OmniCoreAgent:
         """
         self.name = name
         self.system_instruction = system_instruction
-        self.model_config = normalize_model_config(model_config)
-        self.mcp_tools = normalize_mcp_tools(mcp_tools)
+        self.model_config = _runtime("normalize_model_config")(model_config)
+        self.mcp_tools = _runtime("normalize_mcp_tools")(mcp_tools)
 
         # Handle local_tools: optionally convert list to ToolRegistry
         if isinstance(local_tools, list):
@@ -83,16 +111,19 @@ class OmniCoreAgent:
             self.local_tools = local_tools
 
         self.sub_agents = sub_agents
-        self.agent_config = normalize_agent_config(name, agent_config)
+        self.agent_config = _runtime("normalize_agent_config")(name, agent_config)
 
         self.debug = debug
-        self._cumulative_usage = Usage()
+        self._cumulative_usage = _runtime("Usage")()
 
         self.memory_router = memory_router
         self.event_router = event_router
-        self.prompt_builder = prompt_builder or OmniCoreAgentPromptBuilder(
-            REACT_AGENT_PROMPT
-        )
+        if prompt_builder:
+            self.prompt_builder = prompt_builder
+        else:
+            self.prompt_builder = _runtime("OmniCoreAgentPromptBuilder")(
+                _runtime("REACT_AGENT_PROMPT")
+            )
         self.agent = None
         self.mcp_client = None
         self.llm_connection = None
@@ -108,10 +139,12 @@ class OmniCoreAgent:
             return
 
         if not self.memory_router:
-            self.memory_router = MemoryRouter(memory_store_type="in_memory")
+            self.memory_router = _runtime("MemoryRouter")(
+                memory_store_type="in_memory"
+            )
 
         if not self.event_router:
-            self.event_router = EventRouter(event_store_type="in_memory")
+            self.event_router = _runtime("EventRouter")(event_store_type="in_memory")
 
         agent_cfg = self.agent_config
 
@@ -123,14 +156,14 @@ class OmniCoreAgent:
 
         if self.guardrail_mode != "off":
             guardrail_config = agent_cfg.get("guardrail_config", {})
-            g_config = DetectionConfig(**guardrail_config)
-            self.guardrail = PromptInjectionGuard(g_config)
-            logger.info(
+            g_config = _runtime("DetectionConfig")(**guardrail_config)
+            self.guardrail = _runtime("PromptInjectionGuard")(g_config)
+            _logger().info(
                 f"Guardrail enabled for agent '{self.name}' "
                 f"(mode: {self.guardrail_mode})"
             )
         else:
-            logger.info(f"Guardrail disabled for agent '{self.name}'")
+            _logger().info(f"Guardrail disabled for agent '{self.name}'")
 
         self._create_agent()
         self._initialized = True
@@ -149,12 +182,12 @@ class OmniCoreAgent:
             self.llm_connection = self.mcp_client.llm_connection
         else:
             self.mcp_client = None
-            self.llm_connection = LLMConnection(
+            self.llm_connection = _runtime("LLMConnection")(
                 model_config=self.model_config,
                 api_key=self.model_config.get("api_key"),
             )
 
-        agent_settings = AgentConfig(**self.agent_config)
+        agent_settings = _runtime("AgentConfig")(**self.agent_config)
 
         if self.memory_router:
             summary_config = agent_settings.memory_config.get("summary")
@@ -171,11 +204,13 @@ class OmniCoreAgent:
         # In "full" mode, tool outputs and MCP responses are scrubbed
         # In "input_only" mode, only user input is checked at the public run boundary.
         tool_guardrail = self.guardrail if self.guardrail_mode == "full" else None
-        self.agent = ReactAgent(config=agent_settings, guardrail=tool_guardrail)
+        self.agent = _runtime("ReactAgent")(
+            config=agent_settings, guardrail=tool_guardrail
+        )
         self._prepare_dynamic_subagents()
         if self.local_tools:
             if self.agent.enable_advanced_tool_use:
-                advance_tools_manager = AdvanceToolsUse()
+                advance_tools_manager = _runtime("AdvanceToolsUse")()
                 advance_tools_manager.load_and_process_tools(
                     local_tools=self.local_tools
                 )
@@ -192,7 +227,7 @@ class OmniCoreAgent:
         if self.local_tools is None:
             self.local_tools = ToolRegistry()
 
-        self._subagent_factory = SubagentFactory(
+        self._subagent_factory = _runtime("SubagentFactory")(
             base_model_config=self.model_config,
             mcp_tools=self.mcp_tools,
             local_tools=self.local_tools,
@@ -202,7 +237,7 @@ class OmniCoreAgent:
             memory_router=self.memory_router,
             debug=self.debug,
         )
-        build_subagent_tools(self._subagent_factory, self.local_tools)
+        _runtime("build_subagent_tools")(self._subagent_factory, self.local_tools)
 
     async def _summarize_history(
         self, messages: list[Dict[str, Any]], max_tokens: int = None
@@ -218,10 +253,10 @@ class OmniCoreAgent:
             String summary of the messages
         """
         if not self.llm_connection:
-            logger.warning("No LLM connection available for summarization")
+            _logger().warning("No LLM connection available for summarization")
             return ""
 
-        instruction = FAST_CONVERSATION_SUMMARY_PROMPT
+        instruction = _runtime("FAST_CONVERSATION_SUMMARY_PROMPT")
         if max_tokens:
             instruction += f" Keep the summary roughly under {max_tokens} tokens."
 
@@ -258,14 +293,14 @@ class OmniCoreAgent:
                 elif isinstance(response, str):
                     pass
                 else:
-                    logger.error(
+                    _logger().error(
                         f"No valid response content found in LLM response: {type(response)}"
                     )
                     return ""
                 return response
             return ""
         except Exception as e:
-            logger.error(f"Summarization callback failed: {e}")
+            _logger().error(f"Summarization callback failed: {e}")
             return ""
 
     def generate_session_id(self) -> str:
@@ -281,7 +316,7 @@ class OmniCoreAgent:
             await self.mcp_client.connect_to_servers()
             if self.agent.enable_advanced_tool_use:
                 mcp_tools = self.mcp_client.available_tools if self.mcp_client else {}
-                advance_tools_manager = AdvanceToolsUse()
+                advance_tools_manager = _runtime("AdvanceToolsUse")()
 
                 advance_tools_manager.load_and_process_tools(
                     mcp_tools=mcp_tools,
@@ -305,7 +340,7 @@ class OmniCoreAgent:
         if self.guardrail:
             result = self.guardrail.check(query)
             if not result.is_safe:
-                logger.warning(f"Query blocked by guardrail: {result.message}")
+                _logger().warning(f"Query blocked by guardrail: {result.message}")
                 return {
                     "response": f"I'm sorry, but I cannot process this request due to safety concerns: {result.message}",
                     "session_id": session_id,
