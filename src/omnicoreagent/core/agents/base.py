@@ -3,7 +3,6 @@ import time
 
 import json
 from collections.abc import Callable
-from collections import defaultdict
 from contextlib import asynccontextmanager
 from typing import Any, Tuple, List
 from omnicoreagent.core.system_prompts import (
@@ -40,7 +39,6 @@ from omnicoreagent.core.utils import (
     logger,
     show_tool_response,
     track,
-    build_xml_observations_block,
     BackgroundTaskManager,
     resolve_agent,
     build_kwargs,
@@ -78,21 +76,11 @@ from omnicoreagent.core.tool_response_offloader import (
     ToolResponseOffloader,
     OffloadConfig,
 )
+from omnicoreagent.core.tools.tool_observation import ToolObservationHandler
 from omnicoreagent.core.guardrails import PromptInjectionGuard
 from omnicoreagent.core.agents.xml_parser import (
     extract_thought,
     parse_action_or_answer,
-)
-
-TOOL_OUTPUT_OFFLOAD_EXCLUDED_TOOLS = frozenset(
-    {
-        "read_artifact",
-        "tail_artifact",
-        "search_artifact",
-        "list_artifacts",
-        "memory_view",
-        "memory_create_update",
-    }
 )
 
 class BaseReactAgent:
@@ -147,6 +135,11 @@ class BaseReactAgent:
             config=OffloadConfig.from_dict(tool_offload_config or {})
         )
         self.guardrail = guardrail
+        self.tool_observation_handler = ToolObservationHandler(
+            agent_name=self.agent_name,
+            tool_offloader=self.tool_offloader,
+            guardrail=self.guardrail,
+        )
         self.tool_call_resolver = ToolCallResolver(guardrail=self.guardrail)
         self.tool_batch_runner = ToolBatchRunner(
             agent_name=self.agent_name,
@@ -174,138 +167,6 @@ class BaseReactAgent:
                 pending_tool_responses=[],
             )
         return self._session_states[key]
-
-    def _scrub_tool_results(
-        self, tools_results: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
-        """Scrub tool output through guardrails before it enters LLM context.
-
-        Checks each tool result's data and message fields for prompt injection.
-        If a threat is detected at DANGEROUS or CRITICAL level, the tool result
-        is replaced with a sanitized warning. SUSPICIOUS results are logged but
-        passed through.
-
-        Args:
-            tools_results: List of tool result dicts with data/message fields.
-
-        Returns:
-            The tools_results list, potentially with dangerous content replaced.
-        """
-        if not self.guardrail:
-            return tools_results
-
-        for result in tools_results:
-            for field in ("data", "message"):
-                content = result.get(field)
-                if content is None:
-                    continue
-                text = str(content) if not isinstance(content, str) else content
-                if not text.strip():
-                    continue
-
-                check = self.guardrail.check(text)
-                if check.threat_level.value in ("dangerous", "critical"):
-                    tool_name = result.get("tool_name", "unknown")
-                    logger.warning(
-                        f"Guardrail blocked tool output from '{tool_name}': "
-                        f"{check.threat_level.value} (score: {check.threat_score})"
-                    )
-                    result[field] = (
-                        f"[Tool output blocked by guardrail: {check.message}]"
-                    )
-                    result["status"] = "error"
-                elif check.threat_level.value == "suspicious":
-                    tool_name = result.get("tool_name", "unknown")
-                    logger.info(
-                        f"Guardrail flagged suspicious tool output from '{tool_name}': "
-                        f"score={check.threat_score}"
-                    )
-
-        return tools_results
-
-    def _maybe_offload_tool_result(
-        self,
-        result: dict[str, Any],
-        session_id: str | None,
-    ) -> dict[str, Any]:
-        tool_name = result.get("tool_name", "unknown_tool")
-        data = result.get("data")
-
-        if (
-            data is None
-            or not self.tool_offloader.config.enabled
-            or tool_name in TOOL_OUTPUT_OFFLOAD_EXCLUDED_TOOLS
-        ):
-            return result
-
-        data_str = data if isinstance(data, str) else str(data)
-        if not self.tool_offloader.should_offload(data_str):
-            return result
-
-        offloaded = self.tool_offloader.offload(
-            tool_name=tool_name,
-            response=data_str,
-            metadata={"args": result.get("args", {}), "session_id": session_id},
-        )
-        result["data"] = offloaded.context_message
-        return result
-
-    def _build_tool_results_observation(
-        self,
-        tool_call_results: list[ToolCallResult],
-        tools_results: list[dict[str, Any]],
-        session_state: SessionState,
-        session_id: str | None,
-    ) -> str:
-        obs_lines = []
-        success_count = 0
-        error_count = 0
-        tool_counter = defaultdict(int)
-        seen_tools: set[str] = set()
-
-        for result in tools_results[: len(tool_call_results)]:
-            result = self._maybe_offload_tool_result(
-                result=result,
-                session_id=session_id,
-            )
-            tool_name = result.get("tool_name", "unknown_tool")
-            args = result.get("args", {})
-            status = result.get("status", "unknown")
-            data = result.get("data")
-            message = result.get("message", "")
-
-            tool_counter[tool_name] += 1
-            tool_call_generated_id = f"{tool_name}#{tool_counter[tool_name]}"
-            display_value = data if data is not None else message
-            if tool_name not in seen_tools:
-                seen_tools.add(tool_name)
-                session_state.loop_detector.record_tool_call(
-                    str(tool_name),
-                    str(args),
-                    str(display_value),
-                )
-
-            if status == "success":
-                obs_lines.append(f"{tool_call_generated_id}: {display_value}")
-                success_count += 1
-            elif status == "error":
-                reason = display_value or "Unknown error occurred."
-                obs_lines.append(f"{tool_call_generated_id} ERROR: {reason}")
-                error_count += 1
-            else:
-                obs_lines.append(
-                    f"{tool_call_generated_id}: Unexpected status '{status}'"
-                )
-                error_count += 1
-
-        if success_count == len(tools_results):
-            return "\n\n".join(obs_lines)
-        if success_count > 0 and error_count > 0:
-            return "Partial success:\n" + "\n\n".join(obs_lines)
-        if error_count == len(tools_results):
-            error_details = "\n\n".join(obs_lines)
-            return f"Tool execution failed completely:\n{error_details}"
-        return "\n\n".join(obs_lines) or "No valid tool results."
 
     def _build_tool_validation_error_results(
         self,
@@ -374,36 +235,6 @@ class BaseReactAgent:
                 fallback_message=obs_text,
             ),
         )
-
-    async def _append_tool_observations(
-        self,
-        tools_results: list[dict[str, Any]],
-        session_state: SessionState,
-        add_message_to_history: Callable[[str, str, dict | None], Any],
-        session_id: str | None,
-        debug: bool,
-    ) -> str:
-        scrubbed_results = self._scrub_tool_results(tools_results)
-        xml_obs_block = build_xml_observations_block(scrubbed_results)
-        session_state.messages.append(
-            Message(
-                role="user",
-                content=xml_obs_block,
-            )
-        )
-        await add_message_to_history(
-            role="user",
-            content=xml_obs_block,
-            session_id=session_id,
-            metadata={"agent_name": self.agent_name},
-        )
-
-        if debug:
-            logger.info(
-                f"Agent state changed from {session_state.state} to {AgentState.OBSERVING}"
-            )
-        session_state.state = AgentState.OBSERVING
-        return xml_obs_block
 
     async def _handle_tool_loop_state(
         self,
@@ -587,136 +418,6 @@ class BaseReactAgent:
             sub_agents=sub_agents,
         )
 
-    async def parse_tool_observation(self, raw_output: str) -> dict:
-        """
-        Normalizes and parses tool output into a **single, consistent structure**.
-
-        Handles:
-        - JSON string outputs
-        - Aggregated multi-tool outputs
-        - Old-style {successes:[], errors:[]} format
-        - Non-JSON string errors
-
-        Always returns:
-        {
-            "status": "success" | "partial" | "error",
-            "tools_results": [
-                {
-                    "tool_name": str,
-                    "args": dict | None,
-                    "status": "success" | "error",
-                    "data": dict | str | None,
-                    "message": str | None,
-                },
-                ...
-            ]
-        }
-        """
-        try:
-            if isinstance(raw_output, str):
-                try:
-                    parsed = json.loads(raw_output)
-                except json.JSONDecodeError:
-                    logger.warning(
-                        "parse_tool_observation: raw_output is not valid JSON."
-                    )
-                    return {
-                        "status": "error",
-                        "tools_results": [
-                            {
-                                "tool_name": "unknown",
-                                "args": None,
-                                "status": "error",
-                                "data": None,
-                                "message": raw_output,
-                            }
-                        ],
-                    }
-            elif isinstance(raw_output, dict):
-                parsed = raw_output
-            else:
-                return {
-                    "status": "error",
-                    "tools_results": [
-                        {
-                            "tool_name": "unknown",
-                            "args": None,
-                            "status": "error",
-                            "data": None,
-                            "message": str(raw_output),
-                        }
-                    ],
-                }
-
-            normalized_results = []
-
-            if "tools_results" in parsed:
-                raw_results = parsed["tools_results"]
-            elif "successes" in parsed or "errors" in parsed:
-                raw_results = []
-                for s in parsed.get("successes", []):
-                    raw_results.append({**s, "status": "success"})
-                for e in parsed.get("errors", []):
-                    raw_results.append({**e, "status": "error"})
-            else:
-                raw_results = [parsed]
-
-            for item in raw_results:
-                tool_name = item.get("tool_name") or item.get("tool") or "unknown"
-                status = item.get("status", "success")
-                args = item.get("args")
-
-                data = item.get("data")
-                message = item.get("message") or item.get("error")
-
-                if isinstance(data, str):
-                    try:
-                        data = json.loads(data)
-                    except json.JSONDecodeError:
-                        pass
-
-                normalized_results.append(
-                    {
-                        "tool_name": tool_name,
-                        "args": args,
-                        "status": status,
-                        "data": data,
-                        "message": message,
-                    }
-                )
-
-            success_count = sum(
-                1 for r in normalized_results if r["status"] == "success"
-            )
-            error_count = sum(1 for r in normalized_results if r["status"] == "error")
-
-            if success_count > 0 and error_count == 0:
-                global_status = "success"
-            elif success_count > 0 and error_count > 0:
-                global_status = "partial"
-            else:
-                global_status = "error"
-
-            return {
-                "status": global_status,
-                "tools_results": normalized_results,
-            }
-
-        except Exception as e:
-            logger.error(f"Error parsing tool observation: {e}", exc_info=True)
-            return {
-                "status": "error",
-                "tools_results": [
-                    {
-                        "tool_name": "unknown",
-                        "args": None,
-                        "status": "error",
-                        "data": None,
-                        "message": f"Observation parsing failed: {str(e)}",
-                    }
-                ],
-            }
-
     @track("tool_execution")
     async def act(
         self,
@@ -775,8 +476,10 @@ class BaseReactAgent:
                 event_router=event_router,
                 tool_batch_name=tool_batch_name,
                 tool_batch_args=tool_batch_args,
-                parse_tool_observation=self.parse_tool_observation,
-                build_tool_results_observation=self._build_tool_results_observation,
+                parse_tool_observation=self.tool_observation_handler.parse,
+                build_tool_results_observation=(
+                    self.tool_observation_handler.build_results_observation
+                ),
             )
 
         if debug:
@@ -787,7 +490,7 @@ class BaseReactAgent:
                 observation=obs_text,
             )
 
-        await self._append_tool_observations(
+        await self.tool_observation_handler.append_observations(
             tools_results=tools_results,
             session_state=session_state,
             add_message_to_history=add_message_to_history,
