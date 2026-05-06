@@ -754,3 +754,74 @@ async def test_resolve_single_tool_action_rejects_tool_call_to_sub_agent(agent):
     assert isinstance(resolved, ToolError)
     assert resolved.tool_name == "N/A"
     assert "is a sub-agent, not a tool" in resolved.observation
+
+
+def test_parse_tool_actions_handles_empty_and_single_action(agent):
+    empty = agent._parse_tool_actions(ParsedResponse(action=True, data=None))
+    assert isinstance(empty, ToolError)
+    assert empty.observation == "Invalid tool call request: No data provided"
+
+    parsed = agent._parse_tool_actions(
+        ParsedResponse(
+            action=True,
+            data=json.dumps({"tool": "local_ping", "parameters": {"value": "one"}}),
+        )
+    )
+    assert parsed == [{"tool": "local_ping", "parameters": {"value": "one"}}]
+
+
+def test_mcp_tools_for_action_disables_mcp_only_for_tools_retriever(agent):
+    mcp_tools = {"server": [SimpleNamespace(name="search")]}
+
+    assert (
+        agent._mcp_tools_for_action(
+            {"tool": "tools_retriever", "parameters": {"query": "mail"}},
+            mcp_tools=mcp_tools,
+        )
+        is None
+    )
+    assert (
+        agent._mcp_tools_for_action(
+            {"tool": "search", "parameters": {"query": "runtime"}},
+            mcp_tools=mcp_tools,
+        )
+        is mcp_tools
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_tool_call_request_keeps_mcp_available_after_tools_retriever(agent):
+    registry = ToolRegistry()
+
+    @registry.register_tool(
+        name="tools_retriever",
+        inputSchema={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+        description="Retrieve tools.",
+    )
+    async def tools_retriever(query: str):
+        return {"status": "success", "data": query}
+
+    resolved = await agent.resolve_tool_call_request(
+        parsed_response=ParsedResponse(
+            action=True,
+            tool_calls=True,
+            data=json.dumps(
+                [
+                    {"tool": "tools_retriever", "parameters": {"query": "search"}},
+                    {"tool": "search", "parameters": {"query": "runtime"}},
+                ]
+            ),
+        ),
+        sessions={"server": {"session": object()}},
+        mcp_tools={"server": [SimpleNamespace(name="search")]},
+        local_tools=registry,
+    )
+
+    assert not isinstance(resolved, ToolError)
+    assert [tool.tool_name for tool in resolved] == ["tools_retriever", "search"]
+    assert resolved[0].tool_executor.tool_handler.local_tools is registry
+    assert resolved[1].tool_executor.tool_handler.server_name == "server"

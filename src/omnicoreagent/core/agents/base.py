@@ -906,6 +906,29 @@ class BaseReactAgent:
             tool_args=normalize_tool_args(tool_data.get("tool_args")),
         )
 
+    def _parse_tool_actions(
+        self, parsed_response: ParsedResponse
+    ) -> ToolError | list[dict[str, Any]]:
+        if not parsed_response.data:
+            return ToolError(
+                observation="Invalid tool call request: No data provided",
+                tool_name="unknown",
+                tool_args={},
+            )
+
+        actions = json.loads(parsed_response.data)
+        if not isinstance(actions, list):
+            actions = [actions]
+        return actions
+
+    def _mcp_tools_for_action(
+        self, action: dict[str, Any], mcp_tools: dict | None
+    ) -> dict | None:
+        tool_name = action.get("tool", "").strip()
+        if tool_name == "tools_retriever":
+            return None
+        return mcp_tools
+
     async def resolve_tool_call_request(
         self,
         parsed_response: ParsedResponse,
@@ -915,27 +938,21 @@ class BaseReactAgent:
         sub_agents: list = None,
     ) -> ToolError | list[ToolCallResult]:
         try:
-            if not parsed_response.data:
-                return ToolError(
-                    observation="Invalid tool call request: No data provided",
-                    tool_name="unknown",
-                    tool_args={},
-                )
-
-            actions = json.loads(parsed_response.data)
-            if not isinstance(actions, list):
-                actions = [actions]
+            actions = self._parse_tool_actions(parsed_response)
+            if isinstance(actions, ToolError):
+                return actions
 
             results: list[ToolCallResult] = []
 
             for action in actions:
-                tool_name = action.get("tool", "").strip()
-                if tool_name == "tools_retriever":
-                    mcp_tools = None
+                action_mcp_tools = self._mcp_tools_for_action(
+                    action=action,
+                    mcp_tools=mcp_tools,
+                )
                 resolved = await self._resolve_single_tool_action(
                     action=action,
                     sessions=sessions,
-                    mcp_tools=mcp_tools,
+                    mcp_tools=action_mcp_tools,
                     local_tools=local_tools,
                     sub_agents=sub_agents,
                 )
