@@ -1,29 +1,21 @@
 from __future__ import annotations
 
-import asyncio
 import time
 
 from collections.abc import Callable
-from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, Tuple
-from omnicoreagent.core.system_prompts import (
-    AgentPromptContextBuilder,
-    FAST_CONVERSATION_SUMMARY_PROMPT,
-)
+from typing import TYPE_CHECKING, Any
+from omnicoreagent.core.system_prompts import AgentPromptContextBuilder
 from omnicoreagent.core.token_usage import (
     Usage,
-    UsageLimitExceeded,
     UsageLimits,
-    session_stats,
-    usage,
 )
 from omnicoreagent.core.types import (
     AgentState,
     Message,
     ParsedResponse,
+    SessionState,
     ToolCallResult,
     ToolError,
-    SessionState,
 )
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.tool_batch_runner import ToolBatchRunner
@@ -31,19 +23,11 @@ from omnicoreagent.core.tools.tool_call_resolver import ToolCallResolver
 from omnicoreagent.core.tools.tool_failure_handler import ToolFailureHandler
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
 from omnicoreagent.core.utils import (
-    RobustLoopDetector,
     logger,
     show_tool_response,
     BackgroundTaskManager,
 )
-from omnicoreagent.core.events.base import (
-    Event,
-    EventType,
-    FinalAnswerPayload,
-    AgentMessagePayload,
-    UserMessagePayload,
-    AgentThoughtPayload,
-)
+from omnicoreagent.core.events.base import Event
 from omnicoreagent.core.context_manager import (
     AgentLoopContextManager,
     ContextManagementConfig,
@@ -52,15 +36,14 @@ from omnicoreagent.core.tool_response_offloader import (
     ToolResponseOffloader,
     OffloadConfig,
 )
-from omnicoreagent.core.agents.llm_response import (
-    extract_response_content,
-    extract_response_usage,
-)
+from omnicoreagent.core.agents.initial_messages import AgentInitialMessagePreparer
+from omnicoreagent.core.agents.llm_step import AgentLlmStepRunner
 from omnicoreagent.core.agents.message_history import AgentMessageHistoryLoader
+from omnicoreagent.core.agents import events as agent_events
+from omnicoreagent.core.agents.session_state import AgentSessionStateStore
 from omnicoreagent.core.agents.subagent_runner import SubAgentCallRunner
 from omnicoreagent.core.tools.tool_observation import ToolObservationHandler
 from omnicoreagent.core.agents.xml_parser import (
-    extract_thought,
     parse_action_or_answer,
 )
 
@@ -106,13 +89,21 @@ class BaseReactAgent:
             request_limit=self.request_limit, total_tokens_limit=self.total_tokens_limit
         )
 
-        self._session_states: dict[Tuple[str, str], SessionState] = {}
+        self.session_state_store = AgentSessionStateStore(agent_name=self.agent_name)
+        self._session_states = self.session_state_store.states
         self.background_task_manager = BackgroundTaskManager()
         self.init_skills()
         self.register_internal_tool = ToolRegistry()
 
         self.context_manager = AgentLoopContextManager(
             ContextManagementConfig.from_dict(context_management_config or {})
+        )
+        self.llm_step_runner = AgentLlmStepRunner(
+            agent_name=self.agent_name,
+            context_manager=self.context_manager,
+            usage_limits=self.usage_limits,
+            limits_enabled=self._limits_enabled,
+            request_limit=self.request_limit,
         )
 
         self.tool_offloader = ToolResponseOffloader(
@@ -151,6 +142,11 @@ class BaseReactAgent:
             is_tool_offload_enabled=lambda: self.tool_offloader.config.enabled,
             skill_manager=self.skill_manager,
         )
+        self.initial_message_preparer = AgentInitialMessagePreparer(
+            tool_runtime_registry=self.tool_runtime_registry,
+            message_history_loader=self.message_history_loader,
+            prompt_context_builder=self.prompt_context_builder,
+        )
 
     def init_skills(self):
         if self.enable_agent_skills:
@@ -163,16 +159,7 @@ class BaseReactAgent:
             )
 
     def _get_session_state(self, session_id: str, debug: bool) -> SessionState:
-        key = (session_id, self.agent_name)
-        if key not in self._session_states:
-            self._session_states[key] = SessionState(
-                messages=[],
-                state=AgentState.IDLE,
-                loop_detector=RobustLoopDetector(debug=debug),
-                assistant_with_tool_calls=None,
-                pending_tool_responses=[],
-            )
-        return self._session_states[key]
+        return self.session_state_store.get(session_id=session_id, debug=debug)
 
     async def extract_action_or_answer(
         self,
@@ -182,16 +169,12 @@ class BaseReactAgent:
         debug: bool = False,
     ) -> ParsedResponse:
         """Parse LLM response to extract a final answer, tool call, or agent call using XML format only."""
-        thought = extract_thought(response)
-        if thought:
-            event = Event(
-                type=EventType.AGENT_THOUGHT,
-                payload=AgentThoughtPayload(message=thought),
-                agent_name=self.agent_name,
-            )
-            if event_router:
-                await event_router(session_id=session_id, event=event)
-
+        await agent_events.emit_agent_thought_from_response(
+            event_router=event_router,
+            session_id=session_id,
+            agent_name=self.agent_name,
+            response=response,
+        )
         return parse_action_or_answer(response, debug=debug)
 
     async def resolve_tool_call_request(
@@ -310,24 +293,15 @@ class BaseReactAgent:
         messages.extend(old_messages)
         return messages
 
-    @asynccontextmanager
-    async def agent_session_state_context(
+    def agent_session_state_context(
         self, new_state: AgentState, session_id: str, debug: bool
     ):
         """Context manager to change the agent session state"""
-        session_state = self._get_session_state(session_id=session_id, debug=debug)
-        if not isinstance(new_state, AgentState):
-            raise ValueError(f"Invalid agent state: {new_state}")
-        previous_state = session_state.state
-        session_state.state = new_state
-        try:
-            yield
-        except Exception as e:
-            session_state.state = AgentState.ERROR
-            logger.error(f"Error in agent state context: {e}")
-            raise
-        finally:
-            session_state.state = previous_state
+        return self.session_state_store.state_context(
+            new_state=new_state,
+            session_id=session_id,
+            debug=debug,
+        )
 
     async def prepare_initial_messages(
         self,
@@ -340,59 +314,15 @@ class BaseReactAgent:
         debug: bool = False,
         sub_agents: list = None,
     ) -> None:
-        """
-        Prepare the full initial message list for the LLM by concurrently:
-        - Building tool registry
-        - Loading prior message history
-        - Injecting current user query
-        """
-        tasks = {}
-
-        tasks["tools"] = self.tool_runtime_registry.render_prompt_registry(
-            mcp_tools=mcp_tools, local_tools=local_tools
-        )
-
-        tasks["history"] = self.message_history_loader.load(
-            message_history=message_history,
-            session_id=session_id,
+        await self.initial_message_preparer.prepare(
             session_state=session_state,
-        )
-
-        try:
-            results = await asyncio.wait_for(
-                asyncio.gather(
-                    tasks["tools"],
-                    tasks["history"],
-                    return_exceptions=True,
-                ),
-                timeout=20.0,
-            )
-        except asyncio.TimeoutError:
-            logger.warning(
-                "Timeout during initial message preparation (20s). Proceeding with defaults."
-            )
-            results = ["No tools available", None]
-
-        for r in results:
-            if isinstance(r, BaseException):
-                logger.error(f"prepare_initial_messages error: {r}", exc_info=True)
-
-        tools_section = (
-            results[0]
-            if not isinstance(results[0], BaseException)
-            else "No tools available"
-        )
-
-        updated_system_prompt = await self.prompt_context_builder.build_system_prompt(
-            base_system_prompt=system_prompt,
-            tools_section=tools_section,
+            system_prompt=system_prompt,
+            session_id=session_id,
+            message_history=message_history,
+            mcp_tools=mcp_tools,
+            local_tools=local_tools,
             sub_agents=sub_agents,
         )
-
-        session_state.messages.insert(
-            0, Message(role="system", content=updated_system_prompt)
-        )
-        self.prompt_context_builder.inject_current_datetime(session_state.messages)
 
     async def execute_sub_agent_calls(
         self,
@@ -445,23 +375,18 @@ class BaseReactAgent:
         """Execute ReAct loop with JSON communication
         kwargs: if mcp is enbale then it will be sessions and availables_tools else it will be local_tools
         """
-        session_state = self._get_session_state(session_id=session_id, debug=debug)
-        session_state.messages = []
-        session_state.assistant_with_tool_calls = None
-        session_state.pending_tool_responses = []
-        session_state.loop_detector.reset()
+        session_state = self.session_state_store.reset_for_run(
+            session_id=session_id, debug=debug
+        )
         start_time = time.perf_counter()
         run_usage = Usage()
 
-        event = Event(
-            type=EventType.USER_MESSAGE,
-            payload=UserMessagePayload(
-                message=query,
-            ),
+        await agent_events.emit_user_message(
+            event_router=event_router,
+            session_id=session_id,
             agent_name=self.agent_name,
+            message=query,
         )
-        if event_router:
-            await event_router(session_id=session_id, event=event)
 
         await add_message_to_history(
             role="user",
@@ -499,116 +424,18 @@ class BaseReactAgent:
                 session_state.state not in [AgentState.FINISHED]
                 and current_steps < self.max_steps
             ):
-                if debug:
-                    logger.info(
-                        f"Sending {len(session_state.messages)} messages to LLM"
-                    )
                 current_steps += 1
-                if self._limits_enabled:
-                    self.usage_limits.check_before_request(usage=usage)
-
-                try:
-                    if self.context_manager.should_trigger(session_state.messages):
-
-                        async def _summarize_for_context(msgs):
-                            """Summarize messages for context management."""
-                            history_text = "\n".join(
-                                [
-                                    f"{m.role if hasattr(m, 'role') else m.get('role', 'unknown')}: "
-                                    f"{m.content if hasattr(m, 'content') else m.get('content', '')}"
-                                    for m in msgs
-                                ]
-                            )
-                            summary_msgs = [
-                                {
-                                    "role": "system",
-                                    "content": FAST_CONVERSATION_SUMMARY_PROMPT,
-                                },
-                                {
-                                    "role": "user",
-                                    "content": f"Here is the conversation history: {history_text}",
-                                },
-                            ]
-                            response = await llm_connection.llm_call(summary_msgs)
-                            return extract_response_content(response, default="")
-
-                        session_state.messages = (
-                            await self.context_manager.manage_context(
-                                messages=session_state.messages,
-                                summarize_fn=_summarize_for_context,
-                            )
-                        )
-                        if debug:
-                            logger.info(
-                                f"Context managed: now {len(session_state.messages)} messages"
-                            )
-
-                    async def make_llm_call():
-                        return await llm_connection.llm_call(session_state.messages)
-
-                    response = await make_llm_call()
-
-                    if response:
-                        message_content = extract_response_content(
-                            response,
-                            strip=False,
-                        )
-
-                        event = Event(
-                            type=EventType.AGENT_MESSAGE,
-                            payload=AgentMessagePayload(
-                                message=message_content,
-                            ),
-                            agent_name=self.agent_name,
-                        )
-                        if event_router:
-                            # Await to ensure event is queued before continuing
-                            await event_router(session_id=session_id, event=event)
-
-                        request_usage = extract_response_usage(response)
-                        if request_usage:
-                            usage.incr(request_usage)
-                            run_usage.incr(request_usage)
-
-                            if self._limits_enabled:
-                                self.usage_limits.check_tokens(usage)
-                                remaining_tokens = self.usage_limits.remaining_tokens(
-                                    usage
-                                )
-                                used_tokens = usage.total_tokens
-                                used_requests = usage.requests
-                                remaining_requests = self.request_limit - used_requests
-                                session_stats.update(
-                                    {
-                                        "used_requests": used_requests,
-                                        "used_tokens": used_tokens,
-                                        "remaining_requests": remaining_requests,
-                                        "remaining_tokens": remaining_tokens,
-                                        "request_tokens": request_usage.request_tokens,
-                                        "response_tokens": request_usage.response_tokens,
-                                        "total_tokens": request_usage.total_tokens,
-                                    }
-                                )
-                                if debug:
-                                    logger.info(
-                                        f"API Call Stats - Requests: {used_requests}/{self.request_limit}, "
-                                        f"Tokens: {used_tokens}/{self.usage_limits.total_tokens_limit}, "
-                                        f"Request Tokens: {request_usage.request_tokens}, "
-                                        f"Response Tokens: {request_usage.response_tokens}, "
-                                        f"Total Tokens: {request_usage.total_tokens}, "
-                                        f"Remaining Requests: {remaining_requests}, "
-                                        f"Remaining Tokens: {remaining_tokens}"
-                                    )
-                        response = extract_response_content(response)
-                except UsageLimitExceeded as e:
-                    error_message = f"Usage limit error: {e}"
-                    logger.error(error_message)
-                    return {"answer": error_message, "usage": run_usage}
-
-                except Exception as e:
-                    error_message = "Model encountered an error, please do retry again"
-                    logger.error(f"{error_message}: {e}")
-                    return {"answer": error_message, "usage": run_usage}
+                llm_step = await self.llm_step_runner.run(
+                    session_state=session_state,
+                    llm_connection=llm_connection,
+                    run_usage=run_usage,
+                    session_id=session_id,
+                    event_router=event_router,
+                    debug=debug,
+                )
+                if llm_step.error_result is not None:
+                    return llm_step.error_result
+                response = llm_step.response
 
                 parsed_response = await self.extract_action_or_answer(
                     response=response,
@@ -628,17 +455,12 @@ class BaseReactAgent:
                         )
                     )
 
-                    event = Event(
-                        type=EventType.FINAL_ANSWER,
-                        payload=FinalAnswerPayload(
-                            message=str(parsed_response.answer),
-                        ),
+                    await agent_events.emit_final_answer(
+                        event_router=event_router,
+                        session_id=session_id,
                         agent_name=self.agent_name,
+                        message=str(parsed_response.answer),
                     )
-                    if event_router:
-                        # CRITICAL: Await the event emission to ensure it's in the queue
-                        # before run() returns. This prevents race conditions with SSE streaming.
-                        await event_router(session_id=session_id, event=event)
                     await add_message_to_history(
                         role="assistant",
                         content=parsed_response.answer,
