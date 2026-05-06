@@ -1,23 +1,21 @@
 import asyncio
-import json
-import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from omnicoreagent.core.events.base import (
-    Event,
-    EventType,
-    ToolCallErrorPayload,
-    ToolCallResultPayload,
-    ToolCallStartedPayload,
+from omnicoreagent.core.events.base import Event
+from omnicoreagent.core.tools.tool_batch_events import (
+    assign_tool_call_ids,
+    build_tool_batch_args,
+    build_tool_batch_name,
+    build_tool_call_error_event,
+    build_tool_call_history_metadata,
+    build_tool_call_result_event,
+    build_tool_call_started_event,
 )
 from omnicoreagent.core.types import (
     Message,
     SessionState,
-    ToolCall,
-    ToolCallMetadata,
     ToolCallResult,
-    ToolFunction,
 )
 from omnicoreagent.core.utils import logger
 
@@ -79,13 +77,10 @@ class ToolBatchRunner:
                 session_id=session_id,
             )
 
-        event = Event(
-            type=EventType.TOOL_CALL_ERROR,
-            payload=ToolCallErrorPayload(
-                tool_name=tool_batch_name,
-                error_message=error_message,
-            ),
+        event = build_tool_call_error_event(
             agent_name=self.agent_name,
+            tool_batch_name=tool_batch_name,
+            error_message=error_message,
         )
         if event_router:
             await event_router(session_id=session_id, event=event)
@@ -104,36 +99,19 @@ class ToolBatchRunner:
         session_id: str | None,
         event_router: Callable[[str, Event], Any] | None,
     ) -> tuple[str, list[dict[str, Any]]]:
-        tool_batch_name = ", ".join([t.tool_name for t in tool_call_results])
-        tool_batch_args = [t.tool_args for t in tool_call_results]
-
-        for single_tool in tool_call_results:
-            single_tool.tool_call_id = str(uuid.uuid4())
-
-        tool_calls_metadata = ToolCallMetadata(
+        tool_batch_name = build_tool_batch_name(tool_call_results)
+        tool_batch_args = build_tool_batch_args(tool_call_results)
+        assign_tool_call_ids(tool_call_results)
+        tool_calls_metadata = build_tool_call_history_metadata(
             agent_name=self.agent_name,
-            has_tool_calls=True,
-            tool_call_id=tool_call_results[0].tool_call_id,
-            tool_calls=[
-                ToolCall(
-                    id=single_tool.tool_call_id,
-                    function=ToolFunction(
-                        name=single_tool.tool_name,
-                        arguments=json.dumps(single_tool.tool_args),
-                    ),
-                )
-                for single_tool in tool_call_results
-            ],
+            tool_call_results=tool_call_results,
         )
 
-        event = Event(
-            type=EventType.TOOL_CALL_STARTED,
-            payload=ToolCallStartedPayload(
-                tool_name=tool_batch_name,
-                tool_args=json.dumps(tool_batch_args),
-                tool_call_id=tool_call_results[0].tool_call_id,
-            ),
+        event = build_tool_call_started_event(
             agent_name=self.agent_name,
+            tool_batch_name=tool_batch_name,
+            tool_batch_args=tool_batch_args,
+            first_tool_call_id=tool_call_results[0].tool_call_id,
         )
         if event_router:
             await event_router(session_id=session_id, event=event)
@@ -198,15 +176,12 @@ class ToolBatchRunner:
                 session_id,
             )
 
-            event = Event(
-                type=EventType.TOOL_CALL_RESULT,
-                payload=ToolCallResultPayload(
-                    tool_name=tool_batch_name,
-                    tool_args=json.dumps(tool_batch_args),
-                    result=obs_text,
-                    tool_call_id=tool_call_results[0].tool_call_id,
-                ),
+            event = build_tool_call_result_event(
                 agent_name=self.agent_name,
+                tool_batch_name=tool_batch_name,
+                tool_batch_args=tool_batch_args,
+                result=obs_text,
+                first_tool_call_id=tool_call_results[0].tool_call_id,
             )
             if event_router:
                 await event_router(session_id=session_id, event=event)

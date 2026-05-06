@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
+from omnicoreagent.core.tools.tool_action import ToolAction
 from omnicoreagent.core.tools.tool_call_resolver import ToolCallResolver
 from omnicoreagent.core.types import ParsedResponse, ToolCallResult, ToolError
 
@@ -30,7 +31,11 @@ async def test_resolve_single_action_uses_local_registry(resolver):
         return {"status": "success", "data": value}
 
     resolved = await resolver.resolve_single_action(
-        action={"tool": "local_ping", "parameters": {"value": "runtime"}},
+        action=ToolAction(
+            tool_name="local_ping",
+            parameters={"value": "runtime"},
+            raw={"tool": "local_ping", "parameters": {"value": "runtime"}},
+        ),
         sessions={},
         mcp_tools=None,
         local_tools=registry,
@@ -54,7 +59,11 @@ async def test_resolve_single_action_uses_mcp_tools_before_local(resolver):
         return {"status": "success", "data": "local"}
 
     resolved = await resolver.resolve_single_action(
-        action={"tool": "search", "parameters": {"query": "runtime"}},
+        action=ToolAction(
+            tool_name="search",
+            parameters={"query": "runtime"},
+            raw={"tool": "search", "parameters": {"query": "runtime"}},
+        ),
         sessions={"server": {"session": object()}},
         mcp_tools={"server": [SimpleNamespace(name="search")]},
         local_tools=registry,
@@ -71,7 +80,11 @@ async def test_resolve_single_action_rejects_tool_call_to_sub_agent(resolver):
     sub_agent = SimpleNamespace(name="research_agent")
 
     resolved = await resolver.resolve_single_action(
-        action={"tool": "research_agent", "parameters": {"task": "inspect"}},
+        action=ToolAction(
+            tool_name="research_agent",
+            parameters={"task": "inspect"},
+            raw={"tool": "research_agent", "parameters": {"task": "inspect"}},
+        ),
         sessions={},
         mcp_tools=None,
         local_tools=None,
@@ -94,7 +107,40 @@ def test_parse_actions_handles_empty_and_single_action(resolver):
             data=json.dumps({"tool": "local_ping", "parameters": {"value": "one"}}),
         )
     )
-    assert parsed == [{"tool": "local_ping", "parameters": {"value": "one"}}]
+    assert parsed == [
+        ToolAction(
+            tool_name="local_ping",
+            parameters={"value": "one"},
+            raw={"tool": "local_ping", "parameters": {"value": "one"}},
+        )
+    ]
+
+
+def test_parse_actions_rejects_malformed_payloads(resolver):
+    invalid_json = resolver.parse_actions(ParsedResponse(action=True, data="{"))
+    assert isinstance(invalid_json, ToolError)
+    assert "Invalid JSON" in invalid_json.observation
+
+    empty_list = resolver.parse_actions(ParsedResponse(action=True, data="[]"))
+    assert isinstance(empty_list, ToolError)
+    assert empty_list.observation == "Invalid tool call request: No actions provided"
+
+    scalar_action = resolver.parse_actions(ParsedResponse(action=True, data="[1]"))
+    assert isinstance(scalar_action, ToolError)
+    assert scalar_action.observation == (
+        "Invalid tool call request: Action #1 must be an object."
+    )
+
+    scalar_parameters = resolver.parse_actions(
+        ParsedResponse(
+            action=True,
+            data=json.dumps({"tool": "search", "parameters": "query"}),
+        )
+    )
+    assert isinstance(scalar_parameters, ToolError)
+    assert scalar_parameters.observation == (
+        "Invalid tool call request: Parameters for 'search' must be an object."
+    )
 
 
 def test_mcp_tools_for_action_disables_mcp_only_for_tools_retriever(resolver):

@@ -1,7 +1,7 @@
-import inspect
 import asyncio
+import inspect
 from collections.abc import Callable
-from typing import Any, Dict, List
+from typing import Any
 
 
 class Tool:
@@ -26,7 +26,7 @@ class Tool:
             "function": self.function,
         }
 
-    async def execute(self, parameters: Dict[str, Any]) -> Any:
+    async def execute(self, parameters: dict[str, Any]) -> Any:
         """Execute the tool with extracted parameters"""
         sig = inspect.signature(self.function)
         func_params = {}
@@ -52,9 +52,7 @@ class ToolRegistry:
     """Registry for local tools that can be executed by agents."""
 
     def __init__(self):
-        self.tools = {}
-        self.tool_descriptions = {}
-        self.tool_schemas = {}
+        self.tools: dict[str, Tool] = {}
 
     def __str__(self):
         """Return a readable string representation of the ToolRegistry."""
@@ -70,16 +68,19 @@ class ToolRegistry:
         """Register a pre-constructed Tool object or a tool wrapper with get_tool()."""
         if hasattr(tool, "get_tool") and callable(tool.get_tool):
             tool = tool.get_tool()
-        
-        if not isinstance(tool, Tool):
-             raise TypeError(f"Expected Tool object or object with get_tool() method, got {type(tool)}")
 
-        self.tools[tool.name] = tool
+        if not isinstance(tool, Tool):
+            raise TypeError(
+                "Expected Tool object or object with get_tool() method, "
+                f"got {type(tool)}"
+            )
+
+        self.tools[tool.name.lower()] = tool
 
     def merge(self, other_registry: "ToolRegistry"):
         """Merge tools from another registry into this one."""
-        self.tools.update(other_registry.tools)
-
+        for tool in other_registry.list_tools():
+            self.register(tool)
 
     def register_tool(
         self,
@@ -102,7 +103,7 @@ class ToolRegistry:
                 inputSchema=final_schema,
                 function=func,
             )
-            self.tools[tool_name] = tool
+            self.tools[tool_name.lower()] = tool
             return func
 
         return decorator
@@ -113,7 +114,7 @@ class ToolRegistry:
     def list_tools(self) -> list[Tool]:
         return list(self.tools.values())
 
-    def get_available_tools(self) -> List[Dict[str, Any]]:
+    def get_available_tools(self) -> list[dict[str, Any]]:
         """Get list of available tools for OmniCoreAgent"""
         tools = []
         for tool in self.list_tools():
@@ -127,18 +128,7 @@ class ToolRegistry:
             )
         return tools
 
-    def get_tool_schemas(self) -> Dict[str, Dict[str, Any]]:
-        """Get all tool schemas for MCP integration"""
-        schemas = {}
-        for tool in self.tools.values():
-            schemas[tool.name] = {
-                "name": tool.name,
-                "description": tool.description,
-                "inputSchema": tool.inputSchema,
-            }
-        return schemas
-
-    async def execute_tool(self, tool_name: str, parameters: Dict[str, Any]) -> Any:
+    async def execute_tool(self, tool_name: str, parameters: dict[str, Any]) -> Any:
         """Execute a tool by name with parameters"""
         tool = self.get_tool(tool_name)
         if not tool:
