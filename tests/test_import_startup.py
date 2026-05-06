@@ -94,3 +94,40 @@ print(json.dumps({
         "openai_loaded": False,
         "dotenv_loaded": False,
     }
+
+
+def test_omnicoreagent_class_export_does_not_load_runtime_stack(tmp_path):
+    result = _run_import_probe(
+        tmp_path,
+        """
+import json
+import sys
+
+from omnicoreagent import OmniCoreAgent
+
+runtime_modules = [
+    "omnicoreagent.core.agents.base",
+    "omnicoreagent.core.agents.react_agent",
+    "omnicoreagent.core.events.event_router",
+    "omnicoreagent.core.guardrails",
+    "omnicoreagent.core.llm",
+    "omnicoreagent.core.memory_store.memory_router",
+    "omnicoreagent.core.subagents",
+    "omnicoreagent.core.system_prompts",
+    "omnicoreagent.core.tools.advance_tools.advanced_tools_use",
+    "omnicoreagent.mcp_clients_connection.client",
+]
+
+print(json.dumps({
+    "export": OmniCoreAgent.__name__,
+    "loaded_runtime_modules": [
+        module for module in runtime_modules if module in sys.modules
+    ],
+}))
+""",
+    )
+
+    assert result == {
+        "export": "OmniCoreAgent",
+        "loaded_runtime_modules": [],
+    }
