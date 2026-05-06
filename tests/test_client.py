@@ -74,7 +74,7 @@ class TestMCPClient:
     async def test_connect_to_single_server_stdio(self, mock_client, mock_session):
         """Test connecting to a stdio server"""
         with patch(
-            "omnicoreagent.mcp_clients_connection.client.stdio_client"
+            "omnicoreagent.mcp_clients_connection.transports.stdio_client"
         ) as mock_stdio_client:
             mock_transport = (AsyncMock(), AsyncMock())
             mock_stdio_client.return_value.__aenter__.return_value = mock_transport
@@ -102,7 +102,7 @@ class TestMCPClient:
     async def test_connect_to_single_server_sse(self, mock_client, mock_session):
         """Test connecting to an SSE server"""
         with patch(
-            "omnicoreagent.mcp_clients_connection.client.sse_client"
+            "omnicoreagent.mcp_clients_connection.transports.sse_client"
         ) as mock_sse_client:
             mock_transport = (AsyncMock(), AsyncMock())
             mock_sse_client.return_value.__aenter__.return_value = mock_transport
