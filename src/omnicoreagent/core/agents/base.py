@@ -34,7 +34,6 @@ from omnicoreagent.core.utils import (
     RobustLoopDetector,
     logger,
     show_tool_response,
-    track,
     BackgroundTaskManager,
 )
 from omnicoreagent.core.events.base import (
@@ -211,7 +210,6 @@ class BaseReactAgent:
             sub_agents=sub_agents,
         )
 
-    @track("tool_execution")
     async def act(
         self,
         parsed_response: ParsedResponse,
@@ -429,7 +427,6 @@ class BaseReactAgent:
             debug=debug,
         )
 
-    @track("agent_execution")
     async def run(
         self,
         system_prompt: str,
@@ -546,7 +543,6 @@ class BaseReactAgent:
                                 f"Context managed: now {len(session_state.messages)} messages"
                             )
 
-                    @track("llm_call")
                     async def make_llm_call():
                         return await llm_connection.llm_call(session_state.messages)
 
@@ -658,40 +654,31 @@ class BaseReactAgent:
                     if parsed_response.agent_calls is not None:
                         agent_calls = parsed_response.data
 
-                        @track("sub_agent_action_execution")
-                        async def execute_sub_agent_calls():
-                            await self.execute_sub_agent_calls(
-                                response=response,
-                                agent_calls=agent_calls,
-                                sub_agents=sub_agents,
-                                session_id=session_id,
-                                session_state=session_state,
-                                add_message_to_history=add_message_to_history,
-                                run_usage=run_usage,
-                                event_router=event_router,
-                                debug=debug,
-                            )
-
-                        await execute_sub_agent_calls()
+                        await self.execute_sub_agent_calls(
+                            response=response,
+                            agent_calls=agent_calls,
+                            sub_agents=sub_agents,
+                            session_id=session_id,
+                            session_state=session_state,
+                            add_message_to_history=add_message_to_history,
+                            run_usage=run_usage,
+                            event_router=event_router,
+                            debug=debug,
+                        )
                     else:
-
-                        @track("action_execution")
-                        async def execute_action():
-                            await self.act(
-                                parsed_response=parsed_response,
-                                response=response,
-                                add_message_to_history=add_message_to_history,
-                                system_prompt=system_prompt,
-                                mcp_tools=mcp_tools,
-                                debug=debug,
-                                sessions=sessions,
-                                local_tools=runtime_local_tools,
-                                session_id=session_id,
-                                event_router=event_router,
-                                sub_agents=sub_agents,
-                            )
-
-                        await execute_action()
+                        await self.act(
+                            parsed_response=parsed_response,
+                            response=response,
+                            add_message_to_history=add_message_to_history,
+                            system_prompt=system_prompt,
+                            mcp_tools=mcp_tools,
+                            debug=debug,
+                            sessions=sessions,
+                            local_tools=runtime_local_tools,
+                            session_id=session_id,
+                            event_router=event_router,
+                            sub_agents=sub_agents,
+                        )
 
                 if parsed_response.error is not None:
                     session_state.messages.append(

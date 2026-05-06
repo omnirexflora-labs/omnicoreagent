@@ -8,7 +8,7 @@ Transforms any agent into a full REST/SSE API server with:
 - Metrics and tools listing
 - Configurable middleware (CORS, auth, logging, rate limiting)
 - Prometheus metrics endpoint
-- OpenTelemetry tracing support
+- Agent event streaming and in-house trace summaries
 - Retry logic and circuit breaker for resilience
 - Proper lifecycle management
 

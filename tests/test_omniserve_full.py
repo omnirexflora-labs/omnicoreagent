@@ -108,6 +108,13 @@ class TestEndpoints:
         agent.run = AsyncMock(return_value={"response": "Agent response"})
         # Mock get_metrics
         agent.get_metrics = AsyncMock(return_value={"total_tokens": 100})
+        agent.get_trace = AsyncMock(
+            return_value={
+                "session_id": "test-endpoint-session",
+                "summary": {"total_events": 2, "tool_calls": 1},
+                "steps": [{"index": 1, "event_type": "user_message"}],
+            }
+        )
         
         server = OmniServe(agent=agent, config=OmniServeConfig())
         return TestClient(server.app)
@@ -135,6 +142,14 @@ class TestEndpoints:
         resp = server_client.get("/prometheus")
         assert resp.status_code == 200
         assert "omniserve_requests_total" in resp.text
+
+    def test_trace_endpoint(self, server_client):
+        resp = server_client.get("/events/test-endpoint-session/trace")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["session_id"] == "test-endpoint-session"
+        assert data["summary"]["tool_calls"] == 1
+        assert data["steps"][0]["event_type"] == "user_message"
 
 # =============================================================================
 # Test Resilience

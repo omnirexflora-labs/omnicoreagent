@@ -1,16 +1,12 @@
-"""
-OmniServe Observability - OpenTelemetry Integration.
+"""OmniServe observability.
 
-Provides distributed tracing, metrics, and Prometheus endpoint.
-Requires: opentelemetry-api, opentelemetry-sdk, opentelemetry-instrumentation-fastapi
-
-Optional dependencies:
-    pip install opentelemetry-api opentelemetry-sdk opentelemetry-exporter-prometheus
-    pip install opentelemetry-instrumentation-fastapi opentelemetry-instrumentation-httpx
+Provides lightweight in-process request metrics and a Prometheus endpoint.
+Agent-level traces are built from OmniCoreAgent events, not external tracing
+libraries.
 """
 
 import time
-from typing import TYPE_CHECKING, Dict, Callable
+from typing import TYPE_CHECKING, Callable
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import PlainTextResponse
@@ -22,34 +18,19 @@ if TYPE_CHECKING:
     from .config import OmniServeConfig
 
 
-# Check if OpenTelemetry is available
-OTEL_AVAILABLE = False
-try:
-    from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-    from opentelemetry.sdk.resources import Resource, SERVICE_NAME
-    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-
-    OTEL_AVAILABLE = True
-except ImportError:
-    pass
-
-
-# Simple in-memory metrics for when OpenTelemetry is not installed
 class SimpleMetrics:
     """Simple metrics tracker for Prometheus-style output."""
 
     def __init__(self):
-        self.counters: Dict[str, int] = {
+        self.counters: dict[str, int] = {
             "omniserve_requests_total": 0,
             "omniserve_requests_success": 0,
             "omniserve_requests_error": 0,
         }
-        self.histograms: Dict[str, list] = {
+        self.histograms: dict[str, list[float]] = {
             "omniserve_request_duration_seconds": [],
         }
-        self.gauges: Dict[str, float] = {
+        self.gauges: dict[str, float] = {
             "omniserve_active_requests": 0,
         }
 
@@ -158,43 +139,6 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             metrics.inc_counter(f"omniserve_requests_{path}_total")
 
 
-def setup_opentelemetry(app: FastAPI, service_name: str = "omniserve") -> None:
-    """
-    Set up OpenTelemetry tracing and metrics.
-
-    Args:
-        app: FastAPI application
-        service_name: Name for the service in traces
-    """
-    if not OTEL_AVAILABLE:
-        logger.warning(
-            "OmniServe: OpenTelemetry not installed. "
-            "Install with: pip install opentelemetry-api opentelemetry-sdk "
-            "opentelemetry-instrumentation-fastapi"
-        )
-        return
-
-    try:
-        # Create resource
-        resource = Resource.create({SERVICE_NAME: service_name})
-
-        # Set up tracing
-        tracer_provider = TracerProvider(resource=resource)
-
-        # Add console exporter for development (replace with OTLP for production)
-        tracer_provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
-
-        trace.set_tracer_provider(tracer_provider)
-
-        # Instrument FastAPI
-        FastAPIInstrumentor.instrument_app(app)
-
-        logger.info("OmniServe: OpenTelemetry tracing enabled")
-
-    except Exception as e:
-        logger.warning(f"OmniServe: Failed to setup OpenTelemetry: {e}")
-
-
 def add_prometheus_endpoint(app: FastAPI) -> None:
     """
     Add Prometheus metrics endpoint at /prometheus.
@@ -247,9 +191,4 @@ def setup_observability(
     # Add metrics middleware (always enabled)
     add_metrics_middleware(app)
 
-    # Add Prometheus endpoint
     add_prometheus_endpoint(app)
-
-    # Set up OpenTelemetry if available
-    if OTEL_AVAILABLE:
-        setup_opentelemetry(app, service_name)

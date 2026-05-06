@@ -755,17 +755,6 @@ def build_xml_observations_block(tools_results):
     return "\n".join(lines)
 
 
-def track(name_or_func=None):
-    """No-op trace decorator placeholder for internal observability hooks."""
-    if callable(name_or_func):
-        return name_or_func
-
-    def decorator(func):
-        return func
-
-    return decorator
-
-
 def get_json_schema(f) -> dict:
     """
     Generate a JSON schema for the arguments of a function.

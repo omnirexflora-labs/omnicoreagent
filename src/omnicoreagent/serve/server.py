@@ -106,7 +106,7 @@ class OmniServe:
         # Setup middleware
         setup_all_middleware(app, self.config)
 
-        # Setup observability (metrics, tracing)
+        # Setup observability metrics
         from .observability import setup_observability
         setup_observability(app, self.config, service_name=self.agent.name)
 

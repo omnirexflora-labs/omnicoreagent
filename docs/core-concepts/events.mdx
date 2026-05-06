@@ -1,12 +1,12 @@
 ---
 title: Event System
-description: 'Real-time event streaming with runtime switching for observability and debugging'
+description: 'Real-time event streaming and in-house trace summaries for observability and debugging'
 icon: 'signal-stream'
 ---
 
 # Event System
 
-Real-time event streaming with runtime switching. Track every tool call, agent thought, and message in real-time.
+Real-time event streaming with runtime switching. Track every tool call, agent thought, message, and final answer, then build a compact trace summary from the stored events.
 
 ---
 
@@ -49,10 +49,15 @@ async for event in agent.stream_events(session_id):
 | `agent_thought` | Agent's internal reasoning step |
 | `tool_call_started` | Tool execution begins |
 | `tool_call_result` | Tool execution completes |
+| `tool_call_error` | Tool validation or execution failed |
 | `final_answer` | Agent produces final response |
-| `sub_agent_started` | Sub-agent delegation begins |
-| `sub_agent_result` | Sub-agent returns result |
-| `sub_agent_error` | Sub-agent encountered an error |
+| `sub_agent_call_started` | Sub-agent delegation begins |
+| `sub_agent_call_result` | Sub-agent returns result |
+| `sub_agent_call_error` | Sub-agent encountered an error |
+| `background_task_started` | Background task begins |
+| `background_task_completed` | Background task completes |
+| `background_task_error` | Background task failed |
+| `background_agent_status` | Background agent status changed |
 
 ---
 
@@ -66,6 +71,25 @@ for event in events:
     print(f"[{event.timestamp}] {event.type}: {event.payload}")
 ```
 
+---
+
+## Agent Trace
+
+```python
+trace = await agent.get_trace(session_id="user_1")
+
+print(trace["summary"]["total_events"])
+print(trace["summary"]["tool_calls"])
+print(trace["summary"]["tool_errors"])
+
+for step in trace["steps"]:
+    print(step["index"], step["event_type"], step["elapsed_ms"])
+```
+
+The trace is built from the event history. It gives you ordered steps, elapsed
+time between steps, event counts, tool/sub-agent error counts, and the latest
+final answer.
+
 <Tip>
-Enable events when you need real-time monitoring, debugging, or building UIs that show agent progress. Essential for production observability.
+Enable events when you need real-time monitoring, debugging, or building UIs that show agent progress. Use traces when you need a compact session-level view for debugging, feedback loops, or evaluation.
 </Tip>

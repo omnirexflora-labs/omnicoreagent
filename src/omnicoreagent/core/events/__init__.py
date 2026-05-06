@@ -9,7 +9,12 @@ This package provides event handling and routing:
 """
 
 from .event_router import EventRouter
+from .trace import AgentTrace, TraceStep, TraceSummary, build_event_trace
 
 __all__ = [
+    "AgentTrace",
     "EventRouter",
+    "TraceStep",
+    "TraceSummary",
+    "build_event_trace",
 ]

@@ -150,7 +150,7 @@ print(result["response"])
 | 12 | **Workflows** | Sequential, Parallel, and Router agent orchestration | [Workflows →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workflows) |
 | 13 | **BM25 Tool Retrieval** | Auto-discover relevant tools from 1000+ using BM25 search | [Advanced Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/advanced-tools) |
 | 14 | **Guardrails** | Prompt injection protection with configurable sensitivity | [Guardrails →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/guardrails) |
-| 15 | **Observability** | Per-request metrics + Opik distributed tracing | [Observability →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/observability) |
+| 15 | **Observability** | Per-request metrics, event streams, and in-house agent traces | [Observability →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/observability) |
 | 16 | **Universal Models** | 9 providers via LiteLLM (OpenAI, Anthropic, Gemini, Groq, Ollama, etc.) | [Models →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/models) |
 | 17 | **OmniServe** | Turn any agent into a production REST/SSE API with one command | [OmniServe →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/omniserve) |
 

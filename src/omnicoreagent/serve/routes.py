@@ -23,6 +23,7 @@ from .models import (
     MetricsResponse,
     SessionHistoryResponse,
     EventsResponse,
+    TraceResponse,
     ErrorResponse,
 )
 from .sse import run_agent_stream, stream_session_events
@@ -244,6 +245,23 @@ def create_agent_router() -> APIRouter:
             session_id=session_id,
             events=events_list,
             count=len(events_list),
+        )
+
+    @router.get(
+        "/events/{session_id}/trace",
+        response_model=TraceResponse,
+        summary="Get session trace",
+        description="Build a compact trace summary from stored session events.",
+    )
+    async def get_trace(request: Request, session_id: str) -> TraceResponse:
+        """Get a compact trace for a session."""
+        agent: AgentType = request.app.state.agent
+        trace = await agent.get_trace(session_id)
+
+        return TraceResponse(
+            session_id=session_id,
+            summary=trace.get("summary", {}),
+            steps=trace.get("steps", []),
         )
 
     # =========================================================================

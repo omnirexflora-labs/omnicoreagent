@@ -242,7 +242,6 @@ from omnicoreagent import OmniCoreAgent
 
 watched_modules = [
     "decouple",
-    "opik",
     "rich",
     "rich.console",
     "litellm",
@@ -297,7 +296,6 @@ print(json.dumps({
     "log_file_created": Path("omnicoreagent.log").exists(),
     "decouple_loaded": "decouple" in sys.modules,
     "rich_loaded": any(module == "rich" or module.startswith("rich.") for module in sys.modules),
-    "opik_loaded": "opik" in sys.modules,
 }))
 """,
     )
@@ -307,5 +305,4 @@ print(json.dumps({
         "log_file_created": False,
         "decouple_loaded": False,
         "rich_loaded": False,
-        "opik_loaded": False,
     }

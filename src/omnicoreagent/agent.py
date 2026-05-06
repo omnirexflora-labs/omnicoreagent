@@ -490,6 +490,10 @@ class OmniCoreAgent:
     async def get_events(self, session_id: str):
         return await self.event_router.get_events(session_id=session_id)
 
+    async def get_trace(self, session_id: str) -> Dict[str, Any]:
+        trace = await self.event_router.get_trace(session_id=session_id)
+        return trace.model_dump()
+
     async def get_event_store_type(self) -> str:
         """Get the current event store type."""
         return self.event_router.get_event_store_type()
