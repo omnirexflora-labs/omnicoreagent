@@ -50,6 +50,7 @@ from omnicoreagent import (  # noqa: E402
     retry_async,
     get_metrics,
 )
+from omnicoreagent.serve.resilience import CircuitBreakerOpenError  # noqa: E402
 
 
 # =============================================================================
@@ -156,8 +157,6 @@ async def call_with_circuit_breaker_fallback() -> dict:
     """
     Example: Circuit breaker with fallback logic.
     """
-    from omnicoreagent.omni_agent.omni_serve.resilience import CircuitBreakerOpenError
-
     try:
         async with external_api_circuit:
             # Risky call
@@ -181,8 +180,6 @@ async def robust_api_call(url: str) -> dict:
     - If the circuit is closed, we retry on failures
     - If retries exhaust, that counts as a circuit failure
     """
-    from omnicoreagent.omni_agent.omni_serve.resilience import CircuitBreakerOpenError
-
     try:
         async with external_api_circuit:
             # Retry inside the circuit breaker

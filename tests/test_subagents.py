@@ -435,7 +435,7 @@ class TestOmniCoreAgentSubagents:
         assert agent._subagent_factory is None
         assert agent.local_tools is None
 
-    def test_enable_subagents_forces_workspace_memory(self):
+    def test_enable_subagents_forces_workspace_files(self):
         config = normalize_agent_config(
             "Harness",
             {

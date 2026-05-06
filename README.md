@@ -126,7 +126,7 @@ print(result["response"])
 | **MCP Native** | Connect to any MCP server (stdio, SSE, HTTP with OAuth) |
 | **Background Agents** | Schedule autonomous tasks that run on intervals |
 | **Workflow Orchestration** | Sequential, Parallel, and Router agents for complex tasks |
-| **Production Observability** | Metrics, tracing, and event streaming built in |
+| **Runtime Visibility** | Metrics, event streams, and compact in-house trace summaries |
 
 ---
 
@@ -150,7 +150,7 @@ print(result["response"])
 | 12 | **Workflows** | Sequential, Parallel, and Router agent orchestration | [Workflows →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workflows) |
 | 13 | **BM25 Tool Retrieval** | Auto-discover relevant tools from 1000+ using BM25 search | [Advanced Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/advanced-tools) |
 | 14 | **Guardrails** | Prompt injection protection with configurable sensitivity | [Guardrails →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/guardrails) |
-| 15 | **Observability** | Per-request metrics, event streams, and in-house agent traces | [Observability →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/observability) |
+| 15 | **Runtime Visibility** | Per-request metrics, event streams, and compact in-house trace summaries | [Observability →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/observability) |
 | 16 | **Universal Models** | 9 providers via LiteLLM (OpenAI, Anthropic, Gemini, Groq, Ollama, etc.) | [Models →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/models) |
 | 17 | **OmniServe** | Turn any agent into a production REST/SSE API with one command | [OmniServe →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/omniserve) |
 
@@ -165,17 +165,7 @@ All examples are in the **[Cookbook](./cookbook)** — organized by use case wit
 | **Getting Started** | Your first agent, tools, memory, events | [cookbook/getting_started](./cookbook/getting_started) |
 | **Workflows** | Sequential, Parallel, Router agents | [cookbook/workflows](./cookbook/workflows) |
 | **Background Agents** | Scheduled autonomous tasks | [cookbook/background_agents](./cookbook/background_agents) |
-| **Production** | Metrics, guardrails, observability | [cookbook/production](./cookbook/production) |
-| **🏆 Showcase** | Full production applications | [cookbook/showcase](./cookbook/showcase) |
-
-### 🏆 Showcase: Full Production Applications
-
-| Application | Description | Features |
-|-------------|-------------|----------|
-| **[OmniAudit](./cookbook/showcase/omniavelis)** | Healthcare Claims Audit System | Multi-agent pipeline, ERISA compliance |
-| **[DevOps Copilot](./cookbook/showcase/devops_copilot_agent)** | AI-Powered DevOps Automation | Docker, Prometheus, Grafana |
-| **[Deep Code Agent](./cookbook/showcase/deep_code_agent)** | Code Analysis with Sandbox | Sandbox execution, session management |
-
+| **Production** | Metrics and guardrails | [cookbook/production](./cookbook/production) |
 ---
 
 ## ⚙️ Configuration
@@ -290,7 +280,6 @@ MIT License — see [LICENSE](LICENSE)
 |---------|-------------|
 | [🧠 OmniMemory](https://github.com/omnirexflora-labs/omnimemory) | Self-evolving memory for autonomous agents |
 | [🤖 OmniCoreAgent](https://github.com/omnirexflora-labs/omnicoreagent) | Production-ready AI agent framework (this project) |
-| [⚡ OmniDaemon](https://github.com/omnirexflora-labs/OmniDaemon) | Event-driven runtime engine for AI agents |
 
 ### 🙏 Acknowledgments
 
