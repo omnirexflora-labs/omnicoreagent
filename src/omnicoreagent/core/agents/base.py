@@ -4,17 +4,10 @@ import time
 import json
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import Any, Tuple, List
+from typing import Any, Tuple
 from omnicoreagent.core.system_prompts import (
-    tools_retriever_additional_prompt,
-    memory_tool_additional_prompt,
-    sub_agents_additional_prompt,
-    dynamic_subagents_additional_prompt,
-    agent_skills_additional_prompt,
-    artifact_tool_additional_prompt,
     FAST_CONVERSATION_SUMMARY_PROMPT,
 )
-import inspect
 from omnicoreagent.core.token_usage import (
     Usage,
     UsageLimitExceeded,
@@ -35,6 +28,7 @@ from omnicoreagent.core.tools.tool_batch_runner import ToolBatchRunner
 from omnicoreagent.core.tools.tool_call_resolver import ToolCallResolver
 from omnicoreagent.core.tools.tool_failure_handler import ToolFailureHandler
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
+from omnicoreagent.core.agents.prompt_context import AgentPromptContextBuilder
 from omnicoreagent.core.utils import (
     RobustLoopDetector,
     logger,
@@ -143,6 +137,14 @@ class BaseReactAgent:
             enable_subagents=self.enable_subagents,
             enable_workspace_memory=self.enable_workspace_memory,
             enable_agent_skills=self.enable_agent_skills,
+            skill_manager=self.skill_manager,
+        )
+        self.prompt_context_builder = AgentPromptContextBuilder(
+            enable_advanced_tool_use=self.enable_advanced_tool_use,
+            enable_subagents=self.enable_subagents,
+            enable_workspace_memory=self.enable_workspace_memory,
+            enable_agent_skills=self.enable_agent_skills,
+            is_tool_offload_enabled=lambda: self.tool_offloader.config.enabled,
             skill_manager=self.skill_manager,
         )
 
@@ -460,130 +462,16 @@ class BaseReactAgent:
             else "No tools available"
         )
 
-        updated_system_prompt = system_prompt
-
-        if self.enable_advanced_tool_use:
-            updated_system_prompt += f"\n{tools_retriever_additional_prompt}"
-
-        if self.enable_agent_skills and self.skill_manager:
-            updated_system_prompt += f"\n{agent_skills_additional_prompt}"
-
-        if self.enable_subagents:
-            updated_system_prompt += f"\n{dynamic_subagents_additional_prompt}"
-
-        if sub_agents:
-            updated_system_prompt += f"\n{sub_agents_additional_prompt}"
-
-        if self.enable_workspace_memory:
-            updated_system_prompt += f"\n{memory_tool_additional_prompt}"
-
-        if self.tool_offloader.config.enabled:
-            updated_system_prompt += f"\n{artifact_tool_additional_prompt}"
-
-        if self.enable_agent_skills and self.skill_manager:
-            skills_context = self.skill_manager.get_skills_context_xml()
-            if skills_context:
-                updated_system_prompt += f"\n[AVAILABLE SKILLS]\n{skills_context}"
-
-        if sub_agents:
-            sub_agents_registry = await self.sub_agents_registry(sub_agents)
-            updated_system_prompt += (
-                f"\n[AVAILABLE SUB AGENTS REGISTRY]\n{sub_agents_registry}"
-            )
-
-        updated_system_prompt += f"\n[AVAILABLE TOOLS REGISTRY]\n{tools_section}"
+        updated_system_prompt = await self.prompt_context_builder.build_system_prompt(
+            base_system_prompt=system_prompt,
+            tools_section=tools_section,
+            sub_agents=sub_agents,
+        )
 
         session_state.messages.insert(
             0, Message(role="system", content=updated_system_prompt)
         )
-
-        for i in range(len(session_state.messages) - 1, -1, -1):
-            msg = session_state.messages[i]
-            if msg.role == "user":
-                from datetime import datetime
-
-                datetime_info = f"[CURRENT_DATETIME: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}]\n\n"
-                session_state.messages[i] = Message(
-                    role="user", content=datetime_info + msg.content
-                )
-                break
-
-    async def sub_agents_registry(self, sub_agents: List[Any]) -> str:
-        """
-        Compact JSON-based registry format.
-        More concise while maintaining all necessary information.
-        """
-        if not sub_agents:
-            return "No sub-agents available."
-
-        registry = []
-
-        for agent in sub_agents:
-            try:
-                sig = inspect.signature(agent.run)
-
-                parameters = {}
-                for param_name, param in sig.parameters.items():
-                    if param_name == "self":
-                        continue
-
-                    is_required = param.default is inspect.Parameter.empty
-                    param_type = "any"
-                    if param.annotation != inspect.Parameter.empty:
-                        param_type = (
-                            param.annotation.__name__
-                            if hasattr(param.annotation, "__name__")
-                            else str(param.annotation)
-                        )
-
-                    parameters[param_name] = {
-                        "type": param_type,
-                        "required": is_required,
-                        "default": None if is_required else param.default,
-                    }
-
-                registry.append(
-                    {
-                        "agent_name": agent.name,
-                        "description": agent.system_instruction,
-                        "parameters": parameters,
-                    }
-                )
-
-            except Exception as e:
-                logger.error(
-                    f"Error processing agent {getattr(agent, 'name', 'unknown')}: {e}"
-                )
-
-        output_lines = [
-            "════════════════════════════════════════════════════════════",
-            "AVAILABLE SUB-AGENTS REGISTRY",
-            "════════════════════════════════════════════════════════════",
-            "",
-        ]
-
-        for idx, agent_info in enumerate(registry, 1):
-            output_lines.append(f"[{idx}] {agent_info['agent_name']}")
-            output_lines.append(f"    Description: {agent_info['description']}")
-
-            if agent_info["parameters"]:
-                output_lines.append("    Parameters:")
-                for param_name, param_details in agent_info["parameters"].items():
-                    req_str = "REQUIRED" if param_details["required"] else "optional"
-                    default_str = (
-                        f", default={param_details['default']}"
-                        if not param_details["required"]
-                        else ""
-                    )
-                    output_lines.append(
-                        f"      • {param_name}: {param_details['type']} ({req_str}{default_str})"
-                    )
-            else:
-                output_lines.append("    Parameters: None")
-
-            output_lines.append("")
-
-        return "\n".join(output_lines)
+        self.prompt_context_builder.inject_current_datetime(session_state.messages)
 
     async def execute_sub_agent_calls(
         self,
