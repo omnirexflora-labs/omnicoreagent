@@ -342,17 +342,19 @@ def generate_dockerfile(file_path: str, output_dir: str):
     except ValueError:
         rel_path = os.path.basename(file_path)
 
-    # Inspect agent to detect workspace memory tools
-    memory_enabled = False
+    # Inspect agent to detect workspace file tools
+    workspace_files_enabled = False
     try:
         loaded_agent = _load_agent_from_file(file_path)
         if loaded_agent.agent_config and isinstance(loaded_agent.agent_config, dict):
-            memory_enabled = bool(loaded_agent.agent_config.get("enable_workspace_memory"))
+            workspace_files_enabled = bool(
+                loaded_agent.agent_config.get("enable_workspace_files")
+            )
         console.print(f"[green]✓ Detected agent: {loaded_agent.name}[/green]")
-        if memory_enabled:
-            console.print("[dim]Workspace memory tools enabled[/dim]")
+        if workspace_files_enabled:
+            console.print("[dim]Workspace file tools enabled[/dim]")
         else:
-            console.print("[dim]No memory tools configured[/dim]")
+            console.print("[dim]No workspace file tools configured[/dim]")
     except Exception as e:
         console.print(f"[yellow]Warning: Could not inspect agent ({e})[/yellow]")
 
@@ -366,7 +368,7 @@ def generate_dockerfile(file_path: str, output_dir: str):
         "# Agent path",
         f"ENV AGENT_PATH=/app/{rel_path}",
         "",
-        "# Workspace storage for artifacts and memory files",
+        "# Workspace storage for artifacts and workspace files",
         "ENV OMNICOREAGENT_WORKSPACE_BACKEND=local",
         "ENV OMNICOREAGENT_WORKSPACE_DIR=/tmp/workspace",
     ]

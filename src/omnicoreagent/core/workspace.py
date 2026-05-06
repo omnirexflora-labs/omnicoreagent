@@ -10,11 +10,11 @@ _DEFAULT_WORKSPACE = DEFAULT_WORKSPACE_DIR
 class WorkspacePaths:
     root: Path
     artifacts: Path
-    memories: Path
+    files: Path
     config: Path
 
     def ensure(self) -> "WorkspacePaths":
-        for path in (self.root, self.artifacts, self.memories, self.config):
+        for path in (self.root, self.artifacts, self.files, self.config):
             path.mkdir(parents=True, exist_ok=True)
         return self
 
@@ -27,7 +27,7 @@ def resolve_workspace_paths(
     return WorkspacePaths(
         root=root,
         artifacts=root / "artifacts",
-        memories=root / "memories",
+        files=root / "files",
         config=root / "config",
     )
 
@@ -40,8 +40,8 @@ def get_artifacts_dir() -> str:
     return str(resolve_workspace_paths().artifacts)
 
 
-def get_memories_dir() -> str:
-    return str(resolve_workspace_paths().memories)
+def get_workspace_files_dir() -> str:
+    return str(resolve_workspace_paths().files)
 
 
 def get_config_dir() -> str:

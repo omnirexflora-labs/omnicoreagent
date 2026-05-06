@@ -14,17 +14,17 @@ async def build_tool_registry_advance_tools_use(registry: ToolRegistry):
     return await build_advanced_tools(registry=registry)
 
 
-def build_tool_registry_memory_tool(
+def build_tool_registry_workspace_files(
     *,
     backend: Any,
     registry: ToolRegistry,
     workspace_config: WorkspaceConfig | dict | None = None,
 ):
-    from omnicoreagent.core.tools.memory_tool.memory_tool import (
-        build_tool_registry_memory_tool as build_memory_tools,
+    from omnicoreagent.core.tools.workspace_files.tool import (
+        build_tool_registry_workspace_files as build_workspace_files_tool,
     )
 
-    return build_memory_tools(
+    return build_workspace_files_tool(
         backend=backend,
         registry=registry,
         workspace_config=workspace_config,
@@ -56,7 +56,7 @@ class ToolRuntimeRegistry:
         tool_offloader: ToolResponseOffloader,
         enable_advanced_tool_use: bool = False,
         enable_subagents: bool = False,
-        enable_workspace_memory: bool = False,
+        enable_workspace_files: bool = False,
         enable_agent_skills: bool = False,
         skill_manager: Any = None,
         workspace_config: WorkspaceConfig | dict | None = None,
@@ -65,7 +65,7 @@ class ToolRuntimeRegistry:
         self.tool_offloader = tool_offloader
         self.enable_advanced_tool_use = enable_advanced_tool_use
         self.enable_subagents = enable_subagents
-        self.enable_workspace_memory = enable_workspace_memory
+        self.enable_workspace_files = enable_workspace_files
         self.enable_agent_skills = enable_agent_skills
         self.skill_manager = skill_manager
         self.workspace_config = workspace_config
@@ -75,7 +75,7 @@ class ToolRuntimeRegistry:
         needs_internal_registry = (
             self.enable_advanced_tool_use
             or self.enable_subagents
-            or self.enable_workspace_memory
+            or self.enable_workspace_files
             or self.tool_offloader.config.enabled
             or (self.enable_agent_skills and self.skill_manager)
         )
@@ -89,8 +89,8 @@ class ToolRuntimeRegistry:
         if self.enable_advanced_tool_use:
             await build_tool_registry_advance_tools_use(registry=registry)
 
-        if self.enable_workspace_memory:
-            build_tool_registry_memory_tool(
+        if self.enable_workspace_files:
+            build_tool_registry_workspace_files(
                 backend=None,
                 registry=registry,
                 workspace_config=self.workspace_config,

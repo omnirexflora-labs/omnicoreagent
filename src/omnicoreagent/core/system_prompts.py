@@ -33,7 +33,7 @@ class AgentPromptContextBuilder:
         *,
         enable_advanced_tool_use: bool = False,
         enable_subagents: bool = False,
-        enable_workspace_memory: bool = False,
+        enable_workspace_files: bool = False,
         enable_agent_skills: bool = False,
         is_tool_offload_enabled: Callable[[], bool],
         skill_manager: Any = None,
@@ -41,7 +41,7 @@ class AgentPromptContextBuilder:
     ):
         self.enable_advanced_tool_use = enable_advanced_tool_use
         self.enable_subagents = enable_subagents
-        self.enable_workspace_memory = enable_workspace_memory
+        self.enable_workspace_files = enable_workspace_files
         self.enable_agent_skills = enable_agent_skills
         self.is_tool_offload_enabled = is_tool_offload_enabled
         self.skill_manager = skill_manager
@@ -68,8 +68,8 @@ class AgentPromptContextBuilder:
         if sub_agents:
             sections.append(sub_agents_additional_prompt)
 
-        if self.enable_workspace_memory:
-            sections.append(memory_tool_additional_prompt)
+        if self.enable_workspace_files:
+            sections.append(workspace_files_additional_prompt)
 
         if self.is_tool_offload_enabled():
             sections.append(artifact_tool_additional_prompt)
@@ -743,8 +743,8 @@ dynamic_subagents_additional_prompt = """
   </available_tools>
 
   <workspace_contract>
-    Subagents save their output to workspace memory paths using the memory
-    tools. After spawning subagents, read their output paths with memory_view
+    Subagents save their output to workspace file paths using workspace_file_*
+    tools. After spawning subagents, read their output paths with workspace_file_view
     before synthesizing the final answer.
   </workspace_contract>
 
@@ -759,7 +759,7 @@ dynamic_subagents_additional_prompt = """
     <rule>Use spawn_subagents when tasks can be delegated to focused workers.</rule>
     <rule>When tasks do not depend on each other, include all specs in one call so they run in parallel.</rule>
     <rule>Give each subagent a clear role, task, and output_path.</rule>
-    <rule>Use workspace memory paths such as /memories/{task_name}/subagent_{name}/output.md.</rule>
+    <rule>Use workspace file paths such as /workspace/{task_name}/subagent_{name}/output.md.</rule>
     <rule>Do not delegate the immediate blocking step if you need the result before continuing.</rule>
     <rule>After subagents complete, synthesize their outputs instead of repeating them.</rule>
   </rules>
@@ -1048,21 +1048,21 @@ tools_retriever_additional_prompt = """
 """.strip()
 
 
-memory_tool_additional_prompt = """
-<extension name="persistent_memory_tool">
-  <description>Extension module providing persistent working memory capabilities for the agent.</description>
-  <activation_flag>use_persistent_memory</activation_flag>
+workspace_files_additional_prompt = """
+<extension name="persistent_workspace_files">
+  <description>Extension module providing persistent workspace files for agent scratchpads, logs, notes, and task outputs.</description>
+  <activation_flag>use_workspace_files</activation_flag>
 
-  <persistent_memory_tool>
+  <persistent_workspace_files>
     <meta>
-      <name>Persistent Memory Tool</name>
-      <purpose>Working memory / scratchpad persisted across context resets for active task management</purpose>
+      <name>Workspace Files Tool</name>
+      <purpose>Filesystem-style workspace persisted across context resets for active task management</purpose>
     </meta>
 
     <core_mandate>
-      This memory layer complements long-term and episodic memory.
-      Use it for task planning, progress tracking, and reasoning persistence.
-      Only use via provided memory_* tools and reference outputs inside &lt;thought&gt; tags.
+      This workspace file layer complements conversation memory.
+      Use it for task planning, progress tracking, scratchpads, logs, and durable outputs.
+      Only use via provided workspace_file_* tools and reference outputs inside &lt;thought&gt; tags.
     </core_mandate>
 
     <when_to_use>
@@ -1074,18 +1074,18 @@ memory_tool_additional_prompt = """
     </when_to_use>
 
     <tools>
-      <tool>memory_view(path)</tool>
-      <tool>memory_create_update(path, content, mode=create|append|overwrite)</tool>
-      <tool>memory_insert(path, line_number, content)</tool>
-      <tool>memory_str_replace(path, find, replace)</tool>
-      <tool>memory_delete(path)</tool>
-      <tool>memory_rename(old_path, new_path)</tool>
-      <tool>memory_clear_all()</tool>
+      <tool>workspace_file_view(path)</tool>
+      <tool>workspace_file_write(path, content, mode=create|append|overwrite)</tool>
+      <tool>workspace_file_insert(path, line_number, content)</tool>
+      <tool>workspace_file_replace(path, find, replace)</tool>
+      <tool>workspace_file_delete(path)</tool>
+      <tool>workspace_file_rename(old_path, new_path)</tool>
+      <tool>workspace_file_clear()</tool>
     </tools>
 
     <workflow>
       <phase name="context_loading">
-        <step>Use memory_view to inspect prior files or notes.</step>
+        <step>Use workspace_file_view to inspect prior files or notes.</step>
         <step>Read relevant files before starting to avoid duplication.</step>
       </phase>
 
@@ -1097,7 +1097,7 @@ memory_tool_additional_prompt = """
       </phase>
 
       <phase name="finalization">
-        <step>Summarize task results (e.g., /memories/projects/name/final_summary.md).</step>
+        <step>Summarize task results (e.g., /workspace/projects/name/final_summary.md).</step>
         <step>Optionally rename or archive completed tasks.</step>
       </phase>
     </workflow>
@@ -1110,19 +1110,19 @@ memory_tool_additional_prompt = """
     </constraints>
 
     <observation_contract>
-      <description>Each memory_* tool must return structured XML observations.</description>
+      <description>Each workspace_file_* tool must return structured XML observations.</description>
       <example>
         <tool_call>
-          <tool_name>memory_create_update</tool_name>
-          <parameters>{"path":"/memories/projects/x/plan.md","mode":"create","content":"..."}</parameters>
+          <tool_name>workspace_file_write</tool_name>
+          <parameters>{"path":"/workspace/projects/x/plan.md","mode":"create","content":"..."}</parameters>
         </tool_call>
 
         <observation_marker>OBSERVATION RESULT FROM TOOL CALLS</observation_marker>
         <observations>
           <observation>
-            <tool_name>memory_create_update</tool_name>
+            <tool_name>workspace_file_write</tool_name>
             <status>success</status>
-            <output>{"path":"/memories/projects/x/plan.md","version":"v1"}</output>
+            <output>{"path":"/workspace/projects/x/plan.md","version":"v1"}</output>
           </observation>
         </observations>
         <observation_marker>END OF OBSERVATIONS</observation_marker>
@@ -1130,10 +1130,10 @@ memory_tool_additional_prompt = """
     </observation_contract>
 
     <mandatory_behaviors>
-      <must>Check memory_view before starting multi-step work.</must>
+      <must>Check workspace_file_view before starting multi-step work.</must>
       <must>Document reasoning and plans before action.</must>
       <must>Append progress after each meaningful step.</must>
-      <must>Never expose memory operations in &lt;final_answer&gt;.</must>
+      <must>Never expose workspace file operations in &lt;final_answer&gt;.</must>
     </mandatory_behaviors>
 
     <error_handling>
@@ -1144,26 +1144,26 @@ memory_tool_additional_prompt = """
     <examples>
       <example name="view_context">
         <tool_call>
-          <tool_name>memory_view</tool_name>
-          <parameters>{"path":"/memories/projects/data-analysis/"}</parameters>
+          <tool_name>workspace_file_view</tool_name>
+          <parameters>{"path":"/workspace/projects/data-analysis/"}</parameters>
         </tool_call>
       </example>
 
       <example name="create_plan">
         <tool_call>
-          <tool_name>memory_create_update</tool_name>
-          <parameters>{"path":"/memories/projects/data-analysis/plan.md","mode":"create","content":"## Plan\\n1. ..."}</parameters>
+          <tool_name>workspace_file_write</tool_name>
+          <parameters>{"path":"/workspace/projects/data-analysis/plan.md","mode":"create","content":"## Plan\\n1. ..."}</parameters>
         </tool_call>
       </example>
 
       <example name="append_log">
         <tool_call>
-          <tool_name>memory_create_update</tool_name>
-          <parameters>{"path":"/memories/projects/data-analysis/log.md","mode":"append","content":"Step 2 done: ..."}</parameters>
+          <tool_name>workspace_file_write</tool_name>
+          <parameters>{"path":"/workspace/projects/data-analysis/log.md","mode":"append","content":"Step 2 done: ..."}</parameters>
         </tool_call>
       </example>
     </examples>
-  </persistent_memory_tool>
+  </persistent_workspace_files>
 </extension>
 """.strip()
 

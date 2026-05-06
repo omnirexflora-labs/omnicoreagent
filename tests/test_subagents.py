@@ -35,7 +35,7 @@ class TestSubagentFactory:
             agent_config={
                 "max_steps": 50,
                 "enable_subagents": True,
-                "enable_workspace_memory": False,
+                "enable_workspace_files": False,
                 "context_management": {"enabled": True},
                 "tool_offload": {"enabled": True},
             },
@@ -45,7 +45,7 @@ class TestSubagentFactory:
 
         assert config["max_steps"] == 15
         assert config["enable_subagents"] is False
-        assert config["enable_workspace_memory"] is True
+        assert config["enable_workspace_files"] is True
         assert config["context_management"] == {"enabled": True}
         assert config["tool_offload"] == {"enabled": True}
 
@@ -62,13 +62,13 @@ class TestSubagentFactory:
             name="test",
             role="Test role",
             task="Test task",
-            output_path="/memories/test/output.md",
+            output_path="/workspace/test/output.md",
         )
 
         assert agent.name == "subagent_test"
         assert "Test role" in agent.system_instruction
         assert "Test task" in agent.system_instruction
-        assert agent.agent_config["enable_workspace_memory"] is True
+        assert agent.agent_config["enable_workspace_files"] is True
         assert agent.agent_config["enable_subagents"] is False
 
     def test_create_subagent_uses_custom_prompt_builder(self, model_config):
@@ -81,11 +81,11 @@ class TestSubagentFactory:
             name="custom",
             role="Researcher",
             task="Research X",
-            output_path="/memories/x/output.md",
+            output_path="/workspace/x/output.md",
         )
 
         assert agent.system_instruction == (
-            "ROLE=Researcher\nTASK=Research X\nOUTPUT=/memories/x/output.md"
+            "ROLE=Researcher\nTASK=Research X\nOUTPUT=/workspace/x/output.md"
         )
 
     def test_subagent_local_tools_none_when_parent_has_none(self, factory):
@@ -109,7 +109,7 @@ class TestSubagentFactory:
                 name="researcher",
                 role="Research expert",
                 task="Research topic X",
-                output_path="/memories/tasks/test/output.md",
+                output_path="/workspace/tasks/test/output.md",
             )
 
             assert result["status"] == "success"
@@ -136,7 +136,7 @@ class TestSubagentFactory:
                 name="researcher",
                 role="Research expert",
                 task="Research topic X",
-                output_path="/memories/tasks/test/output.md",
+                output_path="/workspace/tasks/test/output.md",
             )
 
         assert result["status"] == "success"
@@ -162,7 +162,7 @@ class TestSubagentFactory:
                 name="researcher",
                 role="Research expert",
                 task="Research topic X",
-                output_path="/memories/tasks/test/output.md",
+                output_path="/workspace/tasks/test/output.md",
             )
 
         assert result["status"] == "error"
@@ -171,13 +171,13 @@ class TestSubagentFactory:
     @pytest.mark.asyncio
     async def test_run_subagent_handles_non_string_response(self, factory):
         with patch.object(OmniCoreAgent, "run", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = {"response": {"saved": True, "path": "/memories/x"}}
+            mock_run.return_value = {"response": {"saved": True, "path": "/workspace/x"}}
 
             result = await factory.run_subagent(
                 name="researcher",
                 role="Research expert",
                 task="Research topic X",
-                output_path="/memories/tasks/test/output.md",
+                output_path="/workspace/tasks/test/output.md",
             )
 
         assert result["status"] == "success"
@@ -195,7 +195,7 @@ class TestSubagentFactory:
             name="researcher",
             role="Research expert",
             task="Research topic X",
-            output_path="/memories/tasks/test/output.md",
+            output_path="/workspace/tasks/test/output.md",
         )
 
         assert result["status"] == "error"
@@ -307,7 +307,7 @@ class TestSubagentFactory:
             name="subagent_0",
             role="Assistant",
             task="",
-            output_path="/memories/tasks/default/subagent_0/",
+            output_path="/workspace/tasks/default/subagent_0/",
         )
 
     @pytest.mark.asyncio
@@ -402,7 +402,7 @@ class TestSubagentFactory:
             local_tools=registry,
             agent_config={
                 "enable_subagents": True,
-                "enable_workspace_memory": False,
+                "enable_workspace_files": False,
             },
         )
         build_subagent_tools(factory, registry)
@@ -411,14 +411,14 @@ class TestSubagentFactory:
             name="worker",
             role="Focused worker",
             task="Do focused work",
-            output_path="/memories/task/worker.md",
+            output_path="/workspace/task/worker.md",
         )
 
         tool_names = [tool.name for tool in agent.local_tools.list_tools()]
         assert "user_tool" in tool_names
         assert "spawn_subagents" not in tool_names
         assert agent.agent_config["enable_subagents"] is False
-        assert agent.agent_config["enable_workspace_memory"] is True
+        assert agent.agent_config["enable_workspace_files"] is True
 
 
 class TestOmniCoreAgentSubagents:
@@ -440,12 +440,12 @@ class TestOmniCoreAgentSubagents:
             "Harness",
             {
                 "enable_subagents": True,
-                "enable_workspace_memory": False,
+                "enable_workspace_files": False,
             },
         )
 
         assert config["enable_subagents"] is True
-        assert config["enable_workspace_memory"] is True
+        assert config["enable_workspace_files"] is True
 
     def test_enable_subagents_registers_core_spawn_tool(self, model_config):
         agent = OmniCoreAgent(
@@ -455,7 +455,7 @@ class TestOmniCoreAgentSubagents:
             agent_config={"enable_subagents": True},
         )
 
-        assert agent.agent_config["enable_workspace_memory"] is True
+        assert agent.agent_config["enable_workspace_files"] is True
 
         agent._prepare_dynamic_subagents()
 
@@ -500,7 +500,7 @@ class TestOmniCoreAgentSubagents:
         assert "spawn_subagents" in tool_names
 
     @pytest.mark.asyncio
-    async def test_initialize_registers_spawn_and_memory_tools(self):
+    async def test_initialize_registers_spawn_and_workspace_files(self):
         agent = OmniCoreAgent(
             name="Harness",
             system_instruction="Test",
@@ -515,8 +515,8 @@ class TestOmniCoreAgentSubagents:
 
         tool_names = [tool.name for tool in runtime_tools.list_tools()]
         assert "spawn_subagents" in tool_names
-        assert "memory_create_update" in tool_names
-        assert "memory_view" in tool_names
+        assert "workspace_file_write" in tool_names
+        assert "workspace_file_view" in tool_names
 
         await agent.cleanup()
 

@@ -12,8 +12,13 @@ TOOL_OUTPUT_OFFLOAD_EXCLUDED_TOOLS = frozenset(
         "tail_artifact",
         "search_artifact",
         "list_artifacts",
-        "memory_view",
-        "memory_create_update",
+        "workspace_file_view",
+        "workspace_file_write",
+        "workspace_file_replace",
+        "workspace_file_insert",
+        "workspace_file_delete",
+        "workspace_file_rename",
+        "workspace_file_clear",
     }
 )
 

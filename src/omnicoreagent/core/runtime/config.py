@@ -108,7 +108,7 @@ class AgentConfig:
     enable_subagents: bool = False
     enable_agent_skills: bool = False
     memory_config: dict[str, Any] = field(default_factory=_default_memory_config)
-    enable_workspace_memory: bool = False
+    enable_workspace_files: bool = False
     guardrail_config: dict[str, Any] = field(default_factory=dict)
     guardrail_mode: str = "full"
     context_management: dict[str, Any] = field(
@@ -139,7 +139,7 @@ class AgentConfig:
         _validate_tool_offload(self.tool_offload)
 
         if self.enable_subagents:
-            self.enable_workspace_memory = True
+            self.enable_workspace_files = True
 
     def model_dump(self) -> dict[str, Any]:
         return asdict(self)

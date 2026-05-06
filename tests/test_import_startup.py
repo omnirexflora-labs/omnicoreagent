@@ -251,7 +251,7 @@ watched_modules = [
     "omnicoreagent.core.tools.advance_tools.advanced_tools_use",
     "omnicoreagent.core.tools.advance_tools_use",
     "omnicoreagent.core.tools.artifact_tool",
-    "omnicoreagent.core.tools.memory_tool.memory_tool",
+    "omnicoreagent.core.tools.workspace_files.tool",
     "omnicoreagent.core.skills.tools",
     "omnicoreagent.core.workspace",
     "omnicoreagent.core.workspace_storage",

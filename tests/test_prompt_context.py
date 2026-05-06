@@ -24,7 +24,7 @@ async def test_build_system_prompt_includes_enabled_harness_context():
     builder = AgentPromptContextBuilder(
         enable_advanced_tool_use=True,
         enable_subagents=True,
-        enable_workspace_memory=True,
+        enable_workspace_files=True,
         enable_agent_skills=True,
         is_tool_offload_enabled=lambda: True,
         skill_manager=FakeSkillManager(),

@@ -1,15 +1,15 @@
 from pathlib import Path
 from datetime import datetime
 
-from omnicoreagent.core.tools.memory_tool.factory import (
-    clear_backend_cache,
-    create_memory_backend,
+from omnicoreagent.core.tools.workspace_files.factory import (
+    clear_workspace_files_backend_cache,
+    create_workspace_files_backend,
 )
 from omnicoreagent.core.workspace import (
     ensure_workspace,
     get_artifacts_dir,
     get_config_dir,
-    get_memories_dir,
+    get_workspace_files_dir,
     get_workspace_dir,
 )
 from omnicoreagent.core.workspace_config import WorkspaceConfig
@@ -24,7 +24,7 @@ def test_workspace_paths_resolve_from_current_environment(monkeypatch, tmp_path)
 
     assert Path(get_workspace_dir()) == workspace
     assert Path(get_artifacts_dir()) == workspace / "artifacts"
-    assert Path(get_memories_dir()) == workspace / "memories"
+    assert Path(get_workspace_files_dir()) == workspace / "files"
     assert Path(get_config_dir()) == workspace / "config"
 
 
@@ -33,12 +33,12 @@ def test_workspace_storage_namespaces_share_one_workspace_root(monkeypatch, tmp_
     monkeypatch.setenv("OMNICOREAGENT_WORKSPACE_DIR", str(workspace))
 
     artifacts = create_workspace_storage(namespace="artifacts")
-    memories = create_workspace_storage(namespace="memories")
+    workspace_files = create_workspace_storage(namespace="files")
 
     assert isinstance(artifacts, LocalWorkspaceStorage)
-    assert isinstance(memories, LocalWorkspaceStorage)
+    assert isinstance(workspace_files, LocalWorkspaceStorage)
     assert artifacts.root == (workspace / "artifacts").resolve()
-    assert memories.root == (workspace / "memories").resolve()
+    assert workspace_files.root == (workspace / "files").resolve()
 
 
 def test_workspace_config_from_env_normalizes_values(monkeypatch, tmp_path):
@@ -86,7 +86,7 @@ def test_workspace_storage_accepts_explicit_s3_config(monkeypatch):
     )
 
     storage = create_workspace_storage(
-        namespace="memories",
+        namespace="files",
         config=WorkspaceConfig(
             backend="s3",
             prefix="agent",
@@ -99,7 +99,7 @@ def test_workspace_storage_accepts_explicit_s3_config(monkeypatch):
     assert isinstance(storage, FakeStorage)
     assert captured == {
         "bucket_name": "bucket",
-        "prefix": "agent/memories",
+        "prefix": "agent/files",
         "region": "us-east-1",
         "aws_access_key_id": None,
         "aws_secret_access_key": None,
@@ -115,26 +115,26 @@ def test_ensure_workspace_creates_runtime_directories(monkeypatch, tmp_path):
 
     assert paths.root.is_dir()
     assert paths.artifacts.is_dir()
-    assert paths.memories.is_dir()
+    assert paths.files.is_dir()
     assert paths.config.is_dir()
 
 
-def test_local_memory_backend_cache_respects_workspace_changes(monkeypatch, tmp_path):
+def test_workspace_files_backend_cache_respects_workspace_changes(monkeypatch, tmp_path):
     first_workspace = tmp_path / "first"
     second_workspace = tmp_path / "second"
-    clear_backend_cache()
+    clear_workspace_files_backend_cache()
 
     monkeypatch.setenv("OMNICOREAGENT_WORKSPACE_DIR", str(first_workspace))
-    first = create_memory_backend()
+    first = create_workspace_files_backend()
 
     monkeypatch.setenv("OMNICOREAGENT_WORKSPACE_DIR", str(second_workspace))
-    second = create_memory_backend()
+    second = create_workspace_files_backend()
 
     assert first is not second
-    assert first.base_dir == (first_workspace / "memories").resolve()
-    assert second.base_dir == (second_workspace / "memories").resolve()
+    assert first.base_dir == (first_workspace / "files").resolve()
+    assert second.base_dir == (second_workspace / "files").resolve()
 
-    clear_backend_cache()
+    clear_workspace_files_backend_cache()
 
 
 def test_local_workspace_storage_keeps_paths_inside_root(tmp_path):
@@ -160,12 +160,12 @@ def test_local_workspace_storage_rejects_path_traversal(tmp_path):
 
 
 def test_local_workspace_storage_strips_namespace_prefix(tmp_path):
-    storage = LocalWorkspaceStorage(tmp_path / "workspace" / "memories")
+    storage = LocalWorkspaceStorage(tmp_path / "workspace" / "files")
 
-    storage.write_text("memories/notes/today.md", "note", strip_prefixes=("memories",))
+    storage.write_text("files/notes/today.md", "note", strip_prefixes=("files",))
 
     assert storage.read_text("notes/today.md") == "note"
-    assert not (tmp_path / "workspace" / "memories" / "memories").exists()
+    assert not (tmp_path / "workspace" / "files" / "files").exists()
 
 
 class FakeS3Body:
