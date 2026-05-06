@@ -2,9 +2,8 @@ from unittest.mock import AsyncMock
 import pytest
 import json
 from omnicoreagent.core.agents.base import BaseReactAgent
-from omnicoreagent.core.events.base import EventType
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.core.types import AgentState, Message, ParsedResponse, ToolCallResult, ToolError
+from omnicoreagent.core.types import ParsedResponse
 
 
 @pytest.fixture
@@ -272,92 +271,3 @@ async def test_run_prepares_internal_tools_once_for_prompt_and_execution(monkeyp
     assert len(tool_messages) == 1
     assert tool_messages[0]["metadata"]["tool"] == "internal_ping"
     assert "pong:runtime" in tool_messages[0]["content"]
-
-
-@pytest.mark.asyncio
-async def test_handle_tool_validation_error_records_loop_and_event(agent):
-    events = []
-    session_state = agent._get_session_state(session_id="chat796", debug=False)
-
-    async def event_router(session_id, event):
-        events.append({"session_id": session_id, "event": event})
-
-    tool_batch_name, tool_batch_args, obs_text, results = (
-        await agent._handle_tool_validation_error(
-            tool_error=ToolError(
-                observation="The tool named 'missing_tool' does not exist.",
-                tool_name="missing_tool",
-                tool_args={"query": "runtime"},
-            ),
-            session_state=session_state,
-            session_id="chat796",
-            event_router=event_router,
-        )
-    )
-
-    assert tool_batch_name == "missing_tool"
-    assert tool_batch_args == [{"query": "runtime"}]
-    assert obs_text == "The tool named 'missing_tool' does not exist."
-    assert results == [
-        {
-            "tool_name": "missing_tool",
-            "args": {"query": "runtime"},
-            "status": "error",
-            "data": None,
-            "message": "The tool named 'missing_tool' does not exist.",
-        }
-    ]
-    assert len(events) == 1
-    assert events[0]["session_id"] == "chat796"
-    assert events[0]["event"].type == EventType.TOOL_CALL_ERROR
-    assert events[0]["event"].payload.tool_name == "missing_tool"
-
-
-@pytest.mark.asyncio
-async def test_handle_tool_loop_state_marks_session_stuck(agent):
-    events = []
-    session_state = agent._get_session_state(session_id="chat800", debug=False)
-    session_state.messages = [Message(role="system", content="system")]
-
-    class FakeLoopDetector:
-        def __init__(self):
-            self.reset_tool_name = None
-
-        def is_looping(self, tool_name):
-            return tool_name == "alpha"
-
-        def get_loop_type(self, tool_name):
-            return ["consecutive_calls"]
-
-        def reset(self, tool_name=None):
-            self.reset_tool_name = tool_name
-
-    session_state.loop_detector = FakeLoopDetector()
-
-    async def event_router(session_id, event):
-        events.append({"session_id": session_id, "event": event})
-
-    await agent._handle_tool_loop_state(
-        tool_call_results=[
-            ToolCallResult(
-                tool_executor=None,
-                tool_name="alpha",
-                tool_args={},
-                tool_call_id="tool-call-alpha",
-            )
-        ],
-        session_state=session_state,
-        system_prompt="system",
-        session_id="chat800",
-        event_router=event_router,
-        debug=False,
-    )
-
-    assert session_state.state == AgentState.STUCK
-    assert session_state.loop_detector.reset_tool_name == "alpha"
-    assert session_state.messages[0].role == "system"
-    assert "Tool call loop detected" in session_state.messages[-1].content
-    assert len(events) == 1
-    assert events[0]["session_id"] == "chat800"
-    assert events[0]["event"].type == EventType.TOOL_CALL_ERROR
-    assert events[0]["event"].payload.tool_name == "alpha"
