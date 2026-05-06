@@ -13,7 +13,8 @@ from omnicoreagent.runtime_config import (
     normalize_mcp_tools,
     normalize_model_config,
 )
-from omnicoreagent.core.agents.prompting import (
+from omnicoreagent.core.system_prompts import (
+    FAST_CONVERSATION_SUMMARY_PROMPT,
     OmniCoreAgentPromptBuilder,
     REACT_AGENT_PROMPT,
 )
@@ -26,7 +27,6 @@ from omnicoreagent.core.guardrails import (
     PromptInjectionGuard,
     DetectionConfig,
 )
-from omnicoreagent.core.system_prompts import FAST_CONVERSATION_SUMMARY_PROMPT
 
 
 class OmniCoreAgent:
