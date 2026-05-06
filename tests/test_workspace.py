@@ -12,6 +12,7 @@ from omnicoreagent.core.workspace import (
     get_memories_dir,
     get_workspace_dir,
 )
+from omnicoreagent.core.workspace_config import WorkspaceConfig
 from omnicoreagent.core.workspace_storage import LocalWorkspaceStorage
 from omnicoreagent.core.workspace_storage import S3WorkspaceStorage
 from omnicoreagent.core.workspace_storage import create_workspace_storage
@@ -38,6 +39,72 @@ def test_workspace_storage_namespaces_share_one_workspace_root(monkeypatch, tmp_
     assert isinstance(memories, LocalWorkspaceStorage)
     assert artifacts.root == (workspace / "artifacts").resolve()
     assert memories.root == (workspace / "memories").resolve()
+
+
+def test_workspace_config_from_env_normalizes_values(monkeypatch, tmp_path):
+    monkeypatch.setenv("OMNICOREAGENT_WORKSPACE_BACKEND", " S3 ")
+    monkeypatch.setenv("OMNICOREAGENT_WORKSPACE_DIR", str(tmp_path / "workspace"))
+    monkeypatch.setenv("OMNICOREAGENT_WORKSPACE_PREFIX", "/agent-workspace/")
+    monkeypatch.setenv("AWS_S3_BUCKET", "bucket")
+
+    config = WorkspaceConfig.from_env()
+
+    assert config.backend == "s3"
+    assert config.workspace_dir == str(tmp_path / "workspace")
+    assert config.namespace_prefix("artifacts") == "agent-workspace/artifacts"
+    assert config.cache_key(namespace="artifacts") == (
+        "s3",
+        "bucket",
+        None,
+        None,
+        "agent-workspace/artifacts",
+    )
+
+
+def test_workspace_storage_accepts_explicit_local_config(monkeypatch, tmp_path):
+    monkeypatch.delenv("OMNICOREAGENT_WORKSPACE_DIR", raising=False)
+    workspace = tmp_path / "explicit-workspace"
+    config = WorkspaceConfig(workspace_dir=workspace)
+
+    storage = create_workspace_storage(namespace="artifacts", config=config)
+
+    assert isinstance(storage, LocalWorkspaceStorage)
+    assert storage.root == (workspace / "artifacts").resolve()
+
+
+def test_workspace_storage_accepts_explicit_s3_config(monkeypatch):
+    monkeypatch.delenv("AWS_S3_BUCKET", raising=False)
+    captured = {}
+
+    class FakeStorage:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "omnicoreagent.core.workspace_storage.S3WorkspaceStorage",
+        FakeStorage,
+    )
+
+    storage = create_workspace_storage(
+        namespace="memories",
+        config=WorkspaceConfig(
+            backend="s3",
+            prefix="agent",
+            s3_bucket="bucket",
+            aws_region="us-east-1",
+            aws_endpoint_url="https://example.test",
+        ),
+    )
+
+    assert isinstance(storage, FakeStorage)
+    assert captured == {
+        "bucket_name": "bucket",
+        "prefix": "agent/memories",
+        "region": "us-east-1",
+        "aws_access_key_id": None,
+        "aws_secret_access_key": None,
+        "endpoint_url": "https://example.test",
+    }
 
 
 def test_ensure_workspace_creates_runtime_directories(monkeypatch, tmp_path):

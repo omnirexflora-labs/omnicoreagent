@@ -51,6 +51,7 @@ from omnicoreagent.core.agents.xml_parser import (
 
 if TYPE_CHECKING:
     from omnicoreagent.core.guardrails import PromptInjectionGuard
+    from omnicoreagent.core.workspace_config import WorkspaceConfig
 
 class BaseReactAgent:
     """Autonomous agent implementing the ReAct paradigm for task solving through iterative reasoning and tool usage."""
@@ -68,6 +69,7 @@ class BaseReactAgent:
         enable_agent_skills: bool = False,
         context_management_config: dict = None,
         tool_offload_config: dict = None,
+        workspace_config: WorkspaceConfig | dict | None = None,
         guardrail: PromptInjectionGuard | None = None,
     ):
         self.agent_name = agent_name
@@ -109,7 +111,8 @@ class BaseReactAgent:
         )
 
         self.tool_offloader = ToolResponseOffloader(
-            config=OffloadConfig.from_dict(tool_offload_config or {})
+            config=OffloadConfig.from_dict(tool_offload_config or {}),
+            workspace_config=workspace_config,
         )
         self.guardrail = guardrail
         self.tool_observation_handler = ToolObservationHandler(
@@ -142,6 +145,7 @@ class BaseReactAgent:
             enable_workspace_memory=self.enable_workspace_memory,
             enable_agent_skills=self.enable_agent_skills,
             skill_manager=self.skill_manager,
+            workspace_config=workspace_config,
         )
         self.prompt_context_builder = AgentPromptContextBuilder(
             enable_advanced_tool_use=self.enable_advanced_tool_use,

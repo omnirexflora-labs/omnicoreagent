@@ -25,5 +25,6 @@ class ReactAgent(BaseReactAgent):
             enable_agent_skills=config.enable_agent_skills,
             context_management_config=config.context_management,
             tool_offload_config=getattr(config, "tool_offload", None),
+            workspace_config=config.workspace_config,
             guardrail=guardrail,
         )

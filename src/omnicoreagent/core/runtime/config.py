@@ -5,6 +5,11 @@ from enum import Enum
 from typing import Any
 import uuid
 
+from omnicoreagent.core.workspace_config import (
+    WorkspaceConfig,
+    resolve_workspace_config,
+)
+
 
 SUPPORTED_MODELS_PROVIDERS = {
     "openai": "openai",
@@ -110,6 +115,7 @@ class AgentConfig:
         default_factory=_default_context_management
     )
     tool_offload: dict[str, Any] = field(default_factory=_default_tool_offload)
+    workspace_config: WorkspaceConfig | dict[str, Any] | None = None
 
     def __post_init__(self):
         self.request_limit = 0 if self.request_limit is None else self.request_limit
@@ -122,6 +128,8 @@ class AgentConfig:
             _default_context_management(), self.context_management
         )
         self.tool_offload = _merge_defaults(_default_tool_offload(), self.tool_offload)
+        if self.workspace_config is not None:
+            self.workspace_config = resolve_workspace_config(self.workspace_config)
 
         _validate_range("max_steps", self.max_steps, minimum=1, maximum=1000)
         _validate_range(

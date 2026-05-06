@@ -6,6 +6,7 @@ implementing AbstractMemoryBackend.
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.memory_tool.base import AbstractMemoryBackend
 from omnicoreagent.core.tools.memory_tool.factory import create_memory_backend
+from omnicoreagent.core.workspace_config import WorkspaceConfig
 
 
 class MemoryTool:
@@ -20,18 +21,24 @@ class MemoryTool:
         memory_tool = MemoryTool(backend=my_custom_backend)
     """
 
-    def __init__(self, backend: AbstractMemoryBackend | None = None):
+    def __init__(
+        self,
+        backend: AbstractMemoryBackend | None = None,
+        workspace_config: WorkspaceConfig | dict | None = None,
+    ):
         """
         Initialize MemoryTool with a backend.
         
         Args:
             backend: Optional AbstractMemoryBackend instance for direct injection.
                 None uses the active workspace backend.
+            workspace_config: Explicit workspace storage config used when backend is
+                not provided. None falls back to environment configuration.
         """
         if isinstance(backend, AbstractMemoryBackend):
             self.backend = backend
         else:
-            self.backend = create_memory_backend()
+            self.backend = create_memory_backend(workspace_config=workspace_config)
 
     def view(self, path: str | None = None) -> str:
         """Show directory listing or file contents."""
@@ -65,6 +72,7 @@ class MemoryTool:
 def build_tool_registry_memory_tool(
     backend: AbstractMemoryBackend | None,
     registry: ToolRegistry,
+    workspace_config: WorkspaceConfig | dict | None = None,
 ) -> ToolRegistry:
     """
     Register memory tool commands in a ToolRegistry.
@@ -73,7 +81,7 @@ def build_tool_registry_memory_tool(
         backend: Optional backend instance. None uses workspace storage.
         registry: ToolRegistry to register commands with
     """
-    memory_tool = MemoryTool(backend=backend)
+    memory_tool = MemoryTool(backend=backend, workspace_config=workspace_config)
 
     @registry.register_tool(
         name="memory_view",
