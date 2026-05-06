@@ -6,8 +6,6 @@ import time
 import warnings
 from typing import Any
 
-from decouple import config as decouple_config
-
 from omnicoreagent.core.utils import logger
 
 warnings.filterwarnings(
@@ -61,7 +59,9 @@ def retry_with_backoff(max_retries=3, base_delay=1, max_delay=60, backoff_factor
                             f"Max retries ({max_retries}) exceeded. Last error: {e}"
                         )
                         break
-                    _sleep_before_retry(e, attempt, max_retries, base_delay, max_delay, backoff_factor)
+                    _sleep_before_retry(
+                        e, attempt, max_retries, base_delay, max_delay, backoff_factor
+                    )
             raise last_exception
 
         def sync_wrapper(*args, **kwargs):
@@ -79,7 +79,9 @@ def retry_with_backoff(max_retries=3, base_delay=1, max_delay=60, backoff_factor
                             f"Max retries ({max_retries}) exceeded. Last error: {e}"
                         )
                         break
-                    _sleep_before_retry(e, attempt, max_retries, base_delay, max_delay, backoff_factor)
+                    _sleep_before_retry(
+                        e, attempt, max_retries, base_delay, max_delay, backoff_factor
+                    )
             raise last_exception
 
         return async_wrapper if inspect.iscoroutinefunction(func) else sync_wrapper
@@ -147,7 +149,7 @@ class LLMConnection:
         if not provider or not model:
             raise ValueError("model_config requires provider and model")
 
-        self.llm_api_key = self.llm_api_key or decouple_config("LLM_API_KEY", default=None)
+        self.llm_api_key = self.llm_api_key or os.environ.get("LLM_API_KEY")
         if not self.llm_api_key and provider.lower() != "ollama":
             raise ValueError("LLM_API_KEY not found in environment variables")
 
@@ -209,7 +211,10 @@ class LLMConnection:
             os.environ[env_name] = self.llm_api_key
 
     def is_llm_available(self) -> bool:
-        return self.llm_api_key is not None or self.llm_config["provider"].lower() == "ollama"
+        return (
+            self.llm_api_key is not None
+            or self.llm_config["provider"].lower() == "ollama"
+        )
 
     def to_dict(self, msg):
         if hasattr(msg, "model_dump"):

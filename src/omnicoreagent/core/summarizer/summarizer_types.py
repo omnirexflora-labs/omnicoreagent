@@ -2,8 +2,8 @@
 Types for the summarizer engine and message lifecycle management.
 """
 
+from dataclasses import dataclass
 from enum import Enum
-from pydantic import BaseModel, Field
 
 
 class MessageStatus(str, Enum):
@@ -28,7 +28,8 @@ class SummaryRetentionPolicy(str, Enum):
     DELETE = "delete"
 
 
-class SummaryConfig(BaseModel):
+@dataclass
+class SummaryConfig:
     """
     User-facing configuration for summarization.
 
@@ -39,16 +40,11 @@ class SummaryConfig(BaseModel):
     Internal settings like summary_ratio and model are handled automatically.
     """
 
-    enabled: bool = Field(
-        default=False, description="Enable summarization when history exceeds limits"
-    )
-    retention_policy: SummaryRetentionPolicy = Field(
-        default=SummaryRetentionPolicy.KEEP,
-        description="What to do with messages after summarization: 'keep' or 'delete'",
-    )
+    enabled: bool = False
+    retention_policy: SummaryRetentionPolicy | str = SummaryRetentionPolicy.KEEP
 
-    class Config:
-        use_enum_values = True
+    def __post_init__(self):
+        self.retention_policy = SummaryRetentionPolicy(self.retention_policy)
 
 
 SUMMARY_TAG = "[CONVERSATION SUMMARY]"

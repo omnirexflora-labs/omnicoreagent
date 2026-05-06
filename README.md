@@ -191,10 +191,6 @@ OMNICOREAGENT_WORKSPACE_BACKEND=local  # local, s3, or r2
 OMNICOREAGENT_WORKSPACE_DIR=.omnicoreagent/workspace
 AWS_S3_BUCKET=your-s3-bucket           # when backend=s3
 R2_BUCKET_NAME=your-r2-bucket          # when backend=r2
-
-# Optional: Observability
-OPIK_API_KEY=your_opik_key
-OPIK_WORKSPACE=your_workspace
 ```
 
 ### Agent Configuration
@@ -298,7 +294,7 @@ MIT License — see [LICENSE](LICENSE)
 
 ### 🙏 Acknowledgments
 
-Built on: [LiteLLM](https://github.com/BerriAI/litellm), [FastAPI](https://fastapi.tiangolo.com/), [Redis](https://redis.io/), [Opik](https://opik.ai/), [Pydantic](https://pydantic-docs.helpmanual.io/), [APScheduler](https://apscheduler.readthedocs.io/)
+Built on: [LiteLLM](https://github.com/BerriAI/litellm), [FastAPI](https://fastapi.tiangolo.com/), [Redis](https://redis.io/), [Pydantic](https://pydantic-docs.helpmanual.io/), [APScheduler](https://apscheduler.readthedocs.io/)
 
 ---
 

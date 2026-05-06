@@ -1,8 +1,9 @@
-from omnicoreagent.core.tools.memory_tool.base import AbstractMemoryBackend
-from omnicoreagent.core.tools.memory_tool.storage import WorkspaceMemoryBackend
+import os
 from threading import Lock
 
-from decouple import config
+from omnicoreagent.core.tools.memory_tool.base import AbstractMemoryBackend
+from omnicoreagent.core.tools.memory_tool.storage import WorkspaceMemoryBackend
+
 from omnicoreagent.core.utils import logger
 from omnicoreagent.core.workspace_storage import create_workspace_storage
 
@@ -45,9 +46,9 @@ def create_memory_backend(
 
 
 def _backend_cache_key() -> tuple:
-    workspace_backend = config("OMNICOREAGENT_WORKSPACE_BACKEND", default="local")
+    workspace_backend = os.environ.get("OMNICOREAGENT_WORKSPACE_BACKEND", "local")
     workspace_backend = workspace_backend.lower().strip()
-    prefix = config("OMNICOREAGENT_WORKSPACE_PREFIX", default="workspace").strip("/")
+    prefix = os.environ.get("OMNICOREAGENT_WORKSPACE_PREFIX", "workspace").strip("/")
 
     if workspace_backend == "local":
         from omnicoreagent.core.workspace import get_memories_dir
@@ -57,17 +58,17 @@ def _backend_cache_key() -> tuple:
     if workspace_backend == "s3":
         return (
             workspace_backend,
-            config("AWS_S3_BUCKET", default=None),
-            config("AWS_REGION", default=None),
-            config("AWS_ENDPOINT_URL", default=None),
+            os.environ.get("AWS_S3_BUCKET"),
+            os.environ.get("AWS_REGION"),
+            os.environ.get("AWS_ENDPOINT_URL"),
             prefix,
         )
 
     if workspace_backend == "r2":
         return (
             workspace_backend,
-            config("R2_BUCKET_NAME", default=None),
-            config("R2_ACCOUNT_ID", default=None),
+            os.environ.get("R2_BUCKET_NAME"),
+            os.environ.get("R2_ACCOUNT_ID"),
             prefix,
         )
 

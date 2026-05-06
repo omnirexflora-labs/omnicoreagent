@@ -1,8 +1,8 @@
 import json
+import os
 import uuid
 from typing import Any, List, Callable
 import redis.asyncio as redis
-from decouple import config
 import threading
 import asyncio
 
@@ -14,7 +14,7 @@ from omnicoreagent.core.summarizer.summarizer_engine import (
 from omnicoreagent.core.summarizer.summarizer_types import SummaryConfig
 from datetime import datetime, timezone
 
-REDIS_URL = config("REDIS_URL", default=None)
+REDIS_URL = os.environ.get("REDIS_URL")
 
 
 class RedisConnectionManager:
