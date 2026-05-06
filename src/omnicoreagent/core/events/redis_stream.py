@@ -1,9 +1,10 @@
+import os
+
 import redis.asyncio as redis
 from typing import AsyncIterator, List
-from decouple import config
 from omnicoreagent.core.events.base import BaseEventStore, Event
 
-REDIS_URL = config("REDIS_URL", default="redis://localhost:6379/0")
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
 
 class RedisStreamEventStore(BaseEventStore):
@@ -45,4 +46,3 @@ class RedisStreamEventStore(BaseEventStore):
                 for entry_id, data in entries:
                     last_id = entry_id
                     yield Event.parse_raw(data["event"])
-

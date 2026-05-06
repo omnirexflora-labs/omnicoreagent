@@ -1,3 +1,4 @@
+import os
 import shutil
 import urllib.parse
 from dataclasses import dataclass
@@ -5,7 +6,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Protocol
 
-from decouple import config
 from filelock import FileLock
 
 from omnicoreagent._optional import load_optional
@@ -452,7 +452,7 @@ def create_workspace_storage(
     namespace: str | None = None,
     workspace_dir: str | Path | None = None,
 ) -> WorkspaceStorage:
-    backend = (backend or config("OMNICOREAGENT_WORKSPACE_BACKEND", default="local"))
+    backend = backend or os.environ.get("OMNICOREAGENT_WORKSPACE_BACKEND", "local")
     backend = backend.lower().strip()
     namespace = (namespace or "").strip("/")
 
@@ -464,19 +464,21 @@ def create_workspace_storage(
         return LocalWorkspaceStorage(root)
 
     if backend == "s3":
-        bucket_name = config("AWS_S3_BUCKET", default=None)
+        bucket_name = os.environ.get("AWS_S3_BUCKET")
         if not bucket_name:
             raise ValueError("S3 workspace backend requires AWS_S3_BUCKET")
-        prefix = config("OMNICOREAGENT_WORKSPACE_PREFIX", default="workspace").strip("/")
+        prefix = os.environ.get("OMNICOREAGENT_WORKSPACE_PREFIX", "workspace").strip(
+            "/"
+        )
         if namespace:
             prefix = f"{prefix}/{namespace}"
         return S3WorkspaceStorage(
             bucket_name=bucket_name,
             prefix=prefix,
-            region=config("AWS_REGION", default=None),
-            aws_access_key_id=config("AWS_ACCESS_KEY_ID", default=None),
-            aws_secret_access_key=config("AWS_SECRET_ACCESS_KEY", default=None),
-            endpoint_url=config("AWS_ENDPOINT_URL", default=None),
+            region=os.environ.get("AWS_REGION"),
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            endpoint_url=os.environ.get("AWS_ENDPOINT_URL"),
         )
 
     if backend == "r2":
@@ -488,20 +490,22 @@ def create_workspace_storage(
                 "R2_ACCESS_KEY_ID",
                 "R2_SECRET_ACCESS_KEY",
             )
-            if not config(name, default=None)
+            if not os.environ.get(name)
         ]
         if missing:
             raise ValueError(
                 f"R2 workspace backend requires environment variables: {', '.join(missing)}"
             )
-        prefix = config("OMNICOREAGENT_WORKSPACE_PREFIX", default="workspace").strip("/")
+        prefix = os.environ.get("OMNICOREAGENT_WORKSPACE_PREFIX", "workspace").strip(
+            "/"
+        )
         if namespace:
             prefix = f"{prefix}/{namespace}"
         return R2WorkspaceStorage(
-            bucket_name=config("R2_BUCKET_NAME"),
-            account_id=config("R2_ACCOUNT_ID"),
-            access_key_id=config("R2_ACCESS_KEY_ID"),
-            secret_access_key=config("R2_SECRET_ACCESS_KEY"),
+            bucket_name=os.environ["R2_BUCKET_NAME"],
+            account_id=os.environ["R2_ACCOUNT_ID"],
+            access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+            secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
             prefix=prefix,
         )
 

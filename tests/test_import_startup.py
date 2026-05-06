@@ -236,14 +236,17 @@ def test_agent_initialize_without_optional_tools_stays_lightweight(tmp_path):
         """
 import asyncio
 import json
-import logging
 import sys
 
 from omnicoreagent import OmniCoreAgent
 
-logging.getLogger("omnicoreagent").disabled = True
-
 watched_modules = [
+    "decouple",
+    "opik",
+    "rich",
+    "rich.console",
+    "litellm",
+    "openai",
     "omnicoreagent.core.tools.advance_tools.advanced_tools_use",
     "omnicoreagent.core.tools.advance_tools_use",
     "omnicoreagent.core.tools.artifact_tool",
@@ -274,4 +277,33 @@ asyncio.run(main())
     assert result == {
         "agent_name": "startup",
         "loaded_modules": [],
+    }
+
+
+def test_core_utils_import_has_no_runtime_side_effects(tmp_path):
+    result = _run_import_probe(
+        tmp_path,
+        """
+import json
+import sys
+from pathlib import Path
+
+from omnicoreagent.core import utils
+
+print(json.dumps({
+    "has_mac_probe": hasattr(utils, "get_mac_address"),
+    "log_file_created": Path("omnicoreagent.log").exists(),
+    "decouple_loaded": "decouple" in sys.modules,
+    "rich_loaded": any(module == "rich" or module.startswith("rich.") for module in sys.modules),
+    "opik_loaded": "opik" in sys.modules,
+}))
+""",
+    )
+
+    assert result == {
+        "has_mac_probe": False,
+        "log_file_created": False,
+        "decouple_loaded": False,
+        "rich_loaded": False,
+        "opik_loaded": False,
     }

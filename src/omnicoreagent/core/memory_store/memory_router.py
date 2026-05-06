@@ -1,5 +1,6 @@
 from typing import Any, Optional, Callable
-from decouple import config as decouple_config
+import os
+
 from omnicoreagent.core.memory_store.in_memory import InMemoryStore
 from omnicoreagent._optional import load_optional
 from omnicoreagent.core.utils import logger
@@ -35,7 +36,7 @@ class MemoryRouter:
         if self.memory_store_type == "in_memory":
             self.memory_store = InMemoryStore()
         elif self.memory_store_type == "database":
-            db_url = decouple_config("DATABASE_URL", default=None)
+            db_url = os.environ.get("DATABASE_URL")
             if db_url is None:
                 logger.info("Database not configured, using in_memory")
                 self.memory_store = InMemoryStore()
@@ -50,7 +51,7 @@ class MemoryRouter:
                 )
                 self.memory_store = DatabaseMessageStore(db_url=db_url)
         elif self.memory_store_type == "redis":
-            redis_url = decouple_config("REDIS_URL", default=None)
+            redis_url = os.environ.get("REDIS_URL")
             if redis_url is None:
                 logger.info("Redis not configured, using in_memory")
                 self.memory_store = InMemoryStore()
@@ -65,13 +66,13 @@ class MemoryRouter:
                 )
                 self.memory_store = RedisMemoryStore(redis_url=redis_url)
         elif self.memory_store_type == "mongodb":
-            uri = decouple_config("MONGODB_URI", default=None)
+            uri = os.environ.get("MONGODB_URI")
             if uri is None:
                 logger.info("MongoDB not configured, using in_memory")
                 self.memory_store = InMemoryStore()
             else:
-                db_name = decouple_config("MONGODB_DB_NAME", default="omnicoreagent")
-                collection = decouple_config("MONGODB_COLLECTION", default="messages")
+                db_name = os.environ.get("MONGODB_DB_NAME", "omnicoreagent")
+                collection = os.environ.get("MONGODB_COLLECTION", "messages")
                 MongoDb = load_optional(
                     "MongoDB memory",
                     "mongodb",

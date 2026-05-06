@@ -1,62 +1,23 @@
 import hashlib
 import json
 import logging
-import platform
 import re
-import subprocess
-import sys
 import traceback
 import uuid
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from typing import Any, Callable, Coroutine, Optional
 from dataclasses import dataclass
 from types import SimpleNamespace
-from rich.console import Console, Group
-from rich.panel import Panel
-from rich.pretty import Pretty
-from rich.text import Text
 from datetime import datetime, timezone
-from decouple import config as decouple_config
 import asyncio
 from html import escape
 import ast
 import inspect
 
-console = Console()
 logger = logging.getLogger("omnicoreagent")
-logger.setLevel(logging.INFO)
-
-
-for handler in logger.handlers[:]:
-    logger.removeHandler(handler)
-
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.INFO)
-
-log_file = Path("omnicoreagent.log")
-file_handler = logging.FileHandler(log_file, mode="a")
-file_handler.setLevel(logging.INFO)
-
-console_formatter = logging.Formatter(
-    "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-
-file_formatter = logging.Formatter(
-    "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-
-console_handler.setFormatter(console_formatter)
-file_handler.setFormatter(file_formatter)
-
-logger.addHandler(console_handler)
-logger.addHandler(file_handler)
-
-console_handler.flush = sys.stdout.flush
-file_handler.flush = lambda: file_handler.stream.flush()
+if not logger.handlers:
+    logger.addHandler(logging.NullHandler())
 
 
 class BackgroundTaskManager:
@@ -640,6 +601,11 @@ def strip_json_comments(text: str) -> str:
 
 
 def show_tool_response(agent_name, tool_name, tool_args, observation):
+    from rich.console import Console, Group
+    from rich.panel import Panel
+    from rich.pretty import Pretty
+    from rich.text import Text
+
     content = Group(
         Text(agent_name.upper(), style="bold magenta"),
         Text(f"→ Calling tool: {tool_name}", style="bold blue"),
@@ -650,10 +616,15 @@ def show_tool_response(agent_name, tool_name, tool_args, observation):
     )
 
     panel = Panel.fit(content, title="🔧 TOOL CALL LOG", border_style="bright_black")
-    console.print(panel)
+    Console().print(panel)
 
 
 def show_sub_agent_call_result(agent_call_result):
+    from rich.console import Console, Group
+    from rich.panel import Panel
+    from rich.pretty import Pretty
+    from rich.text import Text
+
     blocks = []
 
     parent_agent = agent_call_result.get("agent_name", "unknown_agent")
@@ -693,7 +664,7 @@ def show_sub_agent_call_result(agent_call_result):
         border_style="bright_black",
     )
 
-    console.print(panel)
+    Console().print(panel)
 
 
 def normalize_tool_args(value: Any) -> Any:
@@ -757,48 +728,6 @@ def normalize_tool_args(value: Any) -> Any:
     return _normalize(value)
 
 
-def get_mac_address() -> str:
-    """Get the MAC address of the client machine.
-
-    Returns:
-        str: The MAC address as a string, or a fallback UUID if MAC address cannot be determined.
-    """
-    try:
-        if platform.system() == "Linux":
-            for interface in ["eth0", "wlan0", "en0"]:
-                try:
-                    with open(f"/sys/class/net/{interface}/address") as f:
-                        mac = f.read().strip()
-                        if mac:
-                            return mac
-                except FileNotFoundError:
-                    continue
-
-            result = subprocess.run(
-                ["ip", "link", "show"], capture_output=True, text=True
-            )
-            for line in result.stdout.split("\n"):
-                if "link/ether" in line:
-                    return line.split("link/ether")[1].split()[0]
-
-        elif platform.system() == "Darwin":
-            result = subprocess.run(["ifconfig"], capture_output=True, text=True)
-            for line in result.stdout.split("\n"):
-                if "ether" in line:
-                    return line.split("ether")[1].split()[0]
-
-        elif platform.system() == "Windows":
-            result = subprocess.run(["getmac"], capture_output=True, text=True)
-            for line in result.stdout.split("\n"):
-                if ":" in line and "-" in line:
-                    return line.split()[0]
-
-    except Exception as e:
-        logger.warning(f"Could not get MAC address: {e}")
-
-    return str(uuid.uuid4())
-
-
 def build_xml_observations_block(tools_results):
     if not tools_results:
         return "<observations></observations>"
@@ -826,50 +755,15 @@ def build_xml_observations_block(tools_results):
     return "\n".join(lines)
 
 
-CLIENT_MAC_ADDRESS = get_mac_address()
+def track(name_or_func=None):
+    """No-op trace decorator placeholder for internal observability hooks."""
+    if callable(name_or_func):
+        return name_or_func
 
-OPIK_AVAILABLE = False
-track = None
+    def decorator(func):
+        return func
 
-try:
-    api_key = decouple_config("OPIK_API_KEY", default=None)
-    workspace = decouple_config("OPIK_WORKSPACE", default=None)
-
-    if api_key and workspace:
-        from opik import track as opik_track
-
-        OPIK_AVAILABLE = True
-        track = opik_track
-        logger.debug("Opik imported successfully with valid credentials")
-    else:
-        logger.debug("Opik available but no valid credentials - using fake decorator")
-
-        def track(name_or_func=None):
-            if callable(name_or_func):
-                return name_or_func
-            else:
-
-                def decorator(func):
-                    return func
-
-                return decorator
-
-            return decorator
-
-            return decorator
-except ImportError:
-
-    def track(name_or_func=None):
-        if callable(name_or_func):
-            return name_or_func
-        else:
-
-            def decorator(func):
-                return func
-
-            return decorator
-
-    logger.debug("Opik not available, using no-op decorator")
+    return decorator
 
 
 def get_json_schema(f) -> dict:

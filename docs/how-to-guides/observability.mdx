@@ -1,6 +1,6 @@
 ---
 title: Observability
-description: 'Production metrics, Opik tracing, and per-request performance monitoring'
+description: 'Production metrics and per-request performance monitoring'
 icon: 'chart-line'
 ---
 
@@ -26,37 +26,19 @@ print(f"Avg Response Time: {stats['average_time']:.2f}s")
 
 ---
 
-## Opik Tracing
+## Runtime Metrics
 
-Monitor and optimize your agents with deep traces using [Opik](https://opik.ai/).
+OmniCoreAgent exposes lightweight runtime metrics without requiring an external
+tracing service.
 
-### Setup
+### What's Available
 
-```bash
-# Add to .env
-OPIK_API_KEY=your_opik_api_key
-OPIK_WORKSPACE=your_workspace
-```
-
-### What's Tracked
-
-- LLM call performance
-- Tool execution traces
-- Memory operations
-- Agent workflow
-- Bottleneck identification
-
-### Example Trace
-
-```
-Agent Execution Trace:
-├── agent_execution: 4.6s
-    ├── tools_registry_retrieval: 0.02s ✅
-    ├── memory_retrieval_step: 0.08s ✅
-    ├── llm_call: 4.5s ⚠️ (bottleneck!)
-    └── action_execution: 0.03s ✅
-```
+- Request count
+- Request, response, and total tokens
+- Total runtime
+- Average response time
 
 <Tip>
-Essential for production. Use Metrics for cost/performance monitoring, and Opik for identifying bottlenecks and debugging complex agent logic.
+Use metrics for cost and performance monitoring. Deeper agent tracing and
+observability will be handled by OmniCoreAgent's internal observability layer.
 </Tip>

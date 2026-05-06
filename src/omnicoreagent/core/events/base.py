@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, Any, Dict, List, Optional, Union
+from collections.abc import AsyncIterator
+from dataclasses import asdict, dataclass, field, is_dataclass
+from datetime import datetime, timezone
 from enum import Enum
-from datetime import datetime
+import json
+from typing import Any, Type
 from uuid import uuid4
-from typing import Type
-from pydantic import BaseModel, Field
 
 
 class EventType(str, Enum):
@@ -24,49 +27,69 @@ class EventType(str, Enum):
     BACKGROUND_AGENT_STATUS = "background_agent_status"
 
 
-class UserMessagePayload(BaseModel):
+class SerializableRecord:
+    def model_dump(self) -> dict[str, Any]:
+        return _to_plain(self)
+
+    def dict(self) -> dict[str, Any]:
+        return self.model_dump()
+
+    def json(self) -> str:
+        return json.dumps(self.model_dump())
+
+
+@dataclass
+class UserMessagePayload(SerializableRecord):
     message: str
 
 
-class AgentMessagePayload(BaseModel):
+@dataclass
+class AgentMessagePayload(SerializableRecord):
     message: str
 
 
-class ToolCallStartedPayload(BaseModel):
+@dataclass
+class ToolCallStartedPayload(SerializableRecord):
     tool_name: str
-    tool_args: str | Dict[str, Any]
-    tool_call_id: Optional[str] = None
+    tool_args: str | dict[str, Any]
+    tool_call_id: str | None = None
 
 
-class ToolCallResultPayload(BaseModel):
+@dataclass
+class ToolCallResultPayload(SerializableRecord):
     tool_name: str
-    tool_args: str | Dict[str, Any]
-    tool_call_id: Optional[str] = None
+    tool_args: str | dict[str, Any]
     result: str
+    tool_call_id: str | None = None
 
 
-class ToolCallErrorPayload(BaseModel):
+@dataclass
+class ToolCallErrorPayload(SerializableRecord):
     tool_name: str
     error_message: str
 
 
-class FinalAnswerPayload(BaseModel):
+@dataclass
+class FinalAnswerPayload(SerializableRecord):
     message: str
 
 
-class AgentThoughtPayload(BaseModel):
+@dataclass
+class AgentThoughtPayload(SerializableRecord):
     message: str
 
 
-class SubAgentCallStartedPayload(BaseModel):
+@dataclass
+class SubAgentCallStartedPayload(SerializableRecord):
     agent_name: str
     session_id: str
     timestamp: str
     run_count: int
-    kwargs: Dict[str, Any]
+    kwargs: dict[str, Any]
 
 
-class SubAgentCallResultPayload(BaseModel):
+@dataclass
+class SubAgentCallResultPayload(SerializableRecord):
     agent_name: str
     session_id: str
     timestamp: str
@@ -74,7 +97,8 @@ class SubAgentCallResultPayload(BaseModel):
     result: Any
 
 
-class SubAgentCallErrorPayload(BaseModel):
+@dataclass
+class SubAgentCallErrorPayload(SerializableRecord):
     agent_name: str
     session_id: str
     timestamp: str
@@ -82,15 +106,17 @@ class SubAgentCallErrorPayload(BaseModel):
     error_count: int
 
 
-class BackgroundTaskStartedPayload(BaseModel):
+@dataclass
+class BackgroundTaskStartedPayload(SerializableRecord):
     agent_id: str
     session_id: str
     timestamp: str
     run_count: int
-    kwargs: Dict[str, Any]
+    kwargs: dict[str, Any]
 
 
-class BackgroundTaskCompletedPayload(BaseModel):
+@dataclass
+class BackgroundTaskCompletedPayload(SerializableRecord):
     agent_id: str
     session_id: str
     timestamp: str
@@ -98,7 +124,8 @@ class BackgroundTaskCompletedPayload(BaseModel):
     result: Any
 
 
-class BackgroundTaskErrorPayload(BaseModel):
+@dataclass
+class BackgroundTaskErrorPayload(SerializableRecord):
     agent_id: str
     session_id: str
     timestamp: str
@@ -106,44 +133,37 @@ class BackgroundTaskErrorPayload(BaseModel):
     error_count: int
 
 
-class BackgroundAgentStatusPayload(BaseModel):
+@dataclass
+class BackgroundAgentStatusPayload(SerializableRecord):
     agent_id: str
     status: str
     timestamp: str
-    session_id: Optional[str] = None
-    last_run: Optional[str] = None
-    run_count: Optional[int] = None
-    error_count: Optional[int] = None
-    error: Optional[str] = None
+    session_id: str | None = None
+    last_run: str | None = None
+    run_count: int | None = None
+    error_count: int | None = None
+    error: str | None = None
 
 
-EventPayload = Union[
-    UserMessagePayload,
-    AgentMessagePayload,
-    ToolCallStartedPayload,
-    ToolCallResultPayload,
-    ToolCallErrorPayload,
-    FinalAnswerPayload,
-    AgentThoughtPayload,
-    SubAgentCallStartedPayload,
-    SubAgentCallResultPayload,
-    SubAgentCallErrorPayload,
-    BackgroundTaskStartedPayload,
-    BackgroundTaskCompletedPayload,
-    BackgroundTaskErrorPayload,
-    BackgroundAgentStatusPayload,
-]
+EventPayload = (
+    UserMessagePayload
+    | AgentMessagePayload
+    | ToolCallStartedPayload
+    | ToolCallResultPayload
+    | ToolCallErrorPayload
+    | FinalAnswerPayload
+    | AgentThoughtPayload
+    | SubAgentCallStartedPayload
+    | SubAgentCallResultPayload
+    | SubAgentCallErrorPayload
+    | BackgroundTaskStartedPayload
+    | BackgroundTaskCompletedPayload
+    | BackgroundTaskErrorPayload
+    | BackgroundAgentStatusPayload
+)
 
 
-class Event(BaseModel):
-    type: EventType
-    payload: EventPayload
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-    agent_name: str
-    event_id: str = Field(default_factory=lambda: str(uuid4()))
-
-
-EVENT_PAYLOAD_MAP: dict[EventType, Type[BaseModel]] = {
+EVENT_PAYLOAD_MAP: dict[EventType, Type[Any]] = {
     EventType.USER_MESSAGE: UserMessagePayload,
     EventType.AGENT_MESSAGE: AgentMessagePayload,
     EventType.TOOL_CALL_STARTED: ToolCallStartedPayload,
@@ -161,11 +181,67 @@ EVENT_PAYLOAD_MAP: dict[EventType, Type[BaseModel]] = {
 }
 
 
+def _to_plain(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if is_dataclass(value):
+        return {key: _to_plain(item) for key, item in asdict(value).items()}
+    if isinstance(value, dict):
+        return {key: _to_plain(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_to_plain(item) for item in value]
+    if isinstance(value, tuple):
+        return [_to_plain(item) for item in value]
+    return value
+
+
+@dataclass
+class Event:
+    type: EventType | str
+    payload: EventPayload | dict[str, Any]
+    agent_name: str
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    event_id: str = field(default_factory=lambda: str(uuid4()))
+
+    def __post_init__(self):
+        self.type = EventType(self.type)
+        payload_type = EVENT_PAYLOAD_MAP[self.type]
+        if isinstance(self.payload, dict):
+            self.payload = payload_type(**self.payload)
+        validate_event(self)
+
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "type": _to_plain(self.type),
+            "payload": _to_plain(self.payload),
+            "timestamp": _to_plain(self.timestamp),
+            "agent_name": self.agent_name,
+            "event_id": self.event_id,
+        }
+
+    def dict(self) -> dict[str, Any]:
+        return self.model_dump()
+
+    def json(self) -> str:
+        return json.dumps(self.model_dump())
+
+    @classmethod
+    def parse_raw(cls, raw: str) -> Event:
+        data = json.loads(raw)
+        timestamp = data.get("timestamp")
+        if isinstance(timestamp, str):
+            data["timestamp"] = datetime.fromisoformat(timestamp)
+        return cls(**data)
+
+
 def validate_event(event: Event):
     expected_type = EVENT_PAYLOAD_MAP[event.type]
     if not isinstance(event.payload, expected_type):
         raise TypeError(
-            f"Payload mismatch: Expected {expected_type} for {event.type}, got {type(event.payload)}"
+            f"Payload mismatch: Expected {expected_type} for "
+            f"{event.type}, got {type(event.payload)}"
         )
 
 
@@ -176,7 +252,7 @@ class BaseEventStore(ABC):
         raise NotImplementedError("Subclasses must implement this method")
 
     @abstractmethod
-    async def get_events(self, session_id: str) -> List[Event]:
+    async def get_events(self, session_id: str) -> list[Event]:
         raise NotImplementedError("Subclasses must implement this method")
 
     @abstractmethod
