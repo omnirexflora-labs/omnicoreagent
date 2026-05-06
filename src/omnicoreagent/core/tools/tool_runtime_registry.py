@@ -1,16 +1,40 @@
 from typing import Any
 
-from omnicoreagent.core.skills.tools import build_skill_tools
 from omnicoreagent.core.tool_response_offloader import ToolResponseOffloader
-from omnicoreagent.core.tools.advance_tools_use import (
-    build_tool_registry_advance_tools_use,
-)
-from omnicoreagent.core.tools.artifact_tool import build_tool_registry_artifact_tool
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.core.tools.memory_tool.memory_tool import (
-    build_tool_registry_memory_tool,
-)
 from omnicoreagent.core.utils import logger
+
+
+async def build_tool_registry_advance_tools_use(registry: ToolRegistry):
+    from omnicoreagent.core.tools.advance_tools_use import (
+        build_tool_registry_advance_tools_use as build_advanced_tools,
+    )
+
+    return await build_advanced_tools(registry=registry)
+
+
+def build_tool_registry_memory_tool(*, backend: Any, registry: ToolRegistry):
+    from omnicoreagent.core.tools.memory_tool.memory_tool import (
+        build_tool_registry_memory_tool as build_memory_tools,
+    )
+
+    return build_memory_tools(backend=backend, registry=registry)
+
+
+def build_tool_registry_artifact_tool(
+    *, offloader: ToolResponseOffloader, registry: ToolRegistry
+):
+    from omnicoreagent.core.tools.artifact_tool import (
+        build_tool_registry_artifact_tool as build_artifact_tools,
+    )
+
+    return build_artifact_tools(offloader=offloader, registry=registry)
+
+
+def build_skill_tools(*, skill_manager: Any, registry: ToolRegistry):
+    from omnicoreagent.core.skills.tools import build_skill_tools as build_tools
+
+    return build_tools(skill_manager=skill_manager, registry=registry)
 
 
 class ToolRuntimeRegistry:

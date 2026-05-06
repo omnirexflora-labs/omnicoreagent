@@ -10,18 +10,19 @@ Inspired by:
 - Anthropic's "Context efficient tool results" pattern
 """
 
+from __future__ import annotations
+
 import json
 import hashlib
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from typing import TYPE_CHECKING, Optional, Dict, Any
 from datetime import datetime, timedelta
 
 from omnicoreagent.core.summarizer.tokenizer import count_tokens
 from omnicoreagent.core.utils import logger
-from omnicoreagent.core.workspace_storage import (
-    WorkspaceStorage,
-    create_workspace_storage,
-)
+
+if TYPE_CHECKING:
+    from omnicoreagent.core.workspace_storage import WorkspaceStorage
 
 
 @dataclass
@@ -105,11 +106,8 @@ class ToolResponseOffloader:
         if isinstance(config, dict):
             config = OffloadConfig.from_dict(config)
         self.config = config or OffloadConfig()
-
-        self.storage = storage or create_workspace_storage(
-            namespace="artifacts",
-            workspace_dir=base_dir,
-        )
+        self._base_dir = base_dir
+        self._storage = storage
 
         if self.config.enabled:
             self._ensure_storage_dir()
@@ -118,6 +116,18 @@ class ToolResponseOffloader:
 
         self._offload_count = 0
         self._tokens_saved = 0
+
+    @property
+    def storage(self) -> WorkspaceStorage:
+        """Storage backend for persisted tool response artifacts."""
+        if self._storage is None:
+            from omnicoreagent.core.workspace_storage import create_workspace_storage
+
+            self._storage = create_workspace_storage(
+                namespace="artifacts",
+                workspace_dir=self._base_dir,
+            )
+        return self._storage
 
     def _ensure_storage_dir(self):
         """Create storage directory if it doesn't exist."""
