@@ -31,7 +31,7 @@ _EXPORTS = {
     "EventRouter": ("omnicoreagent.core.events", "EventRouter"),
     "ToolRegistry": ("omnicoreagent.core.tools", "ToolRegistry"),
     "Tool": ("omnicoreagent.core.tools", "Tool"),
-    "AgentConfig": ("omnicoreagent.runtime_config", "AgentConfig"),
+    "AgentConfig": ("omnicoreagent.core.runtime.config", "AgentConfig"),
     "ParsedResponse": ("omnicoreagent.core.types", "ParsedResponse"),
     "ToolCall": ("omnicoreagent.core.types", "ToolCall"),
     "UsageLimits": ("omnicoreagent.core.token_usage", "UsageLimits"),

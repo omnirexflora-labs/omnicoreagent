@@ -29,7 +29,7 @@ from .models import (
 from .sse import run_agent_stream, stream_session_events
 
 if TYPE_CHECKING:
-    from omnicoreagent.agent import OmniCoreAgent as AgentType
+    from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent as AgentType
 else:
     AgentType = Any
 

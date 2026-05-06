@@ -106,6 +106,7 @@ import sys
 from omnicoreagent import OmniCoreAgent
 
 runtime_modules = [
+    "omnicoreagent.agent",
     "omnicoreagent.core.agents.base",
     "omnicoreagent.core.agents.react_agent",
     "omnicoreagent.core.events.event_router",
@@ -178,7 +179,6 @@ agent = OmniCoreAgent(
 )
 
 watched_modules = [
-    "omnicoreagent.runtime_config",
     "omnicoreagent.core.agents.react_agent",
     "omnicoreagent.core.constants",
     "omnicoreagent.core.events.event_router",

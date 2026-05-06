@@ -95,7 +95,7 @@ class TestContextManagementValidation:
 
     def test_preserve_recent_minimum_enforced(self):
         """Test that preserve_recent < 4 raises ValidationError."""
-        from omnicoreagent.runtime_config import AgentConfig
+        from omnicoreagent.core.runtime.config import AgentConfig
         import pytest
 
         with pytest.raises(Exception) as exc_info:
@@ -112,7 +112,7 @@ class TestContextManagementValidation:
 
     def test_valid_preserve_recent_accepted(self):
         """Test that preserve_recent >= 4 is accepted."""
-        from omnicoreagent.runtime_config import AgentConfig
+        from omnicoreagent.core.runtime.config import AgentConfig
 
         config = AgentConfig(
             agent_name="test",
@@ -127,7 +127,7 @@ class TestContextManagementValidation:
 
     def test_invalid_mode_rejected(self):
         """Test that invalid mode raises ValidationError."""
-        from omnicoreagent.runtime_config import AgentConfig
+        from omnicoreagent.core.runtime.config import AgentConfig
         import pytest
 
         with pytest.raises(Exception) as exc_info:
@@ -144,7 +144,7 @@ class TestContextManagementValidation:
 
     def test_invalid_strategy_rejected(self):
         """Test that invalid strategy raises ValidationError."""
-        from omnicoreagent.runtime_config import AgentConfig
+        from omnicoreagent.core.runtime.config import AgentConfig
         import pytest
 
         with pytest.raises(Exception) as exc_info:
@@ -161,7 +161,7 @@ class TestContextManagementValidation:
 
     def test_invalid_threshold_rejected(self):
         """Test that threshold outside 1-100 raises ValidationError."""
-        from omnicoreagent.runtime_config import AgentConfig
+        from omnicoreagent.core.runtime.config import AgentConfig
         import pytest
 
         with pytest.raises(Exception) as exc_info:

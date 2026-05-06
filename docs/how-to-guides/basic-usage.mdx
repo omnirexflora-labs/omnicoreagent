@@ -157,16 +157,15 @@ agent = OmniCoreAgent(
     name="streaming_agent",
     system_instruction="You are a helpful assistant.",
     model_config={"provider": "openai", "model": "gpt-4o"},
-    event_router=EventRouter("callback")
+    event_router=EventRouter("in_memory")
 )
 
-@agent.on_event("tool_call")
-async def on_tool(event):
-    print(f"🔧 Tool called: {event['tool_name']}")
+result = await agent.run("What can you do?")
+session_id = result["session_id"]
 
-@agent.on_event("response")
-async def on_response(event):
-    print(f"💬 Response: {event['content'][:100]}")
+events = await agent.get_events(session_id)
+for event in events:
+    print(event.type, event.payload)
 ```
 
 ---
@@ -176,20 +175,14 @@ async def on_response(event):
 Wrap agent calls with try/except for production use:
 
 ```python
-from omnicoreagent.core.exceptions import (
-    ToolExecutionError,
-    TokenLimitError,
-    MCPConnectionError
-)
+from omnicoreagent.exceptions import OmniCoreAgentError
 
 try:
     result = await agent.run("Analyze this dataset", session_id="user_1")
-except ToolExecutionError as e:
-    print(f"Tool failed: {e.tool_name} — {e.message}")
-except TokenLimitError:
-    print("Conversation too long — clear history or increase limit")
-except MCPConnectionError as e:
-    print(f"MCP server unreachable: {e}")
+except OmniCoreAgentError as e:
+    print(f"Agent runtime error: {e.message}")
+except Exception as e:
+    print(f"Unexpected failure: {e}")
 ```
 
 ---

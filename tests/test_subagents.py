@@ -10,7 +10,7 @@ from omnicoreagent import OmniCoreAgent
 from omnicoreagent.core.subagents import SubagentFactory, build_subagent_tools
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.token_usage import Usage
-from omnicoreagent.runtime_config import normalize_agent_config
+from omnicoreagent.core.runtime.config import normalize_agent_config
 
 
 @pytest.fixture

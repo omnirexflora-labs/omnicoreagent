@@ -156,7 +156,7 @@ def mock_runtime_agent():
         )
         mock.return_value.cleanup = AsyncMock()
         with patch(
-            "omnicoreagent.agent.OmniCoreAgent._create_agent",
+            "omnicoreagent.core.runtime.omnicore_agent.OmniCoreAgent._create_agent",
             return_value=None,
         ):
             yield mock

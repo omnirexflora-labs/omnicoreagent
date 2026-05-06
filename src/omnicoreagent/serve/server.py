@@ -18,7 +18,7 @@ from .middleware import setup_all_middleware
 from .routes import create_agent_router
 
 if TYPE_CHECKING:
-    from omnicoreagent.agent import OmniCoreAgent as AgentType
+    from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent as AgentType
 else:
     AgentType = Any
 
