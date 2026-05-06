@@ -24,7 +24,6 @@ from omnicoreagent.core.tools.tool_failure_handler import ToolFailureHandler
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
 from omnicoreagent.core.utils import (
     logger,
-    show_tool_response,
     BackgroundTaskManager,
 )
 from omnicoreagent.core.events.base import Event
@@ -40,8 +39,10 @@ from omnicoreagent.core.agents.initial_messages import AgentInitialMessagePrepar
 from omnicoreagent.core.agents.llm_step import AgentLlmStepRunner
 from omnicoreagent.core.agents.message_history import AgentMessageHistoryLoader
 from omnicoreagent.core.agents import events as agent_events
+from omnicoreagent.core.agents.run_outcome import AgentRunOutcomeHandler
 from omnicoreagent.core.agents.session_state import AgentSessionStateStore
 from omnicoreagent.core.agents.subagent_runner import SubAgentCallRunner
+from omnicoreagent.core.agents.tool_action import AgentToolActionRunner
 from omnicoreagent.core.tools.tool_observation import ToolObservationHandler
 from omnicoreagent.core.agents.xml_parser import (
     parse_action_or_answer,
@@ -125,6 +126,13 @@ class BaseReactAgent:
             agent_name=self.agent_name,
             tool_call_timeout=self.tool_call_timeout,
         )
+        self.tool_action_runner = AgentToolActionRunner(
+            agent_name=self.agent_name,
+            tool_call_resolver=self.tool_call_resolver,
+            tool_failure_handler=self.tool_failure_handler,
+            tool_batch_runner=self.tool_batch_runner,
+            tool_observation_handler=self.tool_observation_handler,
+        )
         self.tool_runtime_registry = ToolRuntimeRegistry(
             register_internal_tool=self.register_internal_tool,
             tool_offloader=self.tool_offloader,
@@ -147,6 +155,7 @@ class BaseReactAgent:
             message_history_loader=self.message_history_loader,
             prompt_context_builder=self.prompt_context_builder,
         )
+        self.run_outcome_handler = AgentRunOutcomeHandler(agent_name=self.agent_name)
 
     def init_skills(self):
         if self.enable_agent_skills:
@@ -207,84 +216,20 @@ class BaseReactAgent:
         event_router: Callable[[str, Event], Any] = None,
         sub_agents: list = None,
     ):
-        session_state = self._get_session_state(session_id=session_id, debug=debug)
-
-        tool_call_result = await self.resolve_tool_call_request(
+        await self.tool_action_runner.run(
             parsed_response=parsed_response,
-            mcp_tools=mcp_tools,
-            sessions=sessions,
-            local_tools=local_tools,
-            sub_agents=sub_agents,
-        )
-
-        tools_results = []
-        obs_text = None
-
-        if isinstance(tool_call_result, ToolError):
-            (
-                tool_batch_name,
-                tool_batch_args,
-                obs_text,
-                tools_results,
-            ) = await self.tool_failure_handler.handle_validation_error(
-                tool_error=tool_call_result,
-                session_state=session_state,
-                session_id=session_id,
-                event_router=event_router,
-            )
-        else:
-            tool_call_result = list(tool_call_result)
-            tool_batch_name, tool_batch_args = await self.tool_batch_runner.start(
-                tool_call_results=tool_call_result,
-                response=response,
-                session_state=session_state,
-                add_message_to_history=add_message_to_history,
-                session_id=session_id,
-                event_router=event_router,
-            )
-            obs_text, tools_results = await self.tool_batch_runner.execute(
-                tool_call_results=tool_call_result,
-                session_state=session_state,
-                add_message_to_history=add_message_to_history,
-                session_id=session_id,
-                event_router=event_router,
-                tool_batch_name=tool_batch_name,
-                tool_batch_args=tool_batch_args,
-                parse_tool_observation=self.tool_observation_handler.parse,
-                build_tool_results_observation=(
-                    self.tool_observation_handler.build_results_observation
-                ),
-            )
-
-        if debug:
-            show_tool_response(
-                agent_name=self.agent_name,
-                tool_name=tool_batch_name,
-                tool_args=tool_batch_args,
-                observation=obs_text,
-            )
-
-        await self.tool_observation_handler.append_observations(
-            tools_results=tools_results,
-            session_state=session_state,
+            response=response,
+            session_state=self._get_session_state(session_id=session_id, debug=debug),
             add_message_to_history=add_message_to_history,
-            session_id=session_id,
-            debug=debug,
-        )
-
-        if isinstance(tool_call_result, (list, tuple)):
-            tool_call_results = list(tool_call_result)
-        else:
-            tool_call_results = [tool_call_result]
-
-        await self.tool_failure_handler.handle_loop_state(
-            tool_call_results=tool_call_results,
-            session_state=session_state,
             system_prompt=system_prompt,
+            reset_system_prompt=self.reset_system_prompt,
+            debug=debug,
+            sessions=sessions,
+            mcp_tools=mcp_tools,
+            local_tools=local_tools,
             session_id=session_id,
             event_router=event_router,
-            debug=debug,
-            reset_system_prompt=self.reset_system_prompt,
+            sub_agents=sub_agents,
         )
 
     async def reset_system_prompt(self, messages: list, system_prompt: str):
@@ -447,30 +392,15 @@ class BaseReactAgent:
                     logger.info(f"current steps: {current_steps}")
                 if parsed_response.answer is not None:
                     last_valid_response = parsed_response.answer
-
-                    session_state.messages.append(
-                        Message(
-                            role="assistant",
-                            content=parsed_response.answer,
-                        )
-                    )
-
-                    await agent_events.emit_final_answer(
+                    return await self.run_outcome_handler.handle_final_answer(
+                        answer=parsed_response.answer,
+                        session_state=session_state,
+                        add_message_to_history=add_message_to_history,
+                        session_id=session_id,
                         event_router=event_router,
-                        session_id=session_id,
-                        agent_name=self.agent_name,
-                        message=str(parsed_response.answer),
+                        run_usage=run_usage,
+                        start_time=start_time,
                     )
-                    await add_message_to_history(
-                        role="assistant",
-                        content=parsed_response.answer,
-                        session_id=session_id,
-                        metadata={"agent_name": self.agent_name},
-                    )
-
-                    session_state.state = AgentState.FINISHED
-                    run_usage.total_time = time.perf_counter() - start_time
-                    return {"answer": parsed_response.answer, "usage": run_usage}
 
                 if parsed_response.action is not None:
                     if parsed_response.agent_calls is not None:
@@ -512,24 +442,16 @@ class BaseReactAgent:
                     continue
                 if current_steps >= self.max_steps:
                     session_state.state = AgentState.STUCK
-                    if last_valid_response:
-                        max_steps_context = f"[SYSTEM_CONTEXT: MAX_STEPS_REACHED - Agent hit {self.max_steps} step limit]\n\n"
-                        return {
-                            "answer": max_steps_context + last_valid_response,
-                            "usage": run_usage,
-                        }
-
-                    else:
-                        return {
-                            "answer": f"[SYSTEM_CONTEXT: MAX_STEPS_REACHED - Agent hit {self.max_steps} step limit without valid response]",
-                            "usage": run_usage,
-                        }
+                    return self.run_outcome_handler.max_steps_result(
+                        max_steps=self.max_steps,
+                        last_valid_response=last_valid_response,
+                        run_usage=run_usage,
+                    )
 
         if session_state.state == AgentState.STUCK and last_valid_response:
-            loop_context = (
-                "[SYSTEM_CONTEXT: LOOP_DETECTED - Agent stuck in tool call loop]\n\n"
+            return self.run_outcome_handler.loop_stuck_result(
+                last_valid_response=last_valid_response
             )
-            return loop_context + last_valid_response
 
         run_usage.total_time = time.perf_counter() - start_time
         return {"answer": last_valid_response, "usage": run_usage}
