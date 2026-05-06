@@ -4,8 +4,8 @@ OmniServe Request/Response Models.
 Pydantic models for API request/response schemas.
 """
 
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from typing import Any, Optional
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # =============================================================================
@@ -41,7 +41,7 @@ class RunResponse(BaseModel):
     response: str = Field(..., description="Agent's response")
     session_id: str = Field(..., description="Session ID for this conversation")
     agent_name: str = Field(..., description="Name of the agent")
-    metric: Optional[Dict[str, Any]] = Field(
+    metric: Optional[dict[str, Any]] = Field(
         None, description="Optional metrics for this run"
     )
 
@@ -71,21 +71,18 @@ class ToolInfo(BaseModel):
 
     name: str = Field(..., description="Tool name")
     description: str = Field(..., description="Tool description")
-    input_schema: Dict[str, Any] = Field(
+    model_config = ConfigDict(populate_by_name=True)
+
+    input_schema: dict[str, Any] = Field(
         default_factory=dict, alias="inputSchema", description="Tool input schema"
     )
     type: str = Field(..., description="Tool type ('mcp' or 'local')")
-
-    class Config:
-        """Pydantic config."""
-
-        populate_by_name = True
 
 
 class ToolsResponse(BaseModel):
     """Response model for tools listing endpoint."""
 
-    tools: List[ToolInfo] = Field(..., description="List of available tools")
+    tools: list[ToolInfo] = Field(..., description="List of available tools")
     total: int = Field(..., description="Total number of tools")
 
 
@@ -104,7 +101,7 @@ class SessionHistoryResponse(BaseModel):
     """Response model for session history endpoint."""
 
     session_id: str = Field(..., description="Session ID")
-    messages: List[Dict[str, Any]] = Field(..., description="Message history")
+    messages: list[dict[str, Any]] = Field(..., description="Message history")
     count: int = Field(..., description="Number of messages")
 
 
@@ -112,7 +109,7 @@ class EventsResponse(BaseModel):
     """Response model for events endpoint."""
 
     session_id: str = Field(..., description="Session ID")
-    events: List[Dict[str, Any]] = Field(..., description="Events list")
+    events: list[dict[str, Any]] = Field(..., description="Events list")
     count: int = Field(..., description="Number of events")
 
 
@@ -120,8 +117,8 @@ class TraceResponse(BaseModel):
     """Response model for session trace endpoint."""
 
     session_id: str = Field(..., description="Session ID")
-    summary: Dict[str, Any] = Field(..., description="Trace summary")
-    steps: List[Dict[str, Any]] = Field(..., description="Ordered trace steps")
+    summary: dict[str, Any] = Field(..., description="Trace summary")
+    steps: list[dict[str, Any]] = Field(..., description="Ordered trace steps")
 
 
 class ErrorResponse(BaseModel):

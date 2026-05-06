@@ -25,8 +25,8 @@ Priority: Environment variables ALWAYS override code values.
 """
 
 import os
-from typing import List, Optional
-from pydantic import BaseModel, Field, model_validator
+from typing import Optional
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def _get_env(key: str) -> Optional[str]:
@@ -54,7 +54,7 @@ def _get_env_int(key: str) -> Optional[int]:
         return None
 
 
-def _get_env_list(key: str) -> Optional[List[str]]:
+def _get_env_list(key: str) -> Optional[list[str]]:
     """Get list from comma-separated environment variable. Returns None if not set."""
     val = _get_env(key)
     if val is None:
@@ -82,9 +82,17 @@ class OmniServeConfig(BaseModel):
 
     # CORS settings
     cors_enabled: bool = Field(default=True, description="Enable CORS middleware")
-    cors_origins: List[str] = Field(default=["*"], description="Allowed CORS origins")
-    cors_methods: List[str] = Field(default=["*"], description="Allowed CORS methods")
-    cors_headers: List[str] = Field(default=["*"], description="Allowed CORS headers")
+    model_config = ConfigDict(extra="allow")
+
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["*"], description="Allowed CORS origins"
+    )
+    cors_methods: list[str] = Field(
+        default_factory=lambda: ["*"], description="Allowed CORS methods"
+    )
+    cors_headers: list[str] = Field(
+        default_factory=lambda: ["*"], description="Allowed CORS headers"
+    )
     cors_credentials: bool = Field(default=True, description="Allow credentials in CORS")
 
     # Authentication
@@ -102,10 +110,6 @@ class OmniServeConfig(BaseModel):
     rate_limit_enabled: bool = Field(default=False, description="Enable rate limiting")
     rate_limit_requests: int = Field(default=100, description="Max requests per time window")
     rate_limit_window: int = Field(default=60, description="Rate limit time window in seconds")
-
-    class Config:
-        """Pydantic config."""
-        extra = "allow"
 
     @model_validator(mode="after")
     def apply_env_overrides(self) -> "OmniServeConfig":
