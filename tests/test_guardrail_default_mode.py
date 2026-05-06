@@ -59,8 +59,8 @@ class TestGuardrailModeDefault:
 
         with (
             patch.object(agent, "_create_agent") as mock_create,
-            patch("omnicoreagent.core.runtime.agent_runtime.MemoryRouter"),
-            patch("omnicoreagent.core.runtime.agent_runtime.EventRouter"),
+            patch("omnicoreagent.core.runtime.imports.MemoryRouter"),
+            patch("omnicoreagent.core.runtime.imports.EventRouter"),
         ):
             # Prevent _create_agent from executing real logic while still
             # allowing guardrail assignment to happen beforehand.
@@ -78,8 +78,8 @@ class TestGuardrailModeDefault:
 
         with (
             patch.object(agent, "_create_agent") as mock_create,
-            patch("omnicoreagent.core.runtime.agent_runtime.MemoryRouter"),
-            patch("omnicoreagent.core.runtime.agent_runtime.EventRouter"),
+            patch("omnicoreagent.core.runtime.imports.MemoryRouter"),
+            patch("omnicoreagent.core.runtime.imports.EventRouter"),
         ):
             mock_create.side_effect = lambda: setattr(agent, "agent", mock_react_agent)
             await agent.initialize()
@@ -104,8 +104,8 @@ class TestGuardrailModeFullExplicit:
 
         with (
             patch.object(agent, "_create_agent") as mock_create,
-            patch("omnicoreagent.core.runtime.agent_runtime.MemoryRouter"),
-            patch("omnicoreagent.core.runtime.agent_runtime.EventRouter"),
+            patch("omnicoreagent.core.runtime.imports.MemoryRouter"),
+            patch("omnicoreagent.core.runtime.imports.EventRouter"),
         ):
             mock_create.side_effect = lambda: setattr(agent, "agent", mock_react_agent)
             await agent.initialize()
@@ -121,8 +121,8 @@ class TestGuardrailModeFullExplicit:
 
         with (
             patch.object(agent, "_create_agent") as mock_create,
-            patch("omnicoreagent.core.runtime.agent_runtime.MemoryRouter"),
-            patch("omnicoreagent.core.runtime.agent_runtime.EventRouter"),
+            patch("omnicoreagent.core.runtime.imports.MemoryRouter"),
+            patch("omnicoreagent.core.runtime.imports.EventRouter"),
         ):
             mock_create.side_effect = lambda: setattr(agent, "agent", mock_react_agent)
             await agent.initialize()
@@ -144,13 +144,13 @@ class TestGuardrailModeFullExplicit:
             return m
 
         with (
-            patch("omnicoreagent.core.runtime.agent_runtime.MemoryRouter"),
-            patch("omnicoreagent.core.runtime.agent_runtime.EventRouter"),
+            patch("omnicoreagent.core.runtime.imports.MemoryRouter"),
+            patch("omnicoreagent.core.runtime.imports.EventRouter"),
             patch(
-                "omnicoreagent.core.runtime.agent_runtime.LLMConnection", return_value=MagicMock()
+                "omnicoreagent.core.runtime.imports.LLMConnection", return_value=MagicMock()
             ),
             patch(
-                "omnicoreagent.core.runtime.agent_runtime.ReactAgent",
+                "omnicoreagent.core.runtime.imports.ReactAgent",
                 side_effect=capture_react_agent_construction,
             ),
         ):
@@ -177,8 +177,8 @@ class TestGuardrailModeInputOnly:
 
         with (
             patch.object(agent, "_create_agent") as mock_create,
-            patch("omnicoreagent.core.runtime.agent_runtime.MemoryRouter"),
-            patch("omnicoreagent.core.runtime.agent_runtime.EventRouter"),
+            patch("omnicoreagent.core.runtime.imports.MemoryRouter"),
+            patch("omnicoreagent.core.runtime.imports.EventRouter"),
         ):
             mock_create.side_effect = lambda: setattr(agent, "agent", mock_react_agent)
             await agent.initialize()
@@ -194,8 +194,8 @@ class TestGuardrailModeInputOnly:
 
         with (
             patch.object(agent, "_create_agent") as mock_create,
-            patch("omnicoreagent.core.runtime.agent_runtime.MemoryRouter"),
-            patch("omnicoreagent.core.runtime.agent_runtime.EventRouter"),
+            patch("omnicoreagent.core.runtime.imports.MemoryRouter"),
+            patch("omnicoreagent.core.runtime.imports.EventRouter"),
         ):
             mock_create.side_effect = lambda: setattr(agent, "agent", mock_react_agent)
             await agent.initialize()
@@ -219,13 +219,13 @@ class TestGuardrailModeInputOnly:
             return m
 
         with (
-            patch("omnicoreagent.core.runtime.agent_runtime.MemoryRouter"),
-            patch("omnicoreagent.core.runtime.agent_runtime.EventRouter"),
+            patch("omnicoreagent.core.runtime.imports.MemoryRouter"),
+            patch("omnicoreagent.core.runtime.imports.EventRouter"),
             patch(
-                "omnicoreagent.core.runtime.agent_runtime.LLMConnection", return_value=MagicMock()
+                "omnicoreagent.core.runtime.imports.LLMConnection", return_value=MagicMock()
             ),
             patch(
-                "omnicoreagent.core.runtime.agent_runtime.ReactAgent",
+                "omnicoreagent.core.runtime.imports.ReactAgent",
                 side_effect=capture_react_agent_construction,
             ),
         ):
@@ -252,8 +252,8 @@ class TestGuardrailModeOff:
 
         with (
             patch.object(agent, "_create_agent") as mock_create,
-            patch("omnicoreagent.core.runtime.agent_runtime.MemoryRouter"),
-            patch("omnicoreagent.core.runtime.agent_runtime.EventRouter"),
+            patch("omnicoreagent.core.runtime.imports.MemoryRouter"),
+            patch("omnicoreagent.core.runtime.imports.EventRouter"),
         ):
             mock_create.side_effect = lambda: setattr(agent, "agent", mock_react_agent)
             await agent.initialize()
@@ -269,8 +269,8 @@ class TestGuardrailModeOff:
 
         with (
             patch.object(agent, "_create_agent") as mock_create,
-            patch("omnicoreagent.core.runtime.agent_runtime.MemoryRouter"),
-            patch("omnicoreagent.core.runtime.agent_runtime.EventRouter"),
+            patch("omnicoreagent.core.runtime.imports.MemoryRouter"),
+            patch("omnicoreagent.core.runtime.imports.EventRouter"),
         ):
             mock_create.side_effect = lambda: setattr(agent, "agent", mock_react_agent)
             await agent.initialize()
@@ -292,13 +292,13 @@ class TestGuardrailModeOff:
             return m
 
         with (
-            patch("omnicoreagent.core.runtime.agent_runtime.MemoryRouter"),
-            patch("omnicoreagent.core.runtime.agent_runtime.EventRouter"),
+            patch("omnicoreagent.core.runtime.imports.MemoryRouter"),
+            patch("omnicoreagent.core.runtime.imports.EventRouter"),
             patch(
-                "omnicoreagent.core.runtime.agent_runtime.LLMConnection", return_value=MagicMock()
+                "omnicoreagent.core.runtime.imports.LLMConnection", return_value=MagicMock()
             ),
             patch(
-                "omnicoreagent.core.runtime.agent_runtime.ReactAgent",
+                "omnicoreagent.core.runtime.imports.ReactAgent",
                 side_effect=capture_react_agent_construction,
             ),
         ):
@@ -340,8 +340,8 @@ class TestCustomGuardrailConfig:
 
         with (
             patch.object(agent, "_create_agent") as mock_create,
-            patch("omnicoreagent.core.runtime.agent_runtime.MemoryRouter"),
-            patch("omnicoreagent.core.runtime.agent_runtime.EventRouter"),
+            patch("omnicoreagent.core.runtime.imports.MemoryRouter"),
+            patch("omnicoreagent.core.runtime.imports.EventRouter"),
             patch.object(DetectionConfig, "__init__", capturing_init),
         ):
             mock_create.side_effect = lambda: setattr(agent, "agent", mock_react)
@@ -374,8 +374,8 @@ class TestCustomGuardrailConfig:
 
         with (
             patch.object(agent, "_create_agent") as mock_create,
-            patch("omnicoreagent.core.runtime.agent_runtime.MemoryRouter"),
-            patch("omnicoreagent.core.runtime.agent_runtime.EventRouter"),
+            patch("omnicoreagent.core.runtime.imports.MemoryRouter"),
+            patch("omnicoreagent.core.runtime.imports.EventRouter"),
             patch.object(DetectionConfig, "__init__", capturing_init),
         ):
             mock_create.side_effect = lambda: setattr(agent, "agent", mock_react)
@@ -402,8 +402,8 @@ class TestCustomGuardrailConfig:
 
         with (
             patch.object(agent, "_create_agent") as mock_create,
-            patch("omnicoreagent.core.runtime.agent_runtime.MemoryRouter"),
-            patch("omnicoreagent.core.runtime.agent_runtime.EventRouter"),
+            patch("omnicoreagent.core.runtime.imports.MemoryRouter"),
+            patch("omnicoreagent.core.runtime.imports.EventRouter"),
             patch.object(DetectionConfig, "__init__", capturing_init),
         ):
             mock_create.side_effect = lambda: setattr(agent, "agent", mock_react_agent)
@@ -575,8 +575,8 @@ class TestInitializeIdempotency:
 
         with (
             patch.object(agent, "_create_agent") as mock_create,
-            patch("omnicoreagent.core.runtime.agent_runtime.MemoryRouter"),
-            patch("omnicoreagent.core.runtime.agent_runtime.EventRouter"),
+            patch("omnicoreagent.core.runtime.imports.MemoryRouter"),
+            patch("omnicoreagent.core.runtime.imports.EventRouter"),
         ):
             mock_create.side_effect = lambda: setattr(agent, "agent", mock_react)
             await agent.initialize()

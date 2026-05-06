@@ -3,7 +3,12 @@ from __future__ import annotations
 import uuid
 from typing import Any, Dict, List, Optional
 
-from omnicoreagent.core.runtime import agent_runtime
+from omnicoreagent.core.runtime import construction, harness_tools, normalization, summaries
+from omnicoreagent.core.runtime.imports import (
+    LazyDefaultPromptBuilder,
+    runtime,
+    runtime_logger,
+)
 
 
 class OmniCoreAgent:
@@ -46,12 +51,12 @@ class OmniCoreAgent:
         """
         self.name = name
         self.system_instruction = system_instruction
-        self.model_config = agent_runtime.build_model_config(model_config)
-        self.mcp_tools = agent_runtime.build_mcp_tools(mcp_tools)
-        self.local_tools = agent_runtime.normalize_local_tools(local_tools)
+        self.model_config = normalization.build_model_config(model_config)
+        self.mcp_tools = normalization.build_mcp_tools(mcp_tools)
+        self.local_tools = normalization.normalize_local_tools(local_tools)
 
         self.sub_agents = sub_agents
-        self.agent_config = agent_runtime.build_agent_config(name, agent_config)
+        self.agent_config = normalization.build_agent_config(name, agent_config)
 
         self.debug = debug
         self._cumulative_usage = None
@@ -61,7 +66,7 @@ class OmniCoreAgent:
         if prompt_builder:
             self.prompt_builder = prompt_builder
         else:
-            self.prompt_builder = agent_runtime.LazyDefaultPromptBuilder()
+            self.prompt_builder = LazyDefaultPromptBuilder()
         self.agent = None
         self.mcp_client = None
         self.llm_connection = None
@@ -77,13 +82,13 @@ class OmniCoreAgent:
             return
 
         if not self.memory_router:
-            self.memory_router = agent_runtime.default_memory_router()
+            self.memory_router = construction.default_memory_router()
 
         if not self.event_router:
-            self.event_router = agent_runtime.default_event_router()
+            self.event_router = construction.default_event_router()
 
         agent_cfg = self.agent_config
-        self.guardrail_mode, self.guardrail = agent_runtime.build_guardrail(
+        self.guardrail_mode, self.guardrail = construction.build_guardrail(
             self.name, agent_cfg
         )
 
@@ -92,27 +97,27 @@ class OmniCoreAgent:
 
     def _create_agent(self):
         """Create the appropriate agent based on configuration"""
-        self.mcp_client, self.llm_connection = agent_runtime.create_llm_runtime(
+        self.mcp_client, self.llm_connection = construction.create_llm_runtime(
             mcp_tools=self.mcp_tools,
             model_config=self.model_config,
             debug=self.debug,
         )
 
-        agent_settings = agent_runtime.build_agent_settings(self.agent_config)
-        agent_runtime.configure_memory_router(
+        agent_settings = construction.build_agent_settings(self.agent_config)
+        construction.configure_memory_router(
             memory_router=self.memory_router,
             agent_settings=agent_settings,
             summarize_fn=self._summarize_history,
         )
 
-        self.agent = agent_runtime.create_react_agent(
+        self.agent = construction.create_react_agent(
             agent_settings=agent_settings,
             guardrail=self.guardrail,
             guardrail_mode=self.guardrail_mode,
         )
         self._prepare_dynamic_subagents()
         if self.local_tools:
-            agent_runtime.index_tools_for_advanced_use(
+            harness_tools.index_tools_for_advanced_use(
                 enabled=self.agent.enable_advanced_tool_use,
                 local_tools=self.local_tools,
             )
@@ -120,7 +125,7 @@ class OmniCoreAgent:
     def _prepare_dynamic_subagents(self):
         """Register dynamic subagent spawning tools when enabled."""
         self._subagent_factory, self.local_tools = (
-            agent_runtime.prepare_dynamic_subagents(
+            harness_tools.prepare_dynamic_subagents(
                 enabled=self.agent_config.get("enable_subagents", False),
                 existing_factory=self._subagent_factory,
                 base_model_config=self.model_config,
@@ -148,13 +153,13 @@ class OmniCoreAgent:
             String summary of the messages
         """
         if not self.llm_connection:
-            agent_runtime.runtime_logger().warning(
+            runtime_logger().warning(
                 "No LLM connection available for summarization"
             )
             return ""
 
-        instruction = agent_runtime.summary_instruction(max_tokens)
-        history_text = agent_runtime.render_history(messages)
+        instruction = summaries.summary_instruction(max_tokens)
+        history_text = summaries.render_history(messages)
 
         prompt_messages = [
             {
@@ -169,9 +174,9 @@ class OmniCoreAgent:
 
         try:
             response = await self.llm_connection.llm_call(messages=prompt_messages)
-            return agent_runtime.extract_summary_text(response)
+            return summaries.extract_summary_text(response)
         except Exception as e:
-            agent_runtime.runtime_logger().error(f"Summarization callback failed: {e}")
+            runtime_logger().error(f"Summarization callback failed: {e}")
             return ""
 
     def generate_session_id(self) -> str:
@@ -185,7 +190,7 @@ class OmniCoreAgent:
 
         if self.mcp_client and self.mcp_tools:
             await self.mcp_client.connect_to_servers()
-            agent_runtime.index_tools_for_advanced_use(
+            harness_tools.index_tools_for_advanced_use(
                 enabled=self.agent.enable_advanced_tool_use,
                 mcp_tools=self.mcp_client.available_tools if self.mcp_client else {},
                 local_tools=self.local_tools,
@@ -208,7 +213,7 @@ class OmniCoreAgent:
         if self.guardrail:
             result = self.guardrail.check(query)
             if not result.is_safe:
-                agent_runtime.runtime_logger().warning(
+                runtime_logger().warning(
                     f"Query blocked by guardrail: {result.message}"
                 )
                 return {
@@ -279,7 +284,7 @@ class OmniCoreAgent:
 
     def _usage(self):
         if self._cumulative_usage is None:
-            self._cumulative_usage = agent_runtime.runtime("Usage")()
+            self._cumulative_usage = runtime("Usage")()
         return self._cumulative_usage
 
     async def list_all_available_tools(self):
@@ -287,7 +292,7 @@ class OmniCoreAgent:
         if not self._initialized:
             await self.initialize()
 
-        return agent_runtime.available_tools(self.mcp_client, self.local_tools)
+        return harness_tools.available_tools(self.mcp_client, self.local_tools)
 
     async def get_session_history(self, session_id: str) -> List[Dict[str, Any]]:
         """Get session history for a specific session ID"""
