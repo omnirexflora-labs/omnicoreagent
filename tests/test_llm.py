@@ -1,5 +1,8 @@
-from unittest.mock import patch, AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
 import pytest
+
 from omnicoreagent.core.llm import LLMConnection
 
 
@@ -15,8 +18,7 @@ def make_model_config(provider="openai", model="gpt-4"):
 
 @pytest.fixture
 def mock_llm_connection():
-    with patch("omnicoreagent.core.llm.litellm"):
-        return LLMConnection(make_model_config(), api_key="test-api-key")
+    return LLMConnection(make_model_config(), api_key="test-api-key")
 
 
 class TestLLMConnection:
@@ -40,12 +42,10 @@ class TestLLMConnection:
     async def test_llm_call_with_tools_and_without(self):
         messages = [{"role": "user", "content": "What is AI?"}]
         tools = [{"name": "tool", "description": "desc"}]
+        mock_completion = AsyncMock(return_value={"mocked": "response"})
+        mock_litellm = SimpleNamespace(acompletion=mock_completion)
 
-        with patch(
-            "omnicoreagent.core.llm.litellm.acompletion", new_callable=AsyncMock
-        ) as mock_completion:
-            mock_completion.return_value = {"mocked": "response"}
-
+        with patch("omnicoreagent.core.llm._get_litellm", return_value=mock_litellm):
             conn = LLMConnection(
                 make_model_config("groq", "llama-3"),
                 api_key="test-api-key",
@@ -72,12 +72,10 @@ class TestLLMConnection:
     @pytest.mark.asyncio
     async def test_llm_call_handles_exceptions_gracefully(self):
         messages = [{"role": "user", "content": "Fail please"}]
+        mock_completion = AsyncMock(side_effect=Exception("Boom"))
+        mock_litellm = SimpleNamespace(acompletion=mock_completion)
 
-        with patch(
-            "omnicoreagent.core.llm.litellm.acompletion", new_callable=AsyncMock
-        ) as mock_completion:
-            mock_completion.side_effect = Exception("Boom")
-
+        with patch("omnicoreagent.core.llm._get_litellm", return_value=mock_litellm):
             conn = LLMConnection(
                 make_model_config("gemini", "gemini-pro"),
                 api_key="test-api-key",

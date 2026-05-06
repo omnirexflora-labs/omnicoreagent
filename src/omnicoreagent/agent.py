@@ -2,7 +2,6 @@ import uuid
 from typing import Any, Dict, List, Optional, Union
 
 from omnicoreagent.core.agents.react_agent import ReactAgent
-from omnicoreagent.mcp_clients_connection.client import MCPClient
 from omnicoreagent.core.llm import LLMConnection
 from omnicoreagent.core.memory_store.memory_router import MemoryRouter
 from omnicoreagent.runtime_config import (
@@ -139,6 +138,8 @@ class OmniCoreAgent:
     def _create_agent(self):
         """Create the appropriate agent based on configuration"""
         if self.mcp_tools:
+            from omnicoreagent.mcp_clients_connection.client import MCPClient
+
             self.mcp_client = MCPClient(
                 servers=self.mcp_tools,
                 model_config=self.model_config,
