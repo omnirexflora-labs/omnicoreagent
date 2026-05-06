@@ -37,6 +37,7 @@ from omnicoreagent.core.tool_response_offloader import (
 )
 from omnicoreagent.core.agents.initial_messages import AgentInitialMessagePreparer
 from omnicoreagent.core.agents.llm_step import AgentLlmStepRunner
+from omnicoreagent.core.agents.loop_step import AgentLoopStepHandler
 from omnicoreagent.core.agents.message_history import AgentMessageHistoryLoader
 from omnicoreagent.core.agents import events as agent_events
 from omnicoreagent.core.agents.run_outcome import AgentRunOutcomeHandler
@@ -156,6 +157,14 @@ class BaseReactAgent:
             prompt_context_builder=self.prompt_context_builder,
         )
         self.run_outcome_handler = AgentRunOutcomeHandler(agent_name=self.agent_name)
+        self.loop_step_handler = AgentLoopStepHandler(
+            agent_name=self.agent_name,
+            max_steps=self.max_steps,
+            run_outcome_handler=self.run_outcome_handler,
+            tool_action_runner=self.tool_action_runner,
+            subagent_runner=self.subagent_runner,
+            reset_system_prompt=self.reset_system_prompt,
+        )
 
     def init_skills(self):
         if self.enable_agent_skills:
@@ -388,65 +397,27 @@ class BaseReactAgent:
                     session_id=session_id,
                     event_router=event_router,
                 )
-                if debug:
-                    logger.info(f"current steps: {current_steps}")
-                if parsed_response.answer is not None:
-                    last_valid_response = parsed_response.answer
-                    return await self.run_outcome_handler.handle_final_answer(
-                        answer=parsed_response.answer,
-                        session_state=session_state,
-                        add_message_to_history=add_message_to_history,
-                        session_id=session_id,
-                        event_router=event_router,
-                        run_usage=run_usage,
-                        start_time=start_time,
-                    )
-
-                if parsed_response.action is not None:
-                    if parsed_response.agent_calls is not None:
-                        agent_calls = parsed_response.data
-
-                        await self.execute_sub_agent_calls(
-                            response=response,
-                            agent_calls=agent_calls,
-                            sub_agents=sub_agents,
-                            session_id=session_id,
-                            session_state=session_state,
-                            add_message_to_history=add_message_to_history,
-                            run_usage=run_usage,
-                            event_router=event_router,
-                            debug=debug,
-                        )
-                    else:
-                        await self.act(
-                            parsed_response=parsed_response,
-                            response=response,
-                            add_message_to_history=add_message_to_history,
-                            system_prompt=system_prompt,
-                            mcp_tools=mcp_tools,
-                            debug=debug,
-                            sessions=sessions,
-                            local_tools=runtime_local_tools,
-                            session_id=session_id,
-                            event_router=event_router,
-                            sub_agents=sub_agents,
-                        )
-
-                if parsed_response.error is not None:
-                    session_state.messages.append(
-                        Message(
-                            role="user",
-                            content=parsed_response.error,
-                        )
-                    )
-                    continue
-                if current_steps >= self.max_steps:
-                    session_state.state = AgentState.STUCK
-                    return self.run_outcome_handler.max_steps_result(
-                        max_steps=self.max_steps,
-                        last_valid_response=last_valid_response,
-                        run_usage=run_usage,
-                    )
+                step_result = await self.loop_step_handler.handle(
+                    parsed_response=parsed_response,
+                    response=response,
+                    session_state=session_state,
+                    add_message_to_history=add_message_to_history,
+                    system_prompt=system_prompt,
+                    session_id=session_id,
+                    run_usage=run_usage,
+                    start_time=start_time,
+                    current_steps=current_steps,
+                    last_valid_response=last_valid_response,
+                    debug=debug,
+                    sessions=sessions,
+                    mcp_tools=mcp_tools,
+                    local_tools=runtime_local_tools,
+                    event_router=event_router,
+                    sub_agents=sub_agents,
+                )
+                last_valid_response = step_result.last_valid_response
+                if step_result.should_return:
+                    return step_result.run_result
 
         if session_state.state == AgentState.STUCK and last_valid_response:
             return self.run_outcome_handler.loop_stuck_result(
