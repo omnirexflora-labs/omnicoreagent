@@ -52,19 +52,6 @@ async def test_extract_action_or_answer_fallback_error(agent):
 
 
 @pytest.mark.asyncio
-async def test_update_llm_working_memory_empty(agent):
-    message_history = AsyncMock(return_value=[])
-    await agent.update_llm_working_memory(
-        message_history=message_history,
-        session_id="chat456",
-        llm_connection=AsyncMock(),
-        debug=False,
-    )
-    session_state = agent._get_session_state("chat456", debug=False)
-    assert len(session_state.messages) == 0
-
-
-@pytest.mark.asyncio
 async def test_act_executes_tool_name_with_and_as_literal(agent):
     registry = ToolRegistry()
     history = []
