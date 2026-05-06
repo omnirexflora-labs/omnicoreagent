@@ -85,7 +85,7 @@ Install production extras only when you need them:
 pip install "omnicoreagent[redis]"       # Redis memory and event streams
 pip install "omnicoreagent[postgres]"    # PostgreSQL / SQL memory
 pip install "omnicoreagent[mongodb]"     # MongoDB memory
-pip install "omnicoreagent[s3]"          # S3 / R2 workspace memory
+pip install "omnicoreagent[s3]"          # S3 / R2 workspace files
 pip install "omnicoreagent[serve]"       # OmniServe REST/SSE API server
 pip install "omnicoreagent[all]"         # Everything
 ```
@@ -141,11 +141,11 @@ print(result["response"])
 | 3 | **Context Engineering** | Dual-layer system: agent loop context management + tool response offloading | [Context →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/context-engineering) |
 | 4 | **Event System** | Real-time event streaming with runtime switching | [Events →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/events) |
 | 5 | **MCP Tools** | Connect external MCP tool servers (stdio, streamable_http, SSE) with OAuth | [MCP →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/mcp) |
-| 6 | **Dynamic Subagents** | Spawn one or many focused workers from OmniCoreAgent with workspace memory | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
+| 6 | **Dynamic Subagents** | Spawn one or many focused workers from OmniCoreAgent with workspace files | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
 | 7 | **Local Tools** | Register any Python function as an AI tool via ToolRegistry | [Local Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/local-tools) |
 | 8 | **Agent Skills** | Polyglot packaged capabilities (Python, Bash, Node.js) | [Skills →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/skills) |
-| 9 | **Workspace Memory** | Persistent file storage with S3/R2/Local backends | [Workspace →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workspace-memory) |
-| 10 | **Harness Defaults** | Enable subagents, workspace memory, context management, and tool offloading on OmniCoreAgent | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
+| 9 | **Workspace Files** | Persistent file storage with S3/R2/Local backends | [Workspace →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workspace-files) |
+| 10 | **Harness Defaults** | Enable subagents, workspace files, context management, and tool offloading on OmniCoreAgent | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
 | 11 | **Background Agents** | Schedule autonomous tasks on intervals | [Background →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/background-agents) |
 | 12 | **Workflows** | Sequential, Parallel, and Router agent orchestration | [Workflows →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workflows) |
 | 13 | **BM25 Tool Retrieval** | Auto-discover relevant tools from 1000+ using BM25 search | [Advanced Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/advanced-tools) |
@@ -186,7 +186,7 @@ All examples are in the **[Cookbook](./cookbook)** — organized by use case wit
 # Required
 LLM_API_KEY=your_api_key
 
-# Optional: workspace backend for artifacts and memory files
+# Optional: workspace backend for artifacts and workspace files
 OMNICOREAGENT_WORKSPACE_BACKEND=local  # local, s3, or r2
 OMNICOREAGENT_WORKSPACE_DIR=.omnicoreagent/workspace
 AWS_S3_BUCKET=your-s3-bucket           # when backend=s3
@@ -205,7 +205,7 @@ agent_config = {
     "enable_advanced_tool_use": True,   # BM25 tool retrieval
     "enable_subagents": True,           # Dynamic focused workers
     "enable_agent_skills": True,        # Specialized packaged skills
-    "enable_workspace_memory": True,    # File memory: notes, logs, scratchpads
+    "enable_workspace_files": True,    # Workspace files: notes, logs, scratchpads
     "context_management": {"enabled": True},
     "tool_offload": {"enabled": True}
 }

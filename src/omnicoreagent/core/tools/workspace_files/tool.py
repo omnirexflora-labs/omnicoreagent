@@ -1,56 +1,46 @@
-"""
-Memory Tool that delegates all operations to a backend
-implementing AbstractMemoryBackend.
-"""
+"""Workspace file tools for scratchpads, logs, task output, and notes."""
 
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.core.tools.memory_tool.base import AbstractMemoryBackend
-from omnicoreagent.core.tools.memory_tool.factory import create_memory_backend
+from omnicoreagent.core.tools.workspace_files.base import AbstractWorkspaceFilesBackend
+from omnicoreagent.core.tools.workspace_files.factory import create_workspace_files_backend
 from omnicoreagent.core.workspace_config import WorkspaceConfig
 
 
-class MemoryTool:
-    """
-    Memory Tool that delegates all operations to a backend.
-    
-    Usage:
-        # Uses the configured workspace backend
-        memory_tool = MemoryTool()
-
-        # Direct backend injection for tests/custom storage
-        memory_tool = MemoryTool(backend=my_custom_backend)
-    """
+class WorkspaceFilesTool:
+    """High-level file operations rooted inside the active workspace."""
 
     def __init__(
         self,
-        backend: AbstractMemoryBackend | None = None,
+        backend: AbstractWorkspaceFilesBackend | None = None,
         workspace_config: WorkspaceConfig | dict | None = None,
     ):
         """
-        Initialize MemoryTool with a backend.
+        Initialize WorkspaceFilesTool with a backend.
         
         Args:
-            backend: Optional AbstractMemoryBackend instance for direct injection.
+            backend: Optional AbstractWorkspaceFilesBackend instance for direct injection.
                 None uses the active workspace backend.
             workspace_config: Explicit workspace storage config used when backend is
                 not provided. None falls back to environment configuration.
         """
-        if isinstance(backend, AbstractMemoryBackend):
+        if isinstance(backend, AbstractWorkspaceFilesBackend):
             self.backend = backend
         else:
-            self.backend = create_memory_backend(workspace_config=workspace_config)
+            self.backend = create_workspace_files_backend(
+                workspace_config=workspace_config
+            )
 
     def view(self, path: str | None = None) -> str:
         """Show directory listing or file contents."""
         return self.backend.view(path)
 
-    def create_update(self, path: str, file_text: str, mode: str = "create") -> str:
+    def write(self, path: str, content: str, mode: str = "create") -> str:
         """Create, append, or overwrite a file."""
-        return self.backend.create_update(path, file_text, mode)
+        return self.backend.write(path, content, mode)
 
-    def str_replace(self, path: str, old_str: str, new_str: str) -> str:
+    def replace(self, path: str, old_str: str, new_str: str) -> str:
         """Replace all occurrences of old_str with new_str in a file."""
-        return self.backend.str_replace(path, old_str, new_str)
+        return self.backend.replace(path, old_str, new_str)
 
     def insert(self, path: str, insert_line: int, insert_text: str) -> str:
         """Insert text at a specific line number in a file."""
@@ -64,35 +54,38 @@ class MemoryTool:
         """Rename or move a file/directory."""
         return self.backend.rename(old_path, new_path)
 
-    def clear_all_memory(self) -> str:
-        """Clear all memory storage."""
-        return self.backend.clear_all_memory()
+    def clear(self) -> str:
+        """Clear all workspace files."""
+        return self.backend.clear()
 
 
-def build_tool_registry_memory_tool(
-    backend: AbstractMemoryBackend | None,
+def build_tool_registry_workspace_files(
+    backend: AbstractWorkspaceFilesBackend | None,
     registry: ToolRegistry,
     workspace_config: WorkspaceConfig | dict | None = None,
 ) -> ToolRegistry:
     """
-    Register memory tool commands in a ToolRegistry.
+    Register workspace file commands in a ToolRegistry.
 
     Args:
         backend: Optional backend instance. None uses workspace storage.
         registry: ToolRegistry to register commands with
     """
-    memory_tool = MemoryTool(backend=backend, workspace_config=workspace_config)
+    workspace_files = WorkspaceFilesTool(
+        backend=backend,
+        workspace_config=workspace_config,
+    )
 
     @registry.register_tool(
-        name="memory_view",
+        name="workspace_file_view",
         description="""
-        Inspect memory contents.
+        Inspect workspace files.
         
         Use this to **read** the contents of a file or **list** the files/directories
         inside a given path. 
         
         Why it exists:
-        - Helps the agent explore the memory structure before writing or modifying anything.
+        - Helps the agent explore workspace files before writing or modifying anything.
         - Essential for context gathering (what files exist, what's inside them).
         """,
         inputSchema={
@@ -100,20 +93,20 @@ def build_tool_registry_memory_tool(
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to a file or directory inside the memory root. Example: '/memories/notes.md' or '/memories'.",
+                    "description": "Path to a file or directory inside workspace files. Example: '/workspace/notes.md', '/files/notes.md', or 'notes.md'.",
                 }
             },
             "required": ["path"],
             "additionalProperties": False,
         },
     )
-    def memory_view(path: str) -> str:
-        return memory_tool.view(path)
+    def workspace_file_view(path: str) -> str:
+        return workspace_files.view(path)
 
     @registry.register_tool(
-        name="memory_create_update",
+        name="workspace_file_write",
         description="""
-        Safely create, append, or overwrite files in memory.
+        Safely create, append, or overwrite files in the workspace.
         
         Modes:
         - 'create': Create a new file. If file exists, returns an error with a preview.
@@ -130,9 +123,9 @@ def build_tool_registry_memory_tool(
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the target file inside the memory root.",
+                    "description": "Path to the target file inside workspace files.",
                 },
-                "file_text": {
+                "content": {
                     "type": "string",
                     "description": "The text content to create, append, or overwrite.",
                 },
@@ -143,15 +136,15 @@ def build_tool_registry_memory_tool(
                     "description": "Choose how the file should be modified.",
                 },
             },
-            "required": ["path", "file_text"],
+            "required": ["path", "content"],
             "additionalProperties": False,
         },
     )
-    def memory_create_update(path: str, file_text: str, mode: str = "create") -> str:
-        return memory_tool.create_update(path, file_text, mode)
+    def workspace_file_write(path: str, content: str, mode: str = "create") -> str:
+        return workspace_files.write(path, content, mode)
 
     @registry.register_tool(
-        name="memory_str_replace",
+        name="workspace_file_replace",
         description="""
         Replace all occurrences of a string inside a file.
         
@@ -173,11 +166,11 @@ def build_tool_registry_memory_tool(
             "additionalProperties": False,
         },
     )
-    def memory_str_replace(path: str, old_str: str, new_str: str) -> str:
-        return memory_tool.str_replace(path, old_str, new_str)
+    def workspace_file_replace(path: str, old_str: str, new_str: str) -> str:
+        return workspace_files.replace(path, old_str, new_str)
 
     @registry.register_tool(
-        name="memory_insert",
+        name="workspace_file_insert",
         description="""
         Insert text into a file at a specific line number.
         
@@ -202,17 +195,17 @@ def build_tool_registry_memory_tool(
             "additionalProperties": False,
         },
     )
-    def memory_insert(path: str, insert_line: int, insert_text: str) -> str:
-        return memory_tool.insert(path, insert_line, insert_text)
+    def workspace_file_insert(path: str, insert_line: int, insert_text: str) -> str:
+        return workspace_files.insert(path, insert_line, insert_text)
 
     @registry.register_tool(
-        name="memory_delete",
+        name="workspace_file_delete",
         description="""
-        Delete a file or directory from memory.
+        Delete a file or directory from workspace files.
         
         Why it exists:
         - Provides cleanup capability when files or directories are no longer needed.
-        - Prevents clutter in the memory store.
+        - Prevents clutter in the workspace files area.
         """,
         inputSchema={
             "type": "object",
@@ -226,16 +219,16 @@ def build_tool_registry_memory_tool(
             "additionalProperties": False,
         },
     )
-    def memory_delete(path: str) -> str:
-        return memory_tool.delete(path)
+    def workspace_file_delete(path: str) -> str:
+        return workspace_files.delete(path)
 
     @registry.register_tool(
-        name="memory_rename",
+        name="workspace_file_rename",
         description="""
-        Rename or move a file/directory inside the memory root.
+        Rename or move a file/directory inside workspace files.
         
         Why it exists:
-        - Enables reorganization of stored memories without deleting data.
+        - Enables reorganization of stored files without deleting data.
         - Useful for moving files between directories or renaming for clarity.
         """,
         inputSchema={
@@ -254,16 +247,16 @@ def build_tool_registry_memory_tool(
             "additionalProperties": False,
         },
     )
-    def memory_rename(old_path: str, new_path: str) -> str:
-        return memory_tool.rename(old_path, new_path)
+    def workspace_file_rename(old_path: str, new_path: str) -> str:
+        return workspace_files.rename(old_path, new_path)
 
     @registry.register_tool(
-        name="memory_clear_all",
+        name="workspace_file_clear",
         description="""
-        Clear all memory storage.
+        Clear all workspace files.
         """,
     )
-    def memory_clear_all() -> str:
-        return memory_tool.clear_all_memory()
+    def workspace_file_clear() -> str:
+        return workspace_files.clear()
 
     return registry

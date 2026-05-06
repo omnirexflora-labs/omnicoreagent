@@ -6,7 +6,7 @@ Subagents inherit:
 - Parent's tools (MCP and local)
 - Parent's agent_config (context_management, tool_offload, etc.)
 - Focused task assignment via prompt_builder
-- Memory path for writing output
+- Workspace file path for writing output
 """
 
 import asyncio
@@ -23,7 +23,7 @@ class SubagentFactory:
     Subagents:
     - Inherit parent's model config, tools, AND agent_config
     - Get focused task via prompt
-    - Write output to workspace memory instead of returning large payloads
+    - Write output to workspace files instead of returning large payloads
     """
 
     def __init__(
@@ -66,14 +66,14 @@ class SubagentFactory:
 
         Subagents get full config but with some adjustments:
         - Fewer max_steps (focused task)
-        - Workspace-backed memory is always enabled for writing output
+        - Workspace files are always enabled for writing output
         - Dynamic delegation stays on the lead agent only
         """
         config = self.agent_config.copy()
 
         config["max_steps"] = min(config.get("max_steps", 15), 15)
         config["enable_subagents"] = False
-        config["enable_workspace_memory"] = True
+        config["enable_workspace_files"] = True
 
         return config
 
@@ -101,13 +101,13 @@ TASK: {task}
 
 OUTPUT REQUIREMENTS:
 - Write your output to: {output_path}
-- Use memory_create_update tool to save your output
+- Use workspace_file_write tool to save your output
 - Be thorough but focused on YOUR specific task only
 - Do not duplicate work assigned to other subagents
 - Structure your output clearly with headers
 
 When you have completed the task:
-1. Save output to the output_path using memory_create_update
+1. Save output to the output_path using workspace_file_write
 2. Confirm you saved the output
 3. Return a brief summary of the completed output
 """
@@ -145,7 +145,7 @@ When you have completed the task:
             name: Subagent identifier
             role: What this subagent specializes in
             task: Specific task to complete
-            output_path: Memory path for writing output
+            output_path: Workspace file path for writing output
 
         Returns:
             Configured OmniCoreAgent ready to run
@@ -278,7 +278,7 @@ When you have completed the task:
                 role=spec.get("role", "Assistant"),
                 task=spec.get("task", ""),
                 output_path=spec.get(
-                    "output_path", f"/memories/tasks/default/subagent_{i}/"
+                    "output_path", f"/workspace/tasks/default/subagent_{i}/"
                 ),
             )
             for i, spec in enumerate(subagent_specs)
@@ -347,8 +347,8 @@ def build_subagent_tools(
     
     Always pass a JSON array of subagent specs. If you only need one subagent,
     pass an array with one item. Multiple specs run in parallel.
-    Each subagent writes output to workspace memory. After completion, read
-    all output paths with memory_view before synthesizing.
+    Each subagent writes output to workspace files. After completion, read
+    all output paths with workspace_file_view before synthesizing.
     
     When to use:
     - Task has multiple independent components
@@ -372,12 +372,12 @@ def build_subagent_tools(
     - name: Unique identifier (e.g., "aws_analyst")
     - role: Worker role or expertise description (e.g., "API reviewer")
     - task: Specific task to complete
-    - output_path: Memory path for output
+    - output_path: Workspace file path for output
     
     Example:
     '[
-        {"name": "api", "role": "API reviewer", "task": "Review API error handling and write concrete risks", "output_path": "/memories/audit/api.md"},
-        {"name": "tests", "role": "Test reviewer", "task": "Review test coverage gaps and write recommended cases", "output_path": "/memories/audit/tests.md"}
+        {"name": "api", "role": "API reviewer", "task": "Review API error handling and write concrete risks", "output_path": "/workspace/audit/api.md"},
+        {"name": "tests", "role": "Test reviewer", "task": "Review test coverage gaps and write recommended cases", "output_path": "/workspace/audit/tests.md"}
     ]'
                     """,
                 },

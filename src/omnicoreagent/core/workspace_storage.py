@@ -34,7 +34,12 @@ class WorkspaceStorage(Protocol):
     def location(self, path: str | Path, *, strip_prefixes: Iterable[str] = ()) -> str:
         ...
 
-    def list_files(self, path: str | Path | None = None) -> list[WorkspaceFile]: ...
+    def list_files(
+        self,
+        path: str | Path | None = None,
+        *,
+        strip_prefixes: Iterable[str] = (),
+    ) -> list[WorkspaceFile]: ...
 
     def write_text(
         self,
@@ -126,8 +131,13 @@ class LocalWorkspaceStorage:
     def location(self, path: str | Path, *, strip_prefixes: Iterable[str] = ()) -> str:
         return str(self.resolve(path, strip_prefixes=strip_prefixes))
 
-    def list_files(self, path: str | Path | None = None) -> list[WorkspaceFile]:
-        target = self.resolve(path)
+    def list_files(
+        self,
+        path: str | Path | None = None,
+        *,
+        strip_prefixes: Iterable[str] = (),
+    ) -> list[WorkspaceFile]:
+        target = self.resolve(path, strip_prefixes=strip_prefixes)
         if not target.exists() or not target.is_dir():
             return []
 
@@ -313,8 +323,13 @@ class S3WorkspaceStorage:
         key = self._normalize_key(path, strip_prefixes=strip_prefixes)
         return f"s3://{self.bucket}/{key}"
 
-    def list_files(self, path: str | Path | None = None) -> list[WorkspaceFile]:
-        prefix = self._normalize_key(path)
+    def list_files(
+        self,
+        path: str | Path | None = None,
+        *,
+        strip_prefixes: Iterable[str] = (),
+    ) -> list[WorkspaceFile]:
+        prefix = self._normalize_key(path, strip_prefixes=strip_prefixes)
         if prefix and not prefix.endswith("/"):
             prefix += "/"
         response = self.s3.list_objects_v2(

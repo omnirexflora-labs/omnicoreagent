@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from omnicoreagent.core.tool_response_offloader import ToolResponseOffloader
-from omnicoreagent.core.tools.memory_tool.factory import clear_backend_cache
+from omnicoreagent.core.tools.workspace_files.factory import clear_workspace_files_backend_cache
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
 from omnicoreagent.core.workspace_config import WorkspaceConfig
@@ -76,29 +76,29 @@ async def test_prepare_tools_uses_internal_registry_when_harness_tools_enabled(
 
 
 @pytest.mark.asyncio
-async def test_prepare_tools_uses_workspace_config_for_memory_tools(
+async def test_prepare_tools_uses_workspace_config_for_workspace_files(
     monkeypatch, tmp_path, internal_registry, offloader
 ):
-    clear_backend_cache()
+    clear_workspace_files_backend_cache()
     monkeypatch.delenv("OMNICOREAGENT_WORKSPACE_DIR", raising=False)
     workspace = tmp_path / "runtime-workspace"
     runtime = make_runtime(
         internal_registry,
         offloader,
-        enable_workspace_memory=True,
+        enable_workspace_files=True,
         workspace_config=WorkspaceConfig(workspace_dir=workspace),
     )
 
     prepared = await runtime.prepare_tools(local_tools=None)
     result = await prepared.execute_tool(
-        "memory_create_update",
-        {"path": "note.txt", "file_text": "hello", "mode": "create"},
+        "workspace_file_write",
+        {"path": "note.txt", "content": "hello", "mode": "create"},
     )
 
     assert "created" in result.lower()
-    assert (workspace / "memories" / "note.txt").read_text() == "hello"
+    assert (workspace / "files" / "note.txt").read_text() == "hello"
 
-    clear_backend_cache()
+    clear_workspace_files_backend_cache()
 
 
 @pytest.mark.asyncio

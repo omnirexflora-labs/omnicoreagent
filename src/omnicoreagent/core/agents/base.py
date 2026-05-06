@@ -65,7 +65,7 @@ class BaseReactAgent:
         total_tokens_limit: int = 0,
         enable_advanced_tool_use: bool = False,
         enable_subagents: bool = False,
-        enable_workspace_memory: bool = False,
+        enable_workspace_files: bool = False,
         enable_agent_skills: bool = False,
         context_management_config: dict = None,
         tool_offload_config: dict = None,
@@ -86,7 +86,7 @@ class BaseReactAgent:
         self.enable_advanced_tool_use = enable_advanced_tool_use
         self.enable_subagents = enable_subagents
 
-        self.enable_workspace_memory = enable_workspace_memory
+        self.enable_workspace_files = enable_workspace_files
         self.enable_agent_skills = enable_agent_skills
         self.skill_manager = None
         self.usage_limits = UsageLimits(
@@ -142,7 +142,7 @@ class BaseReactAgent:
             tool_offloader=self.tool_offloader,
             enable_advanced_tool_use=self.enable_advanced_tool_use,
             enable_subagents=self.enable_subagents,
-            enable_workspace_memory=self.enable_workspace_memory,
+            enable_workspace_files=self.enable_workspace_files,
             enable_agent_skills=self.enable_agent_skills,
             skill_manager=self.skill_manager,
             workspace_config=workspace_config,
@@ -150,7 +150,7 @@ class BaseReactAgent:
         self.prompt_context_builder = AgentPromptContextBuilder(
             enable_advanced_tool_use=self.enable_advanced_tool_use,
             enable_subagents=self.enable_subagents,
-            enable_workspace_memory=self.enable_workspace_memory,
+            enable_workspace_files=self.enable_workspace_files,
             enable_agent_skills=self.enable_agent_skills,
             is_tool_offload_enabled=lambda: self.tool_offloader.config.enabled,
             skill_manager=self.skill_manager,

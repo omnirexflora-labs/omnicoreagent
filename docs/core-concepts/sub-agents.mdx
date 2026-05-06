@@ -18,7 +18,7 @@ verification, or operational actions.
 - **Improved Accuracy**: Specialized agents (e.g., a "Math Expert" or "Code Auditor") are less likely to hallucinate in their specific domain.
 - **Tool Management**: Avoid cluttering a single agent's prompt with hundreds of tools. Instead, give each sub-agent only the tools it needs.
 - **Parallel Work**: Use one `spawn_subagents` call with multiple specs when independent tasks can run at the same time.
-- **Workspace Continuity**: Dynamic subagents write output to workspace memory, so outputs survive context compression and tool offloading.
+- **Workspace Continuity**: Dynamic subagents write output to workspace files, so outputs survive context compression and tool offloading.
 
 ---
 
@@ -35,17 +35,17 @@ agent = OmniCoreAgent(
     model_config={"provider": "openai", "model": "gpt-4o"},
     agent_config={
         "enable_subagents": True,
-        "enable_workspace_memory": True,
+        "enable_workspace_files": True,
         "context_management": {"enabled": True},
         "tool_offload": {"enabled": True},
     },
 )
 ```
 
-When `enable_subagents` is true, OmniCoreAgent also forces workspace memory on
+When `enable_subagents` is true, OmniCoreAgent also forces workspace files on
 even if it is omitted. Keep it explicit in app configs because dynamic workers
-are expected to save output with `memory_create_update`, and the lead agent
-reads those paths with `memory_view` before synthesizing.
+are expected to save output with `workspace_file_write`, and the lead agent
+reads those paths with `workspace_file_view` before synthesizing.
 
 ### `spawn_subagents`
 
@@ -58,19 +58,19 @@ items for parallel workers.
     "name": "api",
     "role": "API reviewer",
     "task": "Review API error handling and write concrete risks.",
-    "output_path": "/memories/product_audit/subagent_api/output.md"
+    "output_path": "/workspace/product_audit/subagent_api/output.md"
   },
   {
     "name": "tests",
     "role": "Test reviewer",
     "task": "Review coverage gaps and write recommended test cases.",
-    "output_path": "/memories/product_audit/subagent_tests/output.md"
+    "output_path": "/workspace/product_audit/subagent_tests/output.md"
   }
 ]
 ```
 
 Spawned workers inherit the parent's model, MCP tools, user local tools,
-workspace memory, context management, and tool offloading. They do not inherit
+workspace files, context management, and tool offloading. They do not inherit
 the lead agent's `spawn_subagents` tool, which keeps delegation controlled by
 the lead agent.
 
@@ -126,7 +126,7 @@ with them:
 ## Best Practices
 
 - **Use One Spawn Call**: When tasks are independent, put every worker spec in one `spawn_subagents` array so they run in parallel.
-- **Write to Memory**: Give each worker a clear `output_path` under `/memories/{task_name}/...`.
+- **Write to Workspace Files**: Give each worker a clear `output_path` under `/workspace/{task_name}/...`.
 - **Read Before Synthesis**: After workers finish, read every output path before producing the final answer.
 - **Explicit Instructions**: For fixed subagents, briefly describe each subagent's expertise in the parent instruction.
 - **Limit Depth**: While hierarchical agents are powerful, avoid nesting agents too deep (e.g., Parent -> Child -> Grandchild) to prevent excessive latency and token usage.

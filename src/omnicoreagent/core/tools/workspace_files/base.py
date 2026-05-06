@@ -2,13 +2,12 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 
-class AbstractMemoryBackend(ABC):
-    """
-    Abstract base class for a memory storage backend.
+class AbstractWorkspaceFilesBackend(ABC):
+    """Storage contract for agent workspace files.
 
-    Defines the contract that all backends (local dir, cloud, DB, etc.)
-    must follow. The MemoryTool uses this interface only — never the concrete
-    implementation directly.
+    Implementations are rooted inside the active workspace storage backend
+    and expose file-style operations for scratchpads, notes, logs, task
+    progress, and generated outputs.
     """
 
     @abstractmethod
@@ -17,12 +16,12 @@ class AbstractMemoryBackend(ABC):
         pass
 
     @abstractmethod
-    def create_update(self, path: str, file_text: str, mode: str = "create") -> str:
+    def write(self, path: str, content: str, mode: str = "create") -> str:
         """Create, append, or overwrite a file."""
         pass
 
     @abstractmethod
-    def str_replace(self, path: str, old_str: str, new_str: str) -> str:
+    def replace(self, path: str, old_str: str, new_str: str) -> str:
         """Replace all occurrences of old_str with new_str in a file."""
         pass
 
@@ -42,6 +41,6 @@ class AbstractMemoryBackend(ABC):
         pass
 
     @abstractmethod
-    def clear_all_memory(self) -> str:
-        """Clear all memory storage."""
+    def clear(self) -> str:
+        """Clear all workspace files."""
         pass
