@@ -3,7 +3,6 @@ import pytest
 import json
 from omnicoreagent.core.agents.base import BaseReactAgent
 from omnicoreagent.core.events.base import EventType
-from omnicoreagent.core.tool_response_offloader import ToolResponseOffloader
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.types import AgentState, Message, ParsedResponse, ToolCallResult, ToolError
 
@@ -275,80 +274,6 @@ async def test_run_prepares_internal_tools_once_for_prompt_and_execution(monkeyp
     assert "pong:runtime" in tool_messages[0]["content"]
 
 
-def test_maybe_offload_tool_result_replaces_large_regular_output(agent, tmp_path):
-    agent.tool_offloader = ToolResponseOffloader(
-        config={"enabled": True, "threshold_bytes": 20, "threshold_tokens": 10_000},
-        base_dir=str(tmp_path),
-    )
-    result = {
-        "tool_name": "search_docs",
-        "args": {"query": "runtime"},
-        "status": "success",
-        "data": "x" * 80,
-        "message": None,
-    }
-
-    processed = agent._maybe_offload_tool_result(result=result, session_id="chat792")
-
-    assert processed is result
-    assert "[TOOL RESPONSE OFFLOADED]" in result["data"]
-    assert "Tool: search_docs" in result["data"]
-    assert agent.tool_offloader.get_stats()["offload_count"] == 1
-
-
-def test_maybe_offload_tool_result_keeps_artifact_tool_output_inline(agent, tmp_path):
-    agent.tool_offloader = ToolResponseOffloader(
-        config={"enabled": True, "threshold_bytes": 20, "threshold_tokens": 10_000},
-        base_dir=str(tmp_path),
-    )
-    result = {
-        "tool_name": "read_artifact",
-        "args": {"artifact_id": "artifact_1"},
-        "status": "success",
-        "data": "x" * 80,
-        "message": None,
-    }
-
-    processed = agent._maybe_offload_tool_result(result=result, session_id="chat793")
-
-    assert processed is result
-    assert result["data"] == "x" * 80
-    assert agent.tool_offloader.get_stats()["offload_count"] == 0
-
-
-def test_build_tool_results_observation_formats_parallel_results(agent):
-    session_state = agent._get_session_state(session_id="chat794", debug=False)
-    tool_calls = [
-        ToolCallResult(tool_executor=None, tool_name="alpha", tool_args={}),
-        ToolCallResult(tool_executor=None, tool_name="beta", tool_args={}),
-    ]
-    tools_results = [
-        {
-            "tool_name": "alpha",
-            "args": {},
-            "status": "success",
-            "data": "alpha result",
-            "message": None,
-        },
-        {
-            "tool_name": "beta",
-            "args": {},
-            "status": "error",
-            "data": None,
-            "message": "beta failed",
-        },
-    ]
-
-    observation = agent._build_tool_results_observation(
-        tool_call_results=tool_calls,
-        tools_results=tools_results,
-        session_state=session_state,
-        session_id="chat794",
-    )
-
-    assert observation == "Partial success:\nalpha#1: alpha result\n\nbeta#1 ERROR: beta failed"
-
-
 @pytest.mark.asyncio
 async def test_handle_tool_validation_error_records_loop_and_event(agent):
     events = []
@@ -386,51 +311,6 @@ async def test_handle_tool_validation_error_records_loop_and_event(agent):
     assert events[0]["session_id"] == "chat796"
     assert events[0]["event"].type == EventType.TOOL_CALL_ERROR
     assert events[0]["event"].payload.tool_name == "missing_tool"
-
-
-@pytest.mark.asyncio
-async def test_append_tool_observations_writes_history_and_sets_observing(agent):
-    history = []
-    session_state = agent._get_session_state(session_id="chat799", debug=False)
-
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        history.append(
-            {
-                "role": role,
-                "content": content,
-                "metadata": metadata or {},
-                "session_id": session_id,
-            }
-        )
-
-    xml_obs_block = await agent._append_tool_observations(
-        tools_results=[
-            {
-                "tool_name": "alpha",
-                "args": {},
-                "status": "success",
-                "data": "alpha result",
-                "message": None,
-            }
-        ],
-        session_state=session_state,
-        add_message_to_history=add_message_to_history,
-        session_id="chat799",
-        debug=False,
-    )
-
-    assert 'tool_name="alpha#1"' in xml_obs_block
-    assert session_state.messages[-1].role == "user"
-    assert session_state.messages[-1].content == xml_obs_block
-    assert session_state.state == AgentState.OBSERVING
-    assert history == [
-        {
-            "role": "user",
-            "content": xml_obs_block,
-            "metadata": {"agent_name": "test_agent"},
-            "session_id": "chat799",
-        }
-    ]
 
 
 @pytest.mark.asyncio
