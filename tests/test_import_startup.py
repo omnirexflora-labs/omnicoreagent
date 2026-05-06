@@ -131,3 +131,31 @@ print(json.dumps({
         "export": "OmniCoreAgent",
         "loaded_runtime_modules": [],
     }
+
+
+def test_tool_registry_export_does_not_load_advanced_tools(tmp_path):
+    result = _run_import_probe(
+        tmp_path,
+        """
+import json
+import sys
+
+from omnicoreagent import ToolRegistry
+
+print(json.dumps({
+    "export": ToolRegistry.__name__,
+    "advanced_tools_loaded": (
+        "omnicoreagent.core.tools.advance_tools.advanced_tools_use" in sys.modules
+    ),
+    "utils_loaded": "omnicoreagent.core.utils" in sys.modules,
+    "constants_loaded": "omnicoreagent.core.constants" in sys.modules,
+}))
+""",
+    )
+
+    assert result == {
+        "export": "ToolRegistry",
+        "advanced_tools_loaded": False,
+        "utils_loaded": False,
+        "constants_loaded": False,
+    }
