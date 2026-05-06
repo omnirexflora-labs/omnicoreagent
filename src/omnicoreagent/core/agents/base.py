@@ -2,7 +2,6 @@ import asyncio
 import time
 
 import json
-import uuid
 from collections.abc import Callable
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -28,14 +27,12 @@ from omnicoreagent.core.types import (
     AgentState,
     Message,
     ParsedResponse,
-    ToolCall,
-    ToolCallMetadata,
     ToolCallResult,
     ToolError,
-    ToolFunction,
     SessionState,
 )
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
+from omnicoreagent.core.tools.tool_batch_runner import ToolBatchRunner
 from omnicoreagent.core.tools.tool_call_resolver import ToolCallResolver
 from omnicoreagent.core.utils import (
     RobustLoopDetector,
@@ -55,8 +52,6 @@ from omnicoreagent.core.events.base import (
     Event,
     EventType,
     ToolCallErrorPayload,
-    ToolCallStartedPayload,
-    ToolCallResultPayload,
     FinalAnswerPayload,
     AgentMessagePayload,
     UserMessagePayload,
@@ -99,10 +94,6 @@ TOOL_OUTPUT_OFFLOAD_EXCLUDED_TOOLS = frozenset(
         "memory_create_update",
     }
 )
-TOOL_CALL_TIMEOUT_MESSAGE = (
-    "Tool call timed out. Please try again or use a different approach."
-)
-
 
 class BaseReactAgent:
     """Autonomous agent implementing the ReAct paradigm for task solving through iterative reasoning and tool usage."""
@@ -157,6 +148,10 @@ class BaseReactAgent:
         )
         self.guardrail = guardrail
         self.tool_call_resolver = ToolCallResolver(guardrail=self.guardrail)
+        self.tool_batch_runner = ToolBatchRunner(
+            agent_name=self.agent_name,
+            tool_call_timeout=self.tool_call_timeout,
+        )
 
     def init_skills(self):
         if self.enable_agent_skills:
@@ -312,68 +307,6 @@ class BaseReactAgent:
             return f"Tool execution failed completely:\n{error_details}"
         return "\n\n".join(obs_lines) or "No valid tool results."
 
-    def _build_tool_error_results(
-        self,
-        tool_call_results: list[ToolCallResult],
-        error_message: str,
-    ) -> list[dict[str, Any]]:
-        return [
-            {
-                "tool_name": getattr(single_tool, "tool_name", "unknown"),
-                "args": getattr(single_tool, "tool_args", {}),
-                "status": "error",
-                "data": None,
-                "message": error_message,
-            }
-            for single_tool in tool_call_results
-        ]
-
-    async def _handle_tool_execution_error(
-        self,
-        tool_call_results: list[ToolCallResult],
-        error_message: str,
-        session_state: SessionState,
-        add_message_to_history: Callable[[str, str, dict | None], Any],
-        session_id: str | None,
-        event_router: Callable[[str, Event], Any] | None,
-        tool_batch_name: str,
-    ) -> list[dict[str, Any]]:
-        for single_tool in tool_call_results:
-            session_state.loop_detector.record_tool_call(
-                str(single_tool.tool_name),
-                str(single_tool.tool_args),
-                error_message,
-            )
-
-        for single_tool in tool_call_results:
-            await add_message_to_history(
-                role="tool",
-                content=error_message,
-                metadata={
-                    "tool_call_id": single_tool.tool_call_id,
-                    "tool": single_tool.tool_name,
-                    "args": single_tool.tool_args,
-                    "agent_name": self.agent_name,
-                },
-                session_id=session_id,
-            )
-
-        event = Event(
-            type=EventType.TOOL_CALL_ERROR,
-            payload=ToolCallErrorPayload(
-                tool_name=tool_batch_name,
-                error_message=error_message,
-            ),
-            agent_name=self.agent_name,
-        )
-        if event_router:
-            await event_router(session_id=session_id, event=event)
-
-        return self._build_tool_error_results(
-            tool_call_results=tool_call_results,
-            error_message=error_message,
-        )
-
     def _build_tool_validation_error_results(
         self,
         tool_errors: list[ToolError],
@@ -441,147 +374,6 @@ class BaseReactAgent:
                 fallback_message=obs_text,
             ),
         )
-
-    async def _start_tool_call_batch(
-        self,
-        tool_call_results: list[ToolCallResult],
-        response: str,
-        session_state: SessionState,
-        add_message_to_history: Callable[[str, str, dict | None], Any],
-        session_id: str | None,
-        event_router: Callable[[str, Event], Any] | None,
-    ) -> tuple[str, list[dict[str, Any]]]:
-        tool_batch_name = ", ".join([t.tool_name for t in tool_call_results])
-        tool_batch_args = [t.tool_args for t in tool_call_results]
-
-        for single_tool in tool_call_results:
-            single_tool.tool_call_id = str(uuid.uuid4())
-
-        tool_calls_metadata = ToolCallMetadata(
-            agent_name=self.agent_name,
-            has_tool_calls=True,
-            tool_call_id=tool_call_results[0].tool_call_id,
-            tool_calls=[
-                ToolCall(
-                    id=single_tool.tool_call_id,
-                    function=ToolFunction(
-                        name=single_tool.tool_name,
-                        arguments=json.dumps(single_tool.tool_args),
-                    ),
-                )
-                for single_tool in tool_call_results
-            ],
-        )
-
-        event = Event(
-            type=EventType.TOOL_CALL_STARTED,
-            payload=ToolCallStartedPayload(
-                tool_name=tool_batch_name,
-                tool_args=json.dumps(tool_batch_args),
-                tool_call_id=tool_call_results[0].tool_call_id,
-            ),
-            agent_name=self.agent_name,
-        )
-        if event_router:
-            await event_router(session_id=session_id, event=event)
-
-        await add_message_to_history(
-            role="assistant",
-            content=response,
-            metadata=tool_calls_metadata.model_dump(),
-            session_id=session_id,
-        )
-        session_state.messages.append(Message(role="assistant", content=response))
-
-        return tool_batch_name, tool_batch_args
-
-    async def _execute_tool_call_batch(
-        self,
-        tool_call_results: list[ToolCallResult],
-        session_state: SessionState,
-        add_message_to_history: Callable[[str, str, dict | None], Any],
-        session_id: str | None,
-        event_router: Callable[[str, Event], Any] | None,
-        tool_batch_name: str,
-        tool_batch_args: list[dict[str, Any]],
-    ) -> tuple[str, list[dict[str, Any]]]:
-        try:
-            async with asyncio.timeout(self.tool_call_timeout):
-                tool_outputs = await asyncio.gather(
-                    *[
-                        single_tool.tool_executor.execute(
-                            agent_name=self.agent_name,
-                            tool_args=single_tool.tool_args,
-                            tool_name=single_tool.tool_name,
-                            tool_call_id=single_tool.tool_call_id,
-                            add_message_to_history=add_message_to_history,
-                            session_id=session_id,
-                        )
-                        for single_tool in tool_call_results
-                    ]
-                )
-
-            observation = await self.parse_tool_observation(
-                {
-                    "status": (
-                        "error"
-                        if any(result.get("status") == "error" for result in tool_outputs)
-                        else "success"
-                    ),
-                    "tools_results": tool_outputs,
-                }
-            )
-
-            tools_results = observation.get("tools_results", [])
-            obs_text = self._build_tool_results_observation(
-                tool_call_results=tool_call_results,
-                tools_results=tools_results,
-                session_state=session_state,
-                session_id=session_id,
-            )
-
-            event = Event(
-                type=EventType.TOOL_CALL_RESULT,
-                payload=ToolCallResultPayload(
-                    tool_name=tool_batch_name,
-                    tool_args=json.dumps(tool_batch_args),
-                    result=obs_text,
-                    tool_call_id=tool_call_results[0].tool_call_id,
-                ),
-                agent_name=self.agent_name,
-            )
-            if event_router:
-                await event_router(session_id=session_id, event=event)
-
-            return obs_text, tools_results
-
-        except asyncio.TimeoutError:
-            obs_text = TOOL_CALL_TIMEOUT_MESSAGE
-            logger.warning(obs_text)
-            tools_results = await self._handle_tool_execution_error(
-                tool_call_results=tool_call_results,
-                error_message=obs_text,
-                session_state=session_state,
-                add_message_to_history=add_message_to_history,
-                session_id=session_id,
-                event_router=event_router,
-                tool_batch_name=tool_batch_name,
-            )
-            return obs_text, tools_results
-
-        except Exception as e:
-            obs_text = f"Error executing tool: {str(e)}"
-            logger.error(obs_text)
-            tools_results = await self._handle_tool_execution_error(
-                tool_call_results=tool_call_results,
-                error_message=obs_text,
-                session_state=session_state,
-                add_message_to_history=add_message_to_history,
-                session_id=session_id,
-                event_router=event_router,
-                tool_batch_name=tool_batch_name,
-            )
-            return obs_text, tools_results
 
     async def _append_tool_observations(
         self,
@@ -967,7 +759,7 @@ class BaseReactAgent:
             )
         else:
             tool_call_result = list(tool_call_result)
-            tool_batch_name, tool_batch_args = await self._start_tool_call_batch(
+            tool_batch_name, tool_batch_args = await self.tool_batch_runner.start(
                 tool_call_results=tool_call_result,
                 response=response,
                 session_state=session_state,
@@ -975,7 +767,7 @@ class BaseReactAgent:
                 session_id=session_id,
                 event_router=event_router,
             )
-            obs_text, tools_results = await self._execute_tool_call_batch(
+            obs_text, tools_results = await self.tool_batch_runner.execute(
                 tool_call_results=tool_call_result,
                 session_state=session_state,
                 add_message_to_history=add_message_to_history,
@@ -983,6 +775,8 @@ class BaseReactAgent:
                 event_router=event_router,
                 tool_batch_name=tool_batch_name,
                 tool_batch_args=tool_batch_args,
+                parse_tool_observation=self.parse_tool_observation,
+                build_tool_results_observation=self._build_tool_results_observation,
             )
 
         if debug:
