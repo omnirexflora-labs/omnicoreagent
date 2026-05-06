@@ -158,7 +158,7 @@ When you have completed the task:
 
         subagent_config = self._build_subagent_config()
 
-        from omnicoreagent.agent import OmniCoreAgent
+        from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
 
         agent = OmniCoreAgent(
             name=f"subagent_{name}",

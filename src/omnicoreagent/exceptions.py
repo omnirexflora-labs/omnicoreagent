@@ -1,17 +1,22 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from omnicoreagent.core.types import Message
+
+MessageLike = str | Message
+StoredMessage = dict[str, Any] | Message
 
 
 class AgentRunException(Exception):
     def __init__(
         self,
-        exc,
-        user_message: Optional[Union[str, Message]] = None,
-        agent_message: Optional[Union[str, Message]] = None,
-        messages: Optional[List[Union[dict, Message]]] = None,
+        exc: Exception | str,
+        user_message: MessageLike | None = None,
+        agent_message: MessageLike | None = None,
+        messages: list[StoredMessage] | None = None,
         stop_execution: bool = False,
     ):
         super().__init__(exc)
@@ -28,13 +33,17 @@ class RetryAgentRun(AgentRunException):
 
     def __init__(
         self,
-        exc,
-        user_message: Optional[Union[str, Message]] = None,
-        agent_message: Optional[Union[str, Message]] = None,
-        messages: Optional[List[Union[dict, Message]]] = None,
+        exc: Exception | str,
+        user_message: MessageLike | None = None,
+        agent_message: MessageLike | None = None,
+        messages: list[StoredMessage] | None = None,
     ):
         super().__init__(
-            exc, user_message=user_message, agent_message=agent_message, messages=messages, stop_execution=False
+            exc,
+            user_message=user_message,
+            agent_message=agent_message,
+            messages=messages,
+            stop_execution=False,
         )
         self.error_id = "retry_agent_run_error"
 
@@ -44,13 +53,17 @@ class StopAgentRun(AgentRunException):
 
     def __init__(
         self,
-        exc,
-        user_message: Optional[Union[str, Message]] = None,
-        agent_message: Optional[Union[str, Message]] = None,
-        messages: Optional[List[Union[dict, Message]]] = None,
+        exc: Exception | str,
+        user_message: MessageLike | None = None,
+        agent_message: MessageLike | None = None,
+        messages: list[StoredMessage] | None = None,
     ):
         super().__init__(
-            exc, user_message=user_message, agent_message=agent_message, messages=messages, stop_execution=True
+            exc,
+            user_message=user_message,
+            agent_message=agent_message,
+            messages=messages,
+            stop_execution=True,
         )
         self.error_id = "stop_agent_run_error"
 
@@ -81,7 +94,12 @@ class OmniCoreAgentError(Exception):
 class ModelAuthenticationError(OmniCoreAgentError):
     """Raised when model authentication fails."""
 
-    def __init__(self, message: str, status_code: int = 401, model_name: Optional[str] = None):
+    def __init__(
+        self,
+        message: str,
+        status_code: int = 401,
+        model_name: str | None = None,
+    ):
         super().__init__(message, status_code)
         self.model_name = model_name
 
@@ -93,7 +111,11 @@ class ModelProviderError(OmniCoreAgentError):
     """Exception raised when a model provider returns an error."""
 
     def __init__(
-        self, message: str, status_code: int = 502, model_name: Optional[str] = None, model_id: Optional[str] = None
+        self,
+        message: str,
+        status_code: int = 502,
+        model_name: str | None = None,
+        model_id: str | None = None,
     ):
         super().__init__(message, status_code)
         self.model_name = model_name
@@ -107,16 +129,14 @@ class ModelRateLimitError(ModelProviderError):
     """Exception raised when a model provider returns a rate limit error."""
 
     def __init__(
-        self, message: str, status_code: int = 429, model_name: Optional[str] = None, model_id: Optional[str] = None
+        self,
+        message: str,
+        status_code: int = 429,
+        model_name: str | None = None,
+        model_id: str | None = None,
     ):
         super().__init__(message, status_code, model_name, model_id)
         self.error_id = "model_rate_limit_error"
-
-
-class EvalError(Exception):
-    """Exception raised when an evaluation fails."""
-
-    pass
 
 
 class CheckTrigger(Enum):
@@ -138,7 +158,7 @@ class InputCheckError(Exception):
         self,
         message: str,
         check_trigger: CheckTrigger = CheckTrigger.INPUT_NOT_ALLOWED,
-        additional_data: Optional[Dict[str, Any]] = None,
+        additional_data: dict[str, Any] | None = None,
     ):
         super().__init__(message)
         self.type = "input_check_error"
@@ -159,7 +179,7 @@ class OutputCheckError(Exception):
         self,
         message: str,
         check_trigger: CheckTrigger = CheckTrigger.OUTPUT_NOT_ALLOWED,
-        additional_data: Optional[Dict[str, Any]] = None,
+        additional_data: dict[str, Any] | None = None,
     ):
         super().__init__(message)
         self.type = "output_check_error"
@@ -175,9 +195,9 @@ class OutputCheckError(Exception):
 
 @dataclass
 class RetryableModelProviderError(Exception):
-    original_error: Optional[str] = None
+    original_error: str | None = None
     # Guidance message to retry a model invocation after an error
-    retry_guidance_message: Optional[str] = None
+    retry_guidance_message: str | None = None
 
 
 class RemoteServerUnavailableError(OmniCoreAgentError):
@@ -193,8 +213,8 @@ class RemoteServerUnavailableError(OmniCoreAgentError):
     def __init__(
         self,
         message: str,
-        base_url: Optional[str] = None,
-        original_error: Optional[Exception] = None,
+        base_url: str | None = None,
+        original_error: Exception | None = None,
     ):
         super().__init__(message, status_code=503)
         self.base_url = base_url

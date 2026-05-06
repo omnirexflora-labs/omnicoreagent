@@ -7,7 +7,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 
-from omnicoreagent.agent import OmniCoreAgent
+from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
 
 from omnicoreagent.core.memory_store.memory_router import MemoryRouter
 

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator
 from omnicoreagent.core.utils import logger
 
 if TYPE_CHECKING:
-    from omnicoreagent.agent import OmniCoreAgent as AgentType
+    from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent as AgentType
 else:
     AgentType = Any
 

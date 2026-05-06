@@ -27,7 +27,7 @@ from omnicoreagent.core.tool_response_offloader import (
 )
 from omnicoreagent.core.tools.artifact_tool import build_tool_registry_artifact_tool
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.runtime_config import AgentConfig
+from omnicoreagent.core.runtime.config import AgentConfig
 
 
 # ============================================================================

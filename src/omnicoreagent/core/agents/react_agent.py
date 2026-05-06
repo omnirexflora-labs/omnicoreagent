@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from omnicoreagent.core.agents.base import BaseReactAgent
-from omnicoreagent.runtime_config import AgentConfig
+from omnicoreagent.core.runtime.config import AgentConfig
 
 if TYPE_CHECKING:
     from omnicoreagent.core.guardrails import PromptInjectionGuard

@@ -52,7 +52,10 @@ _EXPORTS = {
     "ToolRegistry": ("omnicoreagent.core.tools", "ToolRegistry"),
     "Tool": ("omnicoreagent.core.tools", "Tool"),
     "logger": ("omnicoreagent.core.utils", "logger"),
-    "OmniCoreAgent": ("omnicoreagent.agent", "OmniCoreAgent"),
+    "OmniCoreAgent": (
+        "omnicoreagent.core.runtime.omnicore_agent",
+        "OmniCoreAgent",
+    ),
     "MCPClient": ("omnicoreagent.mcp_clients_connection", "MCPClient"),
     "ParallelAgent": ("omnicoreagent.workflows.parallel_agent", "ParallelAgent"),
     "SequentialAgent": ("omnicoreagent.workflows.sequential_agent", "SequentialAgent"),

@@ -210,7 +210,7 @@ class TestReactAgentGuardrailPassthrough:
 
     def test_guardrail_propagated(self):
         from omnicoreagent.core.agents.react_agent import ReactAgent
-        from omnicoreagent.runtime_config import AgentConfig
+        from omnicoreagent.core.runtime.config import AgentConfig
 
         config = AgentConfig(
             agent_name="test",
@@ -223,7 +223,7 @@ class TestReactAgentGuardrailPassthrough:
 
     def test_no_guardrail_default(self):
         from omnicoreagent.core.agents.react_agent import ReactAgent
-        from omnicoreagent.runtime_config import AgentConfig
+        from omnicoreagent.core.runtime.config import AgentConfig
 
         config = AgentConfig(
             agent_name="test",

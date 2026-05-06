@@ -69,7 +69,6 @@ all = [
 ]
 
 [project.scripts]
-omnicoreagent= "omnicoreagent.agent:OmniCoreAgent"
 omniserve = "omnicoreagent.serve.cli:main"
 
 [project.urls]
