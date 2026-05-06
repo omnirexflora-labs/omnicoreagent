@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
-from omnicoreagent.core.tools.tools_handler import (
-    LocalToolHandler,
-    MCPToolHandler,
-    ToolExecutor,
-)
+from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
+from omnicoreagent.core.tools.mcp_tool_handler import MCPToolHandler
+from omnicoreagent.core.tools.tool_action import ToolAction, parse_tool_actions
+from omnicoreagent.core.tools.tool_catalog import find_local_tool_name, find_mcp_tool
+from omnicoreagent.core.tools.tool_executor import ToolExecutor
 from omnicoreagent.core.types import ParsedResponse, ToolCallResult, ToolError
 from omnicoreagent.core.utils import logger, normalize_tool_args
 
@@ -40,130 +39,99 @@ class ToolCallResolver:
             tool_args=tool_args,
         )
 
-    async def resolve_mcp_tool_action(
+    def resolve_mcp_tool_action(
         self,
-        action: dict[str, Any],
+        action: ToolAction,
         sessions: dict,
         mcp_tools: dict | None,
-    ) -> tuple[bool, ToolExecutor | None, dict[str, Any]]:
-        if not mcp_tools:
-            return False, None, {}
+    ) -> ToolCallResult | None:
+        match = find_mcp_tool(tool_name=action.tool_name, mcp_tools=mcp_tools)
+        if not match:
+            return None
 
-        tool_name = action.get("tool", "").strip()
-        for _server_name, tools in mcp_tools.items():
-            for tool in tools:
-                if tool.name.lower() != tool_name.lower():
-                    continue
+        mcp_tool_handler = MCPToolHandler(
+            sessions=sessions,
+            server_name=match.server_name,
+            guardrail=self.guardrail,
+        )
+        return ToolCallResult(
+            tool_executor=ToolExecutor(tool_handler=mcp_tool_handler),
+            tool_name=match.tool_name,
+            tool_args=normalize_tool_args(action.parameters),
+        )
 
-                mcp_tool_handler = MCPToolHandler(
-                    sessions=sessions,
-                    tool_data=json.dumps(action),
-                    mcp_tools=mcp_tools,
-                    guardrail=self.guardrail,
-                )
-                tool_executor = ToolExecutor(tool_handler=mcp_tool_handler)
-                tool_data = await mcp_tool_handler.validate_tool_call_request(
-                    tool_data=json.dumps(action),
-                    mcp_tools=mcp_tools,
-                )
-                return True, tool_executor, tool_data
-
-        return False, None, {}
-
-    async def resolve_local_tool_action(
+    def resolve_local_tool_action(
         self,
-        action: dict[str, Any],
+        action: ToolAction,
         local_tools: Any = None,
-    ) -> tuple[ToolExecutor | None, dict[str, Any]]:
-        if not local_tools:
-            return None, {}
-
-        local_tool_handler = LocalToolHandler(local_tools=local_tools)
-        tool_executor = ToolExecutor(tool_handler=local_tool_handler)
-        tool_data = await local_tool_handler.validate_tool_call_request(
-            tool_data=json.dumps(action),
+    ) -> ToolCallResult | None:
+        local_tool_name = find_local_tool_name(
+            tool_name=action.tool_name,
             local_tools=local_tools,
         )
-        return tool_executor, tool_data
+        if not local_tool_name:
+            return None
+
+        local_tool_handler = LocalToolHandler(local_tools=local_tools)
+        return ToolCallResult(
+            tool_executor=ToolExecutor(tool_handler=local_tool_handler),
+            tool_name=local_tool_name,
+            tool_args=normalize_tool_args(action.parameters),
+        )
 
     async def resolve_single_action(
         self,
-        action: dict[str, Any],
+        action: ToolAction,
         sessions: dict,
         mcp_tools: dict | None,
         local_tools: Any = None,
         sub_agents: list = None,
     ) -> ToolError | ToolCallResult:
-        tool_name = action.get("tool", "").strip()
-        tool_args = action.get("parameters", {})
-
         if sub_agents:
             sub_agent_names = [sub_agent.name for sub_agent in sub_agents]
-            if tool_name in sub_agent_names:
+            if action.tool_name in sub_agent_names:
                 return self.build_sub_agent_tool_error(
-                    tool_name=tool_name,
-                    tool_args=tool_args,
+                    tool_name=action.tool_name,
+                    tool_args=action.parameters,
                 )
 
-        if not tool_name:
-            return ToolError(
-                observation="No tool name provided in the request",
-                tool_name="N/A",
-                tool_args=tool_args,
+        resolved = None
+        if not action.uses_tools_retriever:
+            resolved = self.resolve_mcp_tool_action(
+                action=action,
+                sessions=sessions,
+                mcp_tools=mcp_tools,
             )
 
-        mcp_tool_found, tool_executor, tool_data = await self.resolve_mcp_tool_action(
-            action=action,
-            sessions=sessions,
-            mcp_tools=mcp_tools,
-        )
-
-        if not mcp_tool_found and local_tools:
-            tool_executor, tool_data = await self.resolve_local_tool_action(
+        if not resolved:
+            resolved = self.resolve_local_tool_action(
                 action=action,
                 local_tools=local_tools,
             )
 
-        if not mcp_tool_found and not local_tools:
-            return ToolError(
-                observation=f"The tool named '{tool_name}' does not exist in the available tools.",
-                tool_name=tool_name,
-                tool_args=tool_args,
-            )
+        if resolved:
+            return resolved
 
-        if not tool_data.get("action"):
-            return ToolError(
-                observation=tool_data.get("error", "Tool validation failed"),
-                tool_name=tool_name,
-                tool_args=tool_args,
-            )
-
-        return ToolCallResult(
-            tool_executor=tool_executor,
-            tool_name=tool_data.get("tool_name"),
-            tool_args=normalize_tool_args(tool_data.get("tool_args")),
+        return ToolError(
+            observation=f"The tool named '{action.tool_name}' does not exist in the available tools.",
+            tool_name=action.tool_name,
+            tool_args=action.parameters,
         )
 
     def parse_actions(
         self, parsed_response: ParsedResponse
-    ) -> ToolError | list[dict[str, Any]]:
-        if not parsed_response.data:
-            return ToolError(
-                observation="Invalid tool call request: No data provided",
-                tool_name="unknown",
-                tool_args={},
-            )
-
-        actions = json.loads(parsed_response.data)
-        if not isinstance(actions, list):
-            actions = [actions]
-        return actions
+    ) -> ToolError | list[ToolAction]:
+        return parse_tool_actions(parsed_response)
 
     def mcp_tools_for_action(
-        self, action: dict[str, Any], mcp_tools: dict | None
+        self, action: ToolAction | dict[str, Any], mcp_tools: dict | None
     ) -> dict | None:
-        tool_name = action.get("tool", "").strip()
-        if tool_name == "tools_retriever":
+        tool_name = (
+            action.tool_name
+            if isinstance(action, ToolAction)
+            else str(action.get("tool", "")).strip()
+        )
+        if tool_name.lower() == "tools_retriever":
             return None
         return mcp_tools
 

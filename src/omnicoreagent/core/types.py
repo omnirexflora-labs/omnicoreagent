@@ -142,44 +142,10 @@ class ToolError(SerializableRecord):
 
 
 @dataclass
-class ToolData(SerializableRecord):
-    action: bool
-    tool_name: str | None = None
-    tool_args: dict | None = None
-    error: str | None = None
-
-
-@dataclass
 class ToolCallRecord(SerializableRecord):
     tool_name: str
     tool_args: str
     observation: str
-
-
-@dataclass
-class ToolParameter(SerializableRecord):
-    type: str
-    description: str
-
-
-@dataclass
-class ToolRegistryEntry(SerializableRecord):
-    name: str
-    description: str
-    parameters: list[ToolParameter] = field(default_factory=list)
-
-    def __post_init__(self):
-        self.parameters = [
-            param if isinstance(param, ToolParameter) else ToolParameter(**param)
-            for param in self.parameters
-        ]
-
-
-@dataclass
-class ToolExecutorConfig(SerializableRecord):
-    handler: Any
-    tool_data: dict[str, Any]
-    available_tools: dict[str, Any]
 
 
 @dataclass

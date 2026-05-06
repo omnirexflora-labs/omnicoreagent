@@ -111,7 +111,7 @@ async def test_render_prompt_registry_formats_local_tool_schema(
     rendered = await runtime.render_prompt_registry(local_tools=local_tools)
 
     assert "search_docs: Search documentation. Use for docs." in rendered
-    assert "query: string (required) — Search query." in rendered
+    assert "query: string (required) - Search query." in rendered
     assert 'filters: array of objects ({"field": string, "active": boolean})' in rendered
     assert 'Example: {"field": "...", "active": true}' in rendered
 
@@ -138,7 +138,7 @@ async def test_render_prompt_registry_includes_mcp_tools_when_advanced_tools_dis
     rendered = await runtime.render_prompt_registry(mcp_tools={"server": [mcp_tool]})
 
     assert "mcp_search: MCP search." in rendered
-    assert "query: string (required) — Query." in rendered
+    assert "query: string (required) - Query." in rendered
 
 
 @pytest.mark.asyncio

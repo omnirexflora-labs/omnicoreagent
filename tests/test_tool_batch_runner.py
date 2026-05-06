@@ -1,4 +1,5 @@
 import pytest
+import asyncio
 
 from omnicoreagent.core.events.base import EventType
 from omnicoreagent.core.tools.tool_batch_runner import (
@@ -234,3 +235,76 @@ async def test_execute_returns_observation_and_result_event(runner, session_stat
     assert len(events) == 1
     assert events[0]["event"].type == EventType.TOOL_CALL_RESULT
     assert events[0]["event"].payload.tool_name == "alpha, beta"
+
+
+@pytest.mark.asyncio
+async def test_execute_timeout_records_error_for_each_tool(session_state):
+    runner = ToolBatchRunner(agent_name="test_agent", tool_call_timeout=0.01)
+    history = []
+    events = []
+
+    class SlowExecutor:
+        async def execute(
+            self,
+            agent_name,
+            tool_args,
+            tool_name,
+            tool_call_id,
+            add_message_to_history,
+            session_id,
+        ):
+            await asyncio.sleep(1)
+
+    tool_calls = [
+        ToolCallResult(
+            tool_executor=SlowExecutor(),
+            tool_name="alpha",
+            tool_args={"value": "one"},
+            tool_call_id="tool-call-alpha",
+        ),
+        ToolCallResult(
+            tool_executor=SlowExecutor(),
+            tool_name="beta",
+            tool_args={"value": "two"},
+            tool_call_id="tool-call-beta",
+        ),
+    ]
+
+    async def add_message_to_history(role, content, metadata=None, session_id=None):
+        history.append(
+            {
+                "role": role,
+                "content": content,
+                "metadata": metadata or {},
+                "session_id": session_id,
+            }
+        )
+
+    async def event_router(session_id, event):
+        events.append({"session_id": session_id, "event": event})
+
+    async def parse_tool_observation(raw_output):
+        raise AssertionError("Timed out tools should not be parsed")
+
+    def build_tool_results_observation(
+        tool_call_results, tools_results, session_state, session_id
+    ):
+        raise AssertionError("Timed out tools should not build observations")
+
+    obs_text, tools_results = await runner.execute(
+        tool_call_results=tool_calls,
+        session_state=session_state,
+        add_message_to_history=add_message_to_history,
+        session_id="chat799",
+        event_router=event_router,
+        tool_batch_name="alpha, beta",
+        tool_batch_args=[{"value": "one"}, {"value": "two"}],
+        parse_tool_observation=parse_tool_observation,
+        build_tool_results_observation=build_tool_results_observation,
+    )
+
+    assert obs_text == TOOL_CALL_TIMEOUT_MESSAGE
+    assert [result["status"] for result in tools_results] == ["error", "error"]
+    assert [item["metadata"]["tool"] for item in history] == ["alpha", "beta"]
+    assert len(events) == 1
+    assert events[0]["event"].type == EventType.TOOL_CALL_ERROR

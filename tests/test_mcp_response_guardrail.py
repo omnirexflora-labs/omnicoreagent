@@ -9,7 +9,7 @@ from omnicoreagent.core.guardrails import (
     PromptInjectionGuard,
     ThreatLevel,
 )
-from omnicoreagent.core.tools.tools_handler import MCPToolHandler
+from omnicoreagent.core.tools.mcp_tool_handler import MCPToolHandler
 
 
 # ---------------------------------------------------------------------------
