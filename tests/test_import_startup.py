@@ -247,6 +247,8 @@ watched_modules = [
     "rich.console",
     "litellm",
     "openai",
+    "pydantic",
+    "omnicoreagent.core.guardrails",
     "omnicoreagent.core.tools.advance_tools.advanced_tools_use",
     "omnicoreagent.core.tools.advance_tools_use",
     "omnicoreagent.core.tools.artifact_tool",

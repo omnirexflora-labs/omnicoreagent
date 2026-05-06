@@ -1,12 +1,16 @@
+from __future__ import annotations
+
 import json
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from omnicoreagent.core.guardrails import PromptInjectionGuard
 from omnicoreagent.core.tool_response_offloader import ToolResponseOffloader
 from omnicoreagent.core.types import AgentState, Message, SessionState, ToolCallResult
 from omnicoreagent.core.utils import build_xml_observations_block, logger
+
+if TYPE_CHECKING:
+    from omnicoreagent.core.guardrails import PromptInjectionGuard
 
 TOOL_OUTPUT_OFFLOAD_EXCLUDED_TOOLS = frozenset(
     {

@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import asyncio
 import time
 
 import json
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import Any, Tuple
+from typing import TYPE_CHECKING, Any, Tuple
 from omnicoreagent.core.system_prompts import (
     AgentPromptContextBuilder,
     FAST_CONVERSATION_SUMMARY_PROMPT,
@@ -62,11 +64,13 @@ from omnicoreagent.core.tool_response_offloader import (
 )
 from omnicoreagent.core.agents.message_history import AgentMessageHistoryLoader
 from omnicoreagent.core.tools.tool_observation import ToolObservationHandler
-from omnicoreagent.core.guardrails import PromptInjectionGuard
 from omnicoreagent.core.agents.xml_parser import (
     extract_thought,
     parse_action_or_answer,
 )
+
+if TYPE_CHECKING:
+    from omnicoreagent.core.guardrails import PromptInjectionGuard
 
 class BaseReactAgent:
     """Autonomous agent implementing the ReAct paradigm for task solving through iterative reasoning and tool usage."""

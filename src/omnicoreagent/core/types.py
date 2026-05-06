@@ -1,8 +1,10 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field, is_dataclass
 from enum import Enum
-from typing import Any, Optional
-from uuid import UUID, uuid4
-from pydantic import BaseModel, Field, model_validator
 import json
+from typing import Any
+from uuid import UUID, uuid4
 
 
 class AgentState(str, Enum):
@@ -13,108 +15,6 @@ class AgentState(str, Enum):
     FINISHED = "finished"
     ERROR = "error"
     STUCK = "stuck"
-
-
-class ToolFunction(BaseModel):
-    name: str
-    arguments: str
-
-
-class ToolCall(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid4()))
-    type: str = "function"
-    function: ToolFunction
-
-
-class ToolCallMetadata(BaseModel):
-    has_tool_calls: bool = False
-    tool_calls: list[ToolCall] = []
-    tool_call_id: UUID | None = None
-    agent_name: str | None = None
-
-
-class Message(BaseModel):
-    role: str
-    content: str
-    tool_call_id: Optional[str] = None
-    tool_calls: Optional[str] = None
-    metadata: Optional[ToolCallMetadata] = None
-    timestamp: Optional[str] = None
-
-    @model_validator(mode="before")
-    def ensure_content_is_string(cls, values):
-        c = values.get("content")
-        if not isinstance(c, str):
-            try:
-                values["content"] = json.dumps(c, ensure_ascii=False)
-            except Exception:
-                values["content"] = str(c)
-        return values
-
-
-class ParsedResponse(BaseModel):
-    action: bool | None = None
-    data: str | None = None
-    error: str | None = None
-    answer: str | None = None
-    tool_calls: bool | None = None
-    agent_calls: bool | None = None
-
-
-class ToolCallResult(BaseModel):
-    tool_executor: Any
-    tool_name: str
-    tool_args: dict
-    tool_call_id: str | None = None
-
-
-class ToolError(BaseModel):
-    observation: str
-    tool_name: str
-    tool_args: dict | None = None
-
-
-class ToolData(BaseModel):
-    action: bool
-    tool_name: str | None = None
-    tool_args: dict | None = None
-    error: str | None = None
-
-
-class ToolCallRecord(BaseModel):
-    tool_name: str
-    tool_args: str
-    observation: str
-
-
-class ToolParameter(BaseModel):
-    type: str
-    description: str
-
-
-class ToolRegistryEntry(BaseModel):
-    name: str
-    description: str
-    parameters: list[ToolParameter] = []
-
-
-class ToolExecutorConfig(BaseModel):
-    handler: Any
-    tool_data: dict[str, Any]
-    available_tools: dict[str, Any]
-
-
-class LoopDetectorConfig(BaseModel):
-    max_repeats: int = 3
-    similarity_threshold: float = 0.9
-
-
-class SessionState(BaseModel):
-    messages: list[Message]
-    state: AgentState
-    loop_detector: Any
-    assistant_with_tool_calls: dict | None
-    pending_tool_responses: list[dict]
 
 
 class ContextInclusion(str, Enum):
@@ -123,11 +23,175 @@ class ContextInclusion(str, Enum):
     ALL_SERVERS = "allServers"
 
 
-class AgentState(str, Enum):
-    IDLE = "idle"
-    RUNNING = "running"
-    TOOL_CALLING = "tool_calling"
-    OBSERVING = "observing"
-    FINISHED = "finished"
-    ERROR = "error"
-    STUCK = "stuck"
+def _to_plain(value: Any, *, exclude_none: bool = False) -> Any:
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, UUID):
+        return str(value)
+    if is_dataclass(value):
+        return {
+            key: _to_plain(item, exclude_none=exclude_none)
+            for key, item in asdict(value).items()
+            if not (exclude_none and item is None)
+        }
+    if isinstance(value, dict):
+        return {
+            key: _to_plain(item, exclude_none=exclude_none)
+            for key, item in value.items()
+            if not (exclude_none and item is None)
+        }
+    if isinstance(value, list):
+        return [_to_plain(item, exclude_none=exclude_none) for item in value]
+    if isinstance(value, tuple):
+        return [_to_plain(item, exclude_none=exclude_none) for item in value]
+    return value
+
+
+class SerializableRecord:
+    @classmethod
+    def model_validate(cls, value: Any):
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, dict):
+            return cls(**value)
+        raise ValueError(f"{cls.__name__} requires a dict or {cls.__name__} instance")
+
+    def model_dump(self, *, exclude_none: bool = False, **_: Any) -> dict[str, Any]:
+        return _to_plain(self, exclude_none=exclude_none)
+
+    def dict(self, *, exclude_none: bool = False, **kwargs: Any) -> dict[str, Any]:
+        return self.model_dump(exclude_none=exclude_none, **kwargs)
+
+    def json(self, *, exclude_none: bool = False, **kwargs: Any) -> str:
+        return json.dumps(self.model_dump(exclude_none=exclude_none, **kwargs))
+
+
+@dataclass
+class ToolFunction(SerializableRecord):
+    name: str
+    arguments: str
+
+
+@dataclass
+class ToolCall(SerializableRecord):
+    function: ToolFunction | dict[str, Any]
+    id: str = field(default_factory=lambda: str(uuid4()))
+    type: str = "function"
+
+    def __post_init__(self):
+        if isinstance(self.function, dict):
+            self.function = ToolFunction(**self.function)
+
+
+@dataclass
+class ToolCallMetadata(SerializableRecord):
+    has_tool_calls: bool = False
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    tool_call_id: UUID | str | None = None
+    agent_name: str | None = None
+
+    def __post_init__(self):
+        self.tool_calls = [
+            call if isinstance(call, ToolCall) else ToolCall(**call)
+            for call in self.tool_calls
+        ]
+
+
+@dataclass
+class Message(SerializableRecord):
+    role: str
+    content: str
+    tool_call_id: str | None = None
+    tool_calls: str | None = None
+    metadata: ToolCallMetadata | dict[str, Any] | None = None
+    timestamp: str | None = None
+
+    def __post_init__(self):
+        if not isinstance(self.content, str):
+            try:
+                self.content = json.dumps(self.content, ensure_ascii=False)
+            except Exception:
+                self.content = str(self.content)
+        if isinstance(self.metadata, dict):
+            self.metadata = ToolCallMetadata(**self.metadata)
+
+
+@dataclass
+class ParsedResponse(SerializableRecord):
+    action: bool | None = None
+    data: str | None = None
+    error: str | None = None
+    answer: str | None = None
+    tool_calls: bool | None = None
+    agent_calls: bool | None = None
+
+
+@dataclass
+class ToolCallResult(SerializableRecord):
+    tool_executor: Any
+    tool_name: str
+    tool_args: dict
+    tool_call_id: str | None = None
+
+
+@dataclass
+class ToolError(SerializableRecord):
+    observation: str
+    tool_name: str
+    tool_args: dict | None = None
+
+
+@dataclass
+class ToolData(SerializableRecord):
+    action: bool
+    tool_name: str | None = None
+    tool_args: dict | None = None
+    error: str | None = None
+
+
+@dataclass
+class ToolCallRecord(SerializableRecord):
+    tool_name: str
+    tool_args: str
+    observation: str
+
+
+@dataclass
+class ToolParameter(SerializableRecord):
+    type: str
+    description: str
+
+
+@dataclass
+class ToolRegistryEntry(SerializableRecord):
+    name: str
+    description: str
+    parameters: list[ToolParameter] = field(default_factory=list)
+
+    def __post_init__(self):
+        self.parameters = [
+            param if isinstance(param, ToolParameter) else ToolParameter(**param)
+            for param in self.parameters
+        ]
+
+
+@dataclass
+class ToolExecutorConfig(SerializableRecord):
+    handler: Any
+    tool_data: dict[str, Any]
+    available_tools: dict[str, Any]
+
+
+@dataclass
+class LoopDetectorConfig(SerializableRecord):
+    max_repeats: int = 3
+    similarity_threshold: float = 0.9
+
+
+@dataclass
+class SessionState(SerializableRecord):
+    messages: list[Message]
+    state: AgentState
+    loop_detector: Any
+    assistant_with_tool_calls: dict | None
+    pending_tool_responses: list[dict]

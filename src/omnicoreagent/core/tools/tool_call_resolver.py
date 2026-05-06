@@ -1,7 +1,8 @@
-import json
-from typing import Any
+from __future__ import annotations
 
-from omnicoreagent.core.guardrails import PromptInjectionGuard
+import json
+from typing import TYPE_CHECKING, Any
+
 from omnicoreagent.core.tools.tools_handler import (
     LocalToolHandler,
     MCPToolHandler,
@@ -9,6 +10,9 @@ from omnicoreagent.core.tools.tools_handler import (
 )
 from omnicoreagent.core.types import ParsedResponse, ToolCallResult, ToolError
 from omnicoreagent.core.utils import logger, normalize_tool_args
+
+if TYPE_CHECKING:
+    from omnicoreagent.core.guardrails import PromptInjectionGuard
 
 
 class ToolCallResolver:
