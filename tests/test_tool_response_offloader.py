@@ -28,7 +28,6 @@ from omnicoreagent.core.tool_response_offloader import (
 from omnicoreagent.core.tools.artifact_tool import build_tool_registry_artifact_tool
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.runtime_config import AgentConfig
-from pydantic import ValidationError
 
 
 # ============================================================================
@@ -110,8 +109,8 @@ class TestAgentConfigToolOffloadValidation:
         assert config.tool_offload["enabled"] is True
 
     def test_invalid_threshold_tokens_rejected(self):
-        """Test negative threshold_tokens raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        """Test negative threshold_tokens raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
             AgentConfig(
                 agent_name="test",
                 max_steps=10,
@@ -121,8 +120,8 @@ class TestAgentConfigToolOffloadValidation:
         assert "threshold_tokens must be positive" in str(exc_info.value)
 
     def test_invalid_threshold_bytes_rejected(self):
-        """Test negative threshold_bytes raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        """Test negative threshold_bytes raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
             AgentConfig(
                 agent_name="test",
                 max_steps=10,
@@ -132,8 +131,8 @@ class TestAgentConfigToolOffloadValidation:
         assert "threshold_bytes must be positive" in str(exc_info.value)
 
     def test_invalid_max_preview_tokens_rejected(self):
-        """Test negative max_preview_tokens raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        """Test negative max_preview_tokens raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
             AgentConfig(
                 agent_name="test",
                 max_steps=10,
@@ -143,8 +142,8 @@ class TestAgentConfigToolOffloadValidation:
         assert "max_preview_tokens must be positive" in str(exc_info.value)
 
     def test_invalid_retention_days_rejected(self):
-        """Test negative retention_days raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        """Test negative retention_days raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
             AgentConfig(
                 agent_name="test",
                 max_steps=10,

@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 import json
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from omnicoreagent.core.guardrails import PromptInjectionGuard
+if TYPE_CHECKING:
+    from omnicoreagent.core.guardrails import PromptInjectionGuard
 
 logger = logging.getLogger(__name__)
 

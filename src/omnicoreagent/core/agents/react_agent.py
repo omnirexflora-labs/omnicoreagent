@@ -1,6 +1,12 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from omnicoreagent.core.agents.base import BaseReactAgent
-from omnicoreagent.core.guardrails import PromptInjectionGuard
 from omnicoreagent.runtime_config import AgentConfig
+
+if TYPE_CHECKING:
+    from omnicoreagent.core.guardrails import PromptInjectionGuard
 
 
 class ReactAgent(BaseReactAgent):
