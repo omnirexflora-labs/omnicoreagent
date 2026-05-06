@@ -202,3 +202,76 @@ print(json.dumps({
         "agent_name": "startup",
         "loaded_modules": [],
     }
+
+
+def test_disabled_tool_offloader_does_not_load_workspace_storage(tmp_path):
+    result = _run_import_probe(
+        tmp_path,
+        """
+import json
+import sys
+
+from omnicoreagent.core.tool_response_offloader import ToolResponseOffloader
+
+offloader = ToolResponseOffloader(config={"enabled": False})
+
+print(json.dumps({
+    "offload_enabled": offloader.config.enabled,
+    "workspace_loaded": "omnicoreagent.core.workspace" in sys.modules,
+    "workspace_storage_loaded": "omnicoreagent.core.workspace_storage" in sys.modules,
+}))
+""",
+    )
+
+    assert result == {
+        "offload_enabled": False,
+        "workspace_loaded": False,
+        "workspace_storage_loaded": False,
+    }
+
+
+def test_agent_initialize_without_optional_tools_stays_lightweight(tmp_path):
+    result = _run_import_probe(
+        tmp_path,
+        """
+import asyncio
+import json
+import logging
+import sys
+
+from omnicoreagent import OmniCoreAgent
+
+logging.getLogger("omnicoreagent").disabled = True
+
+watched_modules = [
+    "omnicoreagent.core.tools.advance_tools.advanced_tools_use",
+    "omnicoreagent.core.tools.advance_tools_use",
+    "omnicoreagent.core.tools.artifact_tool",
+    "omnicoreagent.core.tools.memory_tool.memory_tool",
+    "omnicoreagent.core.skills.tools",
+    "omnicoreagent.core.workspace",
+    "omnicoreagent.core.workspace_storage",
+]
+
+async def main():
+    agent = OmniCoreAgent(
+        name="startup",
+        system_instruction="You are fast to initialize.",
+        model_config={"provider": "openai", "model": "gpt-4o", "api_key": "test"},
+        agent_config={"guardrail_mode": "off"},
+    )
+    await agent.initialize()
+
+    print(json.dumps({
+        "agent_name": agent.name,
+        "loaded_modules": [module for module in watched_modules if module in sys.modules],
+    }))
+
+asyncio.run(main())
+""",
+    )
+
+    assert result == {
+        "agent_name": "startup",
+        "loaded_modules": [],
+    }
