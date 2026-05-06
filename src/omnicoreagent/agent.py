@@ -30,9 +30,12 @@ _RUNTIME_EXPORTS = {
     "build_subagent_tools": ("omnicoreagent.core.subagents", "build_subagent_tools"),
     "AgentConfig": ("omnicoreagent.runtime_config", "AgentConfig"),
     "logger": ("omnicoreagent.core.utils", "logger"),
-    "normalize_agent_config": ("omnicoreagent.runtime_config", "normalize_agent_config"),
-    "normalize_mcp_tools": ("omnicoreagent.runtime_config", "normalize_mcp_tools"),
-    "normalize_model_config": ("omnicoreagent.runtime_config", "normalize_model_config"),
+    "normalize_agent_config_light": (
+        "omnicoreagent.config_types",
+        "normalize_agent_config_light",
+    ),
+    "normalize_mcp_tools": ("omnicoreagent.config_types", "normalize_mcp_tools"),
+    "normalize_model_config": ("omnicoreagent.config_types", "normalize_model_config"),
 }
 
 
@@ -54,6 +57,21 @@ def _runtime(name: str) -> Any:
 
 def _logger() -> Any:
     return _runtime("logger")
+
+
+class _LazyDefaultPromptBuilder:
+    def __init__(self):
+        self._builder = None
+
+    def _load(self):
+        if self._builder is None:
+            self._builder = _runtime("OmniCoreAgentPromptBuilder")(
+                _runtime("REACT_AGENT_PROMPT")
+            )
+        return self._builder
+
+    def build(self, *, system_instruction: str) -> str:
+        return self._load().build(system_instruction=system_instruction)
 
 
 class OmniCoreAgent:
@@ -111,19 +129,19 @@ class OmniCoreAgent:
             self.local_tools = local_tools
 
         self.sub_agents = sub_agents
-        self.agent_config = _runtime("normalize_agent_config")(name, agent_config)
+        self.agent_config = _runtime("normalize_agent_config_light")(
+            name, agent_config
+        )
 
         self.debug = debug
-        self._cumulative_usage = _runtime("Usage")()
+        self._cumulative_usage = None
 
         self.memory_router = memory_router
         self.event_router = event_router
         if prompt_builder:
             self.prompt_builder = prompt_builder
         else:
-            self.prompt_builder = _runtime("OmniCoreAgentPromptBuilder")(
-                _runtime("REACT_AGENT_PROMPT")
-            )
+            self.prompt_builder = _LazyDefaultPromptBuilder()
         self.agent = None
         self.mcp_client = None
         self.llm_connection = None
@@ -375,7 +393,7 @@ class OmniCoreAgent:
         )
 
         if isinstance(response, dict) and "usage" in response:
-            self._cumulative_usage.incr(response["usage"])
+            self._usage().incr(response["usage"])
             return {
                 "response": response["answer"],
                 "session_id": session_id,
@@ -392,19 +410,25 @@ class OmniCoreAgent:
         Returns:
             Dict containing total requests, tokens, and time.
         """
+        cumulative_usage = self._usage()
         average_time = (
-            self._cumulative_usage.total_time / self._cumulative_usage.requests
-            if self._cumulative_usage.requests > 0
+            cumulative_usage.total_time / cumulative_usage.requests
+            if cumulative_usage.requests > 0
             else 0
         )
         return {
-            "total_requests": self._cumulative_usage.requests,
-            "total_request_tokens": self._cumulative_usage.request_tokens,
-            "total_response_tokens": self._cumulative_usage.response_tokens,
-            "total_tokens": self._cumulative_usage.total_tokens,
-            "total_time": self._cumulative_usage.total_time,
+            "total_requests": cumulative_usage.requests,
+            "total_request_tokens": cumulative_usage.request_tokens,
+            "total_response_tokens": cumulative_usage.response_tokens,
+            "total_tokens": cumulative_usage.total_tokens,
+            "total_time": cumulative_usage.total_time,
             "average_time": average_time,
         }
+
+    def _usage(self):
+        if self._cumulative_usage is None:
+            self._cumulative_usage = _runtime("Usage")()
+        return self._cumulative_usage
 
     async def list_all_available_tools(self):
         """List all available tools (MCP and local)"""

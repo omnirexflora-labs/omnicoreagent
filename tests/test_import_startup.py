@@ -159,3 +159,46 @@ print(json.dumps({
         "utils_loaded": False,
         "constants_loaded": False,
     }
+
+
+def test_agent_construction_does_not_load_prompt_or_runtime_modules(tmp_path):
+    result = _run_import_probe(
+        tmp_path,
+        """
+import json
+import sys
+
+from omnicoreagent import OmniCoreAgent
+
+agent = OmniCoreAgent(
+    name="startup",
+    system_instruction="You are fast to create.",
+    model_config={"provider": "openai", "model": "gpt-4o", "api_key": "test"},
+    agent_config={"guardrail_mode": "off"},
+)
+
+watched_modules = [
+    "omnicoreagent.runtime_config",
+    "omnicoreagent.core.agents.react_agent",
+    "omnicoreagent.core.constants",
+    "omnicoreagent.core.events.event_router",
+    "omnicoreagent.core.guardrails",
+    "omnicoreagent.core.llm",
+    "omnicoreagent.core.memory_store.memory_router",
+    "omnicoreagent.core.system_prompts",
+    "omnicoreagent.core.token_usage",
+    "omnicoreagent.core.types",
+    "omnicoreagent.core.utils",
+]
+
+print(json.dumps({
+    "agent_name": agent.name,
+    "loaded_modules": [module for module in watched_modules if module in sys.modules],
+}))
+""",
+    )
+
+    assert result == {
+        "agent_name": "startup",
+        "loaded_modules": [],
+    }
