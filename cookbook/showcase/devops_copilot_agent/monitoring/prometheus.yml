@@ -1,8 +1,0 @@
-global:
-  scrape_interval: 5s
-
-scrape_configs:
-  - job_name: 'devops-copilot'
-    static_configs:
-      # - targets: ['copilot:9091']  # ← Internal metrics port
-      - targets: ["host.docker.internal:9091"]

@@ -83,7 +83,7 @@ packages = ["src/omnicoreagent"]
 include = [
 
     "LICENSE",
-    "README.mdx"
+    "README.md"
 ]
 
 [tool.pytest.ini_options]

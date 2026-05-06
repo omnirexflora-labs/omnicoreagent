@@ -5,7 +5,7 @@
 ║               Powered by OmniCoreAgent Multi-Agent Orchestration              ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 
-A showcase application demonstrating how to orchestrate a complex, multi-agent
+An example application demonstrating how to orchestrate a complex, multi-agent
 pipeline for startup investment analysis.
 
 Pipeline Stages:

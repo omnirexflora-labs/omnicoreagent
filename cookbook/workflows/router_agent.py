@@ -7,9 +7,6 @@ from omnicoreagent import (
 )
 import asyncio
 
-# this is for low level import
-# from omnicoreagent.omni_agent.workflow.router_agent import RouterAgent
-
 
 def build_tool_registry_google_search() -> ToolRegistry:
     registry = ToolRegistry()

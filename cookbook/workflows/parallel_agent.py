@@ -8,8 +8,6 @@ from omnicoreagent import (
 )
 from typing import Optional, Dict
 
-# low level import
-# from omnicoreagent.omni_agent.workflow.parallel_agent import ParallelAgent
 import asyncio
 import uuid
 

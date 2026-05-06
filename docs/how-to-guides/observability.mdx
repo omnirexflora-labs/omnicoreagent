@@ -1,10 +1,10 @@
 ---
-title: Observability
+title: Runtime Visibility
 description: 'Production metrics and per-request performance monitoring'
 icon: 'chart-line'
 ---
 
-# Production Observability & Metrics
+# Runtime Visibility & Metrics
 
 Monitor your agents with built-in metrics, event streams, and in-house trace summaries.
 
@@ -56,8 +56,9 @@ for step in trace["steps"]:
     print(step["event_type"], step["elapsed_ms"], step["payload"])
 ```
 
-The trace is intentionally internal and dependency-free. It is the base layer for
-debugging, feedback loops, and future evaluation workflows.
+The trace is intentionally internal and dependency-free. It is a compact
+debugging view built from session events, not a full tracing or evaluation
+system.
 
 <Tip>
 Use metrics for cost and performance monitoring, events for live UI streaming,

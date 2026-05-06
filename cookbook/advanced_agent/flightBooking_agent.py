@@ -4,15 +4,7 @@ import json
 import os
 from typing import Optional
 
-# TOP-LEVEL IMPORTS (Recommended for most use cases)
 from omnicoreagent import OmniCoreAgent, MemoryRouter, EventRouter, ToolRegistry, logger
-
-# LOW-LEVEL IMPORTS (Alternative approach for advanced users)
-# from omnicoreagent.omni_agent.agent import OmniCoreAgent
-# from omnicoreagent.core.memory_store.memory_router import MemoryRouter
-# from omnicoreagent.core.events.event_router import EventRouter
-# from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-# from omnicoreagent.core.utils import logger
 
 # ------------------ Config / CRM bootstrap ------------------ #
 CRM_FILE = "crm.json"
