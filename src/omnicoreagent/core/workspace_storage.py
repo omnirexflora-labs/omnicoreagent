@@ -1,4 +1,3 @@
-import os
 import shutil
 import urllib.parse
 from dataclasses import dataclass
@@ -9,6 +8,10 @@ from typing import Any, Iterable, Protocol
 from filelock import FileLock
 
 from omnicoreagent._optional import load_optional
+from omnicoreagent.core.workspace_config import (
+    WorkspaceConfig,
+    resolve_workspace_config,
+)
 
 
 @dataclass(frozen=True)
@@ -451,61 +454,55 @@ def create_workspace_storage(
     backend: str | None = None,
     namespace: str | None = None,
     workspace_dir: str | Path | None = None,
+    config: WorkspaceConfig | dict | None = None,
 ) -> WorkspaceStorage:
-    backend = backend or os.environ.get("OMNICOREAGENT_WORKSPACE_BACKEND", "local")
-    backend = backend.lower().strip()
+    workspace_config = resolve_workspace_config(config)
+    workspace_config = workspace_config.with_overrides(
+        backend=backend,
+        workspace_dir=workspace_dir,
+    )
+    backend = workspace_config.backend
     namespace = (namespace or "").strip("/")
 
     if backend == "local":
         from omnicoreagent.core.workspace import resolve_workspace_paths
 
-        paths = resolve_workspace_paths(workspace_dir=workspace_dir)
+        paths = resolve_workspace_paths(workspace_dir=workspace_config.workspace_dir)
         root = paths.root / namespace if namespace else paths.root
         return LocalWorkspaceStorage(root)
 
     if backend == "s3":
-        bucket_name = os.environ.get("AWS_S3_BUCKET")
+        bucket_name = workspace_config.s3_bucket
         if not bucket_name:
             raise ValueError("S3 workspace backend requires AWS_S3_BUCKET")
-        prefix = os.environ.get("OMNICOREAGENT_WORKSPACE_PREFIX", "workspace").strip(
-            "/"
-        )
-        if namespace:
-            prefix = f"{prefix}/{namespace}"
+        prefix = workspace_config.namespace_prefix(namespace)
         return S3WorkspaceStorage(
             bucket_name=bucket_name,
             prefix=prefix,
-            region=os.environ.get("AWS_REGION"),
-            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
-            endpoint_url=os.environ.get("AWS_ENDPOINT_URL"),
+            region=workspace_config.aws_region,
+            aws_access_key_id=workspace_config.aws_access_key_id,
+            aws_secret_access_key=workspace_config.aws_secret_access_key,
+            endpoint_url=workspace_config.aws_endpoint_url,
         )
 
     if backend == "r2":
-        missing = [
-            name
-            for name in (
-                "R2_BUCKET_NAME",
-                "R2_ACCOUNT_ID",
-                "R2_ACCESS_KEY_ID",
-                "R2_SECRET_ACCESS_KEY",
-            )
-            if not os.environ.get(name)
-        ]
+        required_fields = {
+            "R2_BUCKET_NAME": workspace_config.r2_bucket_name,
+            "R2_ACCOUNT_ID": workspace_config.r2_account_id,
+            "R2_ACCESS_KEY_ID": workspace_config.r2_access_key_id,
+            "R2_SECRET_ACCESS_KEY": workspace_config.r2_secret_access_key,
+        }
+        missing = [name for name, value in required_fields.items() if not value]
         if missing:
             raise ValueError(
                 f"R2 workspace backend requires environment variables: {', '.join(missing)}"
             )
-        prefix = os.environ.get("OMNICOREAGENT_WORKSPACE_PREFIX", "workspace").strip(
-            "/"
-        )
-        if namespace:
-            prefix = f"{prefix}/{namespace}"
+        prefix = workspace_config.namespace_prefix(namespace)
         return R2WorkspaceStorage(
-            bucket_name=os.environ["R2_BUCKET_NAME"],
-            account_id=os.environ["R2_ACCOUNT_ID"],
-            access_key_id=os.environ["R2_ACCESS_KEY_ID"],
-            secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+            bucket_name=workspace_config.r2_bucket_name,
+            account_id=workspace_config.r2_account_id,
+            access_key_id=workspace_config.r2_access_key_id,
+            secret_access_key=workspace_config.r2_secret_access_key,
             prefix=prefix,
         )
 

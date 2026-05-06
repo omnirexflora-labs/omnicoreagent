@@ -1,10 +1,9 @@
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from omnicoreagent.core.workspace_config import DEFAULT_WORKSPACE_DIR, WorkspaceConfig
 
-_DEFAULT_WORKSPACE = "./workspace"
-_WORKSPACE_ENV = "OMNICOREAGENT_WORKSPACE_DIR"
+_DEFAULT_WORKSPACE = DEFAULT_WORKSPACE_DIR
 
 
 @dataclass(frozen=True)
@@ -22,9 +21,9 @@ class WorkspacePaths:
 
 def resolve_workspace_paths(
     *,
-    workspace_dir: str | os.PathLike | None = None,
+    workspace_dir: str | Path | None = None,
 ) -> WorkspacePaths:
-    root = Path(workspace_dir or os.environ.get(_WORKSPACE_ENV, _DEFAULT_WORKSPACE))
+    root = Path(workspace_dir or WorkspaceConfig.from_env().workspace_dir)
     return WorkspacePaths(
         root=root,
         artifacts=root / "artifacts",

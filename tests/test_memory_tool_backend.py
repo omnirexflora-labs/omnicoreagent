@@ -9,6 +9,7 @@ from omnicoreagent.core.tools.memory_tool.factory import (
 )
 from omnicoreagent.core.tools.memory_tool.memory_tool import MemoryTool
 from omnicoreagent.core.tools.memory_tool.storage import WorkspaceMemoryBackend
+from omnicoreagent.core.workspace_config import WorkspaceConfig
 from omnicoreagent.core.workspace_storage import LocalWorkspaceStorage, S3WorkspaceStorage
 
 
@@ -169,6 +170,35 @@ def test_create_memory_backend_local_uses_workspace_memories(monkeypatch, tmp_pa
 
     assert isinstance(backend, WorkspaceMemoryBackend)
     assert backend.base_dir == (tmp_path / "workspace" / "memories").resolve()
+
+    clear_backend_cache()
+
+
+def test_create_memory_backend_accepts_explicit_workspace_config(monkeypatch, tmp_path):
+    clear_backend_cache()
+    monkeypatch.delenv("OMNICOREAGENT_WORKSPACE_DIR", raising=False)
+    workspace = tmp_path / "explicit-workspace"
+
+    backend = create_memory_backend(
+        workspace_config=WorkspaceConfig(workspace_dir=workspace)
+    )
+
+    assert isinstance(backend, WorkspaceMemoryBackend)
+    assert backend.base_dir == (workspace / "memories").resolve()
+
+    clear_backend_cache()
+
+
+def test_memory_tool_accepts_explicit_workspace_config(monkeypatch, tmp_path):
+    clear_backend_cache()
+    monkeypatch.delenv("OMNICOREAGENT_WORKSPACE_DIR", raising=False)
+    workspace = tmp_path / "memory-tool-workspace"
+
+    tool = MemoryTool(workspace_config=WorkspaceConfig(workspace_dir=workspace))
+    result = tool.create_update("note.txt", "hello", mode="create")
+
+    assert "created" in result.lower()
+    assert (workspace / "memories" / "note.txt").read_text() == "hello"
 
     clear_backend_cache()
 

@@ -3,6 +3,7 @@ from typing import Any
 from omnicoreagent.core.tool_response_offloader import ToolResponseOffloader
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.tool_prompt_renderer import ToolPromptRenderer
+from omnicoreagent.core.workspace_config import WorkspaceConfig
 
 
 async def build_tool_registry_advance_tools_use(registry: ToolRegistry):
@@ -13,12 +14,21 @@ async def build_tool_registry_advance_tools_use(registry: ToolRegistry):
     return await build_advanced_tools(registry=registry)
 
 
-def build_tool_registry_memory_tool(*, backend: Any, registry: ToolRegistry):
+def build_tool_registry_memory_tool(
+    *,
+    backend: Any,
+    registry: ToolRegistry,
+    workspace_config: WorkspaceConfig | dict | None = None,
+):
     from omnicoreagent.core.tools.memory_tool.memory_tool import (
         build_tool_registry_memory_tool as build_memory_tools,
     )
 
-    return build_memory_tools(backend=backend, registry=registry)
+    return build_memory_tools(
+        backend=backend,
+        registry=registry,
+        workspace_config=workspace_config,
+    )
 
 
 def build_tool_registry_artifact_tool(
@@ -49,6 +59,7 @@ class ToolRuntimeRegistry:
         enable_workspace_memory: bool = False,
         enable_agent_skills: bool = False,
         skill_manager: Any = None,
+        workspace_config: WorkspaceConfig | dict | None = None,
     ):
         self.register_internal_tool = register_internal_tool
         self.tool_offloader = tool_offloader
@@ -57,6 +68,7 @@ class ToolRuntimeRegistry:
         self.enable_workspace_memory = enable_workspace_memory
         self.enable_agent_skills = enable_agent_skills
         self.skill_manager = skill_manager
+        self.workspace_config = workspace_config
 
     async def prepare_tools(self, local_tools: Any = None):
         registry = local_tools
@@ -81,6 +93,7 @@ class ToolRuntimeRegistry:
             build_tool_registry_memory_tool(
                 backend=None,
                 registry=registry,
+                workspace_config=self.workspace_config,
             )
 
         if self.tool_offloader.config.enabled:

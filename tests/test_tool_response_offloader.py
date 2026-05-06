@@ -25,6 +25,7 @@ from omnicoreagent.core.tool_response_offloader import (
     OffloadConfig,
     OffloadedResponse,
 )
+from omnicoreagent.core.workspace_config import WorkspaceConfig
 from omnicoreagent.core.tools.artifact_tool import build_tool_registry_artifact_tool
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.runtime.config import AgentConfig
@@ -387,6 +388,20 @@ class TestOffload:
             config={"enabled": True, "threshold_tokens": 10}
         )
         result = offloader.offload("env_tool", "Content " * 50)
+
+        assert Path(result.artifact_path).is_relative_to(workspace / "artifacts")
+        assert Path(result.artifact_path).read_text() == "Content " * 50
+
+    def test_offload_accepts_explicit_workspace_config(self, monkeypatch, tmp_path):
+        """Test offloader can use explicit workspace config without env coupling."""
+        monkeypatch.delenv("OMNICOREAGENT_WORKSPACE_DIR", raising=False)
+        workspace = tmp_path / "explicit-workspace"
+
+        offloader = ToolResponseOffloader(
+            config={"enabled": True, "threshold_tokens": 10},
+            workspace_config=WorkspaceConfig(workspace_dir=workspace),
+        )
+        result = offloader.offload("explicit_tool", "Content " * 50)
 
         assert Path(result.artifact_path).is_relative_to(workspace / "artifacts")
         assert Path(result.artifact_path).read_text() == "Content " * 50

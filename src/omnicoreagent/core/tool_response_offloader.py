@@ -22,6 +22,7 @@ from omnicoreagent.core.summarizer.tokenizer import count_tokens
 from omnicoreagent.core.utils import logger
 
 if TYPE_CHECKING:
+    from omnicoreagent.core.workspace_config import WorkspaceConfig
     from omnicoreagent.core.workspace_storage import WorkspaceStorage
 
 
@@ -102,12 +103,14 @@ class ToolResponseOffloader:
         config: OffloadConfig | dict = None,
         base_dir: str = None,
         storage: WorkspaceStorage | None = None,
+        workspace_config: WorkspaceConfig | dict | None = None,
     ):
         if isinstance(config, dict):
             config = OffloadConfig.from_dict(config)
         self.config = config or OffloadConfig()
         self._base_dir = base_dir
         self._storage = storage
+        self._workspace_config = workspace_config
 
         if self.config.enabled:
             self._ensure_storage_dir()
@@ -126,6 +129,7 @@ class ToolResponseOffloader:
             self._storage = create_workspace_storage(
                 namespace="artifacts",
                 workspace_dir=self._base_dir,
+                config=self._workspace_config,
             )
         return self._storage
 
