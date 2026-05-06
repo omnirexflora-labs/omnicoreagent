@@ -2,7 +2,7 @@ from collections.abc import Callable
 from typing import Any
 
 from omnicoreagent.core.types import Message, SessionState
-from omnicoreagent.core.utils import logger, track
+from omnicoreagent.core.utils import logger
 
 
 class AgentMessageHistoryLoader:
@@ -17,7 +17,6 @@ class AgentMessageHistoryLoader:
     def __init__(self, agent_name: str):
         self.agent_name = agent_name
 
-    @track("memory_processing")
     async def load(
         self,
         *,

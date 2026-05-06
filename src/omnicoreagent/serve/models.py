@@ -116,6 +116,14 @@ class EventsResponse(BaseModel):
     count: int = Field(..., description="Number of events")
 
 
+class TraceResponse(BaseModel):
+    """Response model for session trace endpoint."""
+
+    session_id: str = Field(..., description="Session ID")
+    summary: Dict[str, Any] = Field(..., description="Trace summary")
+    steps: List[Dict[str, Any]] = Field(..., description="Ordered trace steps")
+
+
 class ErrorResponse(BaseModel):
     """Standard error response model."""
 

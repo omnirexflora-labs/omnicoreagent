@@ -1,12 +1,10 @@
-"""
-Event Router for dynamic event store selection.
-"""
+"""Event router for dynamic event store selection."""
 
-from typing import Optional, Dict, Any, List
 from omnicoreagent._optional import load_optional
-from omnicoreagent.core.utils import logger
 from omnicoreagent.core.events.base import BaseEventStore, Event
 from omnicoreagent.core.events.in_memory import InMemoryEventStore
+from omnicoreagent.core.events.trace import AgentTrace, build_event_trace
+from omnicoreagent.core.utils import logger
 
 
 class EventRouter:
@@ -20,7 +18,7 @@ class EventRouter:
             event_store_type: Type of event store ("in_memory", "redis_stream")
         """
         self.event_store_type = event_store_type
-        self._event_store: Optional[BaseEventStore] = None
+        self._event_store: BaseEventStore | None = None
 
         self._initialize_event_store()
 
@@ -71,12 +69,17 @@ class EventRouter:
 
         await self._event_store.append(session_id=session_id, event=event)
 
-    async def get_events(self, session_id: str) -> List[Event]:
+    async def get_events(self, session_id: str) -> list[Event]:
         """Get events from the current event store."""
         if not self._event_store:
             raise RuntimeError("No event store available")
 
         return await self._event_store.get_events(session_id=session_id)
+
+    async def get_trace(self, session_id: str) -> AgentTrace:
+        """Build an internal trace from stored session events."""
+        events = await self.get_events(session_id=session_id)
+        return build_event_trace(session_id=session_id, events=events)
 
     async def stream(self, session_id: str):
         """Stream events from the current event store."""
@@ -94,7 +97,7 @@ class EventRouter:
         """Check if the event store is available."""
         return self._event_store is not None
 
-    def get_event_store_info(self) -> Dict[str, Any]:
+    def get_event_store_info(self) -> dict[str, object]:
         """Get information about the current event store."""
         return {"type": self.event_store_type, "available": self.is_available()}
 

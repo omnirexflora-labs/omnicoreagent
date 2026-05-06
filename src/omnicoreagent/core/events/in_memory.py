@@ -1,6 +1,7 @@
-from collections import defaultdict
 import asyncio
-from typing import AsyncIterator, Set
+from collections import defaultdict
+from collections.abc import AsyncIterator
+
 from omnicoreagent.core.events.base import BaseEventStore, Event
 
 
@@ -16,15 +17,13 @@ class InMemoryEventStore(BaseEventStore):
     def __init__(self):
         self.logs: dict[str, list[Event]] = defaultdict(list)
         # Map session_id -> set of subscriber queues
-        self._subscribers: dict[str, Set[asyncio.Queue]] = defaultdict(set)
+        self._subscribers: dict[str, set[asyncio.Queue]] = defaultdict(set)
         self._lock = asyncio.Lock()
 
     async def append(self, session_id: str, event: Event) -> None:
         """Store event and broadcast to all active subscribers."""
-        self.logs[session_id].append(event)
-
-        # Fan-out to all active subscribers for this session
         async with self._lock:
+            self.logs[session_id].append(event)
             dead_queues = set()
             for queue in self._subscribers[session_id]:
                 try:
@@ -36,7 +35,8 @@ class InMemoryEventStore(BaseEventStore):
 
     async def get_events(self, session_id: str) -> list[Event]:
         """Get all historical events for a session."""
-        return self.logs[session_id]
+        async with self._lock:
+            return list(self.logs[session_id])
 
     async def stream(self, session_id: str) -> AsyncIterator[Event]:
         """

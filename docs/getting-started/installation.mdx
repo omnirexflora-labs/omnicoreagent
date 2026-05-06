@@ -85,7 +85,6 @@ The base install stays focused on the core agent harness. Add heavier production
 | `s3` | AWS S3 and Cloudflare R2 workspace storage |
 | `serve` | OmniServe REST/SSE API server |
 | `background` | APScheduler background task execution |
-| `observability` | Opik tracing |
 | `tokenizer` | tiktoken token counting |
 | `all` | Every optional integration |
 
@@ -145,7 +144,7 @@ python -c "import omnicoreagent; print(omnicoreagent.__version__)"
     pip install "omnicoreagent[redis]"
     ```
 
-    Use `postgres`, `mongodb`, `s3`, `serve`, `background`, `observability`, or `all` for other optional integrations.
+    Use `postgres`, `mongodb`, `s3`, `serve`, `background`, `tokenizer`, or `all` for other optional integrations.
   </Accordion>
   <Accordion title="Getting Help">
     If you encounter issues:

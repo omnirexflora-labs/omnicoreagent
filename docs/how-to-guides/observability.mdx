@@ -6,7 +6,7 @@ icon: 'chart-line'
 
 # Production Observability & Metrics
 
-Monitor your agents with built-in metrics and distributed tracing.
+Monitor your agents with built-in metrics, event streams, and in-house trace summaries.
 
 ---
 
@@ -38,7 +38,28 @@ tracing service.
 - Total runtime
 - Average response time
 
+---
+
+## Agent Trace
+
+Every run emits typed events. You can retrieve the full event history or ask
+OmniCoreAgent to build a compact trace summary from those events.
+
+```python
+trace = await agent.get_trace(session_id=result["session_id"])
+
+print(trace["summary"]["duration_ms"])
+print(trace["summary"]["tool_calls"])
+print(trace["summary"]["tool_errors"])
+
+for step in trace["steps"]:
+    print(step["event_type"], step["elapsed_ms"], step["payload"])
+```
+
+The trace is intentionally internal and dependency-free. It is the base layer for
+debugging, feedback loops, and future evaluation workflows.
+
 <Tip>
-Use metrics for cost and performance monitoring. Deeper agent tracing and
-observability will be handled by OmniCoreAgent's internal observability layer.
+Use metrics for cost and performance monitoring, events for live UI streaming,
+and traces for compact session-level debugging.
 </Tip>
