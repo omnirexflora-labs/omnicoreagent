@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 from omnicoreagent.core.runtime import (
     builder,
     construction,
+    execution,
     harness_tools,
     normalization,
     summaries,
@@ -196,18 +197,14 @@ class OmniCoreAgent:
         if not self._initialized:
             await self.initialize()
 
-        if self.guardrail:
-            result = self.guardrail.check(query)
-            if not result.is_safe:
-                runtime_logger().warning(
-                    f"Query blocked by guardrail: {result.message}"
-                )
-                return {
-                    "response": f"I'm sorry, but I cannot process this request due to safety concerns: {result.message}",
-                    "session_id": session_id,
-                    "agent_name": self.name,
-                    "guardrail_result": result.to_dict(),
-                }
+        blocked_response = execution.blocked_guardrail_response(
+            guardrail=self.guardrail,
+            query=query,
+            session_id=session_id,
+            agent_name=self.name,
+        )
+        if blocked_response:
+            return blocked_response
 
         if not session_id:
             session_id = self.generate_session_id()
@@ -215,14 +212,6 @@ class OmniCoreAgent:
         runtime_prompt = self.prompt_builder.build(
             system_instruction=self.system_instruction
         )
-
-        extra_kwargs = {
-            "sessions": self.mcp_client.sessions if self.mcp_client else {},
-            "mcp_tools": self.mcp_client.available_tools if self.mcp_client else {},
-            "local_tools": self.local_tools,
-            "session_id": session_id,
-            "sub_agents": self.sub_agents,
-        }
 
         response = await self.agent.run(
             system_prompt=runtime_prompt,
@@ -232,19 +221,20 @@ class OmniCoreAgent:
             message_history=self.memory_router.get_messages,
             debug=self.debug,
             event_router=self.event_router.append,
-            **extra_kwargs,
+            **execution.build_agent_run_kwargs(
+                mcp_client=self.mcp_client,
+                local_tools=self.local_tools,
+                session_id=session_id,
+                sub_agents=self.sub_agents,
+            ),
         )
 
-        if isinstance(response, dict) and "usage" in response:
-            self._usage().incr(response["usage"])
-            return {
-                "response": response["answer"],
-                "session_id": session_id,
-                "agent_name": self.name,
-                "metric": response["usage"],
-            }
-
-        return {"response": response, "session_id": session_id, "agent_name": self.name}
+        return execution.format_run_response(
+            response=response,
+            session_id=session_id,
+            agent_name=self.name,
+            usage_getter=self._usage,
+        )
 
     async def get_metrics(self) -> Dict[str, Any]:
         """
