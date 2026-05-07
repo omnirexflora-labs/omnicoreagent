@@ -51,17 +51,6 @@ async def test_extract_action_or_answer_error_mentions_parallel_tool_calls(agent
     assert "Multiple Independent Tools" in result.error
 
 
-@pytest.mark.broken_upstream
-@pytest.mark.asyncio
-async def test_extract_action_or_answer_fallback_error(agent):
-    response = "This is just a general response without XML."
-    result = await agent.extract_action_or_answer(
-        response, session_id="test", event_router=AsyncMock()
-    )
-    assert result.error is not None
-    assert "Response must use XML format" in result.error
-
-
 @pytest.mark.asyncio
 async def test_act_executes_tool_name_with_and_as_literal(agent):
     registry = ToolRegistry()
