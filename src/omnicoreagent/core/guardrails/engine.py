@@ -1,291 +1,17 @@
-import re
-import logging
-from typing import Dict, List, Tuple, Optional, Any
-from enum import Enum
-import unicodedata
-import json
-from dataclasses import dataclass, field
-from datetime import datetime
+from __future__ import annotations
+
 import hashlib
-from collections import defaultdict
+import logging
+import re
 import sys
+import unicodedata
+from collections import Counter
+from datetime import datetime
+from math import log2
+from typing import Any
 
-
-class ThreatLevel(Enum):
-    SAFE = "safe"
-    LOW_RISK = "low_risk"
-    SUSPICIOUS = "suspicious"
-    DANGEROUS = "dangerous"
-    CRITICAL = "critical"
-
-
-@dataclass
-class DetectionConfig:
-    """Configuration for detection parameters"""
-
-    strict_mode: bool = False
-    sensitivity: float = 1.0
-    enable_ml_fallback: bool = False
-    max_input_length: int = 10000
-    enable_encoding_detection: bool = True
-    enable_heuristic_analysis: bool = True
-    enable_sequential_analysis: bool = True
-    enable_entropy_analysis: bool = True
-    log_level: str = "INFO"
-    allowlist_patterns: List[str] = field(default_factory=list)
-    blocklist_patterns: List[str] = field(default_factory=list)
-
-
-@dataclass
-class DetectionResult:
-    """Structured detection result"""
-
-    threat_level: ThreatLevel
-    is_safe: bool
-    flags: List[str]
-    confidence: float
-    threat_score: int
-    message: str
-    recommendations: List[str]
-    input_length: int
-    input_hash: str
-    detection_time: datetime
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization"""
-        result = {
-            "threat_level": self.threat_level.value,
-            "is_safe": self.is_safe,
-            "flags": self.flags,
-            "confidence": self.confidence,
-            "threat_score": self.threat_score,
-            "message": self.message,
-            "recommendations": self.recommendations,
-            "input_length": self.input_length,
-            "input_hash": self.input_hash,
-            "detection_time": self.detection_time.isoformat(),
-        }
-        result.update(self.metadata)
-        return result
-
-    def to_json(self) -> str:
-        """Serialize to JSON"""
-        return json.dumps(self.to_dict())
-
-
-class PatternManager:
-    """Manages attack patterns with versioning and updates"""
-
-    def __init__(self):
-        self.pattern_version = "1.2.0"
-        self._compiled_patterns = {}
-        self._load_patterns()
-
-    def _load_patterns(self):
-        """Load and compile all patterns"""
-        self.patterns = {
-            "instruction_override": {
-                "weight": 12,
-                "requires_target": True,
-                "patterns": [
-                    (
-                        r"\b(?:ignore|disregard|forget|override|bypass|skip|cancel|break)\s+(?:all|any|previous|prior|above|earlier|your|the|existing|current)\s+(?:instructions?|rules?|prompts?|commands?|directives?|guidelines?|constraints?|safeguards?)",
-                        True,
-                    ),
-                    (
-                        r"\b(?:new|updated|revised|latest|current|different|alternate|secret|hidden)\s+(?:instructions?|commands?|directives?|rules?|prompt|system)\s*[:=]\s*(?=\w)",
-                        True,
-                    ),
-                    (
-                        r"(?:system|assistant|model|ai)\s*[:=]\s*(?:ignore|disregard|override|bypass|break|remove)",
-                        True,
-                    ),
-                    (
-                        r"\b(?:clear|erase|delete|remove|reset|wipe)\s+(?:all\s+)?(?:previous|prior|existing|current|original)\s+(?:instructions?|context|memory|rules?|prompt|system)",
-                        True,
-                    ),
-                    (
-                        r"from\s+now\s+on\s*,\s*(?:you are|you're|you will be)\s*(?:no longer\s+)?(?:bound|constrained|restricted|limited)",
-                        True,
-                    ),
-                ],
-            },
-            "prompt_extraction": {
-                "weight": 10,
-                "requires_target": True,
-                "patterns": [
-                    (
-                        r"\b(?:show|tell|give|reveal|display|print|output|repeat|echo|expose|disclose|leak|dump)\s+(?:me\s+)?(?:all\s+)?(?:your\s+|the\s+)?(?:exact\s+|full\s+|complete\s+|entire\s+)?(?:system\s+|hidden\s+|secret\s+|initial\s+|original\s+|base\s+|internal\s+|private\s+)?(?:prompt|instructions?|directives?|guidelines?|configuration|settings|rules?)",
-                        True,
-                    ),
-                    (
-                        r"what\s+(?:are|were|is|was)\s+(?:your|the)\s+(?:exact\s+|full\s+|complete\s+)?(?:initial|original|system|base|hidden|secret|full|complete|internal)\s+(?:prompt|instructions?|config|settings)",
-                        True,
-                    ),
-                    (
-                        r"(?:print|dump|export|output|write)\s+(?:your\s+|the\s+)?(?:system\s+)?(?:prompt|instructions?|config|settings|file)",
-                        True,
-                    ),
-                    (
-                        r"repeat\s+(?:everything\s+)?(?:you\s+were\s+told|your\s+instructions?|back\s+to\s+me|word\s+for\s+word)",
-                        True,
-                    ),
-                    (
-                        r"what\s+(?:are|were)\s+you\s+(?:originally\s+|initially\s+)?(?:told|instructed|programmed)",
-                        True,
-                    ),
-                ],
-            },
-            "jailbreak_roleplay": {
-                "weight": 9,
-                "requires_target": False,
-                "patterns": [
-                    (
-                        r"\b(?:enter|enable|activate|switch\s+to|go\s+into|turn\s+on|initiate)\s+(?:the\s+)?(?:developer|admin|god|sudo|debug|root|super|unrestricted|unsafe|privileged|advanced)\s+(?:mode|state|protocol)",
-                        True,
-                    ),
-                    (
-                        r"\b(?:DAN|STAN|MONG|EVIE|UCAR)\s*(?:v?\d+\.?\d*)?\s*(?:mode|protocol)?\s*(?:activate|enabled|on)",
-                        True,
-                    ),
-                    (
-                        r"\b(?:jailbreak|break\s+free|escape|become\s+(?:unfiltered|unrestricted|uncensored|unlimited|free)|remove\s+(?:all\s+)?restrictions)",
-                        True,
-                    ),
-                    (
-                        r"you\s+(?:are\s+now|have\s+become|will\s+be|must\s+be)\s+(?:an?\s+)?(?:unrestricted|unfiltered|uncensored|unlimited|free|rogue)\s+(?:AI|assistant|bot|model|entity)",
-                        True,
-                    ),
-                    (
-                        r"from\s+now\s+on\s*,?\s*you\s+(?:will\s+)?(?:not\s+)?(?:have|follow|obey|respect|adhere\s+to)\s+(?:any\s+)?(?:rules?|restrictions?|limitations?|guidelines?|policies?|safeguards?)",
-                        True,
-                    ),
-                    (
-                        r"(?:pretend|imagine|assume|act\s+as\s+if)\s+you\s+are\s+(?:an?\s+)?(?:unrestricted|unfiltered|hacked|compromised)",
-                        True,
-                    ),
-                ],
-            },
-            "delimiter_injection": {
-                "weight": 11,
-                "requires_target": False,
-                "patterns": [
-                    (
-                        r"<[/\s]*(?:system|instruction|prompt|admin|root|user_role|assistant_role|command|directive)[^>]*>",
-                        False,
-                    ),
-                    (
-                        r"\[\s*[/\s]*(?:system|instruction|prompt|admin|root|command)[^\]]*\]",
-                        False,
-                    ),
-                    (
-                        r"```+\s*(?:system|instruction|prompt|config|admin|root|command|directive)",
-                        False,
-                    ),
-                    (
-                        r"(?:---|===|\*\*\*)\s*(?:end|start|begin|new|reset)\s+(?:of\s+)?(?:system|instructions?|prompt|context|conversation)",
-                        False,
-                    ),
-                    (
-                        r"(?:system|prompt|instructions?)\s*(?:start|begin|end|terminate)\s*:",
-                        False,
-                    ),
-                ],
-            },
-            "context_manipulation": {
-                "weight": 8,
-                "requires_target": False,
-                "patterns": [
-                    (
-                        r"\b(?:end|stop|terminate|close|finish|halt|pause)\s+(?:of\s+)?(?:system|context|instructions?|prompt|conversation)\s*\.?\s*(?:now|here|immediately)?\s*(?:start|begin|new|initiate|resume)",
-                        False,
-                    ),
-                    (
-                        r"this\s+(?:message|input|text|prompt|query|request)\s+(?:overrides?|replaces?|cancels?|supersedes?|invalidates?)\s+(?:all|everything|previous|prior|above)",
-                        True,
-                    ),
-                    (
-                        r"(?:CRITICAL|URGENT|EMERGENCY|PRIORITY|IMPORTANT|VITAL)\s*(?:INSTRUCTION|COMMAND|DIRECTIVE|MESSAGE|ALERT)\s*[:=]\s*(?:ignore|override|disregard|bypass)",
-                        True,
-                    ),
-                    (
-                        r"highest\s+(?:priority|importance)\s+(?:instruction|command|directive|request)",
-                        True,
-                    ),
-                    (
-                        r"treat\s+this\s+as\s+(?:the\s+)?(?:only|main|primary|real)\s+(?:instruction|command|prompt)",
-                        True,
-                    ),
-                ],
-            },
-            "payload_encoding": {
-                "weight": 7,
-                "requires_target": False,
-                "patterns": [
-                    (r"(?:\\x[0-9a-f]{2,}|%[0-9a-f]{2}|&#x?[0-9a-f]+;)", False),
-                    (r"\\u[0-9a-f]{4,}", False),
-                    (
-                        r"\b(?:base64|rot13|rot-?13|hex|unicode|url|binary)\s*(?:encode|decode|decrypt|encrypt)\s*[:=\(]",
-                        False,
-                    ),
-                    (r"[0-9a-f]{8,}", False),
-                    (
-                        r"(?:[A-Za-z0-9+/]{4}){4,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?",
-                        False,
-                    ),
-                ],
-            },
-            "obfuscation_techniques": {
-                "weight": 6,
-                "requires_target": False,
-                "patterns": [
-                    (
-                        r"\b(?:s\s*e\s*c\s*r\s*e\s*t|i\s*n\s*j\s*e\s*c\s*t|o\s*v\s*e\s*r\s*r\s*i\s*d\s*e)",
-                        False,
-                    ),
-                    (r"([^\[\]{}()\"',:\n])\1{3,}", False),
-                    (r"[^\w\s{}\[\]():,\"'.=/\\-]{4,}", False),
-                    (
-                        r"\b[a-zA-Z]*\d[a-zA-Z]+\d[a-zA-Z]*\d[a-zA-Z]*\b",
-                        False,
-                    ),
-                ],
-            },
-        }
-
-        for group_name, config in self.patterns.items():
-            compiled_patterns = []
-            for pattern_str, is_strict in config["patterns"]:
-                try:
-                    compiled = re.compile(
-                        pattern_str, re.IGNORECASE | re.MULTILINE | re.UNICODE
-                    )
-                    compiled_patterns.append((compiled, is_strict))
-                except re.error as e:
-                    logging.warning(f"Failed to compile pattern {pattern_str}: {e}")
-            config["patterns"] = compiled_patterns
-
-    def get_patterns(self) -> Dict:
-        """Get all compiled patterns"""
-        return self.patterns
-
-    def add_pattern(
-        self, group: str, pattern: str, weight: int = 5, requires_target: bool = False
-    ):
-        """Add a new pattern at runtime"""
-        if group not in self.patterns:
-            self.patterns[group] = {
-                "weight": weight,
-                "requires_target": requires_target,
-                "patterns": [],
-            }
-
-        try:
-            compiled = re.compile(pattern, re.IGNORECASE | re.MULTILINE | re.UNICODE)
-            self.patterns[group]["patterns"].append((compiled, requires_target))
-        except re.error as e:
-            logging.error(f"Failed to add pattern {pattern}: {e}")
+from omnicoreagent.core.guardrails.models import DetectionConfig, DetectionResult, ThreatLevel
+from omnicoreagent.core.guardrails.patterns import PatternManager
 
 
 class DetectionEngine:
@@ -310,7 +36,7 @@ class DetectionEngine:
         logger.setLevel(getattr(logging, self.config.log_level))
         return logger
 
-    def _compile_benign_patterns(self) -> List[re.Pattern]:
+    def _compile_benign_patterns(self) -> list[re.Pattern]:
         """Compile benign context patterns"""
         patterns = [
             r"help me (?:ignore|avoid|overcome|manage|deal with|handle)",
@@ -511,7 +237,7 @@ class DetectionEngine:
         original_lower = original.lower()
         return any(indicator in original_lower for indicator in benign_indicators)
 
-    def _pattern_matching(self, normalized: str) -> Tuple[int, List[str]]:
+    def _pattern_matching(self, normalized: str) -> tuple[int, list[str]]:
         """Pattern matching analysis"""
         score = 0
         flags = []
@@ -567,7 +293,7 @@ class DetectionEngine:
 
     def _heuristic_analysis(
         self, original: str, normalized: str
-    ) -> Tuple[int, List[str]]:
+    ) -> tuple[int, list[str]]:
         """Advanced heuristic analysis"""
         score = 0
         flags = []
@@ -678,7 +404,7 @@ class DetectionEngine:
 
         return score, flags
 
-    def _sequential_analysis(self, text: str) -> Tuple[int, List[str]]:
+    def _sequential_analysis(self, text: str) -> tuple[int, list[str]]:
         """Analyze sequence and structure"""
         score = 0
         flags = []
@@ -714,7 +440,7 @@ class DetectionEngine:
 
         return score, flags
 
-    def _entropy_analysis(self, text: str) -> Tuple[int, List[str]]:
+    def _entropy_analysis(self, text: str) -> tuple[int, list[str]]:
         """Analyze entropy and randomness"""
         score = 0
         flags = []
@@ -722,12 +448,9 @@ class DetectionEngine:
         if len(text) < 20:
             return score, flags
 
-        import math
-        from collections import Counter
-
         freq = Counter(text)
         entropy = -sum(
-            (count / len(text)) * math.log2(count / len(text))
+            (count / len(text)) * log2(count / len(text))
             for count in freq.values()
         )
 
@@ -750,7 +473,7 @@ class DetectionEngine:
 
     def _analyze_with_reduced_sensitivity(
         self, original: str, normalized: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Reduced sensitivity analysis for likely benign inputs"""
         flags = []
         score = 0
@@ -802,7 +525,7 @@ class DetectionEngine:
     def _calculate_threat(
         self,
         score: int,
-        flags: List[str],
+        flags: list[str],
         original: str,
         input_hash: str,
         start_time: datetime,
@@ -867,8 +590,8 @@ class DetectionEngine:
         )
 
     def _generate_recommendations(
-        self, threat_level: ThreatLevel, flags: List[str], score: int
-    ) -> List[str]:
+        self, threat_level: ThreatLevel, flags: list[str], score: int
+    ) -> list[str]:
         """Generate actionable recommendations"""
         recommendations = []
         flag_str = " ".join(flags).lower()
@@ -936,7 +659,7 @@ class DetectionEngine:
     def _create_result(
         self,
         threat_level: ThreatLevel,
-        flags: List[str],
+        flags: list[str],
         score: int,
         message: str,
         input_length: int,
@@ -981,81 +704,3 @@ class DetectionEngine:
                 f"Input analyzed: {result.threat_level.value} "
                 f"(score: {result.threat_score})"
             )
-
-
-class PromptInjectionGuard:
-    """
-    Production-ready prompt injection guardrail.
-
-    Features:
-    - Multi-stage detection pipeline
-    - Advanced normalization and obfuscation detection
-    - Context-aware pattern matching
-    - Heuristic and entropy analysis
-    - Sequential pattern detection
-    - Comprehensive logging and monitoring
-    - Extensible pattern management
-    - Structured results with recommendations
-    """
-
-    def __init__(self, config: Optional[DetectionConfig] = None):
-        self.config = config or DetectionConfig()
-        self.detection_engine = DetectionEngine(self.config)
-        self.detection_stats = defaultdict(int)
-
-    def check(self, user_input: str) -> DetectionResult:
-        """
-        Analyze input for prompt injection attempts.
-
-        Args:
-            user_input: The text to analyze
-
-        Returns:
-            DetectionResult: Structured analysis result
-        """
-        result = self.detection_engine.analyze(user_input)
-
-        self.detection_stats[result.threat_level.value] += 1
-        self.detection_stats["total_checks"] += 1
-
-        return result
-
-    def check_batch(self, inputs: List[str]) -> List[DetectionResult]:
-        """Analyze multiple inputs"""
-        return [self.check(input_text) for input_text in inputs]
-
-    def get_stats(self) -> Dict[str, Any]:
-        """Get detection statistics"""
-        return {
-            "total_checks": self.detection_stats["total_checks"],
-            "safe_count": self.detection_stats.get("safe", 0),
-            "low_risk_count": self.detection_stats.get("low_risk", 0),
-            "suspicious_count": self.detection_stats.get("suspicious", 0),
-            "dangerous_count": self.detection_stats.get("dangerous", 0),
-            "critical_count": self.detection_stats.get("critical", 0),
-        }
-
-    def update_config(self, **kwargs):
-        """Update configuration"""
-        for key, value in kwargs.items():
-            if hasattr(self.config, key):
-                setattr(self.config, key, value)
-
-    def add_custom_pattern(self, group: str, pattern: str, **kwargs):
-        """Add custom detection pattern"""
-        self.detection_engine.pattern_manager.add_pattern(group, pattern, **kwargs)
-
-
-def create_guard(
-    strict: bool = False, sensitivity: float = 1.0, **kwargs
-) -> PromptInjectionGuard:
-    """Factory function to create a guard instance"""
-    config = DetectionConfig(strict_mode=strict, sensitivity=sensitivity, **kwargs)
-    return PromptInjectionGuard(config)
-
-
-def quick_check(user_input: str, strict: bool = False) -> Dict[str, Any]:
-    """Quick one-off check for prompt injection"""
-    guard = create_guard(strict=strict)
-    result = guard.check(user_input)
-    return result.to_dict()
