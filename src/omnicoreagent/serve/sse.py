@@ -4,10 +4,14 @@ OmniServe SSE (Server-Sent Events) Utilities.
 Provides utilities for streaming agent events via SSE.
 """
 
+import asyncio
 import json
 from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 from omnicoreagent.core.logging import logger
+
+from .serialization import normalize_event, normalize_run_result
+from .state import get_agent_name
 
 if TYPE_CHECKING:
     from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent as AgentType
@@ -30,24 +34,12 @@ def format_sse_event(event_type: str, data: dict) -> str:
     return f"event: {event_type}\ndata: {json_data}\n\n"
 
 
-def format_sse_data(data: dict) -> str:
-    """
-    Format data as an SSE data-only event.
-
-    Args:
-        data: The event data to send
-
-    Returns:
-        SSE-formatted string with just data field
-    """
-    json_data = json.dumps(data, default=str)
-    return f"data: {json_data}\n\n"
-
-
 async def run_agent_stream(
     agent: AgentType,
     query: str,
     session_id: str,
+    *,
+    timeout_seconds: int | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Run the agent and stream result via SSE.
@@ -67,17 +59,31 @@ async def run_agent_stream(
     yield format_sse_event("session", {"session_id": session_id, "status": "started"})
 
     try:
-        # Run agent directly (blocking/async wait)
-        response = await agent.run(query, session_id=session_id)
+        run_coro = agent.run(query, session_id=session_id)
+        if timeout_seconds and timeout_seconds > 0:
+            response = await asyncio.wait_for(run_coro, timeout=timeout_seconds)
+        else:
+            response = await run_coro
 
-        # Yield complete event with result
+        normalized = normalize_run_result(
+            response,
+            agent_name=get_agent_name(agent),
+        )
+
         yield format_sse_event(
             "complete",
             {
                 "session_id": session_id,
-                "response": response.get("response", ""),
-                "agent_name": response.get("agent_name", ""),
-                "metric": response.get("metric"),
+                **normalized,
+            },
+        )
+    except asyncio.TimeoutError:
+        logger.error(f"OmniServe SSE: Agent run timed out after {timeout_seconds}s")
+        yield format_sse_event(
+            "error",
+            {
+                "error": "Request timed out",
+                "session_id": session_id,
             },
         )
 
@@ -116,14 +122,7 @@ async def stream_session_events(
 
     try:
         async for event in agent.stream_events(session_id):
-            if hasattr(event, "model_dump"):
-                event_data = event.model_dump()
-            elif hasattr(event, "dict"):
-                event_data = event.dict()
-            elif isinstance(event, dict):
-                event_data = event
-            else:
-                event_data = {"data": str(event)}
+            event_data = normalize_event(event)
 
             event_type = event_data.get("type", "event")
             if hasattr(event_type, "value"):

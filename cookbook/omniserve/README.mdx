@@ -25,7 +25,6 @@ def create_agent():
 |---------|-------------|------------|
 | [cli_agent.py](./cli_agent.py) | Agent file for CLI deployment | `omniserve run --agent cli_agent.py` |
 | [python_api.py](./python_api.py) | Full Python API with all config options | `python python_api.py` |
-| [resilience_patterns.py](./resilience_patterns.py) | Retry, circuit breaker, metrics | `python resilience_patterns.py` |
 
 ---
 
@@ -122,14 +121,15 @@ docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omniserver
 ### Cloud Deployment (Cloud Run, AWS Fargate, Railway)
 
 The generated Dockerfile sets:
-- `OMNICOREAGENT_ARTIFACTS_DIR=/tmp/workspace/artifacts`
-- `OMNICOREAGENT_MEMORY_DIR=/tmp/memories`
+- `OMNICOREAGENT_WORKSPACE_BACKEND=local`
+- `OMNICOREAGENT_WORKSPACE_DIR=/tmp/workspace`
 
-For S3/R2 memory, pass credentials at runtime:
+For S3/R2 workspace persistence, pass backend and credentials at runtime:
 
 ```bash
 docker run -p 8000:8000 \
   -e LLM_API_KEY=$LLM_API_KEY \
+  -e OMNICOREAGENT_WORKSPACE_BACKEND=s3 \
   -e AWS_S3_BUCKET=my-bucket \
   -e AWS_ACCESS_KEY_ID=... \
   -e AWS_SECRET_ACCESS_KEY=... \

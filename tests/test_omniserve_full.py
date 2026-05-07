@@ -1,11 +1,9 @@
-
 import os
 import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
 from fastapi.testclient import TestClient
 from omnicoreagent import OmniCoreAgent, OmniServe, OmniServeConfig
-from omnicoreagent.serve.resilience import CircuitBreaker, CircuitBreakerConfig, CircuitBreakerOpenError
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +24,7 @@ class TestConfiguration:
         assert config.port == 8000
         assert config.workers == 1
         assert config.api_prefix == ""
-        
+
     def test_code_overrides_defaults(self):
         config = OmniServeConfig(port=9090, host="127.0.0.1")
         assert config.port == 9090
@@ -34,17 +32,21 @@ class TestConfiguration:
 
     def test_env_vars_override_code(self):
         """Verify OMNISERVE_* env vars override code values."""
-        with patch.dict(os.environ, {
-            "OMNISERVE_PORT": "7777",
-            "OMNISERVE_AUTH_ENABLED": "true",
-            "OMNISERVE_LOG_LEVEL": "DEBUG"
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "OMNISERVE_PORT": "7777",
+                "OMNISERVE_AUTH_ENABLED": "true",
+                "OMNISERVE_LOG_LEVEL": "DEBUG",
+            },
+        ):
             # Code says port 8000, but Env says 7777
             config = OmniServeConfig(port=8000, auth_enabled=False)
-            
+
             assert config.port == 7777
             assert config.auth_enabled is True
             assert config.log_level == "DEBUG"
+
 
 # =============================================================================
 # Test Middleware & Security
@@ -65,21 +67,49 @@ class TestMiddleware:
         # 1. No token -> 401
         resp = client.post("/run/sync", json={"query": "test"})
         assert resp.status_code == 401
-        
+
         # 2. Invalid token -> 401
-        resp = client.post("/run/sync", json={"query": "test"}, headers={"Authorization": "Bearer wrong"})
+        resp = client.post(
+            "/run/sync",
+            json={"query": "test"},
+            headers={"Authorization": "Bearer wrong"},
+        )
         assert resp.status_code == 401
 
         # 3. Valid token -> 200
         # Mock run method for success
         mock_agent.run = AsyncMock(return_value={"response": "test"})
-        resp = client.post("/run/sync", json={"query": "test"}, headers={"Authorization": "Bearer secret123"})
+        resp = client.post(
+            "/run/sync",
+            json={"query": "test"},
+            headers={"Authorization": "Bearer secret123"},
+        )
+        assert resp.status_code == 200
+
+    def test_auth_respects_api_prefix_and_public_paths(self, mock_agent):
+        config = OmniServeConfig(
+            api_prefix="/api",
+            auth_enabled=True,
+            auth_token="secret123",
+        )
+        server = OmniServe(agent=mock_agent, config=config)
+        client = TestClient(server.app)
+
+        assert client.get("/api/health").status_code == 200
+        assert client.get("/prometheus").status_code == 200
+        assert client.post("/api/run/sync", json={"query": "test"}).status_code == 401
+
+        mock_agent.run = AsyncMock(return_value={"response": "test"})
+        resp = client.post(
+            "/api/run/sync",
+            json={"query": "test"},
+            headers={"Authorization": "Bearer secret123"},
+        )
         assert resp.status_code == 200
 
     def test_cors_middleware(self, mock_agent):
         config = OmniServeConfig(
-            cors_enabled=True, 
-            cors_origins=["https://example.com"]
+            cors_enabled=True, cors_origins=["https://example.com"]
         )
         server = OmniServe(agent=mock_agent, config=config)
         client = TestClient(server.app)
@@ -89,11 +119,12 @@ class TestMiddleware:
             "/run/sync",
             headers={
                 "Origin": "https://example.com",
-                "Access-Control-Request-Method": "POST"
-            }
+                "Access-Control-Request-Method": "POST",
+            },
         )
         assert resp.status_code == 200
         assert resp.headers["access-control-allow-origin"] == "https://example.com"
+
 
 # =============================================================================
 # Test Endpoints
@@ -115,7 +146,7 @@ class TestEndpoints:
                 "steps": [{"index": 1, "event_type": "user_message"}],
             }
         )
-        
+
         server = OmniServe(agent=agent, config=OmniServeConfig())
         return TestClient(server.app)
 
@@ -151,43 +182,65 @@ class TestEndpoints:
         assert data["summary"]["tool_calls"] == 1
         assert data["steps"][0]["event_type"] == "user_message"
 
-# =============================================================================
-# Test Resilience
-# =============================================================================
-class TestResilience:
-    @pytest.mark.asyncio
-    async def test_circuit_breaker_transitions(self):
-        config = CircuitBreakerConfig(
-            failure_threshold=2, 
-            success_threshold=1, 
-            timeout=0.1
+    def test_run_normalizes_string_agent_result(self):
+        agent = MagicMock(spec=OmniCoreAgent)
+        agent.name = "StringAgent"
+        agent.generate_session_id.return_value = "string-session"
+        agent.run = AsyncMock(return_value="plain response")
+
+        server = OmniServe(agent=agent, config=OmniServeConfig())
+        client = TestClient(server.app)
+
+        resp = client.post("/run/sync", json={"query": "Hello"})
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "response": "plain response",
+            "session_id": "string-session",
+            "agent_name": "StringAgent",
+            "metric": None,
+        }
+
+    def test_request_timeout_is_enforced_for_sync_run(self):
+        agent = MagicMock(spec=OmniCoreAgent)
+        agent.name = "TimeoutAgent"
+        agent.generate_session_id.return_value = "timeout-session"
+
+        async def slow_run(*args, **kwargs):
+            await asyncio.sleep(2)
+            return {"response": "too late"}
+
+        agent.run = AsyncMock(side_effect=slow_run)
+
+        server = OmniServe(
+            agent=agent,
+            config=OmniServeConfig(request_timeout=1),
         )
-        breaker = CircuitBreaker("test-breaker", config)
+        client = TestClient(server.app)
 
-        # 1. Closed state (Initial)
-        assert breaker.state.value == "closed"
+        resp = client.post("/run/sync", json={"query": "slow"})
 
-        # 2. Failure 1
-        breaker._record_failure(Exception("fail"))
-        assert breaker.state.value == "closed"
+        assert resp.status_code == 504
+        assert "timed out" in resp.json()["detail"]
 
-        # 3. Failure 2 -> Opens circuit
-        breaker._record_failure(Exception("fail"))
-        assert breaker.state.value == "open"
+    def test_request_metrics_are_per_app_instance(self):
+        agent_one = MagicMock(spec=OmniCoreAgent)
+        agent_one.name = "One"
+        agent_one.generate_session_id.return_value = "one-session"
+        agent_one.run = AsyncMock(return_value={"response": "one"})
 
-        # 4. Call while OPEN -> CircuitBreakerOpenError
-        with pytest.raises(CircuitBreakerOpenError):
-            async with breaker:
-                pass
+        agent_two = MagicMock(spec=OmniCoreAgent)
+        agent_two.name = "Two"
+        agent_two.generate_session_id.return_value = "two-session"
+        agent_two.run = AsyncMock(return_value={"response": "two"})
 
-        # 5. Wait for timeout -> HALF_OPEN (simulated by time passing)
-        await asyncio.sleep(0.15)
-        # Next call attempts to transition to HALF_OPEN
-        
-        # We simulate a successful call
-        async with breaker:
-            # Inside this block, state should ideally be checked or transition happens on entry
-            pass
-            
-        # After success, should be CLOSED again
-        assert breaker.state.value == "closed"
+        client_one = TestClient(OmniServe(agent_one, OmniServeConfig()).app)
+        client_two = TestClient(OmniServe(agent_two, OmniServeConfig()).app)
+
+        assert client_one.post("/run/sync", json={"query": "hello"}).status_code == 200
+
+        metrics_one = client_one.get("/prometheus").text
+        metrics_two = client_two.get("/prometheus").text
+
+        assert "omniserve_requests_total 1" in metrics_one
+        assert "omniserve_requests_total 0" in metrics_two

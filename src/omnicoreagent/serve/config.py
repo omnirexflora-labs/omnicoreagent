@@ -93,11 +93,15 @@ class OmniServeConfig(BaseModel):
     cors_headers: list[str] = Field(
         default_factory=lambda: ["*"], description="Allowed CORS headers"
     )
-    cors_credentials: bool = Field(default=True, description="Allow credentials in CORS")
+    cors_credentials: bool = Field(
+        default=True, description="Allow credentials in CORS"
+    )
 
     # Authentication
     auth_enabled: bool = Field(default=False, description="Enable Bearer token auth")
-    auth_token: Optional[str] = Field(default=None, description="Bearer token for authentication")
+    auth_token: Optional[str] = Field(
+        default=None, description="Bearer token for authentication"
+    )
 
     # Logging
     request_logging: bool = Field(default=True, description="Log incoming requests")
@@ -108,14 +112,18 @@ class OmniServeConfig(BaseModel):
 
     # Rate limiting
     rate_limit_enabled: bool = Field(default=False, description="Enable rate limiting")
-    rate_limit_requests: int = Field(default=100, description="Max requests per time window")
-    rate_limit_window: int = Field(default=60, description="Rate limit time window in seconds")
+    rate_limit_requests: int = Field(
+        default=100, description="Max requests per time window"
+    )
+    rate_limit_window: int = Field(
+        default=60, description="Rate limit time window in seconds"
+    )
 
     @model_validator(mode="after")
     def apply_env_overrides(self) -> "OmniServeConfig":
         """
         Apply environment variable overrides AFTER initial values are set.
-        
+
         Environment variables always take priority over code-defined values.
         """
         # Server settings

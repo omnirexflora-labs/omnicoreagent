@@ -75,7 +75,6 @@ def cli():
     "--port", "-p", default=None, type=int, help="Port to bind to (default: 8000)"
 )
 @click.option("--workers", "-w", default=1, type=int, help="Number of workers")
-@click.option("--reload", is_flag=True, help="Enable auto-reload for development")
 @click.option("--no-docs", is_flag=True, help="Disable Swagger UI")
 @click.option("--cors-origins", default="*", help="Comma-separated CORS origins")
 @click.option("--auth-token", default=None, help="Enable auth with this token")
@@ -87,7 +86,6 @@ def run(
     host: Optional[str],
     port: Optional[int],
     workers: int,
-    reload: bool,
     no_docs: bool,
     cors_origins: str,
     auth_token: Optional[str],
@@ -145,14 +143,14 @@ def run(
     click.echo(f"  • CORS: {config.cors_origins}")
     click.echo("")
     click.echo(
-        "💡 Available options: --auth-token, --rate-limit, --cors-origins, --no-docs, --reload"
+        "💡 Available options: --auth-token, --rate-limit, --cors-origins, --no-docs"
     )
     click.echo("   Run 'omniserve run --help' for all options")
     click.echo("=" * 50)
     click.echo("")
 
     server = OmniServe(loaded_agent, config=config)
-    server.start(reload=reload)
+    server.start()
 
 
 @cli.command()
@@ -223,7 +221,7 @@ def quickstart(
     click.echo("  • CORS: * (all origins)")
     click.echo("")
     click.echo("💡 For more control, use 'omniserve run --agent my_agent.py'")
-    click.echo("   Options: --auth-token, --rate-limit, --cors-origins, --reload")
+    click.echo("   Options: --auth-token, --rate-limit, --cors-origins")
     click.echo("=" * 50)
     click.echo("")
     click.echo("Test with:")

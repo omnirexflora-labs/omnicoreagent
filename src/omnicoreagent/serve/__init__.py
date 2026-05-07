@@ -1,15 +1,14 @@
 """
 OmniServe - Production-ready FastAPI server for OmniCoreAgent.
 
-Transforms any agent into a full REST/SSE API server with:
+Transforms an OmniCoreAgent into a REST/SSE API server with:
 - SSE streaming for agent responses
 - Health and readiness endpoints
 - Session management
 - Metrics and tools listing
 - Configurable middleware (CORS, auth, logging, rate limiting)
 - Prometheus metrics endpoint
-- Agent event streaming and in-house trace summaries
-- Retry logic and circuit breaker for resilience
+- Agent event streaming and compact event trace summaries
 - Proper lifecycle management
 
 Usage:
@@ -29,49 +28,13 @@ CLI Usage:
     omniserve run --agent my_agent.py --port 8000
 
 Extensibility:
-    Users can import individual components to extend functionality:
-    - OmniServeConfig: Server configuration
-    - RetryConfig, with_retry: Retry logic
-    - CircuitBreaker, get_circuit_breaker: Circuit breaker pattern
-    - get_metrics: Access Prometheus metrics
+    Users can import OmniServeConfig for server configuration.
 """
 
 from .server import OmniServe
 from .config import OmniServeConfig
 
-# Resilience utilities for user extension
-from .resilience import (
-    RetryConfig,
-    RetryStrategy,
-    CircuitBreaker,
-    CircuitBreakerConfig,
-    CircuitBreakerOpenError,
-    with_retry,
-    retry_async,
-    resilient_call,
-    get_circuit_breaker,
-    get_llm_circuit_breaker,
-)
-
-# Observability utilities
-from .observability import get_metrics, SimpleMetrics
-
 __all__ = [
-    # Main classes
     "OmniServe",
     "OmniServeConfig",
-    # Resilience
-    "RetryConfig",
-    "RetryStrategy",
-    "CircuitBreaker",
-    "CircuitBreakerConfig",
-    "CircuitBreakerOpenError",
-    "with_retry",
-    "retry_async",
-    "resilient_call",
-    "get_circuit_breaker",
-    "get_llm_circuit_breaker",
-    # Observability
-    "get_metrics",
-    "SimpleMetrics",
 ]

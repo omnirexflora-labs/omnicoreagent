@@ -34,14 +34,6 @@ __all__ = [
     # OmniServe
     "OmniServe",
     "OmniServeConfig",
-    # Resilience utilities
-    "RetryConfig",
-    "RetryStrategy",
-    "CircuitBreaker",
-    "CircuitBreakerConfig",
-    "with_retry",
-    "retry_async",
-    "get_metrics",
 ]
 
 _EXPORTS = {
@@ -83,16 +75,6 @@ _OPTIONAL_EXPORTS = {
     ),
     "OmniServe": ("omnicoreagent.serve", "serve"),
     "OmniServeConfig": ("omnicoreagent.serve", "serve"),
-    "RetryConfig": ("omnicoreagent.serve.resilience", "serve"),
-    "RetryStrategy": ("omnicoreagent.serve.resilience", "serve"),
-    "CircuitBreaker": ("omnicoreagent.serve.resilience", "serve"),
-    "CircuitBreakerConfig": (
-        "omnicoreagent.serve.resilience",
-        "serve",
-    ),
-    "with_retry": ("omnicoreagent.serve.resilience", "serve"),
-    "retry_async": ("omnicoreagent.serve.resilience", "serve"),
-    "get_metrics": ("omnicoreagent.serve.observability", "serve"),
 }
 
 

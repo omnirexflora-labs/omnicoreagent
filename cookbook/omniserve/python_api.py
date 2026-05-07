@@ -24,7 +24,6 @@ configuration of ALL available options:
     ✓ Logging: request logging, log level
     ✓ Timeout: request timeout
     ✓ Tools: Custom local tools
-    ✓ Resilience: Retry logic, Circuit breaker (importable)
 
 =============================================================================
 TEST THE API
@@ -132,9 +131,7 @@ Use tools when appropriate.""",
     },
     local_tools=tools,
     debug=False,
-    agent_config={
-        "memory_tool_backend": "local"  # Use "s3" or "r2" for cloud storage
-    },
+    agent_config={"workspace_storage": {"backend": "local"}},
 )
 
 

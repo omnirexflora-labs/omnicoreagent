@@ -5,17 +5,15 @@ The primary entry point for turning an OmniCoreAgent into a production-ready
 FastAPI server.
 """
 
-import time
 from typing import TYPE_CHECKING, Any, Optional
 
 from fastapi import FastAPI
 
 from omnicoreagent.core.logging import logger
 
+from .app_factory import create_omniserve_app
 from .config import OmniServeConfig
-from .lifespan import agent_lifespan
-from .middleware import setup_all_middleware
-from .routes import create_agent_router
+from .state import get_agent_name
 
 if TYPE_CHECKING:
     from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent as AgentType
@@ -73,9 +71,9 @@ class OmniServe:
         """
         self.agent = agent
         self.config = config or OmniServeConfig()
-        self.title = title or f"{agent.name} API"
+        self.title = title or f"{get_agent_name(agent)} API"
         self.description = description or (
-            f"OmniServe API for {agent.name}. Powered by OmniCoreAgent framework."
+            f"OmniServe API for {get_agent_name(agent)}. Powered by OmniCoreAgent."
         )
 
         self.app = self._create_app()
@@ -87,42 +85,17 @@ class OmniServe:
         Returns:
             Configured FastAPI application
         """
-        # Create FastAPI app with lifespan
-        app = FastAPI(
+        return create_omniserve_app(
+            agent=self.agent,
+            config=self.config,
             title=self.title,
             description=self.description,
-            version="1.0.0",
-            lifespan=agent_lifespan,
-            docs_url="/docs" if self.config.enable_docs else None,
-            redoc_url="/redoc" if self.config.enable_redoc else None,
         )
-
-        # Store agent and config in app state
-        app.state.agent = self.agent
-        app.state.config = self.config
-        app.state.start_time = time.time()
-
-        # Setup middleware
-        setup_all_middleware(app, self.config)
-
-        # Setup observability metrics
-        from .observability import setup_observability
-
-        setup_observability(app, self.config, service_name=self.agent.name)
-
-        # Include routes with optional prefix
-        router = create_agent_router()
-        app.include_router(router, prefix=self.config.api_prefix)
-
-        logger.info(f"OmniServe: Created FastAPI app for agent '{self.agent.name}'")
-
-        return app
 
     def start(
         self,
         host: Optional[str] = None,
         port: Optional[int] = None,
-        reload: bool = False,
         workers: Optional[int] = None,
     ) -> None:
         """
@@ -131,13 +104,7 @@ class OmniServe:
         Args:
             host: Host to bind to (overrides config)
             port: Port to bind to (overrides config)
-            reload: Enable auto-reload for development
             workers: Number of worker processes (overrides config)
-
-        Note:
-            Reload mode is not supported when using OmniServe directly.
-            For hot-reload during development, use:
-                uvicorn your_module:app --reload
         """
         import uvicorn
 
@@ -150,21 +117,10 @@ class OmniServe:
             f"OmniServe: Swagger UI available at http://{final_host}:{final_port}/docs"
         )
 
-        # Note: reload requires an import string, not an app instance
-        # When using OmniServe class directly, we cannot support reload
-        if reload:
-            logger.warning(
-                "OmniServe: Hot reload is not supported with dynamic agent loading. "
-                "The server will start without reload. "
-                "For hot-reload, create a module with 'app = OmniServe(agent).app' "
-                "and run: uvicorn your_module:app --reload"
-            )
-
         uvicorn.run(
             self.app,
             host=final_host,
             port=final_port,
-            reload=False,  # Cannot use reload with app instance
             workers=final_workers,
             log_level=self.config.log_level.lower(),
         )
