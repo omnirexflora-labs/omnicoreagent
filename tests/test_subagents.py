@@ -29,7 +29,9 @@ class SubagentPromptBuilder:
 
 
 class TestSubagentFactory:
-    def test_subagent_config_caps_steps_and_preserves_harness_settings(self, model_config):
+    def test_subagent_config_caps_steps_and_preserves_harness_settings(
+        self, model_config
+    ):
         factory = SubagentFactory(
             base_model_config=model_config,
             agent_config={
@@ -91,7 +93,9 @@ class TestSubagentFactory:
     def test_subagent_local_tools_none_when_parent_has_none(self, factory):
         assert factory._build_subagent_local_tools() is None
 
-    def test_subagent_local_tools_preserves_non_registry_integrations(self, model_config):
+    def test_subagent_local_tools_preserves_non_registry_integrations(
+        self, model_config
+    ):
         local_tools = object()
         factory = SubagentFactory(
             base_model_config=model_config,
@@ -171,7 +175,9 @@ class TestSubagentFactory:
     @pytest.mark.asyncio
     async def test_run_subagent_handles_non_string_response(self, factory):
         with patch.object(OmniCoreAgent, "run", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = {"response": {"saved": True, "path": "/workspace/x"}}
+            mock_run.return_value = {
+                "response": {"saved": True, "path": "/workspace/x"}
+            }
 
             result = await factory.run_subagent(
                 name="researcher",
@@ -184,7 +190,9 @@ class TestSubagentFactory:
         assert "saved" in result["data"]["summary"]
 
     @pytest.mark.asyncio
-    async def test_run_subagent_handles_exceptions_and_cleans_active_agent(self, factory):
+    async def test_run_subagent_handles_exceptions_and_cleans_active_agent(
+        self, factory
+    ):
         agent = MagicMock()
         agent.run = AsyncMock(side_effect=RuntimeError("boom"))
         agent.cleanup = AsyncMock()
@@ -293,7 +301,9 @@ class TestSubagentFactory:
         assert result["data"]["results"][0]["error"] == "worker crashed"
 
     @pytest.mark.asyncio
-    async def test_run_parallel_subagents_applies_defaults_for_sparse_specs(self, factory):
+    async def test_run_parallel_subagents_applies_defaults_for_sparse_specs(
+        self, factory
+    ):
         factory.run_subagent = AsyncMock(
             return_value={
                 "status": "success",
@@ -349,8 +359,7 @@ class TestSubagentFactory:
         await spawn_tool.execute(
             {
                 "subagents_json": (
-                    '[{"name": "test", "role": "r", "task": "t", '
-                    '"output_path": "p"}]'
+                    '[{"name": "test", "role": "r", "task": "t", "output_path": "p"}]'
                 )
             }
         )
@@ -423,7 +432,9 @@ class TestSubagentFactory:
 
 class TestOmniCoreAgentSubagents:
     @pytest.mark.asyncio
-    async def test_enable_subagents_disabled_does_not_register_spawn_tool(self, model_config):
+    async def test_enable_subagents_disabled_does_not_register_spawn_tool(
+        self, model_config
+    ):
         agent = OmniCoreAgent(
             name="CoreHarness",
             system_instruction="Test",
@@ -529,6 +540,48 @@ class TestOmniCoreAgentSubagents:
         assert "spawn_subagents" in tool_names
         assert "workspace_file_write" in tool_names
         assert "workspace_file_view" in tool_names
+
+        await agent.cleanup()
+
+    @pytest.mark.asyncio
+    async def test_initialized_runtime_prompt_includes_dynamic_subagent_surface(self):
+        agent = OmniCoreAgent(
+            name="Harness",
+            system_instruction="Test",
+            model_config={"provider": "ollama", "model": "llama3"},
+            agent_config={"enable_subagents": True, "guardrail_mode": "off"},
+        )
+
+        await agent.initialize()
+        runtime_tools = await agent.agent.tool_runtime_registry.prepare_tools(
+            agent.local_tools
+        )
+        session_state = agent.agent.session_state_store.reset_for_run(
+            session_id="prompt-session",
+            debug=False,
+        )
+
+        async def message_history(agent_name, session_id):
+            return []
+
+        await agent.agent.prepare_initial_messages(
+            session_state=session_state,
+            system_prompt="base system",
+            session_id="prompt-session",
+            message_history=message_history,
+            mcp_tools={},
+            local_tools=runtime_tools,
+            sub_agents=None,
+        )
+
+        prompt = session_state.messages[0].content
+        assert '<extension name="subagents_harness">' in prompt
+        assert "<dynamic_spawn>" in prompt
+        assert "<subagents_json>" in prompt
+        assert '<extension name="workspace_files">' in prompt
+        assert "spawn_subagents:" in prompt
+        assert "workspace_file_view:" in prompt
+        assert "workspace_file_write:" in prompt
 
         await agent.cleanup()
 

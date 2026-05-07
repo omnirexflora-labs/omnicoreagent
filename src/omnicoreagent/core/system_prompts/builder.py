@@ -1,6 +1,7 @@
 """Prompt builders and runtime prompt context assembly."""
 
 import inspect
+import re
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -62,30 +63,43 @@ class AgentPromptContextBuilder:
         sub_agents: list[Any] | None = None,
     ) -> str:
         sections = [base_system_prompt]
+        available_tools = self.available_tool_names(tools_section)
 
-        if self.enable_advanced_tool_use:
+        if self.enable_advanced_tool_use and "tools_retriever" in available_tools:
             sections.append(tools_retriever_additional_prompt)
 
+        skills_context = ""
         if self.enable_agent_skills and self.skill_manager:
+            skills_context = self.skill_manager.get_skills_context_xml()
+
+        has_skill_tools = {
+            "read_skill_file",
+            "run_skill_script",
+        }.issubset(available_tools)
+        if skills_context and has_skill_tools:
             sections.append(agent_skills_additional_prompt)
 
         subagents_prompt = build_subagents_additional_prompt(
-            enable_dynamic_spawn=self.enable_subagents,
+            enable_dynamic_spawn=(
+                self.enable_subagents and "spawn_subagents" in available_tools
+            ),
             enable_configured_subagents=bool(sub_agents),
         )
         if subagents_prompt:
             sections.append(subagents_prompt)
 
-        if self.enable_workspace_files:
+        has_workspace_tools = {
+            "workspace_file_view",
+            "workspace_file_write",
+        }.issubset(available_tools)
+        if self.enable_workspace_files and has_workspace_tools:
             sections.append(workspace_files_additional_prompt)
 
-        if self.is_tool_offload_enabled():
+        if self.is_tool_offload_enabled() and "read_artifact" in available_tools:
             sections.append(artifact_tool_additional_prompt)
 
-        if self.enable_agent_skills and self.skill_manager:
-            skills_context = self.skill_manager.get_skills_context_xml()
-            if skills_context:
-                sections.append(f"[AVAILABLE SKILLS]\n{skills_context}")
+        if skills_context and has_skill_tools:
+            sections.append(f"[AVAILABLE SKILLS]\n{skills_context}")
 
         if sub_agents:
             sub_agents_registry = await self.render_sub_agents_registry(sub_agents)
@@ -93,6 +107,14 @@ class AgentPromptContextBuilder:
 
         sections.append(f"[AVAILABLE TOOLS REGISTRY]\n{tools_section}")
         return "\n".join(sections)
+
+    def available_tool_names(self, tools_section: str) -> set[str]:
+        return {
+            match.group("name")
+            for match in re.finditer(
+                r"(?m)^(?P<name>[A-Za-z_][\w]*)\s*:", tools_section
+            )
+        }
 
     def inject_current_datetime(self, messages: list[Message]) -> None:
         for index in range(len(messages) - 1, -1, -1):

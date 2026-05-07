@@ -32,7 +32,15 @@ async def test_build_system_prompt_includes_enabled_harness_context():
 
     prompt = await builder.build_system_prompt(
         base_system_prompt="base system",
-        tools_section="search: Search docs",
+        tools_section=(
+            "tools_retriever: Discover tools\n"
+            "spawn_subagents: Spawn focused workers\n"
+            "workspace_file_view: Read workspace files\n"
+            "workspace_file_write: Write workspace files\n"
+            "read_artifact: Read artifacts\n"
+            "read_skill_file: Read skills\n"
+            "run_skill_script: Run skill scripts"
+        ),
         sub_agents=[FakeSubAgent()],
     )
 
@@ -58,7 +66,7 @@ async def test_build_system_prompt_includes_enabled_harness_context():
     assert 'area name="files"' in prompt
     assert 'area name="artifacts"' in prompt
     assert "read_artifact" in prompt
-    assert "[AVAILABLE TOOLS REGISTRY]\nsearch: Search docs" in prompt
+    assert "[AVAILABLE TOOLS REGISTRY]\ntools_retriever: Discover tools" in prompt
 
 
 @pytest.mark.asyncio
@@ -72,7 +80,8 @@ async def test_subagent_prompt_dynamic_only_matches_spawn_tool_surface():
         base_system_prompt="base system",
         tools_section=(
             "spawn_subagents: Spawn focused workers\n"
-            "workspace_file_view: Read workspace files"
+            "workspace_file_view: Read workspace files\n"
+            "workspace_file_write: Write workspace files"
         ),
         sub_agents=None,
     )
@@ -85,6 +94,31 @@ async def test_subagent_prompt_dynamic_only_matches_spawn_tool_surface():
     assert "workspace_file_view" in prompt
     assert 'area name="files"' in prompt
     assert "[AVAILABLE SUB AGENTS REGISTRY]" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_extension_prompts_require_backing_tools_in_tools_section():
+    builder = AgentPromptContextBuilder(
+        enable_advanced_tool_use=True,
+        enable_subagents=True,
+        enable_workspace_files=True,
+        enable_agent_skills=True,
+        is_tool_offload_enabled=lambda: True,
+        skill_manager=FakeSkillManager(),
+    )
+
+    prompt = await builder.build_system_prompt(
+        base_system_prompt="base system",
+        tools_section="No tools available",
+        sub_agents=None,
+    )
+
+    assert 'extension name="tools_retriever_extension"' not in prompt
+    assert 'extension name="subagents_harness"' not in prompt
+    assert 'extension name="workspace_files"' not in prompt
+    assert 'extension name="artifact_tool"' not in prompt
+    assert 'extension name="agent_skills"' not in prompt
+    assert "[AVAILABLE SKILLS]" not in prompt
 
 
 @pytest.mark.asyncio
@@ -148,3 +182,15 @@ async def test_render_sub_agents_registry_handles_empty_list():
     builder = AgentPromptContextBuilder(is_tool_offload_enabled=lambda: False)
 
     assert await builder.render_sub_agents_registry([]) == "No sub-agents available."
+
+
+def test_available_tool_names_extracts_rendered_registry_entries():
+    builder = AgentPromptContextBuilder(is_tool_offload_enabled=lambda: False)
+
+    assert builder.available_tool_names(
+        "Available tools:\n\n"
+        "workspace_file_view: Inspect files\n"
+        "  - path: string (required) - Path\n\n"
+        "read_artifact: Read artifact\n"
+        "No colon in this line"
+    ) == {"workspace_file_view", "read_artifact"}
