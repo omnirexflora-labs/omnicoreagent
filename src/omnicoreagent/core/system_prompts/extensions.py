@@ -1,346 +1,95 @@
 """Optional harness extension prompt blocks."""
 
-sub_agents_additional_prompt = """
-<extension name="sub_agents_extension">
+
+def build_subagents_additional_prompt(
+    *,
+    enable_dynamic_spawn: bool,
+    enable_configured_subagents: bool,
+) -> str:
+    """Build subagent guidance that matches the enabled runtime surfaces."""
+    if not (enable_dynamic_spawn or enable_configured_subagents):
+        return ""
+
+    sections = [
+        """
+<extension name="subagents_harness">
   <description>
-    Orchestration system for delegating tasks to specialized sub-agents.
-    Sub-agents are execution workers for focused tasks, including coding,
-    review, analysis, writing, data work, and domain-specific operations.
+    Built-in subagent orchestration for delegated execution. This is part of
+    the agent harness: use it when work benefits from focused workers,
+    specialization, independent exploration, review, or parallel execution.
   </description>
-  <activation_flag>use_sub_agents</activation_flag>
-
-  <sub_agents_extension>
-    <meta>
-      <name>Sub-Agent Extension</name>
-      <purpose>
-        Enables intelligent task delegation to specialized sub-agents for complex operations
-        that require domain expertise, multi-step reasoning, or parallel processing.
-      </purpose>
-    </meta>
-
-    <core_mandate>
-      Sub-agents are specialized workers for delegated execution.
-      Always consult AVAILABLE SUB AGENT REGISTRY to discover capabilities before
-      attempting to handle complex tasks yourself or claiming inability.
-    </core_mandate>
-
-    <when_to_use_sub_agents>
-      Delegate to sub-agents for:
-
-      <complex_reasoning>
-        Analysis, evaluation, or decision-making tasks:
-        - "Analyze this sales data and provide insights"
-        - "Review this document and suggest improvements"
-        - "Compare these options and recommend the best one"
-        - "Research this topic and produce a structured output"
-      </complex_reasoning>
-
-      <domain_expertise>
-        Tasks requiring specialized knowledge:
-        - "Write code to solve this problem"
-        - "Design a system architecture for this use case"
-        - "Create a marketing strategy for this product"
-        - "Explain this complex technical concept"
-      </domain_expertise>
-
-      <multi_step_workflows>
-        Tasks requiring orchestration of multiple steps:
-        - "Gather data, analyze it, and create a report"
-        - "Search for information, synthesize it, and make recommendations"
-        - "Process these files, extract insights, and send summary"
-      </multi_step_workflows>
-
-      <parallel_processing>
-        Tasks that benefit from concurrent execution:
-        - "Check weather in multiple cities"
-        - "Analyze several documents simultaneously"
-        - "Gather information from multiple sources at once"
-      </parallel_processing>
-
-      <iterative_tasks>
-        Tasks requiring refinement or back-and-forth:
-        - "Brainstorm ideas and refine them"
-        - "Generate content and iterate based on feedback"
-        - "Solve problems through trial and error"
-      </iterative_tasks>
-    </when_to_use_sub_agents>
-
-    <sub_agent_discovery>
-      <workflow>
-        Before claiming inability to handle a complex task:
-        1. Check AVAILABLE SUB AGENT REGISTRY for relevant capabilities
-        2. Match user request to sub-agent descriptions and specialties
-        3. Invoke appropriate sub-agent(s) if match exists
-        4. Only explain limitations if no suitable sub-agent exists
-      </workflow>
-
-      <registry_interpretation>
-        The AVAILABLE SUB AGENT REGISTRY contains:
-        - agent_name: Identifier for invocation
-        - description: Sub-agent's specialty and capabilities
-        - parameters: Required inputs with types
-
-        Match requests to sub-agents based on:
-        - Domain/specialty (code, research, writing, analysis)
-        - Task complexity (reasoning, multi-step, expertise)
-        - Expected outputs (insights, recommendations, content)
-      </registry_interpretation>
-    </sub_agent_discovery>
-
-    <invocation_syntax>
-      Sub-agents are invoked using <agent_call> syntax:
-
-      <single_invocation>
-        <agent_call>
-          <agent_name>weather_agent</agent_name>
-          <parameters>
-            <query>New York</query>
-          </parameters>
-        </agent_call>
-      </single_invocation>
-
-      <concurrent_invocation>
-        Use <agent_calls> (plural) for parallel execution:
-        <agent_calls>
-          <agent_call>
-            <agent_name>weather_agent</agent_name>
-            <parameters>
-              <query>New York</query>
-            </parameters>
-          </agent_call>
-          <agent_call>
-            <agent_name>weather_agent</agent_name>
-            <parameters>
-              <query>San Francisco</query>
-            </parameters>
-          </agent_call>
-        </agent_calls>
-      </concurrent_invocation>
-    </invocation_syntax>
-
-    <invocation_patterns>
-      <single_agent>
-        Use single <agent_call> when:
-        - Task maps to one clear specialty
-        - Sequential processing is needed
-        - Output of one step feeds into next
-
-        <example>
-          <thought>User needs weather info - found weather_agent in registry.</thought>
-          <agent_call>
-            <agent_name>weather_agent</agent_name>
-            <parameters>
-              <query>Boston</query>
-            </parameters>
-          </agent_call>
-        </example>
-      </single_agent>
-
-      <concurrent_agents>
-        Use <agent_calls> (plural) when:
-        - Task has independent components that can run in parallel
-        - Need information from multiple domains simultaneously
-        - Time-sensitive tasks benefit from concurrency
-
-        <example>
-          <thought>Travel info needs weather and recommendations - independent tasks, run concurrently.</thought>
-          <agent_calls>
-            <agent_call>
-              <agent_name>weather_agent</agent_name>
-              <parameters>
-                <query>Paris, France</query>
-              </parameters>
-            </agent_call>
-            <agent_call>
-              <agent_name>recommendation_agent</agent_name>
-              <parameters>
-                <query>Tourist attractions in Paris</query>
-              </parameters>
-            </agent_call>
-          </agent_calls>
-        </example>
-      </concurrent_agents>
-
-      <sequential_agents>
-        Chain multiple <agent_call>s when output of first informs second:
-
-        <example>
-          <thought>First gather source material, then analyze the output.</thought>
-          <agent_call>
-            <agent_name>research_agent</agent_name>
-            <parameters>
-              <query>Latest developments in quantum computing</query>
-            </parameters>
-          </agent_call>
-          <!-- Wait for observation -->
-          <thought>Source material collected, now analyze the papers returned.</thought>
-          <agent_call>
-            <agent_name>analysis_agent</agent_name>
-            <parameters>
-              <data>[research results from previous observation]</data>
-            </parameters>
-          </agent_call>
-        </example>
-      </sequential_agents>
-    </invocation_patterns>
-
-    <observation_contract>
-      <format>
-        <observation_marker>OBSERVATION RESULT FROM SUB-AGENTS</observation_marker>
-        <observations>
-          <observation>
-            <agent_name>[sub-agent name]</agent_name>
-            <status>success|error|partial</status>
-            <output>[sub-agent result]</output>
-          </observation>
-        </observations>
-        <observation_marker>END OF OBSERVATIONS</observation_marker>
-      </format>
-
-      <processing_rules>
-        <must>Wait for all observations before reasoning about results</must>
-        <must>Interpret and synthesize sub-agent outputs, don't just repeat them</must>
-        <must>Handle errors gracefully, inform user if sub-agent fails</must>
-        <must>Combine multiple sub-agent outputs into coherent final answer</must>
-      </processing_rules>
-    </observation_contract>
-
-    <mandatory_behaviors>
-      <must>Check AVAILABLE SUB AGENT REGISTRY for complex tasks</must>
-      <must>Use <agent_call> with <agent_name> to invoke sub-agents</must>
-      <must>Match parameters exactly to registry definitions</must>
-      <must>Use <agent_calls> (plural) for concurrent independent tasks</must>
-      <must>Process observations before generating final answer</must>
-      <must>Prefer sub-agents for delegated execution when their capabilities match the task</must>
-      <must_not>Invent sub-agent names not in registry</must_not>
-      <must_not>Skip registry check and claim inability without verification</must_not>
-    </mandatory_behaviors>
-
-    <error_handling>
-      <on_agent_error>
-        Report to user: "The [agent_name] encountered an error: [error_message]"
-        Suggest alternatives or explain limitations clearly.
-      </on_agent_error>
-
-      <on_missing_agent>
-        After checking registry thoroughly:
-        "I checked available sub-agents but didn't find one specialized in [capability]."
-        Explain limitation or suggest alternatives.
-      </on_missing_agent>
-    </error_handling>
-
-    <practical_examples>
-      <example name="weather_query">
-        <user_request>"What's the weather in New York?"</user_request>
-        <thought>User needs weather info - checking registry, found weather_agent.</thought>
-        <agent_call>
-          <agent_name>weather_agent</agent_name>
-          <parameters>
-            <query>New York</query>
-          </parameters>
-        </agent_call>
-      </example>
-
-      <example name="complex_analysis">
-        <user_request>"Analyze the performance metrics in this file and give recommendations"</user_request>
-        <thought>Analysis and recommendations needed - found analysis_agent in registry.</thought>
-        <agent_call>
-          <agent_name>analysis_agent</agent_name>
-          <parameters>
-            <data>[file content]</data>
-            <focus>Performance metrics analysis with actionable recommendations</focus>
-          </parameters>
-        </agent_call>
-      </example>
-
-      <example name="parallel_execution">
-        <user_request>"Compare weather in NYC, SF, and Chicago"</user_request>
-        <thought>Independent parallel tasks - use concurrent calls.</thought>
-        <agent_calls>
-          <agent_call>
-            <agent_name>weather_agent</agent_name>
-            <parameters>
-              <query>New York City</query>
-            </parameters>
-          </agent_call>
-          <agent_call>
-            <agent_name>weather_agent</agent_name>
-            <parameters>
-              <query>San Francisco</query>
-            </parameters>
-          </agent_call>
-          <agent_call>
-            <agent_name>weather_agent</agent_name>
-            <parameters>
-              <query>Chicago</query>
-            </parameters>
-          </agent_call>
-        </agent_calls>
-      </example>
-
-      <example name="research_and_synthesis">
-        <user_request>"Research AI trends and summarize key developments"</user_request>
-        <thought>Multi-step research and synthesis - checking for research capabilities.</thought>
-        <agent_call>
-          <agent_name>research_agent</agent_name>
-          <parameters>
-            <query>Current AI industry trends and key developments</query>
-          </parameters>
-        </agent_call>
-      </example>
-    </practical_examples>
-
-    <success_metrics>
-      This extension is working correctly when:
-      <metric>Complex reasoning tasks trigger sub-agent delegation</metric>
-      <metric>Agent checks registry before claiming inability</metric>
-      <metric>Concurrent tasks use <agent_calls> for parallel execution</metric>
-      <metric>Sub-agent outputs are synthesized, not just repeated</metric>
-      <metric>Parameters match registry definitions exactly</metric>
-    </success_metrics>
-  </sub_agents_extension>
-</extension>
 """.strip()
+    ]
 
-
-dynamic_subagents_additional_prompt = """
-<extension name="dynamic_subagents_extension">
-  <description>
-    Enables dynamic spawning of focused subagents during a task. This is part
-    of the agent harness: use it when work benefits from specialization,
-    independent exploration, verification, or parallel execution.
-  </description>
-
-  <available_tools>
+    if enable_dynamic_spawn:
+        sections.append(
+            """
+  <dynamic_spawn>
     <tool name="spawn_subagents">
-      Spawn one or more focused subagents. Always provide an array of specs;
-      use one item for a single worker or multiple items for parallel workers.
+      Spawn one or more focused subagents. Always provide an array of specs.
+      Use one item for a single worker, or multiple items when independent
+      work can run in parallel.
     </tool>
-  </available_tools>
 
-  <workspace_contract>
-    Subagents save their output to workspace file paths using workspace_file_*
-    tools. After spawning subagents, read their output paths with workspace_file_view
-    before synthesizing the final answer.
-  </workspace_contract>
+    <workspace_contract>
+      Spawned subagents write their outputs to workspace file paths. After
+      spawning subagents, read the returned output paths with workspace_file_view
+      before synthesizing or acting on their results.
+    </workspace_contract>
 
-  <when_to_use>
-    <case>Complex tasks with multiple independent work tracks.</case>
-    <case>Tasks where focused workers or specialist viewpoints improve quality.</case>
-    <case>Verification, review, or gap-filling work that can happen beside the main task.</case>
-    <case>One focused worker is useful, but still call spawn_subagents with a one-item array.</case>
-  </when_to_use>
+    <schema_rules>
+      <rule>Call spawn_subagents as a normal tool_call using the AVAILABLE TOOLS REGISTRY schema.</rule>
+      <rule>The tool expects subagents_json: a JSON array string of worker specs.</rule>
+      <rule>Each spec needs name, role, task, and output_path.</rule>
+    </schema_rules>
 
-  <rules>
-    <rule>Use spawn_subagents when tasks can be delegated to focused workers.</rule>
-    <rule>When tasks do not depend on each other, include all specs in one call so they run in parallel.</rule>
-    <rule>Give each subagent a clear role, task, and output_path.</rule>
-    <rule>Use workspace file paths such as /workspace/{task_name}/subagent_{name}/output.md.</rule>
-    <rule>Do not delegate the immediate blocking step if you need the result before continuing.</rule>
-    <rule>After subagents complete, synthesize their outputs instead of repeating them.</rule>
-  </rules>
+    <rules>
+      <rule>Use spawn_subagents when tasks can be delegated to focused workers.</rule>
+      <rule>When tasks do not depend on each other, include all specs in one call so they run in parallel.</rule>
+      <rule>Give each subagent a clear role, task, and output_path.</rule>
+      <rule>Use workspace file paths such as /workspace/{task_name}/subagent_{name}/output.md.</rule>
+      <rule>Do not delegate the immediate blocking step if you need the result before continuing.</rule>
+      <rule>After subagents complete, synthesize their outputs instead of repeating them.</rule>
+    </rules>
+  </dynamic_spawn>
+""".strip()
+        )
+
+    if enable_configured_subagents:
+        sections.append(
+            """
+  <configured_subagents>
+    If AVAILABLE SUB AGENTS REGISTRY is present, those are explicit
+    application-provided workers. Use them only when the task clearly matches a
+    registered worker.
+
+    <invocation_rules>
+      <rule>Invoke one registered worker with <agent_call>.</rule>
+      <rule>Invoke multiple independent registered workers with <agent_calls>.</rule>
+      <rule>Use only agent names shown in AVAILABLE SUB AGENTS REGISTRY.</rule>
+      <rule>Match the registry parameter names exactly.</rule>
+    </invocation_rules>
+  </configured_subagents>
+""".strip()
+        )
+
+    if enable_dynamic_spawn and enable_configured_subagents:
+        sections.append(
+            """
+  <selection_rule>
+    Use spawn_subagents for ad hoc focused workers. Use configured subagents
+    only when the request clearly maps to a registered application-provided
+    worker.
+  </selection_rule>
+""".strip()
+        )
+
+    sections.append(
+        """
 </extension>
 """.strip()
+    )
+    return "\n\n".join(sections)
 
 
 tools_retriever_additional_prompt = """

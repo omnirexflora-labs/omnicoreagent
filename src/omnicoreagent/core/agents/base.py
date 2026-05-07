@@ -84,8 +84,7 @@ class BaseReactAgent:
         self._limits_enabled = request_limit > 0 or total_tokens_limit > 0
         self.enable_advanced_tool_use = enable_advanced_tool_use
         self.enable_subagents = enable_subagents
-
-        self.enable_workspace_files = enable_workspace_files
+        self.enable_workspace_files = enable_workspace_files or enable_subagents
         self.enable_agent_skills = enable_agent_skills
         self.skill_manager = None
         self.usage_limits = UsageLimits(

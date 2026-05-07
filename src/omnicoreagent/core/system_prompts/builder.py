@@ -10,8 +10,7 @@ from omnicoreagent.core.logging import logger
 from omnicoreagent.core.system_prompts.extensions import (
     agent_skills_additional_prompt,
     artifact_tool_additional_prompt,
-    dynamic_subagents_additional_prompt,
-    sub_agents_additional_prompt,
+    build_subagents_additional_prompt,
     tools_retriever_additional_prompt,
     workspace_files_additional_prompt,
 )
@@ -49,7 +48,7 @@ class AgentPromptContextBuilder:
     ):
         self.enable_advanced_tool_use = enable_advanced_tool_use
         self.enable_subagents = enable_subagents
-        self.enable_workspace_files = enable_workspace_files
+        self.enable_workspace_files = enable_workspace_files or enable_subagents
         self.enable_agent_skills = enable_agent_skills
         self.is_tool_offload_enabled = is_tool_offload_enabled
         self.skill_manager = skill_manager
@@ -70,11 +69,12 @@ class AgentPromptContextBuilder:
         if self.enable_agent_skills and self.skill_manager:
             sections.append(agent_skills_additional_prompt)
 
-        if self.enable_subagents:
-            sections.append(dynamic_subagents_additional_prompt)
-
-        if sub_agents:
-            sections.append(sub_agents_additional_prompt)
+        subagents_prompt = build_subagents_additional_prompt(
+            enable_dynamic_spawn=self.enable_subagents,
+            enable_configured_subagents=bool(sub_agents),
+        )
+        if subagents_prompt:
+            sections.append(subagents_prompt)
 
         if self.enable_workspace_files:
             sections.append(workspace_files_additional_prompt)

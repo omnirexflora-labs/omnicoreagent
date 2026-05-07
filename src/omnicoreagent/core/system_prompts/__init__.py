@@ -8,8 +8,7 @@ from omnicoreagent.core.system_prompts.builder import (
 from omnicoreagent.core.system_prompts.extensions import (
     agent_skills_additional_prompt,
     artifact_tool_additional_prompt,
-    dynamic_subagents_additional_prompt,
-    sub_agents_additional_prompt,
+    build_subagents_additional_prompt,
     tools_retriever_additional_prompt,
     workspace_files_additional_prompt,
 )
@@ -26,8 +25,7 @@ __all__ = [
     "SUMMARIZER_MEMORY_CONSTRUCTOR_PROMPT",
     "agent_skills_additional_prompt",
     "artifact_tool_additional_prompt",
-    "dynamic_subagents_additional_prompt",
-    "sub_agents_additional_prompt",
+    "build_subagents_additional_prompt",
     "tools_retriever_additional_prompt",
     "workspace_files_additional_prompt",
 ]
