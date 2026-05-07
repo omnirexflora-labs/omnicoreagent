@@ -54,7 +54,7 @@ agent_config = {
 
 ## Layer 2: Tool Response Offloading
 
-Large tool responses are automatically saved to files, with only a **preview** in context. The agent can retrieve full content on demand using built-in tools.
+Large tool responses are automatically saved to the workspace `artifacts/` area, with only a **preview** in context. The agent can retrieve full content on demand using built-in artifact tools.
 
 ```python
 agent_config = {
@@ -83,7 +83,7 @@ Automatically available when offloading is enabled:
 | `read_artifact(artifact_id)` | Read full content when needed |
 | `tail_artifact(artifact_id, lines)` | Read last N lines (great for logs) |
 | `search_artifact(artifact_id, query)` | Search within large responses |
-| `list_artifacts()` | See all offloaded data in current session |
+| `list_artifacts()` | See all offloaded artifacts in current session |
 
 ---
 

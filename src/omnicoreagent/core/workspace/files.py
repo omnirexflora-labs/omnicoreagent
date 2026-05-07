@@ -2,14 +2,15 @@ import json
 from pathlib import Path
 from typing import Any
 
-from omnicoreagent.core.tools.workspace_files.base import AbstractWorkspaceFilesBackend
-from omnicoreagent.core.workspace_storage import WorkspaceStorage
+from omnicoreagent.core.workspace.base import AbstractWorkspaceFilesBackend
+from omnicoreagent.core.workspace.paths import WORKSPACE_FILE_PATH_PREFIXES
+from omnicoreagent.core.workspace.storage import WorkspaceStorage
 
 
 class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
     """File operations rooted inside the active workspace storage."""
 
-    _PATH_PREFIXES = ("workspace", "workspace_files", "files")
+    _PATH_PREFIXES = WORKSPACE_FILE_PATH_PREFIXES
 
     def __init__(self, storage: WorkspaceStorage):
         self.storage = storage

@@ -5,9 +5,9 @@ from typing import Optional
 class AbstractWorkspaceFilesBackend(ABC):
     """Storage contract for agent workspace files.
 
-    Implementations are rooted inside the active workspace storage backend
-    and expose file-style operations for scratchpads, notes, logs, task
-    progress, and generated outputs.
+    Implementations are rooted inside the active workspace files area and expose
+    file-style operations for scratchpads, notes, logs, task progress, and
+    generated outputs.
     """
 
     @abstractmethod

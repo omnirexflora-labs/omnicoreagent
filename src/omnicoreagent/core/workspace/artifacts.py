@@ -22,8 +22,9 @@ from omnicoreagent.core.summarizer.tokenizer import count_tokens
 from omnicoreagent.core.utils import logger
 
 if TYPE_CHECKING:
-    from omnicoreagent.core.workspace_config import WorkspaceConfig
-    from omnicoreagent.core.workspace_storage import WorkspaceStorage
+    from omnicoreagent.core.workspace.config import WorkspaceConfig
+    from omnicoreagent.core.workspace.manager import Workspace
+    from omnicoreagent.core.workspace.storage import WorkspaceStorage
 
 
 @dataclass
@@ -103,6 +104,7 @@ class ToolResponseOffloader:
         config: OffloadConfig | dict = None,
         base_dir: str = None,
         storage: WorkspaceStorage | None = None,
+        workspace: Workspace | None = None,
         workspace_config: WorkspaceConfig | dict | None = None,
     ):
         if isinstance(config, dict):
@@ -110,27 +112,32 @@ class ToolResponseOffloader:
         self.config = config or OffloadConfig()
         self._base_dir = base_dir
         self._storage = storage
+        self._workspace = workspace
         self._workspace_config = workspace_config
-
-        if self.config.enabled:
-            self._ensure_storage_dir()
 
         self._artifacts: Dict[str, OffloadedResponse] = {}
 
         self._offload_count = 0
         self._tokens_saved = 0
 
+    def bind_workspace(self, workspace: Workspace) -> "ToolResponseOffloader":
+        """Use a shared runtime workspace when storage was not injected directly."""
+        if self._storage is None:
+            self._workspace = workspace
+        return self
+
     @property
     def storage(self) -> WorkspaceStorage:
-        """Storage backend for persisted tool response artifacts."""
+        """Workspace artifacts area used for persisted tool responses."""
         if self._storage is None:
-            from omnicoreagent.core.workspace_storage import create_workspace_storage
+            if self._workspace is None:
+                from omnicoreagent.core.workspace.manager import Workspace
 
-            self._storage = create_workspace_storage(
-                namespace="artifacts",
-                workspace_dir=self._base_dir,
-                config=self._workspace_config,
-            )
+                self._workspace = Workspace.from_config(
+                    workspace_dir=self._base_dir,
+                    config=self._workspace_config,
+                )
+            self._storage = self._workspace.artifacts
         return self._storage
 
     def _ensure_storage_dir(self):
@@ -224,6 +231,7 @@ class ToolResponseOffloader:
         Returns:
             OffloadedResponse with preview and file reference
         """
+        self._ensure_storage_dir()
         artifact_id = self._generate_artifact_id(tool_name, response)
 
         extension = self._detect_extension(response)

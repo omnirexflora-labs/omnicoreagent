@@ -3,24 +3,9 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from omnicoreagent.core.tool_response_offloader import ToolResponseOffloader
+from omnicoreagent.core.workspace.artifacts import ToolResponseOffloader
 from omnicoreagent.core.types import SessionState, ToolCallResult
-
-TOOL_OUTPUT_OFFLOAD_EXCLUDED_TOOLS = frozenset(
-    {
-        "read_artifact",
-        "tail_artifact",
-        "search_artifact",
-        "list_artifacts",
-        "workspace_file_view",
-        "workspace_file_write",
-        "workspace_file_replace",
-        "workspace_file_insert",
-        "workspace_file_delete",
-        "workspace_file_rename",
-        "workspace_file_clear",
-    }
-)
+from omnicoreagent.core.workspace.offload_policy import should_keep_tool_output_inline
 
 
 class ToolObservationFormatter:
@@ -40,7 +25,7 @@ class ToolObservationFormatter:
         if (
             data is None
             or not self.tool_offloader.config.enabled
-            or tool_name in TOOL_OUTPUT_OFFLOAD_EXCLUDED_TOOLS
+            or should_keep_tool_output_inline(tool_name)
         ):
             return result
 

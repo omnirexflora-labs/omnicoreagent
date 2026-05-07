@@ -3,14 +3,14 @@ from pathlib import Path
 
 import pytest
 
-from omnicoreagent.core.tools.workspace_files.factory import (
+from omnicoreagent.core.workspace.factory import (
     clear_workspace_files_backend_cache,
     create_workspace_files_backend,
 )
-from omnicoreagent.core.tools.workspace_files.tool import WorkspaceFilesTool
-from omnicoreagent.core.tools.workspace_files.storage import WorkspaceFilesBackend
-from omnicoreagent.core.workspace_config import WorkspaceConfig
-from omnicoreagent.core.workspace_storage import LocalWorkspaceStorage, S3WorkspaceStorage
+from omnicoreagent.core.workspace.tools import WorkspaceFilesTool
+from omnicoreagent.core.workspace.files import WorkspaceFilesBackend
+from omnicoreagent.core.workspace.config import WorkspaceConfig
+from omnicoreagent.core.workspace.storage import LocalWorkspaceStorage, S3WorkspaceStorage
 
 
 class FakeS3Body:

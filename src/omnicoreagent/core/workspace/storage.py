@@ -1,5 +1,4 @@
 import shutil
-import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -8,10 +7,11 @@ from typing import Any, Iterable, Protocol
 from filelock import FileLock
 
 from omnicoreagent._optional import load_optional
-from omnicoreagent.core.workspace_config import (
+from omnicoreagent.core.workspace.config import (
     WorkspaceConfig,
     resolve_workspace_config,
 )
+from omnicoreagent.core.workspace.paths import normalize_workspace_path
 
 
 @dataclass(frozen=True)
@@ -92,17 +92,8 @@ class LocalWorkspaceStorage:
         if path is None or str(path).strip() == "":
             return self.root
 
-        decoded = urllib.parse.unquote(str(path)).strip().lstrip("/")
-        for prefix in strip_prefixes:
-            clean_prefix = prefix.strip("/")
-            if decoded == clean_prefix:
-                decoded = ""
-                break
-            if decoded.startswith(f"{clean_prefix}/"):
-                decoded = decoded[len(clean_prefix) + 1 :]
-                break
-
-        candidate = (self.root / decoded).resolve()
+        relative_path = normalize_workspace_path(path, strip_prefixes=strip_prefixes)
+        candidate = (self.root / relative_path).resolve()
         try:
             candidate.relative_to(self.root)
         except ValueError:
@@ -284,22 +275,8 @@ class S3WorkspaceStorage:
         if path is None or str(path).strip() == "":
             return self.prefix
 
-        decoded = urllib.parse.unquote(str(path)).strip().lstrip("/")
-        for prefix in strip_prefixes:
-            clean_prefix = prefix.strip("/")
-            if decoded == clean_prefix:
-                decoded = ""
-                break
-            if decoded.startswith(f"{clean_prefix}/"):
-                decoded = decoded[len(clean_prefix) + 1 :]
-                break
-
-        parts = [part for part in decoded.split("/") if part]
-        if any(part == ".." for part in parts):
-            raise ValueError(
-                f"Invalid path '{path}' resolved outside workspace namespace."
-            )
-        return f"{self.prefix}{'/'.join(parts)}" if parts else self.prefix
+        relative_path = normalize_workspace_path(path, strip_prefixes=strip_prefixes)
+        return f"{self.prefix}{relative_path}" if relative_path else self.prefix
 
     def _put_params(self) -> dict[str, Any]:
         if not self.enable_encryption:
@@ -466,27 +443,24 @@ class R2WorkspaceStorage(S3WorkspaceStorage):
 
 def create_workspace_storage(
     *,
-    backend: str | None = None,
+    workspace_backend: str | None = None,
     namespace: str | None = None,
     workspace_dir: str | Path | None = None,
     config: WorkspaceConfig | dict | None = None,
 ) -> WorkspaceStorage:
     workspace_config = resolve_workspace_config(config)
     workspace_config = workspace_config.with_overrides(
-        backend=backend,
+        workspace_backend=workspace_backend,
         workspace_dir=workspace_dir,
     )
-    backend = workspace_config.backend
+    workspace_backend = workspace_config.workspace_backend
     namespace = (namespace or "").strip("/")
 
-    if backend == "local":
-        from omnicoreagent.core.workspace import resolve_workspace_paths
-
-        paths = resolve_workspace_paths(workspace_dir=workspace_config.workspace_dir)
-        root = paths.root / namespace if namespace else paths.root
+    if workspace_backend == "local":
+        root = workspace_config.local_namespace_path(namespace)
         return LocalWorkspaceStorage(root)
 
-    if backend == "s3":
+    if workspace_backend == "s3":
         bucket_name = workspace_config.s3_bucket
         if not bucket_name:
             raise ValueError("S3 workspace backend requires AWS_S3_BUCKET")
@@ -500,7 +474,7 @@ def create_workspace_storage(
             endpoint_url=workspace_config.aws_endpoint_url,
         )
 
-    if backend == "r2":
+    if workspace_backend == "r2":
         required_fields = {
             "R2_BUCKET_NAME": workspace_config.r2_bucket_name,
             "R2_ACCOUNT_ID": workspace_config.r2_account_id,
@@ -521,4 +495,4 @@ def create_workspace_storage(
             prefix=prefix,
         )
 
-    raise ValueError("workspace backend must be one of: local, s3, r2")
+    raise ValueError("workspace_backend must be one of: local, s3, r2")

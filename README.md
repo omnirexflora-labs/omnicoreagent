@@ -59,8 +59,8 @@ async def main():
     result = await agent.run("What's the weather in Tokyo?")
     print(result["response"])
     
-    # Production backends such as Redis, MongoDB, and Postgres are optional extras.
-    # Install only the backend you use, then switch at runtime when configured.
+    # Production memory stores such as Redis, MongoDB, and Postgres are optional extras.
+    # Install only the memory store you use, then switch at runtime when configured.
 
 asyncio.run(main())
 ```
@@ -144,8 +144,8 @@ print(result["response"])
 | 6 | **Dynamic Subagents** | Spawn one or many focused workers from OmniCoreAgent with workspace files | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
 | 7 | **Local Tools** | Register any Python function as an AI tool via ToolRegistry | [Local Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/local-tools) |
 | 8 | **Agent Skills** | Polyglot packaged capabilities (Python, Bash, Node.js) | [Skills →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/skills) |
-| 9 | **Workspace Files** | Persistent file storage with S3/R2/Local backends | [Workspace →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workspace-files) |
-| 10 | **Harness Defaults** | Enable subagents, workspace files, context management, and tool offloading on OmniCoreAgent | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
+| 9 | **Workspace Files** | Agent-managed files and tool artifacts on local, S3, or R2 workspaces | [Workspace →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workspace-files) |
+| 10 | **Harness Defaults** | Subagents, workspace files, context management, and tool offloading inside OmniCoreAgent | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
 | 11 | **Background Agents** | Schedule autonomous tasks on intervals | [Background →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/background-agents) |
 | 12 | **Workflows** | Sequential, Parallel, and Router agent orchestration | [Workflows →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workflows) |
 | 13 | **BM25 Tool Retrieval** | Auto-discover relevant tools from 1000+ using BM25 search | [Advanced Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/advanced-tools) |
@@ -179,8 +179,8 @@ LLM_API_KEY=your_api_key
 # Optional: workspace backend for artifacts and workspace files
 OMNICOREAGENT_WORKSPACE_BACKEND=local  # local, s3, or r2
 OMNICOREAGENT_WORKSPACE_DIR=.omnicoreagent/workspace
-AWS_S3_BUCKET=your-s3-bucket           # when backend=s3
-R2_BUCKET_NAME=your-r2-bucket          # when backend=r2
+AWS_S3_BUCKET=your-s3-bucket           # when workspace backend=s3
+R2_BUCKET_NAME=your-r2-bucket          # when workspace backend=r2
 ```
 
 ### Agent Configuration
@@ -195,7 +195,7 @@ agent_config = {
     "enable_advanced_tool_use": True,   # BM25 tool retrieval
     "enable_subagents": True,           # Dynamic focused workers
     "enable_agent_skills": True,        # Specialized packaged skills
-    "enable_workspace_files": True,    # Workspace files: notes, logs, scratchpads
+    "enable_workspace_files": True,    # Default: workspace files for notes/logs/scratchpads
     "context_management": {"enabled": True},
     "tool_offload": {"enabled": True}
 }

@@ -7,7 +7,7 @@ from omnicoreagent.core.guardrails import (
     PromptInjectionGuard,
 )
 from omnicoreagent.core.agents.base import BaseReactAgent
-from omnicoreagent.core.tool_response_offloader import ToolResponseOffloader
+from omnicoreagent.core.workspace.artifacts import ToolResponseOffloader
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.tool_observation import ToolObservationHandler
 from omnicoreagent.core.types import AgentState, ParsedResponse, SessionState, ToolCallResult

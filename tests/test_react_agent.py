@@ -2,7 +2,7 @@ import pytest
 
 from omnicoreagent.core.agents.react_agent import ReactAgent
 from omnicoreagent.core.runtime.config import AgentConfig
-from omnicoreagent.core.workspace_config import WorkspaceConfig
+from omnicoreagent.core.workspace.config import WorkspaceConfig
 
 
 @pytest.fixture

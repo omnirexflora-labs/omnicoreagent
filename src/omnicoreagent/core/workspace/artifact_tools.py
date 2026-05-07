@@ -11,7 +11,7 @@ Based on patterns from:
 """
 
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.core.tool_response_offloader import ToolResponseOffloader
+from omnicoreagent.core.workspace.artifacts import ToolResponseOffloader
 
 
 def build_tool_registry_artifact_tool(

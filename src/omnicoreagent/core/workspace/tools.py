@@ -1,9 +1,16 @@
 """Workspace file tools for scratchpads, logs, task output, and notes."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.core.tools.workspace_files.base import AbstractWorkspaceFilesBackend
-from omnicoreagent.core.tools.workspace_files.factory import create_workspace_files_backend
-from omnicoreagent.core.workspace_config import WorkspaceConfig
+from omnicoreagent.core.workspace.base import AbstractWorkspaceFilesBackend
+from omnicoreagent.core.workspace.config import WorkspaceConfig
+from omnicoreagent.core.workspace.factory import create_workspace_files_backend
+
+if TYPE_CHECKING:
+    from omnicoreagent.core.workspace.manager import Workspace
 
 
 class WorkspaceFilesTool:
@@ -11,68 +18,72 @@ class WorkspaceFilesTool:
 
     def __init__(
         self,
-        backend: AbstractWorkspaceFilesBackend | None = None,
+        workspace_files_backend: AbstractWorkspaceFilesBackend | None = None,
+        workspace: Workspace | None = None,
         workspace_config: WorkspaceConfig | dict | None = None,
     ):
         """
-        Initialize WorkspaceFilesTool with a backend.
+        Initialize WorkspaceFilesTool with the workspace files adapter.
         
         Args:
-            backend: Optional AbstractWorkspaceFilesBackend instance for direct injection.
-                None uses the active workspace backend.
-            workspace_config: Explicit workspace storage config used when backend is
+            workspace_files_backend: Optional workspace files adapter for direct injection.
+                None uses the active workspace files area.
+            workspace_config: Explicit workspace config used when an adapter is
                 not provided. None falls back to environment configuration.
         """
-        if isinstance(backend, AbstractWorkspaceFilesBackend):
-            self.backend = backend
+        if isinstance(workspace_files_backend, AbstractWorkspaceFilesBackend):
+            self.files_backend = workspace_files_backend
         else:
-            self.backend = create_workspace_files_backend(
-                workspace_config=workspace_config
+            self.files_backend = create_workspace_files_backend(
+                workspace=workspace,
+                workspace_config=workspace_config,
             )
 
     def view(self, path: str | None = None) -> str:
         """Show directory listing or file contents."""
-        return self.backend.view(path)
+        return self.files_backend.view(path)
 
     def write(self, path: str, content: str, mode: str = "create") -> str:
         """Create, append, or overwrite a file."""
-        return self.backend.write(path, content, mode)
+        return self.files_backend.write(path, content, mode)
 
     def replace(self, path: str, old_str: str, new_str: str) -> str:
         """Replace all occurrences of old_str with new_str in a file."""
-        return self.backend.replace(path, old_str, new_str)
+        return self.files_backend.replace(path, old_str, new_str)
 
     def insert(self, path: str, insert_line: int, insert_text: str) -> str:
         """Insert text at a specific line number in a file."""
-        return self.backend.insert(path, insert_line, insert_text)
+        return self.files_backend.insert(path, insert_line, insert_text)
 
     def delete(self, path: str) -> str:
         """Delete a file or directory."""
-        return self.backend.delete(path)
+        return self.files_backend.delete(path)
 
     def rename(self, old_path: str, new_path: str) -> str:
         """Rename or move a file/directory."""
-        return self.backend.rename(old_path, new_path)
+        return self.files_backend.rename(old_path, new_path)
 
     def clear(self) -> str:
         """Clear all workspace files."""
-        return self.backend.clear()
+        return self.files_backend.clear()
 
 
 def build_tool_registry_workspace_files(
-    backend: AbstractWorkspaceFilesBackend | None,
     registry: ToolRegistry,
+    workspace_files_backend: AbstractWorkspaceFilesBackend | None = None,
+    workspace: Workspace | None = None,
     workspace_config: WorkspaceConfig | dict | None = None,
 ) -> ToolRegistry:
     """
     Register workspace file commands in a ToolRegistry.
 
     Args:
-        backend: Optional backend instance. None uses workspace storage.
+        workspace_files_backend: Optional workspace files adapter. None uses the active workspace files area.
         registry: ToolRegistry to register commands with
     """
     workspace_files = WorkspaceFilesTool(
-        backend=backend,
+        workspace_files_backend=workspace_files_backend,
+        workspace=workspace,
         workspace_config=workspace_config,
     )
 

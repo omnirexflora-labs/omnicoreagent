@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from omnicoreagent.core.tool_response_offloader import ToolResponseOffloader
+from omnicoreagent.core.workspace.artifacts import ToolResponseOffloader
 from omnicoreagent.core.tools.tool_observation_formatter import (
     ToolObservationFormatter,
 )

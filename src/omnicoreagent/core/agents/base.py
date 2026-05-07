@@ -31,7 +31,7 @@ from omnicoreagent.core.context_manager import (
     AgentLoopContextManager,
     ContextManagementConfig,
 )
-from omnicoreagent.core.tool_response_offloader import (
+from omnicoreagent.core.workspace.artifacts import (
     ToolResponseOffloader,
     OffloadConfig,
 )
@@ -51,7 +51,7 @@ from omnicoreagent.core.agents.xml_parser import (
 
 if TYPE_CHECKING:
     from omnicoreagent.core.guardrails import PromptInjectionGuard
-    from omnicoreagent.core.workspace_config import WorkspaceConfig
+    from omnicoreagent.core.workspace.config import WorkspaceConfig
 
 class BaseReactAgent:
     """Autonomous agent implementing the ReAct paradigm for task solving through iterative reasoning and tool usage."""
