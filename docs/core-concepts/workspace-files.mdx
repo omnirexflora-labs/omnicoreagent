@@ -8,7 +8,12 @@ icon: 'folder-open'
 
 > Workspace files give agents durable file-style storage for notes, scratchpads, logs, todos, task progress, generated code, and research files.
 
-There is no separate workspace files storage backend: choose the workspace backend once, and these files use `files/` inside that workspace.
+The workspace has two clear areas:
+
+- `files/` — agent-managed files for scratchpads, todos, progress, preferences, notes, subagent outputs, and generated work.
+- `artifacts/` — runtime-managed tool output artifacts created by tool offloading and read back with artifact tools.
+
+There is no separate workspace files storage backend: choose the workspace backend once, and both areas use that same local, S3, or R2 workspace.
 
 ---
 
@@ -24,16 +29,10 @@ There is no separate workspace files storage backend: choose the workspace backe
 
 ## Quick Setup
 
-Enable workspace files tools, then choose the workspace backend with environment variables.
+Workspace files default to local disk. Choose S3 or R2 only when the whole workspace should live in cloud storage.
 
 ```bash
 pip install "omnicoreagent[s3]"
-```
-
-```python
-agent_config = {
-    "enable_workspace_files": True
-}
 ```
 
 ---
@@ -73,7 +72,7 @@ R2_SECRET_ACCESS_KEY=your-r2-secret
 
 ## Workspace Files Tools
 
-When enabled, your agent automatically gets these tools:
+OmniCoreAgent exposes these tools for the `files/` area:
 
 | Tool | Purpose |
 |------|---------|
@@ -83,7 +82,7 @@ When enabled, your agent automatically gets these tools:
 | `workspace_file_insert` | Insert text at specific line numbers |
 | `workspace_file_delete` | Delete files from workspace files |
 | `workspace_file_rename` | Rename or move files |
-| `workspace_file_clear` | Clear the workspace files namespace |
+| `workspace_file_clear` | Clear the workspace files area |
 
 ---
 
@@ -130,7 +129,6 @@ agent = OmniCoreAgent(
     system_instruction="Save durable notes, logs, task progress, and final output to workspace files.",
     model_config={"provider": "openai", "model": "gpt-4o"},
     agent_config={
-        "enable_workspace_files": True,
         "max_steps": 50,
     }
 )

@@ -144,8 +144,8 @@ print(result["response"])
 | 6 | **Dynamic Subagents** | Spawn one or many focused workers from OmniCoreAgent with workspace files | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
 | 7 | **Local Tools** | Register any Python function as an AI tool via ToolRegistry | [Local Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/local-tools) |
 | 8 | **Agent Skills** | Polyglot packaged capabilities (Python, Bash, Node.js) | [Skills →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/skills) |
-| 9 | **Workspace Files** | Persistent file storage with S3/R2/Local backends | [Workspace →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workspace-files) |
-| 10 | **Harness Defaults** | Enable subagents, workspace files, context management, and tool offloading on OmniCoreAgent | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
+| 9 | **Workspace Files** | Agent-managed files and tool artifacts on local, S3, or R2 workspaces | [Workspace →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workspace-files) |
+| 10 | **Harness Defaults** | Subagents, workspace files, context management, and tool offloading inside OmniCoreAgent | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
 | 11 | **Background Agents** | Schedule autonomous tasks on intervals | [Background →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/background-agents) |
 | 12 | **Workflows** | Sequential, Parallel, and Router agent orchestration | [Workflows →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workflows) |
 | 13 | **BM25 Tool Retrieval** | Auto-discover relevant tools from 1000+ using BM25 search | [Advanced Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/advanced-tools) |
@@ -195,7 +195,7 @@ agent_config = {
     "enable_advanced_tool_use": True,   # BM25 tool retrieval
     "enable_subagents": True,           # Dynamic focused workers
     "enable_agent_skills": True,        # Specialized packaged skills
-    "enable_workspace_files": True,    # Workspace files: notes, logs, scratchpads
+    "enable_workspace_files": True,    # Default: workspace files for notes/logs/scratchpads
     "context_management": {"enabled": True},
     "tool_offload": {"enabled": True}
 }

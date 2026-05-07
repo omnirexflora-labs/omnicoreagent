@@ -1049,128 +1049,75 @@ tools_retriever_additional_prompt = """
 
 
 workspace_files_additional_prompt = """
-<extension name="persistent_workspace_files">
-  <description>Extension module providing persistent workspace files for agent scratchpads, logs, notes, and task outputs.</description>
-  <activation_flag>use_workspace_files</activation_flag>
+<extension name="workspace_files">
+  <description>Workspace file tools for the agent-managed files area.</description>
 
-  <persistent_workspace_files>
+  <workspace>
     <meta>
-      <name>Workspace Files Tool</name>
-      <purpose>Filesystem-style workspace persisted across context resets for active task management</purpose>
+      <name>Workspace Files</name>
+      <purpose>Durable filesystem-style storage for work that should survive context cleanup, compaction, and long task execution.</purpose>
     </meta>
 
-    <core_mandate>
-      This workspace file layer complements conversation memory.
-      Use it for task planning, progress tracking, scratchpads, logs, and durable outputs.
-      Only use via provided workspace_file_* tools and reference outputs inside &lt;thought&gt; tags.
-    </core_mandate>
-
-    <when_to_use>
-      <item>Plan multi-step or ongoing tasks</item>
-      <item>Track workflow progress incrementally</item>
-      <item>Store temporary or intermediate results</item>
-      <item>Document reasoning and decisions as you go</item>
-      <item>Resume context after resets</item>
-    </when_to_use>
+    <areas>
+      <area name="files">
+        Agent-managed files. Use this area for scratchpads, plans, task progress,
+        todos, notes, preferences, logs, generated text, research summaries,
+        subagent outputs, and any file the agent should create or update directly.
+      </area>
+      <area name="artifacts">
+        Runtime-managed tool output artifacts. Large tool results are saved here
+        automatically by tool offloading and must be accessed with artifact tools,
+        not workspace_file_* tools.
+      </area>
+    </areas>
 
     <tools>
       <tool>workspace_file_view(path)</tool>
       <tool>workspace_file_write(path, content, mode=create|append|overwrite)</tool>
-      <tool>workspace_file_insert(path, line_number, content)</tool>
-      <tool>workspace_file_replace(path, find, replace)</tool>
+      <tool>workspace_file_insert(path, insert_line, insert_text)</tool>
+      <tool>workspace_file_replace(path, old_str, new_str)</tool>
       <tool>workspace_file_delete(path)</tool>
       <tool>workspace_file_rename(old_path, new_path)</tool>
       <tool>workspace_file_clear()</tool>
     </tools>
 
-    <workflow>
-      <phase name="context_loading">
-        <step>Use workspace_file_view to inspect prior files or notes.</step>
-        <step>Read relevant files before starting to avoid duplication.</step>
-      </phase>
+    <path_policy>
+      <rule>Paths may be written as /workspace/name.md, /files/name.md, or name.md; all resolve inside the files area.</rule>
+      <rule>Use descriptive directories such as tasks/&lt;task&gt;/plan.md, tasks/&lt;task&gt;/progress.md, subagents/&lt;name&gt;/output.md, or notes/&lt;topic&gt;.md.</rule>
+      <rule>Never use path traversal. Keep all work inside the workspace files area.</rule>
+    </path_policy>
 
-      <phase name="active_documentation">
-        <step>Write a plan before execution (create or overwrite).</step>
-        <step>Append logs or output during work (append mode).</step>
-        <step>Insert or replace text for structured updates.</step>
-        <note>Context resets can occur anytime—save early and often.</note>
-      </phase>
-
-      <phase name="finalization">
-        <step>Summarize task results (e.g., /workspace/projects/name/final_summary.md).</step>
-        <step>Optionally rename or archive completed tasks.</step>
-      </phase>
-    </workflow>
-
-    <constraints>
-      <size_limit>Prefer files ≤ 16k tokens; chunk larger ones.</size_limit>
-      <path_policy>Keep task paths consistent and descriptive.</path_policy>
-      <concurrency>Lock or version files to prevent race conditions.</concurrency>
-      <privacy>Do not persist PII or secrets without authorization.</privacy>
-    </constraints>
-
-    <observation_contract>
-      <description>Each workspace_file_* tool must return structured XML observations.</description>
-      <example>
-        <tool_call>
-          <tool_name>workspace_file_write</tool_name>
-          <parameters>{"path":"/workspace/projects/x/plan.md","mode":"create","content":"..."}</parameters>
-        </tool_call>
-
-        <observation_marker>OBSERVATION RESULT FROM TOOL CALLS</observation_marker>
-        <observations>
-          <observation>
-            <tool_name>workspace_file_write</tool_name>
-            <status>success</status>
-            <output>{"path":"/workspace/projects/x/plan.md","version":"v1"}</output>
-          </observation>
-        </observations>
-        <observation_marker>END OF OBSERVATIONS</observation_marker>
-      </example>
-    </observation_contract>
-
-    <mandatory_behaviors>
-      <must>Check workspace_file_view before starting multi-step work.</must>
-      <must>Document reasoning and plans before action.</must>
-      <must>Append progress after each meaningful step.</must>
-      <must>Never expose workspace file operations in &lt;final_answer&gt;.</must>
-    </mandatory_behaviors>
-
-    <error_handling>
-      <on_error>Return status:error with message inside observation output.</on_error>
-      <on_partial>Return status:partial with detailed outcome report.</on_partial>
-    </error_handling>
+    <usage_policy>
+      <rule>Use workspace files when a task is multi-step, parallel, long-running, or likely to exceed context.</rule>
+      <rule>Use workspace_file_view before editing an existing path.</rule>
+      <rule>Use create for new files, append for ongoing logs/progress, and overwrite only when replacing a whole file intentionally.</rule>
+      <rule>Subagents should write their output to workspace files; the lead agent must read those paths before synthesizing.</rule>
+      <rule>Do not use workspace files as final-answer narration. Use them as internal task state and durable outputs.</rule>
+    </usage_policy>
 
     <examples>
-      <example name="view_context">
-        <tool_call>
-          <tool_name>workspace_file_view</tool_name>
-          <parameters>{"path":"/workspace/projects/data-analysis/"}</parameters>
-        </tool_call>
-      </example>
-
       <example name="create_plan">
         <tool_call>
           <tool_name>workspace_file_write</tool_name>
-          <parameters>{"path":"/workspace/projects/data-analysis/plan.md","mode":"create","content":"## Plan\\n1. ..."}</parameters>
+          <parameters>{"path":"/workspace/tasks/data-analysis/plan.md","mode":"create","content":"## Plan\\n1. ..."}</parameters>
         </tool_call>
       </example>
 
       <example name="append_log">
         <tool_call>
           <tool_name>workspace_file_write</tool_name>
-          <parameters>{"path":"/workspace/projects/data-analysis/log.md","mode":"append","content":"Step 2 done: ..."}</parameters>
+          <parameters>{"path":"/workspace/tasks/data-analysis/progress.md","mode":"append","content":"Step 2 done: ..."}</parameters>
         </tool_call>
       </example>
     </examples>
-  </persistent_workspace_files>
+  </workspace>
 </extension>
 """.strip()
 
 
 artifact_tool_additional_prompt = """
 <extension name="artifact_tool">
-  <description>Extension providing access to offloaded tool responses stored in files.</description>
+  <description>Extension providing access to runtime-managed artifacts stored in the workspace artifacts area.</description>
   <activation_flag>tool_offload_enabled</activation_flag>
 
   <artifact_tool>
@@ -1180,9 +1127,10 @@ artifact_tool_additional_prompt = """
     </meta>
 
     <core_mandate>
-      When tool responses exceed the token threshold, they are automatically saved to files.
+      When tool responses exceed the token threshold, they are automatically saved to workspace artifacts.
       You will see "[TOOL RESPONSE OFFLOADED]" messages with a preview and artifact ID.
       Use these tools to retrieve full content when the preview is not sufficient.
+      Artifact access tool outputs stay inline so you can use the result directly.
     </core_mandate>
 
     <when_to_use>

@@ -1,9 +1,16 @@
 """Workspace file tools for scratchpads, logs, task output, and notes."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.core.tools.workspace_files.base import AbstractWorkspaceFilesBackend
-from omnicoreagent.core.tools.workspace_files.factory import create_workspace_files_backend
-from omnicoreagent.core.workspace_config import WorkspaceConfig
+from omnicoreagent.core.workspace.base import AbstractWorkspaceFilesBackend
+from omnicoreagent.core.workspace.config import WorkspaceConfig
+from omnicoreagent.core.workspace.factory import create_workspace_files_backend
+
+if TYPE_CHECKING:
+    from omnicoreagent.core.workspace.manager import Workspace
 
 
 class WorkspaceFilesTool:
@@ -12,6 +19,7 @@ class WorkspaceFilesTool:
     def __init__(
         self,
         backend: AbstractWorkspaceFilesBackend | None = None,
+        workspace: Workspace | None = None,
         workspace_config: WorkspaceConfig | dict | None = None,
     ):
         """
@@ -27,7 +35,8 @@ class WorkspaceFilesTool:
             self.backend = backend
         else:
             self.backend = create_workspace_files_backend(
-                workspace_config=workspace_config
+                workspace=workspace,
+                workspace_config=workspace_config,
             )
 
     def view(self, path: str | None = None) -> str:
@@ -62,6 +71,7 @@ class WorkspaceFilesTool:
 def build_tool_registry_workspace_files(
     backend: AbstractWorkspaceFilesBackend | None,
     registry: ToolRegistry,
+    workspace: Workspace | None = None,
     workspace_config: WorkspaceConfig | dict | None = None,
 ) -> ToolRegistry:
     """
@@ -73,6 +83,7 @@ def build_tool_registry_workspace_files(
     """
     workspace_files = WorkspaceFilesTool(
         backend=backend,
+        workspace=workspace,
         workspace_config=workspace_config,
     )
 

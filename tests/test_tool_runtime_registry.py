@@ -2,11 +2,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from omnicoreagent.core.tool_response_offloader import ToolResponseOffloader
-from omnicoreagent.core.tools.workspace_files.factory import clear_workspace_files_backend_cache
+from omnicoreagent.core.workspace.artifacts import ToolResponseOffloader
+from omnicoreagent.core.workspace.factory import clear_workspace_files_backend_cache
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
-from omnicoreagent.core.workspace_config import WorkspaceConfig
+from omnicoreagent.core.workspace.config import WorkspaceConfig
 
 
 @pytest.fixture
@@ -97,6 +97,8 @@ async def test_prepare_tools_uses_workspace_config_for_workspace_files(
 
     assert "created" in result.lower()
     assert (workspace / "files" / "note.txt").read_text() == "hello"
+    assert runtime.workspace is not None
+    assert offloader.storage is runtime.workspace.artifacts
 
     clear_workspace_files_backend_cache()
 

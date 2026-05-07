@@ -348,7 +348,7 @@ def generate_dockerfile(file_path: str, output_dir: str):
         loaded_agent = _load_agent_from_file(file_path)
         if loaded_agent.agent_config and isinstance(loaded_agent.agent_config, dict):
             workspace_files_enabled = bool(
-                loaded_agent.agent_config.get("enable_workspace_files")
+                loaded_agent.agent_config.get("enable_workspace_files", True)
             )
         console.print(f"[green]✓ Detected agent: {loaded_agent.name}[/green]")
         if workspace_files_enabled:

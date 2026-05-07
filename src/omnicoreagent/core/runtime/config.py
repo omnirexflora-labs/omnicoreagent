@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any
 import uuid
 
-from omnicoreagent.core.workspace_config import (
+from omnicoreagent.core.workspace.config import (
     WorkspaceConfig,
     resolve_workspace_config,
 )
@@ -108,7 +108,7 @@ class AgentConfig:
     enable_subagents: bool = False
     enable_agent_skills: bool = False
     memory_config: dict[str, Any] = field(default_factory=_default_memory_config)
-    enable_workspace_files: bool = False
+    enable_workspace_files: bool = True
     guardrail_config: dict[str, Any] = field(default_factory=dict)
     guardrail_mode: str = "full"
     context_management: dict[str, Any] = field(

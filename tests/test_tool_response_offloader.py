@@ -20,13 +20,14 @@ import tempfile
 import shutil
 from pathlib import Path
 
-from omnicoreagent.core.tool_response_offloader import (
+from omnicoreagent.core.workspace.artifacts import (
     ToolResponseOffloader,
     OffloadConfig,
     OffloadedResponse,
 )
-from omnicoreagent.core.workspace_config import WorkspaceConfig
-from omnicoreagent.core.tools.artifact_tool import build_tool_registry_artifact_tool
+from omnicoreagent.core.workspace.config import WorkspaceConfig
+from omnicoreagent.core.workspace.manager import Workspace
+from omnicoreagent.core.workspace.artifact_tools import build_tool_registry_artifact_tool
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.runtime.config import AgentConfig
 
@@ -405,6 +406,22 @@ class TestOffload:
 
         assert Path(result.artifact_path).is_relative_to(workspace / "artifacts")
         assert Path(result.artifact_path).read_text() == "Content " * 50
+
+    def test_offload_accepts_shared_workspace(self, tmp_path):
+        """Test runtime can bind one shared workspace to artifact offloading."""
+        workspace = Workspace.from_config(
+            WorkspaceConfig(workspace_dir=tmp_path / "shared-workspace")
+        )
+        offloader = ToolResponseOffloader(
+            config={"enabled": True, "threshold_tokens": 10}
+        ).bind_workspace(workspace)
+
+        result = offloader.offload("shared_tool", "Content " * 50)
+
+        assert offloader.storage is workspace.artifacts
+        assert Path(result.artifact_path).is_relative_to(
+            tmp_path / "shared-workspace" / "artifacts"
+        )
 
 
 # ============================================================================

@@ -35,17 +35,16 @@ agent = OmniCoreAgent(
     model_config={"provider": "openai", "model": "gpt-4o"},
     agent_config={
         "enable_subagents": True,
-        "enable_workspace_files": True,
         "context_management": {"enabled": True},
         "tool_offload": {"enabled": True},
     },
 )
 ```
 
-When `enable_subagents` is true, OmniCoreAgent also forces workspace files on
-even if it is omitted. Keep it explicit in app configs because dynamic workers
-are expected to save output with `workspace_file_write`, and the lead agent
-reads those paths with `workspace_file_view` before synthesizing.
+Workspace files are available by default, and `enable_subagents` also keeps
+them enabled for worker output. Dynamic workers are expected to save output with
+`workspace_file_write`, and the lead agent reads those paths with
+`workspace_file_view` before synthesizing.
 
 ### `spawn_subagents`
 

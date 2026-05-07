@@ -1,7 +1,7 @@
 from pathlib import Path
 from datetime import datetime
 
-from omnicoreagent.core.tools.workspace_files.factory import (
+from omnicoreagent.core.workspace.factory import (
     clear_workspace_files_backend_cache,
     create_workspace_files_backend,
 )
@@ -12,10 +12,11 @@ from omnicoreagent.core.workspace import (
     get_workspace_files_dir,
     get_workspace_dir,
 )
-from omnicoreagent.core.workspace_config import WorkspaceConfig
-from omnicoreagent.core.workspace_storage import LocalWorkspaceStorage
-from omnicoreagent.core.workspace_storage import S3WorkspaceStorage
-from omnicoreagent.core.workspace_storage import create_workspace_storage
+from omnicoreagent.core.workspace.config import WorkspaceConfig
+from omnicoreagent.core.workspace.manager import Workspace
+from omnicoreagent.core.workspace.storage import LocalWorkspaceStorage
+from omnicoreagent.core.workspace.storage import S3WorkspaceStorage
+from omnicoreagent.core.workspace.storage import create_workspace_storage
 
 
 def test_workspace_paths_resolve_from_current_environment(monkeypatch, tmp_path):
@@ -39,6 +40,19 @@ def test_workspace_storage_namespaces_share_one_workspace_root(monkeypatch, tmp_
     assert isinstance(workspace_files, LocalWorkspaceStorage)
     assert artifacts.root == (workspace / "artifacts").resolve()
     assert workspace_files.root == (workspace / "files").resolve()
+
+
+def test_workspace_facade_exposes_files_and_artifacts(tmp_path):
+    workspace_root = tmp_path / "workspace"
+
+    workspace = Workspace.from_config(
+        WorkspaceConfig(workspace_dir=workspace_root)
+    ).ensure()
+    workspace.files.write_text("notes/todo.md", "todo")
+    workspace.artifacts.write_text("tool_output.txt", "result")
+
+    assert (workspace_root / "files" / "notes" / "todo.md").read_text() == "todo"
+    assert (workspace_root / "artifacts" / "tool_output.txt").read_text() == "result"
 
 
 def test_workspace_config_from_env_normalizes_values(monkeypatch, tmp_path):
@@ -81,7 +95,7 @@ def test_workspace_storage_accepts_explicit_s3_config(monkeypatch):
             captured.update(kwargs)
 
     monkeypatch.setattr(
-        "omnicoreagent.core.workspace_storage.S3WorkspaceStorage",
+        "omnicoreagent.core.workspace.storage.S3WorkspaceStorage",
         FakeStorage,
     )
 
@@ -135,6 +149,16 @@ def test_workspace_files_backend_cache_respects_workspace_changes(monkeypatch, t
     assert second.base_dir == (second_workspace / "files").resolve()
 
     clear_workspace_files_backend_cache()
+
+
+def test_workspace_files_backend_can_use_existing_workspace(tmp_path):
+    workspace = Workspace.from_config(WorkspaceConfig(workspace_dir=tmp_path / "ws"))
+
+    backend = create_workspace_files_backend(workspace=workspace)
+    backend.write("scratchpad/progress.md", "done", mode="create")
+
+    saved_file = tmp_path / "ws" / "files" / "scratchpad" / "progress.md"
+    assert saved_file.read_text() == "done"
 
 
 def test_local_workspace_storage_keeps_paths_inside_root(tmp_path):

@@ -211,21 +211,21 @@ def test_disabled_tool_offloader_does_not_load_workspace_storage(tmp_path):
 import json
 import sys
 
-from omnicoreagent.core.tool_response_offloader import ToolResponseOffloader
+from omnicoreagent.core.workspace.artifacts import ToolResponseOffloader
 
 offloader = ToolResponseOffloader(config={"enabled": False})
 
 print(json.dumps({
     "offload_enabled": offloader.config.enabled,
     "workspace_loaded": "omnicoreagent.core.workspace" in sys.modules,
-    "workspace_storage_loaded": "omnicoreagent.core.workspace_storage" in sys.modules,
+    "workspace_storage_loaded": "omnicoreagent.core.workspace.storage" in sys.modules,
 }))
 """,
     )
 
     assert result == {
         "offload_enabled": False,
-        "workspace_loaded": False,
+        "workspace_loaded": True,
         "workspace_storage_loaded": False,
     }
 
@@ -250,11 +250,10 @@ watched_modules = [
     "omnicoreagent.core.guardrails",
     "omnicoreagent.core.tools.advance_tools.advanced_tools_use",
     "omnicoreagent.core.tools.advance_tools_use",
-    "omnicoreagent.core.tools.artifact_tool",
-    "omnicoreagent.core.tools.workspace_files.tool",
+    "omnicoreagent.core.workspace.artifact_tools",
+    "omnicoreagent.core.workspace.tools",
     "omnicoreagent.core.skills.tools",
-    "omnicoreagent.core.workspace",
-    "omnicoreagent.core.workspace_storage",
+    "omnicoreagent.core.workspace.storage",
 ]
 
 async def main():

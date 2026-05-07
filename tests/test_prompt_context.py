@@ -43,6 +43,10 @@ async def test_build_system_prompt_includes_enabled_harness_context():
     assert "researcher" in prompt
     assert "query: str (REQUIRED)" in prompt
     assert "limit: int (optional, default=3)" in prompt
+    assert "workspace_file_write" in prompt
+    assert 'area name="files"' in prompt
+    assert 'area name="artifacts"' in prompt
+    assert "read_artifact" in prompt
     assert "[AVAILABLE TOOLS REGISTRY]\nsearch: Search docs" in prompt
 
 
