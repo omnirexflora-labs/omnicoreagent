@@ -8,7 +8,7 @@ from omnicoreagent.core.runtime.harness_tools import (
     available_tools,
     prepare_dynamic_subagents,
 )
-from omnicoreagent.core.runtime import builder
+from omnicoreagent.core.runtime import builder, execution
 from omnicoreagent.core.runtime.normalization import normalize_local_tools
 from omnicoreagent.core.runtime.summaries import extract_summary_text, render_history
 from omnicoreagent.core.tools.local_tools_registry import Tool
@@ -218,3 +218,125 @@ def test_build_agent_runtime_wires_components(monkeypatch):
         "enabled": True,
         "local_tools": "local-tools",
     }
+
+
+def test_blocked_guardrail_response_returns_none_without_guardrail():
+    assert (
+        execution.blocked_guardrail_response(
+            guardrail=None,
+            query="hello",
+            session_id="session",
+            agent_name="agent",
+        )
+        is None
+    )
+
+
+def test_blocked_guardrail_response_returns_none_for_safe_input():
+    guardrail = SimpleNamespace(
+        check=lambda query: SimpleNamespace(is_safe=True, message="", to_dict=dict)
+    )
+
+    assert (
+        execution.blocked_guardrail_response(
+            guardrail=guardrail,
+            query="hello",
+            session_id="session",
+            agent_name="agent",
+        )
+        is None
+    )
+
+
+def test_blocked_guardrail_response_formats_unsafe_input():
+    result = SimpleNamespace(
+        is_safe=False,
+        message="unsafe",
+        to_dict=lambda: {"is_safe": False, "message": "unsafe"},
+    )
+    guardrail = SimpleNamespace(check=lambda query: result)
+
+    response = execution.blocked_guardrail_response(
+        guardrail=guardrail,
+        query="bad",
+        session_id="session",
+        agent_name="agent",
+    )
+
+    assert response == {
+        "response": (
+            "I'm sorry, but I cannot process this request due to safety concerns: "
+            "unsafe"
+        ),
+        "session_id": "session",
+        "agent_name": "agent",
+        "guardrail_result": {"is_safe": False, "message": "unsafe"},
+    }
+
+
+def test_build_agent_run_kwargs_uses_empty_mcp_state_when_disconnected():
+    assert execution.build_agent_run_kwargs(
+        mcp_client=None,
+        local_tools="local-tools",
+        session_id="session",
+        sub_agents=None,
+    ) == {
+        "sessions": {},
+        "mcp_tools": {},
+        "local_tools": "local-tools",
+        "session_id": "session",
+        "sub_agents": None,
+    }
+
+
+def test_build_agent_run_kwargs_uses_connected_mcp_state():
+    worker = object()
+    mcp_client = SimpleNamespace(
+        sessions={"server": "session"},
+        available_tools={"server": ["tool"]},
+    )
+
+    assert execution.build_agent_run_kwargs(
+        mcp_client=mcp_client,
+        local_tools="local-tools",
+        session_id="session",
+        sub_agents={"worker": worker},
+    ) == {
+        "sessions": {"server": "session"},
+        "mcp_tools": {"server": ["tool"]},
+        "local_tools": "local-tools",
+        "session_id": "session",
+        "sub_agents": {"worker": worker},
+    }
+
+
+def test_format_run_response_keeps_plain_response_without_usage_allocation():
+    def fail_usage_getter():
+        raise AssertionError("usage getter should not be called")
+
+    assert execution.format_run_response(
+        response="done",
+        session_id="session",
+        agent_name="agent",
+        usage_getter=fail_usage_getter,
+    ) == {"response": "done", "session_id": "session", "agent_name": "agent"}
+
+
+def test_format_run_response_increments_usage_for_metric_response():
+    usage = SimpleNamespace()
+    cumulative_usage = SimpleNamespace(incr=lambda value: setattr(value, "seen", True))
+
+    response = execution.format_run_response(
+        response={"answer": "done", "usage": usage},
+        session_id="session",
+        agent_name="agent",
+        usage_getter=lambda: cumulative_usage,
+    )
+
+    assert response == {
+        "response": "done",
+        "session_id": "session",
+        "agent_name": "agent",
+        "metric": usage,
+    }
+    assert getattr(usage, "seen") is True
