@@ -54,11 +54,17 @@ class AgentMessageHistoryLoader:
     def _apply_user_message(
         self, message: Message, session_state: SessionState
     ) -> None:
-        if message.content.strip().startswith("<observations>"):
+        if self._is_transient_observation(message.content):
             return
 
         self._clear_or_flush_pending(session_state=session_state)
         session_state.messages.append(Message(role="user", content=message.content))
+
+    def _is_transient_observation(self, content: str) -> bool:
+        stripped = content.strip()
+        return stripped.startswith("<observations>") or stripped.startswith(
+            "OBSERVATION RESULT FROM SUB-AGENTS"
+        )
 
     def _apply_assistant_message(
         self, message: Message, session_state: SessionState

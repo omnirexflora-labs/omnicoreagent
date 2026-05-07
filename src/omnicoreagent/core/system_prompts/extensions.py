@@ -51,6 +51,15 @@ def build_subagents_additional_prompt(
       <rule>Do not delegate the immediate blocking step if you need the result before continuing.</rule>
       <rule>After subagents complete, synthesize their outputs instead of repeating them.</rule>
     </rules>
+
+    <example>
+      <tool_call>
+        <tool_name>spawn_subagents</tool_name>
+        <parameters>
+          <subagents_json>[{"name":"api","role":"API reviewer","task":"Review API error handling and write risks","output_path":"/workspace/audit/api.md"},{"name":"tests","role":"Test reviewer","task":"Review test gaps and write recommended cases","output_path":"/workspace/audit/tests.md"}]</subagents_json>
+        </parameters>
+      </tool_call>
+    </example>
   </dynamic_spawn>
 """.strip()
         )
@@ -69,6 +78,15 @@ def build_subagents_additional_prompt(
       <rule>Use only agent names shown in AVAILABLE SUB AGENTS REGISTRY.</rule>
       <rule>Match the registry parameter names exactly.</rule>
     </invocation_rules>
+
+    <example>
+      <agent_call>
+        <agent_name>registered_worker_name</agent_name>
+        <parameters>
+          <query>Specific delegated task</query>
+        </parameters>
+      </agent_call>
+    </example>
   </configured_subagents>
 """.strip()
         )
@@ -218,7 +236,9 @@ tools_retriever_additional_prompt = """
           <step_3_query>"send transmit email message communication team group recipients subject body"</step_3_query>
           <tool_call>
             <tool_name>tools_retriever</tool_name>
-            <parameters>{"query": "send transmit email message communication team group recipients subject body"}</parameters>
+            <parameters>
+              <query>send transmit email message communication team group recipients subject body</query>
+            </parameters>
           </tool_call>
           <then>Process results and use discovered email tools or explain limitations</then>
         </example>
@@ -238,7 +258,9 @@ tools_retriever_additional_prompt = """
           <step_3_query>"check view retrieve calendar schedule appointments events date tomorrow"</step_3_query>
           <tool_call>
             <tool_name>tools_retriever</tool_name>
-            <parameters>{"query": "check view retrieve calendar schedule appointments events date tomorrow"}</parameters>
+            <parameters>
+              <query>check view retrieve calendar schedule appointments events date tomorrow</query>
+            </parameters>
           </tool_call>
           <then>Use discovered tools to access calendar or explain what's available</then>
         </example>
@@ -248,14 +270,20 @@ tools_retriever_additional_prompt = """
           <multi_query_approach>This requires multiple capabilities, use two queries</multi_query_approach>
           <query_1>"analyze process calculate sales data statistics metrics aggregation summary"</query_1>
           <query_2>"create generate report document export pdf format output"</query_2>
-          <tool_call_1>
-            <tool_name>tools_retriever</tool_name>
-            <parameters>{"query": "analyze process calculate sales data statistics metrics aggregation summary"}</parameters>
-          </tool_call_1>
-          <tool_call_2>
-            <tool_name>tools_retriever</tool_name>
-            <parameters>{"query": "create generate report document export pdf format output"}</parameters>
-          </tool_call_2>
+          <tool_calls>
+            <tool_call>
+              <tool_name>tools_retriever</tool_name>
+              <parameters>
+                <query>analyze process calculate sales data statistics metrics aggregation summary</query>
+              </parameters>
+            </tool_call>
+            <tool_call>
+              <tool_name>tools_retriever</tool_name>
+              <parameters>
+                <query>create generate report document export pdf format output</query>
+              </parameters>
+            </tool_call>
+          </tool_calls>
           <then>Combine discovered tools to build complete workflow</then>
         </example>
 
@@ -274,45 +302,14 @@ tools_retriever_additional_prompt = """
           <step_3_query>"upload send transfer file document attachment storage save"</step_3_query>
           <tool_call>
             <tool_name>tools_retriever</tool_name>
-            <parameters>{"query": "upload send transfer file document attachment storage save"}</parameters>
+            <parameters>
+              <query>upload send transfer file document attachment storage save</query>
+            </parameters>
           </tool_call>
           <then>Answer based on discovered tools: "Yes, I found file upload capabilities" or "I didn't find file upload tools in the current system"</then>
         </example>
       </practical_examples>
     </mandatory_tool_discovery>
-
-    <observation_contract>
-      <description>
-        All tools_retriever calls must produce structured observations for tracking and debugging.
-      </description>
-      <format>
-        <observation_marker>OBSERVATION RESULT FROM TOOL CALLS</observation_marker>
-        <observations>
-          <observation>
-            <tool_name>tools_retriever</tool_name>
-            <query>[semantic query used]</query>
-            <status>success|error|partial</status>
-            <results_count>[number of tools found]</results_count>
-            <top_match>[name of highest scoring tool if any]</top_match>
-            <top_score>[relevance score 0-1]</top_score>
-            <output>[full results object]</output>
-          </observation>
-        </observations>
-        <observation_marker>END OF OBSERVATIONS</observation_marker>
-      </format>
-
-      <example>
-        <observation>
-          <tool_name>tools_retriever</tool_name>
-          <query>send email message communication recipient subject body</query>
-          <status>success</status>
-          <results_count>3</results_count>
-          <top_match>email_sender</top_match>
-          <top_score>0.87</top_score>
-          <output>{"matched_tools": [{"name": "email_sender", "score": 0.87}, {"name": "notification_service", "score": 0.65}]}</output>
-        </observation>
-      </example>
-    </observation_contract>
 
     <mandatory_behaviors>
       <must>Always call tools_retriever BEFORE any limitation statement</must>
@@ -326,12 +323,11 @@ tools_retriever_additional_prompt = """
 
     <error_handling>
       <on_api_error>
-        Return observation with status:error and diagnostic message.
-        Inform user: "I encountered an error searching for tools. Let me try to help with available capabilities."
+        Use the returned error observation. Explain that tool discovery failed
+        and continue with capabilities that are actually visible.
       </on_api_error>
 
       <on_empty_result>
-        Return observation with status:partial and "no tools found" message.
         Try one alternate query with different terminology.
         If still no results, explain: "I searched for relevant tools but didn't find any for [specific functionality]. The system may not currently support this capability."
       </on_empty_result>
@@ -424,14 +420,22 @@ workspace_files_additional_prompt = """
       <example name="create_plan">
         <tool_call>
           <tool_name>workspace_file_write</tool_name>
-          <parameters>{"path":"/workspace/tasks/data-analysis/plan.md","mode":"create","content":"## Plan\\n1. ..."}</parameters>
+          <parameters>
+            <path>/workspace/tasks/data-analysis/plan.md</path>
+            <mode>create</mode>
+            <content>## Plan\n1. ...</content>
+          </parameters>
         </tool_call>
       </example>
 
       <example name="append_log">
         <tool_call>
           <tool_name>workspace_file_write</tool_name>
-          <parameters>{"path":"/workspace/tasks/data-analysis/progress.md","mode":"append","content":"Step 2 done: ..."}</parameters>
+          <parameters>
+            <path>/workspace/tasks/data-analysis/progress.md</path>
+            <mode>append</mode>
+            <content>Step 2 done: ...</content>
+          </parameters>
         </tool_call>
       </example>
     </examples>
@@ -482,7 +486,9 @@ artifact_tool_additional_prompt = """
     <example>
       <tool_call>
         <tool_name>read_artifact</tool_name>
-        <parameters>{"artifact_id": "web_search_20240109_abc123"}</parameters>
+        <parameters>
+          <artifact_id>web_search_20240109_abc123</artifact_id>
+        </parameters>
       </tool_call>
     </example>
   </artifact_tool>
@@ -550,7 +556,7 @@ agent_skills_additional_prompt = """
       </tool>
       <tool>
         <name>run_skill_script</name>
-        <signature>run_skill_script(skill_name: str, script_name: str, args?: dict, timeout?: int)</signature>
+        <signature>run_skill_script(skill_name: str, script_name: str, args?: list[str], timeout?: int)</signature>
         <purpose>Execute a script bundled with the skill</purpose>
         <usage>Follow SKILL.md instructions for script parameters and expected behavior</usage>
       </tool>
@@ -596,27 +602,33 @@ agent_skills_additional_prompt = """
       <must_not>Assume skill structure - let SKILL.md guide you</must_not>
     </mandatory_behaviors>
 
-    <observation_contract>
-      <example>
-        <tool_call>
-          <tool_name>read_skill_file</tool_name>
-          <parameters>{"skill_name": "database-ops", "file_path": "SKILL.md"}</parameters>
-        </tool_call>
-        <observation_marker>OBSERVATION RESULT FROM TOOL CALLS</observation_marker>
-        <observations>
-          <observation>
-            <tool_name>read_skill_file</tool_name>
-            <status>success</status>
-            <output>{"status": "success", "content": "# Database Operations Skill\n\nSee references/query-patterns.md for advanced usage..."}</output>
-          </observation>
-        </observations>
-        <observation_marker>END OF OBSERVATIONS</observation_marker>
-        <!-- Agent should now decide if reading query-patterns.md is needed for the task -->
-      </example>
-    </observation_contract>
+    <example>
+      <step>First read the skill entry point.</step>
+      <tool_call>
+        <tool_name>read_skill_file</tool_name>
+        <parameters>
+          <skill_name>database-ops</skill_name>
+          <file_path>SKILL.md</file_path>
+        </parameters>
+      </tool_call>
+      <then>Use the returned tool result to decide whether referenced files are needed.</then>
+    </example>
+
+    <script_example>
+      <step>Run a skill script only after SKILL.md says how to use it.</step>
+      <tool_call>
+        <tool_name>run_skill_script</tool_name>
+        <parameters>
+          <skill_name>database-ops</skill_name>
+          <script_name>inspect.py</script_name>
+          <args>["--table", "users"]</args>
+          <timeout>30</timeout>
+        </parameters>
+      </tool_call>
+    </script_example>
 
     <error_handling>
-      <on_error>Return observation with status:error and diagnostic message</on_error>
+      <on_error>Use the returned tool error and continue with available skill information.</on_error>
       <on_missing_reference>If a referenced file doesn't exist, note it and proceed with available information</on_missing_reference>
     </error_handling>
   </agent_skills>

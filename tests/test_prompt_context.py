@@ -39,10 +39,15 @@ async def test_build_system_prompt_includes_enabled_harness_context():
     assert prompt.startswith("base system\n")
     assert 'extension name="subagents_harness"' in prompt
     assert "spawn_subagents" in prompt
+    assert "<subagents_json>" in prompt
     assert "<dynamic_spawn>" in prompt
     assert "<configured_subagents>" in prompt
     assert 'extension name="sub_agents_extension"' not in prompt
     assert 'extension name="dynamic_subagents_extension"' not in prompt
+    assert "OBSERVATION RESULT FROM TOOL CALLS" not in prompt
+    assert "<observation_marker>" not in prompt
+    assert "<tool_call_1>" not in prompt
+    assert "args?: dict" not in prompt
     assert "[AVAILABLE SKILLS]" in prompt
     assert '<skill name="write_tests"' in prompt
     assert "[AVAILABLE SUB AGENTS REGISTRY]" in prompt
@@ -100,6 +105,7 @@ async def test_subagent_prompt_configured_only_does_not_claim_spawn_tool():
     assert "<dynamic_spawn>" not in prompt
     assert "<configured_subagents>" in prompt
     assert "<agent_call>" in prompt
+    assert "<agent_name>registered_worker_name</agent_name>" in prompt
     assert "[AVAILABLE SUB AGENTS REGISTRY]" in prompt
 
 

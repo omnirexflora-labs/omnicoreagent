@@ -70,6 +70,34 @@ async def test_load_skips_observation_user_messages(loader, session_state):
 
 
 @pytest.mark.asyncio
+async def test_load_skips_subagent_observation_user_messages(loader, session_state):
+    async def message_history(agent_name, session_id):
+        return [
+            Message(role="user", content="start"),
+            Message(
+                role="user",
+                content=(
+                    "OBSERVATION RESULT FROM SUB-AGENTS\n"
+                    "<observations><observation>old</observation></observations>\n"
+                    "END OF OBSERVATIONS"
+                ),
+            ),
+            Message(role="assistant", content="answer"),
+        ]
+
+    await loader.load(
+        message_history=message_history,
+        session_id="chat-subagents",
+        session_state=session_state,
+    )
+
+    assert [message.content for message in session_state.messages] == [
+        "start",
+        "answer",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_load_accepts_dict_messages(loader, session_state):
     async def message_history(agent_name, session_id):
         return [

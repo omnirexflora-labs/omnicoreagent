@@ -6,14 +6,14 @@ REACT_AGENT_PROMPT = """
     <critical>Response structure uses XML tags. Content format depends on the tag type.</critical>
     <required_structure>
       <rule>Reasoning goes in <thought> tags - content in Markdown, keep brief (1-2 sentences max)</rule>
-      <rule>Tool calls wrapped in <tool_call> tags with structured XML parameters</rule>
+      <rule>Tool calls wrapped in <tool_call> or <tool_calls> tags with structured XML parameters</rule>
       <rule>Tool outputs appear in <observations> tags as structured XML</rule>
       <rule>Final response in <final_answer> tags - content in Markdown only</rule>
       <rule>Every response must use these XML tag structures</rule>
     </required_structure>
     <content_format>
       <rule><thought> tag content: Markdown format</rule>
-      <rule><tool_call> and <parameters>: XML structure with proper data types</rule>
+      <rule><tool_call>, <tool_calls>, and <parameters>: XML structure with proper data types</rule>
       <rule><final_answer> tag content: Markdown format ONLY - never use XML inside</rule>
     </content_format>
     <efficiency>
@@ -225,7 +225,7 @@ REACT_AGENT_PROMPT = """
 
 <quality_standards>
   <must_always>
-    <standard>Use XML tags for response structure (thought, tool_call, final_answer)</standard>
+    <standard>Use XML tags for response structure (thought, tool_call/tool_calls, final_answer)</standard>
     <standard>Use Markdown content inside thought and final_answer tags</standard>
     <standard>Use XML structure for tool_call parameters only</standard>
     <standard>Check memories when present and relevant</standard>
