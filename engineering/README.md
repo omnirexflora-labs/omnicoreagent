@@ -25,3 +25,8 @@ engineering/
 
 Architecture records explain how to think about a subsystem.
 Specifications define what that subsystem must do exactly.
+
+Current records:
+
+- `architecture/workspace.md`
+- `specifications/workspace.md`
