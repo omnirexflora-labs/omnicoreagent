@@ -1771,7 +1771,6 @@ wheels = [
 name = "omnicoreagent"
 source = { editable = "." }
 dependencies = [
-    { name = "anyio" },
     { name = "click" },
     { name = "colorlog" },
     { name = "docstring-parser" },
@@ -1851,7 +1850,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anyio", specifier = ">=4.13.0" },
     { name = "apscheduler", marker = "extra == 'all'", specifier = ">=3.11.2" },
     { name = "apscheduler", marker = "extra == 'background'", specifier = ">=3.11.2" },
     { name = "boto3", marker = "extra == 'all'", specifier = ">=1.43.4" },
