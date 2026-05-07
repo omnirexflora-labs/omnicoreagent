@@ -22,14 +22,6 @@ class RunRequest(BaseModel):
     )
 
 
-class ClearSessionRequest(BaseModel):
-    """Request model for clearing session history."""
-
-    session_id: Optional[str] = Field(
-        None, description="Session ID to clear. If None, clears all sessions."
-    )
-
-
 # =============================================================================
 # Response Models
 # =============================================================================
@@ -61,9 +53,7 @@ class ReadinessResponse(BaseModel):
     ready: bool = Field(..., description="Whether the agent is ready")
     agent_name: str = Field(..., description="Name of the agent")
     initialized: bool = Field(..., description="Whether the agent is initialized")
-    mcp_connected: bool = Field(
-        ..., description="Whether MCP servers are connected"
-    )
+    mcp_connected: bool = Field(..., description="Whether MCP servers are connected")
 
 
 class ToolInfo(BaseModel):

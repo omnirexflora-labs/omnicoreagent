@@ -26,9 +26,6 @@ HOW TO RUN (CLI)
         --rate-limit 100 \
         --cors-origins "https://myapp.com,https://api.myapp.com"
 
-    # With hot reload (development)
-    omniserve run --agent cookbook/omniserve/cli_agent.py --reload
-
 =============================================================================
 CLI OPTIONS
 =============================================================================
@@ -41,7 +38,6 @@ CLI OPTIONS
     --rate-limit        Rate limit (requests per minute)
     --cors-origins      Comma-separated CORS origins
     --no-docs           Disable Swagger UI
-    --reload            Hot reload for development
 
 =============================================================================
 WHAT THIS FILE DOES

@@ -1,6 +1,6 @@
 ---
 title: OmniServe
-description: 'Production-ready API server with WebSocket streaming and multi-tenancy'
+description: 'Production REST and SSE API server for OmniCoreAgent'
 icon: 'server'
 ---
 
@@ -135,8 +135,7 @@ omniserve run \
   --auth-token YOUR_TOKEN \    # Enable Bearer token auth
   --rate-limit 100 \           # Rate limit (requests per minute)
   --cors-origins "*" \         # Comma-separated CORS origins
-  --no-docs \                  # Disable Swagger UI
-  --reload                     # Enable hot reload (development)
+  --no-docs                    # Disable Swagger UI
 ```
 
 **Examples:**
@@ -158,8 +157,6 @@ omniserve run --agent my_agent.py \
   --rate-limit 100 \
   --cors-origins "https://myapp.com,https://api.myapp.com"
 
-# Development with hot reload
-omniserve run --agent my_agent.py --reload
 ```
 
 ---
@@ -381,22 +378,6 @@ python server.py
 </Warning>
 
 ---
-
-## Advanced: Resilience Patterns
-
-Import retry and circuit breaker for custom use:
-
-```python
-from omnicoreagent import RetryConfig, CircuitBreaker, with_retry
-
-@with_retry(RetryConfig(max_retries=5, strategy="exponential"))
-async def call_external_api():
-    ...
-
-breaker = CircuitBreaker("api", failure_threshold=3, timeout=60)
-async with breaker:
-    result = await risky_call()
-```
 
 <Tip>
 OmniServe is perfect for deploying agents as microservices, webhooks, chatbots, or any HTTP-accessible AI capability.
