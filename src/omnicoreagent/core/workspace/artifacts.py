@@ -128,7 +128,7 @@ class ToolResponseOffloader:
 
     @property
     def storage(self) -> WorkspaceStorage:
-        """Storage backend for persisted tool response artifacts."""
+        """Workspace artifacts area used for persisted tool responses."""
         if self._storage is None:
             if self._workspace is None:
                 from omnicoreagent.core.workspace.manager import Workspace

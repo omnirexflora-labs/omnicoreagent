@@ -22,13 +22,13 @@ def create_workspace_files_backend(
     workspace_config: WorkspaceConfig | dict | None = None,
 ) -> AbstractWorkspaceFilesBackend:
     """
-    Create the workspace files backend from the active workspace storage.
+    Create workspace file operations from the active workspace files area.
 
     Args:
-        use_cache: If True (default), reuse cached backend instances
+        use_cache: If True (default), reuse cached workspace files adapters
 
     Returns:
-        Configured backend instance.
+        Configured workspace files adapter.
     """
     if workspace is not None:
         return _create_backend_instance(workspace.files)
@@ -54,7 +54,7 @@ def create_workspace_files_backend(
 
 
 def _create_backend_instance(storage) -> AbstractWorkspaceFilesBackend:
-    """Create a new backend instance (internal, no caching)."""
+    """Create a new workspace files adapter (internal, no caching)."""
     logger.info("Creating workspace files storage")
     return WorkspaceFilesBackend(storage=storage)
 

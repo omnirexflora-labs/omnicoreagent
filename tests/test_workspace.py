@@ -63,7 +63,7 @@ def test_workspace_config_from_env_normalizes_values(monkeypatch, tmp_path):
 
     config = WorkspaceConfig.from_env()
 
-    assert config.backend == "s3"
+    assert config.workspace_backend == "s3"
     assert config.workspace_dir == str(tmp_path / "workspace")
     assert config.namespace_prefix("artifacts") == "agent-workspace/artifacts"
     assert config.cache_key(namespace="artifacts") == (
@@ -73,6 +73,15 @@ def test_workspace_config_from_env_normalizes_values(monkeypatch, tmp_path):
         None,
         "agent-workspace/artifacts",
     )
+
+
+def test_workspace_config_uses_workspace_backend_name_only():
+    try:
+        WorkspaceConfig(backend="s3")
+    except TypeError as exc:
+        assert "backend" in str(exc)
+    else:
+        raise AssertionError("WorkspaceConfig must not accept generic backend")
 
 
 def test_workspace_storage_accepts_explicit_local_config(monkeypatch, tmp_path):
@@ -102,7 +111,7 @@ def test_workspace_storage_accepts_explicit_s3_config(monkeypatch):
     storage = create_workspace_storage(
         namespace="files",
         config=WorkspaceConfig(
-            backend="s3",
+            workspace_backend="s3",
             prefix="agent",
             s3_bucket="bucket",
             aws_region="us-east-1",
@@ -119,6 +128,32 @@ def test_workspace_storage_accepts_explicit_s3_config(monkeypatch):
         "aws_secret_access_key": None,
         "endpoint_url": "https://example.test",
     }
+
+
+def test_create_workspace_storage_accepts_explicit_workspace_backend(monkeypatch):
+    monkeypatch.delenv("AWS_S3_BUCKET", raising=False)
+    captured = {}
+
+    class FakeStorage:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "omnicoreagent.core.workspace.storage.S3WorkspaceStorage",
+        FakeStorage,
+    )
+
+    storage = create_workspace_storage(
+        namespace="artifacts",
+        workspace_backend="s3",
+        config=WorkspaceConfig(
+            prefix="runtime",
+            s3_bucket="bucket",
+        ),
+    )
+
+    assert isinstance(storage, FakeStorage)
+    assert captured["prefix"] == "runtime/artifacts"
 
 
 def test_ensure_workspace_creates_runtime_directories(monkeypatch, tmp_path):

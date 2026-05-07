@@ -21,8 +21,8 @@ async def build_tool_registry_advance_tools_use(registry: ToolRegistry):
 
 def build_tool_registry_workspace_files(
     *,
-    backend: Any,
     registry: ToolRegistry,
+    workspace_files_backend: Any = None,
     workspace: Workspace | None = None,
     workspace_config: WorkspaceConfig | dict | None = None,
 ):
@@ -31,8 +31,8 @@ def build_tool_registry_workspace_files(
     )
 
     return build_workspace_files_tool(
-        backend=backend,
         registry=registry,
+        workspace_files_backend=workspace_files_backend,
         workspace=workspace,
         workspace_config=workspace_config,
     )
@@ -108,8 +108,8 @@ class ToolRuntimeRegistry:
 
         if self.enable_workspace_files:
             build_tool_registry_workspace_files(
-                backend=None,
                 registry=registry,
+                workspace_files_backend=None,
                 workspace=self._workspace_for_runtime_tools(),
                 workspace_config=self.workspace_config,
             )

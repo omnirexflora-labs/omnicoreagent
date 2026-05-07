@@ -59,8 +59,8 @@ async def main():
     result = await agent.run("What's the weather in Tokyo?")
     print(result["response"])
     
-    # Production backends such as Redis, MongoDB, and Postgres are optional extras.
-    # Install only the backend you use, then switch at runtime when configured.
+    # Production memory stores such as Redis, MongoDB, and Postgres are optional extras.
+    # Install only the memory store you use, then switch at runtime when configured.
 
 asyncio.run(main())
 ```
@@ -179,8 +179,8 @@ LLM_API_KEY=your_api_key
 # Optional: workspace backend for artifacts and workspace files
 OMNICOREAGENT_WORKSPACE_BACKEND=local  # local, s3, or r2
 OMNICOREAGENT_WORKSPACE_DIR=.omnicoreagent/workspace
-AWS_S3_BUCKET=your-s3-bucket           # when backend=s3
-R2_BUCKET_NAME=your-r2-bucket          # when backend=r2
+AWS_S3_BUCKET=your-s3-bucket           # when workspace backend=s3
+R2_BUCKET_NAME=your-r2-bucket          # when workspace backend=r2
 ```
 
 ### Agent Configuration

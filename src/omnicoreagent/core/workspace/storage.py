@@ -443,24 +443,24 @@ class R2WorkspaceStorage(S3WorkspaceStorage):
 
 def create_workspace_storage(
     *,
-    backend: str | None = None,
+    workspace_backend: str | None = None,
     namespace: str | None = None,
     workspace_dir: str | Path | None = None,
     config: WorkspaceConfig | dict | None = None,
 ) -> WorkspaceStorage:
     workspace_config = resolve_workspace_config(config)
     workspace_config = workspace_config.with_overrides(
-        backend=backend,
+        workspace_backend=workspace_backend,
         workspace_dir=workspace_dir,
     )
-    backend = workspace_config.backend
+    workspace_backend = workspace_config.workspace_backend
     namespace = (namespace or "").strip("/")
 
-    if backend == "local":
+    if workspace_backend == "local":
         root = workspace_config.local_namespace_path(namespace)
         return LocalWorkspaceStorage(root)
 
-    if backend == "s3":
+    if workspace_backend == "s3":
         bucket_name = workspace_config.s3_bucket
         if not bucket_name:
             raise ValueError("S3 workspace backend requires AWS_S3_BUCKET")
@@ -474,7 +474,7 @@ def create_workspace_storage(
             endpoint_url=workspace_config.aws_endpoint_url,
         )
 
-    if backend == "r2":
+    if workspace_backend == "r2":
         required_fields = {
             "R2_BUCKET_NAME": workspace_config.r2_bucket_name,
             "R2_ACCOUNT_ID": workspace_config.r2_account_id,
@@ -495,4 +495,4 @@ def create_workspace_storage(
             prefix=prefix,
         )
 
-    raise ValueError("workspace backend must be one of: local, s3, r2")
+    raise ValueError("workspace_backend must be one of: local, s3, r2")

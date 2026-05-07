@@ -13,7 +13,7 @@ DEFAULT_WORKSPACE_PREFIX = "workspace"
 class WorkspaceConfig:
     """Explicit workspace storage configuration."""
 
-    backend: str = DEFAULT_WORKSPACE_BACKEND
+    workspace_backend: str = DEFAULT_WORKSPACE_BACKEND
     workspace_dir: str | Path | None = DEFAULT_WORKSPACE_DIR
     prefix: str = DEFAULT_WORKSPACE_PREFIX
     s3_bucket: str | None = None
@@ -27,7 +27,11 @@ class WorkspaceConfig:
     r2_secret_access_key: str | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "backend", self.backend.lower().strip())
+        object.__setattr__(
+            self,
+            "workspace_backend",
+            self.workspace_backend.lower().strip(),
+        )
         object.__setattr__(self, "prefix", self.prefix.strip("/"))
         if self.workspace_dir is not None:
             object.__setattr__(self, "workspace_dir", str(self.workspace_dir))
@@ -36,7 +40,7 @@ class WorkspaceConfig:
     def from_env(cls, env: Mapping[str, str] | None = None) -> "WorkspaceConfig":
         source = env if env is not None else os.environ
         return cls(
-            backend=source.get(
+            workspace_backend=source.get(
                 "OMNICOREAGENT_WORKSPACE_BACKEND", DEFAULT_WORKSPACE_BACKEND
             ),
             workspace_dir=source.get(
@@ -59,12 +63,12 @@ class WorkspaceConfig:
     def with_overrides(
         self,
         *,
-        backend: str | None = None,
+        workspace_backend: str | None = None,
         workspace_dir: str | Path | None = None,
     ) -> "WorkspaceConfig":
         updates = {}
-        if backend is not None:
-            updates["backend"] = backend
+        if workspace_backend is not None:
+            updates["workspace_backend"] = workspace_backend
         if workspace_dir is not None:
             updates["workspace_dir"] = workspace_dir
         return replace(self, **updates)
@@ -81,30 +85,30 @@ class WorkspaceConfig:
         return root / clean_namespace if clean_namespace else root
 
     def cache_key(self, namespace: str | None = None) -> tuple:
-        if self.backend == "local":
+        if self.workspace_backend == "local":
             return (
-                self.backend,
+                self.workspace_backend,
                 str(self.local_namespace_path(namespace).expanduser().resolve()),
             )
 
-        if self.backend == "s3":
+        if self.workspace_backend == "s3":
             return (
-                self.backend,
+                self.workspace_backend,
                 self.s3_bucket,
                 self.aws_region,
                 self.aws_endpoint_url,
                 self.namespace_prefix(namespace),
             )
 
-        if self.backend == "r2":
+        if self.workspace_backend == "r2":
             return (
-                self.backend,
+                self.workspace_backend,
                 self.r2_bucket_name,
                 self.r2_account_id,
                 self.namespace_prefix(namespace),
             )
 
-        return (self.backend,)
+        return (self.workspace_backend,)
 
 
 def resolve_workspace_config(
