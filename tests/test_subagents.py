@@ -15,7 +15,7 @@ from omnicoreagent.core.runtime.config import normalize_agent_config
 
 @pytest.fixture
 def model_config():
-    return {"provider": "openai", "model": "gpt-4o"}
+    return {"provider": "openai", "model": "gpt-4o", "api_key": "test"}
 
 
 @pytest.fixture
@@ -422,18 +422,21 @@ class TestSubagentFactory:
 
 
 class TestOmniCoreAgentSubagents:
-    def test_enable_subagents_disabled_does_not_register_spawn_tool(self, model_config):
+    @pytest.mark.asyncio
+    async def test_enable_subagents_disabled_does_not_register_spawn_tool(self, model_config):
         agent = OmniCoreAgent(
             name="CoreHarness",
             system_instruction="Test",
             model_config=model_config,
-            agent_config={"enable_subagents": False},
+            agent_config={"enable_subagents": False, "guardrail_mode": "off"},
         )
 
-        agent._prepare_dynamic_subagents()
+        await agent.initialize()
 
         assert agent._subagent_factory is None
         assert agent.local_tools is None
+
+        await agent.cleanup()
 
     def test_enable_subagents_forces_workspace_files(self):
         config = normalize_agent_config(
@@ -447,38 +450,45 @@ class TestOmniCoreAgentSubagents:
         assert config["enable_subagents"] is True
         assert config["enable_workspace_files"] is True
 
-    def test_enable_subagents_registers_core_spawn_tool(self, model_config):
+    @pytest.mark.asyncio
+    async def test_enable_subagents_registers_core_spawn_tool(self, model_config):
         agent = OmniCoreAgent(
             name="CoreHarness",
             system_instruction="Test",
             model_config=model_config,
-            agent_config={"enable_subagents": True},
+            agent_config={"enable_subagents": True, "guardrail_mode": "off"},
         )
 
         assert agent.agent_config["enable_workspace_files"] is True
 
-        agent._prepare_dynamic_subagents()
+        await agent.initialize()
 
         tool_names = [tool.name for tool in agent.local_tools.list_tools()]
         assert tool_names.count("spawn_subagents") == 1
 
-    def test_prepare_dynamic_subagents_is_idempotent(self, model_config):
+        await agent.cleanup()
+
+    @pytest.mark.asyncio
+    async def test_initialize_dynamic_subagents_is_idempotent(self, model_config):
         agent = OmniCoreAgent(
             name="CoreHarness",
             system_instruction="Test",
             model_config=model_config,
-            agent_config={"enable_subagents": True},
+            agent_config={"enable_subagents": True, "guardrail_mode": "off"},
         )
 
-        agent._prepare_dynamic_subagents()
+        await agent.initialize()
         first_factory = agent._subagent_factory
-        agent._prepare_dynamic_subagents()
+        await agent.initialize()
 
         assert agent._subagent_factory is first_factory
         tool_names = [tool.name for tool in agent.local_tools.list_tools()]
         assert tool_names.count("spawn_subagents") == 1
 
-    def test_enable_subagents_preserves_user_tools(self, model_config):
+        await agent.cleanup()
+
+    @pytest.mark.asyncio
+    async def test_enable_subagents_preserves_user_tools(self, model_config):
         user_registry = ToolRegistry()
 
         @user_registry.register_tool("my_custom_tool")
@@ -490,14 +500,16 @@ class TestOmniCoreAgentSubagents:
             system_instruction="Test",
             model_config=model_config,
             local_tools=user_registry,
-            agent_config={"enable_subagents": True},
+            agent_config={"enable_subagents": True, "guardrail_mode": "off"},
         )
 
-        agent._prepare_dynamic_subagents()
+        await agent.initialize()
 
         tool_names = [tool.name for tool in agent.local_tools.list_tools()]
         assert "my_custom_tool" in tool_names
         assert "spawn_subagents" in tool_names
+
+        await agent.cleanup()
 
     @pytest.mark.asyncio
     async def test_initialize_registers_spawn_and_workspace_files(self):
@@ -526,9 +538,9 @@ class TestOmniCoreAgentSubagents:
             name="Harness",
             system_instruction="Test",
             model_config=model_config,
-            agent_config={"enable_subagents": True},
+            agent_config={"enable_subagents": True, "guardrail_mode": "off"},
         )
-        agent._prepare_dynamic_subagents()
+        await agent.initialize()
         agent._subagent_factory.cleanup = AsyncMock()
 
         await agent.cleanup()

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any, Dict, List, Optional
 
-from omnicoreagent.core.runtime import construction, harness_tools, normalization, summaries
+from omnicoreagent.core.runtime import (
+    builder,
+    construction,
+    harness_tools,
+    normalization,
+    summaries,
+)
 from omnicoreagent.core.runtime.imports import (
     LazyDefaultPromptBuilder,
     runtime,
@@ -13,10 +18,10 @@ from omnicoreagent.core.runtime.imports import (
 
 class OmniCoreAgent:
     """
-    A simple, user-friendly interface for creating and using MCP agents.
+    Public facade for the OmniCoreAgent runtime.
 
-    This class provides a high-level API that abstracts away the complexity
-    of MCP client configuration and agent creation.
+    The facade owns lifecycle, session, memory, event, and execution APIs while
+    delegating construction details to runtime helper modules.
     """
 
     def __init__(
@@ -96,48 +101,27 @@ class OmniCoreAgent:
         self._initialized = True
 
     def _create_agent(self):
-        """Create the appropriate agent based on configuration"""
-        self.mcp_client, self.llm_connection = construction.create_llm_runtime(
-            mcp_tools=self.mcp_tools,
+        """Build and attach runtime components."""
+        components = builder.build_agent_runtime(
             model_config=self.model_config,
+            mcp_tools=self.mcp_tools,
+            local_tools=self.local_tools,
+            agent_config=self.agent_config,
+            memory_router=self.memory_router,
+            event_router=self.event_router,
+            prompt_builder=self.prompt_builder,
+            existing_subagent_factory=self._subagent_factory,
+            guardrail=self.guardrail,
+            guardrail_mode=self.guardrail_mode,
+            summarize_fn=self._summarize_history,
             debug=self.debug,
         )
 
-        agent_settings = construction.build_agent_settings(self.agent_config)
-        construction.configure_memory_router(
-            memory_router=self.memory_router,
-            agent_settings=agent_settings,
-            summarize_fn=self._summarize_history,
-        )
-
-        self.agent = construction.create_react_agent(
-            agent_settings=agent_settings,
-            guardrail=self.guardrail,
-            guardrail_mode=self.guardrail_mode,
-        )
-        self._prepare_dynamic_subagents()
-        if self.local_tools:
-            harness_tools.index_tools_for_advanced_use(
-                enabled=self.agent.enable_advanced_tool_use,
-                local_tools=self.local_tools,
-            )
-
-    def _prepare_dynamic_subagents(self):
-        """Register dynamic subagent spawning tools when enabled."""
-        self._subagent_factory, self.local_tools = (
-            harness_tools.prepare_dynamic_subagents(
-                enabled=self.agent_config.get("enable_subagents", False),
-                existing_factory=self._subagent_factory,
-                base_model_config=self.model_config,
-                mcp_tools=self.mcp_tools,
-                local_tools=self.local_tools,
-                agent_config=self.agent_config,
-                prompt_builder=self.prompt_builder,
-                event_router=self.event_router,
-                memory_router=self.memory_router,
-                debug=self.debug,
-            )
-        )
+        self.agent = components.agent
+        self.mcp_client = components.mcp_client
+        self.llm_connection = components.llm_connection
+        self.local_tools = components.local_tools
+        self._subagent_factory = components.subagent_factory
 
     async def _summarize_history(
         self, messages: list[Dict[str, Any]], max_tokens: int = None
@@ -181,6 +165,8 @@ class OmniCoreAgent:
 
     def generate_session_id(self) -> str:
         """Generate a new session ID for the session"""
+        import uuid
+
         return f"omni_core_agent_{self.name}_{uuid.uuid4().hex[:8]}"
 
     async def connect_mcp_servers(self):
