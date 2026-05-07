@@ -197,12 +197,18 @@ class TestMCPClient:
     async def test_add_servers(self, mock_client):
         """Test dynamically adding servers"""
         mock_client._connect_to_single_server = AsyncMock(
-            return_value="new_server connected successfully"
+            side_effect=[
+                "server1 connected successfully",
+                "server2 connected successfully",
+            ]
         )
         result = await mock_client.add_servers(MOCK_MCP_SERVERS)
 
-        assert "server1 connected successfully" in result
-        mock_client._connect_to_single_server.assert_awaited()
+        assert result == [
+            "server1 connected successfully",
+            "server2 connected successfully",
+        ]
+        assert mock_client._connect_to_single_server.await_count == 2
 
     @pytest.mark.asyncio
     async def test_remove_server(self, mock_client):

@@ -2,7 +2,7 @@ import asyncio
 from contextlib import AsyncExitStack
 from datetime import timedelta
 from typing import Any
-import anyio
+
 from mcp import ClientSession
 
 from omnicoreagent.core.llm import LLMConnection
@@ -10,6 +10,10 @@ from omnicoreagent.core.utils import logger
 from omnicoreagent.mcp_clients_connection.oauth import (
     build_oauth_provider,
     is_oauth_enabled,
+)
+from omnicoreagent.mcp_clients_connection.state import (
+    ConnectedServer,
+    MCPClientState,
 )
 from omnicoreagent.mcp_clients_connection.transports import open_server_transport
 
@@ -23,10 +27,7 @@ class MCPClient:
         debug: bool = False,
     ):
         self.servers = self._normalize_servers(servers or [])
-        self.sessions = {}
-        self.available_tools = {}
-        self.server_names = []
-        self.added_servers_names = {}
+        self.state = MCPClientState()
         self.debug = debug
         self.llm_connection = (
             LLMConnection(model_config=model_config, api_key=api_key)
@@ -34,6 +35,38 @@ class MCPClient:
             else None
         )
         self.server_count = 0
+
+    @property
+    def sessions(self) -> dict[str, dict[str, Any]]:
+        return self.state.sessions
+
+    @sessions.setter
+    def sessions(self, value: dict[str, dict[str, Any]]) -> None:
+        self.state.sessions = value
+
+    @property
+    def available_tools(self) -> dict[str, list[Any]]:
+        return self.state.available_tools
+
+    @available_tools.setter
+    def available_tools(self, value: dict[str, list[Any]]) -> None:
+        self.state.available_tools = value
+
+    @property
+    def server_names(self) -> list[str]:
+        return self.state.server_names
+
+    @server_names.setter
+    def server_names(self, value: list[str]) -> None:
+        self.state.server_names = value
+
+    @property
+    def added_servers_names(self) -> dict[str, str]:
+        return self.state.added_servers_names
+
+    @added_servers_names.setter
+    def added_servers_names(self, value: dict[str, str]) -> None:
+        self.state.added_servers_names = value
 
     def _normalize_servers(self, servers: list[dict[str, Any]]) -> list[dict[str, Any]]:
         normalized = []
@@ -91,7 +124,7 @@ class MCPClient:
             )
             init_result = await session.initialize()
             server_name = init_result.serverInfo.name
-            if server_name in self.server_names:
+            if self.state.has_server(server_name):
                 error_message = (
                     f"{server_name} is already connected. Disconnect it and try again."
                 )
@@ -99,17 +132,17 @@ class MCPClient:
                     logger.error(error_message)
                 await stack.aclose()
                 return error_message
-            self.server_names.append(server_name)
-            server_name_data = {server_added_name: server_name}
-            self.added_servers_names.update(server_name_data)
-            self.sessions[server_name] = {
-                "session": session,
-                "read_stream": read_stream,
-                "write_stream": write_stream,
-                "connected": True,
-                "transport_type": transport_type,
-                "stack": stack,
-            }
+            self.state.add_server(
+                ConnectedServer(
+                    requested_name=server_added_name,
+                    server_name=server_name,
+                    session=session,
+                    read_stream=read_stream,
+                    write_stream=write_stream,
+                    transport_type=transport_type,
+                    stack=stack,
+                )
+            )
             if self.debug:
                 logger.info(
                     f"Successfully connected to {server_name} via {transport_type}"
@@ -141,7 +174,7 @@ class MCPClient:
             logger.info(f"{server_name} does not support tools: {e}")
             tools = []
 
-        self.available_tools[server_name] = tools
+        self.state.set_tools(server_name, tools)
         if self.debug:
             logger.info(f"Loaded {len(tools)} MCP tools from {server_name}")
             for tool in tools:
@@ -151,40 +184,30 @@ class MCPClient:
     async def add_servers(self, servers: list[dict[str, Any]]) -> list[Any]:
         """Dynamically add servers at runtime."""
         servers = self._normalize_servers(servers)
-        errors = []
-        servers_connected_response = []
-        try:
-            server_added_name = None
-            async with anyio.create_task_group() as tg:
-                for server in servers:
-                    server_added_name = server["name"]
-                    tg.start_soon(
-                        self._connect_to_single_server, server, server_added_name
-                    )
-                    servers_connected_response.append(
-                        f"{server_added_name} connected successfully"
-                    )
-        except Exception as e:
-            logger.error(f"Failed to add server '{server_added_name}': {e}")
-            errors.append((server_added_name, str(e)))
-        if errors:
-            return errors
-        return servers_connected_response
+        connect_tasks = [
+            self._connect_to_single_server(server, server["name"]) for server in servers
+        ]
+        results = await asyncio.gather(*connect_tasks, return_exceptions=True)
 
-    async def remove_server(self, name: str) -> None:
+        responses = []
+        for server, result in zip(servers, results, strict=True):
+            if isinstance(result, Exception):
+                logger.error(f"Failed to add server '{server['name']}': {result}")
+                responses.append((server["name"], str(result)))
+            else:
+                responses.append(result)
+        return responses
+
+    async def remove_server(self, name: str) -> str:
         """Disconnect and remove a server by name."""
         try:
             old_name = name
-            if name not in self.added_servers_names:
-                raise ValueError(f"Server '{name}' not found.")
+            server_name = self.state.resolve_server_name(name)
             if len(self.sessions) == 1:
                 return (
                     f"Cannot remove {name}: at least one server must remain connected."
                 )
-            for server_added_name, server_name in self.added_servers_names.items():
-                if name.lower() == server_added_name.lower():
-                    name = server_name
-            session_info = self.sessions[name]
+            session_info = self.sessions[server_name]
             await self._close_session(
                 server_name=old_name, session_info=session_info
             )
@@ -197,15 +220,10 @@ class MCPClient:
             logger.error(error_message)
             return error_message
 
-        self.sessions.pop(name, None)
-        self.server_names.remove(name)
-        self.added_servers_names = {
-            k: v for k, v in self.added_servers_names.items() if v != name
-        }
-        self.available_tools.pop(name, None)
+        self.state.remove_server(server_name)
 
-        logger.info(f"Server '{name}' removed successfully.")
-        return f"{name} disconnected successfully"
+        logger.info(f"Server '{server_name}' removed successfully.")
+        return f"{server_name} disconnected successfully"
 
     async def _close_session(self, server_name: str, session_info: dict):
         """Tear down the per-server context stack, which closes streams and session."""
@@ -258,10 +276,7 @@ class MCPClient:
             except Exception as e:
                 logger.error(f"Error during server cleanup: {e}")
 
-            self.server_names.clear()
-            self.added_servers_names.clear()
-            self.sessions.clear()
-            self.available_tools.clear()
+            self.state.clear()
 
             logger.info("All MCP connections cleared")
         except Exception as e:
