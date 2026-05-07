@@ -1,16 +1,16 @@
 # Workspace Architecture
 
-This is an internal architecture record, not public product documentation. Keep
-public docs thin; keep detailed design decisions, debugging paths, and coding
-agent instructions here.
+This is an internal architecture record under `engineering/architecture`, not
+public product documentation. It is the source of truth for OmniCoreAgent
+workspace design.
 
-This file is the source of truth for workspace architecture. It is not a list
-of suggestions. When workspace code changes, the implementation, tests, prompt
-contract, and this document must stay aligned.
+Keep public docs thin. Keep detailed design decisions, runtime boundaries,
+debugging paths, and coding-agent instructions here.
 
-This page is the design record for OmniCoreAgent workspace architecture. Read it
-before changing workspace storage, workspace files, tool offloading, artifact
-tools, subagent output paths, or runtime tool registration.
+This file is not a list of suggestions. When workspace code changes, the
+implementation, tests, prompt contract, and this document must stay aligned.
+Read this before changing workspace storage, workspace files, tool offloading,
+artifact tools, subagent output paths, or runtime tool registration.
 
 The architecture design means the full internal blueprint:
 
@@ -21,6 +21,7 @@ The architecture design means the full internal blueprint:
 - how workspace tools are registered into the agent loop
 - how tool offloading writes and reads artifacts
 - how subagents write output for the lead agent to read
+- what workspace must not own
 - what the prompt must tell the model
 - which invariants and tests must be preserved
 
@@ -54,6 +55,24 @@ state.
 
 ---
 
+## Terminology
+
+Use these names consistently.
+
+| Term | Meaning |
+|------|---------|
+| Workspace | Runtime facade that owns all filesystem-like harness state |
+| Workspace storage driver | The selected storage implementation for workspace data: local, S3, or R2 |
+| `files/` | Agent-managed durable files created intentionally by the model |
+| `artifacts/` | Runtime-managed large tool outputs created automatically by offloading |
+| Workspace file tools | Tools the model uses to create, view, edit, move, or delete files under `files/` |
+| Artifact tools | Tools the model uses to inspect offloaded content under `artifacts/` |
+
+Do not call `workspace_backend` a memory backend. It is the workspace storage
+driver selector. Memory stores and workspace storage are separate systems.
+
+---
+
 ## Architecture Invariants
 
 These invariants are mandatory.
@@ -61,7 +80,7 @@ These invariants are mandatory.
 | Invariant | Reason |
 |-----------|--------|
 | Workspace owns filesystem-like harness state | Avoid scattered file/storage behavior across tools, runtime, and agents |
-| One workspace backend controls both `files/` and `artifacts/` | Local, S3, and R2 must be selected once and behave consistently |
+| One workspace storage driver controls both `files/` and `artifacts/` | Local, S3, and R2 must be selected once and behave consistently |
 | `files/` is agent-managed state | The model can intentionally create, read, update, and organize these files |
 | `artifacts/` is runtime-managed output | Tool offloading writes here automatically; the model reads through artifact tools |
 | Workspace access tool outputs stay inline | Retrieval tools must not recursively offload their own retrieved content |
@@ -140,6 +159,35 @@ This separation matters because `files/` is intentional agent state, while
 
 ---
 
+## What Workspace Does Not Own
+
+Workspace is the filesystem boundary, not every persistence system in the
+runtime.
+
+Workspace must not own:
+
+- LLM provider configuration
+- MCP server configuration
+- local tool definitions
+- tool registry mechanics
+- conversation memory stores such as Redis, Postgres, Mongo, or vector memory
+- event streams
+- tracing, evaluation, or observability systems
+- prompt assembly itself
+
+Those systems may read from or write to the workspace when they produce
+filesystem-like state, but their core behavior belongs in their own modules.
+
+The practical rule:
+
+```text
+If the runtime needs a durable file or file-like object, use workspace.
+If the runtime needs a database, transport, provider, registry, or event stream,
+do not hide that inside workspace.
+```
+
+---
+
 ## Workspace Storage Driver
 
 The Python config field that selects the workspace storage driver is
@@ -162,7 +210,7 @@ The environment variable is already scoped and remains:
 OMNICOREAGENT_WORKSPACE_BACKEND=local
 ```
 
-Default behavior:
+Default local behavior:
 
 ```text
 workspace_backend = local
@@ -177,8 +225,9 @@ workspace_backend=s3 -> s3://bucket/<prefix>/files and s3://bucket/<prefix>/arti
 workspace_backend=r2 -> s3-compatible R2 keys under <prefix>/files and <prefix>/artifacts
 ```
 
-The app chooses one workspace backend. Both `files/` and `artifacts/` use it.
-There is no separate workspace-files backend and no separate artifact backend.
+The app chooses one workspace storage driver. Both `files/` and `artifacts/`
+use it. There is no separate workspace-files driver and no separate artifact
+driver.
 
 ---
 
@@ -205,6 +254,19 @@ core/workspace/
 batching, observation formatting, registries, and prompt rendering. Workspace
 tools are registered into the tool registry from the workspace package, but the
 workspace package owns the behavior.
+
+Ownership boundary:
+
+| Package | Owns |
+|---------|------|
+| `core/workspace` | Workspace facade, storage drivers, file tools, artifacts, path safety, offload policy |
+| `core/tools` | Generic tool registry, tool dispatch, batching, observation formatting |
+| `core/runtime` | Runtime assembly and wiring of configured capabilities |
+| `core/agents` | Agent loop, prompt use, tool calling, subagent orchestration |
+
+Crossing these boundaries should be explicit. For example, runtime may call
+workspace builders to register workspace tools, but `core/tools` should not
+reimplement workspace storage or path rules.
 
 ---
 
@@ -240,13 +302,17 @@ workspace.artifacts  -> <prefix>/artifacts
 When OmniCoreAgent prepares tools:
 
 1. User local tools can already exist in a `ToolRegistry`.
-2. Runtime/internal tools are added to that same registry when enabled.
-3. Workspace file tools are registered when `enable_workspace_files` is true.
+2. Runtime/internal tools are added to that same registry.
+3. Workspace file tools are registered when workspace files are enabled.
 4. Artifact tools are registered when `tool_offload.enabled` is true.
 
 This preserves the existing local-tool model: internal tools are normal tools
 from the agent's point of view. The model calls them through the same loop as
 user tools and MCP tools.
+
+Workspace files are enabled by default. Disabling them should be a deliberate
+runtime choice, because subagent output, durable task progress, and long-running
+agent work depend on this capability.
 
 ### Shared workspace binding
 
@@ -278,6 +344,27 @@ Flow:
 
 The offloaded result message must be small enough to keep the ReAct loop fast
 but useful enough for the model to decide whether it needs the full artifact.
+
+---
+
+## Failure Contract
+
+Workspace failures must be visible and local to the failing operation.
+
+Rules:
+
+- Unsafe paths fail before reaching storage.
+- Missing files return clear tool errors.
+- Workspace file write/edit/delete errors return tool errors.
+- Artifact read/search/tail errors return tool errors.
+- Tool offloading must not silently pretend content was saved when storage
+  failed.
+- Local and S3/R2 failures should use the same logical error shape where
+  practical.
+
+The agent loop can decide what to do with a tool error. The workspace layer must
+not hide failed writes, path escapes, missing files, or storage failures behind
+successful-looking messages.
 
 ---
 
@@ -369,9 +456,13 @@ The model must understand:
 - `artifacts/` is for runtime-managed large tool outputs.
 - Workspace files are useful for multi-step work, parallel work, context
   recovery, and durable task state.
+- For substantial multi-step work, the agent should write plans, progress, and
+  important intermediate outputs to workspace files.
 - Artifact tools are used when a tool response was offloaded.
 - Subagent outputs are written to workspace files and read by the lead
   agent before synthesis.
+- Workspace paths should be stable and meaningful enough for the agent to
+  re-open them later.
 
 Do not describe workspace as just "file storage". The purpose is harness
 reliability: durability, context control, subagent coordination, and repeatable
@@ -452,8 +543,9 @@ harder to reason about.
 
 ### Why `workspace_backend`
 
-The codebase also has memory backends and event backends. A generic field named
-`backend` is ambiguous. `workspace_backend` states exactly what is selected.
+The codebase also has memory backends, event streams, and MCP transports. A
+generic field named `backend` is ambiguous. `workspace_backend` states that the
+selected driver is for workspace storage only.
 
 ### Why no compatibility alias
 
