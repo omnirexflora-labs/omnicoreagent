@@ -1,12 +1,10 @@
-from typing import List, Any, Optional, Tuple, Dict
-from omnicoreagent.core.utils import (
-    logger,
-    normalize_enriched_tool,
-)
 import json
+from typing import List, Any, Optional, Tuple, Dict
 
 
 from omnicoreagent.core.constants import TOOLS_REGISTRY
+from omnicoreagent.core.logging import logger
+from omnicoreagent.core.tools.advance_tools.text import normalize_enriched_tool
 import math
 import re
 from collections import Counter, defaultdict

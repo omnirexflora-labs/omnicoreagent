@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from omnicoreagent.core.types import Message
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 class OmniCoreAgentPromptBuilder:
@@ -92,9 +92,7 @@ class AgentPromptContextBuilder:
             if message.role != "user":
                 continue
 
-            datetime_info = (
-                f"[CURRENT_DATETIME: {self.clock().strftime('%Y-%m-%d %H:%M:%S %Z')}]\n\n"
-            )
+            datetime_info = f"[CURRENT_DATETIME: {self.clock().strftime('%Y-%m-%d %H:%M:%S %Z')}]\n\n"
             messages[index] = Message(
                 role="user",
                 content=datetime_info + message.content,
@@ -450,7 +448,7 @@ sub_agents_additional_prompt = """
 
     <when_to_use_sub_agents>
       Delegate to sub-agents for:
-      
+
       <complex_reasoning>
         Analysis, evaluation, or decision-making tasks:
         - "Analyze this sales data and provide insights"
@@ -458,7 +456,7 @@ sub_agents_additional_prompt = """
         - "Compare these options and recommend the best one"
         - "Research this topic and produce a structured output"
       </complex_reasoning>
-      
+
       <domain_expertise>
         Tasks requiring specialized knowledge:
         - "Write code to solve this problem"
@@ -466,21 +464,21 @@ sub_agents_additional_prompt = """
         - "Create a marketing strategy for this product"
         - "Explain this complex technical concept"
       </domain_expertise>
-      
+
       <multi_step_workflows>
         Tasks requiring orchestration of multiple steps:
         - "Gather data, analyze it, and create a report"
         - "Search for information, synthesize it, and make recommendations"
         - "Process these files, extract insights, and send summary"
       </multi_step_workflows>
-      
+
       <parallel_processing>
         Tasks that benefit from concurrent execution:
         - "Check weather in multiple cities"
         - "Analyze several documents simultaneously"
         - "Gather information from multiple sources at once"
       </parallel_processing>
-      
+
       <iterative_tasks>
         Tasks requiring refinement or back-and-forth:
         - "Brainstorm ideas and refine them"
@@ -497,13 +495,13 @@ sub_agents_additional_prompt = """
         3. Invoke appropriate sub-agent(s) if match exists
         4. Only explain limitations if no suitable sub-agent exists
       </workflow>
-      
+
       <registry_interpretation>
         The AVAILABLE SUB AGENT REGISTRY contains:
         - agent_name: Identifier for invocation
         - description: Sub-agent's specialty and capabilities
         - parameters: Required inputs with types
-        
+
         Match requests to sub-agents based on:
         - Domain/specialty (code, research, writing, analysis)
         - Task complexity (reasoning, multi-step, expertise)
@@ -513,7 +511,7 @@ sub_agents_additional_prompt = """
 
     <invocation_syntax>
       Sub-agents are invoked using <agent_call> syntax:
-      
+
       <single_invocation>
         <agent_call>
           <agent_name>weather_agent</agent_name>
@@ -522,7 +520,7 @@ sub_agents_additional_prompt = """
           </parameters>
         </agent_call>
       </single_invocation>
-      
+
       <concurrent_invocation>
         Use <agent_calls> (plural) for parallel execution:
         <agent_calls>
@@ -548,7 +546,7 @@ sub_agents_additional_prompt = """
         - Task maps to one clear specialty
         - Sequential processing is needed
         - Output of one step feeds into next
-        
+
         <example>
           <thought>User needs weather info - found weather_agent in registry.</thought>
           <agent_call>
@@ -559,13 +557,13 @@ sub_agents_additional_prompt = """
           </agent_call>
         </example>
       </single_agent>
-      
+
       <concurrent_agents>
         Use <agent_calls> (plural) when:
         - Task has independent components that can run in parallel
         - Need information from multiple domains simultaneously
         - Time-sensitive tasks benefit from concurrency
-        
+
         <example>
           <thought>Travel info needs weather and recommendations - independent tasks, run concurrently.</thought>
           <agent_calls>
@@ -584,10 +582,10 @@ sub_agents_additional_prompt = """
           </agent_calls>
         </example>
       </concurrent_agents>
-      
+
       <sequential_agents>
         Chain multiple <agent_call>s when output of first informs second:
-        
+
         <example>
           <thought>First gather source material, then analyze the output.</thought>
           <agent_call>
@@ -620,7 +618,7 @@ sub_agents_additional_prompt = """
         </observations>
         <observation_marker>END OF OBSERVATIONS</observation_marker>
       </format>
-      
+
       <processing_rules>
         <must>Wait for all observations before reasoning about results</must>
         <must>Interpret and synthesize sub-agent outputs, don't just repeat them</must>
@@ -645,7 +643,7 @@ sub_agents_additional_prompt = """
         Report to user: "The [agent_name] encountered an error: [error_message]"
         Suggest alternatives or explain limitations clearly.
       </on_agent_error>
-      
+
       <on_missing_agent>
         After checking registry thoroughly:
         "I checked available sub-agents but didn't find one specialized in [capability]."
@@ -664,7 +662,7 @@ sub_agents_additional_prompt = """
           </parameters>
         </agent_call>
       </example>
-      
+
       <example name="complex_analysis">
         <user_request>"Analyze the performance metrics in this file and give recommendations"</user_request>
         <thought>Analysis and recommendations needed - found analysis_agent in registry.</thought>
@@ -676,7 +674,7 @@ sub_agents_additional_prompt = """
           </parameters>
         </agent_call>
       </example>
-      
+
       <example name="parallel_execution">
         <user_request>"Compare weather in NYC, SF, and Chicago"</user_request>
         <thought>Independent parallel tasks - use concurrent calls.</thought>
@@ -701,7 +699,7 @@ sub_agents_additional_prompt = """
           </agent_call>
         </agent_calls>
       </example>
-      
+
       <example name="research_and_synthesis">
         <user_request>"Research AI trends and summarize key developments"</user_request>
         <thought>Multi-step research and synthesis - checking for research capabilities.</thought>
@@ -770,7 +768,7 @@ dynamic_subagents_additional_prompt = """
 tools_retriever_additional_prompt = """
 <extension name="tools_retriever_extension">
   <description>
-    Mandatory tool discovery system that prevents premature limitation claims by enforcing 
+    Mandatory tool discovery system that prevents premature limitation claims by enforcing
     comprehensive search of available capabilities before any "cannot do" response.
   </description>
   <activation_flag>use_tools_retriever</activation_flag>
@@ -785,10 +783,10 @@ tools_retriever_additional_prompt = """
     </meta>
 
     <core_mandate>
-      ABSOLUTE RULE: Never claim inability to perform any action without FIRST using 
-      tools_retriever to search for available capabilities. This is non-negotiable for 
+      ABSOLUTE RULE: Never claim inability to perform any action without FIRST using
+      tools_retriever to search for available capabilities. This is non-negotiable for
       ALL action-oriented, information-access, or functionality requests.
-      
+
       Violation pattern to avoid: User asks → Agent says "I cannot" → (no tool search performed)
       Correct pattern: User asks → Agent searches tools_retriever → Agent responds based on returned tool results
     </core_mandate>
@@ -800,7 +798,7 @@ tools_retriever_additional_prompt = """
         1. Called tools_retriever with a well-crafted semantic query
         2. Examined the returned results
         3. Verified no relevant tools exist
-        
+
         Only AFTER exhausting tool discovery may you explain limitations.
       </critical_tool_rule>
 
@@ -812,37 +810,37 @@ tools_retriever_additional_prompt = """
           <capability_questions>Capability queries: "Can you...", "Do you support...", "Is it possible to...", "Are you able to..."</capability_questions>
           <functionality_requests>Any request involving external systems, APIs, databases, files, calendars, communication, etc.</functionality_requests>
         </trigger_conditions>
-        
+
         <query_construction_strategy>
           Transform user requests into rich semantic queries using this formula:
-          
+
           Step 1 - Extract Core Intent:
           - Identify the primary action (what user wants done)
           - Identify the target object (what it applies to)
           - Identify key parameters (important context)
-          
+
           Step 2 - Semantic Enrichment:
           <synonyms>Add 2-3 synonyms for each major term
             Example: "send" → "send transmit deliver dispatch"
             Example: "email" → "email message correspondence communication"
           </synonyms>
-          
+
           <related_terms>Include related functionality terms
             Example: "weather" → "weather forecast temperature conditions climate"
             Example: "calendar" → "calendar schedule appointment event meeting"
           </related_terms>
-          
+
           <parameter_hints>Include parameter-related keywords
             Example: For email: "recipient subject body attachment sender"
             Example: For calendar: "date time location participants duration"
           </parameter_hints>
-          
+
           Step 3 - Final Query Format:
           [ACTION_SYNONYMS] [OBJECT_SYNONYMS] [PARAMETER_KEYWORDS] [CONTEXT_TERMS]
-          
+
           Length: Aim for 50-150 characters for optimal BM25 matching.
         </query_construction_strategy>
-        
+
         <multi_query_strategy>
           For complex or ambiguous requests, use multiple focused queries:
           <complex_request>"I need to analyze sales data and email the report"</complex_request>
@@ -850,7 +848,7 @@ tools_retriever_additional_prompt = """
           <query_2>"send email message report attachment recipient delivery"</query_2>
           <rationale>Two focused queries yield better results than one vague query</rationale>
         </multi_query_strategy>
-        
+
         <result_interpretation>
           After receiving tools_retriever results:
           <tools_found>If tools are returned, examine their descriptions and parameters to determine fit</tools_found>
@@ -864,7 +862,7 @@ tools_retriever_additional_prompt = """
             Agent: "I don't have email capabilities."
             <!-- NO TOOL SEARCH PERFORMED -->
           </bad_example>
-          
+
           CORRECT APPROACH - Always do this:
           <good_example>
             User: "Can you send an email?"
@@ -975,7 +973,7 @@ tools_retriever_additional_prompt = """
         </observations>
         <observation_marker>END OF OBSERVATIONS</observation_marker>
       </format>
-      
+
       <example>
         <observation>
           <tool_name>tools_retriever</tool_name>
@@ -1004,13 +1002,13 @@ tools_retriever_additional_prompt = """
         Return observation with status:error and diagnostic message.
         Inform user: "I encountered an error searching for tools. Let me try to help with available capabilities."
       </on_api_error>
-      
+
       <on_empty_result>
         Return observation with status:partial and "no tools found" message.
         Try one alternate query with different terminology.
         If still no results, explain: "I searched for relevant tools but didn't find any for [specific functionality]. The system may not currently support this capability."
       </on_empty_result>
-      
+
       <on_low_relevance>
         If returned tools don't seem to match the request:
         1. Query might be too narrow - try broader terms
@@ -1022,11 +1020,11 @@ tools_retriever_additional_prompt = """
 
     <performance_optimization>
       <caching_hint>
-        For repeated similar requests in same conversation, you may reference previously 
+        For repeated similar requests in same conversation, you may reference previously
         discovered tools without re-querying if the functionality is identical.
         Example: If user asks to send multiple emails, discover email tools once.
       </caching_hint>
-      
+
       <query_efficiency>
         Balance comprehensiveness with conciseness:
         - Too short (< 30 chars): May miss context, underperform
@@ -1169,25 +1167,25 @@ agent_skills_additional_prompt = """
 <extension name="agent_skills">
   <description>Extension providing access to reusable Agent Skills - self-contained capability packages with specialized knowledge, scripts, and documentation.</description>
   <activation_flag>enable_agent_skills</activation_flag>
-  
+
   <agent_skills>
     <meta>
       <name>Agent Skills System</name>
       <purpose>Extend agent capabilities through packaged skills containing instructions, executable scripts, and interconnected documentation</purpose>
     </meta>
-    
+
     <core_mandate>
       Agent Skills are modular capability packages. Each skill is a directory containing:
       - SKILL.md: Primary activation document with instructions and guidance
       - scripts/: Executable scripts implementing the skill's capabilities
       - references/: Additional documentation (may be referenced from SKILL.md)
       - assets/: Templates, examples, and supporting resources
-      
+
       SKILL.md is the entry point - it may be self-contained OR reference other files for deeper context.
-      Your task: Read SKILL.md thoughtfully, identify any referenced documentation, and assemble 
+      Your task: Read SKILL.md thoughtfully, identify any referenced documentation, and assemble
       the complete mental model needed to fulfill the user's request effectively.
     </core_mandate>
-    
+
     <understanding_skills>
       <principle>Skills are knowledge structures, not just scripts</principle>
       <approach>
@@ -1205,13 +1203,13 @@ agent_skills_additional_prompt = """
         - Let the user's request guide your depth of exploration
       </note>
     </understanding_skills>
-    
+
     <when_to_use>
       <trigger>User request matches a skill's description in available_skills</trigger>
       <trigger>Task requires specialized knowledge or operations a skill provides</trigger>
       <trigger>Current approach would benefit from documented patterns in a skill</trigger>
     </when_to_use>
-    
+
     <tools>
       <tool>
         <name>read_skill_file</name>
@@ -1230,7 +1228,7 @@ agent_skills_additional_prompt = """
         <usage>Follow SKILL.md instructions for script parameters and expected behavior</usage>
       </tool>
     </tools>
-    
+
     <workflow>
       <phase name="Discovery">
         Check available_skills registry for skills matching the user's need
@@ -1252,7 +1250,7 @@ agent_skills_additional_prompt = """
         Apply the skill using scripts, following documented patterns
       </phase>
     </workflow>
-    
+
     <mental_model_guidance>
       Think of skills as mini-libraries:
       - SKILL.md is the README - start here always
@@ -1261,7 +1259,7 @@ agent_skills_additional_prompt = """
       - You decide what to read based on task complexity
       - Goal: Build enough understanding to act effectively, not to read everything
     </mental_model_guidance>
-    
+
     <mandatory_behaviors>
       <must>Always read SKILL.md before using any skill</must>
       <must>Identify and evaluate any file references in SKILL.md</must>
@@ -1270,7 +1268,7 @@ agent_skills_additional_prompt = """
       <must_not>Execute scripts without understanding their purpose and parameters</must_not>
       <must_not>Assume skill structure - let SKILL.md guide you</must_not>
     </mandatory_behaviors>
-    
+
     <observation_contract>
       <example>
         <tool_call>
@@ -1289,7 +1287,7 @@ agent_skills_additional_prompt = """
         <!-- Agent should now decide if reading query-patterns.md is needed for the task -->
       </example>
     </observation_contract>
-    
+
     <error_handling>
       <on_error>Return observation with status:error and diagnostic message</on_error>
       <on_missing_reference>If a referenced file doesn't exist, note it and proceed with available information</on_missing_reference>

@@ -2,7 +2,7 @@ import json
 import re
 
 from omnicoreagent.core.types import ParsedResponse
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 def extract_thought(response: str) -> str | None:

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
 
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 if TYPE_CHECKING:
     from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent as AgentType

@@ -9,7 +9,7 @@ from omnicoreagent.core.types import (
     ToolCallMetadata,
     ToolFunction,
 )
-from omnicoreagent.core.utils import RobustLoopDetector
+from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
 
 
 TOOL_ALPHA_ID = "11111111-1111-1111-1111-111111111111"
@@ -51,7 +51,9 @@ async def test_load_skips_observation_user_messages(loader, session_state):
     async def message_history(agent_name, session_id):
         return [
             Message(role="user", content="start"),
-            Message(role="user", content="<observations><tool>old</tool></observations>"),
+            Message(
+                role="user", content="<observations><tool>old</tool></observations>"
+            ),
             Message(role="assistant", content="answer"),
         ]
 

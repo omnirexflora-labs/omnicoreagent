@@ -51,7 +51,7 @@ _EXPORTS = {
     "EventRouter": ("omnicoreagent.core.events", "EventRouter"),
     "ToolRegistry": ("omnicoreagent.core.tools", "ToolRegistry"),
     "Tool": ("omnicoreagent.core.tools", "Tool"),
-    "logger": ("omnicoreagent.core.utils", "logger"),
+    "logger": ("omnicoreagent.core.logging", "logger"),
     "OmniCoreAgent": (
         "omnicoreagent.core.runtime.omnicore_agent",
         "OmniCoreAgent",

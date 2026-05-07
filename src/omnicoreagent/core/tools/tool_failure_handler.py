@@ -6,8 +6,51 @@ from omnicoreagent.core.events.base import (
     EventType,
     ToolCallErrorPayload,
 )
+from omnicoreagent.core.logging import logger
 from omnicoreagent.core.types import AgentState, Message, SessionState, ToolError
-from omnicoreagent.core.utils import handle_stuck_state, logger
+
+
+def build_stuck_state_prompt(message_stuck_prompt: bool = False) -> str:
+    """Build deterministic stuck-loop guidance for the agent prompt."""
+    if message_stuck_prompt:
+        return (
+            "You are stuck in a loop. This must be addressed immediately.\n\n"
+            "REQUIRED ACTIONS:\n"
+            "1. STOP the current approach\n"
+            "2. ANALYZE why the previous attempts failed\n"
+            "3. TRY a completely different method\n"
+            "4. IF the issue cannot be resolved:\n"
+            "   - Explain clearly why not\n"
+            "   - Provide alternative solutions\n"
+            "   - DO NOT repeat the same failed action\n\n"
+            "   - DO NOT try again. immediately stop and do not try again.\n\n"
+            "   - Tell user your last known good state, error message and the current state of the conversation.\n\n"
+            "CONTINUING THE SAME APPROACH WILL RESULT IN FURTHER FAILURES"
+        )
+
+    return (
+        "It looks like you're stuck or repeating an ineffective approach.\n"
+        "Take a moment to do the following:\n"
+        "1. Reflect: Analyze why the previous step didn't work (e.g., tool call failure, irrelevant observation).\n"
+        "2. Try Again Differently: Use a different tool, change the inputs, or attempt a new strategy.\n"
+        "3. If Still Unsolvable:\n"
+        "   - Clearly explain to the user why the issue cannot be solved.\n"
+        "   - Provide any relevant reasoning or constraints.\n"
+        "   - Offer one or more alternative solutions or next steps.\n"
+        "   - DO NOT try again. immediately stop and do not try again.\n\n"
+        "   - Tell user your last known good state, error message and the current state of the conversation.\n\n"
+        "Do not repeat the same failed strategy or go silent."
+    )
+
+
+def handle_stuck_state(
+    _original_system_prompt: str, message_stuck_prompt: bool = False
+) -> str:
+    return (
+        f"{build_stuck_state_prompt(message_stuck_prompt)}\n\n"
+        "Your previous approaches to solve this problem have failed. "
+        "You need to try something completely different.\n\n"
+    )
 
 
 class ToolFailureHandler:

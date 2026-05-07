@@ -6,7 +6,7 @@ import pytest
 
 from omnicoreagent.core.agents.tool_action import AgentToolActionRunner
 from omnicoreagent.core.types import AgentState, ParsedResponse, SessionState, ToolError
-from omnicoreagent.core.utils import RobustLoopDetector
+from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
 
 
 def make_session_state():
@@ -92,8 +92,12 @@ async def test_tool_action_runner_handles_validation_error():
         session_id="chat1",
     )
 
-    assert observation_handler.appended["tools_results"][0]["tool_name"] == "missing_tool"
-    assert failure_handler.loop_state["tool_call_results"][0].tool_name == "missing_tool"
+    assert (
+        observation_handler.appended["tools_results"][0]["tool_name"] == "missing_tool"
+    )
+    assert (
+        failure_handler.loop_state["tool_call_results"][0].tool_name == "missing_tool"
+    )
 
 
 @pytest.mark.asyncio

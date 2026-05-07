@@ -10,7 +10,8 @@ from omnicoreagent.core.tools.tool_observation_formatter import (
 from omnicoreagent.core.tools.tool_observation_guardrail import scrub_tool_results
 from omnicoreagent.core.tools.tool_observation_parser import parse_tool_observation
 from omnicoreagent.core.types import AgentState, Message, SessionState, ToolCallResult
-from omnicoreagent.core.utils import build_xml_observations_block, logger
+from omnicoreagent.core.logging import logger
+from omnicoreagent.core.tools.observations import build_xml_observations_block
 
 if TYPE_CHECKING:
     from omnicoreagent.core.guardrails import PromptInjectionGuard
@@ -33,7 +34,9 @@ class ToolObservationHandler:
     async def parse(self, raw_output: str | dict[str, Any]) -> dict[str, Any]:
         return parse_tool_observation(raw_output)
 
-    def scrub_results(self, tools_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def scrub_results(
+        self, tools_results: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         return scrub_tool_results(tools_results, self.guardrail)
 
     def maybe_offload_result(

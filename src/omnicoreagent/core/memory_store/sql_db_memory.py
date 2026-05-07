@@ -9,8 +9,8 @@ from sqlalchemy import String, Text, DateTime, create_engine, func, inspect, tex
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.ext.mutable import MutableDict
-from omnicoreagent.core.utils import logger
-from omnicoreagent.core.utils import utc_now_str
+from omnicoreagent.core.logging import logger
+from omnicoreagent.core.memory_store.utils import utc_now_str
 from omnicoreagent.core.summarizer.summarizer_engine import (
     apply_summarization_logic,
 )

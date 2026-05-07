@@ -5,7 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from omnicoreagent.core.types import Message, SessionState
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 class AgentInitialMessagePreparer:

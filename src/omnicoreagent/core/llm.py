@@ -6,7 +6,7 @@ import time
 import warnings
 from typing import Any
 
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 warnings.filterwarnings(
     "ignore", message="Pydantic serializer warnings", module="pydantic.main"
@@ -120,9 +120,7 @@ def _sleep_before_retry(
     delay = min(base_delay * (backoff_factor**attempt), max_delay)
     jitter = random.uniform(0, 0.1 * delay)
     total_delay = delay + jitter
-    logger.warning(
-        f"Retryable error on attempt {attempt + 1}/{max_retries + 1}: {exc}"
-    )
+    logger.warning(f"Retryable error on attempt {attempt + 1}/{max_retries + 1}: {exc}")
     logger.info(f"Retrying in {total_delay:.2f} seconds...")
     time.sleep(total_delay)
 

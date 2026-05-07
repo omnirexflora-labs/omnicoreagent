@@ -6,7 +6,7 @@ from omnicoreagent.core.agents.run_outcome import AgentRunOutcomeHandler
 from omnicoreagent.core.events.base import EventType
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.types import AgentState, SessionState
-from omnicoreagent.core.utils import RobustLoopDetector
+from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
 
 
 def make_session_state():

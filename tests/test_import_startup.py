@@ -148,7 +148,7 @@ print(json.dumps({
     "advanced_tools_loaded": (
         "omnicoreagent.core.tools.advance_tools.advanced_tools_use" in sys.modules
     ),
-    "utils_loaded": "omnicoreagent.core.utils" in sys.modules,
+    "legacy_utils_loaded": "omnicoreagent.core.utils" in sys.modules,
     "constants_loaded": "omnicoreagent.core.constants" in sys.modules,
 }))
 """,
@@ -157,7 +157,7 @@ print(json.dumps({
     assert result == {
         "export": "ToolRegistry",
         "advanced_tools_loaded": False,
-        "utils_loaded": False,
+        "legacy_utils_loaded": False,
         "constants_loaded": False,
     }
 
@@ -188,7 +188,7 @@ watched_modules = [
     "omnicoreagent.core.system_prompts",
     "omnicoreagent.core.token_usage",
     "omnicoreagent.core.types",
-    "omnicoreagent.core.utils",
+    "omnicoreagent.core.utils",  # deleted legacy dump-yard module
 ]
 
 print(json.dumps({
@@ -280,7 +280,7 @@ asyncio.run(main())
     }
 
 
-def test_core_utils_import_has_no_runtime_side_effects(tmp_path):
+def test_core_logging_import_has_no_runtime_side_effects(tmp_path):
     result = _run_import_probe(
         tmp_path,
         """
@@ -288,10 +288,10 @@ import json
 import sys
 from pathlib import Path
 
-from omnicoreagent.core import utils
+from omnicoreagent.core.logging import logger
 
 print(json.dumps({
-    "has_mac_probe": hasattr(utils, "get_mac_address"),
+    "logger_name": logger.name,
     "log_file_created": Path("omnicoreagent.log").exists(),
     "decouple_loaded": "decouple" in sys.modules,
     "rich_loaded": any(module == "rich" or module.startswith("rich.") for module in sys.modules),
@@ -300,7 +300,7 @@ print(json.dumps({
     )
 
     assert result == {
-        "has_mac_probe": False,
+        "logger_name": "omnicoreagent",
         "log_file_created": False,
         "decouple_loaded": False,
         "rich_loaded": False,

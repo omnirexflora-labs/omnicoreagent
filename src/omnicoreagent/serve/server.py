@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from fastapi import FastAPI
 
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 from .config import OmniServeConfig
 from .lifespan import agent_lifespan
@@ -75,8 +75,7 @@ class OmniServe:
         self.config = config or OmniServeConfig()
         self.title = title or f"{agent.name} API"
         self.description = description or (
-            f"OmniServe API for {agent.name}. "
-            "Powered by OmniCoreAgent framework."
+            f"OmniServe API for {agent.name}. Powered by OmniCoreAgent framework."
         )
 
         self.app = self._create_app()
@@ -108,15 +107,14 @@ class OmniServe:
 
         # Setup observability metrics
         from .observability import setup_observability
+
         setup_observability(app, self.config, service_name=self.agent.name)
 
         # Include routes with optional prefix
         router = create_agent_router()
         app.include_router(router, prefix=self.config.api_prefix)
 
-        logger.info(
-            f"OmniServe: Created FastAPI app for agent '{self.agent.name}'"
-        )
+        logger.info(f"OmniServe: Created FastAPI app for agent '{self.agent.name}'")
 
         return app
 
@@ -135,7 +133,7 @@ class OmniServe:
             port: Port to bind to (overrides config)
             reload: Enable auto-reload for development
             workers: Number of worker processes (overrides config)
-        
+
         Note:
             Reload mode is not supported when using OmniServe directly.
             For hot-reload during development, use:
@@ -147,9 +145,7 @@ class OmniServe:
         final_port = port or self.config.port
         final_workers = workers or self.config.workers
 
-        logger.info(
-            f"OmniServe: Starting server at http://{final_host}:{final_port}"
-        )
+        logger.info(f"OmniServe: Starting server at http://{final_host}:{final_port}")
         logger.info(
             f"OmniServe: Swagger UI available at http://{final_host}:{final_port}/docs"
         )

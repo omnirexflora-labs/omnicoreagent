@@ -7,7 +7,7 @@ from typing import Any
 from omnicoreagent.core.events.base import Event
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.types import AgentState, Message, ParsedResponse, SessionState
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 @dataclass

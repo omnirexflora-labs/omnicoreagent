@@ -22,10 +22,8 @@ from omnicoreagent.core.tools.tool_batch_runner import ToolBatchRunner
 from omnicoreagent.core.tools.tool_call_resolver import ToolCallResolver
 from omnicoreagent.core.tools.tool_failure_handler import ToolFailureHandler
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
-from omnicoreagent.core.utils import (
-    logger,
-    BackgroundTaskManager,
-)
+from omnicoreagent.core.agents.background_tasks import BackgroundTaskManager
+from omnicoreagent.core.logging import logger
 from omnicoreagent.core.events.base import Event
 from omnicoreagent.core.context_manager import (
     AgentLoopContextManager,
@@ -52,6 +50,7 @@ from omnicoreagent.core.agents.xml_parser import (
 if TYPE_CHECKING:
     from omnicoreagent.core.guardrails import PromptInjectionGuard
     from omnicoreagent.core.workspace.config import WorkspaceConfig
+
 
 class BaseReactAgent:
     """Autonomous agent implementing the ReAct paradigm for task solving through iterative reasoning and tool usage."""

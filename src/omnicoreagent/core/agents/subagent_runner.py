@@ -15,13 +15,13 @@ from omnicoreagent.core.events.base import (
 )
 from omnicoreagent.core.token_usage import Usage, usage
 from omnicoreagent.core.types import Message
-from omnicoreagent.core.utils import (
+from omnicoreagent.core.agents.display import show_sub_agent_call_result
+from omnicoreagent.core.agents.subagent_helpers import (
     build_kwargs,
     build_sub_agents_observation_xml,
-    logger,
     resolve_agent,
-    show_sub_agent_call_result,
 )
+from omnicoreagent.core.logging import logger
 
 
 class SubAgentCallRunner:
@@ -137,7 +137,7 @@ class SubAgentCallRunner:
 
         try:
             agent = resolve_agent(agent_name, sub_agents)
-            params = call.get("parameters", {})
+            params = dict(call.get("parameters", {}))
             params["session_id"] = session_id
             kwargs = build_kwargs(agent, params)
 

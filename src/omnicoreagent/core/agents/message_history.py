@@ -2,7 +2,7 @@ from collections.abc import Callable
 from typing import Any
 
 from omnicoreagent.core.types import Message, SessionState
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 class AgentMessageHistoryLoader:
@@ -79,7 +79,9 @@ class AgentMessageHistoryLoader:
             return
 
         self._clear_or_flush_pending(session_state=session_state)
-        session_state.messages.append(Message(role="assistant", content=message.content))
+        session_state.messages.append(
+            Message(role="assistant", content=message.content)
+        )
 
     def _apply_tool_message(
         self, message: Message, session_state: SessionState

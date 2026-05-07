@@ -13,7 +13,7 @@ from omnicoreagent.core.types import (
     ToolCallResult,
     ToolError,
 )
-from omnicoreagent.core.utils import RobustLoopDetector
+from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
 
 
 @pytest.fixture
@@ -39,17 +39,20 @@ async def test_handle_validation_error_records_loop_and_event(handler, session_s
     async def event_router(session_id, event):
         events.append({"session_id": session_id, "event": event})
 
-    tool_batch_name, tool_batch_args, obs_text, results = (
-        await handler.handle_validation_error(
-            tool_error=ToolError(
-                observation="The tool named 'missing_tool' does not exist.",
-                tool_name="missing_tool",
-                tool_args={"query": "runtime"},
-            ),
-            session_state=session_state,
-            session_id="chat796",
-            event_router=event_router,
-        )
+    (
+        tool_batch_name,
+        tool_batch_args,
+        obs_text,
+        results,
+    ) = await handler.handle_validation_error(
+        tool_error=ToolError(
+            observation="The tool named 'missing_tool' does not exist.",
+            tool_name="missing_tool",
+            tool_args={"query": "runtime"},
+        ),
+        session_state=session_state,
+        session_id="chat796",
+        event_router=event_router,
     )
 
     assert tool_batch_name == "missing_tool"

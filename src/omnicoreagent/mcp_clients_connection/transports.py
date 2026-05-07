@@ -10,7 +10,7 @@ from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 async def open_server_transport(

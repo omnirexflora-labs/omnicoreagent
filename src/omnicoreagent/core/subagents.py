@@ -13,7 +13,7 @@ import asyncio
 import json
 from typing import Any, Dict, List, Optional
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 class SubagentFactory:
@@ -85,7 +85,9 @@ class SubagentFactory:
         output_path: str,
     ) -> str:
         """Build the focused system instruction for a spawned worker."""
-        if self.prompt_builder and hasattr(self.prompt_builder, "build_subagent_prompt"):
+        if self.prompt_builder and hasattr(
+            self.prompt_builder, "build_subagent_prompt"
+        ):
             return self.prompt_builder.build_subagent_prompt(
                 role=role,
                 task=task,
@@ -212,7 +214,9 @@ When you have completed the task:
                 "retry again",
             ]
             response_lower = response.lower()
-            is_error = any(indicator in response_lower for indicator in error_indicators)
+            is_error = any(
+                indicator in response_lower for indicator in error_indicators
+            )
 
             # Also check if response is empty or too short
             is_error = is_error or len(response.strip()) < 10
@@ -344,19 +348,19 @@ def build_subagent_tools(
         name="spawn_subagents",
         description="""
     Spawns one or more subagents to work on focused tasks.
-    
+
     Always pass a JSON array of subagent specs. If you only need one subagent,
     pass an array with one item. Multiple specs run in parallel.
     Each subagent writes output to workspace files. After completion, read
     all output paths with workspace_file_view before synthesizing.
-    
+
     When to use:
     - Task has multiple independent components
     - Work is split across different domains, files, systems, or specialties
     - Parallel execution would be more efficient
     - One focused worker is enough, but keeping one array-based tool avoids
       choosing between single and parallel spawn modes
-    
+
     Example use case: Coordinating a product audit
     - Spawn subagents for API review, UI review, docs review, and test review
     - Each worker executes its assigned task independently
@@ -373,7 +377,7 @@ def build_subagent_tools(
     - role: Worker role or expertise description (e.g., "API reviewer")
     - task: Specific task to complete
     - output_path: Workspace file path for output
-    
+
     Example:
     '[
         {"name": "api", "role": "API reviewer", "task": "Review API error handling and write concrete risks", "output_path": "/workspace/audit/api.md"},

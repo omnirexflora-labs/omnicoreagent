@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Optional, Dict, Any
 from datetime import datetime, timedelta
 
 from omnicoreagent.core.summarizer.tokenizer import count_tokens
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 if TYPE_CHECKING:
     from omnicoreagent.core.workspace.config import WorkspaceConfig
