@@ -104,6 +104,31 @@ async def test_prepare_tools_uses_workspace_config_for_workspace_files(
 
 
 @pytest.mark.asyncio
+async def test_subagents_enable_workspace_file_tools(
+    monkeypatch, tmp_path, internal_registry, offloader
+):
+    clear_workspace_files_backend_cache()
+    monkeypatch.delenv("OMNICOREAGENT_WORKSPACE_DIR", raising=False)
+    workspace = tmp_path / "subagent-workspace"
+    runtime = make_runtime(
+        internal_registry,
+        offloader,
+        enable_subagents=True,
+        enable_workspace_files=False,
+        workspace_config=WorkspaceConfig(workspace_dir=workspace),
+    )
+
+    prepared = await runtime.prepare_tools(local_tools=None)
+
+    tool_names = [tool.name for tool in prepared.list_tools()]
+    assert "workspace_file_write" in tool_names
+    assert "workspace_file_view" in tool_names
+    assert runtime.workspace is not None
+
+    clear_workspace_files_backend_cache()
+
+
+@pytest.mark.asyncio
 async def test_render_prompt_registry_formats_local_tool_schema(
     internal_registry, offloader
 ):
@@ -142,7 +167,9 @@ async def test_render_prompt_registry_formats_local_tool_schema(
 
     assert "search_docs: Search documentation. Use for docs." in rendered
     assert "query: string (required) - Search query." in rendered
-    assert 'filters: array of objects ({"field": string, "active": boolean})' in rendered
+    assert (
+        'filters: array of objects ({"field": string, "active": boolean})' in rendered
+    )
     assert 'Example: {"field": "...", "active": true}' in rendered
 
 

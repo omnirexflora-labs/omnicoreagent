@@ -87,17 +87,12 @@ include = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = [
-    "-m",
-    "not broken_upstream",
-]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "asyncio: marks tests that use asyncio",
     "OpenAIIntegration: marks tests that require an OpenAI API key",
     "requires_api_key: marks tests that require external API keys or credentials",
     "requires_network: marks tests that require network access to external services",
-    "broken_upstream: marks tests broken by upstream source changes (stale mocks/assertions)",
 ]
 
 [tool.uv.sources]

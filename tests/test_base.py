@@ -40,15 +40,15 @@ async def test_extract_action_or_answer_with_action(agent):
     assert data[0]["parameters"]["input"] == "news"
 
 
-@pytest.mark.broken_upstream
 @pytest.mark.asyncio
-async def test_extract_action_or_answer_fallback_error(agent):
-    response = "This is just a general response without XML."
+async def test_extract_action_or_answer_error_mentions_parallel_tool_calls(agent):
     result = await agent.extract_action_or_answer(
-        response, session_id="test", event_router=AsyncMock()
+        "plain text", session_id="test", event_router=AsyncMock()
     )
+
     assert result.error is not None
-    assert "Response must use XML format" in result.error
+    assert "<tool_calls>" in result.error
+    assert "Multiple Independent Tools" in result.error
 
 
 @pytest.mark.asyncio

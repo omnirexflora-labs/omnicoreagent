@@ -73,7 +73,7 @@ class ToolRuntimeRegistry:
         self.tool_offloader = tool_offloader
         self.enable_advanced_tool_use = enable_advanced_tool_use
         self.enable_subagents = enable_subagents
-        self.enable_workspace_files = enable_workspace_files
+        self.enable_workspace_files = enable_workspace_files or enable_subagents
         self.enable_agent_skills = enable_agent_skills
         self.skill_manager = skill_manager
         self.workspace = workspace
