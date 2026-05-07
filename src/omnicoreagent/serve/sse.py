@@ -7,7 +7,7 @@ Provides utilities for streaming agent events via SSE.
 import json
 from typing import TYPE_CHECKING, Any, AsyncGenerator
 
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 if TYPE_CHECKING:
     from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent as AgentType

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from omnicoreagent.core.summarizer.tokenizer import count_tokens
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 class ContextManagementMode(str, Enum):

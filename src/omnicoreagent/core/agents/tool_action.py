@@ -4,8 +4,13 @@ from collections.abc import Callable
 from typing import Any
 
 from omnicoreagent.core.events.base import Event
-from omnicoreagent.core.types import ParsedResponse, SessionState, ToolCallResult, ToolError
-from omnicoreagent.core.utils import show_tool_response
+from omnicoreagent.core.types import (
+    ParsedResponse,
+    SessionState,
+    ToolCallResult,
+    ToolError,
+)
+from omnicoreagent.core.agents.display import show_tool_response
 
 
 class AgentToolActionRunner:
@@ -66,15 +71,18 @@ class AgentToolActionRunner:
             sub_agents=sub_agents,
         )
 
-        tool_batch_name, tool_batch_args, obs_text, tools_results = (
-            await self._execute_or_handle_error(
-                tool_call_result=tool_call_result,
-                response=response,
-                session_state=session_state,
-                add_message_to_history=add_message_to_history,
-                session_id=session_id,
-                event_router=event_router,
-            )
+        (
+            tool_batch_name,
+            tool_batch_args,
+            obs_text,
+            tools_results,
+        ) = await self._execute_or_handle_error(
+            tool_call_result=tool_call_result,
+            response=response,
+            session_state=session_state,
+            add_message_to_history=add_message_to_history,
+            session_id=session_id,
+            event_router=event_router,
         )
 
         if debug:

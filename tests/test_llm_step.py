@@ -8,7 +8,7 @@ from omnicoreagent.core.agents import llm_step
 from omnicoreagent.core.agents.llm_step import AgentLlmStepRunner
 from omnicoreagent.core.token_usage import Usage, UsageLimits
 from omnicoreagent.core.types import AgentState, Message, SessionState
-from omnicoreagent.core.utils import RobustLoopDetector
+from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
 
 
 def make_session_state(messages=None):
@@ -59,7 +59,9 @@ async def test_llm_step_calls_model_emits_message_and_records_usage(monkeypatch)
     class LlmConnection:
         async def llm_call(self, messages):
             return {
-                "choices": [{"message": {"content": "<final_answer>done</final_answer>"}}],
+                "choices": [
+                    {"message": {"content": "<final_answer>done</final_answer>"}}
+                ],
                 "usage": {
                     "prompt_tokens": 3,
                     "completion_tokens": 4,

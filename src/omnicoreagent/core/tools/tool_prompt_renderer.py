@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 class ToolPromptRenderer:

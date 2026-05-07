@@ -11,7 +11,7 @@ Handles:
 import re
 from pathlib import Path
 from typing import Dict, List, Optional
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 from omnicoreagent.core.skills.models import SkillMetadata
 
 

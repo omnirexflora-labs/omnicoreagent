@@ -17,7 +17,7 @@ from omnicoreagent.core.token_usage import (
     usage,
 )
 from omnicoreagent.core.types import SessionState
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 @dataclass

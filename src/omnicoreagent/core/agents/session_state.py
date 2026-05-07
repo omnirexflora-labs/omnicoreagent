@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
+from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
+from omnicoreagent.core.logging import logger
 from omnicoreagent.core.types import AgentState, SessionState
-from omnicoreagent.core.utils import RobustLoopDetector, logger
 
 
 class AgentSessionStateStore:

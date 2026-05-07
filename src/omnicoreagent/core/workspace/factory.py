@@ -1,6 +1,6 @@
 from threading import Lock
 
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 from omnicoreagent.core.workspace.base import AbstractWorkspaceFilesBackend
 from omnicoreagent.core.workspace.config import (
     WorkspaceConfig,

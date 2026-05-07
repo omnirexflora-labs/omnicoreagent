@@ -28,7 +28,7 @@ _RUNTIME_EXPORTS = {
     "SubagentFactory": ("omnicoreagent.core.subagents", "SubagentFactory"),
     "Usage": ("omnicoreagent.core.token_usage", "Usage"),
     "build_subagent_tools": ("omnicoreagent.core.subagents", "build_subagent_tools"),
-    "logger": ("omnicoreagent.core.utils", "logger"),
+    "logger": ("omnicoreagent.core.logging", "logger"),
     "normalize_agent_config": (
         "omnicoreagent.core.runtime.config",
         "normalize_agent_config",

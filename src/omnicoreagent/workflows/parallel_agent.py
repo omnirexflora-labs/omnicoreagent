@@ -1,6 +1,6 @@
 from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
 from typing import List, Optional, Dict
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 import asyncio
 import uuid
 

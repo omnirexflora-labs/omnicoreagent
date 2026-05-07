@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 def parse_tool_observation(raw_output: str | dict[str, Any]) -> dict[str, Any]:

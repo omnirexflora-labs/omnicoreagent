@@ -15,7 +15,7 @@ from omnicoreagent.core.summarizer.summarizer_types import (
     SummaryConfig,
     format_summary_content,
 )
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 SummarizeFn = Callable[[list[dict[str, Any]]], Coroutine[Any, Any, str]]

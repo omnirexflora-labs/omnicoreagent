@@ -4,7 +4,7 @@ from omnicoreagent._optional import load_optional
 from omnicoreagent.core.events.base import BaseEventStore, Event
 from omnicoreagent.core.events.in_memory import InMemoryEventStore
 from omnicoreagent.core.events.trace import AgentTrace, build_event_trace
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 class EventRouter:

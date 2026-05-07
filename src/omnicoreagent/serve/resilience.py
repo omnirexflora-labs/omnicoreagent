@@ -12,7 +12,7 @@ from enum import Enum
 from functools import wraps
 from typing import Callable, Dict, Optional, TypeVar
 
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 # =============================================================================

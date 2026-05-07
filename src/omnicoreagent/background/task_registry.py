@@ -3,7 +3,7 @@ Task registry for managing background agent task definitions.
 """
 
 from typing import Dict, List, Optional
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 from pydantic import BaseModel
 import uuid
 

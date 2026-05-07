@@ -7,7 +7,7 @@ from omnicoreagent.core.tools.tool_batch_runner import (
     ToolBatchRunner,
 )
 from omnicoreagent.core.types import AgentState, SessionState, ToolCallResult
-from omnicoreagent.core.utils import RobustLoopDetector
+from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
 
 
 @pytest.fixture
@@ -132,7 +132,9 @@ async def test_start_records_assistant_and_started_event(runner, session_state):
     assert all(tool.tool_call_id for tool in tool_calls)
     assert len({tool.tool_call_id for tool in tool_calls}) == 2
     assert history[0]["role"] == "assistant"
-    assert [call["function"]["name"] for call in history[0]["metadata"]["tool_calls"]] == [
+    assert [
+        call["function"]["name"] for call in history[0]["metadata"]["tool_calls"]
+    ] == [
         "alpha",
         "beta",
     ]

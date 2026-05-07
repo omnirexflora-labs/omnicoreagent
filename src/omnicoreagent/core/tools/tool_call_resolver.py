@@ -8,7 +8,8 @@ from omnicoreagent.core.tools.tool_action import ToolAction, parse_tool_actions
 from omnicoreagent.core.tools.tool_catalog import find_local_tool_name, find_mcp_tool
 from omnicoreagent.core.tools.tool_executor import ToolExecutor
 from omnicoreagent.core.types import ParsedResponse, ToolCallResult, ToolError
-from omnicoreagent.core.utils import logger, normalize_tool_args
+from omnicoreagent.core.logging import logger
+from omnicoreagent.core.tools.arguments import normalize_tool_args
 
 if TYPE_CHECKING:
     from omnicoreagent.core.guardrails import PromptInjectionGuard

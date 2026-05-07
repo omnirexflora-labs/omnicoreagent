@@ -6,7 +6,7 @@ from typing import Any
 from mcp import ClientSession
 
 from omnicoreagent.core.llm import LLMConnection
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 from omnicoreagent.mcp_clients_connection.oauth import (
     build_oauth_provider,
     is_oauth_enabled,
@@ -208,9 +208,7 @@ class MCPClient:
                     f"Cannot remove {name}: at least one server must remain connected."
                 )
             session_info = self.sessions[server_name]
-            await self._close_session(
-                server_name=old_name, session_info=session_info
-            )
+            await self._close_session(server_name=old_name, session_info=session_info)
         except ValueError as e:
             error_message = f"Error removing server: {str(e)}"
             logger.error(error_message)

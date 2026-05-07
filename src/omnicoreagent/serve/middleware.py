@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 from .config import OmniServeConfig
 

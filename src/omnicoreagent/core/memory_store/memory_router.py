@@ -3,10 +3,10 @@ import os
 
 from omnicoreagent.core.memory_store.in_memory import InMemoryStore
 from omnicoreagent._optional import load_optional
-from omnicoreagent.core.utils import logger
-from omnicoreagent.core.utils import normalize_metadata
+from omnicoreagent.core.logging import logger
+from omnicoreagent.core.memory_store.utils import normalize_metadata
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
-from omnicoreagent.core.utils import normalize_content
+from omnicoreagent.core.memory_store.utils import normalize_content
 
 
 class MemoryRouter:

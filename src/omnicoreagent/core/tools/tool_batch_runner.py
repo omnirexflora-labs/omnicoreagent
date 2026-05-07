@@ -17,7 +17,7 @@ from omnicoreagent.core.types import (
     SessionState,
     ToolCallResult,
 )
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 TOOL_CALL_TIMEOUT_MESSAGE = (
     "Tool call timed out. Please try again or use a different approach."
@@ -161,7 +161,9 @@ class ToolBatchRunner:
                 {
                     "status": (
                         "error"
-                        if any(result.get("status") == "error" for result in tool_outputs)
+                        if any(
+                            result.get("status") == "error" for result in tool_outputs
+                        )
                         else "success"
                     ),
                     "tools_results": tool_outputs,

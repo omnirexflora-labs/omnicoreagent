@@ -14,7 +14,7 @@ from omnicoreagent.background.scheduler_backend import (
 )
 from omnicoreagent.core.memory_store.memory_router import MemoryRouter
 from omnicoreagent.core.events.event_router import EventRouter
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 class BackgroundAgentManager:

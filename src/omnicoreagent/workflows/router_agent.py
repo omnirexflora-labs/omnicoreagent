@@ -1,5 +1,5 @@
 from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 from typing import List, Optional
 import asyncio
 import uuid
@@ -102,8 +102,8 @@ class RouterAgent:
             )
 
         system_prompt = f"""
-    You are an expert summarizer. Your task is to read the following agent description and its tools, 
-    and generate 2-5 concise sentences that clearly describe all the capabilities of this agent. 
+    You are an expert summarizer. Your task is to read the following agent description and its tools,
+    and generate 2-5 concise sentences that clearly describe all the capabilities of this agent.
     The summary should allow any LLM to understand everything this agent can do.
 
     Agent description:

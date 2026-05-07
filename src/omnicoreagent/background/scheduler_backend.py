@@ -7,7 +7,7 @@ import asyncio
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from typing import Any, Callable, Dict, Union, Optional
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 from .base import BackgroundTaskScheduler
 
 

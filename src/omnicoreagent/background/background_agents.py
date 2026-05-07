@@ -11,7 +11,7 @@ from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
 
 from omnicoreagent.core.memory_store.memory_router import MemoryRouter
 
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 from omnicoreagent.core.events.event_router import EventRouter
 from omnicoreagent.core.events.base import (
     Event,

@@ -3,7 +3,8 @@ import threading
 import uuid
 import asyncio
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
-from omnicoreagent.core.utils import logger, utc_now_str
+from omnicoreagent.core.logging import logger
+from omnicoreagent.core.memory_store.utils import utc_now_str
 from omnicoreagent.core.summarizer.summarizer_engine import (
     apply_summarization_logic,
 )

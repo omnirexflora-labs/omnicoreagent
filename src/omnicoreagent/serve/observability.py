@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import PlainTextResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 if TYPE_CHECKING:
     from .config import OmniServeConfig

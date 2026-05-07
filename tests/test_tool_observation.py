@@ -10,8 +10,13 @@ from omnicoreagent.core.agents.base import BaseReactAgent
 from omnicoreagent.core.workspace.artifacts import ToolResponseOffloader
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.tool_observation import ToolObservationHandler
-from omnicoreagent.core.types import AgentState, ParsedResponse, SessionState, ToolCallResult
-from omnicoreagent.core.utils import RobustLoopDetector
+from omnicoreagent.core.types import (
+    AgentState,
+    ParsedResponse,
+    SessionState,
+    ToolCallResult,
+)
+from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
 
 
 @pytest.fixture
@@ -190,11 +195,16 @@ def test_build_results_observation_formats_parallel_results(handler, session_sta
         session_id="chat794",
     )
 
-    assert observation == "Partial success:\nalpha#1: alpha result\n\nbeta#1 ERROR: beta failed"
+    assert (
+        observation
+        == "Partial success:\nalpha#1: alpha result\n\nbeta#1 ERROR: beta failed"
+    )
 
 
 @pytest.mark.asyncio
-async def test_append_observations_writes_history_and_sets_observing(handler, session_state):
+async def test_append_observations_writes_history_and_sets_observing(
+    handler, session_state
+):
     history = []
 
     async def add_message_to_history(role, content, metadata=None, session_id=None):

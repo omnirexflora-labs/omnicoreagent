@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlparse
 from mcp.client.auth import OAuthClientProvider, TokenStorage
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
 
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 
 class InMemoryTokenStorage(TokenStorage):

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
 
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 from .models import (
     RunRequest,
@@ -181,7 +181,8 @@ def create_agent_router() -> APIRouter:
                 elif not isinstance(metric, dict):
                     # Fallback: try to extract attributes
                     metric = {
-                        k: v for k, v in metric.__dict__.items() 
+                        k: v
+                        for k, v in metric.__dict__.items()
                         if not k.startswith("_")
                     }
 

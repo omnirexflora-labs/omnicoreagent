@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from omnicoreagent.core.utils import logger
+from omnicoreagent.core.logging import logger
 
 if TYPE_CHECKING:
     from omnicoreagent.core.guardrails import PromptInjectionGuard
