@@ -12,6 +12,18 @@ This page is the design record for OmniCoreAgent workspace architecture. Read it
 before changing workspace storage, workspace files, tool offloading, artifact
 tools, subagent output paths, or runtime tool registration.
 
+The architecture design means the full internal blueprint:
+
+- why workspace exists in the agent harness
+- what runtime state belongs inside it
+- which code owns each part
+- how local, S3, and R2 storage are selected
+- how workspace tools are registered into the agent loop
+- how tool offloading writes and reads artifacts
+- how subagents write output for the lead agent to read
+- what the prompt must tell the model
+- which invariants and tests must be preserved
+
 The workspace is not just a place to save files. It is a harness capability:
 the durable filesystem boundary added around a model so long-running agents can
 work beyond a single prompt, survive context cleanup, coordinate subagents, and
@@ -53,7 +65,7 @@ These invariants are mandatory.
 | `files/` is agent-managed state | The model can intentionally create, read, update, and organize these files |
 | `artifacts/` is runtime-managed output | Tool offloading writes here automatically; the model reads through artifact tools |
 | Workspace access tool outputs stay inline | Retrieval tools must not recursively offload their own retrieved content |
-| Generic Python config name `backend` is forbidden for workspace | It is ambiguous with memory backends, event backends, and MCP transports |
+| Workspace storage is selected with `workspace_backend` | The name must stay distinct from memory backends, event backends, and MCP transports |
 | Runtime tools register through the same tool registry path as local tools | The model must call workspace tools like any other local/internal tool |
 | New files under `src/omnicoreagent/core/workspace` must be tracked explicitly | `.gitignore` ignores directories named `workspace/`; missing files break CI |
 
@@ -128,9 +140,10 @@ This separation matters because `files/` is intentional agent state, while
 
 ---
 
-## Workspace Backend
+## Workspace Storage Driver
 
-The Python config field is intentionally named `workspace_backend`.
+The Python config field that selects the workspace storage driver is
+intentionally named `workspace_backend`.
 
 ```python
 WorkspaceConfig(workspace_backend="local")
@@ -138,9 +151,10 @@ WorkspaceConfig(workspace_backend="s3")
 WorkspaceConfig(workspace_backend="r2")
 ```
 
-Do not use a generic `backend` field. OmniCoreAgent has several backend-like
-systems: memory stores, event streams, MCP transports, and workspace storage.
-The name must say which system is being selected.
+Do not shorten this to `backend`. OmniCoreAgent has several systems that can
+have their own backends or transports: memory stores, event streams, MCP
+transports, and workspace storage. The field name must say that it selects the
+workspace storage driver only.
 
 The environment variable is already scoped and remains:
 
