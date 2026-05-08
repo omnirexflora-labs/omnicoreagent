@@ -1,29 +1,89 @@
 ---
 title: OmniCoreAgent
-description: 'The primary entry point — create and manage AI agents with built-in memory, events, and tool orchestration'
+description: 'The primary agent harness API: model, loop, tools, memory, workspace, guardrails, events, and runtime options'
 icon: 'robot'
 ---
 
 # OmniCoreAgent
 
-The `OmniCoreAgent` class is the primary entry point for the framework. It provides a high-level, user-friendly API for creating and managing AI agents with built-in memory, events, and tool orchestration.
+`OmniCoreAgent` is the main entry point for the harness. It wraps a model with
+the runtime pieces needed to execute real tasks: a reasoning loop, tool routing,
+parallel tool batches, structured observations, memory, workspace files,
+guardrails, events, and production harness extensions.
+
+Use it when you want one agent object that starts small and grows into a
+production runtime without rebuilding the application around a different API.
+
+For the full implementation-backed map of what OmniCoreAgent adds around the
+model, read [Agent Harness](/docs/core-concepts/agent-harness).
 
 ---
 
-## Quick Start
+## Minimal Agent
 
 ```python
+import asyncio
 from omnicoreagent import OmniCoreAgent
 
-agent = OmniCoreAgent(
-    name="my_assistant",
-    system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-4o"}
-)
+async def main():
+    agent = OmniCoreAgent(
+        name="my_assistant",
+        system_instruction="You are a helpful assistant.",
+        model_config={"provider": "openai", "model": "gpt-4o"},
+    )
 
-result = await agent.run("Hello!")
-print(result["response"])
+    result = await agent.run("Hello!")
+    print(result["response"])
+    await agent.cleanup()
+
+asyncio.run(main())
 ```
+
+This gives you the core harness loop, session memory, workspace files,
+guardrails, events, metrics, and cleanup lifecycle. Heavier capabilities are
+enabled explicitly through `agent_config` or installable extras.
+
+---
+
+## What The Harness Owns
+
+| Area | Responsibility |
+|------|----------------|
+| **Reasoning loop** | Builds the prompt, calls the model, parses tool calls, observes results, and stops with a final response. |
+| **Tool runtime** | Combines local tools, MCP tools, skills, workspace tools, subagent tools, and BM25 retrieval when enabled. |
+| **Parallel execution** | Runs independent tool calls in one batch and returns a single structured observation. |
+| **Observation pipeline** | Normalizes tool outputs, applies guardrails, and offloads large results to workspace files when configured. |
+| **Context management** | Checks message history before each model call and automatically truncates or summarizes when the configured budget threshold is crossed. |
+| **Memory** | Stores and retrieves session history through the configured memory router. |
+| **Workspace** | Provides agent-accessible files for notes, scratchpads, artifacts, subagent output, and tool offloads. |
+| **Events** | Emits runtime events for runs, tool calls, streaming, and server integrations. |
+| **Serving** | Runs the agent through OmniServe when you need REST/SSE endpoints. |
+
+---
+
+## Defaults And Opt-In Capabilities
+
+OmniCoreAgent keeps the default path light. Production features are enabled by
+configuration or installed as extras when the workload needs them.
+
+| Capability | Default | How To Enable |
+|------------|---------|---------------|
+| Harness loop | On | Always part of `OmniCoreAgent`. |
+| Session memory | On | Uses the default memory router unless you pass another one. |
+| Workspace files | On | `enable_workspace_files=True` by default. |
+| Guardrails | On | `guardrail_mode="full"` by default. |
+| Context management | Off | `agent_config={"context_management": {"enabled": True}}` |
+| Tool output offload | Off | `agent_config={"tool_offload": {"enabled": True}}` |
+| BM25 tool retrieval | Off | `agent_config={"enable_advanced_tool_use": True}` |
+| Dynamic subagents | Off | `agent_config={"enable_subagents": True}` |
+| Agent skills | Off | `agent_config={"enable_agent_skills": True}` |
+| Redis/Postgres/MongoDB/S3/R2 | Installable extras | Install the matching package extra and configure the backend. |
+
+<Tip>
+When dynamic subagents are enabled, workspace files are enabled automatically.
+Subagents need a shared file surface for outputs, todos, notes, and task
+artifacts that the lead agent reads back.
+</Tip>
 
 ---
 
@@ -31,46 +91,48 @@ print(result["response"])
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `name` | `str` | Name of the agent (used for session tracking and logging). |
-| `system_instruction` | `str` | The high-level objective or persona for the agent. |
-| `model_config` | `dict` or `ModelConfig` | Configuration for the LLM provider and model. |
-| `mcp_tools` | `list` | (Optional) List of MCP tool configurations. |
-| `local_tools` | `ToolRegistry` or `list` | (Optional) Custom Python functions or application-owned tools. |
-| `sub_agents` | `list` | (Optional) Specialized agents the parent can delegate to. |
-| `agent_config` | `dict` or `AgentConfig` | (Optional) Settings for reasoning steps, timeouts, etc. |
-| `memory_router` | `MemoryRouter` | (Optional) Custom memory backend (defaults to in-memory). |
-| `event_router` | `EventRouter` | (Optional) Custom event backend (defaults to in-memory). |
+| `name` | `str` | Agent name used for session tracking, events, metrics, and logs. |
+| `system_instruction` | `str` | The high-level role, objective, or policy for the agent. |
+| `model_config` | `dict` or `ModelConfig` | LLM provider and model configuration. |
+| `mcp_tools` | `list` | Optional MCP tool server definitions. OmniCoreAgent loads tools from these servers. |
+| `local_tools` | `ToolRegistry` or `list` | Optional Python/application-owned tools. |
+| `sub_agents` | `list` | Optional predefined agents available for delegation. |
+| `agent_config` | `dict` or `AgentConfig` | Runtime behavior: steps, timeouts, context, offload, subagents, skills, workspace. |
+| `memory_router` | `MemoryRouter` | Optional conversation memory backend. Defaults to in-memory. |
+| `event_router` | `EventRouter` | Optional event backend. Defaults to in-memory. |
 
 ---
 
-## Production Agent (Full Configuration)
+## Full Harness Configuration
 
 ```python
-from omnicoreagent import OmniCoreAgent, ToolRegistry, MemoryRouter, EventRouter
+from omnicoreagent import EventRouter, MemoryRouter, OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
 
 agent = OmniCoreAgent(
     name="production_agent",
-    system_instruction="You are a production agent.",
+    system_instruction="You are a production research agent.",
     model_config={"provider": "openai", "model": "gpt-4o"},
-    local_tools=tool_registry,
+    local_tools=tools,
     mcp_tools=[...],
     memory_router=MemoryRouter("redis"),
     event_router=EventRouter("redis_stream"),
     agent_config={
         "max_steps": 20,
+        "tool_call_timeout": 30,
         "enable_advanced_tool_use": True,
         "enable_subagents": True,
         "enable_agent_skills": True,
-        # Conversation memory with summarization
+        "enable_workspace_files": True,
         "memory_config": {
             "mode": "sliding_window",
-            "value": 10,
+            "value": 10000,
             "summary": {
                 "enabled": True,
                 "retention_policy": "summarize",
             },
         },
-        # Context management for long conversations
         "context_management": {
             "enabled": True,
             "mode": "token_budget",
@@ -79,12 +141,12 @@ agent = OmniCoreAgent(
             "strategy": "summarize_and_truncate",
             "preserve_recent": 6,
         },
-        "tool_offload": {"enabled": True},
-        # Prompt injection guardrails
-        "guardrail_config": {
+        "tool_offload": {
             "enabled": True,
-            "strict_mode": True,
+            "threshold_tokens": 500,
+            "threshold_bytes": 2000,
         },
+        "guardrail_config": {"strict_mode": True},
     },
 )
 ```
@@ -95,24 +157,20 @@ agent = OmniCoreAgent(
 
 ### `run()`
 
-Execute a task with the agent. Supports session continuity.
+Execute a task with the agent. Pass a `session_id` when you want continuity
+across calls.
 
 ```python
 result = await agent.run("What is the weather today?", session_id="user_1")
-print(result['response'])
+print(result["response"])
 ```
 
-- **Query**: The user's input string.
-- **Session ID**: (Optional) Provide a unique ID to maintain conversation history.
-- **Returns**: A dictionary containing `response`, `session_id`, `agent_name`, and `metric`.
-
-<Tip>
-Each `agent.run()` call returns a `metric` field containing fine-grained usage (tokens, time) for that specific request.
-</Tip>
+`run()` returns a dictionary with the response, session ID, agent name, and
+request metrics.
 
 ### `connect_mcp_servers()`
 
-Establishes connections to all configured MCP servers.
+Connect all configured MCP tool servers.
 
 ```python
 await agent.connect_mcp_servers()
@@ -120,7 +178,8 @@ await agent.connect_mcp_servers()
 
 ### `list_all_available_tools()`
 
-Returns a list of all tools currently available (both MCP and local).
+Return all currently available tools from MCP, local tools, skills, workspace
+tools, and harness tools.
 
 ```python
 tools = await agent.list_all_available_tools()
@@ -128,7 +187,7 @@ tools = await agent.list_all_available_tools()
 
 ### `cleanup()`
 
-Closes MCP connections and releases agent runtime state.
+Close MCP connections and release runtime state.
 
 ```python
 await agent.cleanup()
@@ -138,84 +197,41 @@ await agent.cleanup()
 
 ## Session Management
 
-### Retrieve History
-
 ```python
 history = await agent.get_session_history("user_1")
-for msg in history:
-    print(f"{msg['role']}: {msg['content']}")
-```
 
-### Clear History
-
-```python
-# Clear specific session
 await agent.clear_session_history("user_1")
-
-# Clear all history for this agent
-await agent.clear_session_history()
+await agent.clear_session_history()  # clear all sessions for this agent
 ```
 
 ---
 
 ## Runtime Switching
 
-Switch memory and event backends at runtime without restarting:
+Switch configured memory and event backends without rebuilding the agent object:
 
 ```python
-# Switch conversation memory stores
 await agent.switch_memory_store("mongodb")
-await agent.switch_memory_store("database")  # PostgreSQL/MySQL/SQLite
+await agent.switch_memory_store("database")
 await agent.switch_memory_store("redis")
 
-# Switch event backends
 await agent.switch_event_store("redis_stream")
 
-# Check current stores
 await agent.get_memory_store_type()
 await agent.get_event_store_type()
 ```
 
 ---
 
-## Complete API Reference
-
-```python
-# Execution
-await agent.run(query)                          # Execute task
-await agent.run(query, session_id="user_1")     # With session context
-
-# MCP
-await agent.connect_mcp_servers()               # Connect MCP tools
-await agent.cleanup_mcp_servers()               # Cleanup MCP without removing agent
-await agent.list_all_available_tools()          # List all tools
-
-# Memory
-await agent.switch_memory_store("mongodb")       # Switch backend at runtime
-await agent.get_session_history(session_id)      # Retrieve conversation history
-await agent.clear_session_history(session_id)    # Clear history
-await agent.get_memory_store_type()              # Get current memory type
-
-# Events
-await agent.switch_event_store("redis_stream")   # Switch event backend
-await agent.get_events(session_id)               # Get event history
-await agent.get_event_store_type()               # Get current event type
-
-# Metrics
-await agent.get_metrics()                        # Cumulative usage stats
-
-# Cleanup
-await agent.cleanup()                            # Full cleanup
-```
-
----
-
 ## Best Practices
 
-1. **Always Cleanup**: Use `await agent.cleanup()` to avoid orphan processes (especially for MCP).
-2. **Session IDs**: Use meaningful session IDs (e.g., user database IDs) to persist context across interactions.
-3. **Model Choice**: Use cheaper models (e.g., `gpt-4o-mini`) for simple tasks and powerful ones (e.g., `gpt-4o`) when complex reasoning is required.
-
-<Tip>
-OmniCoreAgent is your go-to for any AI task — from simple Q&A to complex multi-step workflows. Start here for any agent project.
-</Tip>
+- Use `await agent.cleanup()` when the application shuts down, especially if MCP
+  tools are connected.
+- Use stable `session_id` values, such as your user or task IDs, when you need
+  continuity.
+- Enable context management and tool offloading for long tasks, research agents,
+  coding agents, and agents that call large-output tools.
+- Enable BM25 retrieval when your tool list is too large to place fully in the
+  prompt.
+- Enable subagents when a task naturally splits into focused work units whose
+  outputs belong in the workspace for lead-agent synthesis.

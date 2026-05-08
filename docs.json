@@ -2,7 +2,7 @@
     "$schema": "https://mintlify.com/docs.json",
     "theme": "maple",
     "name": "OmniCoreAgent",
-    "description": "The AI Agent Framework Built for Production",
+    "description": "The Open Agent Harness Built for Production",
     "favicon": "/docs/assets/logo_light.svg",
     "colors": {
         "primary": "#0D9373",
@@ -42,6 +42,7 @@
                         "group": "Core Concepts",
                         "pages": [
                             "docs/core-concepts/overview",
+                            "docs/core-concepts/agent-harness",
                             "docs/core-concepts/architecture",
                             "docs/core-concepts/memory",
                             "docs/core-concepts/context-engineering",
@@ -109,8 +110,12 @@
                         "href": "https://github.com/omnirexflora-labs/omnicoreagent/discussions"
                     },
                     {
+                        "label": "OmniDaemon",
+                        "href": "https://github.com/omnirexflora-labs/OmniDaemon"
+                    },
+                    {
                         "label": "Contribute",
-                        "href": "https://github.com/omnirexflora-labs/omnicoreagent/blob/main/CONTRIBUTING.mdx"
+                        "href": "https://github.com/omnirexflora-labs/omnicoreagent/blob/main/CONTRIBUTING.md"
                     }
                 ]
             }

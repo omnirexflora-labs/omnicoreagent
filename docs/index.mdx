@@ -15,9 +15,14 @@ mode: 'wide'
   alt="OmniCoreAgent Dark"
 />
 
-## The Open Agent Harness for Production AI
+## The Open Agent Harness Built for Production
 
-**OmniCoreAgent** is a production-grade agent harness for building autonomous AI agents that persist, reason, use tools, manage context, and scale. Unlike frameworks that treat memory as an afterthought, OmniCoreAgent puts **State Management** at the center.
+**OmniCoreAgent** is a Python agent harness for building autonomous agents that
+reason, use tools, keep session memory, manage context, write workspace files,
+connect MCP server tools, spawn subagents, and run behind a REST/SSE API.
+
+The goal is direct: give builders the production pieces they otherwise patch
+around an LLM after the first demo starts breaking.
 
 ```bash
 pip install omnicoreagent
@@ -33,7 +38,36 @@ pip install "omnicoreagent[all]"
 
 ---
 
-## Get Started
+## Why It Exists
+
+OmniCoreAgent is built around real agent runtime problems:
+
+<CardGroup cols={2}>
+  <Card title="Parallel tool batches" icon="bolt">
+    The runtime supports independent tool calls in one batch, executes them
+    concurrently, and returns one structured observation.
+  </Card>
+  <Card title="Structured observations" icon="filter">
+    Tool results are parsed, formatted, guardrail-checked, and offloaded when
+    they cross the configured threshold before the model sees them.
+  </Card>
+  <Card title="Signature loop detection" icon="rotate">
+    The harness detects repeated tool signatures and repeated tool interaction
+    patterns beyond max-step exhaustion.
+  </Card>
+  <Card title="Workspace-backed context" icon="folder-tree">
+    Agents, subagents, tool offloads, notes, scratchpads, and artifacts share one
+    local, S3, or R2-backed workspace.
+  </Card>
+  <Card title="Automatic context control" icon="brain-circuit">
+    When enabled, the runtime checks context before each model call and acts
+    before the configured budget is exceeded.
+  </Card>
+</CardGroup>
+
+---
+
+## Start Building
 
 <CardGroup cols={2}>
   <Card
@@ -41,39 +75,27 @@ pip install "omnicoreagent[all]"
     icon="bolt"
     href="/docs/getting-started/quickstart"
   >
-    Build your first agent in under 30 seconds
+    Build your first OmniCoreAgent and run a task.
+  </Card>
+  <Card
+    title="Agent Harness"
+    icon="layer-group"
+    href="/docs/core-concepts/agent-harness"
+  >
+    Understand what OmniCoreAgent adds around the model.
   </Card>
   <Card
     title="Installation"
     icon="download"
     href="/docs/getting-started/installation"
   >
-    Install with pip, uv, or from source
-  </Card>
-</CardGroup>
-
----
-
-## Core Capabilities
-
-<CardGroup cols={3}>
-  <Card title="Multi-Tier Memory" icon="database" href="/docs/core-concepts/memory">
-    5 backends (Redis, PostgreSQL, MongoDB, SQLite, in-memory) with hot-swap at runtime
-  </Card>
-  <Card title="MCP Client" icon="plug" href="/docs/core-concepts/mcp">
-    Built-in Model Context Protocol — stdio, SSE, and Streamable HTTP transports
-  </Card>
-  <Card title="Context Engineering" icon="brain-circuit" href="/docs/core-concepts/context-engineering">
-    Dual-layer context management so agents never hit token limits
-  </Card>
-  <Card title="Agent Harness" icon="layer-group" href="/docs/core-concepts/sub-agents">
-    Dynamic subagents, workspace files, context management, and tool offloading
+    Install the core package or the extras your agent uses.
   </Card>
   <Card title="Local Tools" icon="toolbox" href="/docs/core-concepts/local-tools">
-    Register application-owned Python functions as agent tools
+    Register application-owned Python functions as tools.
   </Card>
-  <Card title="OmniServe" icon="server" href="/docs/how-to-guides/omniserve">
-    Production REST and SSE API server for OmniCoreAgent
+  <Card title="MCP Tools" icon="plug" href="/docs/core-concepts/mcp">
+    Connect external MCP servers over stdio, SSE, or Streamable HTTP.
   </Card>
 </CardGroup>
 
@@ -83,24 +105,39 @@ pip install "omnicoreagent[all]"
 
 ```python
 import asyncio
-from omnicoreagent import OmniCoreAgent
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
+
+@tools.register_tool("search_web")
+def search_web(query: str) -> dict:
+    """Search the web for information."""
+    return {"results": [f"Result for: {query}"]}
+
+@tools.register_tool("read_file")
+def read_file(path: str) -> dict:
+    """Read a project file."""
+    return {"path": path, "content": f"Contents of {path}"}
 
 async def main():
     agent = OmniCoreAgent(
-        name="my_agent",
-        system_instruction="You are a helpful assistant.",
+        name="research_agent",
+        system_instruction=(
+            "Use tools in parallel when the calls are independent."
+        ),
         model_config={"provider": "openai", "model": "gpt-4o"},
-        mcp_tools=[{
-            "name": "filesystem",
-            "transport_type": "stdio",
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
-        }]
+        local_tools=tools,
+        agent_config={
+            "context_management": {"enabled": True},
+            "tool_offload": {"enabled": True},
+        },
     )
 
-    result = await agent.run("Summarize all .md files in /tmp", session_id="user_1")
+    result = await agent.run(
+        "Search for current agent papers and read notes.md. Do both at once "
+        "if neither depends on the other."
+    )
     print(result["response"])
-
     await agent.cleanup()
 
 asyncio.run(main())
@@ -108,25 +145,37 @@ asyncio.run(main())
 
 ---
 
-## Explore the Docs
+## Core Documentation
 
-<CardGroup cols={2}>
+<CardGroup cols={3}>
+  <Card title="OmniCoreAgent" icon="robot" href="/docs/core-concepts/overview">
+    The main agent harness API and runtime capabilities.
+  </Card>
+  <Card title="Agent Harness" icon="layer-group" href="/docs/core-concepts/agent-harness">
+    The implementation-backed map of the runtime pieces around the model.
+  </Card>
   <Card title="Architecture" icon="sitemap" href="/docs/core-concepts/architecture">
-    Layered design — ReAct, Storage, and Connectivity
+    How the loop, tools, observations, memory, workspace, and serving layers fit.
   </Card>
-  <Card title="Event System" icon="signal-stream" href="/docs/core-concepts/events">
-    Real-time streaming for every tool call, thought, and message
+  <Card title="Memory" icon="database" href="/docs/core-concepts/memory">
+    Session history across in-memory, SQLite, Redis, PostgreSQL, and MongoDB.
   </Card>
-  <Card title="Workflows" icon="diagram-project" href="/docs/core-concepts/workflows">
-    Sequential, parallel, and router patterns for multi-agent tasks
+  <Card title="Context Engineering" icon="brain-circuit" href="/docs/core-concepts/context-engineering">
+    Context strategies plus tool-output offloading for long-running tasks.
   </Card>
-  <Card title="Model Support" icon="microchip" href="/docs/how-to-guides/models">
-    9+ providers — OpenAI, Anthropic, Gemini, Groq, DeepSeek, and more
+  <Card title="Workspace Files" icon="folder-tree" href="/docs/core-concepts/workspace-files">
+    Local, S3, or R2 files for notes, scratchpads, artifacts, and offloads.
   </Card>
-  <Card title="Runtime Visibility" icon="chart-line" href="/docs/how-to-guides/observability">
-    In-house agent traces, event streams, and runtime metrics
+  <Card title="Subagents" icon="users" href="/docs/core-concepts/sub-agents">
+    Dynamic focused workers that write outputs back into the workspace.
   </Card>
-  <Card title="Configuration" icon="gear" href="/docs/how-to-guides/configuration">
-    Environment variables, agent settings, and model configuration
+  <Card title="Guardrails" icon="shield" href="/docs/core-concepts/guardrails">
+    Prompt-injection screening inside the observation pipeline.
+  </Card>
+  <Card title="Events" icon="signal-stream" href="/docs/core-concepts/events">
+    Runtime events for runs, tool calls, and streaming integrations.
+  </Card>
+  <Card title="OmniServe" icon="server" href="/docs/how-to-guides/omniserve">
+    Run an OmniCoreAgent behind REST and SSE endpoints.
   </Card>
 </CardGroup>

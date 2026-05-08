@@ -1,14 +1,16 @@
 ---
-title: MCP Client
-description: 'Built-in Model Context Protocol support — stdio, SSE, and Streamable HTTP'
+title: MCP Tools
+description: 'Connect MCP server tools over stdio, SSE, and Streamable HTTP'
 icon: 'plug'
 ---
 
-# Built-in MCP Client
+# MCP Tools
 
-Connect to MCP-compatible tool servers with support for multiple transport protocols and authentication methods. OmniCoreAgent treats MCP as an external tool connector, matching the same runtime model as local tools.
+MCP connects external MCP server tools into OmniCoreAgent's tool runtime.
 
-OmniCoreAgent intentionally loads MCP tools only. It does not load MCP resources, prompts, or sampling callbacks into the agent runtime.
+Those tools run beside local Python tools, workspace tools, artifact tools,
+skills, subagent tools, and other harness tools. The agent sees one available
+tool surface; the runtime handles where each tool came from.
 
 ---
 
@@ -36,9 +38,9 @@ Process communication with local CLI tools:
     "transport_type": "streamable_http",
     "url": "http://localhost:8080/mcp",
     "headers": {
-        "Authorization": "Bearer your-token"  # optional
+        "Authorization": "Bearer your-token"
     },
-    "timeout": 60  # optional
+    "timeout": 60
 }
 
 # With OAuth 2.0 (auto-starts callback server on localhost:3000)
@@ -60,10 +62,10 @@ Process communication with local CLI tools:
     "transport_type": "sse",
     "url": "http://localhost:3000/sse",
     "headers": {
-        "Authorization": "Bearer token"  # optional
+        "Authorization": "Bearer token"
     },
-    "timeout": 60,  # optional
-    "sse_read_timeout": 120  # optional
+    "timeout": 60,
+    "sse_read_timeout": 120
 }
 ```
 
@@ -119,5 +121,7 @@ result = await agent.run("List all Python files and get latest commits")
 | `sse` | Real-time data, streaming | Bearer token, custom headers |
 
 <Tip>
-Use MCP when you need to connect to external tools and services. Choose `stdio` for local CLI tools, `streamable_http` for REST APIs, and `sse` for real-time streaming data.
+Use MCP when the agent needs tools hosted by an MCP server. Choose `stdio` for
+local CLI servers, `streamable_http` for HTTP MCP servers, and `sse` for
+Server-Sent Events transports.
 </Tip>
