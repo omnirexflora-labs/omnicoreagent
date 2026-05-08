@@ -11,6 +11,8 @@ from typing import Optional, Dict
 import asyncio
 import uuid
 
+from _bootstrap import model_config, require_llm_api_key
+
 
 # Example tool: Google Search
 def build_tool_registry_google_search() -> ToolRegistry:
@@ -26,13 +28,6 @@ def build_tool_registry_google_search() -> ToolRegistry:
 
 # --- Researcher Agents ---
 google_search_tool = build_tool_registry_google_search()
-GENERAL_MCP_TOOLS = [
-    {
-        "name": "tavily-remote-mcp",
-        "transport_type": "streamable_http",
-        "url": "https://mcp.tavily.com/mcp/?tavilyApiKey=<tavily api key>",
-    }
-]
 
 # Researcher 1: Renewable Energy
 renewable_energy_agent = OmniCoreAgent(
@@ -44,10 +39,9 @@ renewable_energy_agent = OmniCoreAgent(
     Summarize your key findings concisely (1-2 sentences).
     Output *only* the summary.
     """,
-    model_config={"provider": "openai", "model": "gpt-4.1", "temperature": 0.3},
-    agent_config={"max_steps": 15, "tool_call_timeout": 60},
-    # local_tools=google_search_tool,
-    mcp_tools=GENERAL_MCP_TOOLS,
+    model_config=model_config(temperature=0.3, max_tokens=600),
+    agent_config={"max_steps": 8, "tool_call_timeout": 30},
+    local_tools=google_search_tool,
     memory_router=MemoryRouter("in_memory"),
     event_router=EventRouter("in_memory"),
     debug=True,
@@ -63,10 +57,9 @@ ev_agent = OmniCoreAgent(
     Summarize your key findings concisely (1-2 sentences).
     Output *only* the summary.
     """,
-    model_config={"provider": "openai", "model": "gpt-4.1", "temperature": 0.3},
-    agent_config={"max_steps": 15, "tool_call_timeout": 60},
-    # local_tools=google_search_tool,
-    mcp_tools=GENERAL_MCP_TOOLS,
+    model_config=model_config(temperature=0.3, max_tokens=600),
+    agent_config={"max_steps": 8, "tool_call_timeout": 30},
+    local_tools=google_search_tool,
     memory_router=MemoryRouter("in_memory"),
     event_router=EventRouter("in_memory"),
     debug=True,
@@ -82,10 +75,9 @@ carbon_capture_agent = OmniCoreAgent(
     Summarize your key findings concisely (1-2 sentences).
     Output *only* the summary.
     """,
-    model_config={"provider": "openai", "model": "gpt-4.1", "temperature": 0.3},
-    agent_config={"max_steps": 15, "tool_call_timeout": 60},
-    # local_tools=google_search_tool,
-    mcp_tools=GENERAL_MCP_TOOLS,
+    model_config=model_config(temperature=0.3, max_tokens=600),
+    agent_config={"max_steps": 8, "tool_call_timeout": 30},
+    local_tools=google_search_tool,
     memory_router=MemoryRouter("in_memory"),
     event_router=EventRouter("in_memory"),
     debug=True,
@@ -96,13 +88,6 @@ researcher_parallel_agent = ParallelAgent(
     sub_agents=[renewable_energy_agent, ev_agent, carbon_capture_agent]
 )
 
-# async def main():
-#     result = await researcher_parallel_agent()
-#     print("Async ParallelAgent result:", result)
-
-
-# if __name__ == "__main__":
-#     asyncio.run(main())
 async def run_parallel_researchers(
     agent_tasks: Optional[Dict[str, Optional[str]]] = None,
     session_id: Optional[str] = None,
@@ -129,13 +114,17 @@ async def run_parallel_researchers(
         await researcher_parallel_agent.shutdown()
 
 
-if __name__ == "__main__":
-    # Example usage
+async def main():
+    require_llm_api_key()
     tasks = {
         "RenewableEnergyResearcher": "Summarize recent renewable energy innovations",
         "EVResearcher": None,  # Will use default internal task
         "CarbonCaptureResearcher": "Provide key findings on carbon capture technologies",
     }
 
-    result = asyncio.run(run_parallel_researchers(agent_tasks=tasks))
+    result = await run_parallel_researchers(agent_tasks=tasks)
     print("Parallel Researcher Results:", result)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -17,6 +17,8 @@ import asyncio
 
 from omnicoreagent import OmniCoreAgent, ToolRegistry
 
+from _bootstrap import model_config, require_llm_api_key, response_text
+
 
 def create_tools() -> ToolRegistry:
     """Create a registry of custom local tools."""
@@ -71,6 +73,8 @@ def create_tools() -> ToolRegistry:
 
 
 async def main():
+    require_llm_api_key()
+
     # Create tools registry
     tools = create_tools()
 
@@ -78,7 +82,7 @@ async def main():
     agent = OmniCoreAgent(
         name="local_tools_agent",
         system_instruction="You are a helpful assistant with access to weather, math, and time tools.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=800),
         local_tools=tools,  # <- Attach local tools here
     )
 
@@ -93,17 +97,17 @@ async def main():
 
     print("\nQuery 1: Weather")
     result = await agent.run("What's the weather in Tokyo?")
-    print(f"Response: {result['response']}\n")
+    print(f"Response: {response_text(result)}\n")
 
     print("Query 2: Math")
     result = await agent.run(
         "Calculate the area of a room that's 5.5 meters by 4 meters"
     )
-    print(f"Response: {result['response']}\n")
+    print(f"Response: {response_text(result)}\n")
 
     print("Query 3: Time")
     result = await agent.run("What time is it?")
-    print(f"Response: {result['response']}\n")
+    print(f"Response: {response_text(result)}\n")
 
     await agent.cleanup()
 

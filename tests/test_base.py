@@ -193,6 +193,18 @@ async def test_run_prepares_internal_tools_once_for_prompt_and_execution(monkeyp
         build_count += 1
 
         @registry.register_tool(
+            name="tools_retriever",
+            inputSchema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+            description="Discover available tools.",
+        )
+        async def tools_retriever(query: str):
+            return {"status": "success", "data": f"found:{query}"}
+
+        @registry.register_tool(
             name="internal_ping",
             inputSchema={
                 "type": "object",
@@ -218,7 +230,13 @@ async def test_run_prepares_internal_tools_once_for_prompt_and_execution(monkeyp
         async def llm_call(self, messages):
             self.calls += 1
             if self.calls == 1:
-                assert "internal_ping" in messages[0].content
+                assert "tools_retriever" in messages[0].content
+                assert "internal_ping" not in messages[0].content
+                assert any(
+                    getattr(message, "role", None) == "user"
+                    and "run internal ping" in getattr(message, "content", "")
+                    for message in messages
+                )
                 return """
 <thought>Need internal tool.</thought>
 <tool_call>

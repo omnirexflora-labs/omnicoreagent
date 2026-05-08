@@ -10,12 +10,11 @@ Protect your agents against malicious inputs, jailbreaks, and instruction overri
 
 ```python
 agent_config = {
-    "guardrail_config": {
-        "strict_mode": True,      # Block all suspicious inputs
-        "sensitivity": 0.85,      # 0.0 to 1.0 (higher = more sensitive)
-        "enable_pattern_matching": True,
-        "enable_heuristic_analysis": True
-    }
+        "guardrail_config": {
+            "strict_mode": True,      # Block all suspicious inputs
+            "sensitivity": 1.2,       # 1.0 default; higher = more sensitive
+            "enable_heuristic_analysis": True
+        }
 }
 
 agent = OmniCoreAgent(..., agent_config=agent_config)
@@ -41,7 +40,7 @@ agent = OmniCoreAgent(..., agent_config=agent_config)
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `strict_mode` | `bool` | `False` | When `True`, any detection (even low confidence) blocks the request. |
-| `sensitivity` | `float` | `1.0` | Scaling factor for threat scores (0.0 to 1.0). Higher = more sensitive. |
+| `sensitivity` | `float` | `1.0` | Scaling factor for threat scores. Lower reduces sensitivity; higher increases sensitivity. |
 | `max_input_length` | `int` | `10000` | Maximum allowed query length before blocking. |
 | `enable_encoding_detection` | `bool` | `True` | Detects base64, hex, and other obfuscation attempts. |
 | `enable_heuristic_analysis` | `bool` | `True` | Analyzes prompt structure for typical attack patterns. |

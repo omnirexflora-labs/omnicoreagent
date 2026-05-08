@@ -118,6 +118,41 @@ async def test_load_accepts_dict_messages(loader, session_state):
 
 
 @pytest.mark.asyncio
+async def test_load_accepts_persistence_records_with_extra_fields(loader, session_state):
+    async def message_history(agent_name, session_id):
+        return [
+            {
+                "id": "message-1",
+                "role": "user",
+                "content": "My name is Alice.",
+                "session_id": session_id,
+                "status": "active",
+                "summary_id": None,
+                "metadata": {"agent_name": agent_name},
+            },
+            {
+                "id": "message-2",
+                "role": "assistant",
+                "content": "Hi Alice.",
+                "session_id": session_id,
+                "status": "active",
+                "metadata": {"agent_name": agent_name},
+            },
+        ]
+
+    await loader.load(
+        message_history=message_history,
+        session_id="chat-extra-fields",
+        session_state=session_state,
+    )
+
+    assert [message.content for message in session_state.messages] == [
+        "My name is Alice.",
+        "Hi Alice.",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_load_pairs_assistant_tool_call_with_tool_responses(
     loader, session_state
 ):

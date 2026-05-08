@@ -67,11 +67,8 @@ TEST THE API
 =============================================================================
 """
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
 from omnicoreagent import OmniCoreAgent, ToolRegistry  # noqa: E402
+from _bootstrap import model_config  # noqa: E402
 
 
 # =============================================================================
@@ -148,13 +145,15 @@ Available tools:
 
 Use tools when helpful. Be concise and clear.""",
     model_config={
-        "provider": "gemini",
-        "model": "gemini-2.0-flash",
+        **model_config(max_tokens=700),
     },
     local_tools=tools,
     debug=False,
     agent_config={
-        "memory_tool_backend": "local",  # Use "s3" or "r2" for cloud storage
+        "workspace_config": {
+            "workspace_backend": "local",
+            "workspace_dir": "tmp/omniserve_cli_workspace",
+        }
     },
 )
 

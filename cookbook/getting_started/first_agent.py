@@ -13,18 +13,22 @@ import asyncio
 
 from omnicoreagent import OmniCoreAgent
 
+from _bootstrap import model_config, require_llm_api_key, response_text
+
 
 async def main():
+    require_llm_api_key()
+
     # Create a minimal agent
     agent = OmniCoreAgent(
         name="my_first_agent",
         system_instruction="You are a helpful assistant.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=500),
     )
 
     # Run a query
     result = await agent.run("Hello! What can you help me with?")
-    print(f"Response: {result['response']}")
+    print(f"Response: {response_text(result)}")
     print(f"Session ID: {result['session_id']}")
     print(f"Metrics: {result['metric']}")
 

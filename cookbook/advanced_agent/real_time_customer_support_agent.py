@@ -5,6 +5,7 @@ Real integrations with Zendesk, Intercom, or custom systems
 """
 
 import os
+import re
 import requests
 from datetime import datetime
 from omnicoreagent import (
@@ -12,6 +13,8 @@ from omnicoreagent import (
     ToolRegistry,
 )
 import asyncio
+
+from _bootstrap import model_config, require_llm_api_key, response_text
 
 
 class ProductionSupportAgent:
@@ -175,11 +178,20 @@ class ProductionSupportAgent:
                 else:
                     articles = internal_kb.get(category, [])
 
-                # Simple search in titles
+                query_terms = {
+                    term.rstrip("s")
+                    for term in re.findall(r"\w+", query.lower())
+                    if len(term) > 2
+                }
                 matching_articles = [
                     article
                     for article in articles
                     if query.lower() in article["title"].lower()
+                    or query_terms
+                    & {
+                        term.rstrip("s")
+                        for term in re.findall(r"\w+", article["title"].lower())
+                    }
                 ][:max_results]
 
                 if matching_articles:
@@ -444,39 +456,43 @@ WORKFLOW:
 - Always check SLA status for urgent matters
 
 TONE: Professional, empathetic, solution-oriented, efficient.""",
-            model_config={
-                "provider": "openai",
-                "model": "gpt-4.1",
-                "temperature": 0.2,  # Lower temperature for consistent support responses
-                "max_context_length": 8000,
-            },
+            model_config=model_config(
+                temperature=0.2,  # Lower temperature for consistent support responses
+                max_tokens=800,
+            ),
             local_tools=self.tool_registry,
             agent_config={
                 "max_steps": 12,
                 "tool_call_timeout": 45,
                 "request_limit": 0,
                 "memory_config": {"mode": "sliding_window", "value": 150},
-                "enable_tools_knowledge_base": False,  # Disable built-in KB to use custom tools
+                "enable_advanced_tool_use": True,
             },
             debug=False,  # Production setting
         )
 
         return support_agent
 
-    async def handle_support_request(self, user_message: str, session_id: str = None):
+    async def handle_support_request(
+        self,
+        user_message: str,
+        customer_email: str | None = None,
+        session_id: str = None,
+    ):
         """Process a support request with proper workflow"""
         agent = await self.initialize_agent()
 
         if not session_id:
             session_id = f"support_{int(datetime.now().timestamp())}"
 
+        if customer_email:
+            user_message = f"Customer email: {customer_email}\nRequest: {user_message}"
+
         try:
             result = await agent.run(user_message, session_id=session_id)
             return {
                 "success": True,
-                "response": result.get(
-                    "response", "I apologize, but I couldn't process your request."
-                ),
+                "response": response_text(result),
                 "session_id": session_id,
                 "ticket_created": any(
                     keyword in user_message.lower()
@@ -496,6 +512,7 @@ TONE: Professional, empathetic, solution-oriented, efficient.""",
 # Production Usage Example
 async def production_support_demo():
     """Demo the production support agent with real-world scenarios"""
+    require_llm_api_key()
 
     print("🚀 PRODUCTION CUSTOMER SUPPORT AGENT")
     print("=" * 60)
@@ -530,6 +547,8 @@ async def production_support_demo():
             "type": "History Request",
         },
     ]
+    demo_limit = int(os.getenv("OMNICOREAGENT_COOKBOOK_DEMO_LIMIT", "2"))
+    test_cases = test_cases[:demo_limit]
 
     for i, case in enumerate(test_cases, 1):
         print(f"\n🎯 Case {i}: {case['type']}")
@@ -538,7 +557,9 @@ async def production_support_demo():
         print("-" * 50)
 
         result = await support_agent.handle_support_request(
-            user_message=case["message"], session_id=f"demo_case_{i}"
+            user_message=case["message"],
+            customer_email=case["user"],
+            session_id=f"demo_case_{i}",
         )
 
         if result["success"]:

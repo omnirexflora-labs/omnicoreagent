@@ -19,9 +19,9 @@ Welcome to the **OmniCoreAgent** learning path. This guide takes you from writin
 | 7 | [agent_with_memory_switching.py](./agent_with_memory_switching.py) | **Runtime Switching**: Change memory backends on the fly |
 | 8 | [agent_with_events.py](./agent_with_events.py) | **Observability**: Stream real-time events to UI |
 | 9 | [agent_with_event_switching.py](./agent_with_event_switching.py) | **Scale**: Switch event backends at runtime |
-| 10 | [agent_with_context_management.py](./agent_with_context_management.py) | **🆕 Context Management**: Handle infinitely long conversations |
+| 10 | [agent_with_context_management.py](./agent_with_context_management.py) | **🆕 Context Management**: Keep long conversations within a configured context budget |
 | 11 | [agent_with_guardrails.py](./agent_with_guardrails.py) | **🆕 Guardrails**: Protect against prompt injection |
-| 12 | [agent_with_metrics.py](./agent_with_metrics.py) | **🆕 Metrics**: Track tokens, requests, and costs |
+| 12 | [agent_with_metrics.py](./agent_with_metrics.py) | **🆕 Metrics**: Track tokens, requests, and latency |
 | 13 | [agent_with_sub_agents.py](./agent_with_sub_agents.py) | **🆕 Sub-Agents**: Build multi-agent systems |
 | 14 | [agent_configuration.py](./agent_configuration.py) | **Advanced Config**: All settings in one place |
 
@@ -38,7 +38,7 @@ Welcome to the **OmniCoreAgent** learning path. This guide takes you from writin
 | Save conversation history | [agent_with_memory.py](./agent_with_memory.py) |
 | Handle long conversations | [agent_with_context_management.py](./agent_with_context_management.py) |
 | Protect against attacks | [agent_with_guardrails.py](./agent_with_guardrails.py) |
-| Track usage and costs | [agent_with_metrics.py](./agent_with_metrics.py) |
+| Track usage for cost estimation | [agent_with_metrics.py](./agent_with_metrics.py) |
 | Build multi-agent systems | [agent_with_sub_agents.py](./agent_with_sub_agents.py) |
 
 ---
@@ -69,7 +69,7 @@ MONGODB_URI=mongodb://localhost:27017/omnicoreagent
     "value": 50,
     "summary": {
         "enabled": True,
-        "retention_policy": "summarize"
+        "retention_policy": "keep"
     }
 }
 ```
@@ -86,7 +86,7 @@ Old messages are summarized, not lost.
     "preserve_recent": 6
 }
 ```
-Conversations can run forever without hitting token limits.
+Long conversations stay within the context budget you configure.
 
 #### Choosing the Right Mode
 
@@ -114,11 +114,10 @@ Conversations can run forever without hitting token limits.
 "tool_offload": {
     "enabled": True,
     "threshold_tokens": 500,  # Offload if response > 500 tokens
-    "max_preview_tokens": 150,  # Show first 150 tokens in context
-    "storage_dir": "workspace/artifacts"
+    "max_preview_tokens": 150  # Show first 150 tokens in context
 }
 ```
-Large tool responses are automatically saved to files, with only a preview in context.
+Large tool responses are automatically saved into the active workspace `artifacts/` area, with only a preview in context.
 
 **How it works:**
 1. Tool returns large response (e.g., web search with 50 results)
@@ -144,7 +143,6 @@ Large tool responses are automatically saved to files, with only a preview in co
 ### Guardrails
 ```python
 "guardrail_config": {
-    "enabled": True,
     "strict_mode": True
 }
 ```
@@ -153,7 +151,7 @@ Built-in protection against prompt injection attacks.
 ### Metrics
 ```python
 metrics = await agent.get_metrics()
-# Returns: total_requests, total_tokens, total_input_tokens, total_output_tokens
+# Returns: total_requests, total_tokens, total_request_tokens, total_response_tokens
 ```
 Track usage for cost control and monitoring.
 

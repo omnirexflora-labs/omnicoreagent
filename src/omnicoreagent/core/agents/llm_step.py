@@ -57,7 +57,7 @@ class AgentLlmStepRunner:
 
         try:
             if self.limits_enabled:
-                self.usage_limits.check_before_request(usage=usage)
+                self.usage_limits.check_before_request(usage=run_usage)
 
             if self.context_manager.should_trigger(session_state.messages):
                 session_state.messages = await self.context_manager.manage_context(
@@ -146,10 +146,10 @@ class AgentLlmStepRunner:
         if not self.limits_enabled:
             return
 
-        self.usage_limits.check_tokens(usage)
-        remaining_tokens = self.usage_limits.remaining_tokens(usage)
-        used_tokens = usage.total_tokens
-        used_requests = usage.requests
+        self.usage_limits.check_tokens(run_usage)
+        remaining_tokens = self.usage_limits.remaining_tokens(run_usage)
+        used_tokens = run_usage.total_tokens
+        used_requests = run_usage.requests
         remaining_requests = self.request_limit - used_requests
         session_stats.update(
             {

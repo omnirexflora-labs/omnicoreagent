@@ -14,13 +14,10 @@ Key Benefits:
 """
 
 import asyncio
-import os
-from dotenv import load_dotenv
 
-from omnicoreagent import OmniCoreAgent
-from omnicoreagent.core.tools import LocalToolsIntegration
+from omnicoreagent import OmniCoreAgent, ToolRegistry
 
-load_dotenv()
+from _bootstrap import model_config, require_llm_api_key, response_text
 
 
 # Create a tool that returns a large response
@@ -49,14 +46,18 @@ def search_web(query: str) -> dict:
         )
 
     return {
-        "query": query,
-        "total_results": 1250,
-        "page": 1,
-        "results": results,
-        "metadata": {
-            "search_time_ms": 234,
-            "api_version": "2.0",
+        "status": "success",
+        "data": {
+            "query": query,
+            "total_results": 1250,
+            "page": 1,
+            "results": results,
+            "metadata": {
+                "search_time_ms": 234,
+                "api_version": "2.0",
+            },
         },
+        "message": "Search results retrieved successfully",
     }
 
 
@@ -71,26 +72,32 @@ def fetch_document(document_id: str) -> dict:
     ]
 
     return {
-        "document_id": document_id,
-        "title": f"Comprehensive Report: {document_id}",
-        "content": "\n".join(content_lines),
-        "metadata": {
-            "pages": 25,
-            "word_count": 15000,
-            "created": "2024-01-10",
+        "status": "success",
+        "data": {
+            "document_id": document_id,
+            "title": f"Comprehensive Report: {document_id}",
+            "content": "\n".join(content_lines),
+            "metadata": {
+                "pages": 25,
+                "word_count": 15000,
+                "created": "2024-01-10",
+            },
         },
+        "message": "Document fetched successfully",
     }
 
 
 async def main():
+    require_llm_api_key()
+
     print("=" * 60)
     print("🗂️  Tool Response Offloading Demo")
     print("=" * 60)
 
     # Register tools
-    tools_integration = LocalToolsIntegration()
-    tools_integration.add_tool(search_web)
-    tools_integration.add_tool(fetch_document)
+    tools = ToolRegistry()
+    tools.register_tool("search_web")(search_web)
+    tools.register_tool("fetch_document")(fetch_document)
 
     # Create agent WITH tool offloading enabled
     agent = OmniCoreAgent(
@@ -98,12 +105,8 @@ async def main():
         system_instruction="""You are a research assistant that uses web search tools.
 When tool results are offloaded to files, you'll see a preview with a file reference.
 Use the read_artifact tool if you need to see the full content.""",
-        model_config={
-            "provider": "openai",
-            "model_name": "gpt-4o-mini",
-            "api_key": os.getenv("LLM_API_KEY"),
-        },
-        local_tools=tools_integration,
+        model_config=model_config(max_tokens=900),
+        local_tools=tools,
         agent_config={
             "max_steps": 10,
             "tool_call_timeout": 30,
@@ -114,8 +117,10 @@ Use the read_artifact tool if you need to see the full content.""",
                 "threshold_tokens": 300,  # Offload if >300 tokens (low for demo)
                 "threshold_bytes": 1000,  # Or >1KB
                 "max_preview_tokens": 100,  # Show first ~100 tokens in context
-                "storage_dir": "workspace/artifacts",
             },
+            # Offloaded artifacts are written through the workspace. Use
+            # workspace_config or OMNICOREAGENT_WORKSPACE_DIR to choose the
+            # local/S3/R2 storage location.
         },
         debug=True,
     )
@@ -123,20 +128,24 @@ Use the read_artifact tool if you need to see the full content.""",
     print("\n📊 Tool Offload Configuration:")
     print("  • Threshold: 300 tokens (or 1KB)")
     print("  • Preview: First 100 tokens")
-    print("  • Storage: workspace/artifacts/")
+    print("  • Storage: workspace artifacts")
 
     print("\n🔄 Running agent with large tool response...")
     print("-" * 60)
 
-    # This query will trigger search_web which returns a LARGE response
+    # This query triggers two independent large tool calls so offloading is visible.
     response = await agent.run(
-        query="Search for 'artificial intelligence trends 2024' and summarize the top 3 results",
+        query=(
+            "Search for 'artificial intelligence trends 2024' and fetch document "
+            "'ai-trends-report'. Use both tools together, then summarize the top 3 points."
+        ),
         session_id="offload_demo_session",
     )
 
     print("\n" + "=" * 60)
     print("📝 Agent Response:")
     print("=" * 60)
+    response = response_text(response)
     print(response[:1000] if len(response) > 1000 else response)
 
     # Show offloading stats

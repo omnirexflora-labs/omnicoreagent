@@ -18,6 +18,8 @@ from pathlib import Path
 
 from omnicoreagent import OmniCoreAgent, ToolRegistry
 
+from _bootstrap import model_config, require_llm_api_key, response_text
+
 
 def create_local_tools() -> ToolRegistry:
     """Create custom business logic tools."""
@@ -31,19 +33,19 @@ def create_local_tools() -> ToolRegistry:
                 return {
                     "status": "success",
                     "data": {"count": count},
-                    "message": "This directory has {count} files - very clean and organized!",
+                    "message": f"This directory has {count} files - very clean and organized!",
                 }
             elif count < 50:
                 return {
                     "status": "success",
                     "data": {"count": count},
-                    "message": "This directory has {count} files - moderate amount.",
+                    "message": f"This directory has {count} files - moderate amount.",
                 }
             else:
                 return {
                     "status": "success",
                     "data": {"count": count},
-                    "message": "This directory has {count} files - consider organizing!",
+                    "message": f"This directory has {count} files - consider organizing!",
                 }
         except Exception as e:
             return {
@@ -70,6 +72,16 @@ def create_local_tools() -> ToolRegistry:
 
 
 async def main():
+    require_llm_api_key()
+
+    workspace_dir = Path("tmp/cookbook_hybrid_workspace").resolve()
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    for filename in ["app.py", "config.toml", "README.md"]:
+        (workspace_dir / filename).write_text(
+            f"Example file for {filename}\n",
+            encoding="utf-8",
+        )
+
     # Local tools (custom Python functions)
     local_tools = create_local_tools()
 
@@ -82,7 +94,7 @@ async def main():
             "args": [
                 "-y",
                 "@modelcontextprotocol/server-filesystem",
-                str(Path.home()),
+                str(workspace_dir),
             ],
         }
     ]
@@ -90,12 +102,15 @@ async def main():
     # Create agent with BOTH local and MCP tools
     agent = OmniCoreAgent(
         name="hybrid_tools_agent",
-        system_instruction="""You are a helpful assistant with access to:
+        system_instruction=f"""You are a helpful assistant with access to:
         - Filesystem tools (MCP) - to read/write files
         - Analysis tools (Local) - to analyze and recommend actions
         
-        Use the filesystem tools to get information, then use local tools to analyze it.""",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        The MCP filesystem server is mounted at:
+        {workspace_dir}
+
+        Use the filesystem tools to inspect that exact directory, then use local tools to analyze it.""",
+        model_config=model_config(max_tokens=900),
         local_tools=local_tools,  # <- Local Python tools
         mcp_tools=mcp_tools,  # <- MCP server tools
     )
@@ -112,11 +127,11 @@ async def main():
     print(f"Tools: {[t['name'] for t in tools]}")
 
     # Use combined tools
-    print("\nQuery: Analyze my home directory")
+    print("\nQuery: Analyze the cookbook workspace")
     result = await agent.run(
-        "List the files in my home directory, count how many there are, and give me a recommendation"
+        f"List files in {workspace_dir}, count how many files are there, then call analyze_file_count with that count."
     )
-    print(f"Response: {result['response'][:600]}...")
+    print(f"Response: {response_text(result)[:600]}...")
 
     await agent.cleanup()
 

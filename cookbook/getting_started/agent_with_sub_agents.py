@@ -21,8 +21,12 @@ import asyncio
 
 from omnicoreagent import OmniCoreAgent
 
+from _bootstrap import model_config, require_llm_api_key, response_text
+
 
 async def main():
+    require_llm_api_key()
+
     print("=" * 60)
     print("SUB-AGENTS - Automatic Task Delegation")
     print("=" * 60)
@@ -35,7 +39,7 @@ async def main():
         system_instruction="""You are a research specialist.
 Your job is to gather and summarize information on topics.
 Be concise - provide 2-3 key facts.""",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=600),
     )
 
     analyst = OmniCoreAgent(
@@ -43,7 +47,7 @@ Be concise - provide 2-3 key facts.""",
         system_instruction="""You are an analysis specialist.
 Your job is to analyze information and provide insights.
 Be concise - provide 2-3 key insights.""",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=600),
     )
 
     writer = OmniCoreAgent(
@@ -51,7 +55,7 @@ Be concise - provide 2-3 key insights.""",
         system_instruction="""You are a writing specialist.
 Your job is to take information and create polished, professional content.
 Be concise - provide a brief, well-written summary.""",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=600),
     )
 
     # Step 2: Create parent agent with sub_agents parameter
@@ -67,7 +71,7 @@ You have access to specialized sub-agents:
 
 Delegate tasks appropriately based on what the user needs.
 Combine the outputs from sub-agents to provide complete answers.""",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=900),
         sub_agents=[researcher, analyst, writer],  # Pass sub-agents here
         agent_config={
             "max_steps": 15,  # Allow more steps for delegation
@@ -94,7 +98,7 @@ Combine the outputs from sub-agents to provide complete answers.""",
 Delegate to appropriate specialists."""
     )
 
-    print(f"\n📝 Coordinator's Response:\n{result.get('response', 'No response')}")
+    print(f"\n📝 Coordinator's Response:\n{response_text(result)}")
 
     # Cleanup all agents
     await researcher.cleanup()

@@ -17,8 +17,12 @@ import asyncio
 
 from omnicoreagent import OmniCoreAgent, MemoryRouter, EventRouter
 
+from _bootstrap import model_config, require_llm_api_key, response_text
+
 
 async def main():
+    require_llm_api_key()
+
     print("=" * 50)
     print("AGENT WITH EVENT STREAMING")
     print("=" * 50)
@@ -29,7 +33,7 @@ async def main():
     agent = OmniCoreAgent(
         name="event_agent",
         system_instruction="You are a helpful assistant.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=700),
         memory_router=MemoryRouter("in_memory"),
         event_router=event_router,  # <- Add event router
     )
@@ -40,7 +44,7 @@ async def main():
     result = await agent.run(
         "What is 2 + 2? Explain step by step.", session_id=session_id
     )
-    print(f"Response: {result['response'][:200]}...")
+    print(f"Response: {response_text(result)[:200]}...")
 
     # Get events after the query
     print("\n" + "=" * 50)
@@ -69,7 +73,7 @@ async def demo_streaming():
     agent = OmniCoreAgent(
         name="streaming_agent",
         system_instruction="You are a helpful assistant.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=500),
         memory_router=MemoryRouter("in_memory"),
         event_router=event_router,
     )

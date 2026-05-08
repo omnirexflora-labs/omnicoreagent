@@ -6,10 +6,13 @@ Real integrations with Shopify, WooCommerce, and inventory systems
 
 import asyncio
 import os
+import re
 import requests
 from datetime import datetime
 from typing import Dict, List
 from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+from _bootstrap import model_config, require_llm_api_key, response_text
 
 
 class ProductionEcommerceAgent:
@@ -216,14 +219,34 @@ class ProductionEcommerceAgent:
 
                 matching_products = []
                 for product in all_products:
-                    matches_query = (
-                        query.lower() in product["name"].lower()
-                        or query.lower() in product["brand"].lower()
+                    query_terms = {
+                        term.rstrip("s")
+                        for term in re.findall(r"\w+", query.lower())
+                        if len(term) > 2
+                    }
+                    product_terms = {
+                        term.rstrip("s")
+                        for term in re.findall(
+                            r"\w+",
+                            f"{product['name']} {product['brand']}".lower(),
+                        )
+                    }
+                    matches_query = not query_terms or bool(
+                        query_terms & product_terms
                     )
-                    matches_category = category == "all" or any(
-                        category in cat
-                        for cat in self.product_catalog.keys()
-                        if product in self.product_catalog[cat]
+                    category_terms = {
+                        term.rstrip("s")
+                        for term in re.findall(r"\w+", category.lower())
+                        if len(term) > 2
+                    }
+                    matches_category = (
+                        category == "all"
+                        or any(
+                            category in cat
+                            for cat in self.product_catalog.keys()
+                            if product in self.product_catalog[cat]
+                        )
+                        or bool(category_terms & product_terms)
                     )
                     matches_price = price_min <= product["price"] <= price_max
                     matches_brand = (
@@ -563,26 +586,28 @@ CORE RESPONSIBILITIES:
 
 WORKFLOW PRIORITIES:
 - FIRST: Understand user needs and preferences
+- For actionable shopping requests, first use tools_retriever to discover the right
+  catalog/cart/inventory/shipping tool, then call the discovered tool.
 - Use search_products for product discovery
 - Check inventory before recommending
 - Save user preferences for future personalization
 - Provide price comparisons for expensive items
 - Always show shipping options at checkout
+- Do not ask preference questions before searching when the user already gave a
+  concrete product type, budget, brand, category, or shipping request.
+- Do not recommend products from general knowledge when catalog tools are available.
+  Use catalog results as the source of truth.
 
 TONE: Helpful, knowledgeable, personalized, and sales-oriented but not pushy.""",
-            model_config={
-                "provider": "openai",
-                "model": "gpt-4",
-                "temperature": 0.3,
-                "max_context_length": 6000,
-            },
+            model_config=model_config(temperature=0.3, max_tokens=800),
             local_tools=self.tool_registry,
             agent_config={
                 "max_steps": 15,
                 "tool_call_timeout": 30,
-                "request_limit": 100,
+                "request_limit": 0,
                 "memory_config": {"mode": "sliding_window", "value": 200},
-                "enable_tools_knowledge_base": True,
+                "enable_advanced_tool_use": True,
+                "tool_offload": {"enabled": True},
             },
             debug=False,
         )
@@ -613,9 +638,7 @@ TONE: Helpful, knowledgeable, personalized, and sales-oriented but not pushy."""
             result = await agent.run(user_message, session_id=session_id)
             return {
                 "success": True,
-                "response": result.get(
-                    "response", "I'd be happy to help with your shopping needs!"
-                ),
+                "response": response_text(result),
                 "session_id": session_id,
                 "user_id": user_id,
                 "cart_updated": "cart" in user_message.lower()
@@ -635,6 +658,7 @@ TONE: Helpful, knowledgeable, personalized, and sales-oriented but not pushy."""
 # Production Usage Example
 async def production_ecommerce_demo():
     """Demo the production e-commerce agent with real shopping scenarios"""
+    require_llm_api_key()
 
     print("🛍️ PRODUCTION E-COMMERCE PERSONAL SHOPPER")
     print("=" * 60)
@@ -669,6 +693,8 @@ async def production_ecommerce_demo():
             "type": "Cart + Shipping",
         },
     ]
+    demo_limit = int(os.getenv("OMNICOREAGENT_COOKBOOK_DEMO_LIMIT", "2"))
+    test_scenarios = test_scenarios[:demo_limit]
 
     for i, scenario in enumerate(test_scenarios, 1):
         print(f"\n🛒 Scenario {i}: {scenario['type']}")

@@ -4,9 +4,9 @@ description: 'Scale to 1000+ tools with BM25 lexical retrieval'
 icon: 'wand-magic-sparkles'
 ---
 
-# Advanced Tool Use (BM25 Retrieval)
+# Advanced Tool Use (BM25 Tool Retrieval)
 
-Automatically discover relevant tools at runtime using BM25 lexical search. When you have many tools (10+), this feature ensures the right tools are always available without manual selection.
+Automatically discover relevant tools at runtime using BM25 lexical search. When you have many tools, this feature keeps the model prompt small: the model sees `tools_retriever`, searches the runtime tool catalog, then calls the matching tool returned by the search.
 
 ---
 
@@ -22,20 +22,21 @@ agent_config = {
 
 ## How It Works
 
-1. All MCP tools loaded into in-memory registry
-2. BM25 index built over tool names, descriptions, parameters
-3. User task used as search query
-4. Top 5 relevant tools dynamically injected
+1. Local tools, MCP tools, workspace/artifact tools, skills, and other registered runtime tools are indexed in memory.
+2. Always-visible harness tools such as `tools_retriever`, workspace tools, artifact tools, and subagent tools stay directly visible.
+3. The model calls `tools_retriever` with a semantic query for the capability it needs.
+4. The retriever returns the top matching tools with names, descriptions, and parameters.
+5. The model calls the selected tool normally.
 
 ---
 
 ## Benefits
 
-- **Scales to 1000+ tools** — only relevant tools are injected per request
+- **Scales to 1000+ tools** — searchable tools do not all need to be stuffed into the prompt
 - **Zero network I/O** — index lives in memory
 - **Deterministic** — same query always selects same tools
 - **Container-friendly** — no external dependencies
 
 <Tip>
-Enable when you have many MCP tools (10+) and want the agent to automatically discover the right tools for each task without manual selection.
+Enable when you have many local or MCP tools and want the agent to discover the right capability through the runtime tool catalog.
 </Tip>

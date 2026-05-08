@@ -52,7 +52,10 @@ def normalize_tool_args(value: Any) -> Any:
         if isinstance(v, dict):
             return {key: _normalize(val) for key, val in v.items()}
         if isinstance(v, list):
-            return [_normalize(item) for item in v]
+            normalized_items = [_normalize(item) for item in v]
+            if len(normalized_items) == 1 and isinstance(normalized_items[0], dict):
+                return normalized_items[0]
+            return normalized_items
         if isinstance(v, tuple):
             return tuple(_normalize(item) for item in v)
         return v

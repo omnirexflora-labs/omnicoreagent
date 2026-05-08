@@ -12,7 +12,7 @@ Monitor your agents with built-in metrics, event streams, and in-house trace sum
 
 ## Real-time Usage Metrics
 
-OmniCoreAgent tracks every token, request, and millisecond. Each `run()` returns a `metric` object, and you can get cumulative stats anytime.
+OmniCoreAgent tracks request counts, runtime, and provider-reported token usage when available. Each `run()` returns a `metric` object, and you can get cumulative stats anytime.
 
 ```python
 result = await agent.run("Analyze this data")

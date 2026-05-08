@@ -5,6 +5,7 @@ from typing import List, Any, Optional, Tuple, Dict
 from omnicoreagent.core.constants import TOOLS_REGISTRY
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.tools.advance_tools.text import normalize_enriched_tool
+from omnicoreagent.core.tools.tool_prompt_renderer import ALWAYS_VISIBLE_TOOL_NAMES
 import math
 import re
 from collections import Counter, defaultdict
@@ -225,6 +226,8 @@ class AdvanceToolsUse:
                     try:
                         name = getattr(tool, "name", None) or tool.get("name")
                         name = str(name)
+                        if name in ALWAYS_VISIBLE_TOOL_NAMES:
+                            continue
                         description = (
                             getattr(tool, "description", None)
                             or tool.get("description")
@@ -268,6 +271,8 @@ class AdvanceToolsUse:
                 for tool in local_tools_list:
                     if isinstance(tool, dict):
                         name = tool.get("name", "unknown")
+                        if name in ALWAYS_VISIBLE_TOOL_NAMES:
+                            continue
                         description = (
                             tool.get("description", "").replace("\n", " ").strip()
                         )

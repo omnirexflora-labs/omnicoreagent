@@ -9,7 +9,7 @@ An example application demonstrating how to orchestrate a complex, multi-agent
 pipeline for startup investment analysis.
 
 Pipeline Stages:
-1. Company Research   - Gathers company intel via Tavily search
+1. Company Research   - Gathers company intel via Tavily MCP or local demo tools
 2. Market Analysis    - Analyzes TAM, competitors, positioning
 3. Financial Modeling - Creates revenue projections with charts
 4. Risk Assessment    - Evaluates investment risks
@@ -30,18 +30,29 @@ import os
 import sys
 import time
 from datetime import datetime
-
-from dotenv import load_dotenv
+from pathlib import Path
 
 from omnicoreagent import (
     OmniCoreAgent,
+    ToolRegistry,
+)
+
+from _bootstrap import (
+    get_model,
+    get_provider,
+    load_cookbook_env,
+    model_config as cookbook_model_config,
+    require_llm_api_key,
+    response_text,
 )
 
 # Import the granular tool factories
 from due_diligence_tools import (
     create_chart_tool,
-    create_report_tool,
     create_infographic_tool,
+    create_report_tool,
+    get_output_dir,
+    safe_filename_fragment,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -97,7 +108,7 @@ def print_summary(company: str, outputs: dict, elapsed: float):
 
 {Colors.BOLD}Generated Files:{Colors.RESET}
 """)
-    output_dir = os.path.join(os.getcwd(), "outputs")
+    output_dir = get_output_dir()
     if os.path.exists(output_dir):
         files = sorted(
             os.listdir(output_dir),
@@ -135,19 +146,221 @@ logger = logging.getLogger("DueDiligence")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def create_agents(tavily_key: str, model: str = "gpt-4o", provider: str = "openai"):
+def create_demo_research_tools() -> ToolRegistry:
+    """Create deterministic local research tools for no-Tavily demos and smoke runs."""
+    registry = ToolRegistry()
+
+    @registry.register_tool(
+        name="lookup_company_profile",
+        description=(
+            "Return a deterministic cookbook company profile for due diligence demos "
+            "when live web search is not configured."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "company_name": {
+                    "type": "string",
+                    "description": "Company name to analyze.",
+                },
+                "focus": {
+                    "type": "string",
+                    "description": "Research focus such as team, product, funding, or traction.",
+                },
+            },
+            "required": ["company_name"],
+            "additionalProperties": False,
+        },
+    )
+    def lookup_company_profile(company_name: str, focus: str = "overview") -> dict:
+        company = company_name.strip() or "DemoCo"
+        return {
+            "status": "success",
+            "message": f"Local demo profile returned for {company}",
+            "data": {
+                "source": "local cookbook fixture",
+                "demo_mode": True,
+                "company": company,
+                "focus": focus,
+                "founded": "2024",
+                "headquarters": "San Francisco, CA",
+                "team_size": "18-25",
+                "founders": [
+                    "A former infrastructure engineering lead",
+                    "A GTM operator with enterprise SaaS experience",
+                ],
+                "product": (
+                    "AI workflow infrastructure for investment teams, combining "
+                    "data ingestion, agentic research, and memo generation."
+                ),
+                "funding": "Seed stage; assumed $3.5M raised for demo modeling.",
+                "traction": [
+                    "Four design partners",
+                    "Two paid pilots",
+                    "High usage during weekly investment committee cycles",
+                ],
+            },
+        }
+
+    @registry.register_tool(
+        name="lookup_market_context",
+        description=(
+            "Return deterministic market context for the no-Tavily due diligence demo."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "company_name": {
+                    "type": "string",
+                    "description": "Company name to analyze.",
+                },
+                "market": {
+                    "type": "string",
+                    "description": "Target market or category.",
+                },
+            },
+            "required": ["company_name"],
+            "additionalProperties": False,
+        },
+    )
+    def lookup_market_context(company_name: str, market: str = "AI workflow software") -> dict:
+        return {
+            "status": "success",
+            "message": f"Local demo market context returned for {company_name}",
+            "data": {
+                "source": "local cookbook fixture",
+                "demo_mode": True,
+                "market": market,
+                "tam": "$18B-$25B estimated software opportunity",
+                "sam": "$3B-$5B near-term investment operations segment",
+                "growth": "High double-digit CAGR driven by AI adoption in knowledge work",
+                "competitors": [
+                    "Horizontal agent platforms",
+                    "Internal bank tooling",
+                    "Legacy research workflow software",
+                ],
+                "tailwinds": [
+                    "Rising analyst workload",
+                    "Pressure to shorten diligence cycles",
+                    "Growing comfort with AI-assisted workflows",
+                ],
+                "headwinds": [
+                    "Trust and compliance requirements",
+                    "Data quality variance",
+                    "Crowded AI tooling market",
+                ],
+            },
+        }
+
+    return registry
+
+
+def tavily_mcp_tools(tavily_key: str | None) -> list[dict]:
+    """Return Tavily MCP server config when live search is configured."""
+    if not tavily_key:
+        return []
+    return [
+        {
+            "name": "tavily-remote-mcp",
+            "transport_type": "stdio",
+            "command": "npx",
+            "args": [
+                "-y",
+                "mcp-remote",
+                f"https://mcp.tavily.com/mcp/?tavilyApiKey={tavily_key}",
+            ],
+        }
+    ]
+
+
+def research_source_note(tavily_key: str | None) -> str:
+    if tavily_key:
+        return "Use the Tavily MCP tools for live web research."
+    return (
+        "Use the local demo research tools. Clearly label public-research claims as "
+        "cookbook demo data when the tool output says demo_mode=true."
+    )
+
+
+def generated_files(prefix: str, company_name: str, since: float = 0) -> list[Path]:
+    """Return generated files matching the cookbook artifact naming convention."""
+    output_dir = Path(get_output_dir())
+    company_fragment = safe_filename_fragment(company_name)
+    files = output_dir.glob(f"{prefix}_{company_fragment}_*")
+    return sorted(
+        (path for path in files if path.is_file() and path.stat().st_mtime >= since),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def ensure_financial_chart(company_name: str, since: float) -> dict | None:
+    """Generate a chart directly if the agent did not call the chart tool."""
+    if generated_files("revenue_chart", company_name, since):
+        return None
+
+    chart_tool = create_chart_tool().tools["generate_financial_chart"].function
+    return chart_tool(
+        company_name=company_name,
+        current_arr_m=1.2,
+        bear_rates="1.15,1.12,1.1,1.1,1.08",
+        base_rates="1.7,1.55,1.4,1.3,1.25",
+        bull_rates="2.2,1.9,1.7,1.5,1.4",
+    )
+
+
+def ensure_infographic(company_name: str, since: float) -> dict | None:
+    """Generate an infographic directly if the agent did not call the tool."""
+    if generated_files("infographic", company_name, since):
+        return None
+
+    infographic_tool = create_infographic_tool().tools[
+        "generate_dashboard_infographic"
+    ].function
+    return infographic_tool(
+        company_name=company_name,
+        valuation="Seed stage",
+        arr="$0.25M",
+        growth_rate="Pilot stage",
+        market_size="$18B-$25B",
+        risk_score=6.5,
+        recommendation="HOLD",
+        key_highlights=[
+            "Clear investment workflow pain",
+            "Early design partner traction",
+            "Trust and compliance risk remains",
+            "Needs proof of repeatable sales",
+        ],
+    )
+
+
+def create_agents(
+    tavily_key: str | None = None,
+    model: str | None = None,
+    provider: str | None = None,
+):
     """Initializes all agents for the pipeline with refined system instructions."""
 
     # Shared Model Config
-    model_config = {"provider": provider, "model": model}
+    llm_config = cookbook_model_config(provider=provider, model=model, max_tokens=1400)
+    mcp_tools = tavily_mcp_tools(tavily_key)
+    fallback_research_tools = None if mcp_tools else create_demo_research_tools()
+    source_note = research_source_note(tavily_key)
+    internal_handoff_config = {
+        "guardrail_mode": "off",
+        "max_steps": 8,
+        "tool_call_timeout": 30,
+    }
 
     # ─────────────────────────────────────────────────────────────────────────
     # Stage 1: Company Researcher
     # ─────────────────────────────────────────────────────────────────────────
     researcher = OmniCoreAgent(
         name="CompanyResearcher",
-        system_instruction="""
+        system_instruction=f"""
 You are a senior investment analyst conducting company research.
+
+{source_note}
 
 **RESEARCH STRATEGY:**
 1. Search for key company information: Founded date, HQ, Team Size.
@@ -169,29 +382,11 @@ Provide a structured summary with sections for:
 - Funding History
 - Traction & Growth
 """,
-        model_config=model_config,
-        mcp_tools=[
-            {
-                "name": "tavily-remote-mcp",
-                "transport_type": "stdio",
-                "command": "npx",
-                "args": [
-                    "-y",
-                    "mcp-remote",
-                    f"https://mcp.tavily.com/mcp/?tavilyApiKey={tavily_key}",
-                ],
-            }
-        ],
-        agent_config={
-            "tool_offload": {
-                "enabled": True,  # Enable offloading
-                "threshold_tokens": 300,  # Offload if >300 tokens (low for demo)
-                "threshold_bytes": 1000,  # Or >1KB
-                "max_preview_tokens": 100,  # Show first ~100 tokens in context
-                "storage_dir": "workspace/artifacts",
-            }
-        },
-        debug=True,
+        model_config=llm_config,
+        mcp_tools=mcp_tools,
+        local_tools=fallback_research_tools,
+        agent_config={"max_steps": 6, "tool_call_timeout": 30},
+        debug=False,
     )
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -199,8 +394,10 @@ Provide a structured summary with sections for:
     # ─────────────────────────────────────────────────────────────────────────
     market_analyst = OmniCoreAgent(
         name="MarketAnalyst",
-        system_instruction="""
+        system_instruction=f"""
 You are an expert market research analyst.
+
+{source_note}
 
 **YOUR MISSION:**
 Analyze the market landscape for the provided company.
@@ -215,20 +412,10 @@ Analyze the market landscape for the provided company.
 Provide specific numbers where available. For emerging markets, provide reasoned estimates.
 Structure your response with clear sections for Market Size, Competitors, Positioning, and Trends.
 """,
-        model_config=model_config,
-        mcp_tools=[
-            {
-                "name": "tavily-remote-mcp",
-                "transport_type": "stdio",
-                "command": "npx",
-                "args": [
-                    "-y",
-                    "mcp-remote",
-                    f"https://mcp.tavily.com/mcp/?tavilyApiKey={tavily_key}",
-                ],
-            }
-        ],
-        # debug=True,
+        model_config=llm_config,
+        mcp_tools=mcp_tools,
+        local_tools=fallback_research_tools,
+        agent_config=internal_handoff_config,
     )
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -274,8 +461,9 @@ generate_financial_chart(
 
 After generating the chart, summarize the projected Year 5 ARR for each scenario.
 """,
-        model_config=model_config,
+        model_config=llm_config,
         local_tools=create_chart_tool(),
+        agent_config=internal_handoff_config,
         # debug=True,
     )
 
@@ -307,7 +495,8 @@ End with:
 - **Top 3 Deal-Breaker Risks**
 - **Recommended Protective Terms** (board seat, milestones, etc.)
 """,
-        model_config=model_config,
+        model_config=llm_config,
+        agent_config=internal_handoff_config,
         # debug=True,
     )
 
@@ -353,7 +542,8 @@ You are a General Partner writing an Investment Memo for the Investment Committe
 Synthesize all previous findings into a compelling narrative. Be concise, persuasive, and objective.
 Include specific numbers and data points throughout.
 """,
-        model_config=model_config,
+        model_config=llm_config,
+        agent_config=internal_handoff_config,
         # debug=True,
     )
 
@@ -388,8 +578,9 @@ The tool will generate a professional McKinsey/Goldman Sachs-style HTML report w
 
 After calling the tool, confirm the report was saved successfully.
 """,
-        model_config=model_config,
+        model_config=llm_config,
         local_tools=create_report_tool(),
+        agent_config=internal_handoff_config,
         # debug=True,
     )
 
@@ -440,8 +631,9 @@ generate_dashboard_infographic(
 
 After calling the tool, confirm the infographic was generated successfully.
 """,
-        model_config=model_config,
+        model_config=llm_config,
         local_tools=create_infographic_tool(),
+        agent_config=internal_handoff_config,
         # debug=True,
     )
 
@@ -463,21 +655,24 @@ After calling the tool, confirm the infographic was generated successfully.
 
 async def run_due_diligence(
     company_name: str,
-    model: str = "gpt-4o",
-    provider: str = "openai",
+    model: str | None = None,
+    provider: str | None = None,
     verbose: bool = True,
+    show_summary: bool = True,
 ):
     """Execute the full due diligence workflow."""
 
+    load_cookbook_env()
+    require_llm_api_key()
     tavily_key = os.getenv("TAVILY_API_KEY")
-    if not tavily_key:
+    live_search = bool(tavily_key)
+    model = model or get_model()
+    provider = provider or get_provider()
+
+    if verbose and not live_search:
         print(
-            f"{Colors.RED}Error: TAVILY_API_KEY environment variable not set.{Colors.RESET}"
+            f"{Colors.YELLOW}TAVILY_API_KEY is not set; using local demo research tools.{Colors.RESET}"
         )
-        print(
-            f"{Colors.DIM}Set it in your .env file or export it in your shell.{Colors.RESET}"
-        )
-        return None
 
     start_time = time.time()
     outputs = {}
@@ -494,8 +689,9 @@ async def run_due_diligence(
     )
 
     # Connect MCP servers
-    await researcher.connect_mcp_servers()
-    await market.connect_mcp_servers()
+    if live_search:
+        await researcher.connect_mcp_servers()
+        await market.connect_mcp_servers()
 
     try:
         # ─────────────────────────────────────────────────────────────────
@@ -505,7 +701,7 @@ async def run_due_diligence(
             print_stage(1, total_stages, f"Researching {company_name}...")
 
         res1 = await researcher.run(f"Research this company thoroughly: {company_name}")
-        info_data = res1["response"]
+        info_data = response_text(res1)
         outputs["research"] = info_data
 
         if verbose:
@@ -523,7 +719,7 @@ COMPANY INFO:
 
 TASK: Analyze the market size, competitors, and positioning for this company.
 """)
-        market_data = res2["response"]
+        market_data = response_text(res2)
         outputs["market"] = market_data
 
         if verbose:
@@ -537,6 +733,7 @@ TASK: Analyze the market size, competitors, and positioning for this company.
                 3, total_stages, "Building financial model & generating chart..."
             )
 
+        chart_started_at = time.time()
         res3 = await modeller.run(f"""
 COMPANY: {company_name}
 COMPANY INFO: {info_data}
@@ -545,7 +742,13 @@ MARKET ANALYSIS: {market_data}
 TASK: Create a 5-year financial projection model and generate the revenue chart.
 Remember to use the generate_financial_chart tool with bear_rates, base_rates, and bull_rates.
 """)
-        finance_data = res3["response"]
+        finance_data = response_text(res3)
+        fallback_chart = ensure_financial_chart(company_name, chart_started_at)
+        if fallback_chart:
+            finance_data += (
+                "\n\nChart artifact generated with deterministic demo assumptions: "
+                f"{fallback_chart.get('message', fallback_chart)}"
+            )
         outputs["finance"] = finance_data
 
         if verbose:
@@ -568,7 +771,7 @@ FINANCIAL MODEL:
 
 Provide severity ratings and an overall risk score (1-10).
 """)
-        risk_data = res4["response"]
+        risk_data = response_text(res4)
         outputs["risk"] = risk_data
 
         if verbose:
@@ -595,7 +798,7 @@ FINANCIAL MODEL:
 RISK ASSESSMENT:
 {risk_data}
 """)
-        memo_data = res5["response"]
+        memo_data = response_text(res5)
         outputs["memo"] = memo_data
 
         if verbose:
@@ -630,6 +833,7 @@ INVESTMENT MEMO:
         if verbose:
             print_stage(7, total_stages, "Creating infographic...")
 
+        infographic_started_at = time.time()
         await infographic.run(f"""
 Create a professional investment infographic for {company_name}.
 
@@ -640,19 +844,25 @@ INVESTMENT MEMO:
 
 Remember to pass each parameter individually: company_name, valuation, arr, growth_rate, market_size, risk_score (as a number), recommendation, and key_highlights (as a list).
 """)
+        fallback_infographic = ensure_infographic(company_name, infographic_started_at)
+        if fallback_infographic:
+            outputs["infographic"] = fallback_infographic
 
         if verbose:
             print_stage(7, total_stages, "Infographic", "complete")
 
     finally:
         # Cleanup MCP connections
-        await researcher.cleanup_mcp_servers()
-        await market.cleanup_mcp_servers()
+        if live_search:
+            await researcher.cleanup_mcp_servers()
+            await market.cleanup_mcp_servers()
 
     elapsed = time.time() - start_time
 
-    if verbose:
+    if show_summary:
         print_summary(company_name, outputs, elapsed)
+
+    if verbose:
         print(
             f"{Colors.DIM}Settings: {provider}/{model} | Completed: {datetime.now().strftime('%H:%M:%S')}{Colors.RESET}\n"
         )
@@ -678,8 +888,10 @@ Examples:
   python due_diligence_workflow.py -c "Anthropic" --quiet
 
 Environment Variables:
-  TAVILY_API_KEY    API key for Tavily search (required)
+  TAVILY_API_KEY    Optional API key for live Tavily MCP search
   LLM_API_KEY       API key for the LLM provider (required)
+  OMNICOREAGENT_DUE_DILIGENCE_OUTPUT_DIR
+                   Optional directory for generated report/chart files
         """,
     )
 
@@ -699,12 +911,10 @@ Environment Variables:
         help="Suppress progress output (only show final summary)",
     )
 
-    parser.add_argument(
-        "-m", "--model", default="gpt-4.1", help="LLM model to use (default: gpt-4.1)"
-    )
+    parser.add_argument("-m", "--model", default=None, help="LLM model to use")
 
     parser.add_argument(
-        "-p", "--provider", default="openai", help="LLM provider (default: openai)"
+        "-p", "--provider", default=None, help="LLM provider (default: openai)"
     )
 
     parser.add_argument(
@@ -716,9 +926,11 @@ Environment Variables:
 
 async def main():
     """Main entry point."""
-    load_dotenv()
+    load_cookbook_env()
 
     args = parse_args()
+    model = args.model or get_model()
+    provider = args.provider or get_provider()
 
     # Determine company name from args
     company = args.company_flag or args.company
@@ -739,14 +951,14 @@ async def main():
         f"\n{Colors.BOLD}Analyzing:{Colors.RESET} {Colors.CYAN}{company}{Colors.RESET}"
     )
     print(
-        f"{Colors.BOLD}Model:{Colors.RESET}     {Colors.DIM}{args.provider}/{args.model}{Colors.RESET}"
+        f"{Colors.BOLD}Model:{Colors.RESET}     {Colors.DIM}{provider}/{model}{Colors.RESET}"
     )
     print(
         f"{Colors.DIM}This may take 3-5 minutes depending on the company...{Colors.RESET}"
     )
 
     await run_due_diligence(
-        company, model=args.model, provider=args.provider, verbose=not args.quiet
+        company, model=model, provider=provider, verbose=not args.quiet
     )
 
 

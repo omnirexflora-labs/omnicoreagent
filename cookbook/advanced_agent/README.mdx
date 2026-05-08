@@ -70,7 +70,7 @@ A complete investment research pipeline:
 - Report generation
 - Multi-agent workflow
 
-See the [full documentation](./ai_due_diligence_agent/README.md) for details.
+See the [full documentation](./ai_due_diligence_agent/README.mdx) for details.
 
 ---
 
@@ -100,7 +100,10 @@ agent = OmniCoreAgent(
     agent_config={
         "max_steps": 15,
         "context_management": {"enabled": True},
-        "guardrail_config": {"enabled": True},
+        "guardrail_config": {
+            "strict_mode": True,
+            "sensitivity": 1.2,
+        },
         "memory_config": {
             "summary": {"enabled": True}
         },

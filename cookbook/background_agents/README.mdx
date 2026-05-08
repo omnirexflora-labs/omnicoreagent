@@ -1,14 +1,14 @@
-# Background Agents: "Set-and-Forget" Automation
+# Background Agents: Scheduled Automation Examples
 
-> **Empower your AI to work autonomously.** Background Agents allow you to schedule tasks, monitor systems, and process data streams without constant human intervention—all while maintaining high resilience and detailed observability.
+> Background Agents let you run scheduled agent tasks without a human prompt each time. This cookbook section is currently an experimental scheduled-automation path and will get a deeper production refresh after the core runtime and OmniServe work.
 
 ## Why Background Agents?
 
-OmniCoreAgent's background system is designed for **production reliability**:
-*   **🛡️ Resilient**: Built-in mechanisms for **timeouts**, **automatic retries**, and **queue backpressure** ensure your system stays stable even when tasks fail or stall.
+OmniCoreAgent's background system is designed around scheduled task execution:
+*   **Timeouts and retries**: Configure how long a task may run and how failures are retried.
 *   **⏰ Flexible Scheduling**: Run tasks on a strict frequency (e.g., "every 5 seconds") or precise calendar schedules (e.g., "every Monday at 9 AM") using Cron syntax.
-*   **👀 Observable**: Every action, error, and status change is emitted as a structured event. Inspect agent state and metrics in real-time.
-*   **🎮 Full Control**: Pause, resume, update, or stop agents on the fly without restarting the entire system.
+*   **Events**: Background runs emit structured events you can inspect.
+*   **Lifecycle control**: Pause, resume, update, or stop agents while the manager is running.
 
 ## Key Concepts
 
@@ -17,6 +17,12 @@ OmniCoreAgent's background system is designed for **production reliability**:
 *   **TaskRegistry**: The persistent configuration store that defines *what* an agent does and *how* it should behave (retries, timeouts, etc.).
 
 ## Quick Start
+
+Install the background extra first:
+
+```bash
+pip install "omnicoreagent[background]"
+```
 
 Here is the correct way to initialize and run a simple background monitor:
 
@@ -31,15 +37,14 @@ async def main():
     agent_config = {
         "agent_id": "system_monitor",
         "model_config": {"provider": "openai", "model": "gpt-4o-mini"},
-        # Schedule: Run every 60 seconds
-        "interval": 60,
         # Resilience: Limit queue to 5 pending tasks to prevent overload
-        "queue_size": 5, 
+        "queue_size": 5,
     }
     
     # Define the task logic
     task_config = {
         "query": "Check system CPU usage and return 'High' if > 80%.",
+        "interval": 60,     # Run every 60 seconds
         "timeout": 30,       # Kill task if it takes > 30s
         "max_retries": 3,    # Retry 3 times on failure
     }
@@ -71,8 +76,9 @@ The `task_config` dictionary gives you fine-grained control over execution:
 | `timeout` | `int` | `300` | (Seconds) Hard limit for task execution. Raises `TimeoutError` if exceeded. |
 | `max_retries` | `int` | `3` | Number of times to retry a failed task before marking it as error. |
 | `retry_delay` | `int` | `60` | (Seconds) Wait time between retries. |
-| `queue_size` | `int` | `100` | Max pending tasks. Incoming tasks are dropped if queue is full. |
 | `session_id` | `str` | `uuid4` | Persistent ID for event tracking across multiple runs. |
+
+Set `queue_size` on the top-level agent config to control the worker queue depth.
 
 ## Feature Deep Dive
 
