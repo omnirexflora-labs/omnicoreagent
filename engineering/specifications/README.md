@@ -15,3 +15,8 @@ A specification should answer:
 Specifications are stricter than architecture records. Architecture explains
 the system shape and decisions. A specification defines the contract that code
 must obey.
+
+Current specifications:
+
+- `background-agents.md`
+- `workspace.md`
