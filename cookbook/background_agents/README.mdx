@@ -72,7 +72,7 @@ The `task_config` dictionary gives you fine-grained control over execution:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `query` | `str` | **Required** | The natural language instruction for the agent. |
-| `interval` | `int` or `str` | `3600` | **Int**: Seconds between runs.<br>**String**: Cron expression (e.g., `* * * * *` for every minute). |
+| `interval` | `int` or `str` | `3600` | **Int**: Seconds between runs.<br />**String**: Cron expression (e.g., `* * * * *` for every minute). |
 | `timeout` | `int` | `300` | (Seconds) Hard limit for task execution. Raises `TimeoutError` if exceeded. |
 | `max_retries` | `int` | `3` | Number of times to retry a failed task before marking it as error. |
 | `retry_delay` | `int` | `60` | (Seconds) Wait time between retries. |

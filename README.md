@@ -5,7 +5,7 @@
 <h1 align="center">OmniCoreAgent</h1>
 
 <p align="center">
-  <strong>The Open Agent Harness Built for Production</strong><br>
+  <strong>The Open Agent Harness Built for Production</strong><br />
   <em>Parallel tool batches. Structured observations. Loop detection. Memory, workspace files, MCP, subagents, and serving in one runtime.</em>
 </p>
 
@@ -18,7 +18,9 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> -
+  <a href="#choose-your-path">Choose Your Path</a> -
   <a href="#what-makes-it-different">What Makes It Different</a> -
+  <a href="#install-only-what-you-need">Install</a> -
   <a href="./cookbook">Cookbook</a> -
   <a href="#features">Features</a> -
   <a href="https://docs-omnicoreagent.omnirexfloralabs.com/docs">Docs</a>
@@ -63,6 +65,21 @@ small.
 
 > Ready to go deeper? The [Cookbook](./cookbook) has progressive examples from
 > hello world to production deployments.
+
+---
+
+## Choose Your Path
+
+| Goal | Start Here |
+|------|------------|
+| Build your first agent | [Quick Start](#quick-start) |
+| Add Python tools | [Local tools cookbook](./cookbook/getting_started/agent_with_local_tools.py) |
+| Connect MCP server tools | [MCP tools cookbook](./cookbook/getting_started/agent_with_mcp_tools.py) |
+| Manage memory and context | [Getting started cookbook](./cookbook/getting_started) |
+| Save files, artifacts, and large tool results | [Tool offload cookbook](./cookbook/getting_started/agent_with_tool_offload.py) |
+| Build multi-step workflows | [Workflows cookbook](./cookbook/workflows) |
+| Serve an agent over HTTP/SSE | [OmniServe cookbook](./cookbook/omniserve) |
+| Understand the runtime internals | [Implementation Map](#implementation-map) |
 
 ---
 
@@ -153,28 +170,6 @@ The system prompt is preserved, recent messages are preserved, and older middle
 history is either summarized or removed depending on configuration. If you set
 the budget below your model's real context window, the harness acts before the
 provider rejects the request.
-
----
-
-## Implementation Map
-
-OmniCoreAgent's capabilities are backed by concrete runtime modules:
-
-| Capability | Where It Lives |
-|-------|----------------|
-| Parallel tool batches | `core/tools/tool_batch_runner.py` |
-| XML tool-call contract | `core/agents/xml_parser.py` |
-| Structured observations | `core/tools/tool_observation.py` |
-| Tool output offloading | `core/workspace/artifacts.py` |
-| Automatic context control | `core/agents/llm_step.py`, `core/context_manager.py` |
-| Workspace files | `core/workspace/tools.py`, `core/workspace/storage.py` |
-| Dynamic subagents | `core/subagents.py` |
-| Loop detection | `core/agents/loop_detection.py` |
-| MCP server tools | `mcp_clients_connection/client.py` |
-| OmniServe | `serve/` |
-
-See the [Agent Harness docs](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/agent-harness)
-for the full implementation map.
 
 ---
 
@@ -270,6 +265,28 @@ uses.
 | **Background Agents** | Supports scheduled autonomous tasks for interval-based workloads. |
 | **Universal Models** | Routes through LiteLLM to OpenAI, Anthropic, Gemini, Groq, Ollama, DeepSeek, Mistral, OpenRouter, Azure, and Cencori. |
 | **OmniServe** | Turns an agent into a REST/SSE service with lifecycle management and metrics. |
+
+---
+
+## Implementation Map
+
+OmniCoreAgent's capabilities are backed by concrete runtime modules:
+
+| Capability | Where It Lives |
+|-------|----------------|
+| Parallel tool batches | `core/tools/tool_batch_runner.py` |
+| XML tool-call contract | `core/agents/xml_parser.py` |
+| Structured observations | `core/tools/tool_observation.py` |
+| Tool output offloading | `core/workspace/artifacts.py` |
+| Automatic context control | `core/agents/llm_step.py`, `core/context_manager.py` |
+| Workspace files | `core/workspace/tools.py`, `core/workspace/storage.py` |
+| Dynamic subagents | `core/subagents.py` |
+| Loop detection | `core/agents/loop_detection.py` |
+| MCP server tools | `mcp_clients_connection/client.py` |
+| OmniServe | `serve/` |
+
+See the [Agent Harness docs](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/agent-harness)
+for the full implementation map.
 
 ---
 
