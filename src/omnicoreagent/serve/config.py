@@ -10,8 +10,12 @@ Environment Variables (OVERRIDE code values):
     OMNISERVE_WORKERS: Number of worker processes (default: 1)
     OMNISERVE_API_PREFIX: API path prefix (default: "")
     OMNISERVE_ENABLE_DOCS: Enable Swagger UI (default: true)
+    OMNISERVE_ENABLE_REDOC: Enable ReDoc UI (default: true)
     OMNISERVE_CORS_ENABLED: Enable CORS (default: true)
     OMNISERVE_CORS_ORIGINS: Comma-separated allowed origins (default: *)
+    OMNISERVE_CORS_METHODS: Comma-separated allowed methods (default: *)
+    OMNISERVE_CORS_HEADERS: Comma-separated allowed headers (default: *)
+    OMNISERVE_CORS_CREDENTIALS: Allow credentials in CORS (default: true)
     OMNISERVE_AUTH_ENABLED: Enable Bearer token auth (default: false)
     OMNISERVE_AUTH_TOKEN: Bearer token for auth
     OMNISERVE_REQUEST_LOGGING: Log requests (default: true)

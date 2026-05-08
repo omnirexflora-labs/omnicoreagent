@@ -27,9 +27,9 @@ background scheduling install as extras when the agent needs them.
     ```
 
     <Tip>
-    Provider-specific keys such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-    `GEMINI_API_KEY`, or `GROQ_API_KEY` are supported. See
-    [Model Support](/docs/how-to-guides/models).
+    OmniCoreAgent uses `LLM_API_KEY` as the single public API-key variable.
+    Choose the provider with `model_config["provider"]`. See
+    [Model Support](/docs/how-to-guides/models) for supported provider names.
     </Tip>
   </Step>
 
@@ -168,7 +168,7 @@ result = await agent.run("What is my name?", session_id="user_123")
 ```
 
 The default memory backend is suitable for local development. Use Redis,
-PostgreSQL, MongoDB, or SQLite when the application needs persistence outside
+MongoDB, or SQL database storage when the application needs persistence outside
 the current process.
 
 ---

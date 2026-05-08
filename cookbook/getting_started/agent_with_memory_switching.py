@@ -3,7 +3,7 @@
 Agent with Memory Switching
 
 Switch memory backends at RUNTIME without restarting.
-Start with Redis, switch to MongoDB, then PostgreSQL - seamlessly.
+Start in memory, then switch to Redis, MongoDB, or SQL database storage.
 
 Build on: agent_with_memory.py
 Next: agent_with_events.py
@@ -67,7 +67,7 @@ async def main():
         print(f"   MongoDB not available: {e}")
         print("   (Set MONGODB_URI in .env to enable)")
 
-    # === SWITCH TO SQL DATABASE (PostgreSQL/SQLite/MySQL) ===
+    # === SWITCH TO SQL DATABASE ===
     # Note: Requires DATABASE_URL in .env before runtime switching
     print("\n4. Switching to Database...")
     try:

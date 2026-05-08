@@ -1,12 +1,13 @@
 ---
 title: Multi-Tier Memory
-description: '5 backends with runtime switching — Redis, MongoDB, PostgreSQL, SQLite, and in-memory'
+description: 'MemoryRouter backends with runtime switching — in-memory, Redis, MongoDB, and SQL database storage'
 icon: 'database'
 ---
 
 # Multi-Tier Memory System
 
-**5 backends with runtime switching** — start with Redis, switch to MongoDB, then PostgreSQL — all on the fly!
+**Runtime-switchable memory backends** — start in memory, switch to Redis,
+MongoDB, or SQL database storage when the application needs persistence.
 
 ---
 
@@ -32,7 +33,7 @@ agent = OmniCoreAgent(
 
 # Switch at runtime — no restart needed!
 await agent.switch_memory_store("mongodb")     # Switch to MongoDB
-await agent.switch_memory_store("database")    # Switch to PostgreSQL/MySQL/SQLite
+await agent.switch_memory_store("database")    # Switch to SQL database storage
 await agent.switch_memory_store("in_memory")   # Switch to in-memory
 await agent.switch_memory_store("redis")       # Back to Redis
 ```
@@ -45,7 +46,7 @@ await agent.switch_memory_store("redis")       # Back to Redis
 |---------|----------|---------------------|
 | `in_memory` | Fast development | — |
 | `redis` | Production persistence | `REDIS_URL` |
-| `database` | PostgreSQL/MySQL/SQLite | `DATABASE_URL` |
+| `database` | SQLAlchemy database storage | `DATABASE_URL` |
 | `mongodb` | Document storage | `MONGODB_URI` |
 
 ---
@@ -57,23 +58,22 @@ OmniCoreAgent includes **automatic conversation summarization** to manage long c
 ```python
 from omnicoreagent import OmniCoreAgent, MemoryRouter
 
-# Configure summarization with sliding window
-memory_router = MemoryRouter(
-    store_type="redis",
-    memory_config={
-        "mode": "sliding_window",  # or "token_budget"
-        "value": 10,  # Keep last 10 messages (sliding_window) or max tokens (token_budget)
-        "summary": {
-            "enabled": True,
-            "retention_policy": "keep"  # Options: "keep" or "delete"
-        }
+memory_router = MemoryRouter("redis")
+
+memory_config = {
+    "mode": "sliding_window",  # or "token_budget"
+    "value": 10,  # Keep last 10 messages, or max tokens in token_budget mode
+    "summary": {
+        "enabled": True,
+        "retention_policy": "keep"  # Options: "keep" or "delete"
     }
-)
+}
 
 agent = OmniCoreAgent(
     name="summarizing_agent",
     memory_router=memory_router,
-    model_config={"provider": "openai", "model": "gpt-4o"}
+    model_config={"provider": "openai", "model": "gpt-4o"},
+    agent_config={"memory_config": memory_config},
 )
 ```
 

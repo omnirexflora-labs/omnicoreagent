@@ -15,14 +15,17 @@ dictionaries, and specialized configuration objects.
 
 Environment variables are the best way to manage sensitive data like API keys and connection strings.
 
-### LLM API Keys
-| Provider | Variable |
-|----------|----------|
-| Generic | `LLM_API_KEY` |
-| OpenAI | `OPENAI_API_KEY` |
-| Anthropic | `ANTHROPIC_API_KEY` |
-| Google Gemini | `GEMINI_API_KEY` |
-| Groq | `GROQ_API_KEY` |
+### LLM API Key
+
+OmniCoreAgent uses one public environment variable for hosted model credentials:
+
+```bash
+LLM_API_KEY=your_provider_key
+```
+
+Set `model_config["provider"]` to choose the provider. The runtime reads
+`LLM_API_KEY` and internally passes it to LiteLLM for the selected provider.
+Do not configure provider-specific key names in OmniCoreAgent examples.
 
 ### Memory Backends
 | Backend | Variable | Example |
@@ -31,6 +34,13 @@ Environment variables are the best way to manage sensitive data like API keys an
 | **SQL Database** | `DATABASE_URL` | `postgresql://user:pass@localhost:5432/db` |
 | **MongoDB** | `MONGODB_URI` | `mongodb://localhost:27017` |
 
+Optional MongoDB memory variables:
+
+| Variable | Purpose |
+|----------|---------|
+| `MONGODB_DB_NAME` | MongoDB memory database name. Defaults to `omnicoreagent`. |
+| `MONGODB_COLLECTION` | MongoDB memory collection name. Defaults to `messages`. |
+
 ### Workspace Storage
 Workspace storage is separate from memory storage. Memory stores conversation
 history. Workspace storage stores files, scratchpads, artifacts, subagent
@@ -38,9 +48,44 @@ outputs, and tool offloads.
 
 | Backend | Variables |
 |---------|-----------|
-| **Local** | `OMNICOREAGENT_WORKSPACE_BACKEND=local`, `OMNICOREAGENT_WORKSPACE_DIR=.omnicoreagent/workspace` |
+| **Local** | `OMNICOREAGENT_WORKSPACE_BACKEND=local`, `OMNICOREAGENT_WORKSPACE_DIR=./workspace` |
 | **S3** | `OMNICOREAGENT_WORKSPACE_BACKEND=s3`, `AWS_S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | **R2** | `OMNICOREAGENT_WORKSPACE_BACKEND=r2`, `R2_BUCKET_NAME`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` |
+
+Optional workspace variables:
+
+| Variable | Purpose |
+|----------|---------|
+| `OMNICOREAGENT_WORKSPACE_PREFIX` | Key prefix for S3/R2 workspace objects. |
+| `AWS_REGION` | AWS region for S3 workspaces. |
+| `AWS_ENDPOINT_URL` | Custom S3-compatible endpoint. |
+
+### OmniServe
+
+OmniServe reads these variables through `OmniServeConfig`. Environment variables
+override values passed in code.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `OMNISERVE_HOST` | `0.0.0.0` | Server bind host. |
+| `OMNISERVE_PORT` | `8000` | Server port. |
+| `OMNISERVE_WORKERS` | `1` | Uvicorn worker count. |
+| `OMNISERVE_API_PREFIX` | `""` | API route prefix, such as `/api/v1`. |
+| `OMNISERVE_ENABLE_DOCS` | `true` | Enable Swagger UI. |
+| `OMNISERVE_ENABLE_REDOC` | `true` | Enable ReDoc. |
+| `OMNISERVE_CORS_ENABLED` | `true` | Enable CORS middleware. |
+| `OMNISERVE_CORS_ORIGINS` | `*` | Comma-separated allowed origins. |
+| `OMNISERVE_CORS_METHODS` | `*` | Comma-separated allowed methods. |
+| `OMNISERVE_CORS_HEADERS` | `*` | Comma-separated allowed headers. |
+| `OMNISERVE_CORS_CREDENTIALS` | `true` | Allow CORS credentials. |
+| `OMNISERVE_AUTH_ENABLED` | `false` | Enable Bearer token auth. |
+| `OMNISERVE_AUTH_TOKEN` | unset | Bearer token value. |
+| `OMNISERVE_REQUEST_LOGGING` | `true` | Log incoming requests. |
+| `OMNISERVE_LOG_LEVEL` | `INFO` | Server log level. |
+| `OMNISERVE_REQUEST_TIMEOUT` | `300` | Request timeout in seconds. Set `0` to disable timeout middleware. |
+| `OMNISERVE_RATE_LIMIT_ENABLED` | `false` | Enable in-process rate limiting. |
+| `OMNISERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per rate-limit window. |
+| `OMNISERVE_RATE_LIMIT_WINDOW` | `60` | Rate-limit window in seconds. |
 
 ## 2. Agent Configuration
 
@@ -86,10 +131,16 @@ model_config = {
     "temperature": 0.5,
     "max_tokens": 4000,
     "top_p": 0.9,
-    # Custom endpoint for self-hosted models
-    "api_base": "http://localhost:8000/v1"
 }
 ```
+
+Supported provider values are: `openai`, `anthropic`, `groq`, `ollama`,
+`azure`, `gemini`, `deepseek`, `mistral`, `openrouter`, and `cencori`.
+
+Provider-specific runtime options currently supported by OmniCoreAgent are:
+
+- Azure: `azure_endpoint`, `azure_api_version`, `azure_deployment`
+- Ollama: `ollama_host`
 
 ---
 

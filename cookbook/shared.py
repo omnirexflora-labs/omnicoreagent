@@ -30,7 +30,6 @@ def get_model(default: str = DEFAULT_MODEL) -> str:
     return (
         os.getenv("OMNICOREAGENT_MODEL")
         or os.getenv("OMNICOREAGENT_TEST_MODEL")
-        or os.getenv("OPENAI_MODEL")
         or default
     )
 

@@ -251,7 +251,7 @@ uses.
 | **Signature-Based Loop Detection** | Detects repeated SHA256-backed tool-call signatures and repeated tool interaction patterns beyond step-count exhaustion. |
 | **MCP Native Tools** | Connects MCP servers over stdio, SSE, and Streamable HTTP, including OAuth-capable remote servers. |
 | **Local Tool Registry** | Registers Python functions as tools with inferred schemas and async/sync execution support. |
-| **Multi-Tier Memory** | Uses in-memory, SQLite, Redis, MongoDB, or SQL-backed session history through the memory router. |
+| **Multi-Tier Memory** | Uses in-memory, Redis, MongoDB, or SQL-backed session history through the memory router. |
 | **Runtime Backend Switching** | Switches memory and event backends at runtime when configured. |
 | **Workspace Files** | Gives agents a local, S3, or R2-backed file workspace for notes, scratchpads, artifacts, and tool offloads. |
 | **Context Engineering** | Checks context before each model call and automatically truncates or summarizes when the configured budget threshold is crossed. |
@@ -313,7 +313,7 @@ LLM_API_KEY=your_api_key
 
 # Workspace storage
 OMNICOREAGENT_WORKSPACE_BACKEND=local   # local | s3 | r2
-OMNICOREAGENT_WORKSPACE_DIR=.omnicoreagent/workspace
+OMNICOREAGENT_WORKSPACE_DIR=./workspace
 AWS_S3_BUCKET=your-s3-bucket            # when backend=s3
 R2_BUCKET_NAME=your-r2-bucket           # when backend=r2
 ```
@@ -368,7 +368,7 @@ pytest tests/ --cov=src --cov-report=term-missing
 
 | Error | Fix |
 |-------|-----|
-| `Invalid API key` | Set the right provider key in `.env`, for example `LLM_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`. |
+| `Invalid API key` | Set `LLM_API_KEY` in `.env` to the key for the provider selected in `model_config`. |
 | `ModuleNotFoundError` for Redis / Postgres / MongoDB / S3 | Install the matching extra, for example `pip install "omnicoreagent[redis]"`. |
 | `Redis connection failed` | Start Redis or use `MemoryRouter("in_memory")`. |
 | `MCP connection refused` | Ensure the MCP server is running before starting the agent. |

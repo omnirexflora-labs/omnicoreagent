@@ -1,12 +1,13 @@
 ---
 title: Model Support
-description: '9+ LLM providers — OpenAI, Anthropic, Gemini, Groq, DeepSeek, and more'
+description: 'Supported LLM providers — OpenAI, Anthropic, Gemini, Groq, DeepSeek, and more'
 icon: 'microchip'
 ---
 
 # Universal Model Support
 
-Model-agnostic through LiteLLM — use any provider:
+Model-agnostic through LiteLLM with the provider values supported by the
+OmniCoreAgent runtime:
 
 ---
 
@@ -20,7 +21,7 @@ model_config = {"provider": "openai", "model": "gpt-4o"}
 model_config = {"provider": "anthropic", "model": "claude-3-5-sonnet-20241022"}
 
 # Google Gemini
-model_config = {"provider": "google", "model": "gemini-2.0-flash-exp"}
+model_config = {"provider": "gemini", "model": "gemini-2.0-flash-exp"}
 
 # Groq (Ultra-fast)
 model_config = {"provider": "groq", "model": "llama-3.1-8b-instant"}
@@ -32,7 +33,7 @@ model_config = {"provider": "deepseek", "model": "deepseek-chat"}
 model_config = {"provider": "mistral", "model": "mistral-7b-instruct"}
 
 # Azure OpenAI
-model_config = {"provider": "azure_openai", "model": "gpt-4o"}
+model_config = {"provider": "azure", "model": "gpt-4o"}
 
 # OpenRouter (200+ models)
 model_config = {"provider": "openrouter", "model": "anthropic/claude-3.5-sonnet"}
@@ -61,7 +62,7 @@ model_config = {
 
 ```python
 model_config = {
-    "provider": "azureopenai",
+    "provider": "azure",
     "model": "gpt-4",
     "azure_endpoint": "https://your-resource.openai.azure.com",
     "azure_api_version": "2024-02-01"
@@ -85,9 +86,13 @@ model_config = {
 ## Environment Variables
 
 ```bash
-# All providers use this single key
+# Hosted providers use this single OmniCoreAgent key
 LLM_API_KEY=your_api_key
 ```
+
+OmniCoreAgent reads `LLM_API_KEY`. Select the provider through
+`model_config["provider"]`; do not set provider-specific API-key variables in
+OmniCoreAgent configuration.
 
 ---
 
