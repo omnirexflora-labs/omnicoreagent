@@ -1,107 +1,190 @@
 ---
 title: Context Engineering
-description: 'Dual-layer context management — never hit token limits again'
+description: 'Automatic context control and workspace-backed tool output offloading'
 icon: 'brain-circuit'
 ---
 
-# Context Engineering System
+# Context Engineering
 
-OmniCoreAgent implements **state-of-the-art context engineering** inspired by patterns from Anthropic and Cursor. This dual-layer approach ensures your agents never hit token limits — even during marathon coding sessions or multi-step research tasks.
+OmniCoreAgent has three context-control layers that work together:
+
+| Layer | Scope | Purpose | Default |
+|-------|-------|---------|---------|
+| **Session memory** | Across `agent.run()` calls | Controls how much conversation history is loaded for a session. | On through the memory router |
+| **Agent loop context management** | Inside one `agent.run()` loop | Checks active messages before every model call and reduces them before the configured budget is exceeded. | Off until enabled |
+| **Tool output offloading** | Individual tool responses | Moves large tool outputs into workspace artifacts and keeps only a preview in the prompt. | Off until enabled |
+
+When agent loop context management is enabled and configured with a budget below
+your model's real context window, OmniCoreAgent acts before the provider context
+limit is hit. The runtime checks context before the LLM call, not after an error.
+
+```text
+active messages
+  -> context threshold check
+  -> truncate or summarize+truncate when needed
+  -> model call
+```
+
+This is why long tasks can keep moving without waiting for the provider to reject
+an oversized prompt.
 
 ---
 
-## How the Two Layers Work Together
+## Layer 1: Session Memory
 
-| Layer | Scope | What It Manages | When It Triggers |
-|-------|-------|-----------------|------------------|
-| **Context Management** | Agent loop messages | User/Assistant conversation, tool call history | When context exceeds `threshold_percent` of limit |
-| **Tool Offloading** | Individual tool responses | Large API responses, file contents, search results | When response exceeds `threshold_tokens` |
+Session memory decides what historical messages are loaded when a new
+`agent.run()` starts. This is the cross-request layer.
+
+```python
+agent = OmniCoreAgent(
+    name="assistant",
+    system_instruction="You are helpful.",
+    model_config={"provider": "openai", "model": "gpt-4o"},
+    agent_config={
+        "memory_config": {
+            "mode": "sliding_window",
+            "value": 10000,
+            "summary": {"enabled": False},
+        }
+    },
+)
+```
+
+Use persistent memory backends such as Redis, SQL, MongoDB, or SQLite when
+session history must survive process restarts.
 
 ---
 
-## Layer 1: Agent Loop Context Management
+## Layer 2: Agent Loop Context Management
 
-Prevent token exhaustion during long-running tasks with automatic context management. When enabled, the agent monitors context size and applies truncation or summarization when thresholds are exceeded.
+Agent loop context management runs inside the ReAct loop. Before each model call,
+`OmniCoreAgent` asks the context manager whether the current messages crossed the
+configured threshold. If yes, it reduces the message list before the LLM request
+is sent.
 
 ```python
 agent_config = {
     "context_management": {
         "enabled": True,
-        "mode": "token_budget",  # or "sliding_window"
-        "value": 100000,  # Max tokens (token_budget) or max messages (sliding_window)
-        "threshold_percent": 75,  # Trigger at 75% of limit
+        "mode": "token_budget",          # or "sliding_window"
+        "value": 100000,                 # token budget or message count
+        "threshold_percent": 75,
         "strategy": "summarize_and_truncate",  # or "truncate"
-        "preserve_recent": 4,  # Always keep last N messages
+        "preserve_recent": 6,
     }
 }
 ```
+
+With the config above, management triggers around 75,000 tokens. If the selected
+model has a larger context window, the harness reduces context before the model
+request reaches the provider limit.
+
+### What Is Preserved
+
+| Part | Behavior |
+|------|----------|
+| System prompt | Always preserved. |
+| Recent messages | Preserved according to `preserve_recent`. |
+| Middle history | Truncated, or summarized then truncated, depending on strategy. |
+| Summary metadata | Added when `summarize_and_truncate` creates a context summary. |
 
 ### Modes
 
 | Mode | Description | Best For |
 |------|-------------|----------|
-| `token_budget` | Manage by total token count | Cost control, API limits |
-| `sliding_window` | Manage by message count | Predictable context size |
+| `token_budget` | Manage context by estimated token count. | Provider context limits and cost control. |
+| `sliding_window` | Manage context by message count. | Predictable, low-latency history windows. |
 
 ### Strategies
 
-| Strategy | Behavior | Trade-off |
+| Strategy | Behavior | Trade-Off |
 |----------|----------|-----------|
-| `truncate` | Drop oldest messages | Fast, no extra LLM calls |
-| `summarize_and_truncate` | Summarize then drop | Preserves context, adds latency |
+| `truncate` | Drop older middle messages while preserving system and recent messages. | Fast and deterministic. |
+| `summarize_and_truncate` | Summarize older middle history, insert a summary message, then preserve recent messages. | Keeps more intent, adds an LLM call and latency. |
 
 ---
 
-## Layer 2: Tool Response Offloading
+## Layer 3: Tool Output Offloading
 
-Large tool responses are automatically saved to the workspace `artifacts/` area, with only a **preview** in context. The agent can retrieve full content on demand using built-in artifact tools.
+Tool offloading handles large individual tool responses. It keeps the agent from
+burning context on a full payload when a preview and a file reference are enough
+for the next reasoning step.
 
 ```python
 agent_config = {
     "tool_offload": {
         "enabled": True,
-        "threshold_tokens": 500,  # Offload responses > 500 tokens
-        "max_preview_tokens": 150  # Show first 150 tokens in context
+        "threshold_tokens": 500,
+        "threshold_bytes": 2000,
+        "max_preview_tokens": 150,
+        "max_preview_lines": 10,
     }
 }
 ```
 
-### Token Savings
+When a tool result crosses the configured threshold, OmniCoreAgent writes the
+full payload to the active workspace `artifacts/` area. The observation sent to
+the model contains the preview and the artifact reference.
 
-| Tool Response | Without Offloading | With Offloading | Savings |
-|---------------|-------------------|-----------------|---------|
-| Web search (50 results) | ~10,000 tokens | ~200 tokens | **98%** |
-| Large API response | ~5,000 tokens | ~150 tokens | **97%** |
-| File read (1000 lines) | ~8,000 tokens | ~200 tokens | **97%** |
+```text
+large tool result
+  -> workspace artifact
+  -> preview + artifact reference in the observation
+```
 
-### Built-in Artifact Tools
+The artifact uses the same workspace backend as the rest of the agent: local,
+S3, or R2.
 
-Automatically available when offloading is enabled:
+### Built-In Artifact Tools
+
+Artifact tools are available when offloading is enabled:
 
 | Tool | Purpose |
 |------|---------|
-| `read_artifact(artifact_id)` | Read full content when needed |
-| `tail_artifact(artifact_id, lines)` | Read last N lines (great for logs) |
-| `search_artifact(artifact_id, query)` | Search within large responses |
-| `list_artifacts()` | See all offloaded artifacts in current session |
+| `read_artifact` | Read the full offloaded payload. |
+| `tail_artifact` | Read the last lines of an artifact, useful for logs. |
+| `search_artifact` | Search inside an offloaded payload. |
+| `list_artifacts` | List artifacts available in the current workspace/session scope. |
 
 ---
 
-## Combined Power
+## Full Context Configuration
 
-Enable both for maximum efficiency:
+Use all layers together for long-running research, coding, data, and operational
+agents:
 
 ```python
 agent = OmniCoreAgent(
     name="research_agent",
+    system_instruction=(
+        "Use workspace files and artifact references for long tasks. "
+        "Read artifacts only when the full payload is needed."
+    ),
+    model_config={"provider": "openai", "model": "gpt-4o"},
     agent_config={
-        "context_management": {"enabled": True, "strategy": "summarize_and_truncate"},
-        "tool_offload": {"enabled": True, "threshold_tokens": 500}
-    }
+        "memory_config": {
+            "mode": "sliding_window",
+            "value": 10000,
+        },
+        "context_management": {
+            "enabled": True,
+            "mode": "token_budget",
+            "value": 100000,
+            "threshold_percent": 75,
+            "strategy": "summarize_and_truncate",
+            "preserve_recent": 6,
+        },
+        "tool_offload": {
+            "enabled": True,
+            "threshold_tokens": 500,
+            "threshold_bytes": 2000,
+        },
+    },
 )
-# Result: Agents that can run indefinitely without token exhaustion
 ```
 
 <Tip>
-Enable both layers for long-running tasks (research, multi-step workflows) where context or tool responses can grow unbounded.
+Set `context_management.value` to a budget below your model's real context
+window. OmniCoreAgent checks the budget before each model call and reduces the
+prompt when the threshold is crossed.
 </Tip>

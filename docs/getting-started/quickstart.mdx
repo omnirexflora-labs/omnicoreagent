@@ -1,48 +1,55 @@
 ---
 title: Quick Start
-description: 'Build your first AI agent in under 30 seconds'
+description: 'Build your first OmniCoreAgent and understand what the harness gives you'
 icon: 'bolt'
 ---
 
 # Quick Start
 
-Get your first AI agent running in under 30 seconds with OmniCoreAgent.
+This guide creates the smallest useful OmniCoreAgent: one model, one harness
+runtime, and one task.
 
-The quick start uses the light core install. Production backends such as Redis, PostgreSQL, MongoDB, S3/R2, OmniServe, and background scheduling are optional extras you add only when needed.
+The core install stays light. Redis, PostgreSQL, MongoDB, S3/R2, OmniServe, and
+background scheduling install as extras when the agent needs them.
 
 <Steps>
+  <Step title="Install">
+    ```bash
+    pip install omnicoreagent
+    ```
+  </Step>
+
   <Step title="Set API Key">
     Create a `.env` file in your project directory:
 
     ```bash
-    echo "LLM_API_KEY=your_openai_api_key_here" > .env
+    echo "LLM_API_KEY=your_api_key_here" > .env
     ```
 
     <Tip>
-    You can use keys from OpenAI, Anthropic, Google Gemini, Groq, DeepSeek, and more. See [Universal Model Support](/docs/how-to-guides/models).
+    Provider-specific keys such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+    `GEMINI_API_KEY`, or `GROQ_API_KEY` are supported. See
+    [Model Support](/docs/how-to-guides/models).
     </Tip>
   </Step>
 
   <Step title="Create Your First Agent">
-    Create a file named `hello_agent.py`:
+    Create `hello_agent.py`:
 
     ```python
     import asyncio
     from omnicoreagent import OmniCoreAgent
 
     async def main():
-        # 1. Initialize the agent
         agent = OmniCoreAgent(
             name="my_agent",
             system_instruction="You are a helpful assistant.",
-            model_config={"provider": "openai", "model": "gpt-4o"}
+            model_config={"provider": "openai", "model": "gpt-4o"},
         )
 
-        # 2. Run a task
         result = await agent.run("Hello, what can you do?")
-        print(f"Agent Response: {result['response']}")
+        print(result["response"])
 
-        # 3. Cleanup
         await agent.cleanup()
 
     if __name__ == "__main__":
@@ -55,61 +62,127 @@ The quick start uses the light core install. Production backends such as Redis, 
     python hello_agent.py
     ```
 
-    **✅ That's it!** You just built an AI agent with session management, memory persistence, and error handling.
+    You now have an agent with the core harness loop, session memory, workspace
+    files, guardrails, events, metrics, and cleanup lifecycle.
   </Step>
 </Steps>
 
 ---
 
-## Adding Tools (MCP)
+## Add Local Tools
 
-OmniCoreAgent can connect to any MCP-compatible service. Here's how to add a filesystem tool:
+Local tools are normal Python functions registered through `ToolRegistry`.
+
+```python
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
+
+@tools.register_tool("get_weather")
+def get_weather(city: str) -> dict:
+    """Get current weather for a city."""
+    return {"city": city, "temp": "22C", "condition": "Sunny"}
+
+agent = OmniCoreAgent(
+    name="weather_agent",
+    system_instruction="Use tools when they help answer the user.",
+    model_config={"provider": "openai", "model": "gpt-4o"},
+    local_tools=tools,
+)
+
+result = await agent.run("What's the weather in Tokyo?")
+```
+
+---
+
+## Add MCP Tools
+
+MCP servers are external tool providers. OmniCoreAgent connects to them and loads
+their tools into the same runtime view as local tools.
 
 ```python
 agent = OmniCoreAgent(
     name="fs_agent",
-    system_instruction="You can manage files.",
+    system_instruction="Inspect files when the task needs filesystem context.",
     model_config={"provider": "openai", "model": "gpt-4o"},
     mcp_tools=[
         {
             "name": "filesystem",
             "transport_type": "stdio",
             "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
         }
-    ]
+    ],
 )
 
 await agent.connect_mcp_servers()
 result = await agent.run("List files in /tmp")
 ```
 
+<Note>
+MCP connects external MCP server tools into OmniCoreAgent's tool runtime. Those
+tools run beside local tools, workspace tools, artifact tools, skills, and
+harness tools.
+</Note>
+
 ---
 
-## Persistence with Session IDs
+## Turn On Heavier Harness Features
 
-Agents remember context when you provide a `session_id`:
+For longer tasks, enable the heavier harness features explicitly: automatic
+context control before each model call, tool output offloading into the
+workspace, BM25 tool retrieval, subagents, and skills.
 
 ```python
-# Session 1
-result1 = await agent.run("My name is Abiola.", session_id="user_123")
-
-# Session 2 (Agent remembers the name)
-result2 = await agent.run("What is my name?", session_id="user_123")
+agent = OmniCoreAgent(
+    name="research_agent",
+    system_instruction=(
+        "Use tools in parallel when the calls are independent. Write useful "
+        "notes and outputs to the workspace when the task is long."
+    ),
+    model_config={"provider": "openai", "model": "gpt-4o"},
+    local_tools=tools,
+    agent_config={
+        "max_steps": 20,
+        "context_management": {"enabled": True},
+        "tool_offload": {"enabled": True},
+        "enable_advanced_tool_use": True,
+        "enable_subagents": True,
+        "enable_agent_skills": True,
+    },
+)
 ```
+
+When `enable_subagents` is true, workspace files are enabled automatically so
+workers write outputs that the lead agent reads back.
+
+---
+
+## Persistence With Session IDs
+
+Agents keep continuity when you provide a stable `session_id`:
+
+```python
+await agent.run("My name is Abiola.", session_id="user_123")
+result = await agent.run("What is my name?", session_id="user_123")
+```
+
+The default memory backend is suitable for local development. Use Redis,
+PostgreSQL, MongoDB, or SQLite when the application needs persistence outside
+the current process.
 
 ---
 
 ## Next Steps
 
 <CardGroup cols={3}>
-  <Card title="Core Concepts" icon="brain" href="/docs/core-concepts/overview">
-    Deep dive into memory, events, and the agent API
+  <Card title="Architecture" icon="sitemap" href="/docs/core-concepts/architecture">
+    Understand the runtime layers and request flow.
   </Card>
-  <Card title="Agent Types" icon="users" href="/docs/core-concepts/sub-agents">
-    Build workflows and background agents
+  <Card title="Local Tools" icon="toolbox" href="/docs/core-concepts/local-tools">
+    Register Python functions as tools.
   </Card>
-  <Card title="Advanced Tools" icon="wand-magic-sparkles" href="/docs/how-to-guides/advanced-tools">
-    Scale to 1000+ tools with BM25 retrieval
+  <Card title="Configuration" icon="gear" href="/docs/how-to-guides/configuration">
+    Configure context, tool offload, memory, events, and workspace storage.
   </Card>
 </CardGroup>

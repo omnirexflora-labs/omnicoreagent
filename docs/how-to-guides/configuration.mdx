@@ -6,7 +6,8 @@ icon: 'gear'
 
 # Configuration Guide
 
-OmniCoreAgent can be configured through environment variables, Python dictionaries, or specialized configuration objects.
+OmniCoreAgent supports configuration through environment variables, Python
+dictionaries, and specialized configuration objects.
 
 ---
 
@@ -17,17 +18,29 @@ Environment variables are the best way to manage sensitive data like API keys an
 ### LLM API Keys
 | Provider | Variable |
 |----------|----------|
+| Generic | `LLM_API_KEY` |
 | OpenAI | `OPENAI_API_KEY` |
 | Anthropic | `ANTHROPIC_API_KEY` |
 | Google Gemini | `GEMINI_API_KEY` |
 | Groq | `GROQ_API_KEY` |
 
-### Storage Backends
+### Memory Backends
 | Backend | Variable | Example |
 |---------|----------|---------|
 | **Redis** | `REDIS_URL` | `redis://localhost:6379/0` |
 | **SQL Database** | `DATABASE_URL` | `postgresql://user:pass@localhost:5432/db` |
 | **MongoDB** | `MONGODB_URI` | `mongodb://localhost:27017` |
+
+### Workspace Storage
+Workspace storage is separate from memory storage. Memory stores conversation
+history. Workspace storage stores files, scratchpads, artifacts, subagent
+outputs, and tool offloads.
+
+| Backend | Variables |
+|---------|-----------|
+| **Local** | `OMNICOREAGENT_WORKSPACE_BACKEND=local`, `OMNICOREAGENT_WORKSPACE_DIR=.omnicoreagent/workspace` |
+| **S3** | `OMNICOREAGENT_WORKSPACE_BACKEND=s3`, `AWS_S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
+| **R2** | `OMNICOREAGENT_WORKSPACE_BACKEND=r2`, `R2_BUCKET_NAME`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` |
 
 ## 2. Agent Configuration
 
@@ -37,12 +50,12 @@ The `AgentConfig` handles the runtime behavior of the agent, such as reasoning s
 agent_config = {
     "tool_call_timeout": 30,         # Max seconds per tool execution
     "max_steps": 15,                 # Max reasoning loops per run()
-    "request_limit": 1000,           # Max LLM requests per session
-    "total_tokens_limit": 100000,    # Max total tokens per session
+    "request_limit": 0,              # 0 = unlimited
+    "total_tokens_limit": 0,         # 0 = unlimited
     "enable_subagents": True,        # Dynamic focused workers
-    "enable_workspace_files": True, # Default: workspace files for notes/logs/scratchpads
+    "enable_workspace_files": True,  # Default: workspace files for notes/logs/scratchpads
     "enable_agent_skills": True,     # Enable local skill discovery
-    "enable_advanced_tool_use": True,# Enable BM25 tool retrieval
+    "enable_advanced_tool_use": True, # Enable BM25 tool retrieval
     "context_management": {"enabled": True},
     "tool_offload": {"enabled": True}
 }
@@ -54,10 +67,11 @@ agent = OmniCoreAgent(
 ```
 
 When `enable_subagents` is true, OmniCoreAgent automatically enables workspace
-memory because spawned workers write output, todos, logs, and scratchpads into
+files because spawned workers write output, todos, logs, and scratchpads into
 the active workspace. For full harness-style workloads, pair dynamic subagents
-with context management and tool offloading so long-running tasks can stay fast
-and durable.
+with context management and tool offloading. Context management checks the prompt
+before each model call; tool offloading keeps large tool payloads in workspace
+artifacts instead of feeding the full payload back into the loop.
 
 ---
 
@@ -73,7 +87,7 @@ model_config = {
     "max_tokens": 4000,
     "top_p": 0.9,
     # Custom endpoint for self-hosted models
-    "api_base": "http://localhost:8000/v1" 
+    "api_base": "http://localhost:8000/v1"
 }
 ```
 

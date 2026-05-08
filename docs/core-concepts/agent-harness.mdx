@@ -1,0 +1,155 @@
+---
+title: Agent Harness
+description: 'What OmniCoreAgent adds around a model to make it useful for long-running autonomous work'
+icon: 'layer-group'
+---
+
+# Agent Harness
+
+An LLM is not an agent by itself. A useful agent needs runtime behavior around
+the model: tools, memory, context control, a workspace, guardrails, events,
+delegation, and a serving boundary.
+
+That runtime is the agent harness.
+
+OmniCoreAgent is built as an open Python agent harness. You still choose the
+model and the tools, but the execution system around them is already assembled.
+
+```text
+model
+  + prompt contract
+  + ReAct loop
+  + local tools
+  + MCP tools
+  + parallel tool batches
+  + structured observations
+  + loop detection
+  + memory
+  + context management
+  + workspace files
+  + tool artifacts
+  + guardrails
+  + events
+  + subagents
+  + serving through OmniServe
+```
+
+---
+
+## Why This Matters
+
+A basic tool-calling agent is easy to build. The hard part starts when the agent
+needs to work for more than one or two steps:
+
+- tool calls become sequential bottlenecks
+- large tool outputs fill the prompt
+- old context pushes the model toward provider limits
+- external tool output carries prompt-injection risk
+- the agent repeats the same failing action
+- workers need to split independent work and report back
+- intermediate files, notes, logs, and artifacts need a durable place to live
+- the app eventually needs a stable HTTP/SSE serving boundary
+
+OmniCoreAgent exists because these are runtime problems, not prompt-only
+problems.
+
+---
+
+## Implementation-Backed Capability Map
+
+Every capability below maps to code in the repository.
+
+| Capability | What The User Gets | Main Implementation |
+|------------|--------------------|---------------------|
+| **Custom tool-call contract** | XML tool calls, final answers, single tool calls, multi-tool calls, and agent calls are parsed consistently. | `src/omnicoreagent/core/agents/xml_parser.py` |
+| **Parallel batch tool execution** | Independent tools from one model step are resolved and executed together with timeout handling. | `src/omnicoreagent/core/tools/tool_batch_runner.py` |
+| **Tool runtime registry** | Local tools, MCP tools, workspace tools, artifact tools, skills, subagent tools, and BM25 retrieval are prepared through one runtime surface. | `src/omnicoreagent/core/tools/tool_runtime_registry.py` |
+| **Structured observations** | Tool outputs are normalized, guarded, formatted, and returned to the model as structured observations. | `src/omnicoreagent/core/tools/tool_observation.py` |
+| **Tool output offloading** | Large tool responses are written to workspace artifacts and replaced with a compact preview/reference. | `src/omnicoreagent/core/workspace/artifacts.py` |
+| **Artifact readback tools** | Agents read, tail, search, and list offloaded tool responses when full content is needed. | `src/omnicoreagent/core/workspace/artifact_tools.py` |
+| **Automatic context control** | Before each model call, active messages are checked and reduced when the configured context threshold is crossed. | `src/omnicoreagent/core/agents/llm_step.py`, `src/omnicoreagent/core/context_manager.py` |
+| **Loop detection** | Repeated SHA256-backed tool-call signatures and repeated interaction patterns are detected. | `src/omnicoreagent/core/agents/loop_detection.py` |
+| **Workspace files** | Agents get file tools for notes, scratchpads, todos, task progress, generated work, and subagent output. | `src/omnicoreagent/core/workspace/tools.py` |
+| **Local/S3/R2 workspace storage** | The same workspace interface runs on local disk, S3, or R2. | `src/omnicoreagent/core/workspace/config.py`, `src/omnicoreagent/core/workspace/storage.py` |
+| **Dynamic subagents** | The lead agent spawns one or many focused workers; workers inherit model/tools/config and write output to workspace files. | `src/omnicoreagent/core/subagents.py` |
+| **MCP tools** | MCP servers are loaded as external tool providers over supported transports. | `src/omnicoreagent/mcp_clients_connection/client.py` |
+| **Guardrails** | User input and tool output are screened according to guardrail mode; full mode passes guardrails into the ReAct agent for output scrubbing. | `src/omnicoreagent/core/guardrails/`, `src/omnicoreagent/core/tools/tool_observation_guardrail.py` |
+| **Events and metrics** | Runs and tool actions emit events and return request metrics. | `src/omnicoreagent/core/events/`, `src/omnicoreagent/core/agents/llm_step.py` |
+| **OmniServe** | The same agent is exposed through REST/SSE with shared server state and lifecycle handling. | `src/omnicoreagent/serve/` |
+
+---
+
+## The Harness Loop
+
+The core loop is a controlled runtime cycle:
+
+```text
+1. Load session memory
+2. Assemble prompt and tool registry
+3. Check context before model call
+4. Call model through LiteLLM
+5. Parse XML response
+6. Resolve tool or agent calls
+7. Execute tool batch in parallel
+8. Normalize, guard, and offload observations
+9. Detect repeated tool-call loops
+10. Continue or return final answer
+```
+
+This loop is why OmniCoreAgent supports simple assistants and deeper long-running
+agents through the same entry point.
+
+---
+
+## Defaults Versus Harness Features
+
+The default agent stays light. Heavier harness behavior is enabled when the
+workload needs it.
+
+| Capability | Default | Reason |
+|------------|---------|--------|
+| ReAct loop | On | This is the core agent runtime. |
+| Session memory | On | Agents need conversation continuity. |
+| Workspace files | On | Agents need a filesystem surface for notes and outputs. |
+| Guardrails | On in `full` mode | Input and tool-output safety should be available without extra wiring. |
+| Context management | Off until enabled | Small agents should not pay summarization/truncation overhead. |
+| Tool offload | Off until enabled | Only needed when tools produce large payloads. |
+| BM25 tool retrieval | Off until enabled | Only needed when the tool list is too large for the prompt. |
+| Dynamic subagents | Off until enabled | Only needed for delegated work. |
+| Agent skills | Off until enabled | Only needed when packaged capabilities are installed. |
+| Redis/Postgres/MongoDB/S3/R2 | Optional extras | Install only the production backends you use. |
+
+---
+
+## OmniCoreAgent, OmniServe, And OmniDaemon
+
+These are separate layers:
+
+| Layer | Purpose |
+|-------|---------|
+| **OmniCoreAgent** | In-process agent harness: model loop, tools, memory, context, workspace, guardrails, events, subagents. |
+| **OmniServe** | HTTP/SSE serving layer for exposing an OmniCoreAgent instance as an API. |
+| **OmniDaemon** | Event-driven runtime for supervised, process-isolated agents running as autonomous services. |
+
+Keeping these boundaries clear matters. OmniCoreAgent should stay focused on the
+agent harness. Serving and event-driven infrastructure should live outside the
+core loop.
+
+---
+
+## Boundaries
+
+OmniCoreAgent stays focused on the in-process agent harness. That boundary keeps
+the core runtime clean:
+
+- MCP brings external MCP server tools into the same runtime surface as local
+  tools, workspace tools, skills, and harness tools.
+- Context management works by acting before the model call against the configured
+  budget.
+- Cloud workspace storage is used when the S3 or R2 backend is installed and
+  configured.
+- Distributed process supervision belongs in OmniDaemon, while HTTP/SSE serving
+  belongs in OmniServe.
+
+The result is a complete, open agent harness whose production pieces are already
+integrated and testable.

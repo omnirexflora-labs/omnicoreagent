@@ -2,11 +2,11 @@
   <img src="assets/IMG_5292.jpeg" alt="OmniCoreAgent Logo" width="250"/>
 </p>
 
-<h1 align="center">🚀 OmniCoreAgent</h1>
+<h1 align="center">OmniCoreAgent</h1>
 
 <p align="center">
   <strong>The Open Agent Harness Built for Production</strong><br>
-  <em>Run autonomous agents with tools, memory, context management, guardrails, and deployment paths.</em>
+  <em>Parallel tool batches. Structured observations. Loop detection. Memory, workspace files, MCP, subagents, and serving in one runtime.</em>
 </p>
 
 <p align="center">
@@ -17,77 +17,19 @@
 </p>
 
 <p align="center">
-  <a href="#-quick-start">Quick Start</a> •
-  <a href="#-see-it-in-action">See It In Action</a> •
-  <a href="./cookbook">📚 Cookbook</a> •
-  <a href="#-core-features">Features</a> •
+  <a href="#quick-start">Quick Start</a> -
+  <a href="#what-makes-it-different">What Makes It Different</a> -
+  <a href="./cookbook">Cookbook</a> -
+  <a href="#features">Features</a> -
   <a href="https://docs-omnicoreagent.omnirexfloralabs.com/docs">Docs</a>
 </p>
 
 ---
 
-## 🎬 See It In Action
-
-```python
-import asyncio
-from omnicoreagent import OmniCoreAgent, MemoryRouter, ToolRegistry
-
-# Create tools in seconds
-tools = ToolRegistry()
-
-@tools.register_tool("get_weather")
-def get_weather(city: str) -> dict:
-    """Get current weather for a city."""
-    return {"city": city, "temp": "22°C", "condition": "Sunny"}
-
-# Build a production-ready agent
-agent = OmniCoreAgent(
-    name="assistant",
-    system_instruction="You are a helpful assistant with access to weather data.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    local_tools=tools,
-    memory_router=MemoryRouter("in_memory"),
-    agent_config={
-        "context_management": {"enabled": True},  # Auto-manage long conversations
-        "guardrail_config": {"strict_mode": True},  # Block prompt injections
-        "enable_subagents": True,  # Optional dynamic worker spawning
-    }
-)
-
-async def main():
-    # Run the agent
-    result = await agent.run("What's the weather in Tokyo?")
-    print(result["response"])
-    
-    # Production memory stores such as Redis, MongoDB, and Postgres are optional extras.
-    # Install only the memory store you use, then switch at runtime when configured.
-
-asyncio.run(main())
-```
-
-**What just happened?**
-- ✅ Registered a custom tool with type hints
-- ✅ Built an agent with memory
-- ✅ Enabled automatic context management
-- ✅ Kept production backends optional until you need them
-
----
-
-## ⚡ Quick Start
+## Quick Start
 
 ```bash
 pip install omnicoreagent
-```
-
-Install production extras only when you need them:
-
-```bash
-pip install "omnicoreagent[redis]"       # Redis memory and event streams
-pip install "omnicoreagent[postgres]"    # PostgreSQL / SQL memory
-pip install "omnicoreagent[mongodb]"     # MongoDB memory
-pip install "omnicoreagent[s3]"          # S3 / R2 workspace files
-pip install "omnicoreagent[serve]"       # OmniServe REST/SSE API server
-pip install "omnicoreagent[all]"         # Everything
 ```
 
 ```bash
@@ -95,205 +37,375 @@ echo "LLM_API_KEY=your_api_key" > .env
 ```
 
 ```python
+import asyncio
 from omnicoreagent import OmniCoreAgent
 
 agent = OmniCoreAgent(
-    name="my_agent",
+    name="assistant",
     system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-4o"}
+    model_config={"provider": "openai", "model": "gpt-4o"},
 )
 
-result = await agent.run("Hello!")
-print(result["response"])
+async def main():
+    result = await agent.run("Research the top 3 AI frameworks and summarize them.")
+    print(result["response"])
+    await agent.cleanup()
+
+asyncio.run(main())
 ```
 
-**That's it.** You have an AI agent with session management, memory, and error handling.
+That is the smallest path: one agent, one model, the harness loop, session memory,
+guardrails, workspace files, error handling, and metrics around each run.
 
-> 📚 **Want to learn more?** Check out the [Cookbook](./cookbook) — progressive examples from "Hello World" to production deployments.
+Context management, tool output offloading, BM25 tool retrieval, subagents, skills,
+cloud workspace storage, and production backends are opt-in so a small agent stays
+small.
 
----
-
-## 🎯 What Makes OmniCoreAgent Different?
-
-| Feature | What It Means For You |
-|---------|----------------------|
-| **Agent Harness Runtime** | Tool loop, memory, context management, guardrails, skills, sub-agents, and serving in one open package |
-| **Runtime Backend Switching** | Switch Redis ↔ MongoDB ↔ PostgreSQL without restarting |
-| **Cloud Workspace Storage** | Agent files persist in AWS S3 or Cloudflare R2 ⚡ NEW |
-| **Context Engineering** | Session memory + agent loop context + tool offloading = no token exhaustion |
-| **Tool Response Offloading** | Large tool outputs saved to files, 98% token savings |
-| **Built-in Guardrails** | Prompt injection protection out of the box |
-| **MCP Native** | Connect to any MCP server (stdio, SSE, HTTP with OAuth) |
-| **Background Agents** | Schedule autonomous tasks that run on intervals |
-| **Workflow Orchestration** | Sequential, Parallel, and Router agents for complex tasks |
-| **Runtime Visibility** | Metrics, event streams, and compact in-house trace summaries |
+> Ready to go deeper? The [Cookbook](./cookbook) has progressive examples from
+> hello world to production deployments.
 
 ---
 
-## 🎯 Core Features
+## What Makes It Different
 
-> 📖 **Full documentation**: [docs-omnicoreagent.omnirexfloralabs.com/docs](https://docs-omnicoreagent.omnirexfloralabs.com/docs)
+Most agent frameworks stop at "LLM plus tool loop." OmniCoreAgent is built around
+the problems that show up after that: slow sequential tools, noisy observations,
+stuck loops, context exhaustion, MCP server tools, durable workspace files, and
+runtime serving.
 
-| # | Feature | Description | Docs |
-|---|---------|-------------|------|
-| 1 | **OmniCoreAgent** | The heart of the framework — production agent with all features | [Overview →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/overview) |
-| 2 | **Multi-Tier Memory** | 5 backends (Redis, MongoDB, PostgreSQL, SQLite, in-memory) with runtime switching | [Memory →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/memory) |
-| 3 | **Context Engineering** | Dual-layer system: agent loop context management + tool response offloading | [Context →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/context-engineering) |
-| 4 | **Event System** | Real-time event streaming with runtime switching | [Events →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/events) |
-| 5 | **MCP Tools** | Connect external MCP tool servers (stdio, streamable_http, SSE) with OAuth | [MCP →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/mcp) |
-| 6 | **Dynamic Subagents** | Spawn one or many focused workers from OmniCoreAgent with workspace files | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
-| 7 | **Local Tools** | Register any Python function as an AI tool via ToolRegistry | [Local Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/local-tools) |
-| 8 | **Agent Skills** | Polyglot packaged capabilities (Python, Bash, Node.js) | [Skills →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/skills) |
-| 9 | **Workspace Files** | Agent-managed files and tool artifacts on local, S3, or R2 workspaces | [Workspace →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workspace-files) |
-| 10 | **Harness Defaults** | Subagents, workspace files, context management, and tool offloading inside OmniCoreAgent | [Sub-Agents →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
-| 11 | **Background Agents** | Schedule autonomous tasks on intervals | [Background →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/background-agents) |
-| 12 | **Workflows** | Sequential, Parallel, and Router agent orchestration | [Workflows →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/workflows) |
-| 13 | **BM25 Tool Retrieval** | Auto-discover relevant tools from 1000+ using BM25 search | [Advanced Tools →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/advanced-tools) |
-| 14 | **Guardrails** | Prompt injection protection with configurable sensitivity | [Guardrails →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/guardrails) |
-| 15 | **Runtime Visibility** | Per-request metrics, event streams, and compact in-house trace summaries | [Observability →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/observability) |
-| 16 | **Universal Models** | 9 providers via LiteLLM (OpenAI, Anthropic, Gemini, Groq, Ollama, etc.) | [Models →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/models) |
-| 17 | **OmniServe** | Turn any agent into a production REST/SSE API with one command | [OmniServe →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/omniserve) |
+### 1. Agents call tools in batches instead of forced sequences
+
+The usual tool loop looks like this:
+
+```text
+LLM -> call tool A -> wait -> result -> LLM -> call tool B -> wait -> result
+```
+
+OmniCoreAgent lets the model request independent tools together:
+
+```text
+LLM -> [tool A + tool B + tool C in parallel] -> one structured observation -> LLM
+```
+
+The model gets one complete view of the batch before it reasons again. A failed
+tool is represented beside the successful tools instead of silently collapsing the
+whole step.
+
+Native function calling alone is not the runtime. OmniCoreAgent uses its own
+tool-call contract, parser, resolver, parallel runner, and result formatter so
+the harness controls the full execution path.
+
+### 2. Tool results become structured observations
+
+Raw tool output is often too noisy for the next reasoning step. Large payloads,
+errors, irrelevant fields, and prompt-injection content can all distort the loop.
+
+OmniCoreAgent routes tool results through an observation pipeline:
+
+```text
+tool output -> parse -> format -> guardrail check -> offload when configured -> observation -> model
+```
+
+The model receives the signal it needs to continue the task, not an unbounded dump
+of every byte returned by a tool. When tool offloading is enabled, large outputs
+are written into the active workspace and the model receives a readable preview
+plus a path it can use later.
+
+### 3. Loop detection uses signatures beyond step counts
+
+`max_steps` is still useful, but it is a blunt instrument. It stops an agent that
+is making progress just as quickly as one that is stuck.
+
+OmniCoreAgent tracks SHA256-backed tool-call signatures across the loop. Each
+signature is based on the tool name, input, and output for the call. The runtime
+detects:
+
+- **Consecutive loops**: the same tool call returns the same result repeatedly.
+- **Pattern loops**: the same tool repeats a small interaction pattern.
+
+When the harness stops a loop, the agent gets a reason. That makes debugging the
+agent behavior much easier than "max iterations reached."
+
+### 4. The harness is already assembled
+
+OmniCoreAgent ships as a working agent harness, not a bag of disconnected pieces:
+
+```text
+model + prompt + loop + tools + memory + context + workspace + guardrails + events
+```
+
+Keep it small for simple agents, then turn on the heavier harness pieces when the
+workload needs them: MCP tools, BM25 tool retrieval, dynamic subagents, skills,
+cloud workspace storage, Redis/Postgres/MongoDB memory, event streams, and
+OmniServe.
+
+### 5. Context is managed before the model call
+
+When context management is enabled, OmniCoreAgent checks the active message
+history before every LLM request. If the configured threshold is crossed, the
+harness automatically applies the selected strategy before calling the model:
+
+```text
+messages -> threshold check -> truncate or summarize+truncate -> LLM
+```
+
+The system prompt is preserved, recent messages are preserved, and older middle
+history is either summarized or removed depending on configuration. If you set
+the budget below your model's real context window, the harness acts before the
+provider rejects the request.
 
 ---
 
-## 📚 Examples & Cookbook
+## Implementation Map
 
-All examples are in the **[Cookbook](./cookbook)** — organized by use case with progressive learning paths.
+OmniCoreAgent's capabilities are backed by concrete runtime modules:
 
-| Category | What You'll Build | Location |
-|----------|-------------------|----------|
-| **Getting Started** | Your first agent, tools, memory, events | [cookbook/getting_started](./cookbook/getting_started) |
-| **Workflows** | Sequential, Parallel, Router agents | [cookbook/workflows](./cookbook/workflows) |
-| **Background Agents** | Scheduled autonomous tasks | [cookbook/background_agents](./cookbook/background_agents) |
-| **Production** | Metrics and guardrails | [cookbook/production](./cookbook/production) |
+| Capability | Where It Lives |
+|-------|----------------|
+| Parallel tool batches | `core/tools/tool_batch_runner.py` |
+| XML tool-call contract | `core/agents/xml_parser.py` |
+| Structured observations | `core/tools/tool_observation.py` |
+| Tool output offloading | `core/workspace/artifacts.py` |
+| Automatic context control | `core/agents/llm_step.py`, `core/context_manager.py` |
+| Workspace files | `core/workspace/tools.py`, `core/workspace/storage.py` |
+| Dynamic subagents | `core/subagents.py` |
+| Loop detection | `core/agents/loop_detection.py` |
+| MCP server tools | `mcp_clients_connection/client.py` |
+| OmniServe | `serve/` |
+
+See the [Agent Harness docs](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/agent-harness)
+for the full implementation map.
+
 ---
 
-## ⚙️ Configuration
+## See It In Action
+
+```python
+import asyncio
+from omnicoreagent import MemoryRouter, OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
+
+@tools.register_tool("search_web")
+def search_web(query: str) -> dict:
+    """Search the web for information."""
+    return {"results": [f"Result for: {query}"]}
+
+@tools.register_tool("read_file")
+def read_file(path: str) -> dict:
+    """Read a local project file."""
+    return {"path": path, "content": f"Contents of {path}"}
+
+agent = OmniCoreAgent(
+    name="research-agent",
+    system_instruction=(
+        "You are a research assistant. Use tools in parallel when the calls are "
+        "independent and you can reason over the results together."
+    ),
+    model_config={"provider": "openai", "model": "gpt-4o"},
+    local_tools=tools,
+    memory_router=MemoryRouter("in_memory"),
+    agent_config={
+        "max_steps": 20,
+        "context_management": {"enabled": True},
+        "tool_offload": {"enabled": True},
+        "enable_subagents": True,
+        "enable_advanced_tool_use": True,
+    },
+)
+
+async def main():
+    result = await agent.run(
+        "Search for recent AI agent papers and read notes.md. Do both at once "
+        "if neither depends on the other."
+    )
+    print(result["response"])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+The runtime accepts `search_web` and `read_file` in the same batch, returns both
+results together, and continues from one structured observation.
+
+---
+
+## Install Only What You Need
+
+```bash
+pip install omnicoreagent                    # Core runtime
+pip install "omnicoreagent[redis]"           # Redis memory + event streams
+pip install "omnicoreagent[postgres]"        # PostgreSQL / SQL memory
+pip install "omnicoreagent[mongodb]"         # MongoDB memory
+pip install "omnicoreagent[s3]"              # S3 / R2 workspace storage
+pip install "omnicoreagent[serve]"           # OmniServe REST/SSE API
+pip install "omnicoreagent[all]"             # Everything
+```
+
+Production backends are installable extras. Install only what the agent actually
+uses.
+
+---
+
+## Features
+
+| Feature | What It Does |
+|---------|--------------|
+| **Parallel Batch Tool Execution** | Executes independent tool calls concurrently and returns one combined observation to the model. |
+| **Structured Observation Pipeline** | Parses, formats, guardrail-checks, and offloads tool results when configured before the model sees them. |
+| **Signature-Based Loop Detection** | Detects repeated SHA256-backed tool-call signatures and repeated tool interaction patterns beyond step-count exhaustion. |
+| **MCP Native Tools** | Connects MCP servers over stdio, SSE, and Streamable HTTP, including OAuth-capable remote servers. |
+| **Local Tool Registry** | Registers Python functions as tools with inferred schemas and async/sync execution support. |
+| **Multi-Tier Memory** | Uses in-memory, SQLite, Redis, MongoDB, or SQL-backed session history through the memory router. |
+| **Runtime Backend Switching** | Switches memory and event backends at runtime when configured. |
+| **Workspace Files** | Gives agents a local, S3, or R2-backed file workspace for notes, scratchpads, artifacts, and tool offloads. |
+| **Context Engineering** | Checks context before each model call and automatically truncates or summarizes when the configured budget threshold is crossed. |
+| **Tool Output Offloading** | Writes large tool results to workspace files and gives the model a preview plus a file reference. |
+| **Dynamic Subagents** | Lets the main agent spawn focused workers with isolated context and shared workspace output. |
+| **Agent Skills** | Loads packaged capabilities implemented with Python, Bash, or Node.js. |
+| **BM25 Tool Retrieval** | Selects relevant tools from large tool sets so the prompt stays focused. |
+| **Guardrails** | Adds prompt-injection screening inside the observation path with configurable behavior. |
+| **Event System** | Emits structured runtime events for agent runs, tool calls, and streaming integrations. |
+| **Workflow Orchestration** | Provides sequential, parallel, and router agents for multi-step application workflows. |
+| **Background Agents** | Supports scheduled autonomous tasks for interval-based workloads. |
+| **Universal Models** | Routes through LiteLLM to OpenAI, Anthropic, Gemini, Groq, Ollama, DeepSeek, Mistral, OpenRouter, Azure, and Cencori. |
+| **OmniServe** | Turns an agent into a REST/SSE service with lifecycle management and metrics. |
+
+---
+
+## Cookbook
+
+All examples live in the **[Cookbook](./cookbook)** and are organized by use case.
+
+| Category | What You'll Build |
+|----------|-------------------|
+| [Getting Started](./cookbook/getting_started) | First agent, tools, memory, events |
+| [Workflows](./cookbook/workflows) | Sequential, Parallel, Router agents |
+| [Background Agents](./cookbook/background_agents) | Scheduled autonomous tasks |
+| [Production](./cookbook/production) | Guardrails, serving, and production patterns |
+
+---
+
+## Configuration
 
 ### Environment Variables
 
 ```bash
-# Required
+# Required by most hosted model providers
 LLM_API_KEY=your_api_key
 
-# Optional: workspace backend for artifacts and workspace files
-OMNICOREAGENT_WORKSPACE_BACKEND=local  # local, s3, or r2
+# Workspace storage
+OMNICOREAGENT_WORKSPACE_BACKEND=local   # local | s3 | r2
 OMNICOREAGENT_WORKSPACE_DIR=.omnicoreagent/workspace
-AWS_S3_BUCKET=your-s3-bucket           # when workspace backend=s3
-R2_BUCKET_NAME=your-r2-bucket          # when workspace backend=r2
+AWS_S3_BUCKET=your-s3-bucket            # when backend=s3
+R2_BUCKET_NAME=your-r2-bucket           # when backend=r2
 ```
 
-### Agent Configuration
+### Agent Config Reference
 
 ```python
 agent_config = {
-    "max_steps": 15,                    # Max reasoning steps
-    "tool_call_timeout": 30,            # Tool timeout (seconds)
-    "request_limit": 0,                 # 0 = unlimited
-    "total_tokens_limit": 0,            # 0 = unlimited
-    "memory_config": {"mode": "sliding_window", "value": 10000},
-    "enable_advanced_tool_use": True,   # BM25 tool retrieval
-    "enable_subagents": True,           # Dynamic focused workers
-    "enable_agent_skills": True,        # Specialized packaged skills
-    "enable_workspace_files": True,    # Default: workspace files for notes/logs/scratchpads
+    "max_steps": 15,
+    "tool_call_timeout": 30,
+    "request_limit": 0,                  # 0 = unlimited
+    "total_tokens_limit": 0,             # 0 = unlimited
+    "memory_config": {
+        "mode": "sliding_window",
+        "value": 10000,
+        "summary": {"enabled": False},
+    },
+    "enable_workspace_files": True,      # Default on
+    "guardrail_mode": "full",            # Default guardrail mode
     "context_management": {"enabled": True},
-    "tool_offload": {"enabled": True}
+    "tool_offload": {"enabled": True},
+    "enable_advanced_tool_use": True,
+    "enable_subagents": True,
+    "enable_agent_skills": True,
 }
 ```
 
-> 📖 **Full configuration reference**: [Configuration Guide →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/configuration)
+When `enable_subagents` is true, workspace files are enabled automatically so
+subagents write outputs, notes, todos, and artifacts into the active
+workspace.
+
+> Full reference: [Configuration Guide](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/configuration)
 
 ---
 
-## 🧪 Testing & Development
+## Development
 
 ```bash
-# Clone
 git clone https://github.com/omnirexflora-labs/omnicoreagent.git
 cd omnicoreagent
 
-# Setup
 uv venv && source .venv/bin/activate
 uv sync --dev
 
-# Test
 pytest tests/ -v
 pytest tests/ --cov=src --cov-report=term-missing
 ```
 
 ---
 
-## 🔍 Troubleshooting
+## Troubleshooting
 
 | Error | Fix |
 |-------|-----|
-| `Invalid API key` | Check `.env`: `LLM_API_KEY=your_key` |
-| `ModuleNotFoundError` for Redis/Postgres/Mongo/S3/OmniServe | Install the matching extra, e.g. `pip install "omnicoreagent[redis]"` |
-| `Redis connection failed` | Start Redis or use `MemoryRouter("in_memory")` |
-| `MCP connection refused` | Ensure MCP server is running |
+| `Invalid API key` | Set the right provider key in `.env`, for example `LLM_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`. |
+| `ModuleNotFoundError` for Redis / Postgres / MongoDB / S3 | Install the matching extra, for example `pip install "omnicoreagent[redis]"`. |
+| `Redis connection failed` | Start Redis or use `MemoryRouter("in_memory")`. |
+| `MCP connection refused` | Ensure the MCP server is running before starting the agent. |
 
-> 📖 **More troubleshooting**: [Basic Usage Guide →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/basic-usage)
-
----
-
-## 📝 Changelog
-
-See the full [Changelog →](https://docs-omnicoreagent.omnirexfloralabs.com/docs/changelog) for version history.
+> More help: [Basic Usage Guide](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/basic-usage)
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 ```bash
-# Fork & clone
 git clone https://github.com/omnirexflora-labs/omnicoreagent.git
+cd omnicoreagent
 
-# Setup
 uv venv && source .venv/bin/activate
 uv sync --dev
 pre-commit install
-
-# Submit PR
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. PRs are welcome.
 
 ---
 
-## 📄 License
+## License
 
-MIT License — see [LICENSE](LICENSE)
+MIT - see [LICENSE](LICENSE).
 
 ---
 
-## 👨‍💻 Author & Credits
+## Author
 
-**Created by [Abiola Adeshina](https://github.com/Abiorh001)**
+**Built by [Abiola Adeshina](https://github.com/Abiorh001)**.
 
 - **GitHub**: [@Abiorh001](https://github.com/Abiorh001)
 - **X (Twitter)**: [@abiorhmangana](https://x.com/abiorhmangana)
 - **Email**: abiolaadedayo1993@gmail.com
 
-### 🌟 The OmniRexFlora Ecosystem
+### The OmniRexFlora Ecosystem
 
 | Project | Description |
 |---------|-------------|
-| [🧠 OmniMemory](https://github.com/omnirexflora-labs/omnimemory) | Self-evolving memory for autonomous agents |
-| [🤖 OmniCoreAgent](https://github.com/omnirexflora-labs/omnicoreagent) | Production-ready AI agent framework (this project) |
+| [OmniMemory](https://github.com/omnirexflora-labs/omnimemory) | Self-evolving memory for autonomous agents |
+| [OmniCoreAgent](https://github.com/omnirexflora-labs/omnicoreagent) | Production agent harness (this project) |
+| [OmniDaemon](https://github.com/omnirexflora-labs/OmniDaemon) | Event-driven runtime for running agents as supervised, autonomous infrastructure services |
 
-### 🙏 Acknowledgments
+### Built On
 
-Built on: [LiteLLM](https://github.com/BerriAI/litellm), [FastAPI](https://fastapi.tiangolo.com/), [Redis](https://redis.io/), [Pydantic](https://pydantic-docs.helpmanual.io/), [APScheduler](https://apscheduler.readthedocs.io/)
+[LiteLLM](https://github.com/BerriAI/litellm) - [FastAPI](https://fastapi.tiangolo.com/) - [Redis](https://redis.io/) - [Pydantic](https://docs.pydantic.dev/) - [APScheduler](https://apscheduler.readthedocs.io/)
 
 ---
 
 <p align="center">
-  <strong>Building the future of production-ready AI agent frameworks</strong>
-</p>
-
-<p align="center">
-  <a href="https://github.com/omnirexflora-labs/omnicoreagent">⭐ Star us on GitHub</a> •
-  <a href="https://github.com/omnirexflora-labs/omnicoreagent/issues">🐛 Report Bug</a> •
-  <a href="https://github.com/omnirexflora-labs/omnicoreagent/issues">💡 Request Feature</a> •
-  <a href="https://docs-omnicoreagent.omnirexfloralabs.com/docs">📖 Documentation</a>
+  <a href="https://github.com/omnirexflora-labs/omnicoreagent">Star on GitHub</a> -
+  <a href="https://github.com/omnirexflora-labs/omnicoreagent/issues">Report Bug</a> -
+  <a href="https://github.com/omnirexflora-labs/omnicoreagent/issues">Request Feature</a> -
+  <a href="https://docs-omnicoreagent.omnirexfloralabs.com/docs">Documentation</a>
 </p>

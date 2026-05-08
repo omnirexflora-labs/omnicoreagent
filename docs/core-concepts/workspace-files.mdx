@@ -86,16 +86,16 @@ OmniCoreAgent exposes these tools for the `files/` area:
 
 ---
 
-## Production Features
+## Backend Behavior
 
 | Feature | Local | S3 | R2 |
 |---------|-------|----|-----|
-| Persistent across restarts | ✅ | ✅ | ✅ |
-| Multi-server access | ❌ | ✅ | ✅ |
-| Global CDN distribution | ❌ | ✅ | ✅ |
-| Zero egress fees | N/A | ❌ | ✅ |
-| Auto-retry on failure | ❌ | ✅ | ✅ |
-| Concurrent access safety | ✅ | ✅ | ✅ |
+| Persists across process restarts | Yes | Yes | Yes |
+| Works without cloud credentials | Yes | No | No |
+| Shared across multiple machines | No | Yes | Yes |
+| Fits single-server development | Yes | Yes | Yes |
+| Fits distributed deployments | Limited | Yes | Yes |
+| Uses the same workspace tools | Yes | Yes | Yes |
 
 ---
 
