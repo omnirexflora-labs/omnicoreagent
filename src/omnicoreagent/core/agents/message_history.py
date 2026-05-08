@@ -35,9 +35,22 @@ class AgentMessageHistoryLoader:
 
     def _validated_messages(self, stored_messages: list[Any]) -> list[Message]:
         return [
-            Message.model_validate(message) if isinstance(message, dict) else message
+            self._message_from_record(message) if isinstance(message, dict) else message
             for message in stored_messages
         ]
+
+    def _message_from_record(self, record: dict[str, Any]) -> Message:
+        allowed_fields = {
+            "role",
+            "content",
+            "metadata",
+            "timestamp",
+            "tool_call_id",
+            "tool_calls",
+        }
+        return Message.model_validate(
+            {key: value for key, value in record.items() if key in allowed_fields}
+        )
 
     def _apply_message(self, message: Message, session_state: SessionState) -> None:
         if message.role == "user":

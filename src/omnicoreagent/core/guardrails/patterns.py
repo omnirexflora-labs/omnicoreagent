@@ -69,7 +69,7 @@ class PatternManager:
                 ],
             },
             "jailbreak_roleplay": {
-                "weight": 9,
+                "weight": 11,
                 "requires_target": False,
                 "patterns": [
                     (
@@ -79,6 +79,10 @@ class PatternManager:
                     (
                         r"\b(?:DAN|STAN|MONG|EVIE|UCAR)\s*(?:v?\d+\.?\d*)?\s*(?:mode|protocol)?\s*(?:activate|enabled|on)",
                         True,
+                    ),
+                    (
+                        r"\byou\s+(?:are\s+now|have\s+become|will\s+be|must\s+be)\s+(?:DAN|STAN|MONG|EVIE|UCAR)\b",
+                        False,
                     ),
                     (
                         r"\b(?:jailbreak|break\s+free|escape|become\s+(?:unfiltered|unrestricted|uncensored|unlimited|free)|remove\s+(?:all\s+)?restrictions)",

@@ -17,8 +17,12 @@ import asyncio
 
 from omnicoreagent import OmniCoreAgent, MemoryRouter
 
+from _bootstrap import model_config, require_llm_api_key, response_text
+
 
 async def main():
+    require_llm_api_key()
+
     print("=" * 50)
     print("RUNTIME MEMORY SWITCHING")
     print("=" * 50)
@@ -29,7 +33,7 @@ async def main():
     agent = OmniCoreAgent(
         name="switching_agent",
         system_instruction="You are a helpful assistant.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=600),
         memory_router=memory_router,
     )
 
@@ -39,7 +43,7 @@ async def main():
 
     # Run a query
     result = await agent.run("Hello, I'm testing memory switching!")
-    print(f"   Response: {result['response'][:100]}...")
+    print(f"   Response: {response_text(result)[:100]}...")
 
     # === SWITCH TO REDIS (at runtime!) ===
     # Note: Requires REDIS_URL in .env before runtime switching

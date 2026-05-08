@@ -31,16 +31,13 @@ Then test the endpoints:
 Visit http://localhost:8000/docs for the interactive Swagger UI.
 """
 
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
-
 from omnicoreagent import OmniCoreAgent, OmniServe, OmniServeConfig  # noqa: E402
+from _bootstrap import model_config, require_llm_api_key  # noqa: E402
 
 
 def main():
     """Run the OmniServe server with a simple agent."""
+    require_llm_api_key()
 
     # Create the agent
     agent = OmniCoreAgent(
@@ -48,10 +45,7 @@ def main():
         system_instruction="""You are a helpful AI assistant.
         Answer questions clearly and concisely.
         When performing calculations, show your work.""",
-        model_config={
-            "provider": "gemini",
-            "model": "gemini-2.0-flash",
-        },
+        model_config=model_config(max_tokens=700),
         debug=False,
     )
 

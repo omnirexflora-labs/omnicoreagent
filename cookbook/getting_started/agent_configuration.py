@@ -26,8 +26,12 @@ import asyncio
 
 from omnicoreagent import OmniCoreAgent
 
+from _bootstrap import model_config, require_llm_api_key, response_text
+
 
 async def main():
+    require_llm_api_key()
+
     print("=" * 50)
     print("ADVANCED AGENT CONFIGURATION")
     print("=" * 50)
@@ -49,7 +53,7 @@ async def main():
             "value": 10,  # messages to keep (sliding_window) or tokens (token_budget)
             "summary": {
                 "enabled": True,  # Summarize evicted messages
-                "retention_policy": "summarize",  # or "keep" to save originals
+                "retention_policy": "keep",  # or "delete" to remove summarized originals
             },
         },
         # === CONTEXT MANAGEMENT (for long conversations) ===
@@ -63,8 +67,8 @@ async def main():
         },
         # === GUARDRAILS (prompt injection protection) ===
         "guardrail_config": {
-            "enabled": True,
             "strict_mode": True,  # Block suspicious inputs
+            "sensitivity": 1.0,
         },
     }
 
@@ -75,7 +79,7 @@ async def main():
     agent = OmniCoreAgent(
         name="configured_agent",
         system_instruction="You are a precisely configured agent.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=700),
         agent_config=agent_config,  # <- Pass configuration dict here
         debug=True,  # <- Enable debug logging for development
     )
@@ -86,7 +90,7 @@ async def main():
         result = await agent.run(
             "Calculate the square root of 144, then multiply it by 5."
         )
-        print(f"Response: {result['response']}")
+        print(f"Response: {response_text(result)}")
 
         # Check specific metrics if available
         # (Implementation detail: usage tracking happens internally)

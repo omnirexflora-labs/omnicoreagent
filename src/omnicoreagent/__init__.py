@@ -7,9 +7,16 @@ only be touched when the corresponding runtime object is requested.
 """
 
 from importlib import import_module
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
+try:
+    __version__ = version("omnicoreagent")
+except PackageNotFoundError:
+    __version__ = "0+unknown"
+
 __all__ = [
+    "__version__",
     # Core
     "ReactAgent",
     "MemoryRouter",

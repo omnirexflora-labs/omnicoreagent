@@ -77,4 +77,3 @@ class AgentInitialMessagePreparer:
         session_state.messages.insert(
             0, Message(role="system", content=updated_system_prompt)
         )
-        self.prompt_context_builder.inject_current_datetime(session_state.messages)

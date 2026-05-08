@@ -22,8 +22,12 @@ import asyncio
 
 from omnicoreagent import OmniCoreAgent
 
+from _bootstrap import model_config, require_llm_api_key, response_text
+
 
 async def main():
+    require_llm_api_key()
+
     print("=" * 60)
     print("AGENT METRICS - Monitor Performance and Usage")
     print("=" * 60)
@@ -31,10 +35,10 @@ async def main():
     agent = OmniCoreAgent(
         name="monitored_agent",
         system_instruction="You are a helpful assistant. Keep responses brief.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=500),
         agent_config={
             "request_limit": 100,  # Limit requests for safety
-            "total_tokens_limit": 50000,  # Limit tokens for cost control
+            "total_tokens_limit": 0,  # 0 = unlimited; set a budget in production
         },
         debug=True,
     )
@@ -51,7 +55,7 @@ async def main():
     for i, query in enumerate(queries, 1):
         print(f"\n--- Query {i}/{len(queries)} ---")
         result = await agent.run(query)
-        print(f"Response: {result.get('response', '')[:100]}...")
+        print(f"Response: {response_text(result)[:100]}...")
 
         # Get metrics after each call
         metrics = await agent.get_metrics()
@@ -59,8 +63,8 @@ async def main():
         print(f"\n📈 Metrics after query {i}:")
         print(f"  Total Requests: {metrics.get('total_requests', 0)}")
         print(f"  Total Tokens: {metrics.get('total_tokens', 0)}")
-        print(f"  Input Tokens: {metrics.get('total_input_tokens', 0)}")
-        print(f"  Output Tokens: {metrics.get('total_output_tokens', 0)}")
+        print(f"  Request Tokens: {metrics.get('total_request_tokens', 0)}")
+        print(f"  Response Tokens: {metrics.get('total_response_tokens', 0)}")
 
     # Final metrics summary
     final_metrics = await agent.get_metrics()
@@ -72,12 +76,11 @@ async def main():
 📊 Session Statistics:
   • Total Requests: {final_metrics.get("total_requests", 0)}
   • Total Tokens Used: {final_metrics.get("total_tokens", 0)}
-  • Input Tokens: {final_metrics.get("total_input_tokens", 0)}
-  • Output Tokens: {final_metrics.get("total_output_tokens", 0)}
+  • Request Tokens: {final_metrics.get("total_request_tokens", 0)}
+  • Response Tokens: {final_metrics.get("total_response_tokens", 0)}
   
-💰 Cost Estimation (GPT-4o pricing):
-  • Input: ~${final_metrics.get("total_input_tokens", 0) * 0.000005:.4f}
-  • Output: ~${final_metrics.get("total_output_tokens", 0) * 0.000015:.4f}
+💰 Cost Estimation:
+  • Use the token counts above with your provider's current pricing.
 """)
 
     print("=" * 60)
@@ -89,8 +92,8 @@ await agent.get_metrics() returns:
 {
     "total_requests": int,      # Number of agent.run() calls
     "total_tokens": int,        # Total tokens used (in + out)
-    "total_input_tokens": int,  # Tokens sent to LLM
-    "total_output_tokens": int, # Tokens received from LLM
+    "total_request_tokens": int,  # Tokens sent to LLM
+    "total_response_tokens": int, # Tokens received from LLM
 }
 
 Use Cases:

@@ -8,62 +8,63 @@ icon: 'clock'
 
 The **Background Agent System** provides a framework for creating autonomous agents that execute tasks on a schedule. These agents are ideal for system monitoring, periodic reports, and data synchronization.
 
-## BackgroundAgentService
+<Warning>
+Background-agent docs are pending a deeper refresh. The current exported API is `BackgroundAgentManager`, and the active examples use that manager directly.
+</Warning>
 
-The `BackgroundAgentService` is the primary manager for background agents. It handles scheduling, status tracking, and resource management.
+## BackgroundAgentManager
+
+The `BackgroundAgentManager` is the primary manager for background agents. It handles creation, scheduling, status tracking, and shutdown.
+
+Install the background extra before importing it:
+
+```bash
+pip install "omnicoreagent[background]"
+```
 
 ```python
-from omnicoreagent import BackgroundAgentService, MemoryRouter, EventRouter
+from omnicoreagent import BackgroundAgentManager
 
-# 1. Initialize the service with routers
-bg_service = BackgroundAgentService(
-    MemoryRouter("redis"),
-    EventRouter("redis_stream")
-)
+manager = BackgroundAgentManager()
 
-# 2. Start the manager
-bg_service.start_manager()
+await manager.start()
 ```
 
 ---
 
 ## Creating a Background Agent
 
-To create a background agent, define its configuration including the `interval` (in seconds) and the `query` it should run.
+To create a background agent, define the agent identity and model at the top level, then put the scheduled task fields inside `task_config`.
 
 ```python
 agent_config = {
     "agent_id": "system_monitor",
     "system_instruction": "Monitor system resources and alert if usage is high.",
     "model_config": {"provider": "openai", "model": "gpt-4o-mini"},
-    "interval": 300,  # Run every 5 minutes
     "task_config": {
         "query": "Check local CPU and Memory usage.",
+        "interval": 300,  # Run every 5 minutes
         "max_retries": 2
     }
 }
 
-# Create and register the agent
-await bg_service.create(agent_config)
-
-# Start the agent
-bg_service.start_agent("system_monitor")
+# Create and register the agent, then start the manager
+await manager.create_agent(agent_config)
+await manager.start()
 ```
 
 ---
 
 ## Management API
 
-The service provides a comprehensive API to manage your background fleet:
+The manager exposes the small control surface needed to register, run, inspect, and stop scheduled agents:
 
 | Method | Description |
 |--------|-------------|
-| `start_agent(agent_id)` | Begin the scheduled execution for an agent. |
-| `pause_agent(agent_id)` | Temporarily stop the agent's schedule. |
-| `resume_agent(agent_id)` | Resume a paused agent. |
-| `stop_agent(agent_id)` | Completely stop and remove the agent from the schedule. |
-| `get_agent_status(agent_id)` | Get detailed metrics (run count, error count, last run time). |
-| `list_agents()` | List all managed background agents. |
+| `create_agent(config)` | Create and register a scheduled agent. |
+| `start()` | Start the manager and scheduling loop. |
+| `shutdown()` | Stop the manager and clean up agents. |
+| `get_manager_status()` | Get a snapshot of manager state. |
 
 ---
 
@@ -73,8 +74,8 @@ Background agents emit events just like standard agents. You can stream these ev
 
 ```python
 # Stream events for a background agent
-async for event in bg_service.stream_agent_events("system_monitor"):
-    print(f"[{event.type}] {event.payload}")
+status = await manager.get_manager_status()
+print(status)
 ```
 
 ### Event Types
@@ -100,6 +101,6 @@ An agent that fetches news from several sources once an hour, summarizes them, a
 
 ## Best Practices
 
-- **Timeout Management**: Ensure your `tool_call_timeout` and `interval` are balanced. If a task takes 10 minutes but the interval is 5 minutes, you may experience overlaps.
+- **Timeout Management**: Keep `task_config.timeout` lower than `task_config.interval` unless overlapping runs are acceptable for your workload.
 - **Resource Limits**: Set `request_limit` and `total_tokens_limit` in the agent config to prevent runaway costs if an agent gets stuck in a loop.
 - **Persistent Storage**: Always use `redis` or `database` memory and event stores for background agents to ensure you don't lose progress if your main process restarts.

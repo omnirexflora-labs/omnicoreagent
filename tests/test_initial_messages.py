@@ -68,7 +68,7 @@ async def test_initial_message_preparer_loads_tools_history_and_system_prompt():
     )
 
     assert history_loaded is True
-    assert prompt_builder.injected is True
+    assert prompt_builder.injected is False
     assert session_state.messages[0].role == "system"
     assert session_state.messages[0].content == "system\ntools section"
     assert prompt_builder.calls[0]["sub_agents"] == ["agent"]

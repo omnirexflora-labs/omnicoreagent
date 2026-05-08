@@ -18,8 +18,19 @@ from pathlib import Path
 
 from omnicoreagent import OmniCoreAgent
 
+from _bootstrap import model_config, require_llm_api_key, response_text
+
 
 async def main():
+    require_llm_api_key()
+
+    workspace_dir = Path("tmp/cookbook_mcp_workspace").resolve()
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    (workspace_dir / "README.txt").write_text(
+        "This is a safe MCP filesystem workspace for the cookbook demo.\n",
+        encoding="utf-8",
+    )
+
     # Define MCP server configurations
     # Using stdio transport (local process communication)
     mcp_tools = [
@@ -30,7 +41,7 @@ async def main():
             "args": [
                 "-y",
                 "@modelcontextprotocol/server-filesystem",
-                str(Path.home()),  # Access home directory
+                str(workspace_dir),
             ],
         }
     ]
@@ -39,7 +50,7 @@ async def main():
     agent = OmniCoreAgent(
         name="mcp_tools_agent",
         system_instruction="You are a helpful assistant with access to filesystem tools.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=800),
         mcp_tools=mcp_tools,  # <- Attach MCP tools here
     )
 
@@ -54,9 +65,11 @@ async def main():
     print(f"\nAvailable tools: {[t['name'] for t in tools]}")
 
     # Use the filesystem tools
-    print("\nQuery: List files in home directory")
-    result = await agent.run("List the files and folders in my home directory")
-    print(f"Response: {result['response'][:500]}...")
+    print("\nQuery: List files in the cookbook MCP workspace")
+    result = await agent.run(
+        "List the files in the cookbook MCP workspace and summarize what you find."
+    )
+    print(f"Response: {response_text(result)[:500]}...")
 
     await agent.cleanup()
 

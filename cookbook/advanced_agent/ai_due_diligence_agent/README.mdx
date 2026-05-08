@@ -1,77 +1,108 @@
-# 🔍 AI Due Diligence Agent
+# AI Due Diligence Agent
 
-A professional multi-agent pipeline for automated startup investment analysis. This example demonstrates the power of **OmniCoreAgent** in orchestrating complex, data-driven workflows.
+A multi-agent investment-analysis workflow built with OmniCoreAgent. It turns a company name into a due-diligence package using specialized agents for research, market analysis, financial modeling, risk review, memo writing, report generation, and infographic generation.
 
-## 🌟 Overview
+This cookbook is designed to run in two modes:
 
-The AI Due Diligence Agent automates the grueling process of early-stage investment analysis. It orchestrates 7 specialized agents to transform a simple company name into a comprehensive investment package.
+- **Local demo mode**: no Tavily key required. The research stages use deterministic local tools so you can smoke-test the full orchestration path.
+- **Live research mode**: set `TAVILY_API_KEY` and the research stages connect to Tavily through MCP.
 
-### 🤖 The Agent Team
+## Agent Team
 
 | Agent | Responsibility | Tools |
 | :--- | :--- | :--- |
-| **Researcher** | Gathers company intel, funding history, and team data. | Tavily Search (MCP) |
-| **Market Analyst** | Analyzes TAM, SAM, competitors, and industry trends. | Tavily Search (MCP) |
-| **Financial Modeller** | Builds 5-year revenue projections (Bear/Base/Bull). | Financial Chart Tool |
-| **Risk Specialist** | Conducts a "brutal" assessment of market and execution risks. | Internal Analysis |
-| **Memo Writer** | Synthesizes all findings into a professional narrative. | Internal Synthesis |
-| **Report Generator** | Publishes a McKinsey-style HTML Investment Report. | HTML Report Tool |
-| **Infographic Gen** | Creates a high-impact visual dashboard (PNG). | Infographic Tool |
+| Researcher | Gathers company basics, team, funding, product, and traction. | Tavily MCP or local demo research tools |
+| Market Analyst | Analyzes TAM, SAM, competitors, positioning, and trends. | Tavily MCP or local demo market tools |
+| Financial Modeller | Builds 5-year bear/base/bull revenue projections. | `generate_financial_chart` |
+| Risk Specialist | Assesses market, execution, financial, and regulatory risk. | LLM analysis |
+| Memo Writer | Synthesizes the prior outputs into an investment memo. | LLM synthesis |
+| Report Generator | Publishes the memo as a professional HTML report. | `generate_html_report` |
+| Infographic Generator | Creates a visual investment dashboard. | `generate_dashboard_infographic` |
 
-## 🚀 Features
+## What This Demonstrates
 
-- **Professional Visuals**: Generates data-accurate charts and Goldmann Sachs-style infographics using Matplotlib.
-- **McKinsey-Style Reports**: Produces polished, print-ready HTML reports with full markdown support.
-- **Scenario Analysis**: Models three financial outcomes (pessimistic, expected, optimistic).
-- **Deep Research**: Leverages Tavily's real-time search via MCP for up-to-date startup intelligence.
-- **Manual Orchestration**: Demonstrates precise control over data flow between agents.
+- Multi-agent orchestration with explicit handoff between specialized agents.
+- MCP as a live external tool source when available.
+- Local tools registered beside MCP tools for deterministic smoke testing.
+- Tool-generated artifacts: HTML reports, PNG charts, and PNG dashboards.
+- Shared cookbook model configuration through `.env` and `cookbook/shared.py`.
+- Safe artifact output outside the current working directory by default.
 
-## 🛠️ Setup
+## Setup
 
-1. **Install Dependencies**:
-   ```bash
-   pip install omnicoreagent matplotlib numpy pillow
-   ```
-
-2. **Configure Environment**:
-   Create a `.env` file with your API keys:
-   ```env
-   LLM_API_KEY=your_openai_key
-   TAVILY_API_KEY=your_tavily_key
-   ```
-
-## 📖 Usage
-
-Run the workflow from the terminal. The system supports full CLI control over models and providers.
+Install OmniCoreAgent and the visualization dependencies:
 
 ```bash
-# Basic usage (Interactive)
-python due_diligence_workflow.py
+pip install "omnicoreagent" matplotlib numpy pillow
+```
 
-# Direct analysis (Positional)
+Configure a model key in the repository `.env` or your shell:
+
+```env
+LLM_API_KEY=your_openai_key
+OMNICOREAGENT_MODEL=gpt-5.4-mini
+```
+
+Optional live research:
+
+```env
+TAVILY_API_KEY=your_tavily_key
+```
+
+Live research uses Tavily through `npx mcp-remote`, so Node.js/npm must be available on your PATH when `TAVILY_API_KEY` is set.
+
+Optional artifact output override:
+
+```env
+OMNICOREAGENT_DUE_DILIGENCE_OUTPUT_DIR=/tmp/omnicoreagent_due_diligence_outputs
+```
+
+If no output directory is set, generated files are written to your system temp directory under `omnicoreagent_due_diligence_outputs`.
+
+## Usage
+
+Run from this folder:
+
+```bash
 python due_diligence_workflow.py "Agno AI"
+```
 
-# Advanced usage (Model & Provider control)
-python due_diligence_workflow.py "OpenAI" --model gpt-4o --provider openai
+Run from the repository root:
 
-# Full options
+```bash
+python cookbook/advanced_agent/ai_due_diligence_agent/due_diligence_workflow.py "Agno AI"
+```
+
+Choose a provider or model explicitly:
+
+```bash
+python due_diligence_workflow.py "OpenAI" --provider openai --model gpt-5.4-mini
+```
+
+Quiet mode keeps the final summary but suppresses most progress output:
+
+```bash
+python due_diligence_workflow.py "DemoCo" --quiet
+```
+
+Full CLI reference:
+
+```bash
 python due_diligence_workflow.py --help
 ```
 
-### CLI Arguments
+## Output
 
-- `company`: Name of the company to analyze (positional or `--company`)
-- `-m, --model`: The LLM model to use (default: `gpt-4o`)
-- `-p, --provider`: The LLM provider (default: `openai`)
-- `-q, --quiet`: Suppress progress output and only show the final summary.
+The workflow generates up to three artifact files:
 
+1. `investment_report_[Company]_[Date].html`
+2. `infographic_[Company]_[Date].png`
+3. `revenue_chart_[Company]_[Date].png`
 
-## 📁 Output
+The terminal summary prints the exact output directory and the most recent generated files.
 
-The workflow generates three primary artifacts in the `outputs/` directory:
-1. `investment_report_[Company]_[Date].html`: A full-length professional report.
-2. `infographic_[Company]_[Date].png`: A one-page visual executive summary.
-3. `revenue_chart_[Company]_[Date].png`: A detailed financial projection chart.
+## Notes
 
----
-*Built with [OmniCoreAgent](https://github.com/omnirexflora-labs/omnicoreagent)*
+Local demo mode is for validating the cookbook and showing the orchestration shape without depending on Tavily. When `TAVILY_API_KEY` is present, the researcher and market analyst use Tavily MCP for live search.
+
+*Built with [OmniCoreAgent](https://github.com/omnirexflora-labs/omnicoreagent).*

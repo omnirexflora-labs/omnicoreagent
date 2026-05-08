@@ -341,7 +341,7 @@ class DetectionEngine:
             "admin",
             "root",
             "jailbreak",
-            "DAN",
+            "dan",
             "secret",
             "hidden",
             "unrestricted",
@@ -481,6 +481,10 @@ class DetectionEngine:
         severe_patterns = [
             (r"system\s*[:=]\s*(?:ignore|override|bypass|break)", 10),
             (r"\bDAN\s*(?:mode|activate|enabled)", 9),
+            (
+                r"\byou\s+(?:are\s+now|have\s+become|will\s+be|must\s+be)\s+(?:DAN|STAN|MONG|EVIE|UCAR)\b",
+                18,
+            ),
             (r"<\s*/?\s*system\s*>", 9),
             (r"jailbreak", 8),
             (r"ignore\s+all\s+previous\s+instructions", 12),

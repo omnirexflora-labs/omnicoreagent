@@ -57,16 +57,13 @@ TEST THE API
 =============================================================================
 """
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
 from omnicoreagent import (  # noqa: E402
     OmniCoreAgent,
     ToolRegistry,
     OmniServe,
     OmniServeConfig,
 )
+from _bootstrap import model_config, require_llm_api_key  # noqa: E402
 
 
 # =============================================================================
@@ -126,12 +123,16 @@ Available tools:
 
 Use tools when appropriate.""",
     model_config={
-        "provider": "gemini",
-        "model": "gemini-2.0-flash",
+        **model_config(max_tokens=700),
     },
     local_tools=tools,
     debug=False,
-    agent_config={"workspace_storage": {"backend": "local"}},
+    agent_config={
+        "workspace_config": {
+            "workspace_backend": "local",
+            "workspace_dir": "tmp/omniserve_python_workspace",
+        }
+    },
 )
 
 
@@ -188,6 +189,7 @@ config = OmniServeConfig(
 # =============================================================================
 
 if __name__ == "__main__":
+    require_llm_api_key()
     server = OmniServe(
         agent=agent,
         config=config,

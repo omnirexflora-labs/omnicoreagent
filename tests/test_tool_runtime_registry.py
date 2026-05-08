@@ -220,3 +220,34 @@ async def test_render_prompt_registry_hides_mcp_tools_when_advanced_tools_enable
     rendered = await runtime.render_prompt_registry(mcp_tools={"server": [mcp_tool]})
 
     assert rendered == "No tools available"
+
+
+@pytest.mark.asyncio
+async def test_advanced_tool_use_keeps_retriever_visible_and_custom_tools_searchable(
+    internal_registry, offloader
+):
+    runtime = make_runtime(
+        internal_registry,
+        offloader,
+        enable_advanced_tool_use=True,
+    )
+    local_tools = ToolRegistry()
+
+    @local_tools.register_tool(description="Search products in the catalog.")
+    def search_products(query: str):
+        return {"query": query}
+
+    prepared = await runtime.prepare_tools(local_tools=local_tools)
+    rendered = await runtime.render_prompt_registry(local_tools=prepared)
+
+    assert "tools_retriever:" in rendered
+    assert "search_products:" not in rendered
+
+    retrieval = await prepared.execute_tool(
+        "tools_retriever",
+        {
+            "query": "search ecommerce product catalog for headphones by product name"
+        },
+    )
+
+    assert "search_products" in retrieval["data"]

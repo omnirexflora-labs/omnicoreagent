@@ -7,6 +7,8 @@ from omnicoreagent import (
 )
 import asyncio
 
+from _bootstrap import model_config, require_llm_api_key
+
 
 def build_tool_registry_google_search() -> ToolRegistry:
     registry = ToolRegistry()
@@ -19,15 +21,6 @@ def build_tool_registry_google_search() -> ToolRegistry:
     return registry
 
 
-# --- General MCP tools---
-GENERAL_MCP_TOOLS = [
-    {
-        "name": "tavily-remote-mcp",
-        "transport_type": "streamable_http",
-        "url": "https://mcp.tavily.com/mcp/?tavilyApiKey=<tavily api key>",
-    }
-]
-
 # --- Researcher OmniCoreAgents---
 renewable_energy_agent = OmniCoreAgent(
     name="RenewableEnergyResearcher",
@@ -38,9 +31,8 @@ renewable_energy_agent = OmniCoreAgent(
     Summarize your key findings concisely (1-2 sentences).
     Output *only* the summary.
     """,
-    model_config={"provider": "openai", "model": "gpt-4.1", "temperature": 0.3},
-    agent_config={"max_steps": 15, "tool_call_timeout": 60},
-    mcp_tools=GENERAL_MCP_TOOLS,
+    model_config=model_config(temperature=0.3, max_tokens=600),
+    agent_config={"max_steps": 8, "tool_call_timeout": 30},
     local_tools=build_tool_registry_google_search(),
     memory_router=MemoryRouter("in_memory"),
     event_router=EventRouter("in_memory"),
@@ -56,9 +48,9 @@ ev_agent = OmniCoreAgent(
     Summarize your key findings concisely (1-2 sentences).
     Output *only* the summary.
     """,
-    model_config={"provider": "openai", "model": "gpt-4.1", "temperature": 0.3},
-    agent_config={"max_steps": 15, "tool_call_timeout": 60},
-    mcp_tools=GENERAL_MCP_TOOLS,
+    model_config=model_config(temperature=0.3, max_tokens=600),
+    agent_config={"max_steps": 8, "tool_call_timeout": 30},
+    local_tools=build_tool_registry_google_search(),
     memory_router=MemoryRouter("in_memory"),
     event_router=EventRouter("in_memory"),
     debug=True,
@@ -73,9 +65,9 @@ carbon_capture_agent = OmniCoreAgent(
     Summarize your key findings concisely (1-2 sentences).
     Output *only* the summary.
     """,
-    model_config={"provider": "openai", "model": "gpt-4.1", "temperature": 0.3},
-    agent_config={"max_steps": 15, "tool_call_timeout": 60},
-    mcp_tools=GENERAL_MCP_TOOLS,
+    model_config=model_config(temperature=0.3, max_tokens=600),
+    agent_config={"max_steps": 8, "tool_call_timeout": 30},
+    local_tools=build_tool_registry_google_search(),
     memory_router=MemoryRouter("in_memory"),
     event_router=EventRouter("in_memory"),
     debug=True,
@@ -85,7 +77,7 @@ carbon_capture_agent = OmniCoreAgent(
 # --- RouterAgent (correctly receives model_config, agent_config, memory_router, event_router) ---
 router_agent = RouterAgent(
     sub_agents=[renewable_energy_agent, ev_agent, carbon_capture_agent],
-    model_config={"provider": "openai", "model": "gpt-4.1", "temperature": 0.3},
+    model_config=model_config(temperature=0.3, max_tokens=600),
     agent_config={"max_steps": 8, "tool_call_timeout": 30},
     memory_router=MemoryRouter("in_memory"),
     event_router=EventRouter("in_memory"),
@@ -116,6 +108,7 @@ router_agent = RouterAgent(
 
 
 async def main():
+    require_llm_api_key()
     result = await router_agent(
         task="What are the latest trends in EV charging technology?",
         session_id="test-session",

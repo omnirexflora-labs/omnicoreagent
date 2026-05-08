@@ -2,18 +2,20 @@
 import asyncio
 import json
 import os
+from pathlib import Path
 from typing import Optional
 
 from omnicoreagent import OmniCoreAgent, MemoryRouter, EventRouter, ToolRegistry, logger
 
+from _bootstrap import model_config, require_llm_api_key, response_text
+
 # ------------------ Config / CRM bootstrap ------------------ #
-CRM_FILE = "crm.json"
+CRM_FILE = str(Path("tmp/cookbook_flight_crm.json"))
 
 
 def create_crm(path: str = CRM_FILE) -> None:
-    """Create a sample CRM JSON file if it doesn't exist."""
-    if os.path.exists(path):
-        return
+    """Create a deterministic sample CRM JSON file for the demo run."""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     sample = {
         "users": [
@@ -241,6 +243,7 @@ class AirlineAgentCLI:
 
     async def initialize(self):
         """Initialize the airline agent (instantiate routers and the OmniCoreAgent)."""
+        require_llm_api_key()
         create_crm()  # bootstrap crm.json if missing
         print("🚀 Initializing Flight Booking Agent...")
 
@@ -276,41 +279,39 @@ class AirlineAgentCLI:
                 "  → Think: Check membership tier for baggage allowance, verify payment method limits, calculate total costs\n\n"
                 "**After thinking, execute your plan step-by-step using the appropriate tools.**\n"
                 "Always include booking IDs in confirmations and keep responses professional but concise.\n\n"
+                "**Never ask the user to provide tool output. If you need customer data, flight data, booking data, or cancellation data, call the matching tool yourself.**\n"
+                "- Flight search requests: call search_flights.\n"
+                "- Booking requests: call get_customer_profile when needed, then search_flights if needed, then book_flight.\n"
+                "- Profile requests: call get_customer_profile.\n"
+                "- Cancellation requests: call cancel_booking.\n\n"
                 "**Remember:** The think tool is your strategic planning center. Use it to avoid mistakes and ensure compliance with all airline policies and customer requirements."
             ),
-            model_config={
-                "provider": "openai",
-                "model": "gpt-4.1",
-                "temperature": 0.2,
-                "max_context_length": 50000,
-            },
+            model_config=model_config(temperature=0.2, max_tokens=900),
             local_tools=local_tools,
             agent_config={
                 "max_steps": 12,
                 "tool_call_timeout": 45,
-                "request_limit": 500,
+                "request_limit": 0,
                 "memory_config": {"mode": "token_budget", "value": 8000},
             },
-            memory_store=self.memory_router,
+            memory_router=self.memory_router,
             event_router=self.event_router,
-            debug=True,
+            debug=False,
         )
 
     async def demo_flow(self):
         """Show sample interactions."""
+        session_id = "flight_booking_demo"
         queries = [
             "Search flights from NYC to LON on 2025-09-01",
             "Book the cheapest flight on 2025-09-01 for user U1001",
             "Get profile for user U1001",
-            "Cancel booking B2001 for user U1001",
-            "Book 2 tickets to LON for U1002 with extra baggage allowance",
-            "Cancel U1001's booking and rebook him on the next available flight",
         ]
 
         for q in queries:
             print(f"\nUser: {q}")
-            result = await self.agent.run(q)
-            print("Agent:", result)
+            result = await self.agent.run(q, session_id=session_id)
+            print("Agent:", response_text(result))
 
 
 # ------------------ Entrypoint ------------------ #

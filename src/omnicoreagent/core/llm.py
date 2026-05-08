@@ -23,11 +23,13 @@ for logger_name in ["LiteLLM", "litellm", "litellm.proxy"]:
 def _get_litellm():
     global _LITELLM_CONFIGURED
 
+    os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
     import litellm
 
     if not _LITELLM_CONFIGURED:
         os.environ["LITELLM_LOG"] = "CRITICAL"
         litellm.set_verbose = False
+        litellm.telemetry = False
         litellm.callbacks = []
         litellm.success_callback = []
         litellm.failure_callback = []

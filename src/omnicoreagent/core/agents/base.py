@@ -344,12 +344,6 @@ class BaseReactAgent:
             message=query,
         )
 
-        await add_message_to_history(
-            role="user",
-            content=query,
-            session_id=session_id,
-            metadata={"agent_name": self.agent_name},
-        )
         runtime_local_tools = await self.tool_runtime_registry.prepare_tools(
             local_tools=local_tools
         )
@@ -362,6 +356,15 @@ class BaseReactAgent:
             session_id=session_id,
             debug=debug,
             sub_agents=sub_agents,
+        )
+        session_state.messages.append(Message(role="user", content=query))
+        self.prompt_context_builder.inject_current_datetime(session_state.messages)
+
+        await add_message_to_history(
+            role="user",
+            content=query,
+            session_id=session_id,
+            metadata={"agent_name": self.agent_name},
         )
         if session_state.state not in [
             AgentState.IDLE,

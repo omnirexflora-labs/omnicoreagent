@@ -17,6 +17,8 @@ import asyncio
 
 from omnicoreagent import OmniCoreAgent, MemoryRouter
 
+from _bootstrap import model_config, require_llm_api_key, response_text
+
 
 async def demo_in_memory():
     """Demo with in-memory storage (fastest, but not persistent)."""
@@ -31,7 +33,7 @@ async def demo_in_memory():
     agent = OmniCoreAgent(
         name="memory_agent",
         system_instruction="You are a helpful assistant with memory.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=800),
         memory_router=memory_router,  # <- Add memory router
     )
 
@@ -42,11 +44,11 @@ async def demo_in_memory():
     result = await agent.run(
         "My name is Alice and I'm a software engineer.", session_id=session_id
     )
-    print(f"Response: {result['response']}")
+    print(f"Response: {response_text(result)}")
 
     print("\nConversation 2: Agent remembers!")
     result = await agent.run("What's my name and what do I do?", session_id=session_id)
-    print(f"Response: {result['response']}")
+    print(f"Response: {response_text(result)}")
 
     # Get history
     history = await agent.get_session_history(session_id)
@@ -69,7 +71,7 @@ async def demo_redis():
     agent = OmniCoreAgent(
         name="redis_agent",
         system_instruction="You are a helpful assistant with Redis memory.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=800),
         memory_router=memory_router,
     )
 
@@ -77,11 +79,11 @@ async def demo_redis():
     result = await agent.run(
         "Remember this: my favorite color is blue.", session_id=session_id
     )
-    print(f"Response: {result['response']}")
+    print(f"Response: {response_text(result)}")
 
     print("\nConversation 2: Agent remembers!")
     result = await agent.run("What's my favorite color?", session_id=session_id)
-    print(f"Response: {result['response']}")
+    print(f"Response: {response_text(result)}")
 
     await agent.cleanup()
 
@@ -103,7 +105,7 @@ async def demo_sql_database():
     agent = OmniCoreAgent(
         name="db_agent",
         system_instruction="You are a helpful assistant with database memory.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=800),
         memory_router=memory_router,
     )
 
@@ -111,11 +113,11 @@ async def demo_sql_database():
     result = await agent.run(
         "Store this note: meeting at 3pm tomorrow.", session_id=session_id
     )
-    print(f"Response: {result['response']}")
+    print(f"Response: {response_text(result)}")
 
     print("\nConversation 2: Agent remembers!")
     result = await agent.run("when is meeting tomorrow?", session_id=session_id)
-    print(f"Response: {result['response']}")
+    print(f"Response: {response_text(result)}")
 
     await agent.cleanup()
 
@@ -134,23 +136,24 @@ async def demo_mongodb():
     agent = OmniCoreAgent(
         name="mongo_agent",
         system_instruction="You are a helpful assistant with MongoDB memory.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=800),
         memory_router=memory_router,
     )
 
     session_id = "mongo_session"
     result = await agent.run("I prefer dark mode themes.", session_id=session_id)
-    print(f"Response: {result['response']}")
+    print(f"Response: {response_text(result)}")
 
     print("\nConversation 2: Agent remembers!")
     result = await agent.run("which theme i prefer", session_id=session_id)
-    print(f"Response: {result['response']}")
+    print(f"Response: {response_text(result)}")
 
     await agent.cleanup()
 
 
 async def main():
     """Run in-memory demo (works without external dependencies)."""
+    require_llm_api_key()
     await demo_in_memory()
 
     # Uncomment these if you have the backends configured:

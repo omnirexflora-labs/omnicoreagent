@@ -1,12 +1,12 @@
 # Production
 
-> Deploy OmniCoreAgent with confidence. Metrics and guardrails.
+> Deploy OmniCoreAgent with confidence. Runtime usage metrics and guardrails.
 
 ## Examples
 
 | File | What You'll Learn |
 |------|-------------------|
-| [metrics_observability.py](./metrics_observability.py) | Track tokens, requests, response times, and costs |
+| [metrics_observability.py](./metrics_observability.py) | Track tokens, requests, response times, and usage for cost estimation |
 | [guardrails.py](./guardrails.py) | Protect agents from prompt injection attacks |
 
 ---
@@ -32,15 +32,15 @@ agent = OmniCoreAgent(
 metrics = await agent.get_metrics()
 print(f"Total requests: {metrics['total_requests']}")
 print(f"Total tokens: {metrics['total_tokens']}")
-print(f"Input tokens: {metrics['total_input_tokens']}")
-print(f"Output tokens: {metrics['total_output_tokens']}")
+print(f"Request tokens: {metrics['total_request_tokens']}")
+print(f"Response tokens: {metrics['total_response_tokens']}")
 ```
 
 **Available Metrics**:
 - `total_requests` — Number of `agent.run()` calls
 - `total_tokens` — Total tokens used (input + output)
-- `total_input_tokens` — Tokens sent to LLM
-- `total_output_tokens` — Tokens received from LLM
+- `total_request_tokens` — Tokens sent to LLM
+- `total_response_tokens` — Tokens received from LLM
 
 ---
 
@@ -55,7 +55,6 @@ agent = OmniCoreAgent(
     model_config={"provider": "openai", "model": "gpt-4o"},
     agent_config={
         "guardrail_config": {
-            "enabled": True,
             "strict_mode": True,  # Block suspicious inputs
         },
     },
@@ -70,9 +69,9 @@ agent = OmniCoreAgent(
 
 ---
 
-## 🔧 Cost Control
+## 🔧 Usage Limits
 
-Set limits to prevent runaway costs:
+Set limits to prevent runaway request or token usage:
 
 ```python
 agent_config={

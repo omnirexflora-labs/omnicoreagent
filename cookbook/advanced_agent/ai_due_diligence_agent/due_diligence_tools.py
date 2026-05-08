@@ -5,28 +5,25 @@ This module provides high-quality, local implementation of the workflow tools.
 It creates specific tool registries for each agent to ensure strict Separation of Concerns.
 """
 
-import os
 import logging
+import os
+import re
 from datetime import datetime
+from pathlib import Path
+import tempfile
+
 from omnicoreagent import ToolRegistry
 
 # Try importing matplotlib
 try:
-    import matplotlib.pyplot as plt
     import matplotlib
 
     matplotlib.use("Agg")  # Headless mode
+    import matplotlib.pyplot as plt
+
     HAS_MATPLOTLIB = True
 except ImportError:
     HAS_MATPLOTLIB = False
-
-# Try importing OpenAI
-try:
-    from openai import OpenAI  # noqa: F401
-
-    HAS_OPENAI = True
-except ImportError:
-    HAS_OPENAI = False
 
 logger = logging.getLogger("DueDiligenceTools")
 
@@ -39,10 +36,19 @@ def ensure_string(text: str | list) -> str:
 
 
 def get_output_dir() -> str:
-    """Returns the absolute path to the outputs directory."""
-    output_dir = os.path.join(os.getcwd(), "outputs")
-    os.makedirs(output_dir, exist_ok=True)
-    return output_dir
+    """Return a safe output directory for generated cookbook artifacts."""
+    default_dir = Path(tempfile.gettempdir()) / "omnicoreagent_due_diligence_outputs"
+    output_dir = Path(
+        os.environ.get("OMNICOREAGENT_DUE_DILIGENCE_OUTPUT_DIR", str(default_dir))
+    ).expanduser()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return str(output_dir)
+
+
+def safe_filename_fragment(value: str) -> str:
+    """Return a filesystem-safe filename fragment for generated artifacts."""
+    fragment = re.sub(r"[^A-Za-z0-9_.-]+", "_", ensure_string(value)).strip("_")
+    return fragment or "company"
 
 
 def create_chart_tool() -> ToolRegistry:
@@ -221,8 +227,8 @@ def create_chart_tool() -> ToolRegistry:
 
             # Save chart
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"revenue_chart_{company_name.replace(' ', '_')}_{timestamp}.png"
-            filepath = os.path.join(get_output_dir(), filename)
+            filename = f"revenue_chart_{safe_filename_fragment(company_name)}_{timestamp}.png"
+            filepath = str(Path(get_output_dir()) / filename)
             plt.savefig(filepath, dpi=150, bbox_inches="tight", facecolor="white")
             plt.close()
 
@@ -737,8 +743,8 @@ def create_infographic_tool() -> ToolRegistry:
 
             # Save
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"infographic_{company_name.replace(' ', '_')}_{timestamp}.png"
-            filepath = os.path.join(get_output_dir(), filename)
+            filename = f"infographic_{safe_filename_fragment(company_name)}_{timestamp}.png"
+            filepath = str(Path(get_output_dir()) / filename)
             plt.savefig(
                 filepath,
                 dpi=150,
@@ -1197,9 +1203,9 @@ def create_report_tool() -> ToolRegistry:
             # Save report
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = (
-                f"investment_report_{company_name.replace(' ', '_')}_{timestamp}.html"
+                f"investment_report_{safe_filename_fragment(company_name)}_{timestamp}.html"
             )
-            filepath = os.path.join(get_output_dir(), filename)
+            filepath = str(Path(get_output_dir()) / filename)
 
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(template)

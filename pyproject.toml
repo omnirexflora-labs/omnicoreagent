@@ -65,6 +65,16 @@ all = [
     "apscheduler>=3.11.2",
     "tzlocal>=5.3.1",
     "tiktoken>=0.12.0",
+    "markdown>=3.10.2",
+    "matplotlib>=3.10.9",
+    "numpy>=2.2.6",
+    "pillow>=12.2.0",
+]
+examples = [
+    "markdown>=3.10.2",
+    "matplotlib>=3.10.9",
+    "numpy>=2.2.6",
+    "pillow>=12.2.0",
 ]
 
 [project.scripts]
@@ -77,12 +87,12 @@ Issues = "https://github.com/omnirexflora-labs/omnicoreagent/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["src/omnicoreagent"]
 
-[tool.hatch.build]
-packages = ["src/omnicoreagent"]
+[tool.hatch.build.targets.sdist]
 include = [
-
-    "LICENSE",
-    "README.md"
+    "/LICENSE",
+    "/README.md",
+    "/pyproject.toml",
+    "/src/omnicoreagent/**/*.py",
 ]
 
 [tool.pytest.ini_options]

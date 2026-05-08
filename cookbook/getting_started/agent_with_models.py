@@ -14,8 +14,8 @@ OmniCoreAgent supports multiple LLM providers:
 - OpenRouter
 
 Unified Configuration:
-Regardless of the provider, you only need to set `LLM_API_KEY` in your `.env` file.
-OmniCoreAgent automatically maps this key to the specific provider you choose.
+Set `LLM_API_KEY` for the provider you are running. The cookbook defaults to
+OpenAI with `OMNICOREAGENT_MODEL=gpt-5.4-mini` so examples stay inexpensive.
 
 Build on: first_agent.py
 Next: agent_with_local_tools.py
@@ -28,6 +28,12 @@ import asyncio
 import os
 
 from omnicoreagent import OmniCoreAgent
+
+from _bootstrap import get_model, model_config, require_llm_api_key, response_text
+
+
+def enabled(flag_name: str) -> bool:
+    return os.getenv(flag_name, "").lower() in {"1", "true", "yes"}
 
 
 async def demo_anthropic():
@@ -49,7 +55,7 @@ async def demo_anthropic():
         )
 
         result = await agent.run("Introduce yourself in one sentence.")
-        print(f"Response: {result['response']}")
+        print(f"Response: {response_text(result)}")
         await agent.cleanup()
     except Exception as e:
         print(f"Skipping Anthropic: {e}")
@@ -74,7 +80,7 @@ async def demo_gemini():
         )
 
         result = await agent.run("What is special about the Gemini model?")
-        print(f"Response: {result['response']}")
+        print(f"Response: {response_text(result)}")
         await agent.cleanup()
     except Exception as e:
         print(f"Skipping Gemini: {e}")
@@ -99,7 +105,7 @@ async def demo_groq():
         )
 
         result = await agent.run("Why is Groq so fast?")
-        print(f"Response: {result['response']}")
+        print(f"Response: {response_text(result)}")
         await agent.cleanup()
     except Exception as e:
         print(f"Skipping Groq: {e}")
@@ -128,21 +134,16 @@ async def demo_ollama():
         )
 
         result = await agent.run("Are you running locally?")
-        print(f"Response: {result['response']}")
+        print(f"Response: {response_text(result)}")
         await agent.cleanup()
     except Exception as e:
         print(f"Skipping Ollama: {e}")
 
 
 async def main():
-    # Check if LLM_API_KEY is set
-    if not os.getenv("LLM_API_KEY"):
-        print("ERROR: LLM_API_KEY environment variable is not set.")
-        print("Please set it in your .env file or environment.")
-        print("Example: LLM_API_KEY=sk-...")
-        return
+    require_llm_api_key()
 
-    print("Unified Configuration: Using LLM_API_KEY for all providers.")
+    print("Unified Configuration: using LLM_API_KEY with the selected provider.")
 
     # OpenAI is the default
     print("\n" + "=" * 50)
@@ -151,11 +152,11 @@ async def main():
     try:
         agent = OmniCoreAgent(
             name="openai_agent",
-            system_instruction="You are GPT-4o.",
-            model_config={"provider": "openai", "model": "gpt-4o", "temperature": 0.0},
+            system_instruction=f"You are {get_model()}, a helpful assistant.",
+            model_config=model_config(temperature=0.0, max_tokens=500),
         )
         result = await agent.run("Hello from OpenAI!")
-        print(f"Response: {result['response']}")
+        print(f"Response: {response_text(result)}")
         await agent.cleanup()
     except Exception as e:
         print(f"Skipping OpenAI: {e}")
@@ -166,11 +167,13 @@ async def main():
     # or are changing the env var between runs.
     # But the code shows HOW to configure them.
 
-    print("\n--- Demonstrating other providers (requires valid keys) ---")
-    await demo_anthropic()
-    await demo_gemini()
-    await demo_groq()
-    await demo_ollama()
+    print("\n--- Optional provider demos ---")
+    print("Set RUN_PROVIDER_DEMOS=1 to run Anthropic, Gemini, Groq, and Ollama demos.")
+    if enabled("RUN_PROVIDER_DEMOS"):
+        await demo_anthropic()
+        await demo_gemini()
+        await demo_groq()
+        await demo_ollama()
     print("\n" + "=" * 50)
     print("SUMMARY")
     print("=" * 50)

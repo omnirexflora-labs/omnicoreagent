@@ -52,6 +52,26 @@ print(json.dumps({
     }
 
 
+def test_root_import_exposes_package_version(tmp_path):
+    result = _run_import_probe(
+        tmp_path,
+        """
+import json
+import omnicoreagent
+
+print(json.dumps({
+    "version_type": type(omnicoreagent.__version__).__name__,
+    "has_version": bool(omnicoreagent.__version__),
+}))
+""",
+    )
+
+    assert result == {
+        "version_type": "str",
+        "has_version": True,
+    }
+
+
 def test_public_exports_resolve_without_provider_client_imports(tmp_path):
     result = _run_import_probe(
         tmp_path,

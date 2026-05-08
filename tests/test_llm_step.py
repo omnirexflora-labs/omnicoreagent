@@ -113,13 +113,13 @@ async def test_llm_step_manages_context_before_model_call(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_llm_step_returns_usage_limit_error(monkeypatch):
-    monkeypatch.setattr(llm_step, "usage", Usage(requests=1))
+    monkeypatch.setattr(llm_step, "usage", Usage())
     runner = make_runner(limits_enabled=True, request_limit=1)
 
     result = await runner.run(
         session_state=make_session_state(),
         llm_connection=SimpleNamespace(llm_call=None),
-        run_usage=Usage(),
+        run_usage=Usage(requests=1),
         session_id="chat1",
     )
 

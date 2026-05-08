@@ -13,12 +13,16 @@ import asyncio
 
 from omnicoreagent import OmniCoreAgent
 
+from _bootstrap import model_config, require_llm_api_key
+
 
 async def main():
+    require_llm_api_key()
+
     agent = OmniCoreAgent(
         name="monitored_agent",
         system_instruction="You are a helpful assistant.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=500),
     )
 
     # --- Per-Request Metrics ---
@@ -50,19 +54,11 @@ async def main():
 
     # --- Cost Estimation Example ---
     print("\n" + "=" * 50)
-    print("COST ESTIMATION (GPT-4o pricing)")
+    print("COST ESTIMATION")
     print("=" * 50)
 
-    # GPT-4o pricing (as of 2024)
-    COST_PER_1K_INPUT = 0.0025  # $2.50 per 1M input tokens
-    COST_PER_1K_OUTPUT = 0.01  # $10 per 1M output tokens
-
-    # Simple estimation (actual breakdown would need per-request tracking)
     total_tokens = stats["total_tokens"]
-    estimated_cost = (
-        total_tokens / 1000 * ((COST_PER_1K_INPUT + COST_PER_1K_OUTPUT) / 2)
-    )
-    print(f"Estimated cost for {total_tokens} tokens: ${estimated_cost:.4f}")
+    print(f"Total tokens to price with your provider's current rates: {total_tokens}")
 
     await agent.cleanup()
 

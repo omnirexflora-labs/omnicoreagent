@@ -55,18 +55,29 @@ class ToolExecutor:
         self, tool_name: str, tool_args: dict[str, Any], result: Any
     ) -> dict[str, Any]:
         if isinstance(result, dict):
-            status = result.get("status", "success")
-            data = result.get("data")
-            message = result.get("message")
+            is_result_envelope = any(
+                key in result for key in ("status", "data", "message")
+            )
+            if not is_result_envelope:
+                status = "success"
+                data = result
+                message = None
+            else:
+                status = result.get("status", "success")
+                data = result.get("data")
+                message = result.get("message")
 
-            if status == "error" and not message:
-                message = "Tool returned error status without message."
+                if status == "error" and not message:
+                    message = (
+                        result.get("error")
+                        or "Tool returned error status without message."
+                    )
 
-            if status == "success" and data is None:
-                message = (
-                    message
-                    or "(Tool executed successfully but returned no data; This likely means the action completed or is async.)"
-                )
+                if status == "success" and data is None:
+                    message = (
+                        message
+                        or "(Tool executed successfully but returned no data; This likely means the action completed or is async.)"
+                    )
 
         elif hasattr(result, "content"):
             content = result.content

@@ -17,8 +17,12 @@ import asyncio
 
 from omnicoreagent import OmniCoreAgent, MemoryRouter, EventRouter
 
+from _bootstrap import model_config, require_llm_api_key, response_text
+
 
 async def main():
+    require_llm_api_key()
+
     print("=" * 50)
     print("RUNTIME EVENT ROUTER SWITCHING")
     print("=" * 50)
@@ -29,7 +33,7 @@ async def main():
     agent = OmniCoreAgent(
         name="event_switching_agent",
         system_instruction="You are a helpful assistant.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=600),
         memory_router=MemoryRouter("in_memory"),
         event_router=event_router,
     )
@@ -40,7 +44,7 @@ async def main():
 
     # Run a query
     result = await agent.run("Hello, testing event switching!")
-    print(f"   Response: {result['response'][:80]}...")
+    print(f"   Response: {response_text(result)[:80]}...")
 
     # === SWITCH TO REDIS STREAMS ===
     # Note: Requires REDIS_URL in .env before the agent is initialized
@@ -100,7 +104,7 @@ async def demo_complete_setup():
     agent = OmniCoreAgent(
         name="production_ready_agent",
         system_instruction="You are a production-ready assistant.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config=model_config(max_tokens=700),
         memory_router=memory_router,
         event_router=event_router,
         agent_config={
@@ -114,7 +118,7 @@ async def demo_complete_setup():
     print(f"  Events: {await agent.get_event_store_type()}")
 
     result = await agent.run("What is OmniCoreAgent?")
-    print(f"\nResponse: {result['response'][:200]}...")
+    print(f"\nResponse: {response_text(result)[:200]}...")
 
     await agent.cleanup()
     print("\n✅ Complete setup working!")

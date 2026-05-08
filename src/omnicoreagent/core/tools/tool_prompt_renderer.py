@@ -5,11 +5,60 @@ from typing import Any
 from omnicoreagent.core.logging import logger
 
 
+ALWAYS_VISIBLE_TOOL_NAMES = frozenset(
+    {
+        "tools_retriever",
+        "spawn_subagents",
+        "workspace_file_view",
+        "workspace_file_write",
+        "workspace_file_replace",
+        "workspace_file_insert",
+        "workspace_file_delete",
+        "workspace_file_rename",
+        "workspace_file_clear",
+        "read_artifact",
+        "tail_artifact",
+        "search_artifact",
+        "list_artifacts",
+        "read_skill_file",
+        "run_skill_script",
+    }
+)
+
+TOOL_PROMPT_ORDER = {
+    name: index
+    for index, name in enumerate(
+        [
+            "tools_retriever",
+            "spawn_subagents",
+            "workspace_file_view",
+            "workspace_file_write",
+            "workspace_file_replace",
+            "workspace_file_insert",
+            "workspace_file_delete",
+            "workspace_file_rename",
+            "workspace_file_clear",
+            "read_artifact",
+            "tail_artifact",
+            "search_artifact",
+            "list_artifacts",
+            "read_skill_file",
+            "run_skill_script",
+        ]
+    )
+}
+
+
 class ToolPromptRenderer:
     """Render available local/MCP tools for the agent prompt."""
 
-    def __init__(self, include_mcp_tools: bool = True):
+    def __init__(
+        self,
+        include_mcp_tools: bool = True,
+        direct_tool_names: frozenset[str] | None = None,
+    ):
         self.include_mcp_tools = include_mcp_tools
+        self.direct_tool_names = direct_tool_names
 
     async def render(
         self,
@@ -38,11 +87,18 @@ class ToolPromptRenderer:
         if not local_tools_list:
             return
 
-        for tool in local_tools_list:
+        for tool in sorted(
+            local_tools_list,
+            key=lambda item: TOOL_PROMPT_ORDER.get(item.get("name", ""), 10_000)
+            if isinstance(item, dict)
+            else 10_000,
+        ):
             if not isinstance(tool, dict):
                 continue
 
             name = tool.get("name", "unknown")
+            if self.direct_tool_names is not None and name not in self.direct_tool_names:
+                continue
             desc = tool.get("description", "").replace("\n", " ").strip()
             lines.append(f"\n{name}: {desc}")
             self._append_schema_params(

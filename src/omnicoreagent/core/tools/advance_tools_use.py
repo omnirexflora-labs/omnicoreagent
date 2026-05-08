@@ -3,6 +3,8 @@ from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 
 
 async def build_tool_registry_advance_tools_use(registry: ToolRegistry) -> ToolRegistry:
+    AdvanceToolsUse().load_and_process_tools(local_tools=registry)
+
     @registry.register_tool(
         name="tools_retriever",
         description="""
