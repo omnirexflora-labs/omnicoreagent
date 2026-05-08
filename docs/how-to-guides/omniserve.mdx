@@ -204,7 +204,8 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 | `GET` | `/docs` | No | Swagger UI |
 | `GET` | `/redoc` | No | ReDoc UI |
 
-*Auth required only if `--auth-token` is set.
+*Auth required only if `--auth-token` is set or `OMNISERVE_AUTH_ENABLED=true`
+with `OMNISERVE_AUTH_TOKEN`.
 
 ### Request/Response Examples
 
@@ -244,6 +245,8 @@ All settings via `OMNISERVE_*` prefix. **Environment variables always override c
 | `OMNISERVE_ENABLE_REDOC` | `true` | ReDoc at `/redoc` |
 | `OMNISERVE_CORS_ENABLED` | `true` | Enable CORS |
 | `OMNISERVE_CORS_ORIGINS` | `*` | Allowed origins (comma-separated) |
+| `OMNISERVE_CORS_METHODS` | `*` | Allowed methods (comma-separated) |
+| `OMNISERVE_CORS_HEADERS` | `*` | Allowed headers (comma-separated) |
 | `OMNISERVE_CORS_CREDENTIALS` | `true` | Allow credentials |
 | `OMNISERVE_AUTH_ENABLED` | `false` | Enable Bearer token auth |
 | `OMNISERVE_AUTH_TOKEN` | — | Bearer token value |
@@ -267,6 +270,8 @@ OMNISERVE_AUTH_TOKEN=my-secret-token
 OMNISERVE_RATE_LIMIT_ENABLED=true
 OMNISERVE_RATE_LIMIT_REQUESTS=100
 OMNISERVE_CORS_ORIGINS=https://myapp.com,https://api.myapp.com
+OMNISERVE_CORS_METHODS=GET,POST,OPTIONS
+OMNISERVE_CORS_HEADERS=Authorization,Content-Type
 ```
 
 ---

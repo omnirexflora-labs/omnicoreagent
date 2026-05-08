@@ -3,7 +3,7 @@
 Agent with Persistent Memory
 
 Add persistent storage so your agent remembers conversations.
-Supports: Redis, MongoDB, PostgreSQL, SQLite, In-Memory.
+Supports: in-memory, Redis, MongoDB, and SQL database storage.
 
 Build on: agent_with_all_tools.py
 Next: agent_with_memory_switching.py
@@ -89,16 +89,15 @@ async def demo_redis():
 
 
 async def demo_sql_database():
-    """Demo with database storage (PostgreSQL/MySQL/SQLite)."""
+    """Demo with SQL database storage."""
 
     print("\n" + "=" * 50)
-    print("3. DATABASE STORAGE (PostgreSQL/SQLite/MySQL)")
+    print("3. DATABASE STORAGE")
     print("=" * 50)
 
     # Database - requires DATABASE_URL in .env
     # Examples:
     #   DATABASE_URL=postgresql://user:pass@localhost:5432/db
-    #   DATABASE_URL=mysql://user:pass@localhost:3306/db
     #   DATABASE_URL=sqlite:///./memory.db
     memory_router = MemoryRouter("database")
 
@@ -169,7 +168,7 @@ async def main():
 |------------|---------------------------|---------------------|
 | in_memory  | Development, testing      | (none)              |
 | redis      | Production, fast access   | REDIS_URL           |
-| database   | SQL systems (Postgres, MySQL, SQLite)    | DATABASE_URL        |
+| database   | SQLAlchemy database storage              | DATABASE_URL        |
 | mongodb    | Document-heavy apps       | MONGODB_URI         |
 """)
 

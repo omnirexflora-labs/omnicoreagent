@@ -180,12 +180,8 @@ async def main():
     print("""
 OmniCoreAgent unifies API key management.
 You set `LLM_API_KEY` for the provider you want to use.
-The framework automatically maps it:
-
-LLM_API_KEY -> OPENAI_API_KEY (if provider="openai")
-LLM_API_KEY -> ANTHROPIC_API_KEY (if provider="anthropic")
-LLM_API_KEY -> GEMINI_API_KEY (if provider="gemini")
-...and so on.
+Select the provider with model_config["provider"] and the model with
+model_config["model"].
 """)
 
 

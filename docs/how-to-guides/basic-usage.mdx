@@ -62,7 +62,7 @@ for message in history:
 ### Clearing History
 
 ```python
-await agent.clear_history(session_id="user_42")
+await agent.clear_session_history(session_id="user_42")
 ```
 
 ---
@@ -78,7 +78,7 @@ agent = OmniCoreAgent(
     name="persistent_agent",
     system_instruction="You are a helpful assistant.",
     model_config={"provider": "openai", "model": "gpt-4o"},
-    memory_router=MemoryRouter("redis")  # or "postgresql", "mongodb", "sqlite"
+    memory_router=MemoryRouter("redis")  # or "database", "mongodb", "in_memory"
 )
 ```
 
