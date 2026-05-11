@@ -416,7 +416,7 @@ MIT - see [LICENSE](LICENSE).
 
 ### Built On
 
-[LiteLLM](https://github.com/BerriAI/litellm) - [FastAPI](https://fastapi.tiangolo.com/) - [Redis](https://redis.io/) - [Pydantic](https://docs.pydantic.dev/) - [APScheduler](https://apscheduler.readthedocs.io/)
+[LiteLLM](https://github.com/BerriAI/litellm) - [FastAPI](https://fastapi.tiangolo.com/) - [Redis](https://redis.io/) - [Pydantic](https://docs.pydantic.dev/)
 
 ---
 

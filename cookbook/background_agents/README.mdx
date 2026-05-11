@@ -1,113 +1,77 @@
-# Background Agents: Scheduled Automation Examples
+# Background Agents: Durable Agent Tasks
 
-> Background Agents let you run scheduled agent tasks without a human prompt each time. This cookbook section is currently an experimental scheduled-automation path and will get a deeper production refresh after the core runtime and OmniServe work.
-
-## Why Background Agents?
-
-OmniCoreAgent's background system is designed around scheduled task execution:
-*   **Timeouts and retries**: Configure how long a task may run and how failures are retried.
-*   **⏰ Flexible Scheduling**: Run tasks on a strict frequency (e.g., "every 5 seconds") or precise calendar schedules (e.g., "every Monday at 9 AM") using Cron syntax.
-*   **Events**: Background runs emit structured events you can inspect.
-*   **Lifecycle control**: Pause, resume, update, or stop agents while the manager is running.
+Background Agents run OmniCoreAgent tasks outside the foreground request path.
+They are built around durable runs, task-store state, retries, cancellation,
+workspace output, and inspectable lifecycle events.
 
 ## Key Concepts
 
-*   **BackgroundAgentManager**: The central orchestrator that manages the lifecycle (creation, scheduling, deletion) of all background agents.
-*   **BackgroundOmniCoreAgent**: A specialized agent that runs an internal worker loop to process tasks from a queue.
-*   **TaskRegistry**: The persistent configuration store that defines *what* an agent does and *how* it should behave (retries, timeouts, etc.).
+* **BackgroundAgentManager**: Registers agents, tasks, runs, and lifecycle operations.
+* **Task store**: Operational state for agents, tasks, schedule state, runs, attempts, leases, and cancellation flags.
+* **Run**: One concrete execution of a task. Runs have stable IDs, statuses, attempts, workspace paths, and event history.
+* **Workspace output**: Every background run gets a workspace namespace for durable output.
 
 ## Quick Start
 
-Install the background extra first:
-
-```bash
-pip install "omnicoreagent[background]"
-```
-
-Here is the correct way to initialize and run a simple background monitor:
-
 ```python
 import asyncio
-from omnicoreagent import BackgroundAgentManager
+
+from omnicoreagent import BackgroundAgentManager, OmniCoreAgent
+
 
 async def main():
-    manager = BackgroundAgentManager()
+    agent = OmniCoreAgent(
+        name="system_monitor",
+        system_instruction="Check system health and write concise reports.",
+        model_config={"provider": "openai", "model": "gpt-4o-mini"},
+    )
 
-    # Define the configuration
-    agent_config = {
-        "agent_id": "system_monitor",
-        "model_config": {"provider": "openai", "model": "gpt-4o-mini"},
-        # Resilience: Limit queue to 5 pending tasks to prevent overload
-        "queue_size": 5,
-    }
-    
-    # Define the task logic
-    task_config = {
-        "query": "Check system CPU usage and return 'High' if > 80%.",
-        "interval": 60,     # Run every 60 seconds
-        "timeout": 30,       # Kill task if it takes > 30s
-        "max_retries": 3,    # Retry 3 times on failure
-    }
-    
-    # Combine and create
-    agent_config["task_config"] = task_config
-    await manager.create_agent(agent_config)
+    manager = BackgroundAgentManager(task_store="in_memory")
+    await manager.register_agent(agent_id="system_monitor", agent=agent)
+    await manager.register_task(
+        task_id="health_report",
+        agent_id="system_monitor",
+        query="Check system health and summarize anything that needs attention.",
+        schedule={"type": "manual"},
+        timeout_seconds=60,
+        retry_policy={"max_retries": 1, "initial_delay_seconds": 0},
+    )
 
-    # Start the system
-    await manager.start()
-    
-    # Keep running...
-    try:
-        while True: await asyncio.sleep(1)
-    except KeyboardInterrupt:
-        await manager.shutdown()
+    run = await manager.run_now("health_report", wait=True)
+    print(run.status)
+    print(run.result_preview)
+
 
 asyncio.run(main())
 ```
 
-## Advanced Configuration (`TaskConfig`)
+## Runtime Controls
 
-The `task_config` dictionary gives you fine-grained control over execution:
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `query` | `str` | **Required** | The natural language instruction for the agent. |
-| `interval` | `int` or `str` | `3600` | **Int**: Seconds between runs.<br />**String**: Cron expression (e.g., `* * * * *` for every minute). |
-| `timeout` | `int` | `300` | (Seconds) Hard limit for task execution. Raises `TimeoutError` if exceeded. |
-| `max_retries` | `int` | `3` | Number of times to retry a failed task before marking it as error. |
-| `retry_delay` | `int` | `60` | (Seconds) Wait time between retries. |
-| `session_id` | `str` | `uuid4` | Persistent ID for event tracking across multiple runs. |
-
-Set `queue_size` on the top-level agent config to control the worker queue depth.
-
-## Feature Deep Dive
-
-### 1. Robustness & Resilience
-*   **Timeouts**: Prevents "zombie" tasks from blocking the worker forever.
-*   **Timezone Awareness**: All internal scheduling uses UTC to prevent daylight savings issues.
-*   **Graceful Shutdown**: When `manager.shutdown()` is called, agents stop accepting new tasks but allow currently running tasks to finish (up to a limit), ensuring no data corruption.
-
-### 2. Manual Triggering
-Need to run a report *right now* instead of waiting for the schedule?
 ```python
-await manager.run_task_now("system_monitor", {"query": "Run immediate check!"})
+run = await manager.run_now("health_report")
+status = await manager.get_run(run.run_id)
+attempts = await manager.list_attempts(run.run_id)
+events = await manager.get_run_events(run.run_id)
+
+await manager.cancel_run(run.run_id)
+await manager.pause_task("health_report")
+await manager.resume_task("health_report")
 ```
 
-### 3. Lifecycle Management
-You can modify agents while the application is running:
-*   `manager.pause_agent("id")`: Temporarily stop scheduling new tasks.
-*   `manager.resume_agent("id")`: Resume scheduling.
-*   `manager.update_agent_config("id", {"interval": 10})`: Change the schedule dynamically.
-*   `manager.delete_agent("id")`: Remove the agent and clean up resources.
+## Task Configuration
 
-### 4. Observability
-Get a complete snapshot of the system state:
-```python
-status = await manager.get_manager_status()
-print(f"Active Agents: {status['running_agents']}")
-```
-Or stream events in real-time using the `EventRouter`.
+| Field | Purpose |
+|-------|---------|
+| `task_id` | Stable task identifier. |
+| `agent_id` | Registered agent that executes the task. |
+| `query` | Instruction passed to the agent for each run. |
+| `schedule` | `manual`, `interval`, `cron`, or `once`. |
+| `timeout_seconds` | Optional per-run timeout. |
+| `retry_policy` | Retry count, delay, backoff, and retryable error types. |
+| `overlap_policy` | `skip_if_running`, `queue_next`, `cancel_previous`, or `allow_parallel`. |
+| `session_policy` | `task`, `run`, or `fixed` memory-session behavior. |
 
-## What to Read Next
-
-*   **[background_agent_example.py](./background_agent_example.py)**: A comprehensive **"Kitchen Sink"** example file that demonstrates every feature listed above in a runnable script.
+The current implementation includes the durable model, in-memory task store,
+SQLite task store, manager lifecycle, manual and scheduled runs, retries with
+delay/backoff, lease fencing, expired-lease recovery, cancellation, workspace
+lifecycle files, and event history.

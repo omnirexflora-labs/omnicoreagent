@@ -1,35 +1,73 @@
-"""
-Background Agent System for Self-Flying Automation.
+"""Durable background execution for OmniCoreAgent."""
 
-This module provides a comprehensive system for creating and managing
-background agents that can execute tasks automatically.
-"""
-
-from .background_agents import BackgroundOmniCoreAgent
-from .background_agent_manager import BackgroundAgentManager
-from .task_registry import TaskRegistry
-from .base import BackgroundTaskScheduler
+from omnicoreagent.background.errors import (
+    AgentAlreadyRegisteredError,
+    AgentNotFoundError,
+    BackgroundAgentError,
+    InvalidScheduleError,
+    InvalidTaskStoreError,
+    RunCancelledError,
+    RunExecutionError,
+    RunLeaseError,
+    RunNotFoundError,
+    RunTimeoutError,
+    TaskAlreadyRegisteredError,
+    TaskNotFoundError,
+    TaskStoreError,
+)
+from omnicoreagent.background.manager import BackgroundAgentManager
+from omnicoreagent.background.models import (
+    BackgroundAgentSpec,
+    BackgroundAttempt,
+    BackgroundRun,
+    BackgroundScheduleState,
+    BackgroundTaskSpec,
+    OverlapPolicy,
+    RetryPolicy,
+    RunStatus,
+    ScheduleSpec,
+    SessionPolicy,
+    TaskStoreBackend,
+    TaskStoreConfig,
+    WorkspacePolicy,
+)
+from omnicoreagent.background.store import (
+    AbstractTaskStore,
+    InMemoryTaskStore,
+    SqlTaskStore,
+    TaskStoreRouter,
+)
 
 __all__ = [
-    "BackgroundOmniCoreAgent",
+    "AbstractTaskStore",
+    "AgentAlreadyRegisteredError",
+    "AgentNotFoundError",
+    "BackgroundAgentError",
     "BackgroundAgentManager",
-    "TaskRegistry",
-    "APSchedulerBackend",
-    "BackgroundTaskScheduler",
+    "BackgroundAgentSpec",
+    "BackgroundAttempt",
+    "BackgroundRun",
+    "BackgroundScheduleState",
+    "BackgroundTaskSpec",
+    "InMemoryTaskStore",
+    "InvalidScheduleError",
+    "InvalidTaskStoreError",
+    "OverlapPolicy",
+    "RetryPolicy",
+    "RunCancelledError",
+    "RunExecutionError",
+    "RunLeaseError",
+    "RunNotFoundError",
+    "RunStatus",
+    "RunTimeoutError",
+    "ScheduleSpec",
+    "SessionPolicy",
+    "SqlTaskStore",
+    "TaskAlreadyRegisteredError",
+    "TaskNotFoundError",
+    "TaskStoreBackend",
+    "TaskStoreConfig",
+    "TaskStoreError",
+    "TaskStoreRouter",
+    "WorkspacePolicy",
 ]
-
-
-def __getattr__(name: str):
-    if name != "APSchedulerBackend":
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-    from omnicoreagent._optional import load_optional
-
-    return load_optional(
-        "APScheduler background scheduling",
-        "background",
-        lambda: __import__(
-            "omnicoreagent.background.scheduler_backend",
-            fromlist=["APSchedulerBackend"],
-        ).APSchedulerBackend,
-    )

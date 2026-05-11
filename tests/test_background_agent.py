@@ -1,131 +1,858 @@
+import asyncio
+from datetime import datetime, timedelta, timezone
+import inspect
+import json
+
 import pytest
 
-from omnicoreagent.background.task_registry import TaskRegistry
-from omnicoreagent.background.scheduler_backend import (
-    APSchedulerBackend,
+from omnicoreagent.core.workspace.manager import Workspace
+from omnicoreagent.background import (
+    BackgroundAgentManager,
+    BackgroundAgentSpec,
+    BackgroundAttempt,
+    BackgroundRun,
+    BackgroundTaskSpec,
+    InMemoryTaskStore,
+    OverlapPolicy,
+    RetryPolicy,
+    RunLeaseError,
+    RunStatus,
+    ScheduleSpec,
+    SqlTaskStore,
+    TaskNotFoundError,
+)
+from omnicoreagent.background.models import (
+    AttemptReason,
+    AttemptStatus,
+    BackoffPolicy,
+    ScheduleType,
+    TriggerType,
+    build_occurrence_id,
+    build_session_id,
+    build_workspace_path,
+    next_cron_due,
 )
 
 
-@pytest.fixture
-def task_registry():
-    return TaskRegistry()
+class FakeAgent:
+    name = "fake"
+    system_instruction = "test"
+    model_config = {"provider": "openai", "model": "gpt-4o-mini"}
+    agent_config = {}
+
+    def __init__(self, response="done", fail_times=0, delay=0):
+        self.response = response
+        self.fail_times = fail_times
+        self.delay = delay
+        self.calls = []
+
+    async def run(self, query: str, session_id: str):
+        self.calls.append({"query": query, "session_id": session_id})
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if self.fail_times:
+            self.fail_times -= 1
+            raise RuntimeError("planned failure")
+        return {"response": self.response, "session_id": session_id}
 
 
-@pytest.fixture
-def scheduler_backend():
-    backend = APSchedulerBackend()
-    yield backend
-    if backend.is_running():
-        backend.shutdown()
+class ConfiguredFakeAgent(FakeAgent):
+    def __init__(self):
+        super().__init__()
+        self.mcp_tools = [{"name": "filesystem", "transport": "stdio"}]
+        self.agent_config = {
+            "enable_workspace_files": True,
+            "workspace_config": {"workspace_backend": "local", "workspace_dir": "custom"},
+        }
 
 
-class TestTaskRegistry:
-    def test_register_and_get(self, task_registry):
-        config = {"query": "test task"}
-        task_registry.register("agent1", config)
-        assert task_registry.get("agent1") == config
-        assert task_registry.exists("agent1") is True
+class CountingStore(InMemoryTaskStore):
+    def __init__(self):
+        super().__init__()
+        self.refresh_count = 0
 
-    def test_all_tasks(self, task_registry):
-        task_registry.register("agent1", {"q": 1})
-        task_registry.register("agent2", {"q": 2})
-        tasks = task_registry.all_tasks()
-        assert len(tasks) == 2
-        assert {"q": 1} in tasks
-        assert {"q": 2} in tasks
-
-    def test_remove(self, task_registry):
-        task_registry.register("agent1", {"q": 1})
-        task_registry.remove("agent1")
-        assert task_registry.exists("agent1") is False
-        assert task_registry.get("agent1") is None
-
-    def test_update(self, task_registry):
-        task_registry.register("agent1", {"q": 1})
-        task_registry.update("agent1", {"q": 2})
-        assert task_registry.get("agent1") == {"q": 2}
-
-    def test_update_non_existent(self, task_registry):
-        with pytest.raises(KeyError):
-            task_registry.update("non_existent", {"q": 1})
-
-    def test_get_agent_ids(self, task_registry):
-        task_registry.register("agent1", {"q": 1})
-        task_registry.register("agent2", {"q": 2})
-        ids = task_registry.get_agent_ids()
-        assert set(ids) == {"agent1", "agent2"}
-
-    def test_clear(self, task_registry):
-        task_registry.register("agent1", {"q": 1})
-        task_registry.clear()
-        assert len(task_registry.all_tasks()) == 0
+    async def refresh_lease(self, run_id, worker_id, lease_token, lease_seconds):
+        self.refresh_count += 1
+        await super().refresh_lease(run_id, worker_id, lease_token, lease_seconds)
 
 
-class TestAPSchedulerBackend:
-    @pytest.mark.asyncio
-    async def test_start_shutdown(self, scheduler_backend):
-        assert scheduler_backend.is_running() is False
-        scheduler_backend.start()
-        assert scheduler_backend.is_running() is True
-        scheduler_backend.shutdown()
-        assert scheduler_backend.is_running() is False
+async def wait_for(predicate, timeout=1.0):
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
+        result = predicate()
+        if inspect.isawaitable(result):
+            result = await result
+        if result:
+            return result
+        await asyncio.sleep(0.01)
+    result = predicate()
+    if inspect.isawaitable(result):
+        result = await result
+    return result
 
-    @pytest.mark.asyncio
-    async def test_schedule_interval_task(self, scheduler_backend):
-        async def dummy_task():
-            pass
 
-        scheduler_backend.schedule_task("agent1", 5, dummy_task)
-        assert scheduler_backend.is_task_scheduled("agent1") is True
+def agent_spec():
+    return BackgroundAgentSpec(agent_id="agent")
 
-        status = scheduler_backend.get_job_status("agent1")
-        assert status["id"] == "agent1"
-        assert "interval" in status["trigger"]
 
-    @pytest.mark.asyncio
-    async def test_schedule_cron_task(self, scheduler_backend):
-        async def dummy_task():
-            pass
+def task_spec(**overrides):
+    data = {
+        "task_id": "task",
+        "agent_id": "agent",
+        "query": "write report",
+        "schedule": {"type": "manual"},
+    }
+    data.update(overrides)
+    return BackgroundTaskSpec(**data)
 
-        # Every minute crontab
-        scheduler_backend.schedule_task("agent1", "* * * * *", dummy_task)
-        assert scheduler_backend.is_task_scheduled("agent1") is True
 
-        status = scheduler_backend.get_job_status("agent1")
-        assert "cron" in status["trigger"]
+@pytest.mark.parametrize(
+    "bad_id",
+    ["", "has space", "slash/id", "semi;colon"],
+)
+def test_model_rejects_unsafe_ids(bad_id):
+    with pytest.raises(ValueError):
+        BackgroundAgentSpec(agent_id=bad_id)
 
-    @pytest.mark.asyncio
-    async def test_remove_task(self, scheduler_backend):
-        async def dummy_task():
-            pass
 
-        scheduler_backend.schedule_task("agent1", 5, dummy_task)
-        scheduler_backend.remove_task("agent1")
-        assert scheduler_backend.is_task_scheduled("agent1") is False
+def test_schedule_validation():
+    with pytest.raises(Exception):
+        ScheduleSpec(type="interval", seconds=0)
+    with pytest.raises(Exception):
+        ScheduleSpec(type="manual", seconds=10)
+    assert ScheduleSpec(type="interval", seconds=10).seconds == 10
 
-    @pytest.mark.asyncio
-    async def test_pause_resume_job(self, scheduler_backend):
-        async def dummy_task():
-            pass
 
-        scheduler_backend.schedule_task("agent1", 5, dummy_task)
-        scheduler_backend.pause_job("agent1")
-        # APScheduler job.active might not change immediately or depends on version
-        # But we can verify it doesn't raise error
-        scheduler_backend.resume_job("agent1")
+def test_session_and_workspace_paths():
+    task = task_spec()
+    assert build_session_id(task, "run1") == "background:agent:task"
+    assert build_workspace_path(task, "run1") == "background/agent/task/run1"
 
-    @pytest.mark.asyncio
-    async def test_invalid_interval_type(self, scheduler_backend):
-        async def dummy_task():
-            pass
 
-        with pytest.raises(ValueError, match="Invalid interval type"):
-            scheduler_backend.schedule_task("agent1", 5.5, dummy_task)
+@pytest.mark.asyncio
+async def test_in_memory_store_agent_task_and_schedule_state():
+    store = InMemoryTaskStore()
+    await store.initialize()
+    await store.save_agent(agent_spec())
+    await store.save_task(task_spec())
 
-    @pytest.mark.asyncio
-    async def test_non_async_func(self, scheduler_backend):
-        def sync_task():
-            pass
+    assert (await store.get_agent("agent")).agent_id == "agent"
+    assert (await store.get_task("task")).query == "write report"
+    state = await store.get_schedule_state("task")
+    assert state.task_id == "task"
+    assert state.next_due_at is None
 
-        with pytest.raises(ValueError, match="must be an async function"):
-            scheduler_backend.schedule_task("agent1", 5, sync_task)
+
+@pytest.mark.asyncio
+async def test_due_schedule_and_atomic_dispatch_advances_state():
+    store = InMemoryTaskStore()
+    await store.save_agent(agent_spec())
+    due_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    task = task_spec(
+        schedule={"type": "once", "run_at": due_at},
+        overlap_policy=OverlapPolicy.ALLOW_PARALLEL,
+    )
+    await store.save_task(task)
+
+    due = await store.get_due_schedules(datetime.now(timezone.utc), limit=10)
+    assert len(due) == 1
+    due_task, state, occurrence_id = due[0]
+    run = BackgroundRun(
+        task_id=due_task.task_id,
+        agent_id=due_task.agent_id,
+        query_snapshot=due_task.query,
+        trigger_type=TriggerType.ONCE,
+        due_at=state.next_due_at,
+        occurrence_id=occurrence_id,
+        session_id=build_session_id(due_task, "run_x"),
+        workspace_path=build_workspace_path(due_task, "run_x"),
+    )
+    created = await store.dispatch_scheduled_run(
+        run,
+        due_task.overlap_policy,
+        expected_schedule_revision=state.schedule_revision,
+        next_due_at=None,
+    )
+
+    assert created.status == RunStatus.QUEUED
+    assert (await store.get_schedule_state("task")).next_due_at is None
+    duplicate = await store.dispatch_scheduled_run(
+        run,
+        due_task.overlap_policy,
+        expected_schedule_revision=state.schedule_revision,
+        next_due_at=None,
+    )
+    assert duplicate.run_id == created.run_id
+
+
+@pytest.mark.asyncio
+async def test_cron_schedule_gets_initial_due_time():
+    store = InMemoryTaskStore()
+    await store.save_agent(agent_spec())
+    await store.save_task(task_spec(schedule={"type": "cron", "expression": "* * * * *"}))
+
+    state = await store.get_schedule_state("task")
+
+    assert state.next_due_at is not None
+
+
+@pytest.mark.asyncio
+async def test_overlap_skip_persists_skipped_run():
+    store = InMemoryTaskStore()
+    await store.save_agent(agent_spec())
+    task = task_spec()
+    await store.save_task(task)
+    first = BackgroundRun(
+        task_id="task",
+        agent_id="agent",
+        query_snapshot="one",
+        trigger_type=TriggerType.MANUAL,
+        session_id="s1",
+        workspace_path="w1",
+    )
+    second = BackgroundRun(
+        task_id="task",
+        agent_id="agent",
+        query_snapshot="two",
+        trigger_type=TriggerType.MANUAL,
+        session_id="s2",
+        workspace_path="w2",
+    )
+
+    await store.create_run_with_overlap_guard(first, OverlapPolicy.ALLOW_PARALLEL)
+    skipped = await store.create_run_with_overlap_guard(
+        second, OverlapPolicy.SKIP_IF_RUNNING
+    )
+
+    assert skipped.status == RunStatus.SKIPPED
+    assert skipped.finished_at is not None
+
+
+@pytest.mark.asyncio
+async def test_queue_next_waits_for_active_task_run():
+    store = InMemoryTaskStore()
+    await store.save_agent(agent_spec())
+    await store.save_task(task_spec(overlap_policy=OverlapPolicy.QUEUE_NEXT))
+    first = BackgroundRun(
+        task_id="task",
+        agent_id="agent",
+        query_snapshot="one",
+        trigger_type=TriggerType.MANUAL,
+        session_id="s1",
+        workspace_path="w1",
+    )
+    second = BackgroundRun(
+        task_id="task",
+        agent_id="agent",
+        query_snapshot="two",
+        trigger_type=TriggerType.MANUAL,
+        session_id="s2",
+        workspace_path="w2",
+    )
+    await store.create_run_with_overlap_guard(first, OverlapPolicy.QUEUE_NEXT)
+    await store.create_run_with_overlap_guard(second, OverlapPolicy.QUEUE_NEXT)
+
+    claimed = await store.claim_next_run("worker", lease_seconds=30)
+    assert claimed.run_id == first.run_id
+    claimable = await store.list_claimable_runs(limit=10)
+    assert all(run.run_id != second.run_id for run in claimable)
+
+
+@pytest.mark.asyncio
+async def test_store_rejects_duplicate_run_and_attempt_ids():
+    store = InMemoryTaskStore()
+    await store.save_agent(agent_spec())
+    await store.save_task(task_spec())
+    run = BackgroundRun(
+        run_id="run_duplicate",
+        task_id="task",
+        agent_id="agent",
+        query_snapshot="one",
+        trigger_type=TriggerType.MANUAL,
+        session_id="s1",
+        workspace_path="w1",
+    )
+    await store.create_run_with_overlap_guard(run, OverlapPolicy.ALLOW_PARALLEL)
+    with pytest.raises(Exception):
+        await store.create_run_with_overlap_guard(run, OverlapPolicy.ALLOW_PARALLEL)
+
+    claimed = await store.claim_next_run("worker", lease_seconds=30)
+    running = await store.transition_run(
+        claimed.run_id,
+        {RunStatus.CLAIMED},
+        RunStatus.RUNNING,
+        worker_id="worker",
+        lease_token=claimed.lease_token,
+    )
+    attempt = BackgroundAttempt(
+        attempt_id="attempt_duplicate",
+        run_id=running.run_id,
+        attempt_number=1,
+        worker_id="worker",
+        lease_token=running.lease_token,
+    )
+    await store.create_attempt(attempt)
+    with pytest.raises(Exception):
+        await store.create_attempt(attempt)
+
+
+@pytest.mark.asyncio
+async def test_lease_token_required_for_execution_mutations():
+    store = InMemoryTaskStore()
+    await store.save_agent(agent_spec())
+    await store.save_task(task_spec())
+    run = BackgroundRun(
+        task_id="task",
+        agent_id="agent",
+        query_snapshot="one",
+        trigger_type=TriggerType.MANUAL,
+        session_id="s1",
+        workspace_path="w1",
+    )
+    await store.create_run_with_overlap_guard(run, OverlapPolicy.ALLOW_PARALLEL)
+    claimed = await store.claim_next_run("worker", lease_seconds=30)
+
+    with pytest.raises(RunLeaseError):
+        await store.transition_run(
+            claimed.run_id,
+            {RunStatus.CLAIMED},
+            RunStatus.RUNNING,
+            worker_id="worker",
+            lease_token="wrong",
+        )
+
+    running = await store.transition_run(
+        claimed.run_id,
+        {RunStatus.CLAIMED},
+        RunStatus.RUNNING,
+        worker_id="worker",
+        lease_token=claimed.lease_token,
+    )
+    assert running.status == RunStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_expired_lease_blocks_stale_worker_mutation():
+    store = InMemoryTaskStore()
+    await store.save_agent(agent_spec())
+    await store.save_task(task_spec())
+    run = BackgroundRun(
+        task_id="task",
+        agent_id="agent",
+        query_snapshot="one",
+        trigger_type=TriggerType.MANUAL,
+        session_id="s1",
+        workspace_path="w1",
+    )
+    await store.create_run_with_overlap_guard(run, OverlapPolicy.ALLOW_PARALLEL)
+    claimed = await store.claim_next_run("worker", lease_seconds=-1)
+
+    with pytest.raises(RunLeaseError):
+        await store.transition_run(
+            claimed.run_id,
+            {RunStatus.CLAIMED},
+            RunStatus.RUNNING,
+            worker_id="worker",
+            lease_token=claimed.lease_token,
+        )
+
+
+@pytest.mark.asyncio
+async def test_manager_run_now_executes_agent_and_records_events():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    agent = FakeAgent(response="complete")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    run = await manager.run_now("task", wait=True)
+
+    assert run.status == RunStatus.COMPLETED
+    assert run.result_preview == "complete"
+    assert agent.calls[0]["session_id"] == "background:agent:task"
+    assert "workspace_path: /workspace/background/agent/task/" in agent.calls[0]["query"]
+    events = await manager.get_run_events(run.run_id)
+    assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
+    assert events[-1]["event"] == "background_run_completed"
+
+
+@pytest.mark.asyncio
+async def test_manager_run_now_missing_or_disabled_task_raises():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    await manager.register_agent("agent", FakeAgent())
+    with pytest.raises(TaskNotFoundError):
+        await manager.run_now("missing")
+
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    await manager.update_task("task", {"enabled": False})
+    with pytest.raises(TaskNotFoundError):
+        await manager.run_now("task")
+
+
+@pytest.mark.asyncio
+async def test_update_task_validates_nested_schedule_patch():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    await manager.register_agent("agent", FakeAgent())
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    updated = await manager.update_task("task", {"schedule": {"type": "interval", "seconds": 60}})
+    state = await manager.task_store.get_schedule_state("task")
+
+    assert updated.schedule.type == ScheduleType.INTERVAL
+    assert state.next_due_at is not None
+
+
+@pytest.mark.asyncio
+async def test_manager_retries_failed_attempt():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    agent = FakeAgent(response="ok", fail_times=1)
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=1, initial_delay_seconds=0),
+    )
+
+    run = await manager.run_now("task", wait=True)
+
+    assert run.status == RunStatus.COMPLETED
+    attempts = await manager.list_attempts(run.run_id)
+    assert len(attempts) == 2
+    assert attempts[0].status == AttemptStatus.FAILED
+    assert attempts[0].reason == AttemptReason.INITIAL
+    assert attempts[1].status == AttemptStatus.COMPLETED
+    assert attempts[1].reason == AttemptReason.RETRY
+
+
+@pytest.mark.asyncio
+async def test_manager_dispatches_due_schedule_from_worker_loop():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    agent = FakeAgent(response="scheduled")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="scheduled work",
+        schedule={"type": "once", "run_at": datetime.now(timezone.utc) - timedelta(seconds=1)},
+        overlap_policy=OverlapPolicy.ALLOW_PARALLEL,
+    )
+
+    await manager.start()
+    completed = await wait_for(
+        lambda: manager.list_runs(status=RunStatus.COMPLETED),
+        timeout=0.5,
+    )
+    await manager.shutdown()
+
+    assert len(completed) == 1
+    assert completed[0].trigger_type == TriggerType.ONCE
+    assert agent.calls
+
+
+@pytest.mark.asyncio
+async def test_retry_delay_sets_future_queue_time_and_blocks_claim():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    agent = FakeAgent(response="ok", fail_times=1)
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(
+            max_retries=1,
+            initial_delay_seconds=5,
+            max_delay_seconds=30,
+            backoff=BackoffPolicy.EXPONENTIAL,
+        ),
+    )
+
+    run = await manager.run_now("task", wait=True)
+    attempts = await manager.list_attempts(run.run_id)
+    claimable = await manager.task_store.list_claimable_runs(limit=10)
+
+    assert run.status == RunStatus.QUEUED
+    assert attempts[0].retry_delay_seconds == 5
+    assert all(item.run_id != run.run_id for item in claimable)
+
+
+@pytest.mark.asyncio
+async def test_long_running_attempt_refreshes_lease():
+    store = CountingStore()
+    manager = BackgroundAgentManager(task_store=store, lease_seconds=0.1)
+    await manager.register_agent("agent", FakeAgent(response="ok", delay=0.25))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    run = await manager.run_now("task", wait=True)
+
+    assert run.status == RunStatus.COMPLETED
+    assert store.refresh_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_running_cancel_finishes_cancelled_not_completed():
+    manager = BackgroundAgentManager(task_store="in_memory", lease_seconds=1)
+    agent = FakeAgent(response="late", delay=0.1)
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    await manager.start()
+    run = await manager.run_now("task")
+    await wait_for(lambda: agent.calls, timeout=0.5)
+    await manager.cancel_run(run.run_id)
+    async def terminal_run():
+        latest = await manager.get_run(run.run_id)
+        if latest and latest.status in {
+            RunStatus.CANCELLED,
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+            RunStatus.TIMEOUT,
+        }:
+            return latest
+        return None
+
+    terminal = await wait_for(terminal_run, timeout=1.0)
+    await manager.shutdown()
+
+    assert terminal.status == RunStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_recover_expired_running_run_requeues_when_retry_available():
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store, worker_id="recovery")
+    await manager.register_agent("agent", FakeAgent())
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=1, initial_delay_seconds=0),
+    )
+    run = await manager.run_now("task", wait=False)
+    claimed = await store.claim_run(run.run_id, "lost_worker", lease_seconds=30)
+    running = await store.transition_run(
+        claimed.run_id,
+        {RunStatus.CLAIMED},
+        RunStatus.RUNNING,
+        {"attempt": 1},
+        "lost_worker",
+        claimed.lease_token,
+    )
+    await store.create_attempt(
+        BackgroundAttempt(
+            run_id=running.run_id,
+            attempt_number=1,
+            worker_id="lost_worker",
+            lease_token=running.lease_token,
+        )
+    )
+    async with store._lock:
+        store._runs[run.run_id] = running.model_copy(
+            update={"lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)}
+        )
+
+    await manager.recover_expired_runs()
+    recovered = await manager.get_run(run.run_id)
+
+    assert recovered.status == RunStatus.QUEUED
+    assert recovered.lease_token is None
+
+
+@pytest.mark.asyncio
+async def test_recover_expired_retrying_run_requeues_without_self_transition():
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store, worker_id="recovery")
+    await manager.register_agent("agent", FakeAgent())
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=1, initial_delay_seconds=0),
+    )
+    run = await manager.run_now("task", wait=False)
+    claimed = await store.claim_run(run.run_id, "lost_worker", lease_seconds=30)
+    retrying = await store.transition_run(
+        claimed.run_id,
+        {RunStatus.CLAIMED},
+        RunStatus.RUNNING,
+        {"attempt": 1},
+        "lost_worker",
+        claimed.lease_token,
+    )
+    retrying = await store.transition_run(
+        retrying.run_id,
+        {RunStatus.RUNNING},
+        RunStatus.RETRYING,
+        {"error": "crashed during retry release"},
+        "lost_worker",
+        retrying.lease_token,
+    )
+    async with store._lock:
+        store._runs[run.run_id] = retrying.model_copy(
+            update={"lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)}
+        )
+
+    await manager.recover_expired_runs()
+    recovered = await manager.get_run(run.run_id)
+
+    assert recovered.status == RunStatus.QUEUED
+    assert recovered.lease_token is None
+
+
+@pytest.mark.asyncio
+async def test_update_task_schedule_revisions_and_recomputes_due_time():
+    store = InMemoryTaskStore()
+    await store.save_agent(agent_spec())
+    await store.save_task(task_spec(schedule={"type": "interval", "seconds": 60}))
+    first = await store.get_schedule_state("task")
+
+    await store.save_task(task_spec(schedule={"type": "interval", "seconds": 120}))
+    second = await store.get_schedule_state("task")
+
+    assert second.schedule_revision == first.schedule_revision + 1
+    assert second.next_due_at != first.next_due_at
+
+
+@pytest.mark.asyncio
+async def test_delete_task_can_delete_historical_runs():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    await manager.register_agent("agent", FakeAgent())
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    run = await manager.run_now("task", wait=True)
+
+    await manager.delete_task("task", delete_runs=True)
+
+    assert await manager.get_run(run.run_id) is None
+
+
+@pytest.mark.asyncio
+async def test_sql_task_store_persists_runs_across_manager_restart(tmp_path):
+    url = f"sqlite:///{tmp_path / 'background.db'}"
+    manager = BackgroundAgentManager(task_store={"backend": "sql", "url": url})
+    assert isinstance(manager.task_store, SqlTaskStore)
+    await manager.register_agent("agent", FakeAgent(response="persisted"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    run = await manager.run_now("task", wait=True)
+    await manager.shutdown()
+
+    restored = BackgroundAgentManager(task_store={"backend": "sql", "url": url})
+    await restored.task_store.initialize()
+
+    assert (await restored.get_run(run.run_id)).status == RunStatus.COMPLETED
+    assert (await restored.get_task("task")).task_id == "task"
+    await restored.task_store.close()
+
+
+@pytest.mark.asyncio
+async def test_sql_task_store_does_not_wipe_state_when_used_before_start(tmp_path):
+    url = f"sqlite:///{tmp_path / 'background.db'}"
+    first = BackgroundAgentManager(task_store={"backend": "sql", "url": url})
+    await first.register_agent("agent", FakeAgent(response="persisted"))
+    await first.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    run = await first.run_now("task", wait=True)
+
+    second = BackgroundAgentManager(task_store={"backend": "sql", "url": url})
+    await second.register_agent("new_agent", FakeAgent(), replace=True)
+
+    assert (await second.get_run(run.run_id)).status == RunStatus.COMPLETED
+    assert (await second.get_task("task")).task_id == "task"
+
+
+@pytest.mark.asyncio
+async def test_sql_task_store_claim_is_atomic_across_managers(tmp_path):
+    url = f"sqlite:///{tmp_path / 'background.db'}"
+    first = BackgroundAgentManager(task_store={"backend": "sql", "url": url})
+    await first.register_agent("agent", FakeAgent())
+    await first.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    run = await first.run_now("task")
+
+    store_a = SqlTaskStore(url=url)
+    store_b = SqlTaskStore(url=url)
+    claimed_a = await store_a.claim_next_run("worker_a", lease_seconds=30)
+    claimed_b = await store_b.claim_next_run("worker_b", lease_seconds=30)
+
+    assert claimed_a.run_id == run.run_id
+    assert claimed_b is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_delayed_retry_marks_run_cancelled_immediately():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    await manager.register_agent("agent", FakeAgent(fail_times=1))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=1, initial_delay_seconds=60),
+    )
+    run = await manager.run_now("task", wait=True)
+
+    await manager.cancel_run(run.run_id)
+    cancelled = await manager.get_run(run.run_id)
+
+    assert cancelled.status == RunStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_background_run_writes_workspace_lifecycle_files(tmp_path):
+    workspace = Workspace.from_config(workspace_dir=tmp_path).ensure()
+    manager = BackgroundAgentManager(task_store="in_memory", workspace=workspace)
+    await manager.register_agent("agent", FakeAgent(response="workspace"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    run = await manager.run_now("task", wait=True)
+    run_json = tmp_path / "files" / run.workspace_path / "run.json"
+    events_jsonl = tmp_path / "files" / run.workspace_path / "events.jsonl"
+
+    assert json.loads(run_json.read_text())["run_id"] == run.run_id
+    events = [json.loads(line) for line in events_jsonl.read_text().splitlines()]
+    assert events[0]["event"] == "background_run_queued"
+    assert events[-1]["event"] == "background_run_completed"
+
+
+@pytest.mark.asyncio
+async def test_background_run_events_replay_from_workspace_after_restart(tmp_path):
+    url = f"sqlite:///{tmp_path / 'background.db'}"
+    workspace = Workspace.from_config(workspace_dir=tmp_path / "workspace").ensure()
+    manager = BackgroundAgentManager(
+        task_store={"backend": "sql", "url": url}, workspace=workspace
+    )
+    await manager.register_agent("agent", FakeAgent(response="workspace"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    run = await manager.run_now("task", wait=True)
+
+    restored = BackgroundAgentManager(
+        task_store={"backend": "sql", "url": url}, workspace=workspace
+    )
+    events = await restored.get_run_events(run.run_id)
+
+    assert events[0]["event"] == "background_run_queued"
+    assert events[-1]["event"] == "background_run_completed"
+
+
+@pytest.mark.asyncio
+async def test_workspace_policy_can_disable_lifecycle_files(tmp_path):
+    workspace = Workspace.from_config(workspace_dir=tmp_path).ensure()
+    manager = BackgroundAgentManager(task_store="in_memory", workspace=workspace)
+    await manager.register_agent("agent", FakeAgent(response="workspace"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        workspace_policy={"write_run_json": False, "write_events_jsonl": False},
+    )
+
+    run = await manager.run_now("task", wait=True)
+
+    assert not (tmp_path / "files" / run.workspace_path / "run.json").exists()
+    assert not (tmp_path / "files" / run.workspace_path / "events.jsonl").exists()
+
+
+@pytest.mark.asyncio
+async def test_skip_missed_interval_advances_from_now_not_stale_due():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    await manager.register_agent("agent", FakeAgent())
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "interval", "seconds": 60, "misfire_policy": "skip_missed"},
+        overlap_policy=OverlapPolicy.ALLOW_PARALLEL,
+    )
+    stale_due = datetime.now(timezone.utc) - timedelta(hours=1)
+    state = await manager.task_store.get_schedule_state("task")
+    await manager.task_store.save_schedule_state(
+        state.model_copy(update={"next_due_at": stale_due})
+    )
+
+    await manager._dispatch_due_schedules()
+    updated = await manager.task_store.get_schedule_state("task")
+
+    assert updated.next_due_at > datetime.now(timezone.utc)
+
+
+def test_cron_due_uses_configured_timezone():
+    after = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    due = next_cron_due("0 9 * * *", after, "Africa/Lagos")
+
+    assert due.hour == 8
+    assert due.tzinfo == timezone.utc
+
+
+@pytest.mark.asyncio
+async def test_register_agent_persists_mcp_and_workspace_config():
+    manager = BackgroundAgentManager(task_store="in_memory")
+
+    spec = await manager.register_agent("agent", ConfiguredFakeAgent())
+
+    assert spec.mcp_tools == [{"name": "filesystem", "transport": "stdio"}]
+    assert spec.workspace_config == {
+        "workspace_backend": "local",
+        "workspace_dir": "custom",
+    }
+
+
+def test_occurrence_id_scope_includes_task_revision_and_due_time():
+    due_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    occurrence = build_occurrence_id(ScheduleType.ONCE, 3, due_at)
+    assert occurrence == "once:3:2026-01-01T00:00:00+00:00"

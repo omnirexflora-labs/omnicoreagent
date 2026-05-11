@@ -7,13 +7,7 @@ only be touched when the corresponding runtime object is requested.
 """
 
 from importlib import import_module
-from importlib.metadata import PackageNotFoundError, version
 from typing import Any
-
-try:
-    __version__ = version("omnicoreagent")
-except PackageNotFoundError:
-    __version__ = "0+unknown"
 
 __all__ = [
     "__version__",
@@ -28,11 +22,24 @@ __all__ = [
     "logger",
     # Agents
     "OmniCoreAgent",
-    "BackgroundOmniCoreAgent",
     "BackgroundAgentManager",
-    "TaskRegistry",
-    "APSchedulerBackend",
-    "BackgroundTaskScheduler",
+    "BackgroundAgentSpec",
+    "BackgroundTaskSpec",
+    "BackgroundScheduleState",
+    "BackgroundRun",
+    "BackgroundAttempt",
+    "ScheduleSpec",
+    "RetryPolicy",
+    "OverlapPolicy",
+    "SessionPolicy",
+    "WorkspacePolicy",
+    "RunStatus",
+    "TaskStoreBackend",
+    "TaskStoreConfig",
+    "AbstractTaskStore",
+    "TaskStoreRouter",
+    "InMemoryTaskStore",
+    "SqlTaskStore",
     "ParallelAgent",
     "SequentialAgent",
     "RouterAgent",
@@ -59,33 +66,47 @@ _EXPORTS = {
     "ParallelAgent": ("omnicoreagent.workflows.parallel_agent", "ParallelAgent"),
     "SequentialAgent": ("omnicoreagent.workflows.sequential_agent", "SequentialAgent"),
     "RouterAgent": ("omnicoreagent.workflows.router_agent", "RouterAgent"),
+    "BackgroundAgentManager": ("omnicoreagent.background", "BackgroundAgentManager"),
+    "BackgroundAgentSpec": ("omnicoreagent.background", "BackgroundAgentSpec"),
+    "BackgroundTaskSpec": ("omnicoreagent.background", "BackgroundTaskSpec"),
+    "BackgroundScheduleState": (
+        "omnicoreagent.background",
+        "BackgroundScheduleState",
+    ),
+    "BackgroundRun": ("omnicoreagent.background", "BackgroundRun"),
+    "BackgroundAttempt": ("omnicoreagent.background", "BackgroundAttempt"),
+    "ScheduleSpec": ("omnicoreagent.background", "ScheduleSpec"),
+    "RetryPolicy": ("omnicoreagent.background", "RetryPolicy"),
+    "OverlapPolicy": ("omnicoreagent.background", "OverlapPolicy"),
+    "SessionPolicy": ("omnicoreagent.background", "SessionPolicy"),
+    "WorkspacePolicy": ("omnicoreagent.background", "WorkspacePolicy"),
+    "RunStatus": ("omnicoreagent.background", "RunStatus"),
+    "TaskStoreBackend": ("omnicoreagent.background", "TaskStoreBackend"),
+    "TaskStoreConfig": ("omnicoreagent.background", "TaskStoreConfig"),
+    "AbstractTaskStore": ("omnicoreagent.background", "AbstractTaskStore"),
+    "TaskStoreRouter": ("omnicoreagent.background", "TaskStoreRouter"),
+    "InMemoryTaskStore": ("omnicoreagent.background", "InMemoryTaskStore"),
+    "SqlTaskStore": ("omnicoreagent.background", "SqlTaskStore"),
 }
 
 _OPTIONAL_EXPORTS = {
     "DatabaseMessageStore": ("omnicoreagent.core.memory_store", "postgres"),
-    "BackgroundOmniCoreAgent": (
-        "omnicoreagent.background",
-        "background",
-    ),
-    "BackgroundAgentManager": (
-        "omnicoreagent.background",
-        "background",
-    ),
-    "TaskRegistry": ("omnicoreagent.background", "background"),
-    "APSchedulerBackend": (
-        "omnicoreagent.background",
-        "background",
-    ),
-    "BackgroundTaskScheduler": (
-        "omnicoreagent.background",
-        "background",
-    ),
     "OmniServe": ("omnicoreagent.serve", "serve"),
     "OmniServeConfig": ("omnicoreagent.serve", "serve"),
 }
 
 
 def __getattr__(name: str) -> Any:
+    if name == "__version__":
+        from importlib.metadata import PackageNotFoundError, version
+
+        try:
+            value = version("omnicoreagent")
+        except PackageNotFoundError:
+            value = "0+unknown"
+        globals()[name] = value
+        return value
+
     if name in _EXPORTS:
         module_name, attr_name = _EXPORTS[name]
         value = getattr(import_module(module_name), attr_name)

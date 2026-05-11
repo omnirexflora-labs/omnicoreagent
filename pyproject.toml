@@ -50,7 +50,6 @@ postgres = ["sqlalchemy>=2.0.49", "psycopg2-binary>=2.9.12"]
 mongodb = ["motor>=3.7.1", "pymongo>=4.17.0"]
 s3 = ["boto3>=1.43.4"]
 serve = ["fastapi>=0.136.1", "uvicorn>=0.46.0", "python-multipart>=0.0.27"]
-background = ["apscheduler>=3.11.2", "tzlocal>=5.3.1"]
 tokenizer = ["tiktoken>=0.12.0"]
 all = [
     "redis>=7.4.0",
@@ -62,8 +61,6 @@ all = [
     "fastapi>=0.136.1",
     "uvicorn>=0.46.0",
     "python-multipart>=0.0.27",
-    "apscheduler>=3.11.2",
-    "tzlocal>=5.3.1",
     "tiktoken>=0.12.0",
     "markdown>=3.10.2",
     "matplotlib>=3.10.9",
@@ -110,7 +107,6 @@ omnicoreagent = { workspace = true }
 
 [dependency-groups]
 dev = [
-    "apscheduler>=3.11.2",
     "boto3>=1.43.4",
     "fastapi>=0.136.1",
     "pre-commit>=4.6.0",
@@ -124,7 +120,6 @@ dev = [
     "ruff>=0.15.12",
     "sqlalchemy>=2.0.49",
     "tiktoken>=0.12.0",
-    "tzlocal>=5.3.1",
     "uvicorn>=0.46.0",
     "hatch>=1.16.5",
     "twine>=6.2.0",

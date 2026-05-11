@@ -64,11 +64,8 @@ TaskStoreBackend
 TaskStoreConfig
 AbstractTaskStore
 TaskStoreRouter
-SchedulerBackend
 InMemoryTaskStore
 SqlTaskStore
-RedisTaskStore
-MongoDBTaskStore
 BackgroundAgentError
 AgentAlreadyRegisteredError
 AgentNotFoundError
@@ -78,18 +75,15 @@ RunNotFoundError
 InvalidScheduleError
 InvalidTaskStoreError
 TaskStoreError
-SchedulerError
 RunLeaseError
 RunCancelledError
 RunTimeoutError
 RunExecutionError
 ```
 
-Concrete optional backend classes must be lazy exports. Importing
-`omnicoreagent` or `omnicoreagent.background` must not import Redis, MongoDB,
-SQLAlchemy, or scheduler packages until the matching backend is selected.
-Scheduler implementations are internal adapters unless explicitly documented as
-extension points.
+Importing `omnicoreagent` or `omnicoreagent.background` must not import Redis,
+MongoDB, SQLAlchemy, APScheduler, or other heavyweight scheduler packages.
+Only shipped implementations are exported.
 
 ---
 
@@ -107,9 +101,9 @@ mongodb
 Rules:
 
 - `in_memory` is ephemeral and intended for tests/development.
-- `sql` covers SQLite and Postgres through one backend family.
-- `redis` stores task state in Redis.
-- `mongodb` stores task state in MongoDB.
+- `sql` is the durable local SQLite backend.
+- `redis` is reserved for future Redis task-store support.
+- `mongodb` is reserved for future MongoDB task-store support.
 - The manager uses one task store for its lifecycle.
 - Switching task-store backend during active runs is not supported.
 - Moving state between task-store backends requires explicit export/import or
@@ -133,9 +127,6 @@ SQL requirements:
   `occurrence_id` is not null.
 - claim and transition queries must use row-level locking or an equivalent
   compare-and-set condition.
-- Postgres must use an isolation level that prevents duplicate active runs for
-  guarded overlap policies.
-
 MongoDB requirements:
 
 - task-store writes that must be atomic across schedule/run/attempt records must
@@ -153,7 +144,6 @@ MongoDB requirements:
 ```python
 manager = BackgroundAgentManager(
     task_store=None,
-    scheduler_backend=None,
     memory_router=None,
     event_router=None,
     workspace=None,
@@ -164,7 +154,6 @@ manager = BackgroundAgentManager(
 Defaults:
 
 - `task_store`: `{"backend": "sql", "url": "sqlite:///.omnicoreagent/background.db"}`
-- `scheduler_backend`: default scheduler adapter implementing `SchedulerBackend`
 - `memory_router`: normal OmniCoreAgent default memory router
 - `event_router`: normal OmniCoreAgent default event router
 - `workspace`: normal OmniCoreAgent default workspace
@@ -176,8 +165,6 @@ Accepted `task_store` forms:
 "in_memory"
 "sql"
 {"backend": "sql", "url": "sqlite:///.omnicoreagent/background.db"}
-{"backend": "redis", "url": "redis://localhost:6379/0", "prefix": "oca:bg"}
-{"backend": "mongodb", "uri": "mongodb://localhost:27017", "database": "omnicoreagent"}
 AbstractTaskStore(...)
 ```
 
@@ -209,16 +196,14 @@ Backend-specific fields:
 | Backend | Fields |
 |---------|--------|
 | `in_memory` | no required fields |
-| `sql` | `url`; accepts SQLite and Postgres URLs; defaults to `sqlite:///.omnicoreagent/background.db` when omitted |
-| `redis` | `url`; Redis must use persistence and no eviction for task records |
-| `mongodb` | `uri`, `database`; optional `collection_prefix` |
+| `sql` | `url`; accepts SQLite URLs; defaults to `sqlite:///.omnicoreagent/background.db` when omitted |
+| `redis` | reserved; runtime raises `InvalidTaskStoreError` until implemented |
+| `mongodb` | reserved; runtime raises `InvalidTaskStoreError` until implemented |
 
-Unknown fields raise `InvalidTaskStoreError`. `uri` is only accepted for
-MongoDB. `url` is used for SQL and Redis.
+Unknown fields raise `InvalidTaskStoreError`. `uri` is only accepted for the
+reserved MongoDB config. `url` is used for SQL.
 
-Bare string construction is accepted only for `in_memory` and `sql`. Redis and
-MongoDB require explicit config dictionaries so connection and durability choices
-are visible at construction time.
+Bare string construction is accepted only for `in_memory` and `sql`.
 
 ---
 
@@ -576,8 +561,8 @@ await manager.recover_expired_runs()
 
 Rules:
 
-- `start()` initializes store, scheduler, queue, dispatcher, and supervisor.
-- `start()` rebuilds enabled schedules from the task store.
+- `start()` initializes the task store and starts the schedule/worker loop.
+- `start()` dispatches due schedules from task-store state.
 - `shutdown()` stops accepting new runs and then stops workers by shutdown
   policy.
 - `run_now()` creates a run for any registered enabled task, including manual
@@ -616,6 +601,7 @@ async def list_agents() -> list[BackgroundAgentSpec]: ...
 async def save_task(spec: BackgroundTaskSpec) -> None: ...
 async def get_task(task_id: str) -> BackgroundTaskSpec | None: ...
 async def delete_task(task_id: str) -> None: ...
+async def delete_runs_for_task(task_id: str) -> None: ...
 async def list_tasks(agent_id: str | None = None, enabled: bool | None = None) -> list[BackgroundTaskSpec]: ...
 
 async def save_schedule_state(state: BackgroundScheduleState) -> None: ...
@@ -671,35 +657,6 @@ Store requirements:
 
 ---
 
-## Scheduler Contract
-
-Required methods:
-
-```python
-async def start() -> None: ...
-async def shutdown() -> None: ...
-async def schedule(task: BackgroundTaskSpec, callback: Callable) -> None: ...
-async def unschedule(task_id: str) -> None: ...
-async def pause(task_id: str) -> None: ...
-async def resume(task_id: str) -> None: ...
-async def next_run_time(task_id: str) -> datetime | None: ...
-async def is_scheduled(task_id: str) -> bool: ...
-```
-
-Scheduler requirements:
-
-- manual tasks are not scheduled.
-- disabled tasks are not scheduled.
-- schedule callbacks are advisory wakeups that tell the dispatcher to read due
-  schedules with `get_due_schedules(now, limit)`.
-- schedule callbacks do not call `OmniCoreAgent.run()`.
-- startup schedules are rebuilt from task-store records.
-- invalid schedule specs fail validation before scheduler registration.
-- misfire behavior follows `ScheduleSpec.misfire_policy`.
-- mutable schedule progress is written through `BackgroundScheduleState`.
-
----
-
 ## Dispatcher Contract
 
 Dispatcher input:
@@ -716,7 +673,7 @@ Behavior:
 
 Scheduled behavior:
 
-1. A scheduler wakeup or startup scan calls `get_due_schedules(now, limit)`.
+1. The manager schedule loop calls `get_due_schedules(now, limit)`.
 2. For each due occurrence, build a `BackgroundRun` with `query_snapshot`
    copied from the task.
 3. Persist the run with `dispatch_scheduled_run()`, which atomically applies
@@ -940,7 +897,6 @@ RunNotFoundError
 InvalidScheduleError
 InvalidTaskStoreError
 TaskStoreError
-SchedulerError
 RunLeaseError
 RunCancelledError
 RunTimeoutError
@@ -1068,8 +1024,8 @@ Run the same contract tests against every backend:
 The implementation satisfies this specification when:
 
 - `BackgroundAgentManager` uses `AbstractTaskStore` for all operational state.
-- `TaskStoreRouter` supports `in_memory`, `sql`, `redis`, and `mongodb`.
-- `sql` supports SQLite and Postgres through one backend interface.
+- `TaskStoreRouter` supports the shipped `in_memory` and `sql` stores.
+- `sql` supports local SQLite durability.
 - durable stores survive manager restart.
 - every run has a durable `run_id`.
 - every run has a durable `query_snapshot`.
