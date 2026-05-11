@@ -28,5 +28,8 @@ Specifications define what that subsystem must do exactly.
 
 Current records:
 
+- `architecture/background-agents.md`
+- `architecture/omniserve.md`
 - `architecture/workspace.md`
+- `specifications/background-agents.md`
 - `specifications/workspace.md`
