@@ -1,241 +1,696 @@
 # Background Agents Architecture
 
-This is an internal architecture record under `engineering/architecture`, not
-public product documentation. It is the source of truth for the next
-OmniCoreAgent background-agent design.
+This is an internal architecture record for the OmniCoreAgent background
+execution system. It is not public product documentation.
 
-Keep public docs thin. Keep the full reasoning, ownership boundaries,
-implementation decisions, failure modes, and coding-agent instructions here.
+The document defines the system we are building: durable, inspectable,
+scheduled, triggerable, long-running agent execution on top of `OmniCoreAgent`.
+It is the source of truth for implementation, tests, cookbook examples, and
+OmniServe integration.
 
-This document is not a list of nice-to-have ideas. When background-agent code is
-rebuilt, implementation, tests, public docs, examples, and this architecture
-record must stay aligned.
+Public docs stay concise. This record keeps the full engineering design.
 
 Read this before changing:
 
 - `src/omnicoreagent/background`
-- background-agent exports in `src/omnicoreagent/__init__.py`
-- background events in `src/omnicoreagent/core/events`
-- background cookbook examples
-- OmniServe endpoints that will later manage background agents
-- workspace conventions for scheduled or long-running runs
-
-The design target is a durable background execution system for agents. It is not
-just "run this function every N seconds."
+- `src/omnicoreagent/core/runtime`
+- `src/omnicoreagent/core/workspace`
+- `src/omnicoreagent/core/events`
+- `src/omnicoreagent/core/memory_store`
+- `engineering/specifications/background-agents.md`
 
 ---
 
-## External Design Inputs
+## Design Goal
 
-The design is informed by production systems that separate durable execution,
-scheduling, lifecycle events, and runtime state.
+Background agents turn `OmniCoreAgent` into a durable task runner.
 
-| System | Design lesson |
-|--------|---------------|
-| APScheduler | Schedules, triggers, job stores, and executors are separate concepts. A scheduler should decide when work is due; it should not own all agent state. |
-| Celery | Periodic scheduling, queued execution, retries, and task results are separate operational concerns. |
-| Temporal | Long-running work needs durable run state, retry policies, terminal states, and crash recovery. Fallible I/O should be retryable and observable. |
-| OpenAI background mode | Long-running model work needs stable run IDs, status polling, cancellation, and terminal run states. |
-| Claude Code lifecycle hooks | Agent work has a lifecycle: session start, user prompt, tool calls, tool batches, subagents, compaction, completion, and stop events. Background agents should expose lifecycle events, not hide them. |
-| Google ADK | Sessions, memory, artifacts, tools, and runners are separate services. A background agent should compose these pieces rather than blur them. |
+The system must support:
 
-These systems do not dictate OmniCoreAgent's API. They confirm the architecture
-principle: durable background execution is a runtime layer around the agent
-harness, not a second agent framework.
+- manual background runs
+- interval schedules
+- cron schedules
+- one-shot schedules
+- long-running jobs that run for minutes, hours, or days
+- cancellation
+- retry
+- timeout
+- overlap control
+- restart recovery
+- run inspection
+- workspace output
+- lifecycle events
+- OmniServe control APIs
 
-References reviewed:
-
-- APScheduler user guide: `https://apscheduler.readthedocs.io/en/stable/userguide.html`
-- Celery task guide: `https://docs.celeryq.dev/en/stable/userguide/tasks.html`
-- Temporal durable execution docs: `https://docs.temporal.io/`
-- OpenAI background mode: `https://platform.openai.com/docs/guides/background`
-- OpenAI Codex cloud tasks/environments: `https://developers.openai.com/codex/cloud/environments`
-- Claude Code hooks: `https://code.claude.com/docs/en/hooks`
-- Google ADK sessions/memory: `https://adk.dev/sessions/memory/`
-
----
-
-## Purpose
-
-Background agents exist to run `OmniCoreAgent` under supervision.
-
-They solve these harness problems:
-
-| Problem | Background-agent answer |
-|---------|-------------------------|
-| Agents need to run without a human request in the foreground | Schedule or trigger tasks and execute them in the background |
-| Long-running work must be inspectable | Persist each run, status, attempts, events, and workspace output |
-| Scheduled work must survive process restarts | Store task definitions and run state in a durable task store |
-| Agent runs can fail, time out, or loop | Apply retry, timeout, cancellation, and overlap policies outside the model loop |
-| Operators need control | Support start, pause, resume, cancel, run-now, inspect, and delete operations |
-| Background work must integrate with the harness | Use OmniCoreAgent memory, workspace, tools, guardrails, context management, subagents, and events |
-
-The design rule is:
+The core design rule:
 
 ```text
-Background agents supervise OmniCoreAgent runs.
-They do not replace OmniCoreAgent and they do not fork the agent runtime.
+Background execution supervises OmniCoreAgent.
+OmniCoreAgent remains the only reasoning and tool-execution engine.
 ```
 
+Background agents are not a second agent framework. They are a durable
+execution layer around the agent harness.
+
 ---
 
-## Current Problem
+## Architectural Principles
 
-The current implementation is functional but too small and too tightly coupled.
+| Principle | Requirement |
+|-----------|-------------|
+| Composition over subclassing | Background execution wraps an `OmniCoreAgent` run instead of creating a separate agent type |
+| Durable state first | Task, schedule, run, attempt, cancellation, and lease state live in a task store |
+| Scheduler is not executor | The scheduler emits due work; it never runs the agent |
+| Supervisor owns execution | Retry, timeout, cancellation, heartbeat, leases, and terminal status are handled outside the model loop |
+| Workspace is mandatory | Every background run gets a workspace namespace for durable outputs |
+| Memory is separate | Conversation/session memory stays in `MemoryRouter`; operational state stays in the task store |
+| Events are visibility, not truth | Events describe lifecycle transitions; the task store is the source of truth |
+| Storage is pluggable | `AbstractTaskStore` supports `in_memory`, `sql`, `redis`, and `mongodb` through one interface |
+| Backend choice is explicit | A running manager uses one task store; backend transfer is explicit, not hot-swapped mid-run |
+| Root import stays light | Optional scheduler/storage dependencies load only when background features need them |
 
-Current shape:
+---
+
+## System Context
 
 ```text
+User / OmniServe / Application
+        |
+        v
 BackgroundAgentManager
-  -> TaskRegistry
-  -> APSchedulerBackend
-  -> BackgroundOmniCoreAgent extends OmniCoreAgent
+        |
+        +--> AgentRegistry
+        +--> TaskStoreRouter
+        |       |
+        |       v
+        |   AbstractTaskStore
+        |       |
+        |       +--> in_memory
+        |       +--> sql
+        |       +--> redis
+        |       +--> mongodb
+        |
+        +--> SchedulerBackend
+        +--> Dispatcher
+        +--> RunQueue
+        +--> BackgroundSupervisor
+                |
+                v
+          OmniCoreAgent.run()
+                |
+                +--> MemoryRouter
+                +--> Workspace
+                +--> EventRouter
+                +--> Tools / MCP / Subagents / Guardrails
 ```
 
-Main issues:
-
-- `BackgroundOmniCoreAgent` subclasses `OmniCoreAgent`, making background
-  execution feel like a different agent type instead of a supervised runtime
-  mode.
-- `TaskRegistry` is in-memory only, so schedules and run state are not durable.
-- `create_agent()` mutates the input config by popping `task_config`.
-- task definition, schedule, queue, worker, retry, status, and agent config are
-  represented as mutable dictionaries.
-- scheduler state and task registry state are separate but not reconciled.
-- task updates do not cleanly reschedule from a single source of truth.
-- task runs do not have a durable run record.
-- run output is returned as a result but not standardized into workspace files.
-- lifecycle events exist but are incomplete for operations such as queued,
-  retrying, timeout, cancelled, skipped, paused, resumed, and deleted.
-- tests cover `TaskRegistry` and `APSchedulerBackend`, but not the full durable
-  lifecycle.
-
-The rebuild must move from "background wrapper" to "durable task runtime for
-agents."
+The manager owns orchestration. The store owns operational truth. The scheduler
+owns due-time calculation. The supervisor owns execution lifecycle.
+`OmniCoreAgent` owns reasoning, tool calls, workspace tools, memory, context
+management, guardrails, and final response generation.
 
 ---
 
-## Target Architecture
+## Main Components
 
-Target shape:
+### `BackgroundAgentManager`
+
+The public facade for registering agents, defining tasks, starting scheduling,
+running tasks manually, inspecting runs, cancelling runs, and shutting down the
+background runtime.
+
+It coordinates the internal services but does not directly execute agent logic.
+
+Responsibilities:
+
+- validate public input
+- register agent specs and task specs
+- initialize the selected task store
+- start and stop scheduler, dispatcher, queue, and supervisor
+- expose control operations
+- expose inspection operations
+- enforce background runtime defaults
+
+### `AgentRegistry`
+
+Holds process-local agent objects and serializable agent specs.
+
+Two registration modes exist:
+
+- direct object registration for applications that construct `OmniCoreAgent`
+  themselves
+- serializable spec registration for durable agents that can be reconstructed
+  by workers
+
+### `TaskStoreRouter`
+
+Builds the selected `AbstractTaskStore` implementation from a backend name and
+configuration.
+
+Supported backend names:
 
 ```text
-BackgroundAgentManager
-  -> BackgroundAgentRegistry
-  -> BackgroundTaskStore
-  -> SchedulerBackend
-  -> Dispatcher
-  -> RunQueue
-  -> BackgroundSupervisor
-  -> OmniCoreAgent.run()
-  -> Workspace + Memory + Events
+in_memory
+sql
+redis
+mongodb
 ```
 
-High-level flow:
+The router is a construction boundary only. Runtime code depends on
+`AbstractTaskStore`, not on backend-specific classes.
+
+### `AbstractTaskStore`
+
+The persistence interface for background execution.
+
+It stores:
+
+- agent specs
+- task specs
+- schedule state
+- run records
+- attempt records
+- run leases
+- cancellation flags
+- pause/enabled flags
+- lifecycle checkpoints
+
+It does not store:
+
+- conversation history
+- workspace files
+- tool definitions
+- MCP clients
+- raw event streams
+
+Conversation memory belongs to `MemoryRouter`. Files and artifacts belong to
+workspace storage. Events belong to `EventRouter`. The task store owns
+operational state.
+
+### `SchedulerBackend`
+
+Computes due work from schedule specs.
+
+Responsibilities:
+
+- register enabled scheduled tasks
+- compute next run time
+- handle interval, cron, and once schedules
+- apply misfire policy
+- notify dispatcher when work is due
+- pause, resume, and remove scheduled triggers
+
+Non-responsibilities:
+
+- running agents
+- retrying failed runs
+- persisting result state
+- writing workspace files
+- deciding overlap behavior
+
+The architecture depends on the `SchedulerBackend` contract, not on a specific
+scheduler package. Any scheduler implementation must be replaceable without
+changing the manager, task store, dispatcher, queue, or supervisor.
+
+### `Dispatcher`
+
+Converts due tasks into run records.
+
+Responsibilities:
+
+- load the task from the task store
+- verify the task is enabled
+- apply overlap policy
+- create a run record
+- persist the run as queued
+- enqueue the run
+- emit queued or skipped lifecycle events
+
+### `RunQueue`
+
+Provides the boundary between due work and execution.
+
+Responsibilities:
+
+- accept queued run IDs
+- provide backpressure
+- preserve deterministic ordering
+- support graceful shutdown
+- allow priority/concurrency policy without changing task storage
+
+The initial queue is process-local. The queue contract allows a durable queue
+implementation without changing the manager API.
+
+### `BackgroundSupervisor`
+
+Executes queued runs under operational control.
+
+Responsibilities:
+
+- claim runs with a lease
+- refresh heartbeats for long-running runs
+- resolve agent, task, session, and workspace namespace
+- execute `OmniCoreAgent.run()`
+- enforce timeout
+- honor cancellation
+- apply retry policy
+- preserve partial output
+- write run metadata to workspace
+- mark terminal status exactly once
+- emit lifecycle events
+
+The supervisor design supports workers running in a separate process without
+redesigning the data model.
+
+---
+
+## Task Store Architecture
+
+### Backend Names
+
+The public task-store backend names are:
+
+| Backend | Purpose |
+|---------|---------|
+| `in_memory` | Fast development and tests; state is lost on process exit |
+| `sql` | Durable relational storage for SQLite locally and Postgres in production |
+| `redis` | Durable operational state in Redis for deployments already using Redis |
+| `mongodb` | Durable document storage for MongoDB deployments |
+
+Do not expose separate public routers named after each SQL database. `sql` is
+the relational backend family. Its connection URL decides whether the concrete
+database is SQLite, Postgres, or another supported SQLAlchemy target.
+
+Example:
+
+```python
+manager = BackgroundAgentManager(
+    task_store={
+        "backend": "sql",
+        "url": "sqlite:///.omnicoreagent/background.db",
+    }
+)
+```
+
+Production Postgres uses the same backend:
+
+```python
+manager = BackgroundAgentManager(
+    task_store={
+        "backend": "sql",
+        "url": "postgresql://user:pass@host:5432/omnicoreagent",
+    }
+)
+```
+
+### Backend Selection
+
+The selected task store is part of manager construction.
 
 ```text
-register agent spec
-register task spec
-persist task
-scheduler marks task due
-dispatcher creates run
-queue accepts run
-supervisor claims run
-agent executes with session and workspace namespace
-events stream throughout lifecycle
-workspace captures files/artifacts/output
-task store records terminal run state
-scheduler computes next due time
+BackgroundAgentManager(task_store="in_memory")
+BackgroundAgentManager(task_store="sql")
+BackgroundAgentManager(task_store="redis")
+BackgroundAgentManager(task_store="mongodb")
+BackgroundAgentManager(task_store={...})
 ```
 
-The scheduler only decides when a task is due. It does not own execution.
+The manager must not hot-swap task stores while runs are active. Operational
+state is stateful by design. Moving from one backend to another requires an
+explicit export/import or transfer utility so task definitions, schedule state,
+run records, attempts, leases, and cancellation flags move together.
 
-The supervisor owns execution lifecycle. It does not own model reasoning.
+### Source Of Truth
 
-`OmniCoreAgent` owns reasoning, tools, memory, workspace tools, subagents,
-guardrails, context management, observations, and final response.
+The task store is the source of truth for:
 
----
+- which tasks exist
+- whether a task is enabled
+- when a task last ran
+- when a task is next due
+- which runs exist
+- which runs are active
+- which worker claimed a run
+- whether cancellation was requested
+- final run status
 
-## Terminology
-
-Use these names consistently.
-
-| Term | Meaning |
-|------|---------|
-| Background agent | A registered `OmniCoreAgent` plus supervision metadata |
-| Agent spec | Static definition needed to construct or reference the agent |
-| Task spec | Durable definition of scheduled or manual work |
-| Schedule spec | Interval, cron, once, or manual trigger configuration |
-| Run | One concrete execution attempt created from a task spec |
-| Attempt | One try within a run under the retry policy |
-| Task store | Operational persistence for agents, tasks, schedules, runs, and attempts |
-| Scheduler backend | Adapter that computes due work from schedule specs |
-| Dispatcher | Converts due tasks into queued runs |
-| Run queue | Backpressure and ordering boundary before execution |
-| Supervisor | Claims runs, executes them, handles retries/timeouts/cancel, and records state |
-| Workspace namespace | Durable file area for a task or run |
-
-Do not call the task store a memory store. Memory stores conversation history.
-The task store stores operational state.
-
-Do not call workspace storage a task store. Workspace stores files and artifacts.
-The task store stores metadata, status, and scheduling state.
+The scheduler can keep its own runtime jobs, but those jobs are rebuildable from
+task-store state. On startup, the manager reads enabled tasks from the task
+store and reconstructs scheduler triggers.
 
 ---
 
-## Architecture Invariants
+## Data Model
 
-These invariants are mandatory.
+### Agent Spec
 
-| Invariant | Reason |
-|-----------|--------|
-| `OmniCoreAgent` remains the execution engine | Avoid creating two agent runtimes |
-| Background execution uses composition, not agent subclassing | Keep scheduling/supervision decoupled from reasoning |
-| Task definitions are durable | Scheduled agents must survive restarts |
-| Every run has a durable `run_id` and terminal state | Operators need status, debugging, and reliable automation |
-| Scheduler does not execute agent logic directly | Scheduling and execution have different failure modes |
-| Supervisor owns retries, timeout, cancellation, and overlap policy | These are operational controls, not model reasoning controls |
-| Workspace is the file boundary for run output | Every background run must leave inspectable output |
-| Memory remains conversation/session history | Do not hide scheduled task state in MemoryRouter |
-| Events describe lifecycle transitions | Observability must be reconstructable from events |
-| Public APIs accept typed specs or validated dictionaries | Avoid unvalidated mutable config blobs |
-| In-memory implementations are development/test only | Production behavior needs durable task state |
+`BackgroundAgentSpec` identifies an agent the background system can run.
+
+Fields:
+
+- `agent_id`
+- `name`
+- `system_instruction`
+- `model_config`
+- `agent_config`
+- `mcp_tools`
+- `local_tools_ref`
+- `workspace_config`
+- `metadata`
+- `created_at`
+- `updated_at`
+
+Direct Python tool objects are process-local. Durable agent specs can reference
+tool sets by name, but they do not serialize live Python callables.
+
+### Task Spec
+
+`BackgroundTaskSpec` defines reusable background work.
+
+Fields:
+
+- `task_id`
+- `agent_id`
+- `query`
+- `schedule`
+- `enabled`
+- `timeout_seconds`
+- `retry_policy`
+- `overlap_policy`
+- `session_policy`
+- `workspace_policy`
+- `metadata`
+- `created_at`
+- `updated_at`
+
+The task spec is stable configuration. It is not a run result.
+
+### Schedule Spec
+
+`ScheduleSpec` defines when work becomes due.
+
+Supported schedule types:
+
+- `manual`
+- `interval`
+- `cron`
+- `once`
+
+Schedule state tracks:
+
+- next due time
+- last due time
+- last dispatch time
+- misfire handling
+- timezone
+- jitter
+- enabled/paused state
+
+### Run
+
+`BackgroundRun` is one concrete execution created from a task.
+
+Fields:
+
+- `run_id`
+- `task_id`
+- `agent_id`
+- `status`
+- `attempt`
+- `max_attempts`
+- `trigger`
+- `session_id`
+- `workspace_path`
+- `lease_owner`
+- `lease_expires_at`
+- `heartbeat_at`
+- `queued_at`
+- `claimed_at`
+- `started_at`
+- `finished_at`
+- `cancel_requested_at`
+- `error`
+- `result_preview`
+- `metadata`
+
+### Attempt
+
+`BackgroundAttempt` records each try inside a run.
+
+Fields:
+
+- `attempt_id`
+- `run_id`
+- `attempt_number`
+- `status`
+- `started_at`
+- `finished_at`
+- `error`
+- `retry_delay_seconds`
+- `worker_id`
+
+Attempts make retry behavior inspectable. A multi-day task trajectory must
+show every attempt and every transition that led to the final state.
 
 ---
 
-## Component Ownership
-
-Target module layout:
+## Run Lifecycle
 
 ```text
-background/
-  __init__.py
-  manager.py              # public facade
-  models.py               # typed specs, run records, enums
-  store.py                # TaskStore protocol and in-memory implementation
-  sqlite_store.py         # local durable task store
-  scheduler.py            # SchedulerBackend protocol
-  apscheduler_backend.py  # APScheduler adapter
-  dispatcher.py           # due task -> queued run
-  queue.py                # run queue and backpressure policy
-  supervisor.py           # run claiming, execution, retries, timeout, cancel
-  runner.py               # thin OmniCoreAgent.run adapter
-  workspace.py            # workspace namespace/path helpers
-  events.py               # background event builders
-  errors.py               # typed background errors
+scheduled
+  -> queued
+  -> claimed
+  -> running
+  -> retrying
+  -> running
+  -> completed
+
+running -> failed
+running -> timeout
+queued|claimed|running|retrying -> cancelled
+scheduled|queued -> skipped
 ```
 
-The existing files can be migrated into this shape. Do not keep the old names
-only for compatibility. This code has not been widely exposed enough to justify
-carrying a confusing architecture forward.
+Terminal states:
+
+```text
+completed
+failed
+cancelled
+timeout
+skipped
+```
+
+Terminal states do not transition. A retry creates a new attempt inside the
+same run before terminal status. A replay creates a new run.
+
+---
+
+## Long-Running Execution
+
+Long-running tasks require leases and heartbeats.
+
+When a supervisor claims a run, it writes:
+
+- `lease_owner`
+- `lease_expires_at`
+- `heartbeat_at`
+
+While the run is active, the supervisor refreshes the heartbeat. If the process
+dies, the lease expires and another supervisor can recover the run according to
+the recovery policy.
+
+Recovery policy must distinguish:
+
+- run never started after queue claim
+- run started but heartbeat expired
+- run was retrying when heartbeat expired
+- cancellation was requested before recovery
+- terminal status was already written
+
+The task store must make claim and terminal writes atomic so two supervisors do
+not complete the same run.
+
+---
+
+## Trigger Model
+
+Every run has a trigger record.
+
+Trigger types:
+
+- `manual`
+- `interval`
+- `cron`
+- `once`
+- `retry`
+- `recovery`
+
+Trigger metadata includes:
+
+- `triggered_at`
+- `due_at`
+- `reason`
+- `source`
+- scheduler job ID when available
+
+This gives operators the complete task trajectory: why a run exists, when it
+became due, who claimed it, what happened during execution, and how it ended.
+
+---
+
+## Overlap Policy
+
+Overlap policy is applied by the dispatcher before a run is queued.
+
+Supported policies:
+
+| Policy | Behavior |
+|--------|----------|
+| `skip_if_running` | Do not queue a new run while another active run for the same task exists |
+| `queue_next` | Queue the new run behind active work |
+| `cancel_previous` | Request cancellation for active runs and queue the new run |
+| `allow_parallel` | Allow multiple active runs for the same task |
+
+Default:
+
+```text
+skip_if_running
+```
+
+This protects long-running tasks from accidental runaway schedules.
+
+---
+
+## Retry Policy
+
+Retry policy belongs to the supervisor.
+
+Fields:
+
+- `max_retries`
+- `initial_delay_seconds`
+- `max_delay_seconds`
+- `backoff`
+- `retry_on`
+
+Retries are attempts inside a run. The scheduler is not involved in retrying a
+failed attempt.
+
+---
+
+## Cancellation
+
+Cancellation is a durable flag on the run.
+
+Cancellation can happen:
+
+- before execution starts
+- while waiting in queue
+- while running
+- during retry delay
+
+The supervisor checks cancellation:
+
+- before claiming
+- before starting the agent
+- between attempts
+- during retry sleep
+- after timeout or exception before scheduling another retry
+
+Agent-level hard interruption depends on what the active model/tool call can
+support. The background runtime still records cancellation intent immediately
+and marks the run terminal when execution is safely stopped.
+
+---
+
+## Session Policy
+
+Background tasks use normal OmniCoreAgent memory through `MemoryRouter`.
+
+Supported session policies:
+
+| Policy | Session ID |
+|--------|------------|
+| `task` | `background:{agent_id}:{task_id}` |
+| `run` | `background:{run_id}` |
+| `fixed` | User-provided session ID |
+
+Default:
+
+```text
+task
+```
+
+Use task-level sessions for recurring jobs that carry memory across previous runs.
+Use run-level sessions for isolated batch jobs.
+
+---
+
+## Workspace Contract
+
+Workspace is mandatory for background runs.
+
+Default run namespace:
+
+```text
+background/{agent_id}/{task_id}/{run_id}
+```
+
+Standard files:
+
+```text
+output.md
+run.json
+events.jsonl
+logs/
+artifacts/
+subagents/
+scratchpad/
+```
+
+The supervisor writes `run.json`. The agent writes durable task output through
+workspace tools. Events can also be mirrored to `events.jsonl` for easy
+inspection, while `EventRouter` remains the event service.
+
+The final response returned by `OmniCoreAgent.run()` is stored as
+`result_preview`. The durable result of background work is the workspace output.
+
+Workspace storage can be local, S3, or R2 through the existing workspace
+architecture. Background execution does not create a separate file-storage
+system.
+
+---
+
+## Event Model
+
+Background lifecycle events go through `EventRouter`.
+
+Required events:
+
+- `background_agent_registered`
+- `background_task_registered`
+- `background_task_scheduled`
+- `background_task_paused`
+- `background_task_resumed`
+- `background_task_deleted`
+- `background_run_queued`
+- `background_run_claimed`
+- `background_run_started`
+- `background_run_heartbeat`
+- `background_run_retrying`
+- `background_run_completed`
+- `background_run_failed`
+- `background_run_timeout`
+- `background_run_cancelled`
+- `background_run_skipped`
+- `background_run_recovered`
+
+Events make the run observable. They do not replace the task store.
 
 ---
 
 ## Public API Shape
-
-The public API should feel like scheduling a normal `OmniCoreAgent`, not
-creating a different kind of agent.
 
 ```python
 from omnicoreagent import BackgroundAgentManager, OmniCoreAgent
@@ -246,555 +701,38 @@ agent = OmniCoreAgent(
     model_config={"provider": "openai", "model": "gpt-4o-mini"},
 )
 
-manager = BackgroundAgentManager(task_store="sqlite")
-
-await manager.register_agent(
-    agent_id="system_monitor",
-    agent=agent,
+manager = BackgroundAgentManager(
+    task_store={
+        "backend": "sql",
+        "url": "sqlite:///.omnicoreagent/background.db",
+    }
 )
+
+await manager.register_agent(agent_id="system_monitor", agent=agent)
 
 await manager.register_task(
     task_id="hourly_health_report",
     agent_id="system_monitor",
     query="Check system status and save a report.",
     schedule={"type": "interval", "seconds": 3600},
-    timeout=300,
-    retry_policy={"max_retries": 2, "initial_delay": 30},
+    timeout_seconds=300,
+    retry_policy={"max_retries": 2, "initial_delay_seconds": 30},
 )
 
 await manager.start()
-```
 
-Manual execution:
-
-```python
 run = await manager.run_now("hourly_health_report")
-```
-
-Status and operations:
-
-```python
-await manager.get_task("hourly_health_report")
-await manager.get_run(run.run_id)
-await manager.list_runs(task_id="hourly_health_report")
+status = await manager.get_run(run.run_id)
 await manager.cancel_run(run.run_id)
-await manager.pause_task("hourly_health_report")
-await manager.resume_task("hourly_health_report")
-await manager.delete_task("hourly_health_report")
 ```
-
-The manager may also support one-call registration for convenience:
-
-```python
-await manager.register(
-    agent_id="system_monitor",
-    agent=agent,
-    task_id="hourly_health_report",
-    query="Check system status and save a report.",
-    schedule={"type": "interval", "seconds": 3600},
-)
-```
-
-Convenience must call the same typed core path. It must not create a second
-configuration path.
 
 ---
 
-## Agent Spec
+## OmniServe Integration
 
-`BackgroundAgentSpec` defines what agent is available for background execution.
+OmniServe exposes background execution through the runtime contract.
 
-It supports two registration forms:
-
-1. pass an already-created `OmniCoreAgent`
-2. pass a serializable construction spec
-
-In-process direct registration:
-
-```python
-await manager.register_agent(agent_id="monitor", agent=agent)
-```
-
-Serializable registration:
-
-```python
-await manager.register_agent_spec(
-    {
-        "agent_id": "monitor",
-        "name": "system_monitor",
-        "system_instruction": "Monitor health and report problems.",
-        "model_config": {"provider": "openai", "model": "gpt-4o-mini"},
-        "agent_config": {
-            "context_management": {"enabled": True},
-            "tool_offload": {"enabled": True},
-            "enable_workspace_files": True,
-        },
-        "mcp_tools": [],
-    }
-)
-```
-
-Direct `local_tools` may be in-process only because Python callables are not
-portable across processes. A durable task store may record that an agent has
-non-serializable local tools, but it cannot reconstruct those tools in a new
-process unless the user provides an import path or factory.
-
-This is a key boundary: durable tasks are possible only when the agent can be
-reconstructed or when the process keeps the agent object registered.
-
----
-
-## Task Spec
-
-`BackgroundTaskSpec` defines the scheduled work.
-
-Required fields:
-
-- `task_id`
-- `agent_id`
-- `query`
-- `schedule`
-
-Important optional fields:
-
-- `enabled`
-- `timeout`
-- `retry_policy`
-- `overlap_policy`
-- `session_policy`
-- `workspace_policy`
-- `metadata`
-
-The task spec is durable. It is the source of truth. Scheduler jobs are derived
-from task specs and can be rebuilt.
-
----
-
-## Schedule Spec
-
-Supported schedule types:
-
-| Type | Meaning |
-|------|---------|
-| `interval` | Run every N seconds |
-| `cron` | Run from a cron expression |
-| `once` | Run once at `run_at` |
-| `manual` | Never scheduled automatically; runs only through `run_now()` |
-
-Schedule spec examples:
-
-```python
-{"type": "interval", "seconds": 300}
-{"type": "cron", "expression": "0 * * * *", "timezone": "UTC"}
-{"type": "once", "run_at": "2026-05-09T00:00:00Z"}
-{"type": "manual"}
-```
-
-Scheduling options:
-
-- `timezone`
-- `start_at`
-- `end_at`
-- `jitter_seconds`
-- `misfire_policy`
-
-The default misfire policy should be conservative:
-
-```text
-skip_missed
-```
-
-Do not surprise users by running a backlog of missed jobs after downtime unless
-they explicitly choose that behavior.
-
----
-
-## Run Model
-
-Every execution creates a `BackgroundRun`.
-
-The run is the operational unit that can be inspected, cancelled, retried, and
-linked to workspace output.
-
-```text
-run_id
-task_id
-agent_id
-status
-attempt
-queued_at
-started_at
-finished_at
-cancel_requested_at
-timeout_seconds
-error
-result_preview
-workspace_path
-session_id
-metadata
-```
-
-Run statuses:
-
-```text
-scheduled
-queued
-claimed
-running
-retrying
-completed
-failed
-cancelled
-timeout
-skipped
-```
-
-Terminal statuses:
-
-```text
-completed
-failed
-cancelled
-timeout
-skipped
-```
-
-Once a run reaches a terminal status, it must not transition again except
-through an explicit new retry run or replay run.
-
----
-
-## Task Store
-
-The task store is operational persistence.
-
-It stores:
-
-- agent specs that are serializable
-- task specs
-- schedule state
-- run records
-- attempt records
-- cancellation flags
-- pause/enabled flags
-
-It does not store:
-
-- conversation memory
-- workspace files
-- tool definitions
-- MCP connection objects
-- event stream payloads unless an implementation chooses to denormalize
-
-Initial implementations:
-
-```text
-InMemoryTaskStore
-SQLiteTaskStore
-```
-
-Later implementations:
-
-```text
-RedisTaskStore
-PostgresTaskStore
-```
-
-SQLite should become the local durable default for background agents because a
-background scheduler that forgets all task state on restart is not a production
-background system.
-
----
-
-## Scheduler Backend
-
-The scheduler backend is replaceable.
-
-Initial backend:
-
-```text
-APSchedulerBackend
-```
-
-Responsibilities:
-
-- accept enabled task specs
-- compute due times
-- trigger dispatcher when work is due
-- expose next run time
-- pause/resume/delete scheduler jobs
-- rebuild scheduler jobs from task store on manager startup
-
-Non-responsibilities:
-
-- run the agent
-- retry failed work
-- store result state
-- write workspace files
-- emit all lifecycle events
-
-The scheduler should emit "due task" signals, not call `OmniCoreAgent.run()`
-directly.
-
----
-
-## Dispatcher And Queue
-
-The dispatcher converts due tasks into run records.
-
-Responsibilities:
-
-- load task spec
-- check `enabled`
-- evaluate overlap policy
-- create a durable `BackgroundRun`
-- enqueue the run
-- emit queued/skipped events
-
-The run queue provides backpressure.
-
-Queue policies:
-
-- max queue size
-- enqueue timeout
-- priority later if needed
-- per-task or global concurrency later if needed
-
-The queue can start in memory. The task store keeps run state durable, so a
-future process can recover queued/running runs.
-
----
-
-## Supervisor
-
-The supervisor is the execution heart.
-
-Responsibilities:
-
-- claim queued runs
-- mark runs `running`
-- execute `OmniCoreAgent.run()`
-- enforce timeout
-- handle cancellation
-- apply retry policy
-- record attempts
-- write run result metadata
-- emit lifecycle events
-- mark terminal status
-- release resources
-
-The supervisor should be written so it can later run in a separate process or
-worker. It must not depend on global process state that prevents that future.
-
----
-
-## Retry Policy
-
-Retry belongs to the supervisor, not to the scheduler.
-
-Default:
-
-```text
-max_retries = 0
-```
-
-Users opt into retries. Retrying an agent can be expensive and can repeat side
-effects.
-
-Supported fields:
-
-- `max_retries`
-- `initial_delay`
-- `max_delay`
-- `backoff`
-- `retry_on`
-
-Backoff values:
-
-```text
-fixed
-exponential
-```
-
-Retry must create attempt records. A retry is not invisible.
-
----
-
-## Timeout And Cancellation
-
-Timeout and cancellation are first-class.
-
-Timeout behavior:
-
-- supervisor starts timer when run becomes `running`
-- if timeout is exceeded, cancel the execution task
-- mark run `timeout`
-- emit timeout event
-- preserve workspace files already written
-
-Cancellation behavior:
-
-- `cancel_run(run_id)` sets a cancellation flag in the task store
-- supervisor checks cancellation before starting, between retries, and during
-  long-running execution where possible
-- cancellation marks run `cancelled`
-- cancellation must be idempotent
-
-Hard cancellation of an in-flight Python coroutine is best-effort. The
-architecture must represent that honestly.
-
----
-
-## Overlap Policy
-
-Overlap policy controls what happens when a task is due while a previous run is
-still active.
-
-Supported values:
-
-| Policy | Behavior |
-|--------|----------|
-| `skip_if_running` | Do not enqueue a new run if active run exists |
-| `queue_next` | Queue one or more future runs |
-| `cancel_previous` | Request cancellation of active run before queuing new one |
-| `allow_parallel` | Allow multiple active runs for the same task |
-
-Default:
-
-```text
-skip_if_running
-```
-
-This default prevents runaway schedules and duplicate side effects.
-
----
-
-## Session Policy
-
-Background agents need clear memory behavior.
-
-Supported session policies:
-
-| Policy | Behavior |
-|--------|----------|
-| `task` | Reuse one session per task |
-| `run` | Use one new session per run |
-| `fixed` | Use provided `session_id` |
-
-Default:
-
-```text
-task
-```
-
-For recurring monitoring/reporting, task-level session continuity is useful.
-For independent batch jobs, run-level sessions avoid old context leaking into
-new work.
-
----
-
-## Workspace Policy
-
-Every run must have a workspace namespace.
-
-Default layout:
-
-```text
-/background/{agent_id}/{task_id}/{run_id}/
-  output.md
-  scratchpad.md
-  events.jsonl
-  artifacts/
-  subagents/
-  logs/
-```
-
-Workspace policy fields:
-
-- `namespace`
-- `persist_outputs`
-- `output_file`
-- `event_log_file`
-- `artifact_policy`
-
-The supervisor should inject workspace guidance into the run context so the
-agent knows where to write durable output.
-
-The runtime should never rely only on `result["response"]` for background work.
-A background run must leave inspectable workspace output.
-
----
-
-## Events
-
-Background events must describe lifecycle transitions.
-
-Required event types:
-
-```text
-background_agent_registered
-background_task_registered
-background_task_scheduled
-background_task_paused
-background_task_resumed
-background_task_deleted
-background_run_queued
-background_run_started
-background_run_retrying
-background_run_completed
-background_run_failed
-background_run_timeout
-background_run_cancelled
-background_run_skipped
-```
-
-Existing event types can be migrated or mapped:
-
-```text
-background_task_started      -> background_run_started
-background_task_completed    -> background_run_completed
-background_task_error        -> background_run_failed
-background_agent_status      -> keep as aggregate status event if useful
-```
-
-Events go through `EventRouter`. Run state goes through `TaskStore`.
-
-Do not rely on events as the only source of run state. Event streams are for
-visibility. Task store is the operational source of truth.
-
----
-
-## Integration With OmniCoreAgent Harness
-
-Background execution should enable or encourage harness features that matter for
-long-running work:
-
-- workspace files
-- tool offloading
-- context management
-- event emission
-- memory session continuity
-- subagents where enabled by agent config
-
-The background system should not silently change core agent behavior except
-where required for durability. For example, if `enable_workspace_files` is false,
-the manager can reject the task or force it on by documented policy. The
-recommended policy is:
-
-```text
-background runs require workspace files
-```
-
-Reason: background work must leave durable inspectable output.
-
----
-
-## OmniServe Integration Later
-
-OmniServe should later expose background-agent operations through a dedicated
-router.
-
-Possible endpoints:
+API shape:
 
 ```text
 POST   /background/agents
@@ -805,6 +743,7 @@ DELETE /background/agents/{agent_id}
 POST   /background/tasks
 GET    /background/tasks
 GET    /background/tasks/{task_id}
+PATCH  /background/tasks/{task_id}
 POST   /background/tasks/{task_id}/pause
 POST   /background/tasks/{task_id}/resume
 POST   /background/tasks/{task_id}/run
@@ -814,82 +753,85 @@ GET    /background/runs
 GET    /background/runs/{run_id}
 POST   /background/runs/{run_id}/cancel
 GET    /background/runs/{run_id}/events
+GET    /background/runs/{run_id}/workspace
 ```
 
-This should happen after the internal runtime is clean. Do not build HTTP API
-first.
+The HTTP layer calls the same manager API used by Python applications.
 
 ---
 
-## Migration Strategy
+## Implementation Phases
 
-The rebuild should happen in stages.
+### Phase 1: Models And Task Store
 
-### Stage 1: Typed Models And Store
+- `models.py`
+- `store/base.py`
+- `store/router.py`
+- `store/in_memory.py`
+- `store/sql.py`
+- `store/redis.py`
+- `store/mongodb.py`
+- validation tests
+- store contract tests shared by every backend
 
-- add `models.py`
-- add `TaskStore` protocol
-- add `InMemoryTaskStore`
-- add `SQLiteTaskStore`
-- add tests for model validation and store behavior
+### Phase 2: Scheduler Boundary
 
-### Stage 2: Scheduler Boundary
+- `scheduler.py`
+- scheduler adapter implementation
+- startup schedule reconstruction
+- interval, cron, once, and manual tests
+- misfire tests
 
-- replace direct scheduler ownership with scheduler adapter protocol
-- make APScheduler emit due-task callbacks
-- rebuild schedules from task store at startup
-- test interval, cron, manual, and disabled tasks
+### Phase 3: Dispatcher And Queue
 
-### Stage 3: Dispatcher, Queue, Supervisor
+- dispatcher service
+- queue service
+- overlap policy tests
+- queued/skipped event tests
 
-- create durable run records
-- enqueue runs
-- supervisor claims and executes runs
-- implement retry, timeout, cancellation, and overlap policies
-- test full lifecycle without real LLM by using fake agent runner
+### Phase 4: Supervisor
 
-### Stage 4: Workspace And Events
+- run claiming
+- leases and heartbeat
+- timeout
+- retry
+- cancellation
+- terminal status handling
+- recovery behavior
+- fake-agent end-to-end tests
 
-- assign run workspace namespace
-- inject workspace guidance
-- write standard run output files
-- emit complete lifecycle events
-- test workspace output and event trace
+### Phase 5: Workspace And Events
 
-### Stage 5: Public API And Docs
+- run workspace namespace creation
+- `run.json`
+- `output.md` guidance
+- event stream integration
+- local workspace integration tests
 
-- replace cookbook examples
-- update public background-agent docs
-- add OmniServe design only after runtime stabilizes
+### Phase 6: Public API, Cookbook, OmniServe
 
----
-
-## Open Design Decisions
-
-These decisions must be finalized before implementation.
-
-| Decision | Recommendation |
-|----------|----------------|
-| Default task store | SQLite for durable local behavior; in-memory only when explicitly requested |
-| Default overlap policy | `skip_if_running` |
-| Default retry policy | no retries unless configured |
-| Default session policy | `task` |
-| Workspace required? | yes, background runs require workspace files |
-| Keep `BackgroundOmniCoreAgent`? | no, migrate to composition around `OmniCoreAgent` |
-| Keep old dict API? | accept dicts only through typed validation; do not preserve old shape for compatibility |
-| First HTTP API? | no, internal runtime first |
+- manager API cleanup
+- cookbook examples
+- public docs
+- OmniServe background routes
 
 ---
 
-## Coding-Agent Instructions
+## Acceptance Criteria
 
-Before editing background-agent code:
+The background execution system is ready when:
 
-1. Read this file.
-2. Read `engineering/specifications/background-agents.md`.
-3. Read current files under `src/omnicoreagent/background`.
-4. Do not preserve confusing legacy shapes for compatibility.
-5. Keep `OmniCoreAgent` as the execution engine.
-6. Add tests before or with each behavior change.
-7. Keep public docs honest: if a feature is not implemented, do not describe it
-   as shipped.
+- every task is persisted through `AbstractTaskStore`
+- `in_memory`, `sql`, `redis`, and `mongodb` conform to the same store tests
+- SQL backend supports SQLite locally and Postgres through one `sql` backend
+- enabled schedules survive manager restart on durable stores
+- every run has a durable `run_id`
+- every attempt is inspectable
+- long-running runs heartbeat while active
+- expired leases can be recovered deterministically
+- cancellation, timeout, retry, and overlap policies are tested
+- every background run writes workspace output
+- run status can be inspected without reading event streams
+- lifecycle events can reconstruct the run trajectory
+- optional dependencies do not load during root import
+- public docs describe shipped behavior only
