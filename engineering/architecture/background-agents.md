@@ -189,7 +189,7 @@ operational state.
 
 ### `SchedulerBackend`
 
-Computes due work from schedule specs.
+Computes wakeups from schedule specs.
 
 Responsibilities:
 
@@ -197,7 +197,7 @@ Responsibilities:
 - compute next run time
 - handle interval, cron, and once schedules
 - apply misfire policy
-- notify dispatcher when work is due
+- notify dispatcher that schedule state may have due work
 - pause, resume, and remove scheduled triggers
 
 Non-responsibilities:
@@ -207,10 +207,15 @@ Non-responsibilities:
 - persisting result state
 - writing workspace files
 - deciding overlap behavior
+- claiming due schedule occurrences
 
 The architecture depends on the `SchedulerBackend` contract, not on a specific
 scheduler package. Any scheduler implementation must be replaceable without
 changing the manager, task store, dispatcher, queue, or supervisor.
+
+Scheduler wakeups are advisory. The dispatcher reads due schedule occurrences
+from the task store, then uses one atomic store operation to create the
+scheduled run and advance schedule state.
 
 ### `Dispatcher`
 
@@ -223,7 +228,7 @@ Responsibilities:
 - apply overlap policy
 - create a run record
 - persist the run as queued
-- enqueue the run
+- make the queued run claimable through the task store
 - emit queued or skipped lifecycle events
 
 ### `RunQueue`
@@ -232,14 +237,16 @@ Provides the boundary between due work and execution.
 
 Responsibilities:
 
-- accept queued run IDs
+- expose claimable queued run IDs from the task store
 - provide backpressure
 - preserve deterministic ordering
 - support graceful shutdown
 - allow priority/concurrency policy without changing task storage
 
-The initial queue is process-local. The queue contract allows a durable queue
-implementation without changing the manager API.
+The run queue is store-backed. A queued run is durable before any worker sees
+it, and queued runs remain claimable after process restart. A process-local
+queue can exist only as an optimization over the store-backed queue; it must not
+be the source of truth.
 
 ### `BackgroundSupervisor`
 
@@ -274,7 +281,7 @@ The public task-store backend names are:
 |---------|---------|
 | `in_memory` | Fast development and tests; state is lost on process exit |
 | `sql` | Durable relational storage for SQLite locally and Postgres in production |
-| `redis` | Durable operational state in Redis for deployments already using Redis |
+| `redis` | Operational state in Redis when Redis persistence and no-eviction policy are configured |
 | `mongodb` | Durable document storage for MongoDB deployments |
 
 Do not expose separate public routers named after each SQL database. `sql` is
@@ -310,10 +317,12 @@ The selected task store is part of manager construction.
 ```text
 BackgroundAgentManager(task_store="in_memory")
 BackgroundAgentManager(task_store="sql")
-BackgroundAgentManager(task_store="redis")
-BackgroundAgentManager(task_store="mongodb")
 BackgroundAgentManager(task_store={...})
 ```
+
+Bare string construction is limited to `in_memory` and `sql`. Redis and MongoDB
+use explicit configuration dictionaries so connection and durability settings
+are visible when the manager starts.
 
 The manager must not hot-swap task stores while runs are active. Operational
 state is stateful by design. Moving from one backend to another requires an
@@ -337,6 +346,10 @@ The task store is the source of truth for:
 The scheduler can keep its own runtime jobs, but those jobs are rebuildable from
 task-store state. On startup, the manager reads enabled tasks from the task
 store and reconstructs scheduler triggers.
+
+Scheduler wakeups are not the source of truth. The task store records schedule
+state, exposes due occurrences, and atomically dispatches each scheduled run
+while advancing schedule state.
 
 ---
 
@@ -406,6 +419,29 @@ Schedule state tracks:
 - jitter
 - enabled/paused state
 
+### Schedule State
+
+`BackgroundScheduleState` records mutable scheduling progress for one task.
+
+Fields:
+
+- `task_id`
+- `next_due_at`
+- `last_due_at`
+- `last_dispatched_at`
+- `paused`
+- `schedule_revision`
+- `misfire_cursor`
+- `updated_at`
+
+The schedule spec defines the rule. Schedule state records the runtime progress
+of that rule. The task store owns schedule state so interval, cron, once,
+misfire, and restart behavior remain deterministic.
+
+Each due occurrence gets a stable `occurrence_id`. Dispatch uses that
+occurrence ID when creating a run so the same schedule occurrence cannot create
+duplicate runs after restart or competing dispatchers.
+
 ### Run
 
 `BackgroundRun` is one concrete execution created from a task.
@@ -418,10 +454,17 @@ Fields:
 - `status`
 - `attempt`
 - `max_attempts`
-- `trigger`
+- `query_snapshot`
+- `trigger_type`
+- `triggered_at`
+- `due_at`
+- `occurrence_id`
+- `trigger_metadata`
 - `session_id`
 - `workspace_path`
 - `lease_owner`
+- `lease_token`
+- `lease_generation`
 - `lease_expires_at`
 - `heartbeat_at`
 - `queued_at`
@@ -442,12 +485,14 @@ Fields:
 - `attempt_id`
 - `run_id`
 - `attempt_number`
+- `reason`
 - `status`
 - `started_at`
 - `finished_at`
 - `error`
 - `retry_delay_seconds`
 - `worker_id`
+- `lease_token`
 
 Attempts make retry behavior inspectable. A multi-day task trajectory must
 show every attempt and every transition that led to the final state.
@@ -457,18 +502,19 @@ show every attempt and every transition that led to the final state.
 ## Run Lifecycle
 
 ```text
-scheduled
-  -> queued
+queued
   -> claimed
   -> running
   -> retrying
+  -> queued
+  -> claimed
   -> running
   -> completed
 
 running -> failed
 running -> timeout
 queued|claimed|running|retrying -> cancelled
-scheduled|queued -> skipped
+queued -> skipped
 ```
 
 Terminal states:
@@ -481,8 +527,9 @@ timeout
 skipped
 ```
 
-Terminal states do not transition. A retry creates a new attempt inside the
-same run before terminal status. A replay creates a new run.
+Terminal states do not transition. Schedule state tracks due work before a run
+exists. A retry creates a new attempt inside the same run. A replay creates a
+new run.
 
 ---
 
@@ -500,6 +547,15 @@ While the run is active, the supervisor refreshes the heartbeat. If the process
 dies, the lease expires and another supervisor can recover the run according to
 the recovery policy.
 
+Every claim creates a `lease_token` and increments `lease_generation`. Heartbeat,
+attempt update, terminal status, and workspace metadata writes must carry the
+current lease token. A worker that loses its lease must stop writing and fail
+closed. This fencing rule reduces duplicate side effects during multi-day runs.
+
+Expired-lease recovery steals the lease with a new token before changing run or
+attempt state. The abandoned attempt is closed as `failed` with reason
+`lease_expired` before the recovered run is requeued or marked terminal.
+
 Recovery policy must distinguish:
 
 - run never started after queue claim
@@ -511,20 +567,26 @@ Recovery policy must distinguish:
 The task store must make claim and terminal writes atomic so two supervisors do
 not complete the same run.
 
+Recovery requeues eligible expired runs through the same claim path used by
+normal execution. It does not create a new run. It records recovery as an
+attempt reason and emits `background_run_recovered`.
+
+Generic metadata updates never change execution state. Any execution-state
+transition after claim must include the worker ID and lease token so stale
+workers cannot mutate a recovered run.
+
 ---
 
 ## Trigger Model
 
 Every run has a trigger record.
 
-Trigger types:
+Run trigger types:
 
 - `manual`
 - `interval`
 - `cron`
 - `once`
-- `retry`
-- `recovery`
 
 Trigger metadata includes:
 
@@ -532,10 +594,15 @@ Trigger metadata includes:
 - `due_at`
 - `reason`
 - `source`
+- `occurrence_id`
 - scheduler job ID when available
 
 This gives operators the complete task trajectory: why a run exists, when it
 became due, who claimed it, what happened during execution, and how it ended.
+
+Retry and recovery are attempt reasons and lifecycle events, not initial run
+trigger types. They do not create a new run unless an operator explicitly starts
+a replay.
 
 ---
 
@@ -547,9 +614,9 @@ Supported policies:
 
 | Policy | Behavior |
 |--------|----------|
-| `skip_if_running` | Do not queue a new run while another active run for the same task exists |
+| `skip_if_running` | Persist a terminal `skipped` run instead of queueing a new active run while another active run for the same task exists |
 | `queue_next` | Queue the new run behind active work |
-| `cancel_previous` | Request cancellation for active runs and queue the new run |
+| `cancel_previous` | Request cancellation for active runs and create the successor run in the same store transaction |
 | `allow_parallel` | Allow multiple active runs for the same task |
 
 Default:
@@ -559,6 +626,12 @@ skip_if_running
 ```
 
 This protects long-running tasks from accidental runaway schedules.
+
+Overlap policy must be enforced atomically by the task store when a run is
+created. The dispatcher does not perform a separate "list active runs, then
+create run" sequence because that races under multiple managers. For
+`queue_next`, the run can be persisted as `queued`, but `claim_next_run` must not
+claim it while an earlier active run for the same task is still active.
 
 ---
 
@@ -576,6 +649,12 @@ Fields:
 
 Retries are attempts inside a run. The scheduler is not involved in retrying a
 failed attempt.
+
+When an attempt times out and retries remain, the run transitions to
+`retrying`, records the failed attempt as `timeout`, waits according to the
+retry policy, then returns to `queued` for the next attempt. The run reaches
+terminal `timeout` only after retry policy is exhausted or timeout is not
+retryable.
 
 ---
 
@@ -649,9 +728,10 @@ subagents/
 scratchpad/
 ```
 
-The supervisor writes `run.json`. The agent writes durable task output through
-workspace tools. Events can also be mirrored to `events.jsonl` for easy
-inspection, while `EventRouter` remains the event service.
+The supervisor binds the run workspace before calling the agent and injects a
+short run-context instruction into the request. The agent writes durable task
+output through workspace tools. Events can also be mirrored to `events.jsonl`
+for easy inspection, while `EventRouter` remains the event service.
 
 The final response returned by `OmniCoreAgent.run()` is stored as
 `result_preview`. The durable result of background work is the workspace output.
@@ -760,63 +840,6 @@ The HTTP layer calls the same manager API used by Python applications.
 
 ---
 
-## Implementation Phases
-
-### Phase 1: Models And Task Store
-
-- `models.py`
-- `store/base.py`
-- `store/router.py`
-- `store/in_memory.py`
-- `store/sql.py`
-- `store/redis.py`
-- `store/mongodb.py`
-- validation tests
-- store contract tests shared by every backend
-
-### Phase 2: Scheduler Boundary
-
-- `scheduler.py`
-- scheduler adapter implementation
-- startup schedule reconstruction
-- interval, cron, once, and manual tests
-- misfire tests
-
-### Phase 3: Dispatcher And Queue
-
-- dispatcher service
-- queue service
-- overlap policy tests
-- queued/skipped event tests
-
-### Phase 4: Supervisor
-
-- run claiming
-- leases and heartbeat
-- timeout
-- retry
-- cancellation
-- terminal status handling
-- recovery behavior
-- fake-agent end-to-end tests
-
-### Phase 5: Workspace And Events
-
-- run workspace namespace creation
-- `run.json`
-- `output.md` guidance
-- event stream integration
-- local workspace integration tests
-
-### Phase 6: Public API, Cookbook, OmniServe
-
-- manager API cleanup
-- cookbook examples
-- public docs
-- OmniServe background routes
-
----
-
 ## Acceptance Criteria
 
 The background execution system is ready when:
@@ -825,13 +848,17 @@ The background execution system is ready when:
 - `in_memory`, `sql`, `redis`, and `mongodb` conform to the same store tests
 - SQL backend supports SQLite locally and Postgres through one `sql` backend
 - enabled schedules survive manager restart on durable stores
+- schedule state stores next due, last due, dispatch cursor, and occurrence IDs
 - every run has a durable `run_id`
+- every run stores the exact input snapshot used for execution
 - every attempt is inspectable
 - long-running runs heartbeat while active
+- lease tokens fence stale workers from writing after recovery
 - expired leases can be recovered deterministically
+- queued runs remain claimable after restart
 - cancellation, timeout, retry, and overlap policies are tested
 - every background run writes workspace output
 - run status can be inspected without reading event streams
 - lifecycle events can reconstruct the run trajectory
-- optional dependencies do not load during root import
+- optional dependencies do not load during root or background-package import
 - public docs describe shipped behavior only

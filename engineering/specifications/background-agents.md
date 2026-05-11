@@ -51,6 +51,7 @@ The background package exports:
 BackgroundAgentManager
 BackgroundAgentSpec
 BackgroundTaskSpec
+BackgroundScheduleState
 BackgroundRun
 BackgroundAttempt
 ScheduleSpec
@@ -63,12 +64,30 @@ TaskStoreBackend
 TaskStoreConfig
 AbstractTaskStore
 TaskStoreRouter
+SchedulerBackend
 InMemoryTaskStore
 SqlTaskStore
 RedisTaskStore
 MongoDBTaskStore
+BackgroundAgentError
+AgentAlreadyRegisteredError
+AgentNotFoundError
+TaskAlreadyRegisteredError
+TaskNotFoundError
+RunNotFoundError
+InvalidScheduleError
+InvalidTaskStoreError
+TaskStoreError
+SchedulerError
+RunLeaseError
+RunCancelledError
+RunTimeoutError
+RunExecutionError
 ```
 
+Concrete optional backend classes must be lazy exports. Importing
+`omnicoreagent` or `omnicoreagent.background` must not import Redis, MongoDB,
+SQLAlchemy, or scheduler packages until the matching backend is selected.
 Scheduler implementations are internal adapters unless explicitly documented as
 extension points.
 
@@ -95,6 +114,37 @@ Rules:
 - Switching task-store backend during active runs is not supported.
 - Moving state between task-store backends requires explicit export/import or
   transfer tooling.
+
+Redis requirements:
+
+- task, schedule, run, and attempt records must not use TTL.
+- Redis deployments used for durable background state must enable AOF or an
+  equivalent managed durability setting with an explicit acknowledged-write loss
+  bound. RDB-only persistence is not sufficient for strict durable task state.
+- eviction policy must not evict task-store keys.
+- atomic claim, transition, overlap, and schedule-advance operations must use
+  transactions or Lua scripts.
+
+SQL requirements:
+
+- scheduled dispatch, overlap checks, `cancel_previous`, run claiming, lease
+  refresh, and terminal transitions must run in database transactions.
+- SQL backends must enforce uniqueness for `(task_id, occurrence_id)` when
+  `occurrence_id` is not null.
+- claim and transition queries must use row-level locking or an equivalent
+  compare-and-set condition.
+- Postgres must use an isolation level that prevents duplicate active runs for
+  guarded overlap policies.
+
+MongoDB requirements:
+
+- task-store writes that must be atomic across schedule/run/attempt records must
+  use MongoDB transactions on deployments that support them.
+- deployments must use majority write concern for durable task state.
+- MongoDB backends must create a unique index for `(task_id, occurrence_id)`
+  when `occurrence_id` is not null.
+- claim and transition updates must include expected status and lease token in
+  the filter.
 
 ---
 
@@ -125,8 +175,6 @@ Accepted `task_store` forms:
 ```python
 "in_memory"
 "sql"
-"redis"
-"mongodb"
 {"backend": "sql", "url": "sqlite:///.omnicoreagent/background.db"}
 {"backend": "redis", "url": "redis://localhost:6379/0", "prefix": "oca:bg"}
 {"backend": "mongodb", "uri": "mongodb://localhost:27017", "database": "omnicoreagent"}
@@ -134,6 +182,43 @@ AbstractTaskStore(...)
 ```
 
 If an `AbstractTaskStore` instance is passed, the manager uses it directly.
+
+### `TaskStoreBackend`
+
+Allowed values:
+
+```text
+in_memory
+sql
+redis
+mongodb
+```
+
+### `TaskStoreConfig`
+
+Common fields:
+
+| Field | Type | Required | Meaning |
+|-------|------|----------|---------|
+| `backend` | `TaskStoreBackend` | yes | Store backend |
+| `prefix` | `str | None` | no | Key/table/collection prefix |
+| `connect_timeout` | `float | None` | no | Backend connection timeout |
+
+Backend-specific fields:
+
+| Backend | Fields |
+|---------|--------|
+| `in_memory` | no required fields |
+| `sql` | `url`; accepts SQLite and Postgres URLs; defaults to `sqlite:///.omnicoreagent/background.db` when omitted |
+| `redis` | `url`; Redis must use persistence and no eviction for task records |
+| `mongodb` | `uri`, `database`; optional `collection_prefix` |
+
+Unknown fields raise `InvalidTaskStoreError`. `uri` is only accepted for
+MongoDB. `url` is used for SQL and Redis.
+
+Bare string construction is accepted only for `in_memory` and `sql`. Redis and
+MongoDB require explicit config dictionaries so connection and durability choices
+are visible at construction time.
 
 ---
 
@@ -195,7 +280,7 @@ Validation:
 - `retry_policy.max_retries` defaults to 0.
 - `overlap_policy` defaults to `skip_if_running`.
 - `session_policy` defaults to `task`.
-- `workspace_policy.required` defaults to true.
+- `workspace_policy` always creates a run workspace.
 
 ### `ScheduleSpec`
 
@@ -241,6 +326,14 @@ Validation:
 - `max_delay_seconds >= initial_delay_seconds` unless
   `initial_delay_seconds == 0`
 
+Timeout semantics:
+
+- an attempt timeout records the attempt as `timeout`.
+- if timeout is retryable and attempts remain, the run transitions to
+  `retrying`, waits according to policy, then transitions to `queued`.
+- the run transitions to terminal `timeout` only when no retry remains or
+  timeout is not retryable.
+
 ### `OverlapPolicy`
 
 Allowed values:
@@ -273,13 +366,46 @@ Fields:
 
 | Field | Type | Default |
 |-------|------|---------|
-| `required` | `bool` | `true` |
 | `namespace_template` | `str` | `background/{agent_id}/{task_id}/{run_id}` |
 | `write_run_json` | `bool` | `true` |
 | `write_events_jsonl` | `bool` | `true` |
 
-Background runs require workspace output. If no workspace is configured, the
-manager uses the default local workspace.
+Background runs always require workspace output. If no workspace is configured,
+the manager uses the default local workspace.
+
+### `BackgroundScheduleState`
+
+Fields:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `task_id` | `str` | Source task |
+| `next_due_at` | `datetime | None` | Next due occurrence |
+| `last_due_at` | `datetime | None` | Last due occurrence |
+| `last_dispatched_at` | `datetime | None` | Last successfully dispatched occurrence |
+| `paused` | `bool` | Whether scheduling is paused |
+| `schedule_revision` | `int` | Monotonic revision for compare-and-set updates |
+| `misfire_cursor` | `str | None` | Backend-specific cursor for missed occurrences |
+| `updated_at` | `datetime` | Last schedule-state update |
+
+Each due occurrence has a stable `occurrence_id`. The store uses
+`occurrence_id` to prevent duplicate run creation for the same scheduled
+occurrence.
+
+Occurrence IDs are unique per task. The portable uniqueness key is:
+
+```text
+(task_id, occurrence_id)
+```
+
+`occurrence_id` is derived from the schedule type, schedule revision, and due
+timestamp:
+
+```text
+{schedule_type}:{schedule_revision}:{due_at_iso}
+```
+
+Manual runs do not use occurrence IDs.
 
 ### `BackgroundRun`
 
@@ -293,12 +419,17 @@ Fields:
 | `status` | `RunStatus` | Current state |
 | `attempt` | `int` | Current attempt number |
 | `max_attempts` | `int` | First attempt plus retries |
-| `trigger_type` | `str` | manual, interval, cron, once, retry, recovery |
+| `query_snapshot` | `str` | Run input captured at dispatch time |
+| `trigger_type` | `str` | manual, interval, cron, once |
 | `triggered_at` | `datetime` | Trigger timestamp |
 | `due_at` | `datetime | None` | Schedule due timestamp |
+| `occurrence_id` | `str | None` | Stable schedule occurrence id |
+| `trigger_metadata` | `dict` | Trigger reason/source metadata |
 | `session_id` | `str` | Memory session id |
 | `workspace_path` | `str` | Run workspace namespace |
 | `lease_owner` | `str | None` | Worker holding the run |
+| `lease_token` | `str | None` | Fencing token for the current lease |
+| `lease_generation` | `int` | Monotonic lease generation |
 | `lease_expires_at` | `datetime | None` | Lease expiry |
 | `heartbeat_at` | `datetime | None` | Last heartbeat |
 | `queued_at` | `datetime | None` | Queue timestamp |
@@ -319,8 +450,10 @@ Fields:
 | `attempt_id` | `str` | Stable attempt identifier |
 | `run_id` | `str` | Parent run |
 | `attempt_number` | `int` | Attempt index starting at 1 |
+| `reason` | `str` | initial, retry, recovery, lease_expired |
 | `status` | `str` | running, completed, failed, timeout, cancelled |
 | `worker_id` | `str` | Worker executing attempt |
+| `lease_token` | `str` | Lease token held by the worker |
 | `started_at` | `datetime` | Attempt start |
 | `finished_at` | `datetime | None` | Attempt end |
 | `error` | `str | None` | Attempt error |
@@ -333,7 +466,6 @@ Fields:
 Allowed statuses:
 
 ```text
-scheduled
 queued
 claimed
 running
@@ -357,11 +489,12 @@ skipped
 
 Allowed transitions:
 
-- `scheduled -> queued`
 - `queued -> claimed`
 - `claimed -> running`
 - `running -> retrying`
-- `retrying -> running`
+- `retrying -> queued`
+- `queued -> claimed`
+- `claimed -> running`
 - `running -> completed`
 - `running -> failed`
 - `running -> timeout`
@@ -369,11 +502,11 @@ Allowed transitions:
 - `claimed -> cancelled`
 - `running -> cancelled`
 - `retrying -> cancelled`
-- `scheduled -> skipped`
 - `queued -> skipped`
 
-Terminal runs cannot be mutated except for non-state metadata explicitly allowed
-by the store.
+Schedule state tracks due work before a run exists. A run starts at `queued`
+after the dispatcher creates it. Terminal runs cannot be mutated except for
+non-state metadata explicitly allowed by the store.
 
 ---
 
@@ -399,7 +532,21 @@ Rules:
 ### Task Operations
 
 ```python
-await manager.register_task(spec: BackgroundTaskSpec | dict, replace: bool = False)
+await manager.register_task(
+    spec: BackgroundTaskSpec | dict | None = None,
+    *,
+    task_id: str | None = None,
+    agent_id: str | None = None,
+    query: str | None = None,
+    schedule: ScheduleSpec | dict | None = None,
+    timeout_seconds: int | None = None,
+    retry_policy: RetryPolicy | dict | None = None,
+    overlap_policy: OverlapPolicy | str | None = None,
+    session_policy: SessionPolicy | dict | None = None,
+    workspace_policy: WorkspacePolicy | dict | None = None,
+    metadata: dict | None = None,
+    replace: bool = False,
+)
 await manager.update_task(task_id: str, patch: dict)
 await manager.delete_task(task_id: str, delete_runs: bool = False)
 await manager.get_task(task_id: str)
@@ -410,6 +557,7 @@ Rules:
 
 - registering a task for an unknown `agent_id` raises.
 - duplicate task IDs raise unless `replace=True`.
+- callers pass either `spec` or keyword fields, not both.
 - updating schedule state reschedules from task-store truth.
 - deleting a task removes scheduler triggers.
 - historical runs are preserved unless `delete_runs=True`.
@@ -432,7 +580,8 @@ Rules:
 - `start()` rebuilds enabled schedules from the task store.
 - `shutdown()` stops accepting new runs and then stops workers by shutdown
   policy.
-- `run_now()` creates a run for any registered task, including manual tasks.
+- `run_now()` creates a run for any registered enabled task, including manual
+  tasks.
 - `cancel_run()` is idempotent.
 - `recover_expired_runs()` claims expired leases according to recovery policy.
 
@@ -469,20 +618,28 @@ async def get_task(task_id: str) -> BackgroundTaskSpec | None: ...
 async def delete_task(task_id: str) -> None: ...
 async def list_tasks(agent_id: str | None = None, enabled: bool | None = None) -> list[BackgroundTaskSpec]: ...
 
-async def create_run(run: BackgroundRun) -> None: ...
+async def save_schedule_state(state: BackgroundScheduleState) -> None: ...
+async def get_schedule_state(task_id: str) -> BackgroundScheduleState | None: ...
+async def get_due_schedules(now: datetime, limit: int) -> list[tuple[BackgroundTaskSpec, BackgroundScheduleState, str]]: ...
+async def advance_schedule(task_id: str, expected_revision: int, occurrence_id: str, next_due_at: datetime | None) -> BackgroundScheduleState: ...
+async def dispatch_scheduled_run(run: BackgroundRun, overlap_policy: OverlapPolicy, expected_schedule_revision: int, next_due_at: datetime | None) -> BackgroundRun: ...
+async def create_run_with_overlap_guard(run: BackgroundRun, overlap_policy: OverlapPolicy) -> BackgroundRun: ...
 async def get_run(run_id: str) -> BackgroundRun | None: ...
-async def update_run(run_id: str, patch: dict) -> BackgroundRun: ...
-async def transition_run(run_id: str, expected: set[RunStatus], next_status: RunStatus, patch: dict | None = None) -> BackgroundRun: ...
+async def update_run_metadata(run_id: str, patch: dict, worker_id: str | None = None, lease_token: str | None = None) -> BackgroundRun: ...
+async def transition_run(run_id: str, expected: set[RunStatus], next_status: RunStatus, patch: dict | None = None, worker_id: str | None = None, lease_token: str | None = None) -> BackgroundRun: ...
 async def list_runs(task_id: str | None = None, status: RunStatus | None = None) -> list[BackgroundRun]: ...
 async def list_active_runs(task_id: str | None = None) -> list[BackgroundRun]: ...
+async def list_claimable_runs(limit: int) -> list[BackgroundRun]: ...
+async def claim_next_run(worker_id: str, lease_seconds: int) -> BackgroundRun | None: ...
 
 async def create_attempt(attempt: BackgroundAttempt) -> None: ...
-async def update_attempt(attempt_id: str, patch: dict) -> BackgroundAttempt: ...
+async def update_attempt(attempt_id: str, patch: dict, worker_id: str, lease_token: str) -> BackgroundAttempt: ...
 async def list_attempts(run_id: str) -> list[BackgroundAttempt]: ...
 
 async def claim_run(run_id: str, worker_id: str, lease_seconds: int) -> BackgroundRun: ...
-async def refresh_lease(run_id: str, worker_id: str, lease_seconds: int) -> None: ...
-async def release_lease(run_id: str, worker_id: str) -> None: ...
+async def steal_expired_run(run_id: str, worker_id: str, lease_seconds: int) -> BackgroundRun: ...
+async def refresh_lease(run_id: str, worker_id: str, lease_token: str, lease_seconds: int) -> None: ...
+async def release_lease(run_id: str, worker_id: str, lease_token: str) -> None: ...
 async def list_expired_leases(now: datetime) -> list[BackgroundRun]: ...
 
 async def request_cancel(run_id: str) -> None: ...
@@ -496,6 +653,18 @@ Store requirements:
 - state transitions are validated.
 - terminal status is written exactly once.
 - claim operations are atomic.
+- scheduled dispatch creates the run, applies overlap, handles
+  `cancel_previous`, deduplicates `occurrence_id`, and advances schedule state
+  atomically.
+- manual run creation and overlap guard are atomic.
+- `claim_next_run` enforces `queue_next` per-task serialization.
+- execution-state transitions require `worker_id` and `lease_token` after claim.
+- run metadata writes from an active worker require `worker_id` and
+  `lease_token`; operator metadata writes outside execution must not change
+  execution state.
+- lease writes compare `worker_id` and `lease_token`.
+- expired-lease stealing creates a new `lease_token` and increments
+  `lease_generation` atomically.
 - list methods are deterministic.
 - durable backends persist across process restart.
 - every backend passes the shared task-store contract tests.
@@ -521,11 +690,13 @@ Scheduler requirements:
 
 - manual tasks are not scheduled.
 - disabled tasks are not scheduled.
-- schedule callbacks notify the dispatcher.
+- schedule callbacks are advisory wakeups that tell the dispatcher to read due
+  schedules with `get_due_schedules(now, limit)`.
 - schedule callbacks do not call `OmniCoreAgent.run()`.
 - startup schedules are rebuilt from task-store records.
 - invalid schedule specs fail validation before scheduler registration.
 - misfire behavior follows `ScheduleSpec.misfire_policy`.
+- mutable schedule progress is written through `BackgroundScheduleState`.
 
 ---
 
@@ -538,26 +709,44 @@ task_id: str
 due_at: datetime | None
 trigger_type: str
 trigger_metadata: dict
+occurrence_id: str | None
 ```
 
 Behavior:
 
+Scheduled behavior:
+
+1. A scheduler wakeup or startup scan calls `get_due_schedules(now, limit)`.
+2. For each due occurrence, build a `BackgroundRun` with `query_snapshot`
+   copied from the task.
+3. Persist the run with `dispatch_scheduled_run()`, which atomically applies
+   overlap policy, deduplicates `occurrence_id`, handles `cancel_previous`,
+   and advances schedule state.
+4. Emit `background_run_queued` or `background_run_skipped`.
+
+Manual behavior:
+
 1. Load task from task store.
-2. If missing, emit skipped and return.
-3. If disabled, emit skipped and return.
-4. Load active runs for overlap policy.
-5. Apply overlap policy.
-6. Create `BackgroundRun`.
-7. Persist run as `queued`.
-8. Enqueue run ID.
-9. Emit `background_run_queued`.
+2. If missing, raise `TaskNotFoundError`.
+3. If disabled, raise `TaskNotFoundError`.
+4. Build a `BackgroundRun` with `query_snapshot` copied from the task or manual
+   override.
+5. Persist the run through `create_run_with_overlap_guard()`.
+6. Do not advance schedule state.
+7. Emit `background_run_queued` or `background_run_skipped`.
 
 Overlap behavior:
 
-- `skip_if_running`: emit skipped or create a skipped run.
-- `queue_next`: queue the new run.
-- `cancel_previous`: request cancel on active runs, then queue the new run.
+- `skip_if_running`: create a terminal `skipped` run for a valid scheduled or
+  manual request.
+- `queue_next`: queue the new run; `claim_next_run` holds it until earlier
+  active runs for the same task are terminal.
+- `cancel_previous`: request cancel on active runs and create the successor run
+  in the same store transaction.
 - `allow_parallel`: queue the new run.
+
+The dispatcher does not implement overlap with a separate list-then-create
+sequence. The task store performs the overlap decision atomically.
 
 ---
 
@@ -566,8 +755,7 @@ Overlap behavior:
 Supervisor loop:
 
 ```text
-dequeue run id
-claim run with lease
+claim next run with lease
 resolve agent
 resolve task
 resolve session id
@@ -584,8 +772,17 @@ emit events
 Execution call:
 
 ```python
-result = await agent.run(query=task.query, session_id=run.session_id)
+result = await agent.run(
+    query=run.query_snapshot,
+    session_id=run.session_id,
+)
 ```
+
+Before execution, the supervisor binds the run workspace and injects the
+background run context into the request. The context contains `run_id`,
+`task_id`, `workspace_path`, and output-file guidance. The mechanism can be a
+runtime context object or request augmentation, but it must be explicit in the
+implementation and covered by tests.
 
 Requirements:
 
@@ -593,6 +790,7 @@ Requirements:
 - set `started_at` before agent execution.
 - enforce timeout with async timeout control.
 - refresh heartbeat while active.
+- every heartbeat, attempt update, and terminal write verifies `lease_token`.
 - preserve partial workspace output on failure.
 - create an attempt record before each attempt.
 - update attempt status after each attempt.
@@ -611,9 +809,14 @@ Recovery scans expired leases.
 For each expired run:
 
 - if terminal, ignore.
-- if cancellation requested, mark cancelled.
-- if attempts remain and retry policy allows recovery, mark retrying and queue.
-- if attempts are exhausted, mark failed.
+- steal the expired lease with `steal_expired_run()` to get a new
+  `lease_token`.
+- close the abandoned running attempt as `failed` with reason
+  `lease_expired`.
+- if cancellation requested, mark cancelled with the new lease token.
+- if attempts remain and retry policy allows recovery, mark retrying and then
+  queued for the normal claim path with the new lease token.
+- if attempts are exhausted, mark failed with the new lease token.
 - emit `background_run_recovered` when recovery changes state.
 
 Recovery must use atomic store transitions so multiple supervisors do not
@@ -648,6 +851,9 @@ scratchpad/
 - `agent_id`
 - `status`
 - `attempt`
+- `query_snapshot`
+- `trigger_type`
+- `occurrence_id`
 - `session_id`
 - `workspace_path`
 - `started_at`
@@ -701,11 +907,22 @@ Common payload fields:
 | `status` | when status-related | Current status |
 | `attempt` | when run-related | Attempt number |
 | `timestamp` | yes | ISO timestamp |
+| `sequence` | run events | Monotonic event sequence within the run |
 | `error` | on failures | Error string |
 | `workspace_path` | on run events | Run workspace namespace |
 | `worker_id` | on worker events | Supervisor worker id |
 
 Events must be emitted through `EventRouter`.
+
+Every background event includes `run_id` for run-scoped events. Event backends
+that store task-level streams must filter by `run_id` when returning a run
+trace.
+
+`get_run_events(run_id)` reads events from `EventRouter` when the event backend
+supports replay and run filtering. If the event backend cannot replay, the
+manager reads the run workspace `events.jsonl` mirror. Returned events are
+ordered by `sequence`, then `timestamp`. Missing event history returns an empty
+list; it does not change run state.
 
 ---
 
@@ -741,6 +958,7 @@ serializable state for normal status queries.
 
 - validates agent/task/run IDs
 - validates schedule types
+- validates schedule-state defaults and revisions
 - validates retry policy
 - validates timeout
 - validates workspace policy
@@ -753,13 +971,19 @@ Run the same contract tests against every backend:
 
 - saves and retrieves agent specs
 - saves and retrieves task specs
-- creates and reads run records
+- creates and reads run records through overlap-guarded creation
 - creates and reads attempt records
+- creates and advances schedule state
+- dispatches scheduled run and advances schedule atomically
 - updates run records
 - rejects invalid transitions
 - rejects terminal state mutation
 - claims runs atomically
+- creates manual runs with atomic overlap guard
+- handles `cancel_previous` atomically with successor run creation
+- enforces `queue_next` claim ordering
 - refreshes leases
+- rejects stale lease-token writes
 - lists expired leases
 - stores cancellation flags
 - lists active runs
@@ -781,10 +1005,11 @@ Run the same contract tests against every backend:
 ### Dispatcher Tests
 
 - due task creates queued run
-- disabled task is skipped
-- missing task is skipped
+- manual missing task raises `TaskNotFoundError`
+- manual disabled task raises `TaskNotFoundError`
 - every overlap policy works
-- enqueue failure records failed/skipped behavior
+- duplicate occurrence IDs do not create duplicate runs
+- manual dispatch does not advance schedule state
 
 ### Supervisor Tests
 
@@ -798,9 +1023,16 @@ Run the same contract tests against every backend:
 - applies fixed retry
 - applies exponential retry
 - refreshes heartbeat
+- rejects stale lease-token updates
 - recovers expired lease
+- steals expired lease with a new lease token
+- closes abandoned attempt on recovery
+- requeues recovered runs through the normal claim path
+- executes `query_snapshot`, not mutable task query
+- binds workspace and injects run context before execution
 - writes run metadata to workspace
 - emits lifecycle events
+- mirrors run events to `events.jsonl` when enabled
 
 ### Manager Tests
 
@@ -813,8 +1045,13 @@ Run the same contract tests against every backend:
 - cancels run
 - lists runs
 - lists attempts
+- reads run events from EventRouter or workspace mirror
 - shuts down scheduler and workers
 - does not import optional scheduler/storage dependencies during root import
+- does not import optional scheduler/storage dependencies during
+  `import omnicoreagent.background`
+- lazy optional backend exports fail with clear optional-extra errors when the
+  dependency is absent
 
 ### Integration Tests
 
@@ -835,11 +1072,15 @@ The implementation satisfies this specification when:
 - `sql` supports SQLite and Postgres through one backend interface.
 - durable stores survive manager restart.
 - every run has a durable `run_id`.
+- every run has a durable `query_snapshot`.
+- every scheduled occurrence has a stable `occurrence_id`.
 - every retry creates an attempt record.
 - active runs have leases and heartbeats.
+- lease tokens fence stale workers.
 - expired leases are recoverable.
+- queued runs remain claimable after restart.
 - run status is inspectable without event replay.
 - workspace output is written for every background run.
 - cancellation, timeout, retry, overlap, and recovery behavior are tested.
-- root import remains lightweight.
+- root and background-package imports remain lightweight.
 - public docs and cookbook examples match the implemented API.
