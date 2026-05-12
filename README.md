@@ -5,8 +5,8 @@
 <h1 align="center">OmniCoreAgent</h1>
 
 <p align="center">
-  <strong>The Open Agent Harness Built for Production</strong><br />
-  <em>Parallel tool batches. Structured observations. Loop detection. Memory, workspace files, MCP, subagents, and serving in one runtime.</em>
+  <strong>Open Python Agent Harness and Runtime for Production AI Agents</strong><br />
+  <em>Everything around the model: parallel tool batches, structured observations, loop detection, memory, workspace files, MCP tools, subagents, background tasks, and serving.</em>
 </p>
 
 <p align="center">
@@ -49,7 +49,7 @@ agent = OmniCoreAgent(
 )
 
 async def main():
-    result = await agent.run("Research the top 3 AI frameworks and summarize them.")
+    result = await agent.run("Research the top 3 open-source agent runtimes and summarize them.")
     print(result["response"])
     await agent.cleanup()
 
@@ -85,10 +85,10 @@ small.
 
 ## What Makes It Different
 
-Most agent frameworks stop at "LLM plus tool loop." OmniCoreAgent is built around
-the problems that show up after that: slow sequential tools, noisy observations,
-stuck loops, context exhaustion, MCP server tools, durable workspace files, and
-runtime serving.
+Most agent libraries stop at "LLM plus tool loop." OmniCoreAgent is built around
+the runtime problems that show up after that: slow sequential tools, noisy
+observations, stuck loops, context exhaustion, MCP server tools, durable
+workspace files, and runtime serving.
 
 ### 1. Agents call tools in batches instead of forced sequences
 

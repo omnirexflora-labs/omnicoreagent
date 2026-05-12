@@ -13,12 +13,12 @@ bump = true
 [project]
 name = "omnicoreagent"
 dynamic = ["version"]
-description = "OmniCoreAgent is an open Python agent harness for building autonomous AI agents that use tools, manage memory and context, coordinate workflows, and handle production business logic."
+description = "Open Python agent harness and runtime for production AI agents: parallel tool execution, structured observations, loop detection, memory, workspace files, MCP tools, subagents, background tasks, and OmniServe APIs."
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [{ name = "Abiola Adeshina", email = "abiolaadedayo1993@gmail.com" }]
 requires-python = ">=3.10"
 
-keywords = ["git", "mcp", "llm", "automation", "agent", "ai", "framework", "agent-harness"]
+keywords = ["git", "mcp", "llm", "automation", "agent", "ai", "runtime", "agent-harness"]
 license = { text = "MIT" }
 classifiers = [
     "Development Status :: 4 - Beta",

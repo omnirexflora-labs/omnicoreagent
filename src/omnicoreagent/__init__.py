@@ -1,5 +1,5 @@
 """
-OmniCoreAgent AI Framework.
+OmniCoreAgent agent harness runtime.
 
 Package exports are resolved lazily so importing ``omnicoreagent`` stays light.
 Provider clients, dotenv loading in user code, and optional integrations should
