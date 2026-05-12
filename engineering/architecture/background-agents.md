@@ -60,14 +60,14 @@ execution layer around the agent harness.
 |-----------|-------------|
 | Composition over subclassing | Background execution wraps an `OmniCoreAgent` run instead of creating a separate agent type |
 | Durable state first | Task, schedule, run, attempt, cancellation, and lease state live in a task store |
-| Scheduler is not executor | The scheduler emits due work; it never runs the agent |
+| Schedule dispatch is store-driven | Due work is read from task-store schedule state; no external scheduler owns execution |
 | Supervisor owns execution | Retry, timeout, cancellation, heartbeat, leases, and terminal status are handled outside the model loop |
 | Workspace is mandatory | Every background run gets a workspace namespace for durable outputs |
 | Memory is separate | Conversation/session memory stays in `MemoryRouter`; operational state stays in the task store |
 | Events are visibility, not truth | Events describe lifecycle transitions; the task store is the source of truth |
-| Storage is pluggable | `AbstractTaskStore` supports `in_memory`, `sql`, `redis`, and `mongodb` through one interface |
+| Storage is pluggable | `AbstractTaskStore` supports the shipped `sql` and `in_memory` stores and leaves Redis/MongoDB behind the same interface |
 | Backend choice is explicit | A running manager uses one task store; backend transfer is explicit, not hot-swapped mid-run |
-| Root import stays light | Optional scheduler/storage dependencies load only when background features need them |
+| Root import stays light | Background imports do not pull Redis, MongoDB, or heavyweight scheduler packages |
 
 ---
 
@@ -90,8 +90,7 @@ BackgroundAgentManager
         |       +--> redis
         |       +--> mongodb
         |
-        +--> SchedulerBackend
-        +--> Dispatcher
+        +--> ScheduleDispatcher
         +--> RunQueue
         +--> BackgroundSupervisor
                 |
@@ -104,8 +103,8 @@ BackgroundAgentManager
                 +--> Tools / MCP / Subagents / Guardrails
 ```
 
-The manager owns orchestration. The store owns operational truth. The scheduler
-owns due-time calculation. The supervisor owns execution lifecycle.
+The manager owns orchestration. The store owns operational truth. Schedule
+helpers compute due times from task specs. The supervisor owns execution lifecycle.
 `OmniCoreAgent` owns reasoning, tool calls, workspace tools, memory, context
 management, guardrails, and final response generation.
 
@@ -126,7 +125,7 @@ Responsibilities:
 - validate public input
 - register agent specs and task specs
 - initialize the selected task store
-- start and stop scheduler, dispatcher, queue, and supervisor
+- start and stop schedule dispatch, queue claiming, and supervisor work
 - expose control operations
 - expose inspection operations
 - enforce background runtime defaults
@@ -156,8 +155,9 @@ redis
 mongodb
 ```
 
-The router is a construction boundary only. Runtime code depends on
-`AbstractTaskStore`, not on backend-specific classes.
+The shipped implementations are `sql` and `in_memory`. Redis and MongoDB use
+the same contract when implemented. The router is a construction boundary only.
+Runtime code depends on `AbstractTaskStore`, not on backend-specific classes.
 
 ### `AbstractTaskStore`
 
@@ -187,47 +187,18 @@ Conversation memory belongs to `MemoryRouter`. Files and artifacts belong to
 workspace storage. Events belong to `EventRouter`. The task store owns
 operational state.
 
-### `SchedulerBackend`
-
-Computes wakeups from schedule specs.
-
-Responsibilities:
-
-- register enabled scheduled tasks
-- compute next run time
-- handle interval, cron, and once schedules
-- apply misfire policy
-- notify dispatcher that schedule state may have due work
-- pause, resume, and remove scheduled triggers
-
-Non-responsibilities:
-
-- running agents
-- retrying failed runs
-- persisting result state
-- writing workspace files
-- deciding overlap behavior
-- claiming due schedule occurrences
-
-The architecture depends on the `SchedulerBackend` contract, not on a specific
-scheduler package. Any scheduler implementation must be replaceable without
-changing the manager, task store, dispatcher, queue, or supervisor.
-
-Scheduler wakeups are advisory. The dispatcher reads due schedule occurrences
-from the task store, then uses one atomic store operation to create the
-scheduled run and advance schedule state.
-
-### `Dispatcher`
+### `ScheduleDispatcher`
 
 Converts due tasks into run records.
 
 Responsibilities:
 
-- load the task from the task store
-- verify the task is enabled
+- read due schedule occurrences from the task store
+- compute the next due time from the task schedule
 - apply overlap policy
 - create a run record
 - persist the run as queued
+- advance schedule state atomically with run creation
 - make the queued run claimable through the task store
 - emit queued or skipped lifecycle events
 
@@ -280,13 +251,13 @@ The public task-store backend names are:
 | Backend | Purpose |
 |---------|---------|
 | `in_memory` | Fast development and tests; state is lost on process exit |
-| `sql` | Durable relational storage for SQLite locally and Postgres in production |
-| `redis` | Operational state in Redis when Redis persistence and no-eviction policy are configured |
-| `mongodb` | Durable document storage for MongoDB deployments |
+| `sql` | Durable local SQLite storage |
+| `redis` | Reserved backend name for future Redis task-store support |
+| `mongodb` | Reserved backend name for future MongoDB task-store support |
 
-Do not expose separate public routers named after each SQL database. `sql` is
-the relational backend family. Its connection URL decides whether the concrete
-database is SQLite, Postgres, or another supported SQLAlchemy target.
+Do not expose separate public routers named after each SQL database. The
+current `sql` implementation is SQLite-backed and uses the Python standard
+library.
 
 Example:
 
@@ -295,17 +266,6 @@ manager = BackgroundAgentManager(
     task_store={
         "backend": "sql",
         "url": "sqlite:///.omnicoreagent/background.db",
-    }
-)
-```
-
-Production Postgres uses the same backend:
-
-```python
-manager = BackgroundAgentManager(
-    task_store={
-        "backend": "sql",
-        "url": "postgresql://user:pass@host:5432/omnicoreagent",
     }
 )
 ```
@@ -320,9 +280,7 @@ BackgroundAgentManager(task_store="sql")
 BackgroundAgentManager(task_store={...})
 ```
 
-Bare string construction is limited to `in_memory` and `sql`. Redis and MongoDB
-use explicit configuration dictionaries so connection and durability settings
-are visible when the manager starts.
+Bare string construction is limited to `in_memory` and `sql`.
 
 The manager must not hot-swap task stores while runs are active. Operational
 state is stateful by design. Moving from one backend to another requires an
@@ -845,8 +803,8 @@ The HTTP layer calls the same manager API used by Python applications.
 The background execution system is ready when:
 
 - every task is persisted through `AbstractTaskStore`
-- `in_memory`, `sql`, `redis`, and `mongodb` conform to the same store tests
-- SQL backend supports SQLite locally and Postgres through one `sql` backend
+- `in_memory` and `sql` conform to the same store tests
+- SQL backend supports local SQLite durability
 - enabled schedules survive manager restart on durable stores
 - schedule state stores next due, last due, dispatch cursor, and occurrence IDs
 - every run has a durable `run_id`

@@ -181,18 +181,6 @@ wheels = [
 ]
 
 [[package]]
-name = "apscheduler"
-version = "3.11.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "tzlocal" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/07/12/3e4389e5920b4c1763390c6d371162f3784f86f85cd6d6c1bfe68eef14e2/apscheduler-3.11.2.tar.gz", hash = "sha256:2a9966b052ec805f020c8c4c3ae6e6a06e24b1bf19f2e11d91d8cca0473eef41", size = 108683, upload-time = "2025-12-22T00:39:34.884Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9f/64/2e54428beba8d9992aa478bb8f6de9e4ecaa5f8f513bcfd567ed7fb0262d/apscheduler-3.11.2-py3-none-any.whl", hash = "sha256:ce005177f741409db4e4dd40a7431b76feb856b9dd69d57e0da49d6715bfd26d", size = 64439, upload-time = "2025-12-22T00:39:33.303Z" },
-]
-
-[[package]]
 name = "async-timeout"
 version = "5.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2366,7 +2354,6 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
-    { name = "apscheduler" },
     { name = "boto3" },
     { name = "fastapi" },
     { name = "markdown" },
@@ -2381,12 +2368,7 @@ all = [
     { name = "redis" },
     { name = "sqlalchemy" },
     { name = "tiktoken" },
-    { name = "tzlocal" },
     { name = "uvicorn" },
-]
-background = [
-    { name = "apscheduler" },
-    { name = "tzlocal" },
 ]
 examples = [
     { name = "markdown" },
@@ -2420,7 +2402,6 @@ tokenizer = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "apscheduler" },
     { name = "boto3" },
     { name = "fastapi" },
     { name = "hatch" },
@@ -2436,14 +2417,11 @@ dev = [
     { name = "sqlalchemy" },
     { name = "tiktoken" },
     { name = "twine" },
-    { name = "tzlocal" },
     { name = "uvicorn" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "apscheduler", marker = "extra == 'all'", specifier = ">=3.11.2" },
-    { name = "apscheduler", marker = "extra == 'background'", specifier = ">=3.11.2" },
     { name = "boto3", marker = "extra == 'all'", specifier = ">=1.43.4" },
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.43.4" },
     { name = "click", specifier = ">=8.1.8" },
@@ -2481,16 +2459,13 @@ requires-dist = [
     { name = "sqlalchemy", marker = "extra == 'postgres'", specifier = ">=2.0.49" },
     { name = "tiktoken", marker = "extra == 'all'", specifier = ">=0.12.0" },
     { name = "tiktoken", marker = "extra == 'tokenizer'", specifier = ">=0.12.0" },
-    { name = "tzlocal", marker = "extra == 'all'", specifier = ">=5.3.1" },
-    { name = "tzlocal", marker = "extra == 'background'", specifier = ">=5.3.1" },
     { name = "uvicorn", marker = "extra == 'all'", specifier = ">=0.46.0" },
     { name = "uvicorn", marker = "extra == 'serve'", specifier = ">=0.46.0" },
 ]
-provides-extras = ["all", "background", "examples", "mongodb", "postgres", "redis", "s3", "serve", "tokenizer"]
+provides-extras = ["all", "examples", "mongodb", "postgres", "redis", "s3", "serve", "tokenizer"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "apscheduler", specifier = ">=3.11.2" },
     { name = "boto3", specifier = ">=1.43.4" },
     { name = "fastapi", specifier = ">=0.136.1" },
     { name = "hatch", specifier = ">=1.16.5" },
@@ -2506,7 +2481,6 @@ dev = [
     { name = "sqlalchemy", specifier = ">=2.0.49" },
     { name = "tiktoken", specifier = ">=0.12.0" },
     { name = "twine", specifier = ">=6.2.0" },
-    { name = "tzlocal", specifier = ">=5.3.1" },
     { name = "uvicorn", specifier = ">=0.46.0" },
 ]
 
@@ -4056,27 +4030,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/55/e3/70399cb7dd41c10ac53367ae42139cf4b1ca5f36bb3dc6c9d33acdb43655/typing_inspection-0.4.2.tar.gz", hash = "sha256:ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464", size = 75949, upload-time = "2025-10-01T02:14:41.687Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/dc/9b/47798a6c91d8bdb567fe2698fe81e0c6b7cb7ef4d13da4114b41d239f65d/typing_inspection-0.4.2-py3-none-any.whl", hash = "sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7", size = 14611, upload-time = "2025-10-01T02:14:40.154Z" },
-]
-
-[[package]]
-name = "tzdata"
-version = "2026.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ba/19/1b9b0e29f30c6d35cb345486df41110984ea67ae69dddbc0e8a100999493/tzdata-2026.2.tar.gz", hash = "sha256:9173fde7d80d9018e02a662e168e5a2d04f87c41ea174b139fbef642eda62d10", size = 198254, upload-time = "2026-04-24T15:22:08.651Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ce/e4/dccd7f47c4b64213ac01ef921a1337ee6e30e8c6466046018326977efd95/tzdata-2026.2-py2.py3-none-any.whl", hash = "sha256:bbe9af844f658da81a5f95019480da3a89415801f6cc966806612cc7169bffe7", size = 349321, upload-time = "2026-04-24T15:22:05.876Z" },
-]
-
-[[package]]
-name = "tzlocal"
-version = "5.3.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "tzdata", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/8b/2e/c14812d3d4d9cd1773c6be938f89e5735a1f11a9f184ac3639b93cef35d5/tzlocal-5.3.1.tar.gz", hash = "sha256:cceffc7edecefea1f595541dbd6e990cb1ea3d19bf01b2809f362a03dd7921fd", size = 30761, upload-time = "2025-03-05T21:17:41.549Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c2/14/e2a54fabd4f08cd7af1c07030603c3356b74da07f7cc056e600436edfa17/tzlocal-5.3.1-py3-none-any.whl", hash = "sha256:eb1a66c3ef5847adf7a834f1be0800581b683b5608e74f86ecbcef8ab91bb85d", size = 18026, upload-time = "2025-03-05T21:17:39.857Z" },
 ]
 
 [[package]]

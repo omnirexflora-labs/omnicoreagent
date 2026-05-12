@@ -1,106 +1,115 @@
 ---
 title: Background Agents
-description: 'Schedule autonomous agents that run on intervals in the background'
+description: 'Run durable OmniCoreAgent tasks outside the foreground request path'
 icon: 'clock'
 ---
 
-# Background Agent System
+# Background Agents
 
-The **Background Agent System** provides a framework for creating autonomous agents that execute tasks on a schedule. These agents are ideal for system monitoring, periodic reports, and data synchronization.
+Background agents turn an OmniCoreAgent into a durable task runner. A task can
+run manually, once at a fixed time, on an interval, or from a five-field cron
+expression. Each run is tracked through queued, claimed, running, retrying, and
+terminal states so long-running work can be inspected and recovered.
 
-<Warning>
-Background-agent docs are pending a deeper refresh. The current exported API is `BackgroundAgentManager`, and the active examples use that manager directly.
-</Warning>
-
-## BackgroundAgentManager
-
-The `BackgroundAgentManager` is the primary manager for background agents. It handles creation, scheduling, status tracking, and shutdown.
-
-Install the background extra before importing it:
+Background execution is part of the core package:
 
 ```bash
-pip install "omnicoreagent[background]"
+pip install omnicoreagent
 ```
 
-```python
-from omnicoreagent import BackgroundAgentManager
+## Quick Start
 
-manager = BackgroundAgentManager()
+```python
+import asyncio
+
+from omnicoreagent import BackgroundAgentManager, OmniCoreAgent
+
+
+async def main():
+    agent = OmniCoreAgent(
+        name="system_monitor",
+        system_instruction="Check system health and write concise reports.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    )
+
+    manager = BackgroundAgentManager()
+    await manager.register_agent("system_monitor", agent)
+    await manager.register_task(
+        task_id="health_report",
+        agent_id="system_monitor",
+        query="Check system health and summarize anything that needs attention.",
+        schedule={"type": "manual"},
+        timeout_seconds=60,
+        retry_policy={"max_retries": 1, "initial_delay_seconds": 0},
+    )
+
+    run = await manager.run_now("health_report", wait=True)
+    print(run.status)
+    print(run.result_preview)
+
+
+asyncio.run(main())
+```
+
+## Scheduled Runs
+
+Start the manager when you want it to dispatch due schedules:
+
+```python
+await manager.register_task(
+    task_id="hourly_report",
+    agent_id="system_monitor",
+    query="Write the hourly operational report.",
+    schedule={"type": "interval", "seconds": 3600},
+    overlap_policy="queue_next",
+)
 
 await manager.start()
 ```
 
----
+The worker loop reads due schedules from the task store, creates a run exactly
+once for each occurrence, advances the schedule state, claims queued runs, and
+executes them with lease fencing.
 
-## Creating a Background Agent
-
-To create a background agent, define the agent identity and model at the top level, then put the scheduled task fields inside `task_config`.
-
-```python
-agent_config = {
-    "agent_id": "system_monitor",
-    "system_instruction": "Monitor system resources and alert if usage is high.",
-    "model_config": {"provider": "openai", "model": "gpt-4o-mini"},
-    "task_config": {
-        "query": "Check local CPU and Memory usage.",
-        "interval": 300,  # Run every 5 minutes
-        "max_retries": 2
-    }
-}
-
-# Create and register the agent, then start the manager
-await manager.create_agent(agent_config)
-await manager.start()
-```
-
----
-
-## Management API
-
-The manager exposes the small control surface needed to register, run, inspect, and stop scheduled agents:
-
-| Method | Description |
-|--------|-------------|
-| `create_agent(config)` | Create and register a scheduled agent. |
-| `start()` | Start the manager and scheduling loop. |
-| `shutdown()` | Stop the manager and clean up agents. |
-| `get_manager_status()` | Get a snapshot of manager state. |
-
----
-
-## Observability
-
-Background agents emit events just like standard agents. You can stream these events to monitor "self-flying" tasks in real-time.
+## Runtime Controls
 
 ```python
-# Stream events for a background agent
-status = await manager.get_manager_status()
-print(status)
+run = await manager.run_now("health_report")
+latest = await manager.get_run(run.run_id)
+attempts = await manager.list_attempts(run.run_id)
+events = await manager.get_run_events(run.run_id)
+
+await manager.cancel_run(run.run_id)
+await manager.pause_task("hourly_report")
+await manager.resume_task("hourly_report")
+await manager.delete_task("hourly_report", delete_runs=True)
 ```
 
-### Event Types
-- `background_task_started`
-- `background_task_completed`
-- `background_task_error`
-- `background_agent_status`
+## Task Configuration
 
----
+| Field | Purpose |
+|-------|---------|
+| `task_id` | Stable task identifier. |
+| `agent_id` | Registered agent that executes the task. |
+| `query` | Instruction passed to the agent for each run. |
+| `schedule` | `manual`, `interval`, `cron`, or `once`. |
+| `timeout_seconds` | Optional per-run timeout. |
+| `retry_policy` | Retry count, delay, backoff, and retryable error types. |
+| `overlap_policy` | `skip_if_running`, `queue_next`, `cancel_previous`, or `allow_parallel`. |
+| `session_policy` | `task`, `run`, or `fixed` memory-session behavior. |
+| `workspace_policy` | Workspace namespace used for run output. |
 
-## Use Cases
+## What Is Durable
 
-### 1. 🗄️ Database Archival
-Run an agent every 24 hours to find old records and archive them to S3 or a secondary database.
+The task store is the source of truth for:
 
-### 2. 🚨 Sytem Health Checks
-Monitor disk space, memory usage, and service availability every 60 seconds.
+- registered agent specs
+- task definitions
+- schedule state and occurrence IDs
+- runs and attempts
+- leases, heartbeats, and cancellation flags
 
-### 3. 📰 Content Aggregator
-An agent that fetches news from several sources once an hour, summarizes them, and saves the result to your blog or newsletter database.
-
----
-
-## Best Practices
-
-- **Timeout Management**: Keep `task_config.timeout` lower than `task_config.interval` unless overlapping runs are acceptable for your workload.
-- **Resource Limits**: Set `request_limit` and `total_tokens_limit` in the agent config to prevent runaway costs if an agent gets stuck in a loop.
-- **Persistent Storage**: Always use `redis` or `database` memory and event stores for background agents to ensure you don't lose progress if your main process restarts.
+The current runtime includes the durable model, SQLite and in-memory task stores,
+schedule dispatch, manual runs, retries with delay/backoff, lease fencing,
+expired-lease recovery, cancellation, workspace lifecycle files, and run event
+history.
