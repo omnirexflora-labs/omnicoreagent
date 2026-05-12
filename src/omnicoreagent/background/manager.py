@@ -214,21 +214,11 @@ class BackgroundAgentManager:
         self._initialized = False
 
     async def pause_task(self, task_id: str) -> None:
-        state = await self.task_store.get_schedule_state(task_id)
-        if not state:
-            raise TaskNotFoundError(f"Task not found: {task_id}")
-        await self.task_store.save_schedule_state(
-            state.model_copy(update={"paused": True, "updated_at": utc_now()})
-        )
+        await self.task_store.set_schedule_paused(task_id, True)
         await self._emit("background_task_paused", task_id=task_id)
 
     async def resume_task(self, task_id: str) -> None:
-        state = await self.task_store.get_schedule_state(task_id)
-        if not state:
-            raise TaskNotFoundError(f"Task not found: {task_id}")
-        await self.task_store.save_schedule_state(
-            state.model_copy(update={"paused": False, "updated_at": utc_now()})
-        )
+        await self.task_store.set_schedule_paused(task_id, False)
         await self._emit("background_task_resumed", task_id=task_id)
 
     async def run_now(

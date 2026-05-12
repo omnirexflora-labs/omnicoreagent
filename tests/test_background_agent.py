@@ -978,6 +978,30 @@ async def test_sql_task_store_claim_is_atomic_across_managers(tmp_path):
     assert claimed_b is None
 
 
+@pytest.mark.asyncio
+async def test_set_schedule_paused_preserves_latest_schedule_cursor():
+    store = InMemoryTaskStore()
+    await store.save_agent(agent_spec())
+    await store.save_task(task_spec(schedule={"type": "interval", "seconds": 60}))
+    state = await store.get_schedule_state("task")
+    next_due_at = state.next_due_at + timedelta(minutes=5)
+    occurrence_id = build_occurrence_id(
+        ScheduleType.INTERVAL, state.schedule_revision, state.next_due_at
+    )
+
+    await store.advance_schedule(
+        "task",
+        expected_revision=state.schedule_revision,
+        occurrence_id=occurrence_id,
+        next_due_at=next_due_at,
+    )
+    paused = await store.set_schedule_paused("task", True)
+
+    assert paused.paused is True
+    assert paused.next_due_at == next_due_at
+    assert paused.last_due_at == state.next_due_at
+
+
 def test_task_store_router_builds_redis_and_mongodb_stores(monkeypatch):
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/1")
     monkeypatch.setenv("MONGODB_URI", "mongodb://localhost:27017")

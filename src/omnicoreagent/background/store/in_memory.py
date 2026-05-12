@@ -156,6 +156,18 @@ class InMemoryTaskStore(AbstractTaskStore):
                 raise TaskNotFoundError(f"Task not found: {state.task_id}")
             self._schedule_states[state.task_id] = _copy_model(state)
 
+    async def set_schedule_paused(
+        self, task_id: str, paused: bool
+    ) -> BackgroundScheduleState:
+        async with self._lock:
+            state = self._require_schedule_state(task_id)
+            updated = state.model_copy(
+                update={"paused": paused, "updated_at": _now()},
+                deep=True,
+            )
+            self._schedule_states[task_id] = updated
+            return _copy_model(updated)
+
     async def get_schedule_state(
         self, task_id: str
     ) -> BackgroundScheduleState | None:

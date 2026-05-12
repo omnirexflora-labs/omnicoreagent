@@ -58,6 +58,11 @@ class AbstractTaskStore(ABC):
     async def save_schedule_state(self, state: BackgroundScheduleState) -> None: ...
 
     @abstractmethod
+    async def set_schedule_paused(
+        self, task_id: str, paused: bool
+    ) -> BackgroundScheduleState: ...
+
+    @abstractmethod
     async def get_schedule_state(
         self, task_id: str
     ) -> BackgroundScheduleState | None: ...
