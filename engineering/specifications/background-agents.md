@@ -839,19 +839,16 @@ Use scratchpad files for progress, notes, todos, and resumable work.
 
 ## Event Contract
 
-Required event names:
+Current emitted event names:
 
 ```text
 background_agent_registered
 background_task_registered
-background_task_scheduled
 background_task_paused
 background_task_resumed
 background_task_deleted
 background_run_queued
-background_run_claimed
 background_run_started
-background_run_heartbeat
 background_run_retrying
 background_run_completed
 background_run_failed
@@ -877,17 +874,47 @@ Common payload fields:
 | `workspace_path` | on run events | Run workspace namespace |
 | `worker_id` | on worker events | Supervisor worker id |
 
-Events must be emitted through `EventRouter`.
+Run-scoped events are always captured in the manager process cache. When
+workspace event mirroring is enabled, they are also appended to the run
+workspace `events.jsonl` file. When an `EventRouter` is configured, the manager
+mirrors events to it on a best-effort bounded path.
 
 Every background event includes `run_id` for run-scoped events. Event backends
 that store task-level streams must filter by `run_id` when returning a run
 trace.
 
-`get_run_events(run_id)` reads events from `EventRouter` when the event backend
-supports replay and run filtering. If the event backend cannot replay, the
-manager reads the run workspace `events.jsonl` mirror. Returned events are
-ordered by `sequence`, then `timestamp`. Missing event history returns an empty
-list; it does not change run state.
+`get_run_events(run_id)` is a run-scoped replay helper. It reads the available
+event sources in this order:
+
+1. `EventRouter`, when configured and replay-capable
+2. current process event cache
+3. run workspace `events.jsonl` mirror, when enabled
+
+Selection rules:
+
+- A source is complete when its last event is terminal:
+  `background_run_completed`, `background_run_failed`,
+  `background_run_timeout`, `background_run_cancelled`, or
+  `background_run_skipped`.
+- If one or more complete sources exist, return the longest complete trace.
+- If no complete source exists, prefer `EventRouter`, then process cache, then
+  workspace mirror.
+- Returned events must be ordered by `sequence`, then `timestamp`.
+- Sources with missing, non-positive, malformed, or duplicate run-local
+  `sequence` values are ignored during replay selection. A valid replay source
+  uses contiguous integer sequence numbers starting at `1`.
+- Event-router reads must filter by `run_id` because one background task can run
+  multiple times under the same memory `session_id`.
+- Event-router replay reads are bounded. A slow or unavailable event backend
+  must not block replay from process cache or workspace mirror sources.
+- Event-router appends are bounded. A slow or unavailable event backend can
+  delay lifecycle emission only up to the append timeout; it must not hold task
+  execution indefinitely.
+- Missing event history returns an empty list; it does not change run state.
+
+Durable restart replay requires a replay-capable event backend or the workspace
+`events.jsonl` mirror. The task store remains the source of truth for run state
+even when event replay is unavailable.
 
 ---
 

@@ -711,20 +711,19 @@ system.
 
 ## Event Model
 
-Background lifecycle events go through `EventRouter`.
+Background lifecycle events are captured in the process cache and, when enabled,
+the run workspace `events.jsonl` mirror. If an `EventRouter` is configured, the
+manager also mirrors those events to the router on a best-effort bounded path.
 
-Required events:
+Current emitted events:
 
 - `background_agent_registered`
 - `background_task_registered`
-- `background_task_scheduled`
 - `background_task_paused`
 - `background_task_resumed`
 - `background_task_deleted`
 - `background_run_queued`
-- `background_run_claimed`
 - `background_run_started`
-- `background_run_heartbeat`
 - `background_run_retrying`
 - `background_run_completed`
 - `background_run_failed`
@@ -734,6 +733,28 @@ Required events:
 - `background_run_recovered`
 
 Events make the run observable. They do not replace the task store.
+
+Run event replay is best-effort across the event router, process cache, and the
+workspace `events.jsonl` mirror. `get_run_events(run_id)` returns the most
+complete terminal trace available; while a run is still active, it prefers the
+event router, then cache, then workspace mirror. Event-router replay is always
+filtered by `run_id` because the same task can intentionally reuse one memory
+session across many runs. Replay reads from the event router are bounded so a
+slow event backend cannot prevent fallback to process cache or workspace mirror.
+Sources with duplicate or malformed run-local sequence numbers are ignored
+during source selection. A valid replay source uses contiguous integer sequence
+numbers starting at `1`.
+
+Event-router appends are also bounded. A slow event backend can delay lifecycle
+emission only up to the append timeout; it must not hold the run lifecycle or
+agent execution indefinitely.
+
+The sequence allocator is run-local. Fresh run events start at sequence `1`
+without scanning historical task events. If a manager restarts and continues an
+existing run, it reconstructs the next sequence from persisted router or
+workspace events when one of those replay sources is available. Without durable
+event replay data, the task store still preserves run state, but sequence
+continuity cannot be reconstructed.
 
 ---
 

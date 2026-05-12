@@ -111,6 +111,11 @@ TERMINAL_EVENT_NAMES = {
     "background_run_skipped",
 }
 
+INITIAL_EVENT_NAMES = {
+    "background_run_queued",
+    "background_run_skipped",
+}
+
 ACTIVE_RUN_STATUSES = {
     RunStatus.QUEUED,
     RunStatus.CLAIMED,
