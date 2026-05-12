@@ -1,15 +1,17 @@
 ---
 title: Background Agents
-description: 'Run durable OmniCoreAgent tasks outside the foreground request path'
+description: 'Run tracked OmniCoreAgent tasks outside the foreground request path'
 icon: 'clock'
 ---
 
 # Background Agents
 
-Background agents turn an OmniCoreAgent into a durable task runner. A task can
-run manually, once at a fixed time, on an interval, or from a five-field cron
-expression. Each run is tracked through queued, claimed, running, retrying, and
-terminal states so long-running work can be inspected and recovered.
+Background agents run tracked OmniCoreAgent tasks outside the foreground request
+path. Use the default in-memory store for local development, or `task_store="sql"`
+when tasks, runs, attempts, leases, retries, and cancellation state must survive
+process restarts. A task can run manually, once at a fixed time, on an interval,
+or from a five-field cron expression. Each run is tracked through queued,
+claimed, running, retrying, and terminal states.
 
 Background execution is part of the core package:
 
@@ -17,7 +19,19 @@ Background execution is part of the core package:
 pip install omnicoreagent
 ```
 
+No storage configuration is required to start. `BackgroundAgentManager()` uses an
+in-memory task store by default so the first run has no database requirement.
+Use `task_store="sql"` when tasks, runs, attempts, leases, retries, and
+cancellation state must survive process restarts.
+
+The task store is separate from agent memory. `MemoryRouter` stores
+conversation/session history. The task store stores operational background
+state and owns the atomic claim, lease, retry, and schedule-cursor guarantees.
+
 ## Quick Start
+
+Set `LLM_API_KEY` first, then run the example; no task-store configuration is
+required.
 
 ```python
 import asyncio
@@ -85,6 +99,30 @@ await manager.resume_task("hourly_report")
 await manager.delete_task("hourly_report", delete_runs=True)
 ```
 
+## OmniServe API
+
+When an agent is served through OmniServe, the server registers that agent with
+the background manager during startup and exposes task control over HTTP:
+
+```bash
+curl -X POST http://localhost:8000/background/tasks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task_id": "health_report",
+    "query": "Check system health and write the report.",
+    "schedule": {"type": "manual"},
+    "timeout_seconds": 60
+  }'
+
+curl -X POST http://localhost:8000/background/tasks/health_report/run \
+  -H "Content-Type: application/json" \
+  -d '{"wait": false}'
+```
+
+The background API includes task creation, task listing, pause, resume, delete,
+manual run, cancellation, run status, attempt history, event replay, and
+workspace inspection.
+
 ## Task Configuration
 
 | Field | Purpose |
@@ -99,7 +137,7 @@ await manager.delete_task("hourly_report", delete_runs=True)
 | `session_policy` | `task`, `run`, or `fixed` memory-session behavior. |
 | `workspace_policy` | Workspace namespace used for run output. |
 
-## What Is Durable
+## Persistent State
 
 The task store is the source of truth for:
 
@@ -109,7 +147,7 @@ The task store is the source of truth for:
 - runs and attempts
 - leases, heartbeats, and cancellation flags
 
-The current runtime includes the durable model, SQLite and in-memory task stores,
-schedule dispatch, manual runs, retries with delay/backoff, lease fencing,
-expired-lease recovery, cancellation, workspace lifecycle files, and run event
-history.
+The current runtime includes the tracked run model, SQLite and in-memory task
+stores, schedule dispatch, manual runs, retries with delay/backoff, lease
+fencing, expired-lease recovery, cancellation, workspace lifecycle files, and run
+event history. State is restart-persistent when the task store is SQL.

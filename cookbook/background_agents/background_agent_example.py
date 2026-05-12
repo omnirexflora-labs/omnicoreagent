@@ -1,4 +1,4 @@
-"""Run an OmniCoreAgent task through the durable background manager."""
+"""Run an OmniCoreAgent task through the background manager."""
 
 import asyncio
 import os
@@ -13,11 +13,11 @@ async def main():
 
     agent = OmniCoreAgent(
         name="background_researcher",
-        system_instruction="You write short, durable background task reports.",
+        system_instruction="You write short background task reports.",
         model_config={"provider": "openai", "model": "gpt-4o-mini"},
     )
 
-    manager = BackgroundAgentManager(task_store="in_memory")
+    manager = BackgroundAgentManager()
     await manager.register_agent(agent_id="background_researcher", agent=agent)
     await manager.register_task(
         task_id="daily_research_note",

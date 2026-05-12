@@ -381,6 +381,33 @@ async def test_manager_run_now_executes_agent_and_records_events():
 
 
 @pytest.mark.asyncio
+async def test_manager_run_now_wait_executes_only_created_run():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    agent = FakeAgent(response="complete")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="first",
+        agent_id="agent",
+        query="first work",
+        schedule={"type": "manual"},
+    )
+    await manager.register_task(
+        task_id="second",
+        agent_id="agent",
+        query="second work",
+        schedule={"type": "manual"},
+    )
+    first = await manager.run_now("first")
+
+    second = await manager.run_now("second", wait=True)
+
+    first_latest = await manager.get_run(first.run_id)
+    assert first_latest.status == RunStatus.QUEUED
+    assert second.status == RunStatus.COMPLETED
+    assert agent.calls[0]["query"].endswith("second work")
+
+
+@pytest.mark.asyncio
 async def test_manager_run_now_missing_or_disabled_task_raises():
     manager = BackgroundAgentManager(task_store="in_memory")
     await manager.register_agent("agent", FakeAgent())
@@ -541,6 +568,32 @@ async def test_running_cancel_finishes_cancelled_not_completed():
     await manager.shutdown()
 
     assert terminal.status == RunStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_execute_one_releases_claim_when_cancelled_before_run_starts():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    await manager.register_agent("agent", FakeAgent())
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    run = await manager.run_now("task")
+
+    async def cancelled_before_start(claimed):
+        raise asyncio.CancelledError
+
+    manager._run_claimed = cancelled_before_start
+
+    with pytest.raises(asyncio.CancelledError):
+        await manager._execute_one()
+
+    released = await manager.get_run(run.run_id)
+    assert released.status == RunStatus.QUEUED
+    assert released.lease_owner is None
+    assert released.lease_token is None
 
 
 @pytest.mark.asyncio
@@ -740,6 +793,45 @@ async def test_cancel_delayed_retry_marks_run_cancelled_immediately():
     cancelled = await manager.get_run(run.run_id)
 
     assert cancelled.status == RunStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_cancel_claimed_run_owned_by_manager_marks_terminal():
+    manager = BackgroundAgentManager(task_store="in_memory", worker_id="owner")
+    await manager.register_agent("agent", FakeAgent())
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    run = await manager.run_now("task")
+    await manager.task_store.claim_run(run.run_id, "owner", lease_seconds=30)
+
+    await manager.cancel_run(run.run_id)
+
+    cancelled = await manager.get_run(run.run_id)
+    assert cancelled.status == RunStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_cancel_claimed_run_owned_by_other_worker_records_intent_only():
+    manager = BackgroundAgentManager(task_store="in_memory", worker_id="requester")
+    await manager.register_agent("agent", FakeAgent())
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    run = await manager.run_now("task")
+    await manager.task_store.claim_run(run.run_id, "other_worker", lease_seconds=30)
+
+    await manager.cancel_run(run.run_id)
+
+    latest = await manager.get_run(run.run_id)
+    assert latest.status == RunStatus.CLAIMED
+    assert latest.cancel_requested_at is not None
 
 
 @pytest.mark.asyncio

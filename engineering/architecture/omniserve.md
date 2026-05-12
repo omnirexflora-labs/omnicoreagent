@@ -52,6 +52,7 @@ serve/
     sessions.py          # session history and event endpoints
     tools.py             # /tools
     metrics.py           # /metrics agent usage endpoint
+    background.py        # /background durable task endpoints
   middleware/
     auth.py
     cors.py
@@ -100,6 +101,11 @@ of the production agent harness.
 - `omnicoreagent[serve]` owns FastAPI and Uvicorn dependencies.
 - Multiple `OmniServe` app instances must not share request metrics state.
 - `api_prefix` must apply consistently to API routes.
+- Background routes must use the same `api_prefix`, auth, rate-limit, logging,
+  and timeout middleware as other protected API routes.
+- OmniServe may own HTTP access to background execution, but
+  `BackgroundAgentManager` remains the runtime owner for task stores, schedules,
+  leases, retries, events, and workspace files.
 - Public endpoints that intentionally bypass auth must be explicit and tested.
 - `request_timeout` must be enforced for agent run endpoints.
 - Docs and cookbooks must describe only shipped behavior.

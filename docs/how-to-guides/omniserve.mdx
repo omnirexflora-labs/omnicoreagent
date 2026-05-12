@@ -27,7 +27,7 @@ from omnicoreagent import OmniCoreAgent
 agent = OmniCoreAgent(
     name="MyAgent",
     system_instruction="You are a helpful assistant.",
-    model_config={"provider": "gemini", "model": "gemini-2.0-flash"},
+    model_config={"provider": "openai", "model": "gpt-4o-mini"},
 )
 ```
 
@@ -40,7 +40,7 @@ def create_agent():
     return OmniCoreAgent(
         name="MyAgent",
         system_instruction="You are a helpful assistant.",
-        model_config={"provider": "gemini", "model": "gemini-2.0-flash"},
+        model_config={"provider": "openai", "model": "gpt-4o-mini"},
     )
 ```
 
@@ -74,7 +74,7 @@ def calculate(expression: str) -> dict:
 agent = OmniCoreAgent(
     name="MyAgent",
     system_instruction="You are a helpful assistant with access to greeting and calculation tools.",
-    model_config={"provider": "gemini", "model": "gemini-2.0-flash"},
+    model_config={"provider": "openai", "model": "gpt-4o-mini"},
     local_tools=tools,
 )
 ```
@@ -82,7 +82,7 @@ agent = OmniCoreAgent(
 ### Step 2: Set environment variables
 
 ```bash
-echo "LLM_API_KEY=your_api_key_here" > .env
+export LLM_API_KEY=your_api_key_here
 ```
 
 ### Step 3: Run the server
@@ -128,14 +128,14 @@ open http://localhost:8000/docs
 
 ```bash
 omniserve run \
-  --agent my_agent.py \        # Path to agent file (required)
-  --host 0.0.0.0 \             # Host to bind (default: 0.0.0.0)
-  --port 8000 \                # Port to bind (default: 8000)
-  --workers 1 \                # Worker processes (default: 1)
-  --auth-token YOUR_TOKEN \    # Enable Bearer token auth
-  --rate-limit 100 \           # Rate limit (requests per minute)
-  --cors-origins "*" \         # Comma-separated CORS origins
-  --no-docs                    # Disable Swagger UI
+  --agent my_agent.py \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --workers 1 \
+  --auth-token YOUR_TOKEN \
+  --rate-limit 100 \
+  --cors-origins "*" \
+  --no-docs
 ```
 
 **Examples:**
@@ -167,12 +167,15 @@ Start a server instantly without writing any code:
 
 ```bash
 omniserve quickstart \
-  --provider openai \          # LLM provider (openai, gemini, anthropic)
-  --model gpt-4o \             # Model name
-  --name QuickAgent \          # Agent name (default: QuickAgent)
-  --instruction "You are..." \ # System instruction
-  --port 8000                  # Port (default: 8000)
+  --provider openai \
+  --model gpt-4o \
+  --name QuickAgent \
+  --instruction "You are..." \
+  --port 8000
 ```
+
+Use the provider that matches your `LLM_API_KEY`. For an OpenAI key, run
+`omniserve quickstart --provider openai --model gpt-4o-mini`.
 
 **Examples:**
 
@@ -191,6 +194,8 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 
 ## API Endpoints
 
+### Core Endpoints
+
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | `POST` | `/run` | Yes* | SSE streaming response |
@@ -204,8 +209,31 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 | `GET` | `/docs` | No | Swagger UI |
 | `GET` | `/redoc` | No | ReDoc UI |
 
-*Auth required only if `--auth-token` is set or `OMNISERVE_AUTH_ENABLED=true`
-with `OMNISERVE_AUTH_TOKEN`.
+### Background Task Endpoints
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `POST` | `/background/agents` | Yes* | Register the served agent or an agent spec for background execution |
+| `GET` | `/background/agents` | Yes* | List registered background agents |
+| `GET` | `/background/agents/{agent_id}` | Yes* | Inspect a background agent spec |
+| `DELETE` | `/background/agents/{agent_id}` | Yes* | Delete a background agent spec |
+| `POST` | `/background/tasks` | Yes* | Create a background task |
+| `GET` | `/background/tasks` | Yes* | List background tasks |
+| `GET` | `/background/tasks/{task_id}` | Yes* | Inspect a background task |
+| `PATCH` | `/background/tasks/{task_id}` | Yes* | Patch a background task |
+| `POST` | `/background/tasks/{task_id}/run` | Yes* | Queue a manual background run |
+| `POST` | `/background/tasks/{task_id}/pause` | Yes* | Pause scheduled dispatch |
+| `POST` | `/background/tasks/{task_id}/resume` | Yes* | Resume scheduled dispatch |
+| `DELETE` | `/background/tasks/{task_id}` | Yes* | Delete a background task |
+| `POST` | `/background/runs/{run_id}/cancel` | Yes* | Cancel a queued or running run |
+| `GET` | `/background/runs` | Yes* | List background runs |
+| `GET` | `/background/runs/{run_id}` | Yes* | Inspect run status |
+| `GET` | `/background/runs/{run_id}/attempts` | Yes* | List run attempts |
+| `GET` | `/background/runs/{run_id}/events` | Yes* | Replay lifecycle events |
+| `GET` | `/background/runs/{run_id}/workspace` | Yes* | Inspect run workspace files |
+
+*Auth required only if `--auth-token` is set or `OMNICOREAGENT_SERVE_AUTH_ENABLED=true`
+with `OMNICOREAGENT_SERVE_AUTH_TOKEN`.
 
 ### Request/Response Examples
 
@@ -229,49 +257,98 @@ curl http://localhost:8000/tools \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
+### Background Task Example
+
+OmniServe registers the served agent as a background-capable agent during server
+startup. The default background agent id is `default`; override it with
+`OMNICOREAGENT_BACKGROUND_AGENT_ID` or `OmniServeConfig(background_agent_id="...")`.
+
+```bash
+curl -X POST http://localhost:8000/background/tasks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task_id": "daily_report",
+    "query": "Write today'\''s operations report and save the output.",
+    "schedule": {"type": "manual"},
+    "timeout_seconds": 120,
+    "retry_policy": {"max_retries": 1, "initial_delay_seconds": 30}
+  }'
+
+curl -X POST http://localhost:8000/background/tasks/daily_report/run \
+  -H "Content-Type: application/json" \
+  -d '{"wait": false}'
+```
+
+If auth is enabled with `--auth-token` or
+`OMNICOREAGENT_SERVE_AUTH_ENABLED=true`, add
+`-H "Authorization: Bearer YOUR_TOKEN"` to protected requests.
+
+Each run stores operational state in the task store and writes lifecycle files
+into the configured workspace namespace. Use the default in-memory task store
+for local development, or choose `sql` when runs must survive restarts.
+
 ---
 
 ## Environment Variables
 
-All settings via `OMNISERVE_*` prefix. **Environment variables always override code values.**
+Server settings use the `OMNICOREAGENT_SERVE_*` prefix. Background task settings
+use the `OMNICOREAGENT_BACKGROUND_*` prefix. **Environment variables always
+override code values.**
+
+You can run OmniServe without adding any `OMNICOREAGENT_SERVE_*` variables. The defaults
+enable the background API, start the worker, and use in-memory background task
+state. Add variables only when you want to change server behavior,
+authentication, rate limits, or background storage.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OMNISERVE_HOST` | `0.0.0.0` | Server host |
-| `OMNISERVE_PORT` | `8000` | Server port |
-| `OMNISERVE_WORKERS` | `1` | Worker processes |
-| `OMNISERVE_API_PREFIX` | `""` | API path prefix (e.g., `/api/v1`) |
-| `OMNISERVE_ENABLE_DOCS` | `true` | Swagger UI at `/docs` |
-| `OMNISERVE_ENABLE_REDOC` | `true` | ReDoc at `/redoc` |
-| `OMNISERVE_CORS_ENABLED` | `true` | Enable CORS |
-| `OMNISERVE_CORS_ORIGINS` | `*` | Allowed origins (comma-separated) |
-| `OMNISERVE_CORS_METHODS` | `*` | Allowed methods (comma-separated) |
-| `OMNISERVE_CORS_HEADERS` | `*` | Allowed headers (comma-separated) |
-| `OMNISERVE_CORS_CREDENTIALS` | `true` | Allow credentials |
-| `OMNISERVE_AUTH_ENABLED` | `false` | Enable Bearer token auth |
-| `OMNISERVE_AUTH_TOKEN` | — | Bearer token value |
-| `OMNISERVE_RATE_LIMIT_ENABLED` | `false` | Enable rate limiting |
-| `OMNISERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per window |
-| `OMNISERVE_RATE_LIMIT_WINDOW` | `60` | Window in seconds |
-| `OMNISERVE_REQUEST_LOGGING` | `true` | Log requests |
-| `OMNISERVE_LOG_LEVEL` | `INFO` | Log level (DEBUG/INFO/WARNING/ERROR) |
-| `OMNISERVE_REQUEST_TIMEOUT` | `300` | Request timeout in seconds |
+| `OMNICOREAGENT_SERVE_HOST` | `0.0.0.0` | Server host |
+| `OMNICOREAGENT_SERVE_PORT` | `8000` | Server port |
+| `OMNICOREAGENT_SERVE_WORKERS` | `1` | Worker processes |
+| `OMNICOREAGENT_SERVE_API_PREFIX` | `""` | API path prefix (e.g., `/api/v1`) |
+| `OMNICOREAGENT_SERVE_ENABLE_DOCS` | `true` | Swagger UI at `/docs` |
+| `OMNICOREAGENT_SERVE_ENABLE_REDOC` | `true` | ReDoc at `/redoc` |
+| `OMNICOREAGENT_SERVE_CORS_ENABLED` | `true` | Enable CORS |
+| `OMNICOREAGENT_SERVE_CORS_ORIGINS` | `*` | Allowed origins (comma-separated) |
+| `OMNICOREAGENT_SERVE_CORS_METHODS` | `*` | Allowed methods (comma-separated) |
+| `OMNICOREAGENT_SERVE_CORS_HEADERS` | `*` | Allowed headers (comma-separated) |
+| `OMNICOREAGENT_SERVE_CORS_CREDENTIALS` | `true` | Allow credentials |
+| `OMNICOREAGENT_SERVE_AUTH_ENABLED` | `false` | Enable Bearer token auth |
+| `OMNICOREAGENT_SERVE_AUTH_TOKEN` | — | Bearer token value |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED` | `false` | Enable rate limiting |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per window |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Window in seconds |
+| `OMNICOREAGENT_SERVE_REQUEST_LOGGING` | `true` | Log requests |
+| `OMNICOREAGENT_SERVE_LOG_LEVEL` | `INFO` | Log level (DEBUG/INFO/WARNING/ERROR) |
+| `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` | `300` | Request timeout in seconds |
+| `OMNICOREAGENT_BACKGROUND_ENABLED` | `true` | Expose background task endpoints |
+| `OMNICOREAGENT_BACKGROUND_AGENT_ID` | `default` | Agent id for the served agent in background tasks |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE` | `in_memory` | Background control-plane store: `in_memory` or `sql` |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URL` | — | Optional SQL URL override. Setting this URL selects the SQL task store. |
+| `OMNICOREAGENT_BACKGROUND_START_WORKER` | `true` | Start scheduler and worker loop during server lifespan |
 
-**Example `.env` file:**
+<Info>
+The background task store is not conversation memory. Memory stays in
+`MemoryRouter`. The task store is the control plane for schedules, runs,
+attempts, leases, retries, and cancellation. Leave it at the in-memory default
+to start; choose `sql` when that state must survive restarts.
+</Info>
+
+**Example shell environment:**
 
 ```bash
-# Required
-LLM_API_KEY=your_api_key_here
+# Model credential
+export LLM_API_KEY=your_api_key_here
 
-# OmniServe settings
-OMNISERVE_PORT=8000
-OMNISERVE_AUTH_ENABLED=true
-OMNISERVE_AUTH_TOKEN=my-secret-token
-OMNISERVE_RATE_LIMIT_ENABLED=true
-OMNISERVE_RATE_LIMIT_REQUESTS=100
-OMNISERVE_CORS_ORIGINS=https://myapp.com,https://api.myapp.com
-OMNISERVE_CORS_METHODS=GET,POST,OPTIONS
-OMNISERVE_CORS_HEADERS=Authorization,Content-Type
+# Optional OmniServe overrides
+export OMNICOREAGENT_SERVE_PORT=8000
+export OMNICOREAGENT_SERVE_AUTH_ENABLED=true
+export OMNICOREAGENT_SERVE_AUTH_TOKEN=my-secret-token
+export OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED=true
+export OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS=100
+export OMNICOREAGENT_SERVE_CORS_ORIGINS=https://myapp.com,https://api.myapp.com
+export OMNICOREAGENT_SERVE_CORS_METHODS=GET,POST,OPTIONS
+export OMNICOREAGENT_SERVE_CORS_HEADERS=Authorization,Content-Type
 ```
 
 ---
@@ -344,7 +421,7 @@ def get_time() -> dict:
 agent = OmniCoreAgent(
     name="MyAgent",
     system_instruction="You are a helpful assistant.",
-    model_config={"provider": "gemini", "model": "gemini-2.0-flash"},
+    model_config={"provider": "openai", "model": "gpt-4o-mini"},
     local_tools=tools,
 )
 
@@ -368,7 +445,7 @@ if __name__ == "__main__":
 Run with Python directly:
 
 ```bash
-echo "LLM_API_KEY=your_api_key" > .env
+export LLM_API_KEY=your_api_key
 python server.py
 ```
 
@@ -379,7 +456,7 @@ python server.py
 </Info>
 
 <Warning>
-**Environment Variable Precedence:** `.env` variables **always override** values set in `OmniServeConfig`.
+**Environment Variable Precedence:** environment variables **always override** values set in `OmniServeConfig`.
 </Warning>
 
 ---

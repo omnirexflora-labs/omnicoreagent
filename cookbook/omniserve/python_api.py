@@ -144,43 +144,43 @@ config = OmniServeConfig(
     # -------------------------------------------------------------------------
     # SERVER
     # -------------------------------------------------------------------------
-    host="0.0.0.0",  # OMNISERVE_HOST
-    port=8000,  # OMNISERVE_PORT
-    workers=1,  # OMNISERVE_WORKERS
-    api_prefix="",  # OMNISERVE_API_PREFIX (e.g., "/api/v1")
+    host="0.0.0.0",  # OMNICOREAGENT_SERVE_HOST
+    port=8000,  # OMNICOREAGENT_SERVE_PORT
+    workers=1,  # OMNICOREAGENT_SERVE_WORKERS
+    api_prefix="",  # OMNICOREAGENT_SERVE_API_PREFIX (e.g., "/api/v1")
     # -------------------------------------------------------------------------
     # DOCUMENTATION
     # -------------------------------------------------------------------------
-    enable_docs=True,  # OMNISERVE_ENABLE_DOCS - Swagger UI at /docs
-    enable_redoc=True,  # OMNISERVE_ENABLE_REDOC - ReDoc at /redoc
+    enable_docs=True,  # OMNICOREAGENT_SERVE_ENABLE_DOCS - Swagger UI at /docs
+    enable_redoc=True,  # OMNICOREAGENT_SERVE_ENABLE_REDOC - ReDoc at /redoc
     # -------------------------------------------------------------------------
     # CORS (Cross-Origin Resource Sharing)
     # -------------------------------------------------------------------------
-    cors_enabled=True,  # OMNISERVE_CORS_ENABLED
-    cors_origins=["*"],  # OMNISERVE_CORS_ORIGINS - comma-separated
-    cors_credentials=True,  # OMNISERVE_CORS_CREDENTIALS
-    cors_methods=["*"],  # OMNISERVE_CORS_METHODS
-    cors_headers=["*"],  # OMNISERVE_CORS_HEADERS
+    cors_enabled=True,  # OMNICOREAGENT_SERVE_CORS_ENABLED
+    cors_origins=["*"],  # OMNICOREAGENT_SERVE_CORS_ORIGINS - comma-separated
+    cors_credentials=True,  # OMNICOREAGENT_SERVE_CORS_CREDENTIALS
+    cors_methods=["*"],  # OMNICOREAGENT_SERVE_CORS_METHODS
+    cors_headers=["*"],  # OMNICOREAGENT_SERVE_CORS_HEADERS
     # -------------------------------------------------------------------------
     # AUTHENTICATION
     # -------------------------------------------------------------------------
-    auth_enabled=True,  # OMNISERVE_AUTH_ENABLED
-    auth_token="my-secret-token",  # OMNISERVE_AUTH_TOKEN
+    auth_enabled=True,  # OMNICOREAGENT_SERVE_AUTH_ENABLED
+    auth_token="my-secret-token",  # OMNICOREAGENT_SERVE_AUTH_TOKEN
     # -------------------------------------------------------------------------
     # RATE LIMITING
     # -------------------------------------------------------------------------
-    rate_limit_enabled=True,  # OMNISERVE_RATE_LIMIT_ENABLED
-    rate_limit_requests=100,  # OMNISERVE_RATE_LIMIT_REQUESTS
-    rate_limit_window=60,  # OMNISERVE_RATE_LIMIT_WINDOW (seconds)
+    rate_limit_enabled=True,  # OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED
+    rate_limit_requests=100,  # OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS
+    rate_limit_window=60,  # OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW (seconds)
     # -------------------------------------------------------------------------
     # LOGGING
     # -------------------------------------------------------------------------
-    request_logging=True,  # OMNISERVE_REQUEST_LOGGING
-    log_level="INFO",  # OMNISERVE_LOG_LEVEL (DEBUG/INFO/WARNING/ERROR)
+    request_logging=True,  # OMNICOREAGENT_SERVE_REQUEST_LOGGING
+    log_level="INFO",  # OMNICOREAGENT_SERVE_LOG_LEVEL (DEBUG/INFO/WARNING/ERROR)
     # -------------------------------------------------------------------------
     # TIMEOUTS
     # -------------------------------------------------------------------------
-    request_timeout=300,  # OMNISERVE_REQUEST_TIMEOUT (seconds)
+    request_timeout=300,  # OMNICOREAGENT_SERVE_REQUEST_TIMEOUT (seconds)
 )
 
 

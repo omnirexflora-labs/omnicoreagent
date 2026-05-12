@@ -3,7 +3,7 @@
 # Multi-stage build for smaller production image
 #
 # Build:  docker build -t omniserver:latest -f docker/Dockerfile .
-# Run:    docker run -p 8000:8000 -e OPENAI_API_KEY=xxx omniserver:latest
+# Run:    docker run -p 8000:8000 -e LLM_API_KEY=xxx omniserver:latest
 
 FROM python:3.12-slim AS builder
 
@@ -26,7 +26,7 @@ COPY LICENSE .
 COPY src/ src/
 
 # Install dependencies
-RUN uv pip install --system --no-cache .
+RUN uv pip install --system --no-cache ".[serve]"
 
 # ======================================================================
 # Production image
@@ -69,11 +69,11 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Default environment variables
-ENV OMNISERVER_HOST=0.0.0.0
-ENV OMNISERVER_PORT=8000
-ENV OMNISERVER_ENABLE_DOCS=true
-ENV OMNISERVER_CORS_ENABLED=true
-ENV OMNISERVER_REQUEST_LOGGING=true
+ENV OMNICOREAGENT_SERVE_HOST=0.0.0.0
+ENV OMNICOREAGENT_SERVE_PORT=8000
+ENV OMNICOREAGENT_SERVE_ENABLE_DOCS=true
+ENV OMNICOREAGENT_SERVE_CORS_ENABLED=true
+ENV OMNICOREAGENT_SERVE_REQUEST_LOGGING=true
 
-# Default command: quickstart with gemini
-CMD ["omniserve", "quickstart", "--provider", "gemini", "--model", "gemini-2.0-flash"]
+# Default command: quickstart with OpenAI
+CMD ["omniserve", "quickstart", "--provider", "openai", "--model", "gpt-4o-mini"]

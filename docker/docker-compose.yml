@@ -19,7 +19,7 @@ services:
       dockerfile: docker/Dockerfile
     container_name: omniserver
     ports:
-      - "${OMNISERVE_PORT:-8000}:8000"
+      - "${OMNICOREAGENT_SERVE_PORT:-8000}:8000"
     environment:
       # =======================================================================
       # LLM API Key (Required)
@@ -29,42 +29,42 @@ services:
       # =======================================================================
       # Server Configuration
       # =======================================================================
-      - OMNISERVE_HOST=${OMNISERVE_HOST:-0.0.0.0}
-      - OMNISERVE_PORT=${OMNISERVE_PORT:-8000}
-      - OMNISERVE_WORKERS=${OMNISERVE_WORKERS:-1}
-      - OMNISERVE_API_PREFIX=${OMNISERVE_API_PREFIX:-}
+      - OMNICOREAGENT_SERVE_HOST=${OMNICOREAGENT_SERVE_HOST:-0.0.0.0}
+      - OMNICOREAGENT_SERVE_PORT=${OMNICOREAGENT_SERVE_PORT:-8000}
+      - OMNICOREAGENT_SERVE_WORKERS=${OMNICOREAGENT_SERVE_WORKERS:-1}
+      - OMNICOREAGENT_SERVE_API_PREFIX=${OMNICOREAGENT_SERVE_API_PREFIX:-}
       
       # =======================================================================
       # Documentation
       # =======================================================================
-      - OMNISERVE_ENABLE_DOCS=${OMNISERVE_ENABLE_DOCS:-true}
-      - OMNISERVE_ENABLE_REDOC=${OMNISERVE_ENABLE_REDOC:-true}
+      - OMNICOREAGENT_SERVE_ENABLE_DOCS=${OMNICOREAGENT_SERVE_ENABLE_DOCS:-true}
+      - OMNICOREAGENT_SERVE_ENABLE_REDOC=${OMNICOREAGENT_SERVE_ENABLE_REDOC:-true}
       
       # =======================================================================
       # CORS Configuration
       # =======================================================================
-      - OMNISERVE_CORS_ENABLED=${OMNISERVE_CORS_ENABLED:-true}
-      - OMNISERVE_CORS_ORIGINS=${OMNISERVE_CORS_ORIGINS:-*}
-      - OMNISERVE_CORS_CREDENTIALS=${OMNISERVE_CORS_CREDENTIALS:-true}
+      - OMNICOREAGENT_SERVE_CORS_ENABLED=${OMNICOREAGENT_SERVE_CORS_ENABLED:-true}
+      - OMNICOREAGENT_SERVE_CORS_ORIGINS=${OMNICOREAGENT_SERVE_CORS_ORIGINS:-*}
+      - OMNICOREAGENT_SERVE_CORS_CREDENTIALS=${OMNICOREAGENT_SERVE_CORS_CREDENTIALS:-true}
       
       # =======================================================================
       # Authentication
       # =======================================================================
-      - OMNISERVE_AUTH_ENABLED=${OMNISERVE_AUTH_ENABLED:-false}
-      - OMNISERVE_AUTH_TOKEN=${OMNISERVE_AUTH_TOKEN:-}
+      - OMNICOREAGENT_SERVE_AUTH_ENABLED=${OMNICOREAGENT_SERVE_AUTH_ENABLED:-false}
+      - OMNICOREAGENT_SERVE_AUTH_TOKEN=${OMNICOREAGENT_SERVE_AUTH_TOKEN:-}
       
       # =======================================================================
       # Logging
       # =======================================================================
-      - OMNISERVE_REQUEST_LOGGING=${OMNISERVE_REQUEST_LOGGING:-true}
-      - OMNISERVE_LOG_LEVEL=${OMNISERVE_LOG_LEVEL:-INFO}
+      - OMNICOREAGENT_SERVE_REQUEST_LOGGING=${OMNICOREAGENT_SERVE_REQUEST_LOGGING:-true}
+      - OMNICOREAGENT_SERVE_LOG_LEVEL=${OMNICOREAGENT_SERVE_LOG_LEVEL:-INFO}
       
       # =======================================================================
       # Rate Limiting
       # =======================================================================
-      - OMNISERVE_RATE_LIMIT_ENABLED=${OMNISERVE_RATE_LIMIT_ENABLED:-false}
-      - OMNISERVE_RATE_LIMIT_REQUESTS=${OMNISERVE_RATE_LIMIT_REQUESTS:-100}
-      - OMNISERVE_RATE_LIMIT_WINDOW=${OMNISERVE_RATE_LIMIT_WINDOW:-60}
+      - OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED=${OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED:-false}
+      - OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS=${OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS:-100}
+      - OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW=${OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW:-60}
       
       # =======================================================================
       # Timeouts
@@ -88,7 +88,7 @@ services:
       # =======================================================================
       # Timeouts
       # =======================================================================
-      - OMNISERVE_REQUEST_TIMEOUT=${OMNISERVE_REQUEST_TIMEOUT:-300}
+      - OMNICOREAGENT_SERVE_REQUEST_TIMEOUT=${OMNICOREAGENT_SERVE_REQUEST_TIMEOUT:-300}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

@@ -5,10 +5,12 @@ from typing import TYPE_CHECKING, Any
 from fastapi import Request
 
 if TYPE_CHECKING:
+    from omnicoreagent.background import BackgroundAgentManager
     from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent as AgentType
 
     from .config import OmniServeConfig
 else:
+    BackgroundAgentManager = Any
     AgentType = Any
     OmniServeConfig = Any
 
@@ -21,6 +23,11 @@ def get_agent(request: Request) -> AgentType:
 def get_config(request: Request) -> OmniServeConfig:
     """Return the OmniServe config bound to the FastAPI app."""
     return request.app.state.config
+
+
+def get_background_manager(request: Request) -> BackgroundAgentManager | None:
+    """Return the optional background manager bound to the FastAPI app."""
+    return getattr(request.app.state, "background_manager", None)
 
 
 def get_agent_name(agent: AgentType) -> str:

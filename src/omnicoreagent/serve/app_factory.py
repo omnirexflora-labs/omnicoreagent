@@ -26,6 +26,7 @@ def create_omniserve_app(
     config: OmniServeConfig,
     title: str,
     description: str,
+    background_manager: Any | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application for one agent."""
     app = FastAPI(
@@ -40,6 +41,10 @@ def create_omniserve_app(
     app.state.agent = agent
     app.state.config = config
     app.state.start_time = time.time()
+    app.state.background_manager = _build_background_manager(
+        config=config,
+        background_manager=background_manager,
+    )
 
     setup_all_middleware(app, config)
     setup_metrics(app, config)
@@ -48,3 +53,18 @@ def create_omniserve_app(
 
     logger.info(f"OmniServe: Created FastAPI app for agent '{get_agent_name(agent)}'")
     return app
+
+
+def _build_background_manager(
+    *,
+    config: OmniServeConfig,
+    background_manager: Any | None,
+) -> Any | None:
+    if not config.background_enabled:
+        return None
+    if background_manager is not None:
+        return background_manager
+
+    from omnicoreagent.background import BackgroundAgentManager
+
+    return BackgroundAgentManager(task_store=config.background_task_store_config())

@@ -2,54 +2,60 @@
 OmniServe Configuration.
 
 Pydantic settings for server configuration with sensible defaults.
-Supports configuration via environment variables with OMNISERVE_ prefix.
+Supports configuration via OMNICOREAGENT_SERVE_* and
+OMNICOREAGENT_BACKGROUND_* environment variables.
 
 Environment Variables (OVERRIDE code values):
-    OMNISERVE_HOST: Host to bind to (default: 0.0.0.0)
-    OMNISERVE_PORT: Port to bind to (default: 8000)
-    OMNISERVE_WORKERS: Number of worker processes (default: 1)
-    OMNISERVE_API_PREFIX: API path prefix (default: "")
-    OMNISERVE_ENABLE_DOCS: Enable Swagger UI (default: true)
-    OMNISERVE_ENABLE_REDOC: Enable ReDoc UI (default: true)
-    OMNISERVE_CORS_ENABLED: Enable CORS (default: true)
-    OMNISERVE_CORS_ORIGINS: Comma-separated allowed origins (default: *)
-    OMNISERVE_CORS_METHODS: Comma-separated allowed methods (default: *)
-    OMNISERVE_CORS_HEADERS: Comma-separated allowed headers (default: *)
-    OMNISERVE_CORS_CREDENTIALS: Allow credentials in CORS (default: true)
-    OMNISERVE_AUTH_ENABLED: Enable Bearer token auth (default: false)
-    OMNISERVE_AUTH_TOKEN: Bearer token for auth
-    OMNISERVE_REQUEST_LOGGING: Log requests (default: true)
-    OMNISERVE_LOG_LEVEL: Logging level (default: INFO)
-    OMNISERVE_REQUEST_TIMEOUT: Request timeout in seconds (default: 300)
-    OMNISERVE_RATE_LIMIT_ENABLED: Enable rate limiting (default: false)
-    OMNISERVE_RATE_LIMIT_REQUESTS: Max requests per window (default: 100)
-    OMNISERVE_RATE_LIMIT_WINDOW: Time window in seconds (default: 60)
+    OMNICOREAGENT_SERVE_HOST: Host to bind to (default: 0.0.0.0)
+    OMNICOREAGENT_SERVE_PORT: Port to bind to (default: 8000)
+    OMNICOREAGENT_SERVE_WORKERS: Number of worker processes (default: 1)
+    OMNICOREAGENT_SERVE_API_PREFIX: API path prefix (default: "")
+    OMNICOREAGENT_SERVE_ENABLE_DOCS: Enable Swagger UI (default: true)
+    OMNICOREAGENT_SERVE_ENABLE_REDOC: Enable ReDoc UI (default: true)
+    OMNICOREAGENT_SERVE_CORS_ENABLED: Enable CORS (default: true)
+    OMNICOREAGENT_SERVE_CORS_ORIGINS: Comma-separated allowed origins (default: *)
+    OMNICOREAGENT_SERVE_CORS_METHODS: Comma-separated allowed methods (default: *)
+    OMNICOREAGENT_SERVE_CORS_HEADERS: Comma-separated allowed headers (default: *)
+    OMNICOREAGENT_SERVE_CORS_CREDENTIALS: Allow credentials in CORS (default: true)
+    OMNICOREAGENT_SERVE_AUTH_ENABLED: Enable Bearer token auth (default: false)
+    OMNICOREAGENT_SERVE_AUTH_TOKEN: Bearer token for auth
+    OMNICOREAGENT_SERVE_REQUEST_LOGGING: Log requests (default: true)
+    OMNICOREAGENT_SERVE_LOG_LEVEL: Logging level (default: INFO)
+    OMNICOREAGENT_SERVE_REQUEST_TIMEOUT: Request timeout in seconds (default: 300)
+    OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED: Enable rate limiting (default: false)
+    OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS: Max requests per window (default: 100)
+    OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW: Time window in seconds (default: 60)
+    OMNICOREAGENT_BACKGROUND_ENABLED: Enable background APIs (default: true)
+    OMNICOREAGENT_BACKGROUND_AGENT_ID: Agent id used for the served agent (default: default)
+    OMNICOREAGENT_BACKGROUND_TASK_STORE: Task store backend, in_memory or sql (default: in_memory)
+    OMNICOREAGENT_BACKGROUND_TASK_STORE_URL: SQL task store URL
+    OMNICOREAGENT_BACKGROUND_START_WORKER: Start scheduler/worker loop (default: true)
 
 Priority: Environment variables ALWAYS override code values.
 """
 
 import os
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-def _get_env(key: str) -> Optional[str]:
-    """Get environment variable with OMNISERVE_ prefix. Returns None if not set."""
-    val = os.environ.get(f"OMNISERVE_{key}")
+def _get_env(prefix: str, key: str) -> Optional[str]:
+    """Get a prefixed environment variable. Returns None if not set."""
+    val = os.environ.get(f"{prefix}_{key}")
     return val if val is not None and val != "" else None
 
 
-def _get_env_bool(key: str) -> Optional[bool]:
+def _get_env_bool(prefix: str, key: str) -> Optional[bool]:
     """Get boolean environment variable. Returns None if not set."""
-    val = _get_env(key)
+    val = _get_env(prefix, key)
     if val is None:
         return None
     return val.lower() in ("true", "1", "yes", "on")
 
 
-def _get_env_int(key: str) -> Optional[int]:
+def _get_env_int(prefix: str, key: str) -> Optional[int]:
     """Get integer environment variable. Returns None if not set."""
-    val = _get_env(key)
+    val = _get_env(prefix, key)
     if val is None:
         return None
     try:
@@ -58,9 +64,9 @@ def _get_env_int(key: str) -> Optional[int]:
         return None
 
 
-def _get_env_list(key: str) -> Optional[list[str]]:
+def _get_env_list(prefix: str, key: str) -> Optional[list[str]]:
     """Get list from comma-separated environment variable. Returns None if not set."""
-    val = _get_env(key)
+    val = _get_env(prefix, key)
     if val is None:
         return None
     return [item.strip() for item in val.split(",") if item.strip()]
@@ -70,8 +76,9 @@ class OmniServeConfig(BaseModel):
     """
     Configuration for OmniServe server.
 
-    Environment variables with OMNISERVE_ prefix ALWAYS override code values.
-    For example, if OMNISERVE_PORT=9000 is set, it will override port=8000 in code.
+    OMNICOREAGENT_SERVE_* and OMNICOREAGENT_BACKGROUND_* environment variables
+    ALWAYS override code values. For example, if
+    OMNICOREAGENT_SERVE_PORT=9000 is set, it overrides port=8000 in code.
     """
 
     # Server settings
@@ -123,6 +130,24 @@ class OmniServeConfig(BaseModel):
         default=60, description="Rate limit time window in seconds"
     )
 
+    # Background execution
+    background_enabled: bool = Field(
+        default=True, description="Expose background execution endpoints"
+    )
+    background_agent_id: str = Field(
+        default="default", description="Agent id used for the served agent"
+    )
+    background_task_store: str | dict[str, Any] | None = Field(
+        default="in_memory", description="Background task store backend or config"
+    )
+    background_task_store_url: str | None = Field(
+        default=None, description="SQL task store URL for background execution"
+    )
+    background_start_worker: bool = Field(
+        default=True,
+        description="Start the background scheduler/worker during OmniServe lifespan",
+    )
+
     @model_validator(mode="after")
     def apply_env_overrides(self) -> "OmniServeConfig":
         """
@@ -131,56 +156,71 @@ class OmniServeConfig(BaseModel):
         Environment variables always take priority over code-defined values.
         """
         # Server settings
-        if (val := _get_env("HOST")) is not None:
+        serve_prefix = "OMNICOREAGENT_SERVE"
+        background_prefix = "OMNICOREAGENT_BACKGROUND"
+
+        if (val := _get_env(serve_prefix, "HOST")) is not None:
             self.host = val
-        if (val := _get_env_int("PORT")) is not None:
+        if (val := _get_env_int(serve_prefix, "PORT")) is not None:
             self.port = val
-        if (val := _get_env_int("WORKERS")) is not None:
+        if (val := _get_env_int(serve_prefix, "WORKERS")) is not None:
             self.workers = val
 
         # API settings
-        if (val := _get_env("API_PREFIX")) is not None:
+        if (val := _get_env(serve_prefix, "API_PREFIX")) is not None:
             self.api_prefix = val
-        if (val := _get_env_bool("ENABLE_DOCS")) is not None:
+        if (val := _get_env_bool(serve_prefix, "ENABLE_DOCS")) is not None:
             self.enable_docs = val
-        if (val := _get_env_bool("ENABLE_REDOC")) is not None:
+        if (val := _get_env_bool(serve_prefix, "ENABLE_REDOC")) is not None:
             self.enable_redoc = val
 
         # CORS settings
-        if (val := _get_env_bool("CORS_ENABLED")) is not None:
+        if (val := _get_env_bool(serve_prefix, "CORS_ENABLED")) is not None:
             self.cors_enabled = val
-        if (val := _get_env_list("CORS_ORIGINS")) is not None:
+        if (val := _get_env_list(serve_prefix, "CORS_ORIGINS")) is not None:
             self.cors_origins = val
-        if (val := _get_env_list("CORS_METHODS")) is not None:
+        if (val := _get_env_list(serve_prefix, "CORS_METHODS")) is not None:
             self.cors_methods = val
-        if (val := _get_env_list("CORS_HEADERS")) is not None:
+        if (val := _get_env_list(serve_prefix, "CORS_HEADERS")) is not None:
             self.cors_headers = val
-        if (val := _get_env_bool("CORS_CREDENTIALS")) is not None:
+        if (val := _get_env_bool(serve_prefix, "CORS_CREDENTIALS")) is not None:
             self.cors_credentials = val
 
         # Authentication
-        if (val := _get_env_bool("AUTH_ENABLED")) is not None:
+        if (val := _get_env_bool(serve_prefix, "AUTH_ENABLED")) is not None:
             self.auth_enabled = val
-        if (val := _get_env("AUTH_TOKEN")) is not None:
+        if (val := _get_env(serve_prefix, "AUTH_TOKEN")) is not None:
             self.auth_token = val
 
         # Logging
-        if (val := _get_env_bool("REQUEST_LOGGING")) is not None:
+        if (val := _get_env_bool(serve_prefix, "REQUEST_LOGGING")) is not None:
             self.request_logging = val
-        if (val := _get_env("LOG_LEVEL")) is not None:
+        if (val := _get_env(serve_prefix, "LOG_LEVEL")) is not None:
             self.log_level = val
 
         # Timeouts
-        if (val := _get_env_int("REQUEST_TIMEOUT")) is not None:
+        if (val := _get_env_int(serve_prefix, "REQUEST_TIMEOUT")) is not None:
             self.request_timeout = val
 
         # Rate limiting
-        if (val := _get_env_bool("RATE_LIMIT_ENABLED")) is not None:
+        if (val := _get_env_bool(serve_prefix, "RATE_LIMIT_ENABLED")) is not None:
             self.rate_limit_enabled = val
-        if (val := _get_env_int("RATE_LIMIT_REQUESTS")) is not None:
+        if (val := _get_env_int(serve_prefix, "RATE_LIMIT_REQUESTS")) is not None:
             self.rate_limit_requests = val
-        if (val := _get_env_int("RATE_LIMIT_WINDOW")) is not None:
+        if (val := _get_env_int(serve_prefix, "RATE_LIMIT_WINDOW")) is not None:
             self.rate_limit_window = val
+
+        # Background execution
+        if (val := _get_env_bool(background_prefix, "ENABLED")) is not None:
+            self.background_enabled = val
+        if (val := _get_env(background_prefix, "AGENT_ID")) is not None:
+            self.background_agent_id = val
+        if (val := _get_env(background_prefix, "TASK_STORE")) is not None:
+            self.background_task_store = val
+        if (val := _get_env(background_prefix, "TASK_STORE_URL")) is not None:
+            self.background_task_store_url = val
+        if (val := _get_env_bool(background_prefix, "START_WORKER")) is not None:
+            self.background_start_worker = val
 
         return self
 
@@ -188,3 +228,17 @@ class OmniServeConfig(BaseModel):
     def from_env(cls) -> "OmniServeConfig":
         """Create config from environment variables only."""
         return cls()
+
+    def background_task_store_config(self) -> str | dict[str, Any] | None:
+        """Return normalized task-store config for BackgroundAgentManager."""
+        if isinstance(self.background_task_store, dict):
+            return self.background_task_store
+        if self.background_task_store_url:
+            backend = self.background_task_store or "sql"
+            if backend == "in_memory":
+                backend = "sql"
+            return {
+                "backend": backend,
+                "url": self.background_task_store_url,
+            }
+        return self.background_task_store

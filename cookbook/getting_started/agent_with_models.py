@@ -118,8 +118,6 @@ async def demo_ollama():
     print("OLLAMA (LOCAL LLAMA3)")
     print("=" * 50)
 
-    # Ollama doesn't usually need an API key, but the agent framework
-    # expects LLM_API_KEY to be present for initialization checks.
     print("Note: Ensure you have pulled the model first: `ollama pull llama3`")
 
     try:

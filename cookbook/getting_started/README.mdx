@@ -46,17 +46,14 @@ Welcome to the **OmniCoreAgent** learning path. This guide takes you from writin
 ## 🛠️ Prerequisites
 
 ```bash
-# Required
 pip install omnicoreagent
 
-# Create .env file
-LLM_API_KEY=your_key_here
-
-# Optional (for persistence examples)
-REDIS_URL=redis://localhost:6379/0
-DATABASE_URL=postgresql://user:pass@localhost:5432/db
-MONGODB_URI=mongodb://localhost:27017/omnicoreagent
+# Most hosted model providers need only this key. The cookbook loader reads .env.
+echo "LLM_API_KEY=your_key_here" > .env
 ```
+
+The examples start with in-memory defaults. Add `REDIS_URL`, `DATABASE_URL`, or
+`MONGODB_URI` only when you intentionally run the persistence examples.
 
 ---
 
