@@ -1,5 +1,5 @@
 """
-Core AI Agent Framework Components.
+Core AI agent harness components.
 
 Exports are resolved lazily to keep core package import cheap and free of
 provider/runtime side effects.
