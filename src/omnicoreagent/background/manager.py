@@ -18,6 +18,7 @@ from omnicoreagent.background.errors import (
 )
 from omnicoreagent.background.models import (
     TERMINAL_RUN_STATUSES,
+    TERMINAL_EVENT_NAMES,
     AttemptReason,
     AttemptStatus,
     BackgroundAgentSpec,
@@ -384,13 +385,25 @@ class BackgroundAgentManager:
         }
 
     async def get_run_events(self, run_id: str) -> list[dict[str, Any]]:
-        events = self._events.get(run_id)
-        if events:
-            return list(events)
         run = await self.task_store.get_run(run_id)
         if not run:
             return []
-        return self._read_workspace_events(run.workspace_path)
+        events = self._events.get(run_id)
+        workspace_events = self._read_workspace_events(run.workspace_path)
+        router_events = await self._read_event_router_events(run)
+        candidates = [router_events, list(events or []), workspace_events]
+        complete = [
+            candidate
+            for candidate in candidates
+            if candidate and candidate[-1].get("event") in TERMINAL_EVENT_NAMES
+        ]
+        if complete:
+            return max(complete, key=len)
+        if router_events:
+            return router_events
+        if events:
+            return list(events)
+        return workspace_events
 
     async def get_run_workspace(self, run_id: str) -> dict[str, Any]:
         """Return the durable workspace location and visible files for a run."""
@@ -846,14 +859,64 @@ class BackgroundAgentManager:
                     payload={
                         "agent_id": event.get("agent_id") or "background",
                         "status": event["event"],
+                        "event": event["event"],
                         "timestamp": event["timestamp"],
                         "session_id": event.get("session_id"),
+                        "task_id": event.get("task_id"),
+                        "run_id": event.get("run_id"),
+                        "run_status": event.get("status"),
+                        "attempt": event.get("attempt"),
+                        "sequence": event.get("sequence"),
+                        "workspace_path": event.get("workspace_path"),
+                        "last_run": event.get("run_id"),
+                        "run_count": event.get("sequence"),
+                        "error": event.get("error"),
                     },
                     agent_name=event.get("agent_id") or "background",
                 ),
             )
         except Exception:
             return
+
+    async def _read_event_router_events(self, run: BackgroundRun) -> list[dict[str, Any]]:
+        if self.event_router is None:
+            return []
+        try:
+            router_events = await self.event_router.get_events(session_id=run.session_id)
+        except Exception:
+            return []
+
+        events: list[dict[str, Any]] = []
+        for item in router_events:
+            raw = item.model_dump() if hasattr(item, "model_dump") else dict(item)
+            payload = raw.get("payload", {})
+            if hasattr(payload, "model_dump"):
+                payload = payload.model_dump()
+            if payload.get("run_id") != run.run_id and payload.get("last_run") != run.run_id:
+                continue
+            event = {
+                "event": payload.get("event") or payload.get("status"),
+                "timestamp": payload.get("timestamp") or raw.get("timestamp"),
+                "agent_id": payload.get("agent_id"),
+                "task_id": payload.get("task_id"),
+                "run_id": payload.get("run_id") or payload.get("last_run"),
+                "session_id": payload.get("session_id"),
+                "status": payload.get("run_status"),
+                "attempt": payload.get("attempt"),
+                "sequence": payload.get("sequence") or payload.get("run_count"),
+                "workspace_path": payload.get("workspace_path"),
+            }
+            if payload.get("error"):
+                event["error"] = payload["error"]
+            events.append({key: value for key, value in event.items() if value is not None})
+
+        return sorted(
+            events,
+            key=lambda event: (
+                event.get("sequence", 0),
+                event.get("timestamp", ""),
+            ),
+        )
 
     def _resolve_workspace(self) -> Any | None:
         if self._workspace is not None:

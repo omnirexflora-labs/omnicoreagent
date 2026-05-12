@@ -103,6 +103,14 @@ TERMINAL_RUN_STATUSES = {
     RunStatus.SKIPPED,
 }
 
+TERMINAL_EVENT_NAMES = {
+    "background_run_completed",
+    "background_run_failed",
+    "background_run_timeout",
+    "background_run_cancelled",
+    "background_run_skipped",
+}
+
 ACTIVE_RUN_STATUSES = {
     RunStatus.QUEUED,
     RunStatus.CLAIMED,
