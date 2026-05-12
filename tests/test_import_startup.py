@@ -300,6 +300,32 @@ asyncio.run(main())
     }
 
 
+def test_background_import_does_not_load_backend_clients(tmp_path):
+    result = _run_import_probe(
+        tmp_path,
+        """
+import json
+import sys
+
+from omnicoreagent.background import TaskStoreRouter
+
+print(json.dumps({
+    "router": TaskStoreRouter.__name__,
+    "redis_loaded": "redis" in sys.modules or "redis.asyncio" in sys.modules,
+    "motor_loaded": "motor" in sys.modules or "motor.motor_asyncio" in sys.modules,
+    "pymongo_loaded": "pymongo" in sys.modules,
+}))
+""",
+    )
+
+    assert result == {
+        "router": "TaskStoreRouter",
+        "redis_loaded": False,
+        "motor_loaded": False,
+        "pymongo_loaded": False,
+    }
+
+
 def test_core_logging_import_has_no_runtime_side_effects(tmp_path):
     result = _run_import_probe(
         tmp_path,

@@ -285,7 +285,8 @@ If auth is enabled with `--auth-token` or
 
 Each run stores operational state in the task store and writes lifecycle files
 into the configured workspace namespace. Use the default in-memory task store
-for local development, or choose `sql` when runs must survive restarts.
+for local development, or choose `sql`, `redis`, or `mongodb` when runs must
+survive restarts.
 
 ---
 
@@ -323,15 +324,22 @@ authentication, rate limits, or background storage.
 | `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` | `300` | Request timeout in seconds |
 | `OMNICOREAGENT_BACKGROUND_ENABLED` | `true` | Expose background task endpoints |
 | `OMNICOREAGENT_BACKGROUND_AGENT_ID` | `default` | Agent id for the served agent in background tasks |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE` | `in_memory` | Background control-plane store: `in_memory` or `sql` |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URL` | — | Optional SQL URL override. Setting this URL selects the SQL task store. |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE` | `in_memory` | Background control-plane store: `in_memory`, `sql`, `redis`, or `mongodb` |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URL` | — | SQL or Redis URL. Use `OMNICOREAGENT_BACKGROUND_TASK_STORE=redis` for Redis URLs |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URI` | — | MongoDB URI |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE` | `omnicoreagent` | MongoDB database name |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_PREFIX` | — | Redis key prefix |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_COLLECTION_PREFIX` | — | MongoDB collection prefix |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_CONNECT_TIMEOUT` | — | Backend connect timeout in seconds |
 | `OMNICOREAGENT_BACKGROUND_START_WORKER` | `true` | Start scheduler and worker loop during server lifespan |
 
 <Info>
 The background task store is not conversation memory. Memory stays in
 `MemoryRouter`. The task store is the control plane for schedules, runs,
 attempts, leases, retries, and cancellation. Leave it at the in-memory default
-to start; choose `sql` when that state must survive restarts.
+to start; choose `sql`, `redis`, or `mongodb` when that state must survive
+restarts. Redis durable deployments need persistence enabled and a no-eviction
+policy for task-store keys. MongoDB durable deployments use majority writes.
 </Info>
 
 **Example shell environment:**

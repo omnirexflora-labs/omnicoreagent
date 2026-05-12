@@ -267,9 +267,14 @@ export LLM_API_KEY=your_api_key_here
 
 # Optional background task persistence
 # Background APIs and the worker are enabled by default with in-memory task state.
-# Use SQL when tasks, runs, attempts, leases, and retries must survive restarts.
+# Use SQL, Redis, or MongoDB when task control-plane state must survive restarts.
 # export OMNICOREAGENT_BACKGROUND_TASK_STORE=sql
 # export OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=sqlite:///.omnicoreagent/background.db
+# export OMNICOREAGENT_BACKGROUND_TASK_STORE=redis
+# export OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=redis://localhost:6379/0
+# export OMNICOREAGENT_BACKGROUND_TASK_STORE=mongodb
+# export OMNICOREAGENT_BACKGROUND_TASK_STORE_URI=mongodb://localhost:27017
+# export OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE=omnicoreagent
 """)
         return
 

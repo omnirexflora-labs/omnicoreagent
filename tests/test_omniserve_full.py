@@ -61,7 +61,54 @@ class TestConfiguration:
         assert config.background_task_store_config() == {
             "backend": "sql",
             "url": "sqlite:///custom-background.db",
+            "prefix": None,
+            "connect_timeout": None,
         }
+
+    def test_background_task_store_uri_selects_mongodb(self):
+        config = OmniServeConfig(
+            background_task_store_uri="mongodb://localhost:27017",
+            background_task_store_database="tasks",
+        )
+
+        assert config.background_task_store_config() == {
+            "backend": "mongodb",
+            "uri": "mongodb://localhost:27017",
+            "database": "tasks",
+            "collection_prefix": None,
+            "connect_timeout": None,
+        }
+
+    def test_background_task_store_redis_keeps_tuning_without_url(self):
+        with patch.dict(os.environ, {"REDIS_URL": "redis://localhost:6379/3"}):
+            config = OmniServeConfig(
+                background_task_store="redis",
+                background_task_store_prefix="tasks",
+                background_task_store_connect_timeout=1.25,
+            )
+            assert config.background_task_store_config() == {
+                "backend": "redis",
+                "url": "redis://localhost:6379/3",
+                "prefix": "tasks",
+                "connect_timeout": 1.25,
+            }
+
+    def test_background_task_store_mongodb_keeps_tuning_without_uri(self):
+        with patch.dict(os.environ, {"MONGODB_URI": "mongodb://localhost:27017"}):
+            config = OmniServeConfig(
+                background_task_store="mongodb",
+                background_task_store_database="tasks",
+                background_task_store_collection_prefix="background_tasks",
+                background_task_store_connect_timeout=2.5,
+            )
+            assert config.background_task_store_config() == {
+                "backend": "mongodb",
+                "uri": "mongodb://localhost:27017",
+                "database": "tasks",
+                "prefix": None,
+                "collection_prefix": "background_tasks",
+                "connect_timeout": 2.5,
+            }
 
     def test_env_example_includes_background_settings(self):
         result = CliRunner().invoke(cli, ["config", "--env-example"])
@@ -70,6 +117,8 @@ class TestConfiguration:
         for key in [
             "OMNICOREAGENT_BACKGROUND_TASK_STORE",
             "OMNICOREAGENT_BACKGROUND_TASK_STORE_URL",
+            "OMNICOREAGENT_BACKGROUND_TASK_STORE_URI",
+            "OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE",
         ]:
             assert key in result.output
         assert "export LLM_API_KEY=your_api_key_here" in result.output

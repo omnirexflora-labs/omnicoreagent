@@ -65,7 +65,7 @@ execution layer around the agent harness.
 | Workspace is mandatory | Every background run gets a workspace namespace for durable outputs |
 | Memory is separate | Conversation/session memory stays in `MemoryRouter`; operational state stays in the task store |
 | Events are visibility, not truth | Events describe lifecycle transitions; the task store is the source of truth |
-| Storage is pluggable | `AbstractTaskStore` supports the shipped `sql` and `in_memory` stores and leaves Redis/MongoDB behind the same interface |
+| Storage is pluggable | `AbstractTaskStore` supports the shipped `in_memory`, `sql`, `redis`, and `mongodb` stores behind the same interface |
 | Backend choice is explicit | A running manager uses one task store; backend transfer is explicit, not hot-swapped mid-run |
 | Root import stays light | Background imports do not pull Redis, MongoDB, or heavyweight scheduler packages |
 
@@ -155,9 +155,9 @@ redis
 mongodb
 ```
 
-The shipped implementations are `sql` and `in_memory`. Redis and MongoDB use
-the same contract when implemented. The router is a construction boundary only.
-Runtime code depends on `AbstractTaskStore`, not on backend-specific classes.
+The shipped implementations are `in_memory`, `sql`, `redis`, and `mongodb`.
+The router is a construction boundary only. Runtime code depends on
+`AbstractTaskStore`, not on backend-specific classes.
 
 ### `AbstractTaskStore`
 
@@ -252,8 +252,8 @@ The public task-store backend names are:
 |---------|---------|
 | `in_memory` | Default zero-config store for first-run UX; state is lost on process exit |
 | `sql` | Durable local SQLite storage when restart persistence is required |
-| `redis` | Reserved backend name for future Redis task-store support |
-| `mongodb` | Reserved backend name for future MongoDB task-store support |
+| `redis` | Redis-backed task store for durable remote state; stores one serialized state snapshot behind a token-checked lock |
+| `mongodb` | MongoDB-backed task store for durable remote state; stores one serialized state snapshot behind an expiring lock document |
 
 Do not expose separate public routers named after each SQL database. The
 current `sql` implementation is SQLite-backed and uses the Python standard
@@ -285,9 +285,11 @@ BackgroundAgentManager(task_store={...})
 
 Omitting `task_store` means `in_memory`. This keeps the first-run developer
 experience lightweight. Production deployments that need restart persistence
-must choose `sql` explicitly.
+must choose `sql`, `redis`, or `mongodb` explicitly.
 
-Bare string construction is limited to `in_memory` and `sql`.
+Bare string construction is supported for all backend names. Redis uses
+`REDIS_URL` when no URL is provided. MongoDB uses `MONGODB_URI` and defaults the
+database to `omnicoreagent` when no database is provided.
 
 The manager must not hot-swap task stores while runs are active. Operational
 state is stateful by design. Moving from one backend to another requires an

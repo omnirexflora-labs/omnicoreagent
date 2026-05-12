@@ -1,11 +1,11 @@
-"""SQLite-backed task store for durable background execution."""
+"""Shared serialized task-store wrapper for remote durable backends."""
 
 from __future__ import annotations
 
+import asyncio
+from abc import abstractmethod
 from collections.abc import Awaitable, Callable
-import sqlite3
-from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from omnicoreagent.background.models import (
     BackgroundAgentSpec,
@@ -22,23 +22,12 @@ from omnicoreagent.background.store.in_memory import InMemoryTaskStore
 T = TypeVar("T")
 
 
-class SqlTaskStore(InMemoryTaskStore):
-    """Durable local SQLite task store.
+class SerializedTaskStore(InMemoryTaskStore):
+    """Persist in-memory task-store state through backend load/save hooks."""
 
-    The store reloads current SQLite state before each public operation. Mutating
-    operations run under ``BEGIN IMMEDIATE`` so competing manager processes cannot
-    claim or transition the same run from stale local state.
-    """
-
-    def __init__(self, url: str | None = None) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.url = url or "sqlite:///.omnicoreagent/background.db"
-        self.path = self._path_from_url(self.url)
-        self._schema_ready = False
-
-    async def initialize(self) -> None:
-        await super().initialize()
-        await self._reload()
+        self._operation_lock = asyncio.Lock()
 
     async def save_agent(self, spec: BackgroundAgentSpec) -> None:
         await self._mutate(lambda: InMemoryTaskStore.save_agent(self, spec))
@@ -256,113 +245,63 @@ class SqlTaskStore(InMemoryTaskStore):
         )
 
     async def _read(self, operation: Callable[[], Awaitable[T]]) -> T:
-        await self._reload()
-        return await operation()
+        async with self._operation_lock:
+            await self._load_backend_state()
+            return await operation()
 
-    async def _mutate(self, operation: Callable[[], Awaitable[T]]) -> T:
-        self._ensure_schema()
-        connection = self._connect()
-        connection.isolation_level = None
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            await self._load_from_connection(connection)
-            result = await operation()
-            await self._persist_to_connection(connection)
-            connection.execute("COMMIT")
-            return result
-        except Exception:
-            connection.execute("ROLLBACK")
-            raise
-        finally:
-            connection.close()
+    @abstractmethod
+    async def _mutate(self, operation: Callable[[], Awaitable[T]]) -> T: ...
 
-    async def _reload(self) -> None:
-        self._ensure_schema()
-        with self._connect() as connection:
-            await self._load_from_connection(connection)
+    @abstractmethod
+    async def _load_backend_state(self) -> None: ...
 
-    async def _load_from_connection(self, connection: sqlite3.Connection) -> None:
-        rows = connection.execute("SELECT kind, id, data FROM background_state").fetchall()
+    async def _load_snapshot(self, snapshot: dict[str, Any] | None) -> None:
+        snapshot = snapshot or {}
         async with self._lock:
-            self._agents.clear()
-            self._tasks.clear()
-            self._schedule_states.clear()
-            self._runs.clear()
-            self._attempts.clear()
-            self._cancel_requested.clear()
-            for kind, record_id, data in rows:
-                if kind == "agent":
-                    self._agents[record_id] = BackgroundAgentSpec.model_validate_json(data)
-                elif kind == "task":
-                    self._tasks[record_id] = BackgroundTaskSpec.model_validate_json(data)
-                elif kind == "schedule":
-                    self._schedule_states[record_id] = (
-                        BackgroundScheduleState.model_validate_json(data)
-                    )
-                elif kind == "run":
-                    self._runs[record_id] = BackgroundRun.model_validate_json(data)
-                elif kind == "attempt":
-                    self._attempts[record_id] = BackgroundAttempt.model_validate_json(data)
-                elif kind == "cancel":
-                    self._cancel_requested.add(record_id)
+            self._agents = {
+                key: BackgroundAgentSpec.model_validate(value)
+                for key, value in snapshot.get("agents", {}).items()
+            }
+            self._tasks = {
+                key: BackgroundTaskSpec.model_validate(value)
+                for key, value in snapshot.get("tasks", {}).items()
+            }
+            self._schedule_states = {
+                key: BackgroundScheduleState.model_validate(value)
+                for key, value in snapshot.get("schedule_states", {}).items()
+            }
+            self._runs = {
+                key: BackgroundRun.model_validate(value)
+                for key, value in snapshot.get("runs", {}).items()
+            }
+            self._attempts = {
+                key: BackgroundAttempt.model_validate(value)
+                for key, value in snapshot.get("attempts", {}).items()
+            }
+            self._cancel_requested = set(snapshot.get("cancel_requested", []))
 
-    async def _persist_to_connection(self, connection: sqlite3.Connection) -> None:
+    async def _snapshot(self) -> dict[str, Any]:
         async with self._lock:
-            records = []
-            records.extend(
-                ("agent", key, value.model_dump_json())
-                for key, value in self._agents.items()
-            )
-            records.extend(
-                ("task", key, value.model_dump_json())
-                for key, value in self._tasks.items()
-            )
-            records.extend(
-                ("schedule", key, value.model_dump_json())
-                for key, value in self._schedule_states.items()
-            )
-            records.extend(
-                ("run", key, value.model_dump_json())
-                for key, value in self._runs.items()
-            )
-            records.extend(
-                ("attempt", key, value.model_dump_json())
-                for key, value in self._attempts.items()
-            )
-            records.extend(("cancel", run_id, "{}") for run_id in self._cancel_requested)
-
-        connection.execute("DELETE FROM background_state")
-        connection.executemany(
-            "INSERT INTO background_state(kind, id, data) VALUES (?, ?, ?)",
-            records,
-        )
-
-    def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.path, timeout=30)
-
-    def _ensure_schema(self) -> None:
-        if self._schema_ready:
-            return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as connection:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS background_state (
-                    kind TEXT NOT NULL,
-                    id TEXT NOT NULL,
-                    data TEXT NOT NULL,
-                    PRIMARY KEY (kind, id)
-                )
-                """
-            )
-        self._schema_ready = True
-
-    @staticmethod
-    def _path_from_url(url: str) -> Path:
-        if url in {"sqlite:///:memory:", ":memory:"}:
-            return Path(":memory:")
-        if url.startswith("sqlite:///"):
-            return Path(url.removeprefix("sqlite:///")).expanduser()
-        if url.startswith("sqlite://"):
-            return Path(url.removeprefix("sqlite://")).expanduser()
-        return Path(url).expanduser()
+            return {
+                "agents": {
+                    key: value.model_dump(mode="json")
+                    for key, value in self._agents.items()
+                },
+                "tasks": {
+                    key: value.model_dump(mode="json")
+                    for key, value in self._tasks.items()
+                },
+                "schedule_states": {
+                    key: value.model_dump(mode="json")
+                    for key, value in self._schedule_states.items()
+                },
+                "runs": {
+                    key: value.model_dump(mode="json")
+                    for key, value in self._runs.items()
+                },
+                "attempts": {
+                    key: value.model_dump(mode="json")
+                    for key, value in self._attempts.items()
+                },
+                "cancel_requested": sorted(self._cancel_requested),
+            }
