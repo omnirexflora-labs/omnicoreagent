@@ -27,8 +27,13 @@ Environment Variables (OVERRIDE code values):
     OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW: Time window in seconds (default: 60)
     OMNICOREAGENT_BACKGROUND_ENABLED: Enable background APIs (default: true)
     OMNICOREAGENT_BACKGROUND_AGENT_ID: Agent id used for the served agent (default: default)
-    OMNICOREAGENT_BACKGROUND_TASK_STORE: Task store backend, in_memory or sql (default: in_memory)
-    OMNICOREAGENT_BACKGROUND_TASK_STORE_URL: SQL task store URL
+    OMNICOREAGENT_BACKGROUND_TASK_STORE: Task store backend (default: in_memory)
+    OMNICOREAGENT_BACKGROUND_TASK_STORE_URL: SQL or Redis task-store URL
+    OMNICOREAGENT_BACKGROUND_TASK_STORE_URI: MongoDB task-store URI
+    OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE: MongoDB task-store database
+    OMNICOREAGENT_BACKGROUND_TASK_STORE_PREFIX: Redis task-store key prefix
+    OMNICOREAGENT_BACKGROUND_TASK_STORE_COLLECTION_PREFIX: MongoDB collection prefix
+    OMNICOREAGENT_BACKGROUND_TASK_STORE_CONNECT_TIMEOUT: Backend connect timeout
     OMNICOREAGENT_BACKGROUND_START_WORKER: Start scheduler/worker loop (default: true)
 
 Priority: Environment variables ALWAYS override code values.
@@ -141,7 +146,22 @@ class OmniServeConfig(BaseModel):
         default="in_memory", description="Background task store backend or config"
     )
     background_task_store_url: str | None = Field(
-        default=None, description="SQL task store URL for background execution"
+        default=None, description="SQL or Redis task store URL for background execution"
+    )
+    background_task_store_uri: str | None = Field(
+        default=None, description="MongoDB task store URI for background execution"
+    )
+    background_task_store_database: str | None = Field(
+        default=None, description="MongoDB task store database"
+    )
+    background_task_store_prefix: str | None = Field(
+        default=None, description="Redis task store key prefix"
+    )
+    background_task_store_collection_prefix: str | None = Field(
+        default=None, description="MongoDB task store collection prefix"
+    )
+    background_task_store_connect_timeout: float | None = Field(
+        default=None, description="Task store backend connect timeout"
     )
     background_start_worker: bool = Field(
         default=True,
@@ -219,6 +239,19 @@ class OmniServeConfig(BaseModel):
             self.background_task_store = val
         if (val := _get_env(background_prefix, "TASK_STORE_URL")) is not None:
             self.background_task_store_url = val
+        if (val := _get_env(background_prefix, "TASK_STORE_URI")) is not None:
+            self.background_task_store_uri = val
+        if (val := _get_env(background_prefix, "TASK_STORE_DATABASE")) is not None:
+            self.background_task_store_database = val
+        if (val := _get_env(background_prefix, "TASK_STORE_PREFIX")) is not None:
+            self.background_task_store_prefix = val
+        if (val := _get_env(background_prefix, "TASK_STORE_COLLECTION_PREFIX")) is not None:
+            self.background_task_store_collection_prefix = val
+        if (val := _get_env(background_prefix, "TASK_STORE_CONNECT_TIMEOUT")) is not None:
+            try:
+                self.background_task_store_connect_timeout = float(val)
+            except ValueError:
+                pass
         if (val := _get_env_bool(background_prefix, "START_WORKER")) is not None:
             self.background_start_worker = val
 
@@ -233,6 +266,14 @@ class OmniServeConfig(BaseModel):
         """Return normalized task-store config for BackgroundAgentManager."""
         if isinstance(self.background_task_store, dict):
             return self.background_task_store
+        if self.background_task_store_uri:
+            return {
+                "backend": "mongodb",
+                "uri": self.background_task_store_uri,
+                "database": self.background_task_store_database or "omnicoreagent",
+                "collection_prefix": self.background_task_store_collection_prefix,
+                "connect_timeout": self.background_task_store_connect_timeout,
+            }
         if self.background_task_store_url:
             backend = self.background_task_store or "sql"
             if backend == "in_memory":
@@ -240,5 +281,23 @@ class OmniServeConfig(BaseModel):
             return {
                 "backend": backend,
                 "url": self.background_task_store_url,
+                "prefix": self.background_task_store_prefix,
+                "connect_timeout": self.background_task_store_connect_timeout,
+            }
+        if self.background_task_store == "mongodb":
+            return {
+                "backend": "mongodb",
+                "uri": os.getenv("MONGODB_URI"),
+                "database": self.background_task_store_database or "omnicoreagent",
+                "prefix": self.background_task_store_prefix,
+                "collection_prefix": self.background_task_store_collection_prefix,
+                "connect_timeout": self.background_task_store_connect_timeout,
+            }
+        if self.background_task_store == "redis":
+            return {
+                "backend": "redis",
+                "url": os.getenv("REDIS_URL"),
+                "prefix": self.background_task_store_prefix,
+                "connect_timeout": self.background_task_store_connect_timeout,
             }
         return self.background_task_store

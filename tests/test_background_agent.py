@@ -13,13 +13,17 @@ from omnicoreagent.background import (
     BackgroundRun,
     BackgroundTaskSpec,
     InMemoryTaskStore,
+    MongoDbTaskStore,
     OverlapPolicy,
+    RedisTaskStore,
     RetryPolicy,
     RunLeaseError,
     RunStatus,
     ScheduleSpec,
     SqlTaskStore,
     TaskNotFoundError,
+    TaskStoreError,
+    TaskStoreRouter,
 )
 from omnicoreagent.background.models import (
     AttemptReason,
@@ -74,6 +78,204 @@ class CountingStore(InMemoryTaskStore):
     async def refresh_lease(self, run_id, worker_id, lease_token, lease_seconds):
         self.refresh_count += 1
         await super().refresh_lease(run_id, worker_id, lease_token, lease_seconds)
+
+
+class FakeRedisClient:
+    def __init__(self):
+        self.values = {}
+        self.hashes = {}
+        self.sets = {}
+
+    async def get(self, key):
+        return self.values.get(key)
+
+    async def set(self, key, value, nx=False, px=None):
+        if nx and key in self.values:
+            return False
+        self.values[key] = value
+        return True
+
+    async def hset(self, key, mapping):
+        self.hashes.setdefault(key, {}).update(mapping)
+        return len(mapping)
+
+    async def hgetall(self, key):
+        return self.hashes.get(key, {})
+
+    async def sadd(self, key, *values):
+        self.sets.setdefault(key, set()).update(values)
+        return len(values)
+
+    async def smembers(self, key):
+        return self.sets.get(key, set())
+
+    async def delete(self, *keys):
+        for key in keys:
+            self.values.pop(key, None)
+            self.hashes.pop(key, None)
+            self.sets.pop(key, None)
+        return len(keys)
+
+    async def eval(self, script, numkeys, *args):
+        if "PEXPIRE" in script:
+            key, token, _lease_ms = args
+            return 1 if self.values.get(key) == token else 0
+        if "SET" in script and numkeys == 2:
+            lock_key, active_generation_key, token, generation = args
+            if self.values.get(lock_key) == token:
+                self.values[active_generation_key] = generation
+                return 1
+            return 0
+        if "SET" in script and numkeys == 3:
+            (
+                lock_key,
+                active_generation_key,
+                previous_generation_key,
+                token,
+                generation,
+                previous_generation,
+            ) = args
+            if self.values.get(lock_key) == token:
+                self.values[active_generation_key] = generation
+                if previous_generation:
+                    self.values[previous_generation_key] = previous_generation
+                return 1
+            return 0
+        key, token = args
+        if self.values.get(key) == token:
+            self.values.pop(key, None)
+            return 1
+        return 0
+
+
+class FakeMongoUpdateResult:
+    def __init__(self, matched_count=0, upserted_id=None):
+        self.matched_count = matched_count
+        self.upserted_id = upserted_id
+
+
+class FakeMongoCollection:
+    def __init__(self):
+        self.docs = {}
+
+    async def find_one(self, filter):
+        return self.docs.get(filter["_id"])
+
+    async def replace_one(self, filter, document, upsert=False):
+        self.docs[filter["_id"]] = document
+        return FakeMongoUpdateResult(matched_count=1)
+
+    def find(self, filter):
+        class Cursor:
+            def __init__(self, docs):
+                self.docs = docs
+
+            async def to_list(self, length=None):
+                return self.docs
+
+        generation = filter["_generation"]
+        return Cursor(
+            [doc for doc in self.docs.values() if doc.get("_generation") == generation]
+        )
+
+    async def insert_many(self, documents):
+        for document in documents:
+            if document["_id"] in self.docs:
+                raise ValueError(f"duplicate document id: {document['_id']}")
+            self.docs[document["_id"]] = document
+
+    async def delete_many(self, filter):
+        generation = filter["_generation"]
+        to_delete = [
+            doc_id
+            for doc_id, doc in self.docs.items()
+            if doc.get("_generation") == generation
+        ]
+        for doc_id in to_delete:
+            self.docs.pop(doc_id, None)
+        return FakeMongoUpdateResult(matched_count=len(to_delete))
+
+    async def update_one(self, filter, update, upsert=False):
+        doc_id = filter["_id"]
+        doc = self.docs.get(doc_id)
+        if doc is None:
+            if not upsert:
+                return FakeMongoUpdateResult()
+            doc = {"_id": doc_id}
+            doc.update(update.get("$setOnInsert", {}))
+            self.docs[doc_id] = doc
+            return FakeMongoUpdateResult(upserted_id=doc_id)
+
+        if "$or" in filter and not any(
+            self._matches(doc, condition) for condition in filter["$or"]
+        ):
+            return FakeMongoUpdateResult()
+        if "token" in filter and doc.get("token") != filter["token"]:
+            return FakeMongoUpdateResult()
+        doc.update(update.get("$set", {}))
+        self.docs[doc_id] = doc
+        return FakeMongoUpdateResult(matched_count=1)
+
+    def _matches(self, doc, condition):
+        if condition == {"token": None}:
+            return doc.get("token") is None
+        if condition == {"token": {"$exists": False}}:
+            return "token" not in doc
+        if "expires_at" in condition:
+            return doc.get("expires_at") <= condition["expires_at"]["$lte"]
+        if "token" in condition:
+            return doc.get("token") == condition["token"]
+        return False
+
+
+class FakeMongoDb:
+    def __init__(self):
+        self.collections = {}
+
+    def __getitem__(self, name):
+        return self.collections.setdefault(name, FakeMongoCollection())
+
+    def with_options(self, **kwargs):
+        return self
+
+
+class FakeRedisTaskStore(RedisTaskStore):
+    def __init__(self, client):
+        super().__init__(url="redis://localhost:6379", prefix="lazy")
+        self.client = client
+        self.initialize_count = 0
+        self.close_count = 0
+
+    async def initialize(self):
+        self.initialize_count += 1
+        self._client = self.client
+        await self._load_backend_state()
+
+    async def close(self):
+        self.close_count += 1
+        self._client = None
+
+
+class FakeMongoTaskStore(MongoDbTaskStore):
+    def __init__(self, db):
+        super().__init__(uri="mongodb://localhost:27017", database="test")
+        self.db = db
+        self.initialize_count = 0
+        self.close_count = 0
+
+    async def initialize(self):
+        self.initialize_count += 1
+        self._db = self.db
+        await self._lock_collection.update_one(
+            {"_id": "task_store"},
+            {"$setOnInsert": {"token": None, "expires_at": datetime.now(timezone.utc)}},
+            upsert=True,
+        )
+        await self._load_backend_state()
+
+    async def close(self):
+        self.close_count += 1
+        self._db = None
 
 
 async def wait_for(predicate, timeout=1.0):
@@ -774,6 +976,274 @@ async def test_sql_task_store_claim_is_atomic_across_managers(tmp_path):
 
     assert claimed_a.run_id == run.run_id
     assert claimed_b is None
+
+
+def test_task_store_router_builds_redis_and_mongodb_stores(monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/1")
+    monkeypatch.setenv("MONGODB_URI", "mongodb://localhost:27017")
+    monkeypatch.setenv("OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE", "env_tasks")
+
+    redis_store = TaskStoreRouter.create("redis")
+    mongo_store = TaskStoreRouter.create("mongodb")
+
+    assert isinstance(redis_store, RedisTaskStore)
+    assert redis_store.url == "redis://localhost:6379/1"
+    assert isinstance(mongo_store, MongoDbTaskStore)
+    assert mongo_store.uri == "mongodb://localhost:27017"
+    assert mongo_store.database_name == "env_tasks"
+
+
+def test_task_store_router_accepts_explicit_redis_and_mongodb_config():
+    redis_store = TaskStoreRouter.create(
+        {
+            "backend": "redis",
+            "url": "redis://localhost:6379/2",
+            "prefix": "custom:background",
+            "connect_timeout": 1.5,
+        }
+    )
+    mongo_store = TaskStoreRouter.create(
+        {
+            "backend": "mongodb",
+            "uri": "mongodb://localhost:27017",
+            "database": "tasks",
+            "collection_prefix": "custom_tasks",
+            "connect_timeout": 2.0,
+        }
+    )
+
+    assert isinstance(redis_store, RedisTaskStore)
+    assert redis_store.prefix == "custom:background"
+    assert redis_store.connect_timeout == 1.5
+    assert isinstance(mongo_store, MongoDbTaskStore)
+    assert mongo_store.database_name == "tasks"
+    assert mongo_store.collection_prefix == "custom_tasks"
+    assert mongo_store.connect_timeout == 2.0
+
+
+def test_task_store_router_uses_common_prefix_for_mongodb_collections():
+    mongo_store = TaskStoreRouter.create(
+        {
+            "backend": "mongodb",
+            "uri": "mongodb://localhost:27017",
+            "database": "tasks",
+            "prefix": "common_tasks",
+        }
+    )
+
+    assert isinstance(mongo_store, MongoDbTaskStore)
+    assert mongo_store.collection_prefix == "common_tasks"
+
+
+@pytest.mark.asyncio
+async def test_remote_task_stores_lazy_initialize_before_manager_registration():
+    redis_store = FakeRedisTaskStore(FakeRedisClient())
+    redis_manager = BackgroundAgentManager(task_store=redis_store)
+
+    await redis_manager.register_agent("agent", FakeAgent())
+
+    assert redis_store.initialize_count == 1
+    assert (await redis_manager.get_agent("agent")).agent_id == "agent"
+
+    mongo_store = FakeMongoTaskStore(FakeMongoDb())
+    mongo_manager = BackgroundAgentManager(task_store=mongo_store)
+
+    await mongo_manager.register_agent("agent", FakeAgent())
+
+    assert mongo_store.initialize_count == 1
+    assert (await mongo_manager.get_agent("agent")).agent_id == "agent"
+
+
+@pytest.mark.asyncio
+async def test_manager_shutdown_closes_lazy_initialized_task_store():
+    store = FakeRedisTaskStore(FakeRedisClient())
+    manager = BackgroundAgentManager(task_store=store)
+
+    await manager.register_agent("agent", FakeAgent())
+    await manager.shutdown()
+
+    assert store.close_count == 1
+    assert store._client is None
+
+
+@pytest.mark.asyncio
+async def test_redis_task_store_persists_state_through_backend_snapshot():
+    client = FakeRedisClient()
+    first = RedisTaskStore(url="redis://localhost:6379", prefix="test")
+    first._client = client
+    await first.save_agent(agent_spec())
+    await first.save_task(task_spec())
+    run = await first.create_run_with_overlap_guard(
+        BackgroundRun(
+            task_id="task",
+            agent_id="agent",
+            query_snapshot="do work",
+            trigger_type=TriggerType.MANUAL,
+            session_id="background:agent:task",
+            workspace_path="background/agent/task/run",
+        ),
+        OverlapPolicy.SKIP_IF_RUNNING,
+    )
+
+    restored = RedisTaskStore(url="redis://localhost:6379", prefix="test")
+    restored._client = client
+
+    assert (await restored.get_task("task")).task_id == "task"
+    assert (await restored.get_run(run.run_id)).query_snapshot == "do work"
+
+
+@pytest.mark.asyncio
+async def test_redis_task_store_cleans_previous_generation_after_commit():
+    client = FakeRedisClient()
+    store = RedisTaskStore(url="redis://localhost:6379", prefix="test")
+    store._client = client
+
+    await store.save_agent(agent_spec())
+    first_generation = client.values[store._active_generation_key]
+    await store.save_task(task_spec())
+    second_generation = client.values[store._active_generation_key]
+
+    assert second_generation != first_generation
+    assert first_generation in client.values[store._previous_generation_key]
+
+    await store.save_task(task_spec(task_id="task_2"))
+
+    assert all(first_generation not in key for key in client.hashes)
+    assert all(first_generation not in key for key in client.sets)
+
+
+@pytest.mark.asyncio
+async def test_redis_task_store_reads_use_backend_lock():
+    client = FakeRedisClient()
+    store = RedisTaskStore(
+        url="redis://localhost:6379", prefix="test", lock_timeout=0.01
+    )
+    store._client = client
+    client.values[store._lock_key] = "other-worker"
+
+    with pytest.raises(TaskStoreError, match="Timed out acquiring Redis"):
+        await store.get_agent("agent")
+
+
+@pytest.mark.asyncio
+async def test_redis_task_store_rejects_commit_after_lock_loss():
+    client = FakeRedisClient()
+    store = RedisTaskStore(url="redis://localhost:6379", prefix="test")
+    store._client = client
+
+    token = await store._acquire_lock()
+    client.values.pop(store._lock_key)
+
+    with pytest.raises(Exception, match="lock expired before commit"):
+        await store._persist_backend_state(token)
+
+
+@pytest.mark.asyncio
+async def test_mongodb_task_store_persists_state_through_backend_snapshot():
+    db = FakeMongoDb()
+    first = MongoDbTaskStore(uri="mongodb://localhost:27017", database="test")
+    first._db = db
+    await first._lock_collection.update_one(
+        {"_id": "task_store"},
+        {"$setOnInsert": {"token": None, "expires_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    await first.save_agent(agent_spec())
+    await first.save_task(task_spec())
+    run = await first.create_run_with_overlap_guard(
+        BackgroundRun(
+            task_id="task",
+            agent_id="agent",
+            query_snapshot="do work",
+            trigger_type=TriggerType.MANUAL,
+            session_id="background:agent:task",
+            workspace_path="background/agent/task/run",
+        ),
+        OverlapPolicy.SKIP_IF_RUNNING,
+    )
+
+    restored = MongoDbTaskStore(uri="mongodb://localhost:27017", database="test")
+    restored._db = db
+
+    assert (await restored.get_task("task")).task_id == "task"
+    assert (await restored.get_run(run.run_id)).query_snapshot == "do work"
+
+
+@pytest.mark.asyncio
+async def test_mongodb_task_store_cleans_previous_generation_after_commit():
+    db = FakeMongoDb()
+    store = MongoDbTaskStore(uri="mongodb://localhost:27017", database="test")
+    store._db = db
+    await store._lock_collection.update_one(
+        {"_id": "task_store"},
+        {"$setOnInsert": {"token": None, "expires_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+
+    await store.save_agent(agent_spec())
+    first_generation = db["omnicoreagent_background_locks"].docs["task_store"][
+        "active_generation"
+    ]
+    await store.save_task(task_spec())
+    second_generation = db["omnicoreagent_background_locks"].docs["task_store"][
+        "active_generation"
+    ]
+
+    assert second_generation != first_generation
+    assert (
+        db["omnicoreagent_background_locks"].docs["task_store"]["previous_generation"]
+        == first_generation
+    )
+
+    await store.save_task(task_spec(task_id="task_2"))
+
+    for collection in db.collections.values():
+        assert all(
+            doc.get("_generation") != first_generation
+            for doc in collection.docs.values()
+        )
+
+
+@pytest.mark.asyncio
+async def test_mongodb_task_store_reads_use_backend_lock():
+    db = FakeMongoDb()
+    store = MongoDbTaskStore(
+        uri="mongodb://localhost:27017", database="test", lock_timeout=0.01
+    )
+    store._db = db
+    await store._lock_collection.update_one(
+        {"_id": "task_store"},
+        {
+            "$setOnInsert": {
+                "token": "other-worker",
+                "expires_at": datetime.now(timezone.utc) + timedelta(seconds=60),
+            }
+        },
+        upsert=True,
+    )
+
+    with pytest.raises(TaskStoreError, match="Timed out acquiring MongoDB"):
+        await store.get_agent("agent")
+
+
+@pytest.mark.asyncio
+async def test_mongodb_task_store_rejects_commit_after_lock_loss():
+    db = FakeMongoDb()
+    store = MongoDbTaskStore(uri="mongodb://localhost:27017", database="test")
+    store._db = db
+    await store._lock_collection.update_one(
+        {"_id": "task_store"},
+        {"$setOnInsert": {"token": None, "expires_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    token = await store._acquire_lock()
+    await store._lock_collection.update_one(
+        {"_id": "task_store", "token": token},
+        {"$set": {"token": None, "expires_at": datetime.now(timezone.utc)}},
+    )
+
+    with pytest.raises(Exception, match="lock expired before commit"):
+        await store._persist_backend_state(token)
 
 
 @pytest.mark.asyncio

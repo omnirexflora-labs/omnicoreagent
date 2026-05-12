@@ -3,8 +3,8 @@
 Background Agents run OmniCoreAgent tasks outside the foreground request path.
 They are built around tracked runs, task-store state, retries, cancellation,
 workspace output, and inspectable lifecycle events. Use the default in-memory
-store for local development, or `task_store="sql"` when runs must survive
-restarts.
+store for local development, or `sql`, `redis`, or `mongodb` when runs must
+survive restarts.
 
 ## Key Concepts
 
@@ -15,7 +15,15 @@ restarts.
 
 You can run the background manager without storage configuration. Use
 `BackgroundAgentManager()` for the default zero-config in-memory task store. Use
-`task_store="sql"` when task state must survive process restarts.
+`task_store="sql"`, `task_store="redis"`, or `task_store="mongodb"` when task
+state must survive process restarts.
+
+Redis and MongoDB task stores use optional backend drivers:
+
+```bash
+pip install "omnicoreagent[redis]"
+pip install "omnicoreagent[mongodb]"
+```
 
 ## Quick Start
 
@@ -77,8 +85,23 @@ await manager.resume_task("health_report")
 | `overlap_policy` | `skip_if_running`, `queue_next`, `cancel_previous`, or `allow_parallel`. |
 | `session_policy` | `task`, `run`, or `fixed` memory-session behavior. |
 
-The current implementation includes the tracked run model, SQLite task store,
-in-memory task store for local development and tests, manager lifecycle, manual
-and scheduled runs, retries with delay/backoff, lease fencing, expired-lease
-recovery, cancellation, workspace lifecycle files, and event history. State is
-restart-persistent when the task store is SQL.
+The current implementation includes the tracked run model, in-memory, SQL,
+Redis, and MongoDB task stores, manager lifecycle, manual and scheduled runs,
+retries with delay/backoff, lease fencing, expired-lease recovery, cancellation,
+workspace lifecycle files, and event history. State is restart-persistent when
+the task store is SQL, Redis, or MongoDB.
+
+Redis durable deployments need persistence enabled and a no-eviction policy for
+task-store keys. MongoDB task-store writes use majority write concern.
+
+```python
+BackgroundAgentManager(task_store="sql")
+BackgroundAgentManager(task_store={"backend": "redis", "url": "redis://localhost:6379/0"})
+BackgroundAgentManager(
+    task_store={
+        "backend": "mongodb",
+        "uri": "mongodb://localhost:27017",
+        "database": "omnicoreagent",
+    }
+)
+```

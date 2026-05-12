@@ -210,9 +210,8 @@ class BackgroundAgentManager:
             except asyncio.CancelledError:
                 pass
             self._worker_task = None
-        if self._initialized:
-            await self.task_store.close()
-            self._initialized = False
+        await self.task_store.close()
+        self._initialized = False
 
     async def pause_task(self, task_id: str) -> None:
         state = await self.task_store.get_schedule_state(task_id)

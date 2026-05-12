@@ -101,15 +101,23 @@ and use an in-memory task store. Set only the values you want to override.
 | `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Rate-limit window in seconds. |
 | `OMNICOREAGENT_BACKGROUND_ENABLED` | `true` | Expose background task endpoints. |
 | `OMNICOREAGENT_BACKGROUND_AGENT_ID` | `default` | Agent id used when OmniServe registers the served agent for background work. |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE` | `in_memory` | Background control-plane store: `in_memory` for zero-config local use or `sql` for restart-persistent SQLite. |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URL` | unset | Optional SQL URL override. Setting this URL selects the SQL task store even if `OMNICOREAGENT_BACKGROUND_TASK_STORE` is unset. |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE` | `in_memory` | Background control-plane store: `in_memory`, `sql`, `redis`, or `mongodb`. |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URL` | unset | SQL or Redis URL. A URL with no backend selects SQL; use `OMNICOREAGENT_BACKGROUND_TASK_STORE=redis` for Redis URLs. |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URI` | unset | MongoDB URI. Setting this selects the MongoDB task store. |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE` | `omnicoreagent` | MongoDB database name. |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_PREFIX` | unset | Redis key prefix. |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_COLLECTION_PREFIX` | unset | MongoDB collection prefix. |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_CONNECT_TIMEOUT` | unset | Optional backend connect timeout in seconds. |
 | `OMNICOREAGENT_BACKGROUND_START_WORKER` | `true` | Start the scheduler and worker loop during server lifespan. |
 
 The background task store is separate from `MemoryRouter`. `MemoryRouter` stores
 conversation/session history. The task store stores scheduler/runtime state:
 tasks, schedule cursors, runs, attempts, leases, heartbeats, retries, and
-cancellation flags. Defaults are intentionally light. Use `sql` when background
-tasks must survive process restarts.
+cancellation flags. Defaults are intentionally light. Use `sql`, `redis`, or
+`mongodb` when background tasks must survive process restarts.
+
+For Redis durability, enable Redis persistence and keep task-store keys out of
+eviction. MongoDB task-store writes use majority write concern.
 
 ## 2. Agent Configuration
 

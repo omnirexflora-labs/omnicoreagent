@@ -7,11 +7,11 @@ icon: 'clock'
 # Background Agents
 
 Background agents run tracked OmniCoreAgent tasks outside the foreground request
-path. Use the default in-memory store for local development, or `task_store="sql"`
-when tasks, runs, attempts, leases, retries, and cancellation state must survive
-process restarts. A task can run manually, once at a fixed time, on an interval,
-or from a five-field cron expression. Each run is tracked through queued,
-claimed, running, retrying, and terminal states.
+path. Use the default in-memory store for local development, or choose `sql`,
+`redis`, or `mongodb` when tasks, runs, attempts, leases, retries, and
+cancellation state must survive process restarts. A task can run manually, once
+at a fixed time, on an interval, or from a five-field cron expression. Each run
+is tracked through queued, claimed, running, retrying, and terminal states.
 
 Background execution is part of the core package:
 
@@ -19,10 +19,18 @@ Background execution is part of the core package:
 pip install omnicoreagent
 ```
 
+Redis and MongoDB task stores use optional backend drivers:
+
+```bash
+pip install "omnicoreagent[redis]"
+pip install "omnicoreagent[mongodb]"
+```
+
 No storage configuration is required to start. `BackgroundAgentManager()` uses an
 in-memory task store by default so the first run has no database requirement.
-Use `task_store="sql"` when tasks, runs, attempts, leases, retries, and
-cancellation state must survive process restarts.
+Use `task_store="sql"`, `task_store="redis"`, or `task_store="mongodb"` when
+tasks, runs, attempts, leases, retries, and cancellation state must survive
+process restarts.
 
 The task store is separate from agent memory. `MemoryRouter` stores
 conversation/session history. The task store stores operational background
@@ -147,7 +155,23 @@ The task store is the source of truth for:
 - runs and attempts
 - leases, heartbeats, and cancellation flags
 
-The current runtime includes the tracked run model, SQLite and in-memory task
-stores, schedule dispatch, manual runs, retries with delay/backoff, lease
-fencing, expired-lease recovery, cancellation, workspace lifecycle files, and run
-event history. State is restart-persistent when the task store is SQL.
+The current runtime includes the tracked run model, in-memory, SQL, Redis, and
+MongoDB task stores, schedule dispatch, manual runs, retries with delay/backoff,
+lease fencing, expired-lease recovery, cancellation, workspace lifecycle files,
+and run event history. State is restart-persistent when the task store is SQL,
+Redis, or MongoDB.
+
+Redis durable deployments need persistence enabled and a no-eviction policy for
+task-store keys. MongoDB task-store writes use majority write concern.
+
+```python
+BackgroundAgentManager(task_store="sql")
+BackgroundAgentManager(task_store={"backend": "redis", "url": "redis://localhost:6379/0"})
+BackgroundAgentManager(
+    task_store={
+        "backend": "mongodb",
+        "uri": "mongodb://localhost:27017",
+        "database": "omnicoreagent",
+    }
+)
+```

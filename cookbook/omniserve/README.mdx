@@ -97,8 +97,13 @@ limiting until you opt in.
 | `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` | `300` | Timeout seconds |
 | `OMNICOREAGENT_BACKGROUND_ENABLED` | `true` | Expose background task endpoints |
 | `OMNICOREAGENT_BACKGROUND_AGENT_ID` | `default` | Agent id for the served agent in background tasks |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE` | `in_memory` | Background task store backend |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URL` | — | SQL task store URL; setting it selects the SQL task store |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE` | `in_memory` | Background task store backend: `in_memory`, `sql`, `redis`, or `mongodb` |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URL` | — | SQL or Redis task store URL. Use `OMNICOREAGENT_BACKGROUND_TASK_STORE=redis` for Redis URLs |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URI` | — | MongoDB task store URI |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE` | `omnicoreagent` | MongoDB database name |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_PREFIX` | — | Redis key prefix |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_COLLECTION_PREFIX` | — | MongoDB collection prefix |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_CONNECT_TIMEOUT` | — | Backend connect timeout in seconds |
 | `OMNICOREAGENT_BACKGROUND_START_WORKER` | `true` | Start scheduler and worker loop |
 
 ---

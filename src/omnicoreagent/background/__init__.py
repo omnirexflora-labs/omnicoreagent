@@ -34,6 +34,8 @@ from omnicoreagent.background.models import (
 from omnicoreagent.background.store import (
     AbstractTaskStore,
     InMemoryTaskStore,
+    MongoDbTaskStore,
+    RedisTaskStore,
     SqlTaskStore,
     TaskStoreRouter,
 )
@@ -52,7 +54,9 @@ __all__ = [
     "InMemoryTaskStore",
     "InvalidScheduleError",
     "InvalidTaskStoreError",
+    "MongoDbTaskStore",
     "OverlapPolicy",
+    "RedisTaskStore",
     "RetryPolicy",
     "RunCancelledError",
     "RunExecutionError",

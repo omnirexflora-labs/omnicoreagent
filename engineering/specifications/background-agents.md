@@ -66,6 +66,8 @@ AbstractTaskStore
 TaskStoreRouter
 InMemoryTaskStore
 SqlTaskStore
+RedisTaskStore
+MongoDbTaskStore
 BackgroundAgentError
 AgentAlreadyRegisteredError
 AgentNotFoundError
@@ -103,8 +105,8 @@ Rules:
 - Omitting `task_store` selects `in_memory` for zero-config first-run UX.
 - `in_memory` is ephemeral and intended for local use, examples, and tests.
 - `sql` is the durable local SQLite backend for restart persistence.
-- `redis` is reserved for future Redis task-store support.
-- `mongodb` is reserved for future MongoDB task-store support.
+- `redis` is the durable Redis backend for remote task-store state.
+- `mongodb` is the durable MongoDB backend for remote task-store state.
 - The manager uses one task store for its lifecycle.
 - Switching task-store backend during active runs is not supported.
 - Moving state between task-store backends requires explicit export/import or
@@ -117,8 +119,10 @@ Redis requirements:
   equivalent managed durability setting with an explicit acknowledged-write loss
   bound. RDB-only persistence is not sufficient for strict durable task state.
 - eviction policy must not evict task-store keys.
-- atomic claim, transition, overlap, and schedule-advance operations must use
-  transactions or Lua scripts.
+- claim, transition, overlap, and schedule-advance operations must be serialized
+  by a backend lock before the state snapshot is read, mutated, and persisted.
+  The lock release must be token-checked so one worker cannot release another
+  worker's lock.
 
 SQL requirements:
 
@@ -128,15 +132,15 @@ SQL requirements:
   `occurrence_id` is not null.
 - claim and transition queries must use row-level locking or an equivalent
   compare-and-set condition.
+
 MongoDB requirements:
 
-- task-store writes that must be atomic across schedule/run/attempt records must
-  use MongoDB transactions on deployments that support them.
 - deployments must use majority write concern for durable task state.
-- MongoDB backends must create a unique index for `(task_id, occurrence_id)`
-  when `occurrence_id` is not null.
-- claim and transition updates must include expected status and lease token in
-  the filter.
+- claim, transition, overlap, and schedule-advance operations must be serialized
+  by a backend lock document before the state snapshot is read, mutated, and
+  persisted.
+- lock acquisition must be token and expiry based so a dead worker does not hold
+  the store forever.
 
 ---
 
@@ -154,7 +158,7 @@ manager = BackgroundAgentManager(
 
 Defaults:
 
-- `task_store`: `{"backend": "sql", "url": "sqlite:///.omnicoreagent/background.db"}`
+- `task_store`: `None` selects `in_memory`
 - `memory_router`: normal OmniCoreAgent default memory router
 - `event_router`: normal OmniCoreAgent default event router
 - `workspace`: normal OmniCoreAgent default workspace
@@ -165,6 +169,8 @@ Accepted `task_store` forms:
 ```python
 "in_memory"
 "sql"
+{"backend": "redis", "url": "redis://localhost:6379/0"}
+{"backend": "mongodb", "uri": "mongodb://localhost:27017", "database": "omnicoreagent"}
 {"backend": "sql", "url": "sqlite:///.omnicoreagent/background.db"}
 AbstractTaskStore(...)
 ```
@@ -198,13 +204,14 @@ Backend-specific fields:
 |---------|--------|
 | `in_memory` | no required fields |
 | `sql` | `url`; accepts SQLite URLs; defaults to `sqlite:///.omnicoreagent/background.db` when omitted |
-| `redis` | reserved; runtime raises `InvalidTaskStoreError` until implemented |
-| `mongodb` | reserved; runtime raises `InvalidTaskStoreError` until implemented |
+| `redis` | `url`; defaults from `REDIS_URL` when bare `task_store="redis"` is used |
+| `mongodb` | `uri`, `database`; URI defaults from `MONGODB_URI`, database defaults to `omnicoreagent` for bare `task_store="mongodb"` |
 
 Unknown fields raise `InvalidTaskStoreError`. `uri` is only accepted for the
-reserved MongoDB config. `url` is used for SQL.
+MongoDB config. `url` is used for SQL and Redis.
 
-Bare string construction is accepted only for `in_memory` and `sql`.
+Bare string construction is accepted for all backend names. Redis and MongoDB
+still require their connection environment variables before initialization.
 
 ---
 
@@ -1025,8 +1032,10 @@ Run the same contract tests against every backend:
 The implementation satisfies this specification when:
 
 - `BackgroundAgentManager` uses `AbstractTaskStore` for all operational state.
-- `TaskStoreRouter` supports the shipped `in_memory` and `sql` stores.
+- `TaskStoreRouter` supports the shipped `in_memory`, `sql`, `redis`, and `mongodb` stores.
 - `sql` supports local SQLite durability.
+- `redis` supports durable Redis state through a serialized snapshot and backend lock.
+- `mongodb` supports durable MongoDB state through a serialized snapshot and lock document.
 - durable stores survive manager restart.
 - every run has a durable `run_id`.
 - every run has a durable `query_snapshot`.
