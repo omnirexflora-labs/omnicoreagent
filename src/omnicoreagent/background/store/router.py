@@ -41,8 +41,7 @@ class TaskStoreRouter:
     ) -> TaskStoreConfig:
         if config is None:
             return TaskStoreConfig(
-                backend=TaskStoreBackend.SQL,
-                url="sqlite:///.omnicoreagent/background.db",
+                backend=TaskStoreBackend.IN_MEMORY,
             )
         if isinstance(config, str):
             if config not in {

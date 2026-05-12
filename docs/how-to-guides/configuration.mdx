@@ -15,19 +15,28 @@ dictionaries, and specialized configuration objects.
 
 Environment variables are the best way to manage sensitive data like API keys and connection strings.
 
+For the first working agent, set only `LLM_API_KEY`. Memory and events default
+to in-memory storage, workspace files default to local disk, and OmniServe
+settings have server-side defaults. Add backend variables only when you are
+intentionally moving from local defaults to persistent or cloud infrastructure.
+
 ### LLM API Key
 
 OmniCoreAgent uses one public environment variable for hosted model credentials:
 
 ```bash
-LLM_API_KEY=your_provider_key
+export LLM_API_KEY=your_provider_key
 ```
 
 Set `model_config["provider"]` to choose the provider. The runtime reads
 `LLM_API_KEY` and internally passes it to LiteLLM for the selected provider.
 Do not configure provider-specific key names in OmniCoreAgent examples.
 
-### Memory Backends
+### Optional Memory Backends
+
+The default memory backend is in-memory and needs no environment variables.
+Set these only when conversation history must live outside the current process.
+
 | Backend | Variable | Example |
 |---------|----------|---------|
 | **Redis** | `REDIS_URL` | `redis://localhost:6379/0` |
@@ -65,27 +74,42 @@ Optional workspace variables:
 OmniServe reads these variables through `OmniServeConfig`. Environment variables
 override values passed in code.
 
+You do not need any OmniServe environment variables to start. Defaults bind the
+server to port `8000`, enable the background API, start the background worker,
+and use an in-memory task store. Set only the values you want to override.
+
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `OMNISERVE_HOST` | `0.0.0.0` | Server bind host. |
-| `OMNISERVE_PORT` | `8000` | Server port. |
-| `OMNISERVE_WORKERS` | `1` | Uvicorn worker count. |
-| `OMNISERVE_API_PREFIX` | `""` | API route prefix, such as `/api/v1`. |
-| `OMNISERVE_ENABLE_DOCS` | `true` | Enable Swagger UI. |
-| `OMNISERVE_ENABLE_REDOC` | `true` | Enable ReDoc. |
-| `OMNISERVE_CORS_ENABLED` | `true` | Enable CORS middleware. |
-| `OMNISERVE_CORS_ORIGINS` | `*` | Comma-separated allowed origins. |
-| `OMNISERVE_CORS_METHODS` | `*` | Comma-separated allowed methods. |
-| `OMNISERVE_CORS_HEADERS` | `*` | Comma-separated allowed headers. |
-| `OMNISERVE_CORS_CREDENTIALS` | `true` | Allow CORS credentials. |
-| `OMNISERVE_AUTH_ENABLED` | `false` | Enable Bearer token auth. |
-| `OMNISERVE_AUTH_TOKEN` | unset | Bearer token value. |
-| `OMNISERVE_REQUEST_LOGGING` | `true` | Log incoming requests. |
-| `OMNISERVE_LOG_LEVEL` | `INFO` | Server log level. |
-| `OMNISERVE_REQUEST_TIMEOUT` | `300` | Request timeout in seconds. Set `0` to disable timeout middleware. |
-| `OMNISERVE_RATE_LIMIT_ENABLED` | `false` | Enable in-process rate limiting. |
-| `OMNISERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per rate-limit window. |
-| `OMNISERVE_RATE_LIMIT_WINDOW` | `60` | Rate-limit window in seconds. |
+| `OMNICOREAGENT_SERVE_HOST` | `0.0.0.0` | Server bind host. |
+| `OMNICOREAGENT_SERVE_PORT` | `8000` | Server port. |
+| `OMNICOREAGENT_SERVE_WORKERS` | `1` | Uvicorn worker count. |
+| `OMNICOREAGENT_SERVE_API_PREFIX` | `""` | API route prefix, such as `/api/v1`. |
+| `OMNICOREAGENT_SERVE_ENABLE_DOCS` | `true` | Enable Swagger UI. |
+| `OMNICOREAGENT_SERVE_ENABLE_REDOC` | `true` | Enable ReDoc. |
+| `OMNICOREAGENT_SERVE_CORS_ENABLED` | `true` | Enable CORS middleware. |
+| `OMNICOREAGENT_SERVE_CORS_ORIGINS` | `*` | Comma-separated allowed origins. |
+| `OMNICOREAGENT_SERVE_CORS_METHODS` | `*` | Comma-separated allowed methods. |
+| `OMNICOREAGENT_SERVE_CORS_HEADERS` | `*` | Comma-separated allowed headers. |
+| `OMNICOREAGENT_SERVE_CORS_CREDENTIALS` | `true` | Allow CORS credentials. |
+| `OMNICOREAGENT_SERVE_AUTH_ENABLED` | `false` | Enable Bearer token auth. |
+| `OMNICOREAGENT_SERVE_AUTH_TOKEN` | unset | Bearer token value. |
+| `OMNICOREAGENT_SERVE_REQUEST_LOGGING` | `true` | Log incoming requests. |
+| `OMNICOREAGENT_SERVE_LOG_LEVEL` | `INFO` | Server log level. |
+| `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` | `300` | Request timeout in seconds. Set `0` to disable timeout middleware. |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED` | `false` | Enable in-process rate limiting. |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per rate-limit window. |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Rate-limit window in seconds. |
+| `OMNICOREAGENT_BACKGROUND_ENABLED` | `true` | Expose background task endpoints. |
+| `OMNICOREAGENT_BACKGROUND_AGENT_ID` | `default` | Agent id used when OmniServe registers the served agent for background work. |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE` | `in_memory` | Background control-plane store: `in_memory` for zero-config local use or `sql` for restart-persistent SQLite. |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URL` | unset | Optional SQL URL override. Setting this URL selects the SQL task store even if `OMNICOREAGENT_BACKGROUND_TASK_STORE` is unset. |
+| `OMNICOREAGENT_BACKGROUND_START_WORKER` | `true` | Start the scheduler and worker loop during server lifespan. |
+
+The background task store is separate from `MemoryRouter`. `MemoryRouter` stores
+conversation/session history. The task store stores scheduler/runtime state:
+tasks, schedule cursors, runs, attempts, leases, heartbeats, retries, and
+cancellation flags. Defaults are intentionally light. Use `sql` when background
+tasks must survive process restarts.
 
 ## 2. Agent Configuration
 

@@ -25,7 +25,7 @@ class RunNotFoundError(BackgroundAgentError):
     """Raised when a run cannot be found."""
 
 
-class InvalidScheduleError(BackgroundAgentError):
+class InvalidScheduleError(BackgroundAgentError, ValueError):
     """Raised when schedule configuration is invalid."""
 
 

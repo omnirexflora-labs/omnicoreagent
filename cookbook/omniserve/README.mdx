@@ -34,7 +34,7 @@ def create_agent():
 
 ```bash
 # Quickstart with defaults (no agent file needed)
-omniserve quickstart --provider gemini --model gemini-2.0-flash
+omniserve quickstart --provider openai --model gpt-4o-mini
 
 # Run with your agent file
 omniserve run --agent cookbook/omniserve/cli_agent.py --port 8000
@@ -46,6 +46,9 @@ omniserve run --agent cookbook/omniserve/cli_agent.py \
   --rate-limit 100
 ```
 
+Use the provider that matches your `LLM_API_KEY`. For an OpenAI key, run
+`omniserve quickstart --provider openai --model gpt-4o-mini`.
+
 ### Option 2: Python API (Programmatic control)
 
 ```bash
@@ -55,10 +58,10 @@ python cookbook/omniserve/python_api.py
 
 > [!WARNING]
 > **Environment Variable Precedence:**
-> `.env` variables **ALWAYS override** values set in `OmniServeConfig`.
+> Environment variables **ALWAYS override** values set in `OmniServeConfig`.
 > ```python
 > # In code: port=8000
-> # In .env: OMNISERVE_PORT=9000
+> # In environment: OMNICOREAGENT_SERVE_PORT=9000
 > # Result: Server runs on port 9000 (env wins!)
 > ```
 
@@ -66,33 +69,43 @@ python cookbook/omniserve/python_api.py
 
 ## Environment Variables
 
-All config via `OMNISERVE_*` prefix.
+Server settings use the `OMNICOREAGENT_SERVE_*` prefix. Background task settings
+use the `OMNICOREAGENT_BACKGROUND_*` prefix. You can start without either prefix;
+defaults use port `8000`, in-memory background task state, and no auth/rate
+limiting until you opt in.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OMNISERVE_HOST` | `0.0.0.0` | Server host |
-| `OMNISERVE_PORT` | `8000` | Server port |
-| `OMNISERVE_WORKERS` | `1` | Worker processes |
-| `OMNISERVE_API_PREFIX` | `""` | API path prefix |
-| `OMNISERVE_ENABLE_DOCS` | `true` | Swagger UI at `/docs` |
-| `OMNISERVE_ENABLE_REDOC` | `true` | ReDoc at `/redoc` |
-| `OMNISERVE_CORS_ENABLED` | `true` | Enable CORS |
-| `OMNISERVE_CORS_ORIGINS` | `*` | Allowed origins |
-| `OMNISERVE_CORS_METHODS` | `*` | Allowed methods |
-| `OMNISERVE_CORS_HEADERS` | `*` | Allowed headers |
-| `OMNISERVE_CORS_CREDENTIALS` | `true` | Allow credentials |
-| `OMNISERVE_AUTH_ENABLED` | `false` | Enable Bearer auth |
-| `OMNISERVE_AUTH_TOKEN` | — | Bearer token value |
-| `OMNISERVE_RATE_LIMIT_ENABLED` | `false` | Rate limiting |
-| `OMNISERVE_RATE_LIMIT_REQUESTS` | `100` | Requests/window |
-| `OMNISERVE_RATE_LIMIT_WINDOW` | `60` | Window seconds |
-| `OMNISERVE_REQUEST_LOGGING` | `true` | Log requests |
-| `OMNISERVE_LOG_LEVEL` | `INFO` | Log level |
-| `OMNISERVE_REQUEST_TIMEOUT` | `300` | Timeout seconds |
+| `OMNICOREAGENT_SERVE_HOST` | `0.0.0.0` | Server host |
+| `OMNICOREAGENT_SERVE_PORT` | `8000` | Server port |
+| `OMNICOREAGENT_SERVE_WORKERS` | `1` | Worker processes |
+| `OMNICOREAGENT_SERVE_API_PREFIX` | `""` | API path prefix |
+| `OMNICOREAGENT_SERVE_ENABLE_DOCS` | `true` | Swagger UI at `/docs` |
+| `OMNICOREAGENT_SERVE_ENABLE_REDOC` | `true` | ReDoc at `/redoc` |
+| `OMNICOREAGENT_SERVE_CORS_ENABLED` | `true` | Enable CORS |
+| `OMNICOREAGENT_SERVE_CORS_ORIGINS` | `*` | Allowed origins |
+| `OMNICOREAGENT_SERVE_CORS_METHODS` | `*` | Allowed methods |
+| `OMNICOREAGENT_SERVE_CORS_HEADERS` | `*` | Allowed headers |
+| `OMNICOREAGENT_SERVE_CORS_CREDENTIALS` | `true` | Allow credentials |
+| `OMNICOREAGENT_SERVE_AUTH_ENABLED` | `false` | Enable Bearer auth |
+| `OMNICOREAGENT_SERVE_AUTH_TOKEN` | — | Bearer token value |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED` | `false` | Rate limiting |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests/window |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Window seconds |
+| `OMNICOREAGENT_SERVE_REQUEST_LOGGING` | `true` | Log requests |
+| `OMNICOREAGENT_SERVE_LOG_LEVEL` | `INFO` | Log level |
+| `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` | `300` | Timeout seconds |
+| `OMNICOREAGENT_BACKGROUND_ENABLED` | `true` | Expose background task endpoints |
+| `OMNICOREAGENT_BACKGROUND_AGENT_ID` | `default` | Agent id for the served agent in background tasks |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE` | `in_memory` | Background task store backend |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URL` | — | SQL task store URL; setting it selects the SQL task store |
+| `OMNICOREAGENT_BACKGROUND_START_WORKER` | `true` | Start scheduler and worker loop |
 
 ---
 
 ## API Endpoints
+
+### Core Endpoints
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
@@ -106,7 +119,30 @@ All config via `OMNISERVE_*` prefix.
 | GET | `/docs` | No | Swagger UI |
 | GET | `/redoc` | No | ReDoc UI |
 
-*Auth required only if `OMNISERVE_AUTH_ENABLED=true` or `--auth-token` is set.
+### Background Task Endpoints
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | `/background/agents` | Yes* | Register a background agent |
+| GET | `/background/agents` | Yes* | List background agents |
+| GET | `/background/agents/{agent_id}` | Yes* | Inspect a background agent |
+| DELETE | `/background/agents/{agent_id}` | Yes* | Delete a background agent |
+| POST | `/background/tasks` | Yes* | Create a background task |
+| GET | `/background/tasks` | Yes* | List background tasks |
+| GET | `/background/tasks/{task_id}` | Yes* | Inspect a task |
+| PATCH | `/background/tasks/{task_id}` | Yes* | Patch a task |
+| POST | `/background/tasks/{task_id}/run` | Yes* | Queue a manual run |
+| POST | `/background/tasks/{task_id}/pause` | Yes* | Pause scheduled dispatch |
+| POST | `/background/tasks/{task_id}/resume` | Yes* | Resume scheduled dispatch |
+| DELETE | `/background/tasks/{task_id}` | Yes* | Delete a task |
+| POST | `/background/runs/{run_id}/cancel` | Yes* | Cancel a queued or running run |
+| GET | `/background/runs` | Yes* | List runs |
+| GET | `/background/runs/{run_id}` | Yes* | Inspect run state |
+| GET | `/background/runs/{run_id}/attempts` | Yes* | List run attempts |
+| GET | `/background/runs/{run_id}/events` | Yes* | Replay lifecycle events |
+| GET | `/background/runs/{run_id}/workspace` | Yes* | Inspect run workspace files |
+
+*Auth required only if `OMNICOREAGENT_SERVE_AUTH_ENABLED=true` or `--auth-token` is set.
 
 ---
 

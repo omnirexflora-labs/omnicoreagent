@@ -35,7 +35,7 @@ pip install omnicoreagent
 ```
 
 ```bash
-echo "LLM_API_KEY=your_api_key" > .env
+export LLM_API_KEY=your_api_key
 ```
 
 ```python
@@ -307,18 +307,23 @@ All examples live in the **[Cookbook](./cookbook)** and are organized by use cas
 
 ### Environment Variables
 
-```bash
-# Required by most hosted model providers
-LLM_API_KEY=your_api_key
+For the first run, most hosted model providers only need `LLM_API_KEY`.
+OmniCoreAgent defaults memory and events to in-memory storage, workspace files to
+local disk, and optional production integrations stay off until you configure
+them.
 
-# Workspace storage
-OMNICOREAGENT_WORKSPACE_BACKEND=local   # local | s3 | r2
-OMNICOREAGENT_WORKSPACE_DIR=./workspace
-AWS_S3_BUCKET=your-s3-bucket            # when backend=s3
-R2_BUCKET_NAME=your-r2-bucket           # when backend=r2
+```bash
+export LLM_API_KEY=your_api_key
 ```
 
-### Agent Config Reference
+Add backend-specific variables only when you opt into Redis, MongoDB, SQL
+database storage, S3, R2, or OmniServe deployment settings.
+
+### Full Harness Config Example
+
+The defaults keep the first agent small: workspace files and guardrails are on,
+conversation memory is in-memory, and advanced harness pieces stay off until
+you enable them. This example shows the production-style switches together.
 
 ```python
 agent_config = {
@@ -332,12 +337,12 @@ agent_config = {
         "summary": {"enabled": False},
     },
     "enable_workspace_files": True,      # Default on
-    "guardrail_mode": "full",            # Default guardrail mode
-    "context_management": {"enabled": True},
-    "tool_offload": {"enabled": True},
-    "enable_advanced_tool_use": True,
-    "enable_subagents": True,
-    "enable_agent_skills": True,
+    "guardrail_mode": "full",            # Default
+    "context_management": {"enabled": True},  # Default off
+    "tool_offload": {"enabled": True},        # Default off
+    "enable_advanced_tool_use": True,         # Default off
+    "enable_subagents": True,                 # Default off
+    "enable_agent_skills": True,              # Default off
 }
 ```
 
@@ -368,7 +373,7 @@ pytest tests/ --cov=src --cov-report=term-missing
 
 | Error | Fix |
 |-------|-----|
-| `Invalid API key` | Set `LLM_API_KEY` in `.env` to the key for the provider selected in `model_config`. |
+| `Invalid API key` | Export `LLM_API_KEY` with the key for the provider selected in `model_config`. |
 | `ModuleNotFoundError` for Redis / Postgres / MongoDB / S3 | Install the matching extra, for example `pip install "omnicoreagent[redis]"`. |
 | `Redis connection failed` | Start Redis or use `MemoryRouter("in_memory")`. |
 | `MCP connection refused` | Ensure the MCP server is running before starting the agent. |

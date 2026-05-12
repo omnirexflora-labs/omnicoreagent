@@ -5,6 +5,7 @@ DOC_ROOTS = [
     Path("README.md"),
     Path("cookbook"),
     Path("docs"),
+    Path("docker"),
 ]
 
 FORBIDDEN_PUBLIC_API_KEY_NAMES = {
@@ -21,7 +22,13 @@ def _iter_user_facing_files():
             yield root
             continue
         for path in root.rglob("*"):
-            if path.suffix in {".md", ".mdx", ".py"}:
+            if path.name in {"Dockerfile", ".env.example"} or path.suffix in {
+                ".md",
+                ".mdx",
+                ".py",
+                ".yml",
+                ".yaml",
+            }:
                 yield path
 
 
@@ -41,27 +48,47 @@ def test_user_facing_docs_use_single_llm_api_key_name():
     )
 
 
+def test_user_facing_docs_do_not_use_stale_omniserve_prefixes():
+    stale_prefixes = {"OMNISERVE_", "OMNISERVER_"}
+    offenders = []
+    for path in _iter_user_facing_files():
+        text = path.read_text(encoding="utf-8")
+        found = sorted(prefix for prefix in stale_prefixes if prefix in text)
+        if found:
+            offenders.append(f"{path}: {', '.join(found)}")
+
+    assert not offenders, (
+        "User-facing docs and Docker examples must use OMNICOREAGENT_SERVE_* "
+        "or OMNICOREAGENT_BACKGROUND_* env prefixes:\n" + "\n".join(offenders)
+    )
+
+
 def test_omniserve_docs_include_all_public_env_vars():
     expected = {
-        "OMNISERVE_HOST",
-        "OMNISERVE_PORT",
-        "OMNISERVE_WORKERS",
-        "OMNISERVE_API_PREFIX",
-        "OMNISERVE_ENABLE_DOCS",
-        "OMNISERVE_ENABLE_REDOC",
-        "OMNISERVE_CORS_ENABLED",
-        "OMNISERVE_CORS_ORIGINS",
-        "OMNISERVE_CORS_METHODS",
-        "OMNISERVE_CORS_HEADERS",
-        "OMNISERVE_CORS_CREDENTIALS",
-        "OMNISERVE_AUTH_ENABLED",
-        "OMNISERVE_AUTH_TOKEN",
-        "OMNISERVE_REQUEST_LOGGING",
-        "OMNISERVE_LOG_LEVEL",
-        "OMNISERVE_REQUEST_TIMEOUT",
-        "OMNISERVE_RATE_LIMIT_ENABLED",
-        "OMNISERVE_RATE_LIMIT_REQUESTS",
-        "OMNISERVE_RATE_LIMIT_WINDOW",
+        "OMNICOREAGENT_SERVE_HOST",
+        "OMNICOREAGENT_SERVE_PORT",
+        "OMNICOREAGENT_SERVE_WORKERS",
+        "OMNICOREAGENT_SERVE_API_PREFIX",
+        "OMNICOREAGENT_SERVE_ENABLE_DOCS",
+        "OMNICOREAGENT_SERVE_ENABLE_REDOC",
+        "OMNICOREAGENT_SERVE_CORS_ENABLED",
+        "OMNICOREAGENT_SERVE_CORS_ORIGINS",
+        "OMNICOREAGENT_SERVE_CORS_METHODS",
+        "OMNICOREAGENT_SERVE_CORS_HEADERS",
+        "OMNICOREAGENT_SERVE_CORS_CREDENTIALS",
+        "OMNICOREAGENT_SERVE_AUTH_ENABLED",
+        "OMNICOREAGENT_SERVE_AUTH_TOKEN",
+        "OMNICOREAGENT_SERVE_REQUEST_LOGGING",
+        "OMNICOREAGENT_SERVE_LOG_LEVEL",
+        "OMNICOREAGENT_SERVE_REQUEST_TIMEOUT",
+        "OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED",
+        "OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS",
+        "OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW",
+        "OMNICOREAGENT_BACKGROUND_ENABLED",
+        "OMNICOREAGENT_BACKGROUND_AGENT_ID",
+        "OMNICOREAGENT_BACKGROUND_TASK_STORE",
+        "OMNICOREAGENT_BACKGROUND_TASK_STORE_URL",
+        "OMNICOREAGENT_BACKGROUND_START_WORKER",
     }
     docs = {
         Path("docs/how-to-guides/omniserve.mdx"),

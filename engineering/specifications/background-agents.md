@@ -100,8 +100,9 @@ mongodb
 
 Rules:
 
-- `in_memory` is ephemeral and intended for tests/development.
-- `sql` is the durable local SQLite backend.
+- Omitting `task_store` selects `in_memory` for zero-config first-run UX.
+- `in_memory` is ephemeral and intended for local use, examples, and tests.
+- `sql` is the durable local SQLite backend for restart persistence.
 - `redis` is reserved for future Redis task-store support.
 - `mongodb` is reserved for future MongoDB task-store support.
 - The manager uses one task store for its lifecycle.

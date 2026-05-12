@@ -1,15 +1,21 @@
-# Background Agents: Durable Agent Tasks
+# Background Agents: Tracked Agent Tasks
 
 Background Agents run OmniCoreAgent tasks outside the foreground request path.
-They are built around durable runs, task-store state, retries, cancellation,
-workspace output, and inspectable lifecycle events.
+They are built around tracked runs, task-store state, retries, cancellation,
+workspace output, and inspectable lifecycle events. Use the default in-memory
+store for local development, or `task_store="sql"` when runs must survive
+restarts.
 
 ## Key Concepts
 
 * **BackgroundAgentManager**: Registers agents, tasks, runs, and lifecycle operations.
-* **Task store**: Operational state for agents, tasks, schedule state, runs, attempts, leases, and cancellation flags.
+* **Task store**: Operational state for agents, tasks, schedule state, runs, attempts, leases, retries, and cancellation flags. It defaults to in-memory and is separate from conversation memory.
 * **Run**: One concrete execution of a task. Runs have stable IDs, statuses, attempts, workspace paths, and event history.
-* **Workspace output**: Every background run gets a workspace namespace for durable output.
+* **Workspace output**: Every background run gets a workspace namespace for output.
+
+You can run the background manager without storage configuration. Use
+`BackgroundAgentManager()` for the default zero-config in-memory task store. Use
+`task_store="sql"` when task state must survive process restarts.
 
 ## Quick Start
 
@@ -26,7 +32,7 @@ async def main():
         model_config={"provider": "openai", "model": "gpt-4o-mini"},
     )
 
-    manager = BackgroundAgentManager(task_store="in_memory")
+    manager = BackgroundAgentManager()
     await manager.register_agent(agent_id="system_monitor", agent=agent)
     await manager.register_task(
         task_id="health_report",
@@ -71,7 +77,8 @@ await manager.resume_task("health_report")
 | `overlap_policy` | `skip_if_running`, `queue_next`, `cancel_previous`, or `allow_parallel`. |
 | `session_policy` | `task`, `run`, or `fixed` memory-session behavior. |
 
-The current implementation includes the durable model, in-memory task store,
-SQLite task store, manager lifecycle, manual and scheduled runs, retries with
-delay/backoff, lease fencing, expired-lease recovery, cancellation, workspace
-lifecycle files, and event history.
+The current implementation includes the tracked run model, SQLite task store,
+in-memory task store for local development and tests, manager lifecycle, manual
+and scheduled runs, retries with delay/backoff, lease fencing, expired-lease
+recovery, cancellation, workspace lifecycle files, and event history. State is
+restart-persistent when the task store is SQL.

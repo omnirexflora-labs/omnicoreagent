@@ -59,6 +59,7 @@ class OmniServe:
         config: Optional[OmniServeConfig] = None,
         title: Optional[str] = None,
         description: Optional[str] = None,
+        background_manager: Any | None = None,
     ):
         """
         Initialize OmniServe.
@@ -68,6 +69,7 @@ class OmniServe:
             config: Optional server configuration
             title: Optional API title (defaults to agent name)
             description: Optional API description
+            background_manager: Optional durable background manager to serve
         """
         self.agent = agent
         self.config = config or OmniServeConfig()
@@ -75,6 +77,7 @@ class OmniServe:
         self.description = description or (
             f"OmniServe API for {get_agent_name(agent)}. Powered by OmniCoreAgent."
         )
+        self.background_manager = background_manager
 
         self.app = self._create_app()
 
@@ -90,6 +93,7 @@ class OmniServe:
             config=self.config,
             title=self.title,
             description=self.description,
+            background_manager=self.background_manager,
         )
 
     def start(

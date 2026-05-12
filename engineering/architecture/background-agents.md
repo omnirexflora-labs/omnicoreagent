@@ -250,8 +250,8 @@ The public task-store backend names are:
 
 | Backend | Purpose |
 |---------|---------|
-| `in_memory` | Fast development and tests; state is lost on process exit |
-| `sql` | Durable local SQLite storage |
+| `in_memory` | Default zero-config store for first-run UX; state is lost on process exit |
+| `sql` | Durable local SQLite storage when restart persistence is required |
 | `redis` | Reserved backend name for future Redis task-store support |
 | `mongodb` | Reserved backend name for future MongoDB task-store support |
 
@@ -262,7 +262,9 @@ library.
 Example:
 
 ```python
-manager = BackgroundAgentManager(
+manager = BackgroundAgentManager()  # defaults to in_memory
+
+durable_manager = BackgroundAgentManager(
     task_store={
         "backend": "sql",
         "url": "sqlite:///.omnicoreagent/background.db",
@@ -275,10 +277,15 @@ manager = BackgroundAgentManager(
 The selected task store is part of manager construction.
 
 ```text
+BackgroundAgentManager()
 BackgroundAgentManager(task_store="in_memory")
 BackgroundAgentManager(task_store="sql")
 BackgroundAgentManager(task_store={...})
 ```
+
+Omitting `task_store` means `in_memory`. This keeps the first-run developer
+experience lightweight. Production deployments that need restart persistence
+must choose `sql` explicitly.
 
 Bare string construction is limited to `in_memory` and `sql`.
 
@@ -790,6 +797,7 @@ DELETE /background/tasks/{task_id}
 GET    /background/runs
 GET    /background/runs/{run_id}
 POST   /background/runs/{run_id}/cancel
+GET    /background/runs/{run_id}/attempts
 GET    /background/runs/{run_id}/events
 GET    /background/runs/{run_id}/workspace
 ```

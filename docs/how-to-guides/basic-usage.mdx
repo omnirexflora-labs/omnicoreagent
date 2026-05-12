@@ -28,8 +28,8 @@ async def main():
     result = await agent.run("What is the capital of France?")
 
     print(result["response"])       # The agent's text reply
-    print(result["usage"])          # Token usage stats
-    print(result["tool_calls"])     # Tools the agent invoked (if any)
+    print(result["session_id"])     # Session used for this run
+    print(result.get("metric"))     # Token/timing metric when provider usage is available
 
     await agent.cleanup()
 
@@ -191,7 +191,7 @@ except Exception as e:
 
 | Error | Fix |
 |-------|-----|
-| `Invalid API key` | Check `.env`: `LLM_API_KEY=your_key` |
+| `Invalid API key` | Export `LLM_API_KEY` with the key for the provider selected in `model_config`. |
 | `ModuleNotFoundError` for an optional backend | Install the matching extra, e.g. `pip install "omnicoreagent[redis]"` |
 | `Redis connection failed` | Start Redis or use `MemoryRouter("in_memory")` |
 | `MCP connection refused` | Ensure MCP server is running and path is correct |

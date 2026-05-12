@@ -7,6 +7,17 @@ Pydantic models for API request/response schemas.
 from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnicoreagent.background import (
+    BackgroundAgentSpec,
+    BackgroundRun,
+    BackgroundTaskSpec,
+    OverlapPolicy,
+    RetryPolicy,
+    ScheduleSpec,
+    SessionPolicy,
+    WorkspacePolicy,
+)
+
 
 # =============================================================================
 # Request Models
@@ -19,6 +30,67 @@ class RunRequest(BaseModel):
     query: str = Field(..., description="The query/prompt for the agent")
     session_id: Optional[str] = Field(
         None, description="Optional session ID for conversation continuity"
+    )
+
+
+class BackgroundAgentRegistrationRequest(BaseModel):
+    """Register the served agent or an agent spec for background work."""
+
+    agent_id: str | None = Field(
+        default=None,
+        description="Agent id. Defaults to OmniServe background_agent_id.",
+    )
+    replace: bool = Field(default=False, description="Replace an existing agent spec")
+    spec: BackgroundAgentSpec | None = Field(
+        default=None,
+        description="Optional agent spec. Omit to register the served agent.",
+    )
+
+
+class BackgroundTaskCreateRequest(BaseModel):
+    """Create a background task."""
+
+    task_id: str = Field(..., description="Stable task identifier")
+    agent_id: str | None = Field(
+        default=None,
+        description="Agent id. Defaults to OmniServe background_agent_id.",
+    )
+    query: str = Field(..., description="Instruction executed for each run")
+    schedule: ScheduleSpec = Field(..., description="Manual, once, interval, or cron")
+    enabled: bool = Field(default=True, description="Whether the scheduler may run it")
+    timeout_seconds: int | None = Field(default=None, description="Per-run timeout")
+    retry_policy: RetryPolicy = Field(default_factory=RetryPolicy)
+    overlap_policy: OverlapPolicy = Field(default=OverlapPolicy.SKIP_IF_RUNNING)
+    session_policy: SessionPolicy = Field(default_factory=SessionPolicy)
+    workspace_policy: WorkspacePolicy = Field(default_factory=WorkspacePolicy)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    replace: bool = Field(default=False, description="Replace an existing task")
+
+
+class BackgroundTaskPatchRequest(BaseModel):
+    """Patch mutable fields on a background task."""
+
+    query: str | None = None
+    schedule: ScheduleSpec | None = None
+    enabled: bool | None = None
+    timeout_seconds: int | None = None
+    retry_policy: RetryPolicy | None = None
+    overlap_policy: OverlapPolicy | None = None
+    session_policy: SessionPolicy | None = None
+    workspace_policy: WorkspacePolicy | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class BackgroundTaskRunRequest(BaseModel):
+    """Queue a manual run for an existing task."""
+
+    query: str | None = Field(
+        default=None,
+        description="Optional one-off query override for this run",
+    )
+    wait: bool = Field(
+        default=False,
+        description="Wait for the run to reach a terminal status before returning",
     )
 
 
@@ -109,6 +181,51 @@ class TraceResponse(BaseModel):
     session_id: str = Field(..., description="Session ID")
     summary: dict[str, Any] = Field(..., description="Trace summary")
     steps: list[dict[str, Any]] = Field(..., description="Ordered trace steps")
+
+
+class BackgroundStatusResponse(BaseModel):
+    """Simple status response for background control endpoints."""
+
+    status: str = Field(..., description="Operation status")
+
+
+class BackgroundAgentsResponse(BaseModel):
+    """Response model for background agent listing."""
+
+    agents: list[BackgroundAgentSpec]
+    total: int
+
+
+class BackgroundTasksResponse(BaseModel):
+    """Response model for background task listing."""
+
+    tasks: list[BackgroundTaskSpec]
+    total: int
+
+
+class BackgroundRunsResponse(BaseModel):
+    """Response model for background run listing."""
+
+    runs: list[BackgroundRun]
+    total: int
+
+
+class BackgroundRunEventsResponse(BaseModel):
+    """Response model for background run event replay."""
+
+    run_id: str
+    events: list[dict[str, Any]]
+    count: int
+
+
+class BackgroundRunWorkspaceResponse(BaseModel):
+    """Response model for background run workspace inspection."""
+
+    run_id: str
+    task_id: str
+    agent_id: str
+    workspace_path: str
+    files: list[dict[str, Any]]
 
 
 class ErrorResponse(BaseModel):

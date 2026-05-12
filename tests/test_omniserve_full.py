@@ -3,14 +3,16 @@ import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
 from fastapi.testclient import TestClient
+from click.testing import CliRunner
 from omnicoreagent import OmniCoreAgent, OmniServe, OmniServeConfig
+from omnicoreagent.serve.cli import cli
 
 
 @pytest.fixture(autouse=True)
 def isolate_omniserve_env(monkeypatch):
     """Keep local dotenv values from changing explicit test config."""
     for key in list(os.environ):
-        if key.startswith("OMNISERVE_"):
+        if key.startswith(("OMNICOREAGENT_SERVE_", "OMNICOREAGENT_BACKGROUND_")):
             monkeypatch.delenv(key, raising=False)
 
 
@@ -31,21 +33,46 @@ class TestConfiguration:
         assert config.host == "127.0.0.1"
 
     def test_env_vars_override_code(self):
-        """Verify OMNISERVE_* env vars override code values."""
+        """Verify public env vars override code values."""
         with patch.dict(
             os.environ,
             {
-                "OMNISERVE_PORT": "7777",
-                "OMNISERVE_AUTH_ENABLED": "true",
-                "OMNISERVE_LOG_LEVEL": "DEBUG",
+                "OMNICOREAGENT_SERVE_PORT": "7777",
+                "OMNICOREAGENT_SERVE_AUTH_ENABLED": "true",
+                "OMNICOREAGENT_SERVE_LOG_LEVEL": "DEBUG",
+                "OMNICOREAGENT_BACKGROUND_TASK_STORE": "sql",
             },
         ):
             # Code says port 8000, but Env says 7777
-            config = OmniServeConfig(port=8000, auth_enabled=False)
+            config = OmniServeConfig(
+                port=8000, auth_enabled=False, background_task_store="in_memory"
+            )
 
             assert config.port == 7777
             assert config.auth_enabled is True
             assert config.log_level == "DEBUG"
+            assert config.background_task_store == "sql"
+
+    def test_background_task_store_url_infers_sql(self):
+        config = OmniServeConfig(
+            background_task_store_url="sqlite:///custom-background.db"
+        )
+
+        assert config.background_task_store_config() == {
+            "backend": "sql",
+            "url": "sqlite:///custom-background.db",
+        }
+
+    def test_env_example_includes_background_settings(self):
+        result = CliRunner().invoke(cli, ["config", "--env-example"])
+
+        assert result.exit_code == 0
+        for key in [
+            "OMNICOREAGENT_BACKGROUND_TASK_STORE",
+            "OMNICOREAGENT_BACKGROUND_TASK_STORE_URL",
+        ]:
+            assert key in result.output
+        assert "export LLM_API_KEY=your_api_key_here" in result.output
 
 
 # =============================================================================

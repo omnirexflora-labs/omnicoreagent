@@ -141,6 +141,10 @@ def run(
         f"  • Rate Limit: {'✓ ' + str(config.rate_limit_requests) + '/min' if config.rate_limit_enabled else '✗ (use --rate-limit N to enable)'}"
     )
     click.echo(f"  • CORS: {config.cors_origins}")
+    click.echo(
+        f"  • Background API: {'✓' if config.background_enabled else '✗'}, "
+        f"task store: {config.background_task_store}"
+    )
     click.echo("")
     click.echo(
         "💡 Available options: --auth-token, --rate-limit, --cors-origins, --no-docs"
@@ -238,52 +242,34 @@ def quickstart(
 @click.option(
     "--show", is_flag=True, help="Show current configuration from environment"
 )
-@click.option("--env-example", is_flag=True, help="Print example .env file")
+@click.option("--env-example", is_flag=True, help="Print example shell environment")
 def config_cmd(show: bool, env_example: bool):
     """View or generate configuration.
 
     Example:
         omniserve config --show
-        omniserve config --env-example > .env
+        eval "$(omniserve config --env-example)"
     """
     from omnicoreagent.serve import OmniServeConfig
 
     if env_example:
-        click.echo("""# OmniServe Configuration
-# Copy this to .env and modify as needed
+        click.echo("""# OmniCoreAgent / OmniServe
+# Most local runs need only the model key.
+export LLM_API_KEY=your_api_key_here
 
-# Server
-OMNISERVE_HOST=0.0.0.0
-OMNISERVE_PORT=8000
-OMNISERVE_WORKERS=1
+# Optional server overrides
+# export OMNICOREAGENT_SERVE_PORT=8000
+# export OMNICOREAGENT_SERVE_HOST=0.0.0.0
+# export OMNICOREAGENT_SERVE_AUTH_ENABLED=true
+# export OMNICOREAGENT_SERVE_AUTH_TOKEN=change-me
+# export OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED=true
+# export OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS=100
 
-# API
-OMNISERVE_API_PREFIX=
-OMNISERVE_ENABLE_DOCS=true
-OMNISERVE_ENABLE_REDOC=true
-
-# CORS
-OMNISERVE_CORS_ENABLED=true
-OMNISERVE_CORS_ORIGINS=*
-OMNISERVE_CORS_METHODS=*
-OMNISERVE_CORS_HEADERS=*
-OMNISERVE_CORS_CREDENTIALS=true
-
-# Authentication
-OMNISERVE_AUTH_ENABLED=false
-OMNISERVE_AUTH_TOKEN=
-
-# Logging
-OMNISERVE_REQUEST_LOGGING=true
-OMNISERVE_LOG_LEVEL=INFO
-
-# Rate Limiting
-OMNISERVE_RATE_LIMIT_ENABLED=false
-OMNISERVE_RATE_LIMIT_REQUESTS=100
-OMNISERVE_RATE_LIMIT_WINDOW=60
-
-# Timeout
-OMNISERVE_REQUEST_TIMEOUT=300
+# Optional background task persistence
+# Background APIs and the worker are enabled by default with in-memory task state.
+# Use SQL when tasks, runs, attempts, leases, and retries must survive restarts.
+# export OMNICOREAGENT_BACKGROUND_TASK_STORE=sql
+# export OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=sqlite:///.omnicoreagent/background.db
 """)
         return
 
@@ -380,7 +366,7 @@ def generate_dockerfile(file_path: str, output_dir: str):
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir omnicoreagent
+RUN pip install --no-cache-dir "omnicoreagent[serve]"
 
 # Copy entire project into image
 COPY . /app

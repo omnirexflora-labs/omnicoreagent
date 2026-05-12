@@ -11,11 +11,13 @@ from uuid import uuid4
 from omnicoreagent.background.errors import (
     AgentAlreadyRegisteredError,
     AgentNotFoundError,
+    RunLeaseError,
     RunNotFoundError,
     TaskAlreadyRegisteredError,
     TaskNotFoundError,
 )
 from omnicoreagent.background.models import (
+    TERMINAL_RUN_STATUSES,
     AttemptReason,
     AttemptStatus,
     BackgroundAgentSpec,
@@ -61,6 +63,7 @@ class BackgroundAgentManager:
         self._stop_event = asyncio.Event()
         self._events: dict[str, list[dict[str, Any]]] = {}
         self._workspace = workspace
+        self._initialized = False
 
     async def register_agent(
         self, agent_id: str, agent: Any, replace: bool = False
@@ -92,6 +95,7 @@ class BackgroundAgentManager:
             raise AgentAlreadyRegisteredError(
                 f"Agent already registered: {agent_spec.agent_id}"
             )
+        self._agents.pop(agent_spec.agent_id, None)
         await self.task_store.save_agent(agent_spec)
         await self._emit("background_agent_registered", agent_id=agent_spec.agent_id)
         return agent_spec
@@ -117,6 +121,7 @@ class BackgroundAgentManager:
         agent_id: str | None = None,
         query: str | None = None,
         schedule: ScheduleSpec | dict[str, Any] | None = None,
+        enabled: bool = True,
         timeout_seconds: int | None = None,
         retry_policy: dict[str, Any] | None = None,
         overlap_policy: OverlapPolicy | str | None = None,
@@ -136,6 +141,7 @@ class BackgroundAgentManager:
                 agent_id=agent_id,
                 query=query,
                 schedule=schedule,
+                enabled=enabled,
                 timeout_seconds=timeout_seconds,
                 retry_policy=retry_policy or {},
                 overlap_policy=overlap_policy or OverlapPolicy.SKIP_IF_RUNNING,
@@ -182,24 +188,31 @@ class BackgroundAgentManager:
     async def start(self) -> None:
         if self._running:
             return
-        await self.task_store.initialize()
+        await self.initialize()
         self._stop_event.clear()
         self._running = True
         self._worker_task = asyncio.create_task(self._worker_loop())
 
-    async def shutdown(self) -> None:
-        if not self._running:
+    async def initialize(self) -> None:
+        if self._initialized:
             return
-        self._running = False
-        self._stop_event.set()
-        if self._worker_task:
+        await self.task_store.initialize()
+        self._initialized = True
+
+    async def shutdown(self) -> None:
+        if self._running:
+            self._running = False
+            self._stop_event.set()
+        if self._worker_task is not None:
             self._worker_task.cancel()
             try:
                 await self._worker_task
             except asyncio.CancelledError:
                 pass
             self._worker_task = None
-        await self.task_store.close()
+        if self._initialized:
+            await self.task_store.close()
+            self._initialized = False
 
     async def pause_task(self, task_id: str) -> None:
         state = await self.task_store.get_schedule_state(task_id)
@@ -233,18 +246,38 @@ class BackgroundAgentManager:
         if wait and created.status == RunStatus.QUEUED:
             while True:
                 latest = await self.task_store.get_run(created.run_id)
-                if latest and latest.status in {
-                    RunStatus.COMPLETED,
-                    RunStatus.FAILED,
-                    RunStatus.CANCELLED,
-                    RunStatus.TIMEOUT,
-                    RunStatus.SKIPPED,
-                }:
+                if latest and latest.status in TERMINAL_RUN_STATUSES:
                     return latest
-                did_work = await self._execute_one()
+                did_work = (
+                    await self._execute_run(created.run_id)
+                    if latest and latest.status == RunStatus.QUEUED
+                    else False
+                )
                 if not did_work:
                     return latest or created
         return created
+
+    async def wait_for_run(
+        self,
+        run_id: str,
+        timeout_seconds: float | None = None,
+        poll_interval_seconds: float = 0.05,
+    ) -> BackgroundRun:
+        """Wait for one specific run to become terminal without executing work."""
+        deadline = (
+            asyncio.get_running_loop().time() + timeout_seconds
+            if timeout_seconds and timeout_seconds > 0
+            else None
+        )
+        while True:
+            latest = await self.task_store.get_run(run_id)
+            if not latest:
+                raise RunNotFoundError(f"Run not found: {run_id}")
+            if latest.status in TERMINAL_RUN_STATUSES:
+                return latest
+            if deadline is not None and asyncio.get_running_loop().time() >= deadline:
+                return latest
+            await asyncio.sleep(poll_interval_seconds)
 
     async def cancel_run(self, run_id: str) -> None:
         run = await self.task_store.get_run(run_id)
@@ -252,7 +285,14 @@ class BackgroundAgentManager:
             raise RunNotFoundError(f"Run not found: {run_id}")
         await self.task_store.request_cancel(run_id)
         latest = await self.task_store.get_run(run_id)
-        if latest and latest.status in {RunStatus.QUEUED, RunStatus.CLAIMED}:
+        if not latest:
+            return
+        if latest.status == RunStatus.QUEUED:
+            await self._mark_terminal(latest, RunStatus.CANCELLED, "cancelled")
+        elif (
+            latest.status == RunStatus.CLAIMED
+            and latest.lease_owner == self.worker_id
+        ):
             await self._mark_terminal(latest, RunStatus.CANCELLED, "cancelled")
 
     async def recover_expired_runs(self) -> None:
@@ -363,6 +403,33 @@ class BackgroundAgentManager:
             return []
         return self._read_workspace_events(run.workspace_path)
 
+    async def get_run_workspace(self, run_id: str) -> dict[str, Any]:
+        """Return the durable workspace location and visible files for a run."""
+        run = await self.task_store.get_run(run_id)
+        if not run:
+            raise RunNotFoundError(f"Run not found: {run_id}")
+
+        workspace = self._resolve_workspace()
+        files = []
+        if workspace is not None:
+            for item in workspace.files.list_files(run.workspace_path):
+                files.append(
+                    {
+                        "path": item.path,
+                        "name": item.name,
+                        "modified_at": item.modified_at.isoformat(),
+                        "is_dir": item.is_dir,
+                    }
+                )
+
+        return {
+            "run_id": run.run_id,
+            "task_id": run.task_id,
+            "agent_id": run.agent_id,
+            "workspace_path": run.workspace_path,
+            "files": files,
+        }
+
     async def _worker_loop(self) -> None:
         while not self._stop_event.is_set():
             await self.recover_expired_runs()
@@ -407,8 +474,51 @@ class BackgroundAgentManager:
         )
         if not claimed:
             return False
-        await self._run_claimed(claimed)
+        try:
+            await self._run_claimed(claimed)
+        except asyncio.CancelledError:
+            await self._release_claimed_before_start(claimed.run_id)
+            raise
         return True
+
+    async def _execute_run(self, run_id: str) -> bool:
+        latest = await self.task_store.get_run(run_id)
+        if (
+            not latest
+            or latest.status != RunStatus.QUEUED
+            or (latest.queued_at is not None and latest.queued_at > utc_now())
+        ):
+            return False
+        try:
+            claimed = await self.task_store.claim_run(
+                run_id, self.worker_id, self.lease_seconds
+            )
+        except RunLeaseError:
+            return False
+        try:
+            await self._run_claimed(claimed)
+        except asyncio.CancelledError:
+            await self._release_claimed_before_start(claimed.run_id)
+            raise
+        return True
+
+    async def _release_claimed_before_start(self, run_id: str) -> None:
+        latest = await self.task_store.get_run(run_id)
+        if (
+            not latest
+            or latest.status != RunStatus.CLAIMED
+            or latest.lease_owner != self.worker_id
+            or latest.lease_token is None
+        ):
+            return
+        await self.task_store.transition_run(
+            latest.run_id,
+            {RunStatus.CLAIMED},
+            RunStatus.QUEUED,
+            self._release_lease_patch(),
+            self.worker_id,
+            latest.lease_token,
+        )
 
     async def _run_claimed(self, claimed: BackgroundRun) -> None:
         task = await self.task_store.get_task(claimed.task_id)
@@ -453,48 +563,63 @@ class BackgroundAgentManager:
                 if task.timeout_seconds
                 else await coro
             )
+        except asyncio.CancelledError:
+            try:
+                await self._handle_attempt_failure(
+                    task, run, attempt, "exception", RuntimeError("worker shutdown")
+                )
+            finally:
+                heartbeat_task.cancel()
+                await self._drain_cancelled_task(heartbeat_task)
+            raise
         except asyncio.TimeoutError as exc:
-            heartbeat_task.cancel()
-            await self._drain_cancelled_task(heartbeat_task)
-            await self._handle_attempt_failure(task, run, attempt, "timeout", exc)
+            try:
+                await self._handle_attempt_failure(task, run, attempt, "timeout", exc)
+            finally:
+                heartbeat_task.cancel()
+                await self._drain_cancelled_task(heartbeat_task)
             return
         except Exception as exc:
-            heartbeat_task.cancel()
-            await self._drain_cancelled_task(heartbeat_task)
-            await self._handle_attempt_failure(task, run, attempt, "exception", exc)
+            try:
+                await self._handle_attempt_failure(task, run, attempt, "exception", exc)
+            finally:
+                heartbeat_task.cancel()
+                await self._drain_cancelled_task(heartbeat_task)
             return
-        heartbeat_task.cancel()
-        await self._drain_cancelled_task(heartbeat_task)
 
-        preview = self._result_preview(result)
-        if await self.task_store.is_cancel_requested(run.run_id):
+        try:
+            preview = self._result_preview(result)
+            if await self.task_store.is_cancel_requested(run.run_id):
+                await self.task_store.update_attempt(
+                    attempt.attempt_id,
+                    {
+                        "status": AttemptStatus.CANCELLED,
+                        "finished_at": utc_now(),
+                        "error": "cancelled",
+                    },
+                    self.worker_id,
+                    run.lease_token,
+                )
+                await self._mark_terminal(run, RunStatus.CANCELLED, "cancelled")
+                return
             await self.task_store.update_attempt(
                 attempt.attempt_id,
-                {
-                    "status": AttemptStatus.CANCELLED,
-                    "finished_at": utc_now(),
-                    "error": "cancelled",
-                },
+                {"status": AttemptStatus.COMPLETED, "finished_at": utc_now()},
                 self.worker_id,
                 run.lease_token,
             )
-            await self._mark_terminal(run, RunStatus.CANCELLED, "cancelled")
-            return
-        await self.task_store.update_attempt(
-            attempt.attempt_id,
-            {"status": AttemptStatus.COMPLETED, "finished_at": utc_now()},
-            self.worker_id,
-            run.lease_token,
-        )
-        completed = await self.task_store.transition_run(
-            run.run_id,
-            {RunStatus.RUNNING},
-            RunStatus.COMPLETED,
-            {"result_preview": preview},
-            self.worker_id,
-            run.lease_token,
-        )
-        await self._emit_run("background_run_completed", completed)
+            completed = await self.task_store.transition_run(
+                run.run_id,
+                {RunStatus.RUNNING},
+                RunStatus.COMPLETED,
+                {"result_preview": preview},
+                self.worker_id,
+                run.lease_token,
+            )
+            await self._emit_run("background_run_completed", completed)
+        finally:
+            heartbeat_task.cancel()
+            await self._drain_cancelled_task(heartbeat_task)
 
     async def _handle_attempt_failure(
         self,
