@@ -143,6 +143,13 @@ class BackgroundAgentStatusPayload(SerializableRecord):
     run_count: int | None = None
     error_count: int | None = None
     error: str | None = None
+    task_id: str | None = None
+    run_id: str | None = None
+    event: str | None = None
+    run_status: str | None = None
+    attempt: int | None = None
+    sequence: int | None = None
+    workspace_path: str | None = None
 
 
 EventPayload = (

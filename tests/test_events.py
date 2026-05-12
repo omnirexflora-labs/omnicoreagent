@@ -4,6 +4,7 @@ import pytest
 
 from omnicoreagent.core.events.base import (
     AgentMessagePayload,
+    BackgroundAgentStatusPayload,
     Event,
     EventType,
     FinalAnswerPayload,
@@ -24,6 +25,26 @@ def test_event_payloads_keep_model_dump_compatibility():
     assert payload.model_dump() == {"message": "hello"}
     assert payload.dict() == {"message": "hello"}
     assert payload.json() == '{"message": "hello"}'
+
+
+def test_background_status_payload_keeps_positional_compatibility():
+    payload = BackgroundAgentStatusPayload(
+        "agent",
+        "background_run_completed",
+        "2026-05-12T00:00:00+00:00",
+        "session",
+        "run_1",
+        3,
+        1,
+        "failed",
+    )
+
+    assert payload.last_run == "run_1"
+    assert payload.run_count == 3
+    assert payload.error_count == 1
+    assert payload.error == "failed"
+    assert payload.task_id is None
+    assert payload.run_id is None
 
 
 def test_event_serializes_and_parses_without_pydantic():

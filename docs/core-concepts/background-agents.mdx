@@ -107,6 +107,30 @@ await manager.resume_task("hourly_report")
 await manager.delete_task("hourly_report", delete_runs=True)
 ```
 
+## Run Event Replay
+
+Each run emits ordered lifecycle events with a run-local `sequence` number.
+`get_run_events(run_id)` returns the most complete trace it can read from the
+available runtime sources:
+
+- the configured `EventRouter`, when it can replay events
+- the current process cache
+- the run workspace `events.jsonl` mirror, when workspace event mirroring is enabled
+
+If more than one source is available, OmniCoreAgent returns a complete terminal
+trace first. If no source has reached a terminal event yet, it prefers the
+event router, then the process cache, then the workspace mirror. Event-router
+replay is filtered by `run_id`, so multiple runs sharing the same memory
+session do not mix their lifecycle events. Sources with malformed or duplicate
+run-local sequence numbers are ignored during replay selection. A valid source
+uses contiguous integer sequence numbers starting at `1`.
+
+Durable restart replay needs at least one durable event source. Use a
+replay-capable event router backend or keep workspace event mirroring enabled.
+If a process exits with only in-memory events and no workspace mirror, the task
+store still preserves run status, attempts, leases, and results, but old event
+history may not be replayable.
+
 ## OmniServe API
 
 When an agent is served through OmniServe, the server registers that agent with
@@ -158,8 +182,10 @@ The task store is the source of truth for:
 The current runtime includes the tracked run model, in-memory, SQL, Redis, and
 MongoDB task stores, schedule dispatch, manual runs, retries with delay/backoff,
 lease fencing, expired-lease recovery, cancellation, workspace lifecycle files,
-and run event history. State is restart-persistent when the task store is SQL,
-Redis, or MongoDB.
+and run event replay. Task, schedule, run, attempt, lease, retry, and
+cancellation state is restart-persistent when the task store is SQL, Redis, or
+MongoDB. Event history follows the replay rules above and needs either a
+replay-capable event router or the workspace `events.jsonl` mirror.
 
 Redis durable deployments need persistence enabled and a no-eviction policy for
 task-store keys. MongoDB task-store writes use majority write concern.

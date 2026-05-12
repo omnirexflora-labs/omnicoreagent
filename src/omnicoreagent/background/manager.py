@@ -18,6 +18,8 @@ from omnicoreagent.background.errors import (
 )
 from omnicoreagent.background.models import (
     TERMINAL_RUN_STATUSES,
+    INITIAL_EVENT_NAMES,
+    TERMINAL_EVENT_NAMES,
     AttemptReason,
     AttemptStatus,
     BackgroundAgentSpec,
@@ -37,6 +39,10 @@ from omnicoreagent.background.models import (
 )
 from omnicoreagent.background.store.base import AbstractTaskStore
 from omnicoreagent.background.store.router import TaskStoreRouter
+
+
+_EVENT_REPLAY_TIMEOUT_SECONDS = 2.0
+_EVENT_APPEND_TIMEOUT_SECONDS = 2.0
 
 
 class BackgroundAgentManager:
@@ -62,6 +68,9 @@ class BackgroundAgentManager:
         self._worker_task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
         self._events: dict[str, list[dict[str, Any]]] = {}
+        self._event_sequences: dict[str, int] = {}
+        self._event_replay_timeout_seconds = _EVENT_REPLAY_TIMEOUT_SECONDS
+        self._event_append_timeout_seconds = _EVENT_APPEND_TIMEOUT_SECONDS
         self._workspace = workspace
         self._initialized = False
 
@@ -384,13 +393,29 @@ class BackgroundAgentManager:
         }
 
     async def get_run_events(self, run_id: str) -> list[dict[str, Any]]:
-        events = self._events.get(run_id)
-        if events:
-            return list(events)
         run = await self.task_store.get_run(run_id)
         if not run:
             return []
-        return self._read_workspace_events(run.workspace_path)
+        events = self._prepare_event_trace(self._events.get(run_id) or [])
+        workspace_events = self._prepare_event_trace(
+            self._read_workspace_events(run.workspace_path)
+        )
+        router_events = self._prepare_event_trace(
+            await self._read_event_router_events(run)
+        )
+        candidates = [router_events, events, workspace_events]
+        complete = [
+            candidate
+            for candidate in candidates
+            if candidate and candidate[-1].get("event") in TERMINAL_EVENT_NAMES
+        ]
+        if complete:
+            return max(complete, key=len)
+        if router_events:
+            return router_events
+        if events:
+            return events
+        return workspace_events
 
     async def get_run_workspace(self, run_id: str) -> dict[str, Any]:
         """Return the durable workspace location and visible files for a run."""
@@ -799,10 +824,47 @@ class BackgroundAgentManager:
         }
         if run_id:
             events = self._events.setdefault(run_id, [])
-            event["sequence"] = len(events) + 1
+            event["sequence"] = await self._next_run_event_sequence(
+                run_id, event_name, events
+            )
             events.append(event)
             await self._write_run_event(event)
             await self._append_event_router(event)
+
+    async def _next_run_event_sequence(
+        self, run_id: str, event_name: str, local_events: list[dict[str, Any]]
+    ) -> int:
+        cached = self._event_sequences.get(run_id)
+        if cached is not None:
+            self._event_sequences[run_id] = cached + 1
+            return cached + 1
+        sequences = [
+            int(event["sequence"])
+            for event in local_events
+            if isinstance(event.get("sequence"), int)
+        ]
+        if sequences:
+            next_sequence = max(sequences) + 1
+            self._event_sequences[run_id] = next_sequence
+            return next_sequence
+        if event_name in INITIAL_EVENT_NAMES:
+            self._event_sequences[run_id] = 1
+            return 1
+
+        run = await self.task_store.get_run(run_id)
+        if run:
+            for source in (
+                await self._read_event_router_events(run),
+                self._read_workspace_events(run.workspace_path),
+            ):
+                sequences.extend(
+                    int(event["sequence"])
+                    for event in source
+                    if isinstance(event.get("sequence"), int)
+                )
+        next_sequence = (max(sequences) if sequences else 0) + 1
+        self._event_sequences[run_id] = next_sequence
+        return next_sequence
 
     async def _write_run_snapshot(self, run: BackgroundRun) -> None:
         task = await self.task_store.get_task(run.task_id)
@@ -839,21 +901,108 @@ class BackgroundAgentManager:
         try:
             from omnicoreagent.core.events.base import Event, EventType
 
-            await self.event_router.append(
-                session_id=event.get("session_id") or event.get("run_id"),
-                event=Event(
-                    type=EventType.BACKGROUND_AGENT_STATUS,
-                    payload={
-                        "agent_id": event.get("agent_id") or "background",
-                        "status": event["event"],
-                        "timestamp": event["timestamp"],
-                        "session_id": event.get("session_id"),
-                    },
-                    agent_name=event.get("agent_id") or "background",
+            await asyncio.wait_for(
+                self.event_router.append(
+                    session_id=event.get("session_id") or event.get("run_id"),
+                    event=Event(
+                        type=EventType.BACKGROUND_AGENT_STATUS,
+                        payload={
+                            "agent_id": event.get("agent_id") or "background",
+                            "status": event["event"],
+                            "event": event["event"],
+                            "timestamp": event["timestamp"],
+                            "session_id": event.get("session_id"),
+                            "task_id": event.get("task_id"),
+                            "run_id": event.get("run_id"),
+                            "run_status": event.get("status"),
+                            "attempt": event.get("attempt"),
+                            "sequence": event.get("sequence"),
+                            "workspace_path": event.get("workspace_path"),
+                            "last_run": event.get("run_id"),
+                            "run_count": event.get("sequence"),
+                            "error": event.get("error"),
+                        },
+                        agent_name=event.get("agent_id") or "background",
+                    ),
                 ),
+                timeout=self._event_append_timeout_seconds,
             )
         except Exception:
             return
+
+    async def _read_event_router_events(self, run: BackgroundRun) -> list[dict[str, Any]]:
+        if self.event_router is None:
+            return []
+        try:
+            router_events = await asyncio.wait_for(
+                self.event_router.get_events(session_id=run.session_id),
+                timeout=self._event_replay_timeout_seconds,
+            )
+        except Exception:
+            return []
+
+        events: list[dict[str, Any]] = []
+        for item in router_events:
+            raw = item.model_dump() if hasattr(item, "model_dump") else dict(item)
+            payload = raw.get("payload", {})
+            if hasattr(payload, "model_dump"):
+                payload = payload.model_dump()
+            if payload.get("run_id") != run.run_id and payload.get("last_run") != run.run_id:
+                continue
+            event = {
+                "event": payload.get("event") or payload.get("status"),
+                "timestamp": payload.get("timestamp") or raw.get("timestamp"),
+                "agent_id": payload.get("agent_id"),
+                "task_id": payload.get("task_id"),
+                "run_id": payload.get("run_id") or payload.get("last_run"),
+                "session_id": payload.get("session_id"),
+                "status": payload.get("run_status"),
+                "attempt": payload.get("attempt"),
+                "sequence": payload.get("sequence") or payload.get("run_count"),
+                "workspace_path": payload.get("workspace_path"),
+            }
+            if payload.get("error"):
+                event["error"] = payload["error"]
+            events.append({key: value for key, value in event.items() if value is not None})
+
+        return sorted(
+            events,
+            key=lambda event: (
+                event.get("sequence", 0),
+                event.get("timestamp", ""),
+            ),
+        )
+
+    @staticmethod
+    def _prepare_event_trace(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not events:
+            return []
+
+        normalized: list[dict[str, Any]] = []
+        seen_sequences: set[int] = set()
+        for event in events:
+            sequence = event.get("sequence")
+            if isinstance(sequence, bool) or not isinstance(sequence, int):
+                return []
+            if sequence < 1 or sequence in seen_sequences:
+                return []
+            seen_sequences.add(sequence)
+            normalized_event = dict(event)
+            normalized_event["sequence"] = sequence
+            normalized.append(normalized_event)
+
+        normalized = sorted(
+            normalized,
+            key=lambda event: (
+                event.get("sequence", 0),
+                event.get("timestamp", ""),
+            ),
+        )
+        if [event["sequence"] for event in normalized] != list(
+            range(1, len(normalized) + 1)
+        ):
+            return []
+        return normalized
 
     def _resolve_workspace(self) -> Any | None:
         if self._workspace is not None:
