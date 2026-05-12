@@ -81,6 +81,24 @@ class CountingStore(InMemoryTaskStore):
         await super().refresh_lease(run_id, worker_id, lease_token, lease_seconds)
 
 
+class BrokenWorkspaceFiles:
+    def write_text(self, path, text):
+        raise RuntimeError("workspace write failed")
+
+    def append_text(self, path, text):
+        raise RuntimeError("workspace append failed")
+
+    def read_text(self, path):
+        raise RuntimeError("workspace read failed")
+
+    def list_files(self, path):
+        return []
+
+
+class BrokenWorkspace:
+    files = BrokenWorkspaceFiles()
+
+
 class FakeRedisClient:
     def __init__(self):
         self.values = {}
@@ -335,6 +353,18 @@ class HangingEventRouter:
 class HangingAppendEventRouter:
     async def append(self, session_id, event):
         await asyncio.sleep(60)
+
+    async def get_events(self, session_id):
+        return []
+
+
+class HangingClaimAppendEventRouter:
+    async def append(self, session_id, event):
+        if getattr(event.payload, "status", None) in {
+            "background_run_claimed",
+            "background_run_heartbeat",
+        }:
+            await asyncio.sleep(60)
 
     async def get_events(self, session_id):
         return []
@@ -652,6 +682,7 @@ async def test_manager_run_now_executes_agent_and_records_events():
     events = await manager.get_run_events(run.run_id)
     assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
     assert events[-1]["event"] == "background_run_completed"
+    assert "background_run_claimed" in {event["event"] for event in events}
 
 
 @pytest.mark.asyncio
@@ -774,8 +805,9 @@ async def test_background_event_replay_ignores_duplicate_sequence_sources(tmp_pa
 
     assert [(event["event"], event["sequence"]) for event in events] == [
         ("background_run_queued", 1),
-        ("background_run_started", 2),
-        ("background_run_completed", 3),
+        ("background_run_claimed", 2),
+        ("background_run_started", 3),
+        ("background_run_completed", 4),
     ]
 
 
@@ -807,8 +839,9 @@ async def test_background_event_replay_ignores_invalid_sequence_sources(
 
     assert [(event["event"], event["sequence"]) for event in events] == [
         ("background_run_queued", 1),
-        ("background_run_started", 2),
-        ("background_run_completed", 3),
+        ("background_run_claimed", 2),
+        ("background_run_started", 3),
+        ("background_run_completed", 4),
     ]
 
 
@@ -843,6 +876,7 @@ async def test_background_run_does_not_block_on_hanging_event_append(tmp_path):
         task_store="in_memory",
         event_router=HangingAppendEventRouter(),
         workspace=workspace,
+        lease_seconds=0.1,
     )
     manager._event_append_timeout_seconds = 0.01
     await manager.register_agent("agent", FakeAgent(response="complete"))
@@ -859,6 +893,29 @@ async def test_background_run_does_not_block_on_hanging_event_append(tmp_path):
     events = await manager.get_run_events(run.run_id)
     assert events[0]["event"] == "background_run_queued"
     assert events[-1]["event"] == "background_run_completed"
+
+
+@pytest.mark.asyncio
+async def test_slow_claimed_event_append_does_not_expire_active_lease(tmp_path):
+    workspace = Workspace.from_config(workspace_dir=tmp_path).ensure()
+    manager = BackgroundAgentManager(
+        task_store="in_memory",
+        event_router=HangingClaimAppendEventRouter(),
+        workspace=workspace,
+        lease_seconds=0.1,
+    )
+    manager._event_append_timeout_seconds = 0.2
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    run = await asyncio.wait_for(manager.run_now("task", wait=True), timeout=1.0)
+
+    assert run.status == RunStatus.COMPLETED
 
 
 @pytest.mark.asyncio
@@ -918,8 +975,9 @@ async def test_background_event_sequence_continues_after_manager_restart(tmp_pat
 
     assert [(event["event"], event["sequence"]) for event in events] == [
         ("background_run_queued", 1),
-        ("background_run_started", 2),
-        ("background_run_completed", 3),
+        ("background_run_claimed", 2),
+        ("background_run_started", 3),
+        ("background_run_completed", 4),
     ]
 
 
@@ -1033,6 +1091,149 @@ async def test_manager_dispatches_due_schedule_from_worker_loop():
     assert len(completed) == 1
     assert completed[0].trigger_type == TriggerType.ONCE
     assert agent.calls
+    events = await manager.get_run_events(completed[0].run_id)
+    assert [event["event"] for event in events[:2]] == [
+        "background_task_scheduled",
+        "background_run_queued",
+    ]
+    assert events[0]["occurrence_id"] == completed[0].occurrence_id
+    assert events[0]["due_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_duplicate_scheduled_dispatch_does_not_duplicate_run_events():
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store)
+    await manager.register_agent("agent", FakeAgent(response="scheduled"))
+    due_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="scheduled work",
+        schedule={"type": "once", "run_at": due_at},
+        overlap_policy=OverlapPolicy.ALLOW_PARALLEL,
+    )
+
+    await manager._dispatch_due_schedules()
+    state = await store.get_schedule_state("task")
+    async with store._lock:
+        store._schedule_states["task"] = state.model_copy(
+            update={"next_due_at": due_at},
+            deep=True,
+        )
+    await manager._dispatch_due_schedules()
+    runs = await manager.list_runs(task_id="task")
+    events = await manager.get_run_events(runs[0].run_id)
+
+    assert len(runs) == 1
+    assert [event["event"] for event in events] == [
+        "background_task_scheduled",
+        "background_run_queued",
+    ]
+    assert [event["sequence"] for event in events] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_manual_overlap_skip_emits_skipped_event():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    await manager.register_agent("agent", FakeAgent(response="complete", delay=0.1))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        overlap_policy=OverlapPolicy.SKIP_IF_RUNNING,
+    )
+    first = await manager.run_now("task")
+    second = await manager.run_now("task")
+
+    events = await manager.get_run_events(second.run_id)
+
+    assert first.status == RunStatus.QUEUED
+    assert second.status == RunStatus.SKIPPED
+    assert events[-1]["event"] == "background_run_skipped"
+    assert events[-1]["status"] == RunStatus.SKIPPED.value
+
+
+@pytest.mark.asyncio
+async def test_long_running_background_run_emits_heartbeat_events():
+    manager = BackgroundAgentManager(task_store="in_memory", lease_seconds=1)
+    agent = FakeAgent(response="complete", delay=0.35)
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    run = await manager.run_now("task", wait=True)
+    events = await manager.get_run_events(run.run_id)
+    heartbeats = [
+        event for event in events if event["event"] == "background_run_heartbeat"
+    ]
+
+    assert run.status == RunStatus.COMPLETED
+    assert heartbeats
+    assert all(event["worker_id"] == manager.worker_id for event in heartbeats)
+    assert all(event["heartbeat_at"] for event in heartbeats)
+    assert all(event["lease_expires_at"] for event in heartbeats)
+    assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_visibility_failure_does_not_block_execution():
+    manager = BackgroundAgentManager(
+        task_store="in_memory",
+        workspace=BrokenWorkspace(),
+    )
+    agent = FakeAgent(response="complete")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    run = await manager.run_now("task", wait=True)
+    latest = await manager.get_run(run.run_id)
+
+    assert latest.status == RunStatus.COMPLETED
+    assert agent.calls
+    assert [event["event"] for event in manager._events[run.run_id]] == [
+        "background_run_queued",
+        "background_run_claimed",
+        "background_run_started",
+        "background_run_completed",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_visibility_failure_does_not_stop_lease_refresh():
+    store = CountingStore()
+    manager = BackgroundAgentManager(
+        task_store=store,
+        workspace=BrokenWorkspace(),
+        lease_seconds=1,
+    )
+    agent = FakeAgent(response="complete", delay=0.35)
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    run = await manager.run_now("task", wait=True)
+
+    assert run.status == RunStatus.COMPLETED
+    assert store.refresh_count >= 1
+    assert any(
+        event["event"] == "background_run_heartbeat"
+        for event in manager._events[run.run_id]
+    )
 
 
 @pytest.mark.asyncio
@@ -1137,6 +1338,10 @@ async def test_execute_one_releases_claim_when_cancelled_before_run_starts():
     assert released.status == RunStatus.QUEUED
     assert released.lease_owner is None
     assert released.lease_token is None
+    assert [event["event"] for event in manager._events[run.run_id]] == [
+        "background_run_queued",
+        "background_run_queued",
+    ]
 
 
 @pytest.mark.asyncio

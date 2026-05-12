@@ -125,6 +125,10 @@ session do not mix their lifecycle events. Sources with malformed or duplicate
 run-local sequence numbers are ignored during replay selection. A valid source
 uses contiguous integer sequence numbers starting at `1`.
 
+Run-scoped lifecycle events include schedule dispatch, queueing, claiming,
+start, heartbeat, retry, terminal status, and recovery transitions when those
+transitions occur.
+
 Durable restart replay needs at least one durable event source. Use a
 replay-capable event router backend or keep workspace event mirroring enabled.
 If a process exits with only in-memory events and no workspace mirror, the task
