@@ -55,7 +55,7 @@ over smaller services:
 | `BackgroundEventLog` | Lifecycle event ordering, workspace persistence, event-router fanout, replay |
 | `BackgroundWorkspaceIO` | Background workspace file reads and writes |
 | `BackgroundScheduleDispatcher` | Convert due schedules into durable queued or skipped runs |
-| `BackgroundSupervisor` | Claim, execute, heartbeat, cancel, retry, timeout, and recover runs |
+| `BackgroundSupervisor` | Claim, attempt lifecycle, execution, heartbeat, cancel, retry, timeout, and recover runs |
 | `AbstractTaskStore` | Durable operational state and lease fencing |
 
 `BackgroundAgentManager` must not execute agent runs directly. It registers
@@ -793,6 +793,19 @@ handle retry/timeout/cancel/error
 write workspace metadata
 mark terminal
 emit events
+```
+
+Supervisor attempt lifecycle:
+
+```text
+resolve claimed task and agent
+refresh claimed lease
+transition claimed -> running
+create attempt record
+start heartbeat
+execute agent
+finalize success or failure
+cleanup heartbeat and active task state
 ```
 
 Execution call:

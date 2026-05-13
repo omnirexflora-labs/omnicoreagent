@@ -300,6 +300,11 @@ class InMemoryTaskStore(AbstractTaskStore):
                 )
             if run.status in {RunStatus.CLAIMED, RunStatus.RUNNING, RunStatus.RETRYING}:
                 self._verify_lease(run, worker_id, lease_token)
+            if (
+                next_status in {RunStatus.COMPLETED, RunStatus.RETRYING, RunStatus.QUEUED}
+                and run.cancel_requested_at is not None
+            ):
+                raise TaskStoreError("Run cancellation requested before completion")
             update = {**(patch or {}), "status": next_status}
             if next_status in TERMINAL_RUN_STATUSES:
                 update.setdefault("finished_at", _now())

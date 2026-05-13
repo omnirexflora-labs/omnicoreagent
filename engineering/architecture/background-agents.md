@@ -299,6 +299,9 @@ to this service instead of carrying execution logic directly.
 Responsibilities:
 
 - claim runs with a lease
+- resolve claimed task and agent targets
+- start each attempt as a fenced running state
+- track active agent execution tasks
 - refresh heartbeats for long-running runs
 - resolve agent, task, session, and workspace namespace
 - execute `OmniCoreAgent.run()`
@@ -309,6 +312,11 @@ Responsibilities:
 - write run metadata to workspace
 - mark terminal status exactly once
 - emit lifecycle events
+
+The supervisor keeps attempt lifecycle steps separate: target resolution,
+attempt start, agent execution, success finalization, failure handling, and
+cleanup. This keeps the lease/cancellation/retry rules auditable without
+changing the public manager API.
 
 The supervisor design supports workers running in a separate process without
 redesigning the data model.

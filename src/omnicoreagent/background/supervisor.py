@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
 from omnicoreagent.core.events.base import reset_event_run_id, set_event_run_id
 from omnicoreagent.background.agent_specs import resolve_agent
-from omnicoreagent.background.errors import RunLeaseError, RunNotFoundError
+from omnicoreagent.background.errors import RunLeaseError, RunNotFoundError, TaskStoreError
 from omnicoreagent.background.event_log import BackgroundEventLog
 from omnicoreagent.background.models import (
     TERMINAL_RUN_STATUSES,
@@ -30,6 +31,18 @@ from omnicoreagent.background.run_helpers import (
     run_until_terminal_sleep_seconds,
 )
 from omnicoreagent.background.store.base import AbstractTaskStore
+
+
+@dataclass(slots=True)
+class _RunningAttempt:
+    task: BackgroundTaskSpec
+    agent: Any
+    run: BackgroundRun
+    attempt: BackgroundAttempt
+    heartbeat_task: asyncio.Task
+
+
+_ATTEMPT_ALREADY_TERMINAL = object()
 
 
 class BackgroundSupervisor:
@@ -295,6 +308,62 @@ class BackgroundSupervisor:
         await self.emit_run("background_run_queued", released)
 
     async def run_claimed(self, claimed: BackgroundRun) -> None:
+        target = await self.resolve_claimed_target(claimed)
+        if target is None:
+            return
+        task, agent = target
+
+        running = await self.start_claimed_attempt(claimed, task, agent)
+        if running is None:
+            return
+
+        try:
+            result = await self.execute_agent_attempt(running)
+        except asyncio.CancelledError:
+            try:
+                if await self.task_store.is_cancel_requested(running.run.run_id):
+                    await self.mark_attempt_cancelled(running.attempt, running.run)
+                    await self.mark_terminal(
+                        running.run, RunStatus.CANCELLED, "cancelled"
+                    )
+                    return
+                await self.handle_attempt_failure(
+                    running.task,
+                    running.run,
+                    running.attempt,
+                    "exception",
+                    RuntimeError("worker shutdown"),
+                )
+            finally:
+                await self.cleanup_running_attempt(running)
+            raise
+        except asyncio.TimeoutError as exc:
+            try:
+                await self.handle_attempt_failure(
+                    running.task, running.run, running.attempt, "timeout", exc
+                )
+            finally:
+                await self.cleanup_running_attempt(running)
+            return
+        except Exception as exc:
+            try:
+                await self.handle_attempt_failure(
+                    running.task, running.run, running.attempt, "exception", exc
+                )
+            finally:
+                await self.cleanup_running_attempt(running)
+            return
+
+        try:
+            if result is _ATTEMPT_ALREADY_TERMINAL:
+                return
+            await self.complete_successful_attempt(running, result)
+        finally:
+            await self.cleanup_running_attempt(running)
+
+    async def resolve_claimed_target(
+        self, claimed: BackgroundRun
+    ) -> tuple[BackgroundTaskSpec, Any] | None:
         task = await self.task_store.get_task(claimed.task_id)
         if not task:
             await self.mark_terminal(claimed, RunStatus.FAILED, "task missing")
@@ -312,7 +381,11 @@ class BackgroundSupervisor:
         if await self.task_store.is_cancel_requested(claimed.run_id):
             await self.mark_terminal(claimed, RunStatus.CANCELLED, "cancelled")
             return
+        return task, agent
 
+    async def start_claimed_attempt(
+        self, claimed: BackgroundRun, task: BackgroundTaskSpec, agent: Any
+    ) -> _RunningAttempt | None:
         if claimed.lease_token is not None:
             if not await self.refresh_run_lease(claimed.run_id, claimed.lease_token):
                 return
@@ -340,7 +413,7 @@ class BackgroundSupervisor:
         )
         await self.task_store.create_attempt(attempt)
         if await self.task_store.is_cancel_requested(run.run_id):
-            await self._mark_attempt_cancelled(attempt, run)
+            await self.mark_attempt_cancelled(attempt, run)
             await self.mark_terminal(run, RunStatus.CANCELLED, "cancelled")
             return
         heartbeat_task = asyncio.create_task(
@@ -348,96 +421,127 @@ class BackgroundSupervisor:
         )
         await self.emit_run("background_run_claimed", claimed)
         await self.emit_run("background_run_started", run)
+        return _RunningAttempt(
+            task=task,
+            agent=agent,
+            run=run,
+            attempt=attempt,
+            heartbeat_task=heartbeat_task,
+        )
 
-        try:
-            if await self.task_store.is_cancel_requested(run.run_id):
-                await self._mark_attempt_cancelled(attempt, run)
-                await self.mark_terminal(run, RunStatus.CANCELLED, "cancelled")
-                return
-            query = build_run_context(run)
-            agent_task = asyncio.create_task(
-                self.run_agent_with_event_context(
-                    agent=agent,
-                    query=query,
-                    run=run,
-                    timeout_seconds=task.timeout_seconds,
-                )
+    async def execute_agent_attempt(self, running: _RunningAttempt) -> Any:
+        if await self.task_store.is_cancel_requested(running.run.run_id):
+            await self.mark_attempt_cancelled(running.attempt, running.run)
+            await self.mark_terminal(running.run, RunStatus.CANCELLED, "cancelled")
+            return _ATTEMPT_ALREADY_TERMINAL
+        query = build_run_context(running.run)
+        agent_task = asyncio.create_task(
+            self.run_agent_with_event_context(
+                agent=running.agent,
+                query=query,
+                run=running.run,
+                timeout_seconds=running.task.timeout_seconds,
             )
-            self.active_agent_tasks[run.run_id] = agent_task
-            result = await agent_task
-        except asyncio.CancelledError:
-            try:
-                if await self.task_store.is_cancel_requested(run.run_id):
-                    await self._mark_attempt_cancelled(attempt, run)
-                    await self.mark_terminal(run, RunStatus.CANCELLED, "cancelled")
-                    return
-                await self.handle_attempt_failure(
-                    task, run, attempt, "exception", RuntimeError("worker shutdown")
-                )
-            finally:
-                self.active_agent_tasks.pop(run.run_id, None)
-                heartbeat_task.cancel()
-                await self.drain_cancelled_task(heartbeat_task)
-            raise
-        except asyncio.TimeoutError as exc:
-            try:
-                await self.handle_attempt_failure(task, run, attempt, "timeout", exc)
-            finally:
-                self.active_agent_tasks.pop(run.run_id, None)
-                heartbeat_task.cancel()
-                await self.drain_cancelled_task(heartbeat_task)
-            return
-        except Exception as exc:
-            try:
-                await self.handle_attempt_failure(task, run, attempt, "exception", exc)
-            finally:
-                self.active_agent_tasks.pop(run.run_id, None)
-                heartbeat_task.cancel()
-                await self.drain_cancelled_task(heartbeat_task)
-            return
+        )
+        self.active_agent_tasks[running.run.run_id] = agent_task
+        return await agent_task
 
-        try:
-            preview = result_preview(result)
-            if await self.task_store.is_cancel_requested(run.run_id):
-                if run.lease_token is not None:
-                    if not await self.refresh_run_lease(run.run_id, run.lease_token):
-                        return
-                await self._mark_attempt_cancelled(attempt, run)
-                await self.mark_terminal(run, RunStatus.CANCELLED, "cancelled")
+    async def complete_successful_attempt(
+        self, running: _RunningAttempt, result: Any
+    ) -> None:
+        preview = result_preview(result)
+        if await self.cancel_if_requested(running.run, running.attempt):
+            return
+        if running.run.lease_token is not None:
+            if not await self.refresh_run_lease(
+                running.run.run_id, running.run.lease_token
+            ):
                 return
-            if run.lease_token is not None:
-                if not await self.refresh_run_lease(run.run_id, run.lease_token):
-                    return
-            await self.task_store.update_attempt(
-                attempt.attempt_id,
-                {"status": AttemptStatus.COMPLETED, "finished_at": utc_now()},
+        await self.task_store.update_attempt(
+            running.attempt.attempt_id,
+            {"status": AttemptStatus.COMPLETED, "finished_at": utc_now()},
+            self.worker_id,
+            running.run.lease_token,
+        )
+        if await self.cancel_if_requested(running.run, running.attempt):
+            return
+        if running.run.lease_token is not None:
+            if not await self.refresh_run_lease(
+                running.run.run_id, running.run.lease_token
+            ):
+                return
+        if await self.cancel_if_requested(running.run, running.attempt):
+            return
+        await self.mark_completed_if_not_cancelled(running, preview)
+
+    async def transition_or_cancel(
+        self,
+        *,
+        run: BackgroundRun,
+        attempt: BackgroundAttempt,
+        expected: set[RunStatus],
+        next_status: RunStatus,
+        patch: dict[str, Any] | None = None,
+    ) -> BackgroundRun | None:
+        try:
+            return await self.task_store.transition_run(
+                run.run_id,
+                expected,
+                next_status,
+                patch,
                 self.worker_id,
                 run.lease_token,
             )
-            if await self.task_store.is_cancel_requested(run.run_id):
-                await self._mark_attempt_cancelled(attempt, run)
-                await self.mark_terminal(run, RunStatus.CANCELLED, "cancelled")
-                return
-            if run.lease_token is not None:
-                if not await self.refresh_run_lease(run.run_id, run.lease_token):
-                    return
-            if await self.task_store.is_cancel_requested(run.run_id):
-                await self._mark_attempt_cancelled(attempt, run)
-                await self.mark_terminal(run, RunStatus.CANCELLED, "cancelled")
-                return
+        except TaskStoreError:
+            if await self.cancel_if_requested(run, attempt):
+                return None
+            raise
+
+    async def mark_completed_if_not_cancelled(
+        self, running: _RunningAttempt, preview: str | None
+    ) -> None:
+        latest = await self.task_store.get_run(running.run.run_id)
+        if not latest:
+            return
+        if latest.cancel_requested_at is not None:
+            await self.mark_attempt_cancelled(running.attempt, latest)
+            await self.mark_terminal(latest, RunStatus.CANCELLED, "cancelled")
+            return
+        try:
             completed = await self.task_store.transition_run(
-                run.run_id,
+                latest.run_id,
                 {RunStatus.RUNNING},
                 RunStatus.COMPLETED,
                 {"result_preview": preview},
                 self.worker_id,
-                run.lease_token,
+                latest.lease_token,
             )
-            await self.emit_run("background_run_completed", completed)
-        finally:
-            self.active_agent_tasks.pop(run.run_id, None)
-            heartbeat_task.cancel()
-            await self.drain_cancelled_task(heartbeat_task)
+        except TaskStoreError:
+            if await self.cancel_if_requested(running.run, running.attempt):
+                return
+            raise
+        if completed.cancel_requested_at is not None:
+            await self.mark_attempt_cancelled(running.attempt, completed)
+            await self.mark_terminal(completed, RunStatus.CANCELLED, "cancelled")
+            return
+        await self.emit_run("background_run_completed", completed)
+
+    async def cancel_if_requested(
+        self, run: BackgroundRun, attempt: BackgroundAttempt
+    ) -> bool:
+        if not await self.task_store.is_cancel_requested(run.run_id):
+            return False
+        if run.lease_token is not None:
+            if not await self.refresh_run_lease(run.run_id, run.lease_token):
+                return True
+        await self.mark_attempt_cancelled(attempt, run)
+        await self.mark_terminal(run, RunStatus.CANCELLED, "cancelled")
+        return True
+
+    async def cleanup_running_attempt(self, running: _RunningAttempt) -> None:
+        self.active_agent_tasks.pop(running.run.run_id, None)
+        running.heartbeat_task.cancel()
+        await self.drain_cancelled_task(running.heartbeat_task)
 
     async def run_agent_with_event_context(
         self,
@@ -476,6 +580,8 @@ class BackgroundSupervisor:
             self.worker_id,
             run.lease_token,
         )
+        if await self.cancel_if_requested(run, attempt):
+            return
         can_retry = (
             reason in task.retry_policy.retry_on
             and run.attempt <= task.retry_policy.max_retries
@@ -494,26 +600,32 @@ class BackgroundSupervisor:
             if run.lease_token is not None:
                 if not await self.refresh_run_lease(run.run_id, run.lease_token):
                     return
-            retrying = await self.task_store.transition_run(
-                run.run_id,
-                {RunStatus.RUNNING},
-                RunStatus.RETRYING,
-                {"error": str(exc)},
-                self.worker_id,
-                run.lease_token,
+            if await self.cancel_if_requested(run, attempt):
+                return
+            retrying = await self.transition_or_cancel(
+                run=run,
+                attempt=attempt,
+                expected={RunStatus.RUNNING},
+                next_status=RunStatus.RETRYING,
+                patch={"error": str(exc)},
             )
+            if retrying is None:
+                return
             await self.emit_run("background_run_retrying", retrying)
-            queued = await self.task_store.transition_run(
-                retrying.run_id,
-                {RunStatus.RETRYING},
-                RunStatus.QUEUED,
-                {
+            if await self.cancel_if_requested(retrying, attempt):
+                return
+            queued = await self.transition_or_cancel(
+                run=retrying,
+                attempt=attempt,
+                expected={RunStatus.RETRYING},
+                next_status=RunStatus.QUEUED,
+                patch={
                     **release_lease_patch(),
                     "queued_at": utc_now() + timedelta(seconds=retry_delay),
                 },
-                self.worker_id,
-                retrying.lease_token,
             )
+            if queued is None:
+                return
             await self.emit_run("background_run_queued", queued)
             return
         terminal = RunStatus.TIMEOUT if reason == "timeout" else RunStatus.FAILED
@@ -583,7 +695,7 @@ class BackgroundSupervisor:
         await asyncio.gather(*pending, return_exceptions=True)
         self.active_agent_tasks.clear()
 
-    async def _mark_attempt_cancelled(
+    async def mark_attempt_cancelled(
         self, attempt: BackgroundAttempt, run: BackgroundRun
     ) -> None:
         await self.task_store.update_attempt(
