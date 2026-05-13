@@ -831,8 +831,12 @@ the run finishes before the configured request timeout: when the OmniServe
 worker loop is running, the request waits on the durable run record owned by the
 worker; when the worker loop is disabled, the request calls
 `BackgroundAgentManager.run_now(wait=True, timeout_seconds=...)` and the manager
-drives that run inline so queue ordering and overlap policy still apply. Timeout
-returns `504` without removing the run from the task store.
+drives that run inline so queue ordering and overlap policy still apply. The
+manager receives a background wait budget derived from the configured request
+timeout with a small margin for OmniServe to return the structured response
+before the outer HTTP timeout. Wait timeout returns `504` without removing the
+run from the task store, and the response `detail` includes `run_id`, `task_id`,
+latest `status`, `wait_timeout_seconds`, and `request_timeout_seconds`.
 
 Delete endpoints return `404` for missing agents or tasks. Silent deletes hide
 control-plane mistakes and make production automation harder to debug.

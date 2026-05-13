@@ -221,7 +221,7 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 | `GET` | `/background/tasks` | Yes* | List background tasks |
 | `GET` | `/background/tasks/{task_id}` | Yes* | Inspect a background task |
 | `PATCH` | `/background/tasks/{task_id}` | Yes* | Patch a background task |
-| `POST` | `/background/tasks/{task_id}/run` | Yes* | Queue a manual background run |
+| `POST` | `/background/tasks/{task_id}/run` | Yes* | Queue a manual background run, optionally waiting for terminal state |
 | `POST` | `/background/tasks/{task_id}/pause` | Yes* | Pause scheduled dispatch |
 | `POST` | `/background/tasks/{task_id}/resume` | Yes* | Resume scheduled dispatch |
 | `DELETE` | `/background/tasks/{task_id}` | Yes* | Delete a background task |
@@ -278,6 +278,12 @@ curl -X POST http://localhost:8000/background/tasks/daily_report/run \
   -H "Content-Type: application/json" \
   -d '{"wait": false}'
 ```
+
+Set `{"wait": true}` when the response should wait for terminal run state. If
+the run does not finish before the background wait budget, OmniServe returns
+`504` with the `run_id`, latest `status`, `wait_timeout_seconds`, and
+`request_timeout_seconds` in `detail`; use the `run_id` with
+`/background/runs/{run_id}` to inspect the run later.
 
 If auth is enabled with `--auth-token` or
 `OMNICOREAGENT_SERVE_AUTH_ENABLED=true`, add

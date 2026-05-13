@@ -277,7 +277,7 @@ def test_background_api_wait_true_uses_worker_wait_path(tmp_path):
         assert run_response.status_code == 200
         assert run_response.json()["status"] == "completed"
 
-    assert manager.run_now_wait_values == [False]
+    assert manager.run_now_wait_values == [True]
     assert manager.wait_for_run_called is True
 
 
@@ -360,10 +360,99 @@ def test_background_api_wait_true_without_worker_times_out_on_delayed_retry(tmp_
             json={"wait": True},
         )
         assert run_response.status_code == 504
+        timeout_detail = run_response.json()["detail"]
+        assert timeout_detail["task_id"] == "retry_later"
+        assert timeout_detail["status"] == "queued"
+        assert timeout_detail["run_id"].startswith("run_")
+        assert timeout_detail["wait_timeout_seconds"] == 0.75
+        assert timeout_detail["request_timeout_seconds"] == 1
         runs = client.get("/background/runs", params={"task_id": "retry_later"})
         assert runs.status_code == 200
         assert runs.json()["total"] == 1
         assert runs.json()["runs"][0]["status"] == "queued"
+        assert runs.json()["runs"][0]["run_id"] == timeout_detail["run_id"]
+
+    assert len(agent.calls) == 1
+
+
+def test_background_api_wait_true_without_request_timeout_returns_retry_state(tmp_path):
+    agent = ServedAgent()
+    agent.fail_times = 1
+    manager = make_background_manager(tmp_path)
+    server = OmniServe(
+        agent,
+        OmniServeConfig(
+            background_agent_id="served",
+            background_start_worker=False,
+            request_timeout=0,
+        ),
+        background_manager=manager,
+    )
+
+    with TestClient(server.app) as client:
+        created = client.post(
+            "/background/tasks",
+            json={
+                "task_id": "retry_without_http_timeout",
+                "query": "retry later",
+                "schedule": {"type": "manual"},
+                "retry_policy": {
+                    "max_retries": 1,
+                    "initial_delay_seconds": 5,
+                    "max_delay_seconds": 5,
+                },
+            },
+        )
+        assert created.status_code == 200
+
+        run_response = client.post(
+            "/background/tasks/retry_without_http_timeout/run",
+            json={"wait": True},
+        )
+        assert run_response.status_code == 200
+        run = run_response.json()
+        assert run["status"] == "queued"
+        assert run["run_id"].startswith("run_")
+
+    assert len(agent.calls) == 1
+
+
+def test_background_api_wait_true_times_out_before_slow_inline_run_finishes(tmp_path):
+    agent = ServedAgent()
+    agent.delay_seconds = 2
+    manager = make_background_manager(tmp_path)
+    server = OmniServe(
+        agent,
+        OmniServeConfig(
+            background_agent_id="served",
+            background_start_worker=False,
+            request_timeout=1,
+        ),
+        background_manager=manager,
+    )
+
+    with TestClient(server.app) as client:
+        created = client.post(
+            "/background/tasks",
+            json={
+                "task_id": "slow_inline",
+                "query": "slow inline",
+                "schedule": {"type": "manual"},
+            },
+        )
+        assert created.status_code == 200
+
+        run_response = client.post(
+            "/background/tasks/slow_inline/run",
+            json={"wait": True},
+        )
+        assert run_response.status_code == 504
+        timeout_detail = run_response.json()["detail"]
+        assert timeout_detail["task_id"] == "slow_inline"
+        assert timeout_detail["run_id"].startswith("run_")
+        assert timeout_detail["status"] in {"claimed", "running"}
+        assert timeout_detail["wait_timeout_seconds"] == 0.75
+        assert timeout_detail["request_timeout_seconds"] == 1
 
     assert len(agent.calls) == 1
 
@@ -431,3 +520,36 @@ def test_background_api_can_be_disabled():
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Background execution is disabled"
+
+
+def test_background_openapi_matches_http_exception_response_shapes(tmp_path):
+    agent = ServedAgent()
+    manager = make_background_manager(tmp_path)
+    server = OmniServe(
+        agent,
+        OmniServeConfig(
+            background_agent_id="served",
+            background_start_worker=False,
+        ),
+        background_manager=manager,
+    )
+
+    with TestClient(server.app) as client:
+        schema = client.get("/openapi.json").json()
+        delete_task_responses = schema["paths"]["/background/tasks/{task_id}"][
+            "delete"
+        ]["responses"]
+        run_responses = schema["paths"]["/background/tasks/{task_id}/run"][
+            "post"
+        ]["responses"]
+
+        assert (
+            delete_task_responses["404"]["content"]["application/json"]["schema"][
+                "$ref"
+            ]
+            == "#/components/schemas/HttpErrorResponse"
+        )
+        assert (
+            run_responses["504"]["content"]["application/json"]["schema"]["$ref"]
+            == "#/components/schemas/BackgroundRunTimeoutResponse"
+        )

@@ -153,8 +153,12 @@ limiting until you opt in.
 needs terminal run state in the response. With the worker enabled, OmniServe
 waits on the durable run record. With the worker disabled, OmniServe executes
 the run inline through the background manager execution path. If the run does
-not finish before the configured request timeout, the response is `504` and the
-run can still be inspected through `/background/runs/{run_id}`.
+not finish before the background wait budget, the response is `504`. The wait
+budget is derived from the configured request timeout and leaves a small margin
+for OmniServe to return the structured response before the outer HTTP timeout.
+The `detail` payload includes the `run_id`, latest `status`,
+`wait_timeout_seconds`, and `request_timeout_seconds` so the run can still be
+inspected through `/background/runs/{run_id}`.
 
 ---
 

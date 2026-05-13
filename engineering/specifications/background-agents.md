@@ -596,12 +596,16 @@ Rules:
 - `POST /background/tasks/{task_id}/run` with `wait=false` returns the queued
   or skipped run immediately.
 - `POST /background/tasks/{task_id}/run` with `wait=true` returns terminal run
-  state only if the run finishes before the configured request timeout. If the
-  worker loop is active, OmniServe waits on the durable run record. If the
-  worker loop is disabled, OmniServe calls
+  state only if the run finishes before the background wait budget. The wait
+  budget is derived from the configured request timeout with a small margin for
+  returning the structured HTTP response. If the worker loop is active,
+  OmniServe waits on the durable run record. If the worker loop is disabled,
+  OmniServe calls
   `BackgroundAgentManager.run_now(wait=True, timeout_seconds=...)`; the manager
   owns inline execution, queue ordering, and overlap-policy enforcement. Timeout
-  returns `504` and leaves the run inspectable through the run endpoints.
+  returns `504` with `run_id`, `task_id`, latest `status`,
+  `wait_timeout_seconds`, and `request_timeout_seconds` in `detail`, leaving
+  the run inspectable through the run endpoints.
 - deleting a missing background agent returns `404`.
 - deleting a missing background task returns `404`.
 - run event replay responses preserve contiguous event sequence numbers and

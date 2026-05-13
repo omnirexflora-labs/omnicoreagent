@@ -377,6 +377,9 @@ class InMemoryTaskStore(AbstractTaskStore):
             run = self._require_run(run_id)
             if run.status != RunStatus.QUEUED:
                 raise RunLeaseError(f"Run {run_id} is not queued")
+            claimable_ids = {item.run_id for item in self._claimable_runs_locked()}
+            if run_id not in claimable_ids:
+                raise RunLeaseError(f"Run {run_id} is blocked by overlap policy")
             return _copy_model(self._claim_run_locked(run, worker_id, lease_seconds))
 
     async def steal_expired_run(
@@ -395,7 +398,7 @@ class InMemoryTaskStore(AbstractTaskStore):
     ) -> None:
         async with self._lock:
             run = self._require_run(run_id)
-            self._verify_lease_identity(run, worker_id, lease_token)
+            self._verify_lease(run, worker_id, lease_token)
             self._runs[run_id] = run.model_copy(
                 update={
                     "heartbeat_at": _now(),
@@ -486,7 +489,7 @@ class InMemoryTaskStore(AbstractTaskStore):
             if run.status == RunStatus.QUEUED
             and (run.queued_at is None or run.queued_at <= _now())
         ]
-        queued = self._sorted(queued, "queued_at")
+        queued = sorted(queued, key=self._run_order_key)
         claimable: list[BackgroundRun] = []
         for run in queued:
             task = self._tasks.get(run.task_id)
@@ -498,8 +501,13 @@ class InMemoryTaskStore(AbstractTaskStore):
                     for item in self._runs.values()
                     if item.task_id == run.task_id
                     and item.run_id != run.run_id
-                    and item.status in {RunStatus.CLAIMED, RunStatus.RUNNING, RunStatus.RETRYING}
-                    and (item.queued_at or _now()) <= (run.queued_at or _now())
+                    and item.status in {
+                        RunStatus.QUEUED,
+                        RunStatus.CLAIMED,
+                        RunStatus.RUNNING,
+                        RunStatus.RETRYING,
+                    }
+                    and self._run_order_key(item) < self._run_order_key(run)
                 ]
                 if earlier_active:
                     continue
@@ -589,3 +597,8 @@ class InMemoryTaskStore(AbstractTaskStore):
     @staticmethod
     def _sorted(items, field: str = "created_at"):
         return sorted(items, key=lambda item: getattr(item, field, None) or utc_now())
+
+    @staticmethod
+    def _run_order_key(run: BackgroundRun) -> tuple[datetime, datetime, str]:
+        queued_at = run.queued_at or run.triggered_at
+        return (queued_at, run.triggered_at, run.run_id)
