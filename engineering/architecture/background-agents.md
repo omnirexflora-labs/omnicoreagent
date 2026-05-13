@@ -711,26 +711,25 @@ system.
 
 ## Event Model
 
-Background lifecycle events are captured in the process cache and, when enabled,
-the run workspace `events.jsonl` mirror. If an `EventRouter` is configured, the
-manager also mirrors those events to the router on a best-effort bounded path.
+Run-scoped background lifecycle events are captured in the process cache and,
+when enabled, the run workspace `events.jsonl` mirror. If an `EventRouter` is
+configured, the manager also mirrors those run events to the router on a
+best-effort bounded path.
 
-Current emitted events:
+Current emitted run-scoped events:
 
-- `background_agent_registered`
-- `background_task_registered`
-- `background_task_paused`
-- `background_task_resumed`
-- `background_task_deleted`
+- `background_task_scheduled`
 - `background_run_queued`
+- `background_run_claimed`
 - `background_run_started`
+- `background_run_heartbeat`
 - `background_run_retrying`
 - `background_run_completed`
 - `background_run_failed`
 - `background_run_timeout`
 - `background_run_cancelled`
 - `background_run_skipped`
-- `background_run_recovered`
+- `background_run_recovered` for expired-lease recovery that requeues the run
 
 Events make the run observable. They do not replace the task store.
 

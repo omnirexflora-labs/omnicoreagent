@@ -150,6 +150,12 @@ class BackgroundAgentStatusPayload(SerializableRecord):
     attempt: int | None = None
     sequence: int | None = None
     workspace_path: str | None = None
+    worker_id: str | None = None
+    lease_generation: int | None = None
+    heartbeat_at: str | None = None
+    lease_expires_at: str | None = None
+    occurrence_id: str | None = None
+    due_at: str | None = None
 
 
 EventPayload = (

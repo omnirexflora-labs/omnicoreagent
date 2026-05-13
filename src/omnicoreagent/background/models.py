@@ -112,6 +112,7 @@ TERMINAL_EVENT_NAMES = {
 }
 
 INITIAL_EVENT_NAMES = {
+    "background_task_scheduled",
     "background_run_queued",
     "background_run_skipped",
 }

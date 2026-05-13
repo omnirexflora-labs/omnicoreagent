@@ -687,7 +687,8 @@ Scheduled behavior:
 3. Persist the run with `dispatch_scheduled_run()`, which atomically applies
    overlap policy, deduplicates `occurrence_id`, handles `cancel_previous`,
    and advances schedule state.
-4. Emit `background_run_queued` or `background_run_skipped`.
+4. Emit `background_task_scheduled`.
+5. Emit `background_run_queued` or `background_run_skipped`.
 
 Manual behavior:
 
@@ -779,10 +780,14 @@ For each expired run:
 - close the abandoned running attempt as `failed` with reason
   `lease_expired`.
 - if cancellation requested, mark cancelled with the new lease token.
+- if the run expired after claim but before start, requeue it for the normal
+  claim path with the new lease token released; emit `background_run_recovered`.
 - if attempts remain and retry policy allows recovery, mark retrying and then
-  queued for the normal claim path with the new lease token.
+  queued for the normal claim path with the new lease token; emit
+  `background_run_recovered`.
 - if attempts are exhausted, mark failed with the new lease token.
-- emit `background_run_recovered` when recovery changes state.
+- recovery paths that end in a terminal state emit the corresponding terminal
+  event instead of `background_run_recovered`.
 
 Recovery must use atomic store transitions so multiple supervisors do not
 recover the same run.
@@ -839,16 +844,14 @@ Use scratchpad files for progress, notes, todos, and resumable work.
 
 ## Event Contract
 
-Current emitted event names:
+Current emitted run-scoped event names:
 
 ```text
-background_agent_registered
-background_task_registered
-background_task_paused
-background_task_resumed
-background_task_deleted
+background_task_scheduled
 background_run_queued
+background_run_claimed
 background_run_started
+background_run_heartbeat
 background_run_retrying
 background_run_completed
 background_run_failed

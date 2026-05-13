@@ -240,7 +240,12 @@ class BackgroundAgentManager:
         created = await self.task_store.create_run_with_overlap_guard(
             run, task.overlap_policy
         )
-        await self._emit_run("background_run_queued", created)
+        await self._emit_run(
+            "background_run_skipped"
+            if created.status == RunStatus.SKIPPED
+            else "background_run_queued",
+            created,
+        )
         if wait and created.status == RunStatus.QUEUED:
             while True:
                 latest = await self.task_store.get_run(created.run_id)
@@ -466,6 +471,9 @@ class BackgroundAgentManager:
                 due_at=state.next_due_at,
                 occurrence_id=occurrence_id,
             )
+            existing_run_ids = {
+                item.run_id for item in await self.task_store.list_runs(task.task_id)
+            }
             next_due_at = next_schedule_due(task.schedule, state.next_due_at, utc_now())
             created = await self.task_store.dispatch_scheduled_run(
                 run,
@@ -474,6 +482,9 @@ class BackgroundAgentManager:
                 next_due_at,
             )
             dispatched_any = True
+            if created.run_id in existing_run_ids:
+                continue
+            await self._emit_run("background_task_scheduled", created)
             await self._emit_run(
                 "background_run_skipped"
                 if created.status == RunStatus.SKIPPED
@@ -525,7 +536,7 @@ class BackgroundAgentManager:
             or latest.lease_token is None
         ):
             return
-        await self.task_store.transition_run(
+        released = await self.task_store.transition_run(
             latest.run_id,
             {RunStatus.CLAIMED},
             RunStatus.QUEUED,
@@ -533,6 +544,7 @@ class BackgroundAgentManager:
             self.worker_id,
             latest.lease_token,
         )
+        await self._emit_run("background_run_queued", released)
 
     async def _run_claimed(self, claimed: BackgroundRun) -> None:
         task = await self.task_store.get_task(claimed.task_id)
@@ -564,10 +576,11 @@ class BackgroundAgentManager:
             lease_token=run.lease_token,
         )
         await self.task_store.create_attempt(attempt)
-        await self._emit_run("background_run_started", run)
         heartbeat_task = asyncio.create_task(
             self._heartbeat_until_finished(run.run_id, run.lease_token)
         )
+        await self._emit_run("background_run_claimed", claimed)
+        await self._emit_run("background_run_started", run)
 
         try:
             query = self._build_run_context(run)
@@ -716,6 +729,12 @@ class BackgroundAgentManager:
                 )
             except Exception:
                 return
+            try:
+                latest = await self.task_store.get_run(run_id)
+                if latest and latest.status in {RunStatus.RUNNING, RunStatus.RETRYING}:
+                    await self._emit_run("background_run_heartbeat", latest)
+            except Exception:
+                continue
 
     async def _drain_cancelled_task(self, task: asyncio.Task) -> None:
         try:
@@ -802,18 +821,36 @@ class BackgroundAgentManager:
         self._agents[agent_id] = agent
         return agent
 
-    async def _emit_run(self, event_name: str, run: BackgroundRun) -> None:
-        await self._emit(
-            event_name,
-            agent_id=run.agent_id,
-            task_id=run.task_id,
-            run_id=run.run_id,
-            session_id=run.session_id,
-            status=run.status.value,
-            attempt=run.attempt,
-            workspace_path=run.workspace_path,
-        )
-        await self._write_run_snapshot(run)
+    async def _emit_run(
+        self, event_name: str, run: BackgroundRun, **extra_payload: Any
+    ) -> None:
+        try:
+            await self._emit(
+                event_name,
+                agent_id=run.agent_id,
+                task_id=run.task_id,
+                run_id=run.run_id,
+                session_id=run.session_id,
+                status=run.status.value,
+                attempt=run.attempt,
+                workspace_path=run.workspace_path,
+                worker_id=run.lease_owner,
+                lease_generation=run.lease_generation,
+                heartbeat_at=run.heartbeat_at.isoformat() if run.heartbeat_at else None,
+                lease_expires_at=(
+                    run.lease_expires_at.isoformat() if run.lease_expires_at else None
+                ),
+                occurrence_id=run.occurrence_id,
+                due_at=run.due_at.isoformat() if run.due_at else None,
+                **extra_payload,
+            )
+        except Exception:
+            pass
+        if event_name != "background_run_heartbeat":
+            try:
+                await self._write_run_snapshot(run)
+            except Exception:
+                pass
 
     async def _emit(self, event_name: str, **payload: Any) -> None:
         run_id = payload.get("run_id")
@@ -828,8 +865,21 @@ class BackgroundAgentManager:
                 run_id, event_name, events
             )
             events.append(event)
-            await self._write_run_event(event)
+            if event_name == "background_run_heartbeat":
+                asyncio.create_task(self._write_and_route_event(event))
+                return
+            try:
+                await self._write_run_event(event)
+            except Exception:
+                pass
             await self._append_event_router(event)
+
+    async def _write_and_route_event(self, event: dict[str, Any]) -> None:
+        try:
+            await self._write_run_event(event)
+        except Exception:
+            pass
+        await self._append_event_router(event)
 
     async def _next_run_event_sequence(
         self, run_id: str, event_name: str, local_events: list[dict[str, Any]]
@@ -921,6 +971,12 @@ class BackgroundAgentManager:
                             "last_run": event.get("run_id"),
                             "run_count": event.get("sequence"),
                             "error": event.get("error"),
+                            "worker_id": event.get("worker_id"),
+                            "lease_generation": event.get("lease_generation"),
+                            "heartbeat_at": event.get("heartbeat_at"),
+                            "lease_expires_at": event.get("lease_expires_at"),
+                            "occurrence_id": event.get("occurrence_id"),
+                            "due_at": event.get("due_at"),
                         },
                         agent_name=event.get("agent_id") or "background",
                     ),
@@ -960,6 +1016,12 @@ class BackgroundAgentManager:
                 "attempt": payload.get("attempt"),
                 "sequence": payload.get("sequence") or payload.get("run_count"),
                 "workspace_path": payload.get("workspace_path"),
+                "worker_id": payload.get("worker_id"),
+                "lease_generation": payload.get("lease_generation"),
+                "heartbeat_at": payload.get("heartbeat_at"),
+                "lease_expires_at": payload.get("lease_expires_at"),
+                "occurrence_id": payload.get("occurrence_id"),
+                "due_at": payload.get("due_at"),
             }
             if payload.get("error"):
                 event["error"] = payload["error"]
