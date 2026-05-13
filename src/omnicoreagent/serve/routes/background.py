@@ -19,6 +19,7 @@ from ..models import (
     BackgroundAgentRegistrationRequest,
     BackgroundAgentsResponse,
     BackgroundRunEventsResponse,
+    BackgroundRunTimeoutResponse,
     BackgroundRunWorkspaceResponse,
     BackgroundRunsResponse,
     BackgroundStatusResponse,
@@ -26,9 +27,12 @@ from ..models import (
     BackgroundTaskPatchRequest,
     BackgroundTaskRunRequest,
     BackgroundTasksResponse,
-    ErrorResponse,
+    HttpErrorResponse,
 )
 from ..state import get_agent, get_background_manager, get_config
+
+
+_HTTP_ERROR = {"model": HttpErrorResponse}
 
 
 def create_background_router() -> APIRouter:
@@ -39,7 +43,7 @@ def create_background_router() -> APIRouter:
         "/agents",
         response_model=BackgroundAgentSpec,
         summary="Register a background agent",
-        responses={409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        responses={409: _HTTP_ERROR, 503: _HTTP_ERROR},
     )
     async def register_background_agent(
         request: Request, body: BackgroundAgentRegistrationRequest
@@ -78,7 +82,7 @@ def create_background_router() -> APIRouter:
         "/agents/{agent_id}",
         response_model=BackgroundAgentSpec,
         summary="Get a background agent spec",
-        responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        responses={404: _HTTP_ERROR, 503: _HTTP_ERROR},
     )
     async def get_background_agent(request: Request, agent_id: str) -> BackgroundAgentSpec:
         manager = _require_background_manager(request)
@@ -91,7 +95,11 @@ def create_background_router() -> APIRouter:
         "/agents/{agent_id}",
         response_model=BackgroundStatusResponse,
         summary="Delete a background agent spec",
-        responses={409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        responses={
+            404: _HTTP_ERROR,
+            409: _HTTP_ERROR,
+            503: _HTTP_ERROR,
+        },
     )
     async def delete_background_agent(
         request: Request,
@@ -99,6 +107,8 @@ def create_background_router() -> APIRouter:
         force: bool = Query(default=False),
     ) -> BackgroundStatusResponse:
         manager = _require_background_manager(request)
+        if not await manager.get_agent(agent_id):
+            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
         try:
             await manager.unregister_agent(agent_id, force=force)
         except AgentAlreadyRegisteredError as exc:
@@ -110,9 +120,9 @@ def create_background_router() -> APIRouter:
         response_model=BackgroundTaskSpec,
         summary="Create a background task",
         responses={
-            404: {"model": ErrorResponse},
-            409: {"model": ErrorResponse},
-            503: {"model": ErrorResponse},
+            404: _HTTP_ERROR,
+            409: _HTTP_ERROR,
+            503: _HTTP_ERROR,
         },
     )
     async def create_background_task(
@@ -157,7 +167,7 @@ def create_background_router() -> APIRouter:
         "/tasks/{task_id}",
         response_model=BackgroundTaskSpec,
         summary="Get a background task",
-        responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        responses={404: _HTTP_ERROR, 503: _HTTP_ERROR},
     )
     async def get_background_task(request: Request, task_id: str) -> BackgroundTaskSpec:
         manager = _require_background_manager(request)
@@ -170,7 +180,7 @@ def create_background_router() -> APIRouter:
         "/tasks/{task_id}",
         response_model=BackgroundTaskSpec,
         summary="Patch a background task",
-        responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        responses={404: _HTTP_ERROR, 503: _HTTP_ERROR},
     )
     async def patch_background_task(
         request: Request, task_id: str, body: BackgroundTaskPatchRequest
@@ -185,8 +195,15 @@ def create_background_router() -> APIRouter:
     @router.post(
         "/tasks/{task_id}/run",
         response_model=BackgroundRun,
-        summary="Queue a manual task run",
-        responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        summary="Queue or wait for a manual task run",
+        responses={
+            404: _HTTP_ERROR,
+            503: _HTTP_ERROR,
+            504: {
+                "model": BackgroundRunTimeoutResponse,
+                "description": "Run did not finish before request timeout",
+            },
+        },
     )
     async def run_background_task(
         request: Request, task_id: str, body: BackgroundTaskRunRequest | None = None
@@ -194,24 +211,21 @@ def create_background_router() -> APIRouter:
         manager = _require_background_manager(request)
         config = get_config(request)
         run_request = body or BackgroundTaskRunRequest()
+        wait_timeout = _background_wait_timeout(config.request_timeout)
         try:
             run = await manager.run_now(
                 task_id,
                 query=run_request.query,
-                wait=False,
+                wait=run_request.wait,
+                timeout_seconds=wait_timeout if run_request.wait else None,
             )
             if not run_request.wait:
                 return run
-            latest = await manager.wait_for_run(
-                run.run_id,
-                timeout_seconds=config.request_timeout,
-            )
-            if latest.status not in TERMINAL_RUN_STATUSES:
-                raise HTTPException(
-                    status_code=504,
-                    detail=f"Background run did not finish within {config.request_timeout} seconds",
-                )
-            return latest
+            if run.status not in TERMINAL_RUN_STATUSES:
+                if wait_timeout is None:
+                    return run
+                _raise_run_timeout(run, wait_timeout, config.request_timeout)
+            return run
         except TaskNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -219,7 +233,7 @@ def create_background_router() -> APIRouter:
         "/tasks/{task_id}/pause",
         response_model=BackgroundStatusResponse,
         summary="Pause scheduled dispatch for a task",
-        responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        responses={404: _HTTP_ERROR, 503: _HTTP_ERROR},
     )
     async def pause_background_task(
         request: Request, task_id: str
@@ -235,7 +249,7 @@ def create_background_router() -> APIRouter:
         "/tasks/{task_id}/resume",
         response_model=BackgroundStatusResponse,
         summary="Resume scheduled dispatch for a task",
-        responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        responses={404: _HTTP_ERROR, 503: _HTTP_ERROR},
     )
     async def resume_background_task(
         request: Request, task_id: str
@@ -251,7 +265,7 @@ def create_background_router() -> APIRouter:
         "/tasks/{task_id}",
         response_model=BackgroundStatusResponse,
         summary="Delete a background task",
-        responses={503: {"model": ErrorResponse}},
+        responses={404: _HTTP_ERROR, 503: _HTTP_ERROR},
     )
     async def delete_background_task(
         request: Request,
@@ -259,6 +273,8 @@ def create_background_router() -> APIRouter:
         delete_runs: bool = Query(default=False),
     ) -> BackgroundStatusResponse:
         manager = _require_background_manager(request)
+        if not await manager.get_task(task_id):
+            raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
         await manager.delete_task(task_id, delete_runs=delete_runs)
         return BackgroundStatusResponse(status="deleted")
 
@@ -266,7 +282,7 @@ def create_background_router() -> APIRouter:
         "/runs/{run_id}/cancel",
         response_model=BackgroundStatusResponse,
         summary="Cancel a queued or running background run",
-        responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        responses={404: _HTTP_ERROR, 503: _HTTP_ERROR},
     )
     async def cancel_background_run(
         request: Request, run_id: str
@@ -282,7 +298,7 @@ def create_background_router() -> APIRouter:
         "/runs",
         response_model=BackgroundRunsResponse,
         summary="List background runs",
-        responses={503: {"model": ErrorResponse}},
+        responses={503: _HTTP_ERROR},
     )
     async def list_background_runs(
         request: Request,
@@ -300,7 +316,7 @@ def create_background_router() -> APIRouter:
         "/runs/{run_id}",
         response_model=BackgroundRun,
         summary="Get background run status",
-        responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        responses={404: _HTTP_ERROR, 503: _HTTP_ERROR},
     )
     async def get_background_run(request: Request, run_id: str) -> BackgroundRun:
         manager = _require_background_manager(request)
@@ -313,7 +329,7 @@ def create_background_router() -> APIRouter:
         "/runs/{run_id}/attempts",
         response_model=list[BackgroundAttempt],
         summary="List background run attempts",
-        responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        responses={404: _HTTP_ERROR, 503: _HTTP_ERROR},
     )
     async def list_background_run_attempts(request: Request, run_id: str):
         manager = _require_background_manager(request)
@@ -324,7 +340,7 @@ def create_background_router() -> APIRouter:
         "/runs/{run_id}/events",
         response_model=BackgroundRunEventsResponse,
         summary="Replay background run lifecycle events",
-        responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        responses={404: _HTTP_ERROR, 503: _HTTP_ERROR},
     )
     async def list_background_run_events(
         request: Request, run_id: str
@@ -342,7 +358,7 @@ def create_background_router() -> APIRouter:
         "/runs/{run_id}/workspace",
         response_model=BackgroundRunWorkspaceResponse,
         summary="Inspect background run workspace files",
-        responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        responses={404: _HTTP_ERROR, 503: _HTTP_ERROR},
     )
     async def get_background_run_workspace(
         request: Request, run_id: str
@@ -368,3 +384,30 @@ async def _require_run(manager, run_id: str) -> BackgroundRun:
     if not run:
         raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
     return run
+
+
+def _raise_run_timeout(
+    run: BackgroundRun,
+    wait_timeout_seconds: float | None,
+    request_timeout_seconds: float | None,
+) -> None:
+    raise HTTPException(
+        status_code=504,
+        detail={
+            "message": (
+                "Background run did not finish within "
+                f"{wait_timeout_seconds} seconds"
+            ),
+            "run_id": run.run_id,
+            "task_id": run.task_id,
+            "status": run.status.value,
+            "wait_timeout_seconds": wait_timeout_seconds,
+            "request_timeout_seconds": request_timeout_seconds,
+        },
+    )
+
+
+def _background_wait_timeout(request_timeout: float | None) -> float | None:
+    if request_timeout is None or request_timeout <= 0:
+        return None
+    return max(request_timeout - 0.25, 0.001)

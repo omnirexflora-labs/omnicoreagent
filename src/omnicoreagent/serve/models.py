@@ -82,7 +82,7 @@ class BackgroundTaskPatchRequest(BaseModel):
 
 
 class BackgroundTaskRunRequest(BaseModel):
-    """Queue a manual run for an existing task."""
+    """Queue a manual run, optionally waiting for terminal state."""
 
     query: str | None = Field(
         default=None,
@@ -226,6 +226,33 @@ class BackgroundRunWorkspaceResponse(BaseModel):
     agent_id: str
     workspace_path: str
     files: list[dict[str, Any]]
+
+
+class HttpErrorResponse(BaseModel):
+    """Response shape produced by FastAPI HTTPException."""
+
+    detail: Any = Field(..., description="Error detail")
+
+
+class BackgroundRunTimeoutDetail(BaseModel):
+    """Detail payload for a background run wait timeout."""
+
+    message: str = Field(..., description="Timeout message")
+    run_id: str = Field(..., description="Run that can be inspected later")
+    task_id: str = Field(..., description="Task that created the run")
+    status: str = Field(..., description="Latest run status")
+    wait_timeout_seconds: float | None = Field(
+        None, description="Background run wait budget applied to the request"
+    )
+    request_timeout_seconds: float | None = Field(
+        None, description="Outer HTTP request timeout"
+    )
+
+
+class BackgroundRunTimeoutResponse(BaseModel):
+    """HTTPException response for background run wait timeout."""
+
+    detail: BackgroundRunTimeoutDetail
 
 
 class ErrorResponse(BaseModel):

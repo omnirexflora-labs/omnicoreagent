@@ -155,6 +155,17 @@ curl -X POST http://localhost:8000/background/tasks/health_report/run \
   -d '{"wait": false}'
 ```
 
+Use `{"wait": true}` when the HTTP request should wait for terminal run state.
+If the OmniServe worker is running, the API waits for that worker-owned run. If
+the worker is disabled, the API queues the run through the background manager
+and drives that run inline through the same execution contract. If the run does
+not finish before the background wait budget, OmniServe returns `504` and the
+run remains inspectable through the background run endpoints. The wait budget is
+derived from the configured request timeout and leaves a small margin for
+OmniServe to return the structured response before the outer HTTP timeout. The
+`504` response includes the `run_id`, `task_id`, latest `status`,
+`wait_timeout_seconds`, and `request_timeout_seconds` in `detail`.
+
 The background API includes task creation, task listing, pause, resume, delete,
 manual run, cancellation, run status, attempt history, event replay, and
 workspace inspection.

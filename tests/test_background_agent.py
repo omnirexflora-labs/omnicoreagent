@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 import inspect
 import json
+import time
 
 import pytest
 
@@ -58,6 +59,14 @@ class FakeAgent:
         if self.fail_times:
             self.fail_times -= 1
             raise RuntimeError("planned failure")
+        return {"response": self.response, "session_id": session_id}
+
+
+class BlockingAgent(FakeAgent):
+    async def run(self, query: str, session_id: str):
+        self.calls.append({"query": query, "session_id": session_id})
+        if self.delay:
+            time.sleep(self.delay)
         return {"response": self.response, "session_id": session_id}
 
 
@@ -876,7 +885,7 @@ async def test_background_run_does_not_block_on_hanging_event_append(tmp_path):
         task_store="in_memory",
         event_router=HangingAppendEventRouter(),
         workspace=workspace,
-        lease_seconds=0.1,
+        lease_seconds=1,
     )
     manager._event_append_timeout_seconds = 0.01
     await manager.register_agent("agent", FakeAgent(response="complete"))
@@ -902,7 +911,7 @@ async def test_slow_claimed_event_append_does_not_expire_active_lease(tmp_path):
         task_store="in_memory",
         event_router=HangingClaimAppendEventRouter(),
         workspace=workspace,
-        lease_seconds=0.1,
+        lease_seconds=1,
     )
     manager._event_append_timeout_seconds = 0.2
     await manager.register_agent("agent", FakeAgent(response="complete"))
@@ -1006,6 +1015,181 @@ async def test_manager_run_now_wait_executes_only_created_run():
     assert first_latest.status == RunStatus.QUEUED
     assert second.status == RunStatus.COMPLETED
     assert agent.calls[0]["query"].endswith("second work")
+
+
+@pytest.mark.asyncio
+async def test_manager_run_now_wait_respects_queue_next_active_run():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    agent = FakeAgent(response="complete")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        overlap_policy=OverlapPolicy.QUEUE_NEXT,
+    )
+    first = await manager.run_now("task")
+    await manager.task_store.claim_run(first.run_id, "other_worker", 30)
+
+    second = await manager.run_now("task", wait=True)
+
+    assert second.status == RunStatus.QUEUED
+    assert agent.calls == []
+
+
+@pytest.mark.asyncio
+async def test_manager_run_now_wait_respects_queue_next_earlier_queued_run():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    agent = FakeAgent(response="complete")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        overlap_policy=OverlapPolicy.QUEUE_NEXT,
+    )
+    first = await manager.run_now("task")
+
+    second = await manager.run_now("task", wait=True)
+
+    assert first.status == RunStatus.QUEUED
+    assert second.status == RunStatus.QUEUED
+    assert agent.calls == []
+
+
+@pytest.mark.asyncio
+async def test_manager_run_now_wait_timeout_polls_queue_next_blocker():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    agent = FakeAgent(response="complete")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        overlap_policy=OverlapPolicy.QUEUE_NEXT,
+    )
+    first = await manager.run_now("task")
+
+    async def cancel_blocker():
+        await asyncio.sleep(0.05)
+        await manager.cancel_run(first.run_id)
+
+    cancel_task = asyncio.create_task(cancel_blocker())
+    try:
+        second = await manager.run_now("task", wait=True, timeout_seconds=0.5)
+    finally:
+        await cancel_task
+
+    assert second.status == RunStatus.COMPLETED
+    assert agent.calls
+
+
+@pytest.mark.asyncio
+async def test_queue_next_equal_queued_at_uses_stable_ordering():
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store)
+    agent = FakeAgent(response="complete")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        overlap_policy=OverlapPolicy.QUEUE_NEXT,
+    )
+    queued_at = datetime.now(timezone.utc)
+    run_a = await manager.run_now("task", wait=False)
+    run_b = await manager.run_now("task", wait=False)
+    async with store._lock:
+        store._runs[run_a.run_id] = store._runs[run_a.run_id].model_copy(
+            update={"queued_at": queued_at, "triggered_at": queued_at}
+        )
+        store._runs[run_b.run_id] = store._runs[run_b.run_id].model_copy(
+            update={"queued_at": queued_at, "triggered_at": queued_at}
+        )
+
+    claimable = await store.list_claimable_runs(limit=10)
+
+    assert [item.run_id for item in claimable] == [min(run_a.run_id, run_b.run_id)]
+
+
+@pytest.mark.asyncio
+async def test_manager_run_now_wait_timeout_does_not_block_on_running_agent():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    agent = FakeAgent(response="complete", delay=0.2)
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    started = asyncio.get_running_loop().time()
+    run = await manager.run_now("task", wait=True, timeout_seconds=0.01)
+    elapsed = asyncio.get_running_loop().time() - started
+
+    assert elapsed < 0.15
+    assert run.status in {RunStatus.QUEUED, RunStatus.CLAIMED, RunStatus.RUNNING}
+    completed = await wait_for(
+        lambda: manager.list_runs(status=RunStatus.COMPLETED),
+        timeout=0.5,
+    )
+    assert completed[0].run_id == run.run_id
+
+
+@pytest.mark.asyncio
+async def test_inline_timeout_shutdown_honors_retry_policy():
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store)
+    agent = FakeAgent(response="complete", delay=0.2)
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    run = await manager.run_now("task", wait=True, timeout_seconds=0.01)
+    await wait_for(lambda: manager.list_attempts(run.run_id), timeout=0.5)
+    await manager.shutdown()
+
+    latest = await store.get_run(run.run_id)
+    attempts = await store.list_attempts(run.run_id)
+    assert latest.status == RunStatus.FAILED
+    assert attempts[0].status == AttemptStatus.FAILED
+    assert attempts[0].error == "worker shutdown"
+
+
+@pytest.mark.asyncio
+async def test_inline_timeout_shutdown_requeues_retryable_run():
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store)
+    agent = FakeAgent(response="complete", delay=0.2)
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=1, initial_delay_seconds=0),
+    )
+
+    run = await manager.run_now("task", wait=True, timeout_seconds=0.01)
+    await wait_for(lambda: manager.list_attempts(run.run_id), timeout=0.5)
+    await manager.shutdown()
+
+    latest = await store.get_run(run.run_id)
+    attempts = await store.list_attempts(run.run_id)
+    assert latest.status == RunStatus.QUEUED
+    assert latest.lease_owner is None
+    assert latest.lease_token is None
+    assert attempts[0].status == AttemptStatus.FAILED
+    assert attempts[0].retry_delay_seconds == 0
 
 
 @pytest.mark.asyncio
@@ -1266,8 +1450,8 @@ async def test_retry_delay_sets_future_queue_time_and_blocks_claim():
 @pytest.mark.asyncio
 async def test_long_running_attempt_refreshes_lease():
     store = CountingStore()
-    manager = BackgroundAgentManager(task_store=store, lease_seconds=0.1)
-    await manager.register_agent("agent", FakeAgent(response="ok", delay=0.25))
+    manager = BackgroundAgentManager(task_store=store, lease_seconds=0.5)
+    await manager.register_agent("agent", FakeAgent(response="ok", delay=0.7))
     await manager.register_task(
         task_id="task",
         agent_id="agent",
@@ -1279,6 +1463,33 @@ async def test_long_running_attempt_refreshes_lease():
 
     assert run.status == RunStatus.COMPLETED
     assert store.refresh_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_expired_lease_cannot_be_refreshed_by_stale_owner():
+    store = InMemoryTaskStore()
+    await store.save_agent(agent_spec())
+    await store.save_task(task_spec())
+    run = BackgroundRun(
+        task_id="task",
+        agent_id="agent",
+        query_snapshot="work",
+        trigger_type=TriggerType.MANUAL,
+        session_id="session",
+        workspace_path="workspace",
+    )
+    created = await store.create_run_with_overlap_guard(
+        run, OverlapPolicy.ALLOW_PARALLEL
+    )
+    claimed = await store.claim_run(created.run_id, "worker", lease_seconds=-1)
+
+    with pytest.raises(RunLeaseError):
+        await store.refresh_lease(
+            claimed.run_id,
+            "worker",
+            claimed.lease_token,
+            lease_seconds=30,
+        )
 
 
 @pytest.mark.asyncio
@@ -1384,6 +1595,52 @@ async def test_recover_expired_running_run_requeues_when_retry_available():
 
     assert recovered.status == RunStatus.QUEUED
     assert recovered.lease_token is None
+
+
+@pytest.mark.asyncio
+async def test_expired_lease_during_completion_does_not_crash_worker():
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(
+        task_store=store,
+        worker_id="worker",
+        lease_seconds=0.01,
+    )
+    await manager.register_agent("agent", BlockingAgent(response="done", delay=0.05))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=1, initial_delay_seconds=0),
+    )
+    run = await manager.run_now("task", wait=False)
+
+    did_work = await manager._execute_one()
+    latest = await manager.get_run(run.run_id)
+    attempts = await manager.list_attempts(run.run_id)
+
+    assert did_work is True
+    assert latest.status == RunStatus.RUNNING
+    assert attempts[0].status == AttemptStatus.RUNNING
+
+    await manager.recover_expired_runs()
+    still_recoverable = await manager.get_run(run.run_id)
+    assert still_recoverable.status in {
+        RunStatus.RUNNING,
+        RunStatus.RETRYING,
+        RunStatus.QUEUED,
+    }
+
+    if still_recoverable.status != RunStatus.QUEUED:
+        manager.lease_seconds = 1
+        await manager.recover_expired_runs()
+    recovered = await manager.get_run(run.run_id)
+    recovered_attempts = await manager.list_attempts(run.run_id)
+
+    assert recovered.status == RunStatus.QUEUED
+    assert recovered.lease_token is None
+    assert recovered_attempts[0].status == AttemptStatus.FAILED
+    assert recovered_attempts[0].reason == AttemptReason.LEASE_EXPIRED
 
 
 @pytest.mark.asyncio

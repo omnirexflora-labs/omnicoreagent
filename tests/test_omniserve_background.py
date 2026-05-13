@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import os
+import threading
 
 from fastapi.testclient import TestClient
 import pytest
 
 from omnicoreagent import OmniServe, OmniServeConfig
 from omnicoreagent.background import BackgroundAgentManager
+from omnicoreagent.core.events.event_router import EventRouter
 from omnicoreagent.core.workspace.manager import Workspace
 
 
@@ -28,6 +31,10 @@ class ServedAgent:
         self.calls: list[dict] = []
         self.connected = False
         self.cleaned = False
+        self.delay_seconds = 0.0
+        self.fail_times = 0
+        self.wait_until: threading.Event | None = None
+        self.wait_timeout_seconds = 2.0
 
     async def connect_mcp_servers(self) -> None:
         self.connected = True
@@ -40,22 +47,89 @@ class ServedAgent:
 
     async def run(self, query: str, session_id: str | None = None) -> dict:
         self.calls.append({"query": query, "session_id": session_id})
+        if self.wait_until is not None:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + self.wait_timeout_seconds
+            while not self.wait_until.is_set() and loop.time() < deadline:
+                await asyncio.sleep(0.01)
+        if self.delay_seconds:
+            await asyncio.sleep(self.delay_seconds)
+        if self.fail_times:
+            self.fail_times -= 1
+            raise RuntimeError("planned failure")
         return {"response": f"completed:{session_id}:{query[-16:]}"}
 
 
-def make_background_manager(tmp_path):
+class HeartbeatEventRouter(EventRouter):
+    def __init__(self):
+        super().__init__()
+        self.heartbeat_seen = threading.Event()
+
+    async def append(self, session_id, event):
+        await super().append(session_id=session_id, event=event)
+        if getattr(event.payload, "status", None) == "background_run_heartbeat":
+            self.heartbeat_seen.set()
+
+
+class SpyBackgroundAgentManager(BackgroundAgentManager):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.run_now_wait_values: list[bool] = []
+        self.wait_for_run_called = False
+
+    async def run_now(
+        self,
+        task_id: str,
+        query: str | None = None,
+        wait: bool = False,
+        timeout_seconds: float | None = None,
+    ):
+        self.run_now_wait_values.append(wait)
+        return await super().run_now(
+            task_id,
+            query=query,
+            wait=wait,
+            timeout_seconds=timeout_seconds,
+        )
+
+    async def wait_for_run(
+        self,
+        run_id: str,
+        timeout_seconds: float | None = None,
+        poll_interval_seconds: float = 0.05,
+    ):
+        self.wait_for_run_called = True
+        return await super().wait_for_run(
+            run_id,
+            timeout_seconds=timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+        )
+
+
+def make_background_manager(tmp_path, *, lease_seconds=30, event_router=None):
     workspace = Workspace.from_config(
         {
             "workspace_backend": "local",
             "workspace_dir": str(tmp_path / "workspace"),
         }
     ).ensure()
-    return BackgroundAgentManager(task_store="in_memory", workspace=workspace)
+    return BackgroundAgentManager(
+        task_store="in_memory",
+        event_router=event_router,
+        workspace=workspace,
+        lease_seconds=lease_seconds,
+    )
 
 
 def test_background_api_runs_task_and_exposes_events_and_workspace(tmp_path):
     agent = ServedAgent()
-    manager = make_background_manager(tmp_path)
+    event_router = HeartbeatEventRouter()
+    agent.wait_until = event_router.heartbeat_seen
+    manager = make_background_manager(
+        tmp_path,
+        lease_seconds=1,
+        event_router=event_router,
+    )
     server = OmniServe(
         agent,
         OmniServeConfig(
@@ -121,9 +195,31 @@ def test_background_api_runs_task_and_exposes_events_and_workspace(tmp_path):
 
         events = client.get(f"/background/runs/{run['run_id']}/events")
         assert events.status_code == 200
-        event_names = [item["event"] for item in events.json()["events"]]
+        replayed_events = events.json()["events"]
+        event_names = [item["event"] for item in replayed_events]
+        assert events.json()["count"] == len(replayed_events)
+        assert [item["sequence"] for item in replayed_events] == list(
+            range(1, len(replayed_events) + 1)
+        )
+        assert event_names[:3] == [
+            "background_run_queued",
+            "background_run_claimed",
+            "background_run_started",
+        ]
         assert "background_run_started" in event_names
+        assert "background_run_heartbeat" in event_names
         assert "background_run_completed" in event_names
+        claimed = next(
+            item for item in replayed_events if item["event"] == "background_run_claimed"
+        )
+        assert claimed["worker_id"] == manager.worker_id
+        assert claimed["lease_generation"] == 1
+        assert claimed["lease_expires_at"]
+        heartbeat = next(
+            item for item in replayed_events if item["event"] == "background_run_heartbeat"
+        )
+        assert heartbeat["worker_id"] == manager.worker_id
+        assert heartbeat["heartbeat_at"]
         assert client.get("/background/runs/missing/events").status_code == 404
 
         workspace = client.get(f"/background/runs/{run['run_id']}/workspace")
@@ -133,12 +229,232 @@ def test_background_api_runs_task_and_exposes_events_and_workspace(tmp_path):
 
         deleted = client.delete("/background/tasks/daily_report", params={"delete_runs": True})
         assert deleted.status_code == 200
+        assert client.delete("/background/tasks/daily_report").status_code == 404
         assert client.delete("/background/agents/served").status_code == 200
+        assert client.delete("/background/agents/served").status_code == 404
 
     assert agent.connected is True
     assert agent.cleaned is True
     assert agent.calls
     assert agent.calls[0]["session_id"] == "background:served:daily_report"
+
+
+def test_background_api_wait_true_uses_worker_wait_path(tmp_path):
+    agent = ServedAgent()
+    agent.delay_seconds = 0.05
+    workspace = Workspace.from_config(
+        {
+            "workspace_backend": "local",
+            "workspace_dir": str(tmp_path / "workspace"),
+        }
+    ).ensure()
+    manager = SpyBackgroundAgentManager(task_store="in_memory", workspace=workspace)
+    server = OmniServe(
+        agent,
+        OmniServeConfig(
+            background_agent_id="served",
+            background_start_worker=True,
+            request_timeout=2,
+        ),
+        background_manager=manager,
+    )
+
+    with TestClient(server.app) as client:
+        created = client.post(
+            "/background/tasks",
+            json={
+                "task_id": "worker_wait",
+                "query": "write with worker",
+                "schedule": {"type": "manual"},
+            },
+        )
+        assert created.status_code == 200
+
+        run_response = client.post(
+            "/background/tasks/worker_wait/run",
+            json={"wait": True},
+        )
+        assert run_response.status_code == 200
+        assert run_response.json()["status"] == "completed"
+
+    assert manager.run_now_wait_values == [True]
+    assert manager.wait_for_run_called is True
+
+
+def test_background_api_wait_true_executes_without_worker(tmp_path):
+    agent = ServedAgent()
+    manager = make_background_manager(tmp_path)
+    server = OmniServe(
+        agent,
+        OmniServeConfig(
+            background_agent_id="served",
+            background_start_worker=False,
+            request_timeout=2,
+        ),
+        background_manager=manager,
+    )
+
+    with TestClient(server.app) as client:
+        created = client.post(
+            "/background/tasks",
+            json={
+                "task_id": "manual_sync",
+                "query": "write the synchronous result",
+                "schedule": {"type": "manual"},
+            },
+        )
+        assert created.status_code == 200
+
+        run_response = client.post(
+            "/background/tasks/manual_sync/run",
+            json={"wait": True},
+        )
+        assert run_response.status_code == 200
+        run = run_response.json()
+        assert run["status"] == "completed"
+
+        events = client.get(f"/background/runs/{run['run_id']}/events")
+        assert events.status_code == 200
+        assert [item["event"] for item in events.json()["events"]] == [
+            "background_run_queued",
+            "background_run_claimed",
+            "background_run_started",
+            "background_run_completed",
+        ]
+
+    assert len(agent.calls) == 1
+
+
+def test_background_api_wait_true_without_worker_times_out_on_delayed_retry(tmp_path):
+    agent = ServedAgent()
+    agent.fail_times = 1
+    manager = make_background_manager(tmp_path)
+    server = OmniServe(
+        agent,
+        OmniServeConfig(
+            background_agent_id="served",
+            background_start_worker=False,
+            request_timeout=1,
+        ),
+        background_manager=manager,
+    )
+
+    with TestClient(server.app) as client:
+        created = client.post(
+            "/background/tasks",
+            json={
+                "task_id": "retry_later",
+                "query": "retry later",
+                "schedule": {"type": "manual"},
+                "retry_policy": {
+                    "max_retries": 1,
+                    "initial_delay_seconds": 5,
+                    "max_delay_seconds": 5,
+                },
+            },
+        )
+        assert created.status_code == 200
+
+        run_response = client.post(
+            "/background/tasks/retry_later/run",
+            json={"wait": True},
+        )
+        assert run_response.status_code == 504
+        timeout_detail = run_response.json()["detail"]
+        assert timeout_detail["task_id"] == "retry_later"
+        assert timeout_detail["status"] == "queued"
+        assert timeout_detail["run_id"].startswith("run_")
+        assert timeout_detail["wait_timeout_seconds"] == 0.75
+        assert timeout_detail["request_timeout_seconds"] == 1
+        runs = client.get("/background/runs", params={"task_id": "retry_later"})
+        assert runs.status_code == 200
+        assert runs.json()["total"] == 1
+        assert runs.json()["runs"][0]["status"] == "queued"
+        assert runs.json()["runs"][0]["run_id"] == timeout_detail["run_id"]
+
+    assert len(agent.calls) == 1
+
+
+def test_background_api_wait_true_without_request_timeout_returns_retry_state(tmp_path):
+    agent = ServedAgent()
+    agent.fail_times = 1
+    manager = make_background_manager(tmp_path)
+    server = OmniServe(
+        agent,
+        OmniServeConfig(
+            background_agent_id="served",
+            background_start_worker=False,
+            request_timeout=0,
+        ),
+        background_manager=manager,
+    )
+
+    with TestClient(server.app) as client:
+        created = client.post(
+            "/background/tasks",
+            json={
+                "task_id": "retry_without_http_timeout",
+                "query": "retry later",
+                "schedule": {"type": "manual"},
+                "retry_policy": {
+                    "max_retries": 1,
+                    "initial_delay_seconds": 5,
+                    "max_delay_seconds": 5,
+                },
+            },
+        )
+        assert created.status_code == 200
+
+        run_response = client.post(
+            "/background/tasks/retry_without_http_timeout/run",
+            json={"wait": True},
+        )
+        assert run_response.status_code == 200
+        run = run_response.json()
+        assert run["status"] == "queued"
+        assert run["run_id"].startswith("run_")
+
+    assert len(agent.calls) == 1
+
+
+def test_background_api_wait_true_times_out_before_slow_inline_run_finishes(tmp_path):
+    agent = ServedAgent()
+    agent.delay_seconds = 2
+    manager = make_background_manager(tmp_path)
+    server = OmniServe(
+        agent,
+        OmniServeConfig(
+            background_agent_id="served",
+            background_start_worker=False,
+            request_timeout=1,
+        ),
+        background_manager=manager,
+    )
+
+    with TestClient(server.app) as client:
+        created = client.post(
+            "/background/tasks",
+            json={
+                "task_id": "slow_inline",
+                "query": "slow inline",
+                "schedule": {"type": "manual"},
+            },
+        )
+        assert created.status_code == 200
+
+        run_response = client.post(
+            "/background/tasks/slow_inline/run",
+            json={"wait": True},
+        )
+        assert run_response.status_code == 504
+        timeout_detail = run_response.json()["detail"]
+        assert timeout_detail["task_id"] == "slow_inline"
+        assert timeout_detail["run_id"].startswith("run_")
+        assert timeout_detail["status"] in {"claimed", "running"}
+        assert timeout_detail["wait_timeout_seconds"] == 0.75
+        assert timeout_detail["request_timeout_seconds"] == 1
+
+    assert len(agent.calls) == 1
 
 
 def test_background_api_rejects_invalid_schedule_payload(tmp_path):
@@ -204,3 +520,36 @@ def test_background_api_can_be_disabled():
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Background execution is disabled"
+
+
+def test_background_openapi_matches_http_exception_response_shapes(tmp_path):
+    agent = ServedAgent()
+    manager = make_background_manager(tmp_path)
+    server = OmniServe(
+        agent,
+        OmniServeConfig(
+            background_agent_id="served",
+            background_start_worker=False,
+        ),
+        background_manager=manager,
+    )
+
+    with TestClient(server.app) as client:
+        schema = client.get("/openapi.json").json()
+        delete_task_responses = schema["paths"]["/background/tasks/{task_id}"][
+            "delete"
+        ]["responses"]
+        run_responses = schema["paths"]["/background/tasks/{task_id}/run"][
+            "post"
+        ]["responses"]
+
+        assert (
+            delete_task_responses["404"]["content"]["application/json"]["schema"][
+                "$ref"
+            ]
+            == "#/components/schemas/HttpErrorResponse"
+        )
+        assert (
+            run_responses["504"]["content"]["application/json"]["schema"]["$ref"]
+            == "#/components/schemas/BackgroundRunTimeoutResponse"
+        )

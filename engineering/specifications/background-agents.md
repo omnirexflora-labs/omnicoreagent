@@ -562,7 +562,8 @@ await manager.start()
 await manager.shutdown()
 await manager.pause_task(task_id: str)
 await manager.resume_task(task_id: str)
-await manager.run_now(task_id: str, query: str | None = None)
+await manager.run_now(task_id: str, query: str | None = None, wait: bool = False, timeout_seconds: float | None = None)
+await manager.run_until_terminal(run_id: str, timeout_seconds: float | None = None)
 await manager.cancel_run(run_id: str)
 await manager.recover_expired_runs()
 ```
@@ -575,8 +576,41 @@ Rules:
   policy.
 - `run_now()` creates a run for any registered enabled task, including manual
   tasks.
+- `run_now(wait=True)` executes a queued manual run through the manager and
+  returns terminal state if the run completes before `timeout_seconds`; if the
+  run cannot be claimed yet or the timeout expires, it returns the latest
+  non-terminal run state.
+- `run_until_terminal()` is the public manager-owned driver for inline
+  execution. HTTP adapters must use it through `run_now(wait=True)` or call it
+  directly after creating a run.
 - `cancel_run()` is idempotent.
 - `recover_expired_runs()` claims expired leases according to recovery policy.
+
+### OmniServe Runtime Contract
+
+OmniServe exposes the manager contract over HTTP. The HTTP layer must not own
+task-store or execution semantics.
+
+Rules:
+
+- `POST /background/tasks/{task_id}/run` with `wait=false` returns the queued
+  or skipped run immediately.
+- `POST /background/tasks/{task_id}/run` with `wait=true` returns terminal run
+  state only if the run finishes before the background wait budget. The wait
+  budget is derived from the configured request timeout with a small margin for
+  returning the structured HTTP response. If the worker loop is active,
+  OmniServe waits on the durable run record. If the worker loop is disabled,
+  OmniServe calls
+  `BackgroundAgentManager.run_now(wait=True, timeout_seconds=...)`; the manager
+  owns inline execution, queue ordering, and overlap-policy enforcement. Timeout
+  returns `504` with `run_id`, `task_id`, latest `status`,
+  `wait_timeout_seconds`, and `request_timeout_seconds` in `detail`, leaving
+  the run inspectable through the run endpoints.
+- deleting a missing background agent returns `404`.
+- deleting a missing background task returns `404`.
+- run event replay responses preserve contiguous event sequence numbers and
+  lifecycle fields such as `worker_id`, `lease_generation`, `heartbeat_at`,
+  `lease_expires_at`, `occurrence_id`, and `due_at`.
 
 ### Inspection Operations
 
