@@ -123,10 +123,6 @@ Runtime event stores are intentionally limited to:
 - `in_memory` for local development, tests, and single-process applications
 - `redis_stream` for multi-process or production live streaming
 
-SQL and MongoDB are not event-stream backends. They are useful for durable state
-records, but live event fan-out should not depend on polling a document or row
-store.
-
 Current guarantees:
 
 - events are isolated by store key (`session_id`)

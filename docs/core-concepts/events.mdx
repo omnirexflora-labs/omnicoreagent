@@ -20,10 +20,6 @@ Runtime event streaming supports two event stores:
 - `in_memory` for local development, tests, and single-process apps
 - `redis_stream` for production or multi-process live streaming
 
-SQL and MongoDB are not event-stream backends. Use them for memory or
-background task state; use Redis Streams when live events need to cross process
-boundaries.
-
 Redis Streams require the Redis extra:
 
 ```bash

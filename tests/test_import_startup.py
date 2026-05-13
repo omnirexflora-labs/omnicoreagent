@@ -307,10 +307,14 @@ def test_background_import_does_not_load_backend_clients(tmp_path):
 import json
 import sys
 
-from omnicoreagent.background import TaskStoreRouter
+from omnicoreagent import MongoDbTaskStore, RedisTaskStore, TaskStoreRouter
+from omnicoreagent.background import TaskStoreRouter as BackgroundTaskStoreRouter
 
 print(json.dumps({
     "router": TaskStoreRouter.__name__,
+    "background_router": BackgroundTaskStoreRouter.__name__,
+    "redis_store": RedisTaskStore.__name__,
+    "mongodb_store": MongoDbTaskStore.__name__,
     "redis_loaded": "redis" in sys.modules or "redis.asyncio" in sys.modules,
     "motor_loaded": "motor" in sys.modules or "motor.motor_asyncio" in sys.modules,
     "pymongo_loaded": "pymongo" in sys.modules,
@@ -320,6 +324,9 @@ print(json.dumps({
 
     assert result == {
         "router": "TaskStoreRouter",
+        "background_router": "TaskStoreRouter",
+        "redis_store": "RedisTaskStore",
+        "mongodb_store": "MongoDbTaskStore",
         "redis_loaded": False,
         "motor_loaded": False,
         "pymongo_loaded": False,

@@ -402,6 +402,19 @@ class CountingEventRouter(EventRouter):
         return await super().get_events(session_id)
 
 
+class CancellingAttemptStore(InMemoryTaskStore):
+    async def create_attempt(self, attempt):
+        await super().create_attempt(attempt)
+        await self.request_cancel(attempt.run_id)
+
+
+class CancelOnStartedManager(BackgroundAgentManager):
+    async def _emit_run(self, event_name, run, **extra_payload):
+        await super()._emit_run(event_name, run, **extra_payload)
+        if event_name == "background_run_started":
+            await self.cancel_run(run.run_id)
+
+
 async def wait_for(predicate, timeout=1.0):
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
@@ -1395,6 +1408,121 @@ async def test_long_running_background_run_emits_heartbeat_events():
     assert all(event["heartbeat_at"] for event in heartbeats)
     assert all(event["lease_expires_at"] for event in heartbeats)
     assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
+
+
+@pytest.mark.asyncio
+async def test_cancel_running_same_worker_stops_active_agent_task():
+    manager = BackgroundAgentManager(task_store="in_memory", lease_seconds=1)
+    agent = FakeAgent(response="complete", delay=60)
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    await manager.start()
+    try:
+        queued = await manager.run_now("task")
+        running = await wait_for(
+            lambda: manager.get_run(queued.run_id),
+            timeout=1.0,
+        )
+        while running.status != RunStatus.RUNNING:
+            await asyncio.sleep(0.01)
+            running = await manager.get_run(queued.run_id)
+
+        await manager.cancel_run(queued.run_id)
+        terminal = await manager.wait_for_run(queued.run_id, timeout_seconds=1)
+        attempts = await manager.list_attempts(queued.run_id)
+
+        assert terminal.status == RunStatus.CANCELLED
+        assert attempts[-1].status == AttemptStatus.CANCELLED
+        assert queued.run_id not in manager._active_agent_tasks
+    finally:
+        await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_cancel_requested_before_agent_task_starts_marks_cancelled():
+    store = CancellingAttemptStore()
+    manager = BackgroundAgentManager(task_store=store, lease_seconds=1)
+    agent = FakeAgent(response="complete")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    queued = await manager.run_now("task")
+    did_work = await manager._execute_run(queued.run_id)
+    latest = await manager.get_run(queued.run_id)
+    attempts = await manager.list_attempts(queued.run_id)
+
+    assert did_work is True
+    assert latest.status == RunStatus.CANCELLED
+    assert attempts[-1].status == AttemptStatus.CANCELLED
+    assert agent.calls == []
+    assert queued.run_id not in manager._active_agent_tasks
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_start_event_before_agent_task_starts_marks_cancelled():
+    manager = CancelOnStartedManager(task_store="in_memory", lease_seconds=1)
+    agent = FakeAgent(response="complete")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    queued = await manager.run_now("task")
+    did_work = await manager._execute_run(queued.run_id)
+    latest = await manager.get_run(queued.run_id)
+    attempts = await manager.list_attempts(queued.run_id)
+
+    assert did_work is True
+    assert latest.status == RunStatus.CANCELLED
+    assert attempts[-1].status == AttemptStatus.CANCELLED
+    assert agent.calls == []
+    assert queued.run_id not in manager._active_agent_tasks
+
+
+@pytest.mark.asyncio
+async def test_worker_loop_survives_transient_iteration_failure():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    original_recover = manager.recover_expired_runs
+    failures_left = 1
+
+    async def flaky_recover():
+        nonlocal failures_left
+        if failures_left:
+            failures_left -= 1
+            raise RuntimeError("transient store failure")
+        await original_recover()
+
+    manager.recover_expired_runs = flaky_recover
+    await manager.start()
+    try:
+        queued = await manager.run_now("task")
+        completed = await manager.wait_for_run(queued.run_id, timeout_seconds=2)
+
+        assert completed.status == RunStatus.COMPLETED
+        assert manager._worker_task is not None
+        assert not manager._worker_task.done()
+    finally:
+        await manager.shutdown()
 
 
 @pytest.mark.asyncio

@@ -115,9 +115,8 @@ Rules:
 - Redis import failures fall back to `in_memory`.
 - Switching event stores selects a new backing store.
 - Switching stores does not migrate previously stored events.
-- SQL and MongoDB are not valid runtime event stream backends.
-- Use SQL, Redis, or MongoDB task stores for background task state; use
-  `redis_stream` when runtime events must stream across processes.
+- Runtime event stores are `in_memory` and `redis_stream`.
+- Use `redis_stream` when runtime events must stream across processes.
 
 ---
 
