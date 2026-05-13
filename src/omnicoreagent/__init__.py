@@ -40,6 +40,8 @@ __all__ = [
     "TaskStoreRouter",
     "InMemoryTaskStore",
     "SqlTaskStore",
+    "RedisTaskStore",
+    "MongoDbTaskStore",
     "ParallelAgent",
     "SequentialAgent",
     "RouterAgent",
@@ -87,6 +89,8 @@ _EXPORTS = {
     "TaskStoreRouter": ("omnicoreagent.background", "TaskStoreRouter"),
     "InMemoryTaskStore": ("omnicoreagent.background", "InMemoryTaskStore"),
     "SqlTaskStore": ("omnicoreagent.background", "SqlTaskStore"),
+    "RedisTaskStore": ("omnicoreagent.background", "RedisTaskStore"),
+    "MongoDbTaskStore": ("omnicoreagent.background", "MongoDbTaskStore"),
 }
 
 _OPTIONAL_EXPORTS = {

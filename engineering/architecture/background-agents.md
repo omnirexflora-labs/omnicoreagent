@@ -62,7 +62,7 @@ execution layer around the agent harness.
 | Durable state first | Task, schedule, run, attempt, cancellation, and lease state live in a task store |
 | Schedule dispatch is store-driven | Due work is read from task-store schedule state; no external scheduler owns execution |
 | Supervisor owns execution | Retry, timeout, cancellation, heartbeat, leases, and terminal status are handled outside the model loop |
-| Workspace is mandatory | Every background run gets a workspace namespace for durable outputs |
+| Workspace namespace is mandatory | Every background run gets a workspace namespace for durable outputs; lifecycle file writes are best-effort visibility and must not block execution |
 | Memory is separate | Conversation/session memory stays in `MemoryRouter`; operational state stays in the task store |
 | Events are visibility, not truth | Events describe lifecycle transitions; the task store is the source of truth |
 | Storage is pluggable | `AbstractTaskStore` supports the shipped `in_memory`, `sql`, `redis`, and `mongodb` stores behind the same interface |
@@ -79,7 +79,7 @@ User / OmniServe / Application
         v
 BackgroundAgentManager
         |
-        +--> AgentRegistry
+        +--> agent_specs
         +--> TaskStoreRouter
         |       |
         |       v
@@ -90,9 +90,10 @@ BackgroundAgentManager
         |       +--> redis
         |       +--> mongodb
         |
-        +--> ScheduleDispatcher
-        +--> RunQueue
-        +--> BackgroundSupervisor
+        +--> run_helpers
+        +--> BackgroundEventLog
+        +--> BackgroundWorkspaceIO
+        +--> schedule/queue/supervisor methods
                 |
                 v
           OmniCoreAgent.run()
@@ -103,10 +104,13 @@ BackgroundAgentManager
                 +--> Tools / MCP / Subagents / Guardrails
 ```
 
-The manager owns orchestration. The store owns operational truth. Schedule
-helpers compute due times from task specs. The supervisor owns execution lifecycle.
-`OmniCoreAgent` owns reasoning, tool calls, workspace tools, memory, context
-management, guardrails, and final response generation.
+The manager owns the public facade and orchestration flow. The store owns
+operational truth. `run_helpers` owns pure run construction and retry helpers.
+`BackgroundEventLog` owns lifecycle event ordering, workspace event persistence,
+and event-router fanout. `BackgroundWorkspaceIO` owns background workspace file
+access. The supervisor path owns execution lifecycle. `OmniCoreAgent` owns
+reasoning, tool calls, workspace tools, memory, context management, guardrails,
+and final response generation.
 
 ---
 
@@ -130,9 +134,15 @@ Responsibilities:
 - expose inspection operations
 - enforce background runtime defaults
 
-### `AgentRegistry`
+It must not become the dump yard for every background concern. If a change only
+knows about agent spec reconstruction, run construction, workspace IO, event
+replay, or backend storage, it belongs in the smaller module that owns that
+concern.
 
-Holds process-local agent objects and serializable agent specs.
+### `agent_specs`
+
+Converts runtime agents into durable `BackgroundAgentSpec` records and resolves
+registered agents from either process-local objects or durable specs.
 
 Two registration modes exist:
 
@@ -140,6 +150,57 @@ Two registration modes exist:
   themselves
 - serializable spec registration for durable agents that can be reconstructed
   by workers
+
+This module is also the lazy import boundary for `OmniCoreAgent` reconstruction,
+so importing background execution stays light.
+
+### `run_helpers`
+
+Pure helpers for run construction and deterministic lifecycle calculations.
+
+Responsibilities:
+
+- construct `BackgroundRun` records
+- build the prompt prefix passed to `OmniCoreAgent.run()`
+- calculate retry delays
+- calculate inline wait sleep windows
+- produce lease-release patches
+- create safe result previews
+
+These helpers do not touch the task store, workspace, event router, or model.
+
+### `BackgroundEventLog`
+
+Owns background lifecycle visibility.
+
+Responsibilities:
+
+- assign per-run lifecycle event sequence numbers
+- keep the process-local event cache
+- persist lifecycle events to workspace `events.jsonl`
+- write run snapshots to workspace `run.json`
+- append lifecycle events into `EventRouter`
+- replay the strongest complete event source for a run
+- tolerate workspace or event-router visibility failures without blocking task
+  execution
+
+Events are still visibility, not source of truth. Task-store state remains the
+authority for run lifecycle.
+
+### `BackgroundWorkspaceIO`
+
+Owns the background workspace file boundary.
+
+Responsibilities:
+
+- resolve the configured workspace lazily
+- list visible files for a run workspace namespace
+- read lifecycle `events.jsonl`
+- write `run.json`
+- append lifecycle events
+
+Workspace IO failures are intentionally contained so background execution can
+continue when the visibility surface is temporarily unavailable.
 
 ### `TaskStoreRouter`
 
@@ -187,9 +248,11 @@ Conversation memory belongs to `MemoryRouter`. Files and artifacts belong to
 workspace storage. Events belong to `EventRouter`. The task store owns
 operational state.
 
-### `ScheduleDispatcher`
+### Schedule Dispatch Methods
 
-Converts due tasks into run records.
+Schedule dispatch is currently implemented inside `BackgroundAgentManager`.
+Those methods convert due tasks into run records. A future extraction may move
+this into a dedicated `ScheduleDispatcher`, but that class does not exist today.
 
 Responsibilities:
 
@@ -202,9 +265,11 @@ Responsibilities:
 - make the queued run claimable through the task store
 - emit queued or skipped lifecycle events
 
-### `RunQueue`
+### Run Queue Methods
 
-Provides the boundary between due work and execution.
+Run claiming is currently implemented through `BackgroundAgentManager` methods
+backed by `AbstractTaskStore`. A future extraction may move this into a
+dedicated `RunQueue`, but that class does not exist today.
 
 Responsibilities:
 
@@ -219,9 +284,12 @@ it, and queued runs remain claimable after process restart. A process-local
 queue can exist only as an optimization over the store-backed queue; it must not
 be the source of truth.
 
-### `BackgroundSupervisor`
+### Supervisor Methods
 
-Executes queued runs under operational control.
+Run supervision is currently implemented inside `BackgroundAgentManager`. These
+methods execute queued runs under operational control. A future extraction may
+move this into a dedicated `BackgroundSupervisor`, but that class does not exist
+today.
 
 Responsibilities:
 
@@ -675,7 +743,7 @@ Use run-level sessions for isolated batch jobs.
 
 ## Workspace Contract
 
-Workspace is mandatory for background runs.
+A workspace namespace is mandatory for background runs.
 
 Default run namespace:
 
@@ -695,13 +763,15 @@ subagents/
 scratchpad/
 ```
 
-The supervisor binds the run workspace before calling the agent and injects a
-short run-context instruction into the request. The agent writes durable task
-output through workspace tools. Events can also be mirrored to `events.jsonl`
-for easy inspection, while `EventRouter` remains the event service.
+The supervisor injects a short run-context instruction into the request with the
+run workspace namespace. The agent writes durable task output through workspace
+tools. Lifecycle files such as `run.json` and `events.jsonl` are best-effort
+visibility artifacts and must not stop execution if workspace IO is temporarily
+unavailable. `EventRouter` remains the runtime event service.
 
 The final response returned by `OmniCoreAgent.run()` is stored as
-`result_preview`. The durable result of background work is the workspace output.
+`result_preview`. The durable result of background work should live in the run
+workspace when the task writes files.
 
 Workspace storage can be local, S3, or R2 through the existing workspace
 architecture. Background execution does not create a separate file-storage
@@ -860,7 +930,7 @@ The background execution system is ready when:
 - expired leases can be recovered deterministically
 - queued runs remain claimable after restart
 - cancellation, timeout, retry, and overlap policies are tested
-- every background run writes workspace output
+- every background run has a workspace namespace
 - run status can be inspected without reading event streams
 - lifecycle events can reconstruct the run trajectory
 - optional dependencies do not load during root or background-package import

@@ -363,8 +363,10 @@ Fields:
 | `write_run_json` | `bool` | `true` |
 | `write_events_jsonl` | `bool` | `true` |
 
-Background runs always require workspace output. If no workspace is configured,
-the manager uses the default local workspace.
+Background runs always require a workspace namespace. If no workspace is
+configured, the manager uses the default local workspace. Lifecycle files such
+as `run.json` and `events.jsonl` are visibility artifacts: failed writes or
+failed workspace listing must not stop, fail, or block the background run.
 
 ### `BackgroundScheduleState`
 
@@ -778,11 +780,9 @@ result = await agent.run(
 )
 ```
 
-Before execution, the supervisor binds the run workspace and injects the
-background run context into the request. The context contains `run_id`,
-`task_id`, `workspace_path`, and output-file guidance. The mechanism can be a
-runtime context object or request augmentation, but it must be explicit in the
-implementation and covered by tests.
+Before execution, the supervisor injects the background run context into the
+request. The context contains `run_id`, `task_id`, `workspace_path`, and
+output-file guidance. The current mechanism is request augmentation.
 
 Requirements:
 
@@ -791,7 +791,7 @@ Requirements:
 - enforce timeout with async timeout control.
 - refresh heartbeat while active.
 - every heartbeat, attempt update, and terminal write verifies `lease_token`.
-- preserve partial workspace output on failure.
+- preserve partial workspace output on failure when workspace IO is available.
 - create an attempt record before each attempt.
 - update attempt status after each attempt.
 - apply retry policy outside scheduler.
@@ -1057,7 +1057,7 @@ Run the same contract tests against every backend:
 - closes abandoned attempt on recovery
 - requeues recovered runs through the normal claim path
 - executes `query_snapshot`, not mutable task query
-- binds workspace and injects run context before execution
+- injects run context before execution
 - writes run metadata to workspace
 - emits lifecycle events
 - mirrors run events to `events.jsonl` when enabled
@@ -1085,7 +1085,7 @@ Run the same contract tests against every backend:
 
 - in-memory end-to-end background run with fake agent
 - SQL SQLite end-to-end restart recovery
-- workspace output persists for local workspace
+- workspace lifecycle files and task outputs persist for local workspace when written
 - event trace can be built for a background run
 - cookbook background example runs with a short schedule and clean shutdown
 
@@ -1110,7 +1110,7 @@ The implementation satisfies this specification when:
 - expired leases are recoverable.
 - queued runs remain claimable after restart.
 - run status is inspectable without event replay.
-- workspace output is written for every background run.
+- every background run has a workspace namespace.
 - cancellation, timeout, retry, overlap, and recovery behavior are tested.
 - root and background-package imports remain lightweight.
 - public docs and cookbook examples match the implemented API.
