@@ -1009,6 +1009,27 @@ async def test_manager_run_now_wait_executes_only_created_run():
 
 
 @pytest.mark.asyncio
+async def test_manager_run_now_wait_respects_queue_next_active_run():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    agent = FakeAgent(response="complete")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        overlap_policy=OverlapPolicy.QUEUE_NEXT,
+    )
+    first = await manager.run_now("task")
+    await manager.task_store.claim_run(first.run_id, "other_worker", 30)
+
+    second = await manager.run_now("task", wait=True)
+
+    assert second.status == RunStatus.QUEUED
+    assert agent.calls == []
+
+
+@pytest.mark.asyncio
 async def test_manager_run_now_missing_or_disabled_task_raises():
     manager = BackgroundAgentManager(task_store="in_memory")
     await manager.register_agent("agent", FakeAgent())

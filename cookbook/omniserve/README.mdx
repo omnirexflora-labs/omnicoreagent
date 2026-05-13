@@ -136,7 +136,7 @@ limiting until you opt in.
 | GET | `/background/tasks` | Yes* | List background tasks |
 | GET | `/background/tasks/{task_id}` | Yes* | Inspect a task |
 | PATCH | `/background/tasks/{task_id}` | Yes* | Patch a task |
-| POST | `/background/tasks/{task_id}/run` | Yes* | Queue a manual run |
+| POST | `/background/tasks/{task_id}/run` | Yes* | Queue or synchronously execute a manual run |
 | POST | `/background/tasks/{task_id}/pause` | Yes* | Pause scheduled dispatch |
 | POST | `/background/tasks/{task_id}/resume` | Yes* | Resume scheduled dispatch |
 | DELETE | `/background/tasks/{task_id}` | Yes* | Delete a task |
@@ -148,6 +148,13 @@ limiting until you opt in.
 | GET | `/background/runs/{run_id}/workspace` | Yes* | Inspect run workspace files |
 
 *Auth required only if `OMNICOREAGENT_SERVE_AUTH_ENABLED=true` or `--auth-token` is set.
+
+`POST /background/tasks/{task_id}/run` accepts `{"wait": true}` when the client
+needs terminal run state in the response. With the worker enabled, OmniServe
+waits on the durable run record. With the worker disabled, OmniServe executes
+the run inline through the background manager execution path. If the run does
+not finish before the configured request timeout, the response is `504` and the
+run can still be inspected through `/background/runs/{run_id}`.
 
 ---
 

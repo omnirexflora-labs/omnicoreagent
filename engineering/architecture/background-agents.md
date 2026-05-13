@@ -825,6 +825,17 @@ GET    /background/runs/{run_id}/workspace
 ```
 
 The HTTP layer calls the same manager API used by Python applications.
+Manual run requests with `wait=false` return the queued or skipped run
+immediately. Manual run requests with `wait=true` return terminal run state if
+the run finishes before the configured request timeout: when the OmniServe
+worker loop is running, the request waits on the durable run record owned by the
+worker; when the worker loop is disabled, the request calls
+`BackgroundAgentManager.run_now(wait=True, timeout_seconds=...)` and the manager
+drives that run inline so queue ordering and overlap policy still apply. Timeout
+returns `504` without removing the run from the task store.
+
+Delete endpoints return `404` for missing agents or tasks. Silent deletes hide
+control-plane mistakes and make production automation harder to debug.
 
 ---
 

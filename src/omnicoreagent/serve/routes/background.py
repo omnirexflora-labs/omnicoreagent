@@ -91,7 +91,11 @@ def create_background_router() -> APIRouter:
         "/agents/{agent_id}",
         response_model=BackgroundStatusResponse,
         summary="Delete a background agent spec",
-        responses={409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        responses={
+            404: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+        },
     )
     async def delete_background_agent(
         request: Request,
@@ -99,6 +103,8 @@ def create_background_router() -> APIRouter:
         force: bool = Query(default=False),
     ) -> BackgroundStatusResponse:
         manager = _require_background_manager(request)
+        if not await manager.get_agent(agent_id):
+            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
         try:
             await manager.unregister_agent(agent_id, force=force)
         except AgentAlreadyRegisteredError as exc:
@@ -185,8 +191,12 @@ def create_background_router() -> APIRouter:
     @router.post(
         "/tasks/{task_id}/run",
         response_model=BackgroundRun,
-        summary="Queue a manual task run",
-        responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        summary="Queue or wait for a manual task run",
+        responses={
+            404: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+            504: {"description": "Run did not finish before request timeout"},
+        },
     )
     async def run_background_task(
         request: Request, task_id: str, body: BackgroundTaskRunRequest | None = None
@@ -195,6 +205,20 @@ def create_background_router() -> APIRouter:
         config = get_config(request)
         run_request = body or BackgroundTaskRunRequest()
         try:
+            if run_request.wait and not getattr(manager, "_running", False):
+                run = await manager.run_now(
+                    task_id,
+                    query=run_request.query,
+                    wait=True,
+                    timeout_seconds=config.request_timeout,
+                )
+                if run.status not in TERMINAL_RUN_STATUSES:
+                    raise HTTPException(
+                        status_code=504,
+                        detail=f"Background run did not finish within {config.request_timeout} seconds",
+                    )
+                return run
+
             run = await manager.run_now(
                 task_id,
                 query=run_request.query,
@@ -251,7 +275,7 @@ def create_background_router() -> APIRouter:
         "/tasks/{task_id}",
         response_model=BackgroundStatusResponse,
         summary="Delete a background task",
-        responses={503: {"model": ErrorResponse}},
+        responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
     )
     async def delete_background_task(
         request: Request,
@@ -259,6 +283,8 @@ def create_background_router() -> APIRouter:
         delete_runs: bool = Query(default=False),
     ) -> BackgroundStatusResponse:
         manager = _require_background_manager(request)
+        if not await manager.get_task(task_id):
+            raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
         await manager.delete_task(task_id, delete_runs=delete_runs)
         return BackgroundStatusResponse(status="deleted")
 

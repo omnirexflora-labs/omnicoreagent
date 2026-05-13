@@ -395,7 +395,7 @@ class InMemoryTaskStore(AbstractTaskStore):
     ) -> None:
         async with self._lock:
             run = self._require_run(run_id)
-            self._verify_lease(run, worker_id, lease_token)
+            self._verify_lease_identity(run, worker_id, lease_token)
             self._runs[run_id] = run.model_copy(
                 update={
                     "heartbeat_at": _now(),
@@ -565,12 +565,18 @@ class InMemoryTaskStore(AbstractTaskStore):
     def _verify_lease(
         self, run: BackgroundRun, worker_id: str | None, lease_token: str | None
     ) -> None:
+        self._verify_lease_identity(run, worker_id, lease_token)
+        if run.lease_expires_at is not None and run.lease_expires_at <= _now():
+            raise RunLeaseError("Run lease has expired")
+
+    @staticmethod
+    def _verify_lease_identity(
+        run: BackgroundRun, worker_id: str | None, lease_token: str | None
+    ) -> None:
         if not worker_id or not lease_token:
             raise RunLeaseError("worker_id and lease_token are required")
         if run.lease_owner != worker_id or run.lease_token != lease_token:
             raise RunLeaseError("Run lease token mismatch")
-        if run.lease_expires_at is not None and run.lease_expires_at <= _now():
-            raise RunLeaseError("Run lease has expired")
 
     @staticmethod
     def _ensure_utc(value: datetime | None) -> datetime | None:
