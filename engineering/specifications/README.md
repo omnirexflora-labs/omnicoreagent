@@ -19,4 +19,5 @@ must obey.
 Current specifications:
 
 - `background-agents.md`
+- `events.md`
 - `workspace.md`

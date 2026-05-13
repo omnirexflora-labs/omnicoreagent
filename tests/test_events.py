@@ -1,4 +1,6 @@
 from datetime import datetime, timezone, timedelta
+from collections import defaultdict
+import asyncio
 
 import pytest
 
@@ -174,6 +176,243 @@ async def test_in_memory_event_store_returns_snapshot():
 
 
 @pytest.mark.asyncio
+async def test_in_memory_event_stream_is_live_and_session_scoped():
+    store = InMemoryEventStore()
+    session_event = Event(
+        type=EventType.AGENT_MESSAGE,
+        payload=AgentMessagePayload(message="session event"),
+        agent_name="agent",
+        event_id="session-event",
+    )
+    other_event = Event(
+        type=EventType.AGENT_MESSAGE,
+        payload=AgentMessagePayload(message="other event"),
+        agent_name="agent",
+        event_id="other-event",
+    )
+
+    stream = store.stream("session-a")
+    next_event = asyncio.create_task(stream.__anext__())
+    await asyncio.sleep(0)
+
+    await store.append("session-b", other_event)
+    await asyncio.sleep(0)
+    assert not next_event.done()
+
+    await store.append("session-a", session_event)
+
+    assert await asyncio.wait_for(next_event, timeout=1) == session_event
+    assert session_event.sequence == 1
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_in_memory_stream_after_cursor_replays_events_written_before_consume():
+    store = InMemoryEventStore()
+    cursor = await store.get_stream_cursor("session-a")
+    event = Event(
+        type=EventType.AGENT_MESSAGE,
+        payload=AgentMessagePayload(message="after cursor"),
+        agent_name="agent",
+    )
+
+    await store.append("session-a", event)
+
+    events_after = await store.get_events_after("session-a", cursor)
+    assert [item.event_id for item in events_after] == [event.event_id]
+
+    stream = store.stream_after("session-a", cursor)
+    try:
+        streamed = await asyncio.wait_for(stream.__anext__(), timeout=1)
+        assert streamed.event_id == event.event_id
+        assert streamed.sequence == 1
+    finally:
+        await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_in_memory_stream_overflow_raises_instead_of_hanging(monkeypatch):
+    from omnicoreagent.core.events import in_memory
+
+    monkeypatch.setattr(in_memory, "_SUBSCRIBER_QUEUE_SIZE", 1)
+    store = InMemoryEventStore()
+    stream = store.stream("session-a")
+    next_event = asyncio.create_task(stream.__anext__())
+    await asyncio.sleep(0)
+
+    first = Event(
+        type=EventType.AGENT_MESSAGE,
+        payload=AgentMessagePayload(message="first"),
+        agent_name="agent",
+    )
+    second = Event(
+        type=EventType.AGENT_MESSAGE,
+        payload=AgentMessagePayload(message="second"),
+        agent_name="agent",
+    )
+    await store.append("session-a", first)
+    await store.append("session-a", second)
+
+    with pytest.raises(RuntimeError, match="subscriber overflow"):
+        await asyncio.wait_for(next_event, timeout=1)
+    await stream.aclose()
+
+
+class _FakeRedisStreamClient:
+    def __init__(self):
+        self.streams: dict[str, list[tuple[str, dict[str, str]]]] = defaultdict(list)
+        self.waiters: dict[str, list[asyncio.Future]] = defaultdict(list)
+
+    async def eval(self, script: str, numkeys: int, stream_name: str, event_json: str):
+        sequence = len(self.streams[stream_name]) + 1
+        entry_id = await self.xadd(
+            stream_name,
+            {"event": event_json, "sequence": str(sequence)},
+        )
+        return [entry_id, str(sequence)]
+
+    async def xadd(self, stream_name: str, data: dict[str, str]):
+        entry_id = f"{len(self.streams[stream_name]) + 1}-0"
+        self.streams[stream_name].append((entry_id, data))
+        waiters = self.waiters.pop(stream_name, [])
+        for waiter in waiters:
+            if not waiter.done():
+                waiter.set_result([(stream_name, [(entry_id, data)])])
+        return entry_id
+
+    async def xrange(self, stream_name: str, min: str = "-", max: str = "+"):
+        entries = list(self.streams[stream_name])
+        if min.startswith("("):
+            after_id = min[1:]
+            entries = [
+                (entry_id, data)
+                for entry_id, data in entries
+                if _redis_entry_index(entry_id) > _redis_entry_index(after_id)
+            ]
+        return entries
+
+    async def xrevrange(
+        self,
+        stream_name: str,
+        max: str = "+",
+        min: str = "-",
+        count: int = 1,
+    ):
+        return list(reversed(self.streams[stream_name]))[:count]
+
+    async def xread(self, streams: dict[str, str], block: int = 0, count: int = 1):
+        stream_name, last_id = next(iter(streams.items()))
+        entries = self.streams[stream_name]
+
+        if last_id != "$":
+            next_entries = [
+                (entry_id, data)
+                for entry_id, data in entries
+                if _redis_entry_index(entry_id) > _redis_entry_index(last_id)
+            ][:count]
+            if next_entries:
+                return [(stream_name, next_entries)]
+
+        loop = asyncio.get_running_loop()
+        waiter = loop.create_future()
+        self.waiters[stream_name].append(waiter)
+        return await waiter
+
+
+def _redis_entry_index(entry_id: str) -> int:
+    return int(entry_id.split("-", 1)[0])
+
+
+@pytest.mark.asyncio
+async def test_redis_event_store_replays_history_and_streams_live_session_only(
+    monkeypatch,
+):
+    from omnicoreagent.core.events import redis_stream
+
+    fake_redis = _FakeRedisStreamClient()
+    monkeypatch.setattr(
+        redis_stream.redis,
+        "from_url",
+        lambda url, decode_responses: fake_redis,
+    )
+
+    store = redis_stream.RedisStreamEventStore()
+    session_event = Event(
+        type=EventType.AGENT_MESSAGE,
+        payload=AgentMessagePayload(message="session event"),
+        agent_name="agent",
+        event_id="redis-session-event",
+    )
+    other_event = Event(
+        type=EventType.AGENT_MESSAGE,
+        payload=AgentMessagePayload(message="other event"),
+        agent_name="agent",
+        event_id="redis-other-event",
+    )
+
+    await store.append("session-a", session_event)
+    await store.append("session-b", other_event)
+
+    assert await store.get_events("session-a") == [session_event]
+    assert session_event.sequence == 1
+
+    stream = store.stream("session-a")
+    next_event = asyncio.create_task(stream.__anext__())
+    await asyncio.sleep(0)
+
+    await store.append("session-b", other_event)
+    await asyncio.sleep(0)
+    assert not next_event.done()
+
+    live_event = Event(
+        type=EventType.AGENT_MESSAGE,
+        payload=AgentMessagePayload(message="live session event"),
+        agent_name="agent",
+        event_id="redis-live-event",
+    )
+    await store.append("session-a", live_event)
+
+    assert await asyncio.wait_for(next_event, timeout=1) == live_event
+    assert live_event.sequence == 2
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_redis_stream_after_cursor_replays_events_written_before_consume(
+    monkeypatch,
+):
+    from omnicoreagent.core.events import redis_stream
+
+    fake_redis = _FakeRedisStreamClient()
+    monkeypatch.setattr(
+        redis_stream.redis,
+        "from_url",
+        lambda url, decode_responses: fake_redis,
+    )
+
+    store = redis_stream.RedisStreamEventStore()
+    cursor = await store.get_stream_cursor("session-a")
+    event = Event(
+        type=EventType.AGENT_MESSAGE,
+        payload=AgentMessagePayload(message="after cursor"),
+        agent_name="agent",
+    )
+
+    await store.append("session-a", event)
+
+    events_after = await store.get_events_after("session-a", cursor)
+    assert [item.event_id for item in events_after] == [event.event_id]
+
+    stream = store.stream_after("session-a", cursor)
+    try:
+        streamed = await asyncio.wait_for(stream.__anext__(), timeout=1)
+        assert streamed.event_id == event.event_id
+        assert streamed.sequence == 1
+    finally:
+        await stream.aclose()
+
+
+@pytest.mark.asyncio
 async def test_event_router_builds_trace_from_store():
     router = EventRouter(event_store_type="in_memory")
     await router.append(
@@ -201,3 +440,11 @@ async def test_event_router_builds_trace_from_store():
         "user_message",
         "final_answer",
     ]
+    assert [step.sequence for step in trace.steps] == [1, 2]
+
+
+def test_event_router_unknown_backend_reports_in_memory_fallback():
+    router = EventRouter(event_store_type="unknown")
+
+    assert router.get_event_store_type() == "in_memory"
+    assert router.get_event_store_info() == {"type": "in_memory", "available": True}

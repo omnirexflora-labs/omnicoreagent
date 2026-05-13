@@ -201,7 +201,8 @@ mcp_tools = [
 
 ## 5. Persistence Configuration
 
-Pass a `MemoryRouter` or `EventRouter` to customize where history and telemetry are stored.
+Pass a `MemoryRouter` to customize conversation memory, and an `EventRouter` to
+customize runtime event streaming.
 
 ```python
 from omnicoreagent import MemoryRouter, EventRouter
@@ -212,6 +213,9 @@ agent = OmniCoreAgent(
     event_router=EventRouter("redis_stream")
 )
 ```
+
+Event streaming supports `in_memory` and `redis_stream`. SQL and MongoDB are
+for memory or background task state, not live runtime event streams.
 
 ---
 

@@ -7,6 +7,7 @@ import time
 import pytest
 
 from omnicoreagent.core.workspace.manager import Workspace
+from omnicoreagent.core.events.base import current_event_run_id
 from omnicoreagent.core.events.event_router import EventRouter
 from omnicoreagent.background import (
     BackgroundAgentManager,
@@ -59,6 +60,18 @@ class FakeAgent:
         if self.fail_times:
             self.fail_times -= 1
             raise RuntimeError("planned failure")
+        return {"response": self.response, "session_id": session_id}
+
+
+class RunIdRecordingAgent(FakeAgent):
+    async def run(self, query: str, session_id: str):
+        self.calls.append(
+            {
+                "query": query,
+                "session_id": session_id,
+                "event_run_id": current_event_run_id(),
+            }
+        )
         return {"response": self.response, "session_id": session_id}
 
 
@@ -718,6 +731,25 @@ async def test_background_run_events_replay_from_event_router():
     assert events[-1]["task_id"] == "task"
     assert events[-1]["status"] == RunStatus.COMPLETED.value
     assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
+
+
+@pytest.mark.asyncio
+async def test_background_run_sets_event_run_id_context():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    agent = RunIdRecordingAgent(response="complete")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    run = await manager.run_now("task", wait=True)
+
+    assert run.status == RunStatus.COMPLETED
+    assert agent.calls[0]["event_run_id"] == run.run_id
+    assert current_event_run_id() is None
 
 
 @pytest.mark.asyncio

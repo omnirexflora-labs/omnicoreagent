@@ -8,6 +8,7 @@ import json
 from typing import Any
 from uuid import uuid4
 
+from omnicoreagent.core.events.base import reset_event_run_id, set_event_run_id
 from omnicoreagent.background.errors import (
     AgentAlreadyRegisteredError,
     AgentNotFoundError,
@@ -295,19 +296,18 @@ class BackgroundAgentManager:
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
                     return latest
-                done, _ = await asyncio.wait(
-                    {execution_task},
-                    timeout=remaining,
-                )
-                if done:
-                    executed = execution_task.result()
+                try:
+                    executed = await asyncio.wait_for(
+                        asyncio.shield(execution_task),
+                        timeout=remaining,
+                    )
                     if not executed:
                         if deadline is None:
                             return await self.task_store.get_run(run_id) or latest
                         latest = await self.task_store.get_run(run_id) or latest
                     else:
                         continue
-                else:
+                except asyncio.TimeoutError:
                     return await self.task_store.get_run(run_id) or latest
 
             if deadline is None:
@@ -368,7 +368,13 @@ class BackgroundAgentManager:
                 return latest
             if deadline is not None and asyncio.get_running_loop().time() >= deadline:
                 return latest
-            await asyncio.sleep(poll_interval_seconds)
+            sleep_seconds = poll_interval_seconds
+            if deadline is not None:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    return latest
+                sleep_seconds = min(sleep_seconds, remaining)
+            await asyncio.sleep(max(sleep_seconds, 0.001))
 
     @staticmethod
     def _run_is_due(run: BackgroundRun) -> bool:
@@ -706,11 +712,11 @@ class BackgroundAgentManager:
 
         try:
             query = self._build_run_context(run)
-            coro = agent.run(query=query, session_id=run.session_id)
-            result = (
-                await asyncio.wait_for(coro, timeout=task.timeout_seconds)
-                if task.timeout_seconds
-                else await coro
+            result = await self._run_agent_with_event_context(
+                agent=agent,
+                query=query,
+                run=run,
+                timeout_seconds=task.timeout_seconds,
             )
         except asyncio.CancelledError:
             try:
@@ -778,6 +784,25 @@ class BackgroundAgentManager:
         finally:
             heartbeat_task.cancel()
             await self._drain_cancelled_task(heartbeat_task)
+
+    async def _run_agent_with_event_context(
+        self,
+        *,
+        agent: Any,
+        query: str,
+        run: BackgroundRun,
+        timeout_seconds: int | None,
+    ) -> Any:
+        token = set_event_run_id(run.run_id)
+        try:
+            coro = agent.run(query=query, session_id=run.session_id)
+            return (
+                await asyncio.wait_for(coro, timeout=timeout_seconds)
+                if timeout_seconds
+                else await coro
+            )
+        finally:
+            reset_event_run_id(token)
 
     async def _handle_attempt_failure(
         self,
