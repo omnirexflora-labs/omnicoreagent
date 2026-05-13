@@ -93,7 +93,8 @@ BackgroundAgentManager
         +--> run_helpers
         +--> BackgroundEventLog
         +--> BackgroundWorkspaceIO
-        +--> schedule/queue/supervisor methods
+        +--> BackgroundScheduleDispatcher
+        +--> BackgroundSupervisor
                 |
                 v
           OmniCoreAgent.run()
@@ -108,9 +109,10 @@ The manager owns the public facade and orchestration flow. The store owns
 operational truth. `run_helpers` owns pure run construction and retry helpers.
 `BackgroundEventLog` owns lifecycle event ordering, workspace event persistence,
 and event-router fanout. `BackgroundWorkspaceIO` owns background workspace file
-access. The supervisor path owns execution lifecycle. `OmniCoreAgent` owns
-reasoning, tool calls, workspace tools, memory, context management, guardrails,
-and final response generation.
+access. `BackgroundScheduleDispatcher` owns due-schedule dispatch.
+`BackgroundSupervisor` owns queue claiming, execution, cancellation, heartbeat,
+retry, and recovery. `OmniCoreAgent` owns reasoning, tool calls, workspace
+tools, memory, context management, guardrails, and final response generation.
 
 ---
 
@@ -248,11 +250,13 @@ Conversation memory belongs to `MemoryRouter`. Files and artifacts belong to
 workspace storage. Events belong to `EventRouter`. The task store owns
 operational state.
 
-### Schedule Dispatch Methods
+### `BackgroundScheduleDispatcher`
 
-Schedule dispatch is currently implemented inside `BackgroundAgentManager`.
-Those methods convert due tasks into run records. A future extraction may move
-this into a dedicated `ScheduleDispatcher`, but that class does not exist today.
+Converts due schedule state into durable queued or skipped run records.
+
+The dispatcher depends on `AbstractTaskStore` and the manager event emission
+boundary. It does not execute agents and does not keep schedule state in
+process memory.
 
 Responsibilities:
 
@@ -265,11 +269,10 @@ Responsibilities:
 - make the queued run claimable through the task store
 - emit queued or skipped lifecycle events
 
-### Run Queue Methods
+### Store-Backed Run Queue
 
-Run claiming is currently implemented through `BackgroundAgentManager` methods
-backed by `AbstractTaskStore`. A future extraction may move this into a
-dedicated `RunQueue`, but that class does not exist today.
+Run claiming is store-backed through `AbstractTaskStore` and executed by
+`BackgroundSupervisor`.
 
 Responsibilities:
 
@@ -284,12 +287,14 @@ it, and queued runs remain claimable after process restart. A process-local
 queue can exist only as an optimization over the store-backed queue; it must not
 be the source of truth.
 
-### Supervisor Methods
+### `BackgroundSupervisor`
 
-Run supervision is currently implemented inside `BackgroundAgentManager`. These
-methods execute queued runs under operational control. A future extraction may
-move this into a dedicated `BackgroundSupervisor`, but that class does not exist
-today.
+Executes queued runs under operational control.
+
+The supervisor depends on `AbstractTaskStore`, registered agent specs/objects,
+memory/event routers, and the manager event emission boundary. It owns running
+agent tasks and inline execution work. The manager delegates execution control
+to this service instead of carrying execution logic directly.
 
 Responsibilities:
 

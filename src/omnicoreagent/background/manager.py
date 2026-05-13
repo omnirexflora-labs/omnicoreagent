@@ -3,24 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
 from typing import Any
 from uuid import uuid4
 
-from omnicoreagent.core.events.base import reset_event_run_id, set_event_run_id
 from omnicoreagent.background.agent_specs import resolve_agent, spec_from_agent
 from omnicoreagent.background.errors import (
     AgentAlreadyRegisteredError,
     AgentNotFoundError,
-    RunLeaseError,
     RunNotFoundError,
     TaskAlreadyRegisteredError,
     TaskNotFoundError,
 )
 from omnicoreagent.background.models import (
     TERMINAL_RUN_STATUSES,
-    AttemptReason,
-    AttemptStatus,
     BackgroundAgentSpec,
     BackgroundAttempt,
     BackgroundRun,
@@ -30,21 +25,16 @@ from omnicoreagent.background.models import (
     ScheduleSpec,
     TriggerType,
     coerce_model,
-    next_schedule_due,
     utc_now,
 )
 from omnicoreagent.background.event_log import BackgroundEventLog
 from omnicoreagent.background.run_helpers import (
     build_run,
-    build_run_context,
-    is_run_due,
-    release_lease_patch,
-    result_preview,
-    retry_delay_seconds,
-    run_until_terminal_sleep_seconds,
 )
+from omnicoreagent.background.scheduler import BackgroundScheduleDispatcher
 from omnicoreagent.background.store.base import AbstractTaskStore
 from omnicoreagent.background.store.router import TaskStoreRouter
+from omnicoreagent.background.supervisor import BackgroundSupervisor
 from omnicoreagent.background.workspace_io import BackgroundWorkspaceIO
 
 
@@ -74,8 +64,6 @@ class BackgroundAgentManager:
         self._running = False
         self._worker_task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
-        self._inline_execution_tasks: dict[str, asyncio.Task] = {}
-        self._active_agent_tasks: dict[str, asyncio.Task] = {}
         self._event_replay_timeout_seconds = _EVENT_REPLAY_TIMEOUT_SECONDS
         self._event_append_timeout_seconds = _EVENT_APPEND_TIMEOUT_SECONDS
         self._workspace_io = BackgroundWorkspaceIO(workspace)
@@ -86,6 +74,23 @@ class BackgroundAgentManager:
             replay_timeout_seconds=self._event_replay_timeout_seconds,
             append_timeout_seconds=self._event_append_timeout_seconds,
         )
+        self._scheduler = BackgroundScheduleDispatcher(
+            task_store=self.task_store,
+            event_log=self._event_log,
+            emit_run=self._emit_run,
+        )
+        self._supervisor = BackgroundSupervisor(
+            task_store=self.task_store,
+            agents=self._agents,
+            worker_id=self.worker_id,
+            lease_seconds=self.lease_seconds,
+            memory_router=self.memory_router,
+            event_router=self.event_router,
+            event_log=self._event_log,
+            emit_run=self._emit_run,
+        )
+        self._inline_execution_tasks = self._supervisor.inline_execution_tasks
+        self._active_agent_tasks = self._supervisor.active_agent_tasks
         self._events = self._event_log.local_events
         self._event_sequences = self._event_log.event_sequences
         self._event_router_tasks = self._event_log.router_tasks
@@ -270,90 +275,22 @@ class BackgroundAgentManager:
         timeout_seconds: float | None = None,
         poll_interval_seconds: float = 0.05,
     ) -> BackgroundRun:
-        """Drive a queued run until terminal state or timeout using manager semantics."""
-        deadline = (
-            asyncio.get_running_loop().time() + timeout_seconds
-            if timeout_seconds and timeout_seconds > 0
-            else None
+        self._sync_services_config()
+        return await self._supervisor.run_until_terminal(
+            run_id,
+            timeout_seconds=timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
         )
-        while True:
-            latest = await self.task_store.get_run(run_id)
-            if not latest:
-                raise RunNotFoundError(f"Run not found: {run_id}")
-            if latest.status in TERMINAL_RUN_STATUSES:
-                return latest
-
-            if latest.status == RunStatus.QUEUED and is_run_due(latest):
-                execution_task = self._get_or_start_inline_execution_task(run_id)
-                if deadline is None:
-                    executed = await execution_task
-                    if not executed:
-                        return await self.task_store.get_run(run_id) or latest
-                    continue
-                remaining = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    return latest
-                try:
-                    executed = await asyncio.wait_for(
-                        asyncio.shield(execution_task),
-                        timeout=remaining,
-                    )
-                    if not executed:
-                        if deadline is None:
-                            return await self.task_store.get_run(run_id) or latest
-                        latest = await self.task_store.get_run(run_id) or latest
-                    else:
-                        continue
-                except asyncio.TimeoutError:
-                    return await self.task_store.get_run(run_id) or latest
-
-            if deadline is None:
-                return latest
-
-            if deadline is not None and asyncio.get_running_loop().time() >= deadline:
-                return latest
-
-            await asyncio.sleep(
-                    run_until_terminal_sleep_seconds(
-                        latest,
-                        deadline,
-                        poll_interval_seconds,
-                )
-            )
 
     def _get_or_start_inline_execution_task(self, run_id: str) -> asyncio.Task:
-        existing = self._inline_execution_tasks.get(run_id)
-        if existing is not None and not existing.done():
-            return existing
-        task = asyncio.create_task(self._execute_run(run_id))
-        self._inline_execution_tasks[run_id] = task
-
-        def _forget(completed: asyncio.Task) -> None:
-            if self._inline_execution_tasks.get(run_id) is completed:
-                self._inline_execution_tasks.pop(run_id, None)
-
-        task.add_done_callback(_forget)
-        return task
+        self._sync_services_config()
+        return self._supervisor.get_or_start_inline_execution_task(run_id)
 
     async def _cancel_inline_execution_tasks(self) -> None:
-        pending = [task for task in self._inline_execution_tasks.values() if not task.done()]
-        if not pending:
-            self._inline_execution_tasks.clear()
-            return
-        for task in pending:
-            task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
-        self._inline_execution_tasks.clear()
+        await self._supervisor.cancel_inline_execution_tasks()
 
     async def _cancel_active_agent_tasks(self) -> None:
-        pending = [task for task in self._active_agent_tasks.values() if not task.done()]
-        if not pending:
-            self._active_agent_tasks.clear()
-            return
-        for task in pending:
-            task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
-        self._active_agent_tasks.clear()
+        await self._supervisor.cancel_active_agent_tasks()
 
     async def wait_for_run(
         self,
@@ -384,96 +321,16 @@ class BackgroundAgentManager:
             await asyncio.sleep(max(sleep_seconds, 0.001))
 
     async def cancel_run(self, run_id: str) -> None:
-        run = await self.task_store.get_run(run_id)
-        if not run:
-            raise RunNotFoundError(f"Run not found: {run_id}")
-        await self.task_store.request_cancel(run_id)
-        latest = await self.task_store.get_run(run_id)
-        if not latest:
-            return
-        if latest.status == RunStatus.QUEUED:
-            await self._mark_terminal(latest, RunStatus.CANCELLED, "cancelled")
-        elif (
-            latest.status == RunStatus.CLAIMED
-            and latest.lease_owner == self.worker_id
-        ):
-            await self._mark_terminal(latest, RunStatus.CANCELLED, "cancelled")
-        elif latest.status == RunStatus.RUNNING and latest.lease_owner == self.worker_id:
-            active_task = self._active_agent_tasks.get(run_id)
-            if active_task is not None and not active_task.done():
-                active_task.cancel()
+        self._sync_services_config()
+        await self._supervisor.cancel_run(run_id)
 
     async def recover_expired_runs(self) -> None:
-        expired = await self.task_store.list_expired_leases(utc_now())
-        for run in expired:
-            try:
-                await self._recover_expired_run(run)
-            except RunLeaseError:
-                continue
+        self._sync_services_config()
+        await self._supervisor.recover_expired_runs()
 
     async def _recover_expired_run(self, run: BackgroundRun) -> None:
-        stolen = await self.task_store.steal_expired_run(
-            run.run_id, self.worker_id, self.lease_seconds
-        )
-        if await self.task_store.is_cancel_requested(stolen.run_id):
-            await self._mark_terminal(stolen, RunStatus.CANCELLED, "cancelled")
-            return
-
-        attempts = await self.task_store.list_attempts(stolen.run_id)
-        running = [item for item in attempts if item.status == AttemptStatus.RUNNING]
-        for attempt in running:
-            await self.task_store.update_attempt(
-                attempt.attempt_id,
-                {
-                    "status": AttemptStatus.FAILED,
-                    "reason": AttemptReason.LEASE_EXPIRED,
-                    "finished_at": utc_now(),
-                    "error": "lease expired",
-                },
-                self.worker_id,
-                stolen.lease_token,
-            )
-        task = await self.task_store.get_task(stolen.task_id)
-        if not task:
-            await self._mark_terminal(stolen, RunStatus.FAILED, "task missing")
-            return
-
-        if stolen.status == RunStatus.CLAIMED:
-            recovered = await self.task_store.transition_run(
-                stolen.run_id,
-                {RunStatus.CLAIMED},
-                RunStatus.QUEUED,
-                release_lease_patch(),
-                self.worker_id,
-                stolen.lease_token,
-            )
-            await self._emit_run("background_run_recovered", recovered)
-            return
-
-        can_retry = stolen.attempt <= task.retry_policy.max_retries
-        if can_retry:
-            retrying = stolen
-            if stolen.status == RunStatus.RUNNING:
-                retrying = await self.task_store.transition_run(
-                    stolen.run_id,
-                    {RunStatus.RUNNING},
-                    RunStatus.RETRYING,
-                    {"error": "lease expired"},
-                    self.worker_id,
-                    stolen.lease_token,
-                )
-            recovered = await self.task_store.transition_run(
-                retrying.run_id,
-                {RunStatus.RETRYING},
-                RunStatus.QUEUED,
-                release_lease_patch(),
-                self.worker_id,
-                retrying.lease_token,
-            )
-            await self._emit_run("background_run_recovered", recovered)
-            return
-
-        await self._mark_terminal(stolen, RunStatus.FAILED, "lease expired")
+        self._sync_services_config()
+        await self._supervisor.recover_expired_run(run)
 
     async def get_run(self, run_id: str) -> BackgroundRun | None:
         return await self.task_store.get_run(run_id)
@@ -538,268 +395,24 @@ class BackgroundAgentManager:
                 await asyncio.sleep(0.05)
 
     async def _dispatch_due_schedules(self, limit: int = 25) -> bool:
-        dispatched_any = False
-        due_items = await self.task_store.get_due_schedules(utc_now(), limit=limit)
-        for task, state, occurrence_id in due_items:
-            if state.next_due_at is None:
-                continue
-            trigger = TriggerType(task.schedule.type.value)
-            run = build_run(
-                task,
-                trigger,
-                task.query,
-                due_at=state.next_due_at,
-                occurrence_id=occurrence_id,
-            )
-            existing_run_ids = {
-                item.run_id for item in await self.task_store.list_runs(task.task_id)
-            }
-            next_due_at = next_schedule_due(task.schedule, state.next_due_at, utc_now())
-            created = await self.task_store.dispatch_scheduled_run(
-                run,
-                task.overlap_policy,
-                state.schedule_revision,
-                next_due_at,
-            )
-            dispatched_any = True
-            if created.run_id in existing_run_ids:
-                continue
-            await self._emit_run("background_task_scheduled", created)
-            await self._emit_run(
-                "background_run_skipped"
-                if created.status == RunStatus.SKIPPED
-                else "background_run_queued",
-                created,
-            )
-        return dispatched_any
+        self._sync_services_config()
+        return await self._scheduler.dispatch_due_schedules(limit=limit)
 
     async def _execute_one(self) -> bool:
-        claimed = await self.task_store.claim_next_run(
-            self.worker_id, self.lease_seconds
-        )
-        if not claimed:
-            return False
-        try:
-            await self._run_claimed(claimed)
-        except asyncio.CancelledError:
-            await self._release_claimed_before_start(claimed.run_id)
-            raise
-        return True
+        self._sync_services_config()
+        return await self._supervisor.execute_one()
 
     async def _execute_run(self, run_id: str) -> bool:
-        latest = await self.task_store.get_run(run_id)
-        if (
-            not latest
-            or latest.status != RunStatus.QUEUED
-            or (latest.queued_at is not None and latest.queued_at > utc_now())
-        ):
-            return False
-        claimable = await self.task_store.list_claimable_runs(limit=10_000)
-        if latest.run_id not in {run.run_id for run in claimable}:
-            return False
-        try:
-            claimed = await self.task_store.claim_run(
-                run_id, self.worker_id, self.lease_seconds
-            )
-        except RunLeaseError:
-            return False
-        try:
-            await self._run_claimed(claimed)
-        except asyncio.CancelledError:
-            await self._release_claimed_before_start(claimed.run_id)
-            raise
-        return True
+        self._sync_services_config()
+        return await self._supervisor.execute_run(run_id)
 
     async def _release_claimed_before_start(self, run_id: str) -> None:
-        latest = await self.task_store.get_run(run_id)
-        if (
-            not latest
-            or latest.status != RunStatus.CLAIMED
-            or latest.lease_owner != self.worker_id
-            or latest.lease_token is None
-        ):
-            return
-        released = await self.task_store.transition_run(
-            latest.run_id,
-            {RunStatus.CLAIMED},
-            RunStatus.QUEUED,
-            release_lease_patch(),
-            self.worker_id,
-            latest.lease_token,
-        )
-        await self._emit_run("background_run_queued", released)
+        self._sync_services_config()
+        await self._supervisor.release_claimed_before_start(run_id)
 
     async def _run_claimed(self, claimed: BackgroundRun) -> None:
-        task = await self.task_store.get_task(claimed.task_id)
-        if not task:
-            await self._mark_terminal(claimed, RunStatus.FAILED, "task missing")
-            return
-        agent = await resolve_agent(
-            agent_id=claimed.agent_id,
-            agents=self._agents,
-            task_store=self.task_store,
-            memory_router=self.memory_router,
-            event_router=self.event_router,
-        )
-        if agent is None:
-            await self._mark_terminal(claimed, RunStatus.FAILED, "agent missing")
-            return
-        if await self.task_store.is_cancel_requested(claimed.run_id):
-            await self._mark_terminal(claimed, RunStatus.CANCELLED, "cancelled")
-            return
-
-        if claimed.lease_token is not None:
-            await self._refresh_run_lease(claimed.run_id, claimed.lease_token)
-            claimed = await self.task_store.get_run(claimed.run_id) or claimed
-
-        attempt_number = claimed.attempt + 1
-        run = await self.task_store.transition_run(
-            claimed.run_id,
-            {RunStatus.CLAIMED},
-            RunStatus.RUNNING,
-            {"started_at": utc_now(), "attempt": attempt_number},
-            self.worker_id,
-            claimed.lease_token,
-        )
-        if run.lease_token is not None:
-            if not await self._refresh_run_lease(run.run_id, run.lease_token):
-                return
-            run = await self.task_store.get_run(run.run_id) or run
-        attempt = BackgroundAttempt(
-            run_id=run.run_id,
-            attempt_number=attempt_number,
-            reason=AttemptReason.INITIAL if attempt_number == 1 else AttemptReason.RETRY,
-            worker_id=self.worker_id,
-            lease_token=run.lease_token,
-        )
-        await self.task_store.create_attempt(attempt)
-        if await self.task_store.is_cancel_requested(run.run_id):
-            await self.task_store.update_attempt(
-                attempt.attempt_id,
-                {
-                    "status": AttemptStatus.CANCELLED,
-                    "finished_at": utc_now(),
-                    "error": "cancelled",
-                },
-                self.worker_id,
-                run.lease_token,
-            )
-            await self._mark_terminal(run, RunStatus.CANCELLED, "cancelled")
-            return
-        heartbeat_task = asyncio.create_task(
-            self._heartbeat_until_finished(run.run_id, run.lease_token)
-        )
-        await self._emit_run("background_run_claimed", claimed)
-        await self._emit_run("background_run_started", run)
-
-        try:
-            if await self.task_store.is_cancel_requested(run.run_id):
-                await self.task_store.update_attempt(
-                    attempt.attempt_id,
-                    {
-                        "status": AttemptStatus.CANCELLED,
-                        "finished_at": utc_now(),
-                        "error": "cancelled",
-                    },
-                    self.worker_id,
-                    run.lease_token,
-                )
-                await self._mark_terminal(run, RunStatus.CANCELLED, "cancelled")
-                return
-            query = build_run_context(run)
-            agent_task = asyncio.create_task(
-                self._run_agent_with_event_context(
-                    agent=agent,
-                    query=query,
-                    run=run,
-                    timeout_seconds=task.timeout_seconds,
-                )
-            )
-            self._active_agent_tasks[run.run_id] = agent_task
-            result = await agent_task
-        except asyncio.CancelledError:
-            try:
-                if await self.task_store.is_cancel_requested(run.run_id):
-                    await self.task_store.update_attempt(
-                        attempt.attempt_id,
-                        {
-                            "status": AttemptStatus.CANCELLED,
-                            "finished_at": utc_now(),
-                            "error": "cancelled",
-                        },
-                        self.worker_id,
-                        run.lease_token,
-                    )
-                    await self._mark_terminal(run, RunStatus.CANCELLED, "cancelled")
-                    return
-                await self._handle_attempt_failure(
-                    task, run, attempt, "exception", RuntimeError("worker shutdown")
-                )
-            finally:
-                self._active_agent_tasks.pop(run.run_id, None)
-                heartbeat_task.cancel()
-                await self._drain_cancelled_task(heartbeat_task)
-            raise
-        except asyncio.TimeoutError as exc:
-            try:
-                await self._handle_attempt_failure(task, run, attempt, "timeout", exc)
-            finally:
-                self._active_agent_tasks.pop(run.run_id, None)
-                heartbeat_task.cancel()
-                await self._drain_cancelled_task(heartbeat_task)
-            return
-        except Exception as exc:
-            try:
-                await self._handle_attempt_failure(task, run, attempt, "exception", exc)
-            finally:
-                self._active_agent_tasks.pop(run.run_id, None)
-                heartbeat_task.cancel()
-                await self._drain_cancelled_task(heartbeat_task)
-            return
-
-        try:
-            preview = result_preview(result)
-            if await self.task_store.is_cancel_requested(run.run_id):
-                if run.lease_token is not None:
-                    if not await self._refresh_run_lease(run.run_id, run.lease_token):
-                        return
-                await self.task_store.update_attempt(
-                    attempt.attempt_id,
-                    {
-                        "status": AttemptStatus.CANCELLED,
-                        "finished_at": utc_now(),
-                        "error": "cancelled",
-                    },
-                    self.worker_id,
-                    run.lease_token,
-                )
-                await self._mark_terminal(run, RunStatus.CANCELLED, "cancelled")
-                return
-            if run.lease_token is not None:
-                if not await self._refresh_run_lease(run.run_id, run.lease_token):
-                    return
-            await self.task_store.update_attempt(
-                attempt.attempt_id,
-                {"status": AttemptStatus.COMPLETED, "finished_at": utc_now()},
-                self.worker_id,
-                run.lease_token,
-            )
-            if run.lease_token is not None:
-                if not await self._refresh_run_lease(run.run_id, run.lease_token):
-                    return
-            completed = await self.task_store.transition_run(
-                run.run_id,
-                {RunStatus.RUNNING},
-                RunStatus.COMPLETED,
-                {"result_preview": preview},
-                self.worker_id,
-                run.lease_token,
-            )
-            await self._emit_run("background_run_completed", completed)
-        finally:
-            self._active_agent_tasks.pop(run.run_id, None)
-            heartbeat_task.cancel()
-            await self._drain_cancelled_task(heartbeat_task)
+        self._sync_services_config()
+        await self._supervisor.run_claimed(claimed)
 
     async def _run_agent_with_event_context(
         self,
@@ -809,16 +422,12 @@ class BackgroundAgentManager:
         run: BackgroundRun,
         timeout_seconds: int | None,
     ) -> Any:
-        token = set_event_run_id(run.run_id)
-        try:
-            coro = agent.run(query=query, session_id=run.session_id)
-            return (
-                await asyncio.wait_for(coro, timeout=timeout_seconds)
-                if timeout_seconds
-                else await coro
-            )
-        finally:
-            reset_event_run_id(token)
+        return await self._supervisor.run_agent_with_event_context(
+            agent=agent,
+            query=query,
+            run=run,
+            timeout_seconds=timeout_seconds,
+        )
 
     async def _handle_attempt_failure(
         self,
@@ -828,111 +437,27 @@ class BackgroundAgentManager:
         reason: str,
         exc: BaseException,
     ) -> None:
-        status = AttemptStatus.TIMEOUT if reason == "timeout" else AttemptStatus.FAILED
-        if run.lease_token is not None:
-            if not await self._refresh_run_lease(run.run_id, run.lease_token):
-                return
-        await self.task_store.update_attempt(
-            attempt.attempt_id,
-            {"status": status, "finished_at": utc_now(), "error": str(exc)},
-            self.worker_id,
-            run.lease_token,
-        )
-        can_retry = (
-            reason in task.retry_policy.retry_on
-            and run.attempt <= task.retry_policy.max_retries
-        )
-        if can_retry:
-            retry_delay = retry_delay_seconds(task, run.attempt)
-            if run.lease_token is not None:
-                if not await self._refresh_run_lease(run.run_id, run.lease_token):
-                    return
-            await self.task_store.update_attempt(
-                attempt.attempt_id,
-                {"retry_delay_seconds": retry_delay},
-                self.worker_id,
-                run.lease_token,
-            )
-            if run.lease_token is not None:
-                if not await self._refresh_run_lease(run.run_id, run.lease_token):
-                    return
-            retrying = await self.task_store.transition_run(
-                run.run_id,
-                {RunStatus.RUNNING},
-                RunStatus.RETRYING,
-                {"error": str(exc)},
-                self.worker_id,
-                run.lease_token,
-            )
-            await self._emit_run("background_run_retrying", retrying)
-            await self.task_store.transition_run(
-                retrying.run_id,
-                {RunStatus.RETRYING},
-                RunStatus.QUEUED,
-                {
-                    **release_lease_patch(),
-                    "queued_at": utc_now() + timedelta(seconds=retry_delay),
-                },
-                self.worker_id,
-                retrying.lease_token,
-            )
-            return
-        terminal = RunStatus.TIMEOUT if reason == "timeout" else RunStatus.FAILED
-        await self._mark_terminal(run, terminal, str(exc))
+        self._sync_services_config()
+        await self._supervisor.handle_attempt_failure(task, run, attempt, reason, exc)
 
     async def _mark_terminal(
         self, run: BackgroundRun, status: RunStatus, error: str | None
     ) -> None:
-        latest = await self.task_store.get_run(run.run_id)
-        if not latest:
-            return
-        if latest.lease_token is not None:
-            if not await self._refresh_run_lease(latest.run_id, latest.lease_token):
-                return
-            latest = await self.task_store.get_run(run.run_id) or latest
-        terminal = await self.task_store.transition_run(
-            latest.run_id,
-            {latest.status},
-            status,
-            {"error": error},
-            self.worker_id,
-            latest.lease_token,
-        )
-        await self._emit_run(f"background_run_{status.value}", terminal)
+        self._sync_services_config()
+        await self._supervisor.mark_terminal(run, status, error)
 
     async def _heartbeat_until_finished(
         self, run_id: str, lease_token: str | None
     ) -> None:
-        if lease_token is None:
-            return
-        interval = max(0.01, self.lease_seconds / 4)
-        if not await self._refresh_run_lease(run_id, lease_token):
-            return
-        while True:
-            await asyncio.sleep(interval)
-            if not await self._refresh_run_lease(run_id, lease_token):
-                return
-            try:
-                latest = await self.task_store.get_run(run_id)
-                if latest and latest.status in {RunStatus.RUNNING, RunStatus.RETRYING}:
-                    await self._emit_run("background_run_heartbeat", latest)
-            except Exception:
-                continue
+        self._sync_services_config()
+        await self._supervisor.heartbeat_until_finished(run_id, lease_token)
 
     async def _refresh_run_lease(self, run_id: str, lease_token: str) -> bool:
-        try:
-            await self.task_store.refresh_lease(
-                run_id, self.worker_id, lease_token, self.lease_seconds
-            )
-            return True
-        except Exception:
-            return False
+        self._sync_services_config()
+        return await self._supervisor.refresh_run_lease(run_id, lease_token)
 
     async def _drain_cancelled_task(self, task: asyncio.Task) -> None:
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        await self._supervisor.drain_cancelled_task(task)
 
     async def _resolve_agent(self, agent_id: str) -> Any | None:
         return await resolve_agent(
@@ -984,6 +509,13 @@ class BackgroundAgentManager:
 
     def _read_workspace_events(self, workspace_path: str) -> list[dict[str, Any]]:
         return self._workspace_io.read_events(workspace_path)
+
+    def _sync_services_config(self) -> None:
+        self._sync_event_log_config()
+        self._supervisor.worker_id = self.worker_id
+        self._supervisor.memory_router = self.memory_router
+        self._supervisor.event_router = self.event_router
+        self._supervisor.lease_seconds = self.lease_seconds
 
     def _sync_event_log_config(self) -> None:
         self._event_log.event_router = self.event_router

@@ -43,6 +43,29 @@ This specification does not cover:
 
 ---
 
+## Internal Runtime Modules
+
+The public background API is `BackgroundAgentManager`. The manager is a facade
+over smaller services:
+
+| Module | Responsibility |
+|--------|----------------|
+| `agent_specs` | Convert and resolve durable agent specs |
+| `run_helpers` | Pure run construction, retry, lease-release, sleep, and preview helpers |
+| `BackgroundEventLog` | Lifecycle event ordering, workspace persistence, event-router fanout, replay |
+| `BackgroundWorkspaceIO` | Background workspace file reads and writes |
+| `BackgroundScheduleDispatcher` | Convert due schedules into durable queued or skipped runs |
+| `BackgroundSupervisor` | Claim, execute, heartbeat, cancel, retry, timeout, and recover runs |
+| `AbstractTaskStore` | Durable operational state and lease fencing |
+
+`BackgroundAgentManager` must not execute agent runs directly. It registers
+agents and tasks, starts/stops the worker loop, delegates due schedules to
+`BackgroundScheduleDispatcher`, delegates run execution to
+`BackgroundSupervisor`, and exposes inspection/control methods to applications
+and OmniServe.
+
+---
+
 ## Public Exports
 
 The background package exports:
@@ -582,9 +605,10 @@ Rules:
   returns terminal state if the run completes before `timeout_seconds`; if the
   run cannot be claimed yet or the timeout expires, it returns the latest
   non-terminal run state.
-- `run_until_terminal()` is the public manager-owned driver for inline
-  execution. HTTP adapters must use it through `run_now(wait=True)` or call it
-  directly after creating a run.
+- `run_until_terminal()` is the public manager API for inline execution. The
+  manager delegates queue claiming and agent execution to `BackgroundSupervisor`.
+  HTTP adapters must use it through `run_now(wait=True)` or call it directly
+  after creating a run.
 - `cancel_run()` is idempotent.
 - `recover_expired_runs()` claims expired leases according to recovery policy.
 
@@ -604,8 +628,8 @@ Rules:
   OmniServe waits on the durable run record. If the worker loop is disabled,
   OmniServe calls
   `BackgroundAgentManager.run_now(wait=True, timeout_seconds=...)`; the manager
-  owns inline execution, queue ordering, and overlap-policy enforcement. Timeout
-  returns `504` with `run_id`, `task_id`, latest `status`,
+  preserves the public contract while delegating inline execution to
+  `BackgroundSupervisor`. Timeout returns `504` with `run_id`, `task_id`, latest `status`,
   `wait_timeout_seconds`, and `request_timeout_seconds` in `detail`, leaving
   the run inspectable through the run endpoints.
 - deleting a missing background agent returns `404`.

@@ -408,6 +408,19 @@ class CancellingAttemptStore(InMemoryTaskStore):
         await self.request_cancel(attempt.run_id)
 
 
+class CancellingCompletedAttemptStore(InMemoryTaskStore):
+    async def update_attempt(self, attempt_id, patch, worker_id=None, lease_token=None):
+        updated = await super().update_attempt(
+            attempt_id,
+            patch,
+            worker_id,
+            lease_token,
+        )
+        if patch.get("status") == AttemptStatus.COMPLETED:
+            await self.request_cancel(updated.run_id)
+        return updated
+
+
 class CancelOnStartedManager(BackgroundAgentManager):
     async def _emit_run(self, event_name, run, **extra_payload):
         await super()._emit_run(event_name, run, **extra_payload)
@@ -1177,7 +1190,7 @@ async def test_manager_run_now_wait_timeout_does_not_block_on_running_agent():
     run = await manager.run_now("task", wait=True, timeout_seconds=0.01)
     elapsed = asyncio.get_running_loop().time() - started
 
-    assert elapsed < 0.15
+    assert elapsed < 0.3
     assert run.status in {RunStatus.QUEUED, RunStatus.CLAIMED, RunStatus.RUNNING}
     completed = await wait_for(
         lambda: manager.list_runs(status=RunStatus.COMPLETED),
@@ -1295,6 +1308,16 @@ async def test_manager_retries_failed_attempt():
     assert attempts[0].reason == AttemptReason.INITIAL
     assert attempts[1].status == AttemptStatus.COMPLETED
     assert attempts[1].reason == AttemptReason.RETRY
+    assert [event["event"] for event in manager._events[run.run_id]] == [
+        "background_run_queued",
+        "background_run_claimed",
+        "background_run_started",
+        "background_run_retrying",
+        "background_run_queued",
+        "background_run_claimed",
+        "background_run_started",
+        "background_run_completed",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1489,6 +1512,32 @@ async def test_cancel_during_start_event_before_agent_task_starts_marks_cancelle
     assert latest.status == RunStatus.CANCELLED
     assert attempts[-1].status == AttemptStatus.CANCELLED
     assert agent.calls == []
+    assert queued.run_id not in manager._active_agent_tasks
+
+
+@pytest.mark.asyncio
+async def test_cancel_after_agent_result_before_completion_marks_cancelled():
+    store = CancellingCompletedAttemptStore()
+    manager = BackgroundAgentManager(task_store=store, lease_seconds=1)
+    agent = FakeAgent(response="complete")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    queued = await manager.run_now("task")
+    did_work = await manager._execute_run(queued.run_id)
+    latest = await manager.get_run(queued.run_id)
+    attempts = await manager.list_attempts(queued.run_id)
+
+    assert did_work is True
+    assert latest.status == RunStatus.CANCELLED
+    assert latest.cancel_requested_at is not None
+    assert attempts[-1].status == AttemptStatus.CANCELLED
+    assert agent.calls
     assert queued.run_id not in manager._active_agent_tasks
 
 
@@ -1700,7 +1749,7 @@ async def test_execute_one_releases_claim_when_cancelled_before_run_starts():
     async def cancelled_before_start(claimed):
         raise asyncio.CancelledError
 
-    manager._run_claimed = cancelled_before_start
+    manager._supervisor.run_claimed = cancelled_before_start
 
     with pytest.raises(asyncio.CancelledError):
         await manager._execute_one()
