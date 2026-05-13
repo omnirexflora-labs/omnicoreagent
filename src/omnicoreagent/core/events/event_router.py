@@ -53,6 +53,7 @@ class EventRouter:
                 logger.warning(
                     f"Unknown event store type: {self.event_store_type}. Falling back to memory."
                 )
+                self.event_store_type = "in_memory"
                 self._event_store = InMemoryEventStore()
 
         except Exception as e:
@@ -60,6 +61,7 @@ class EventRouter:
                 f"Failed to initialize {self.event_store_type} event store: {e}"
             )
             logger.info("Falling back to in-memory event store")
+            self.event_store_type = "in_memory"
             self._event_store = InMemoryEventStore()
 
     async def append(self, session_id: str, event: Event) -> None:
@@ -88,6 +90,38 @@ class EventRouter:
 
         async for event in self._event_store.stream(session_id=session_id):
             yield event
+
+    async def get_stream_cursor(self, session_id: str) -> str | None:
+        """Get the current event stream cursor for a session."""
+        if not self._event_store:
+            raise RuntimeError("No event store available")
+
+        return await self._event_store.get_stream_cursor(session_id=session_id)
+
+    async def stream_after(self, session_id: str, cursor: str | None):
+        """Stream events appended after a specific session cursor."""
+        if not self._event_store:
+            raise RuntimeError("No event store available")
+
+        async for event in self._event_store.stream_after(
+            session_id=session_id,
+            cursor=cursor,
+        ):
+            yield event
+
+    async def get_events_after(
+        self,
+        session_id: str,
+        cursor: str | None,
+    ) -> list[Event]:
+        """Get stored events appended after a specific session cursor."""
+        if not self._event_store:
+            raise RuntimeError("No event store available")
+
+        return await self._event_store.get_events_after(
+            session_id=session_id,
+            cursor=cursor,
+        )
 
     def get_event_store_type(self) -> str:
         """Get the current event store type."""

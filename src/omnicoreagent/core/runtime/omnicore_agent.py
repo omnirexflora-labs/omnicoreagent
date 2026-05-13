@@ -295,6 +295,22 @@ class OmniCoreAgent:
         async for event in self.event_router.stream(session_id=session_id):
             yield event
 
+    async def get_event_stream_cursor(self, session_id: str) -> str | None:
+        return await self.event_router.get_stream_cursor(session_id=session_id)
+
+    async def stream_events_after(self, session_id: str, cursor: str | None):
+        async for event in self.event_router.stream_after(
+            session_id=session_id,
+            cursor=cursor,
+        ):
+            yield event
+
+    async def get_events_after(self, session_id: str, cursor: str | None):
+        return await self.event_router.get_events_after(
+            session_id=session_id,
+            cursor=cursor,
+        )
+
     async def get_events(self, session_id: str):
         return await self.event_router.get_events(session_id=session_id)
 

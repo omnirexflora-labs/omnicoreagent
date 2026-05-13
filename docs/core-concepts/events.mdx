@@ -6,11 +6,23 @@ icon: 'signal-stream'
 
 # Event System
 
-Real-time event streaming with runtime switching. Track every tool call, agent thought, message, and final answer, then build a compact trace summary from the stored events.
+Real-time event streaming with runtime switching. OmniCoreAgent records typed
+runtime events for messages, tool calls, agent thoughts, subagents, final
+answers, and background task lifecycle changes. Those events can be listed,
+streamed live, or summarized into a compact in-house trace.
 
 ---
 
 ## Quick Start
+
+Runtime event streaming supports two event stores:
+
+- `in_memory` for local development, tests, and single-process apps
+- `redis_stream` for production or multi-process live streaming
+
+SQL and MongoDB are not event-stream backends. Use them for memory or
+background task state; use Redis Streams when live events need to cross process
+boundaries.
 
 Redis Streams require the Redis extra:
 
@@ -70,6 +82,34 @@ events = await agent.get_events(session_id="user_1")
 for event in events:
     print(f"[{event.timestamp}] {event.type}: {event.payload}")
 ```
+
+---
+
+## Streaming Events
+
+Stream live events from a running session:
+
+```python
+async for event in agent.stream_events(session_id="user_1"):
+    print(event.type, event.payload)
+```
+
+When using OmniServe:
+
+- `POST /run` streams runtime events as the agent runs and then sends a final
+  `complete` event with the normalized run result.
+- `GET /events/{session_id}` replays stored events for that session, then keeps
+  following new live events.
+
+Every OmniServe SSE runtime event includes the route `session_id` in the JSON
+payload so clients can keep streams separated. Events appended through the
+runtime event store also include a per-session `sequence`, which makes replay
+and debugging deterministic without requiring a full tracing system.
+
+`POST /run` also adds a run-scoped `run_id` to streamed runtime events and the
+final `complete` event. That keeps concurrent runs on the same session from
+mixing in one live response while the session event feed can still show the full
+session history.
 
 ---
 

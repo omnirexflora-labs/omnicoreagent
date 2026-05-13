@@ -16,6 +16,7 @@ class TraceStep:
     agent_name: str
     timestamp: str
     payload: dict[str, Any]
+    sequence: int | None = None
     elapsed_ms: float | None = None
     since_previous_ms: float | None = None
 
@@ -54,7 +55,7 @@ class AgentTrace:
 
 def build_event_trace(session_id: str, events: list[Event]) -> AgentTrace:
     """Build a compact internal trace from session events."""
-    ordered_events = sorted(events, key=lambda event: event.timestamp)
+    ordered_events = _order_events(events)
     steps: list[TraceStep] = []
 
     first_timestamp = ordered_events[0].timestamp if ordered_events else None
@@ -80,6 +81,7 @@ def build_event_trace(session_id: str, events: list[Event]) -> AgentTrace:
                 agent_name=event.agent_name,
                 timestamp=event.timestamp.isoformat(),
                 payload=payload,
+                sequence=event.sequence,
                 elapsed_ms=elapsed_ms,
                 since_previous_ms=since_previous_ms,
             )
@@ -88,6 +90,12 @@ def build_event_trace(session_id: str, events: list[Event]) -> AgentTrace:
 
     summary = _build_summary(session_id=session_id, events=ordered_events)
     return AgentTrace(session_id=session_id, summary=summary, steps=steps)
+
+
+def _order_events(events: list[Event]) -> list[Event]:
+    if all(event.sequence is not None for event in events):
+        return sorted(events, key=lambda event: (event.sequence, event.timestamp))
+    return sorted(events, key=lambda event: event.timestamp)
 
 
 def _build_summary(session_id: str, events: list[Event]) -> TraceSummary:

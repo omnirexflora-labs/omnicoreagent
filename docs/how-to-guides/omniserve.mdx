@@ -205,6 +205,8 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 | `GET` | `/prometheus` | No | Prometheus metrics |
 | `GET` | `/tools` | Yes* | List available tools |
 | `GET` | `/metrics` | Yes* | Agent usage metrics |
+| `GET` | `/events/{session_id}` | Yes* | Replay stored session events, then follow live events over SSE |
+| `GET` | `/events/{session_id}/list` | Yes* | Return stored session events as JSON |
 | `GET` | `/events/{session_id}/trace` | Yes* | Compact agent trace summary |
 | `GET` | `/docs` | No | Swagger UI |
 | `GET` | `/redoc` | No | ReDoc UI |
@@ -251,6 +253,9 @@ curl -X POST http://localhost:8000/run/sync \
 curl -X POST http://localhost:8000/run \
   -H "Content-Type: application/json" \
   -d '{"query": "Explain quantum computing"}'
+
+# Replay and follow one session's events
+curl -N http://localhost:8000/events/user123
 
 # List tools
 curl http://localhost:8000/tools \

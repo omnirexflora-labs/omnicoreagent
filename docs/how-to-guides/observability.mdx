@@ -40,6 +40,35 @@ tracing service.
 
 ---
 
+## Runtime Events
+
+OmniCoreAgent emits typed runtime events for user messages, tool calls, tool
+results, final answers, subagent calls, and background task lifecycle changes.
+Use events when you need a live UI, session debugging, or a lightweight
+execution record.
+
+```python
+result = await agent.run("Research this topic", session_id="research_1")
+
+events = await agent.get_events("research_1")
+for event in events:
+    print(event.type, event.payload)
+```
+
+When serving through OmniServe, `POST /run` streams the live run over SSE and
+`GET /events/{session_id}` replays stored events for that session before
+following new live events.
+
+```bash
+curl -N -X POST http://localhost:8000/run \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Research this topic", "session_id": "research_1"}'
+
+curl -N http://localhost:8000/events/research_1
+```
+
+---
+
 ## Agent Trace
 
 Every run emits typed events. You can retrieve the full event history or ask

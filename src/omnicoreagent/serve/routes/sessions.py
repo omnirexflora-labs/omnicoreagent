@@ -26,6 +26,7 @@ def create_sessions_router() -> APIRouter:
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
             },
         )
 

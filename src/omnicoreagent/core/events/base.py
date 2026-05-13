@@ -2,12 +2,18 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
+from contextvars import ContextVar, Token
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
 import json
 from typing import Any, Type
 from uuid import uuid4
+
+_CURRENT_EVENT_RUN_ID: ContextVar[str | None] = ContextVar(
+    "omnicoreagent_event_run_id",
+    default=None,
+)
 
 
 class EventType(str, Enum):
@@ -210,6 +216,18 @@ def _to_plain(value: Any) -> Any:
     return value
 
 
+def current_event_run_id() -> str | None:
+    return _CURRENT_EVENT_RUN_ID.get()
+
+
+def set_event_run_id(run_id: str | None) -> Token:
+    return _CURRENT_EVENT_RUN_ID.set(run_id)
+
+
+def reset_event_run_id(token: Token) -> None:
+    _CURRENT_EVENT_RUN_ID.reset(token)
+
+
 @dataclass
 class Event:
     type: EventType | str
@@ -217,6 +235,8 @@ class Event:
     agent_name: str
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     event_id: str = field(default_factory=lambda: str(uuid4()))
+    sequence: int | None = None
+    run_id: str | None = field(default_factory=current_event_run_id)
 
     def __post_init__(self):
         self.type = EventType(self.type)
@@ -232,6 +252,8 @@ class Event:
             "timestamp": _to_plain(self.timestamp),
             "agent_name": self.agent_name,
             "event_id": self.event_id,
+            "sequence": self.sequence,
+            "run_id": self.run_id,
         }
 
     def dict(self) -> dict[str, Any]:
@@ -270,4 +292,24 @@ class BaseEventStore(ABC):
 
     @abstractmethod
     async def stream(self, session_id: str) -> AsyncIterator[Event]:
+        raise NotImplementedError("Subclasses must implement this method")
+
+    @abstractmethod
+    async def get_stream_cursor(self, session_id: str) -> str | None:
+        raise NotImplementedError("Subclasses must implement this method")
+
+    @abstractmethod
+    async def stream_after(
+        self,
+        session_id: str,
+        cursor: str | None,
+    ) -> AsyncIterator[Event]:
+        raise NotImplementedError("Subclasses must implement this method")
+
+    @abstractmethod
+    async def get_events_after(
+        self,
+        session_id: str,
+        cursor: str | None,
+    ) -> list[Event]:
         raise NotImplementedError("Subclasses must implement this method")
