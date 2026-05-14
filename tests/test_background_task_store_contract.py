@@ -36,7 +36,8 @@ MONGODB_CONTRACT_URI_ENV = "OMNICOREAGENT_TEST_MONGODB_URI"
 MONGODB_CONTRACT_DATABASE_ENV = "OMNICOREAGENT_TEST_MONGODB_DATABASE"
 DEFAULT_MONGODB_CONTRACT_URI = "mongodb://localhost:27017"
 DEFAULT_MONGODB_CONTRACT_DATABASE = "omnicoreagent_test"
-SHARED_CONTRACT_BACKENDS = ["in_memory", "sql", "mongodb"]
+SHARED_CONTRACT_BACKENDS = ["in_memory", "sql", "redis", "mongodb"]
+_UNAVAILABLE_BACKENDS: dict[str, str] = {}
 
 
 def agent_spec(agent_id: str = "agent") -> BackgroundAgentSpec:
@@ -65,24 +66,35 @@ def background_run(
     *,
     occurrence_id: str | None = None,
     queued_at: datetime | None = None,
+    trigger_type: TriggerType = TriggerType.MANUAL,
+    due_at: datetime | None = None,
 ) -> BackgroundRun:
     return BackgroundRun(
         task_id=task_id,
         agent_id="agent",
         query_snapshot=f"snapshot {task_id}",
-        trigger_type=TriggerType.MANUAL,
+        trigger_type=trigger_type,
         session_id=f"session-{task_id}",
         workspace_path=f"background/agent/{task_id}/run",
         occurrence_id=occurrence_id,
+        due_at=due_at,
         queued_at=queued_at,
     )
 
 
 async def create_store(kind: str, tmp_path):
+    skip_if_backend_unavailable(kind)
     if kind == "in_memory":
         store = InMemoryTaskStore()
     elif kind == "sql":
         store = SqlTaskStore(url=f"sqlite:///{tmp_path / 'background.db'}")
+    elif kind == "redis":
+        store = RedisTaskStore(
+            url=redis_contract_url(),
+            prefix=f"test:omnicoreagent:background:{uuid4().hex}",
+            connect_timeout=0.2,
+            lock_timeout=0.5,
+        )
     elif kind == "mongodb":
         store = MongoDbTaskStore(
             uri=mongodb_contract_uri(),
@@ -97,13 +109,21 @@ async def create_store(kind: str, tmp_path):
         await store.initialize()
     except Exception as exc:
         await store.close()
+        if kind == "redis":
+            skip_backend(kind, redis_unavailable_message(exc))
         if kind == "mongodb":
-            pytest.skip(mongodb_unavailable_message(exc))
+            skip_backend(kind, mongodb_unavailable_message(exc))
         raise
     return store
 
 
 async def close_store(store) -> None:
+    if isinstance(store, RedisTaskStore):
+        try:
+            await cleanup_redis_prefix(store)
+        finally:
+            await store.close()
+        return
     if isinstance(store, MongoDbTaskStore):
         try:
             await cleanup_mongodb_prefix(store)
@@ -111,6 +131,33 @@ async def close_store(store) -> None:
             await store.close()
         return
     await store.close()
+
+
+def skip_if_backend_unavailable(kind: str) -> None:
+    if kind in _UNAVAILABLE_BACKENDS:
+        pytest.skip(_UNAVAILABLE_BACKENDS[kind])
+
+
+def skip_backend(kind: str, message: str) -> None:
+    _UNAVAILABLE_BACKENDS[kind] = message
+    pytest.skip(message)
+
+
+async def save_mutated_schedule_state(store) -> None:
+    await store.save_task(task_spec(schedule={"type": "interval", "seconds": 60}))
+    state = await store.get_schedule_state("task")
+    due_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    state = state.model_copy(update={"next_due_at": due_at}, deep=True)
+    await store.save_schedule_state(state)
+    await store.advance_schedule(
+        "task",
+        expected_revision=state.schedule_revision,
+        occurrence_id=build_occurrence_id(
+            ScheduleType.INTERVAL, state.schedule_revision, due_at
+        ),
+        next_due_at=due_at + timedelta(seconds=60),
+    )
+    await store.set_schedule_paused("task", True)
 
 
 @pytest.mark.asyncio
@@ -148,18 +195,243 @@ async def test_task_store_contract_core_records_and_deterministic_lists(
         assert advanced.last_due_at == state.next_due_at
         assert advanced.next_due_at is None
 
+        run_order_start = datetime.now(timezone.utc)
         first = await store.create_run_with_overlap_guard(
-            background_run(occurrence_id=occurrence_id),
+            background_run(
+                occurrence_id=occurrence_id,
+                queued_at=run_order_start,
+            ),
             OverlapPolicy.ALLOW_PARALLEL,
         )
         second = await store.create_run_with_overlap_guard(
-            background_run("task", occurrence_id="manual-second"),
+            background_run(
+                "task",
+                occurrence_id="manual-second",
+                queued_at=run_order_start + timedelta(seconds=1),
+            ),
             OverlapPolicy.ALLOW_PARALLEL,
         )
         assert [run.run_id for run in await store.list_runs()] == [
             first.run_id,
             second.run_id,
         ]
+    finally:
+        await close_store(store)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store_kind", SHARED_CONTRACT_BACKENDS)
+async def test_task_store_contract_scheduled_dispatch_is_idempotent_and_advances_state(
+    store_kind, tmp_path
+):
+    store = await create_store(store_kind, tmp_path)
+    try:
+        await store.save_agent(agent_spec())
+        await store.save_task(
+            task_spec(schedule={"type": "interval", "seconds": 60})
+        )
+        state = await store.get_schedule_state("task")
+        due_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        state = state.model_copy(update={"next_due_at": due_at}, deep=True)
+        await store.save_schedule_state(state)
+
+        occurrence_id = build_occurrence_id(
+            ScheduleType.INTERVAL, state.schedule_revision, due_at
+        )
+        next_due_at = due_at + timedelta(seconds=60)
+        scheduled_run = background_run(
+            occurrence_id=occurrence_id,
+            trigger_type=TriggerType.INTERVAL,
+            due_at=due_at,
+            queued_at=due_at,
+        )
+
+        created = await store.dispatch_scheduled_run(
+            scheduled_run,
+            OverlapPolicy.ALLOW_PARALLEL,
+            expected_schedule_revision=state.schedule_revision,
+            next_due_at=next_due_at,
+        )
+
+        assert created.status == RunStatus.QUEUED
+        updated_state = await store.get_schedule_state("task")
+        assert updated_state.schedule_revision == state.schedule_revision
+        assert updated_state.last_due_at == due_at
+        assert updated_state.next_due_at == next_due_at
+        assert updated_state.last_dispatched_at is not None
+
+        duplicate = await store.dispatch_scheduled_run(
+            background_run(
+                occurrence_id=occurrence_id,
+                trigger_type=TriggerType.INTERVAL,
+                due_at=due_at,
+                queued_at=due_at + timedelta(seconds=1),
+            ),
+            OverlapPolicy.ALLOW_PARALLEL,
+            expected_schedule_revision=state.schedule_revision,
+            next_due_at=next_due_at + timedelta(seconds=60),
+        )
+        assert duplicate.run_id == created.run_id
+        assert [run.run_id for run in await store.list_runs()] == [created.run_id]
+        duplicate_state = await store.get_schedule_state("task")
+        assert duplicate_state.next_due_at == updated_state.next_due_at
+        assert duplicate_state.last_due_at == updated_state.last_due_at
+        assert duplicate_state.last_dispatched_at == updated_state.last_dispatched_at
+        assert duplicate_state.updated_at == updated_state.updated_at
+
+        with pytest.raises(TaskStoreError):
+            await store.dispatch_scheduled_run(
+                background_run(
+                    occurrence_id="wrong-revision",
+                    trigger_type=TriggerType.INTERVAL,
+                    due_at=next_due_at,
+                ),
+                OverlapPolicy.ALLOW_PARALLEL,
+                expected_schedule_revision=state.schedule_revision + 1,
+                next_due_at=next_due_at + timedelta(seconds=60),
+            )
+    finally:
+        await close_store(store)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store_kind", SHARED_CONTRACT_BACKENDS)
+async def test_task_store_contract_active_runs_and_cancel_previous(
+    store_kind, tmp_path
+):
+    store = await create_store(store_kind, tmp_path)
+    try:
+        await store.save_agent(agent_spec())
+        await store.save_task(
+            task_spec(overlap_policy=OverlapPolicy.CANCEL_PREVIOUS)
+        )
+        await store.save_task(task_spec("other"))
+
+        queued_at = datetime.now(timezone.utc)
+        first = await store.create_run_with_overlap_guard(
+            background_run(
+                occurrence_id="first",
+                queued_at=queued_at,
+            ),
+            OverlapPolicy.CANCEL_PREVIOUS,
+        )
+        second = await store.create_run_with_overlap_guard(
+            background_run(
+                occurrence_id="second",
+                queued_at=queued_at + timedelta(seconds=1),
+            ),
+            OverlapPolicy.CANCEL_PREVIOUS,
+        )
+        other = await store.create_run_with_overlap_guard(
+            background_run(
+                "other",
+                occurrence_id="other",
+                queued_at=queued_at + timedelta(seconds=2),
+            ),
+            OverlapPolicy.ALLOW_PARALLEL,
+        )
+
+        cancelled_first = await store.get_run(first.run_id)
+        assert cancelled_first.cancel_requested_at is not None
+        assert await store.is_cancel_requested(first.run_id) is True
+        assert [run.run_id for run in await store.list_active_runs("task")] == [
+            first.run_id,
+            second.run_id,
+        ]
+
+        await store.transition_run(first.run_id, {RunStatus.QUEUED}, RunStatus.CANCELLED)
+        assert [run.run_id for run in await store.list_active_runs("task")] == [
+            second.run_id
+        ]
+        assert [run.run_id for run in await store.list_active_runs()] == [
+            second.run_id,
+            other.run_id,
+        ]
+    finally:
+        await close_store(store)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store_kind", SHARED_CONTRACT_BACKENDS)
+async def test_task_store_contract_deterministic_indexes_and_work_queues(
+    store_kind, tmp_path
+):
+    store = await create_store(store_kind, tmp_path)
+    try:
+        await store.save_agent(agent_spec())
+        created_at = datetime.now(timezone.utc)
+        due_at = created_at - timedelta(seconds=1)
+        task_a = task_spec(
+            "task-a",
+            schedule={"type": "once", "run_at": due_at},
+        ).model_copy(
+            update={"created_at": created_at, "updated_at": created_at},
+            deep=True,
+        )
+        task_b = task_spec(
+            "task-b",
+            schedule={"type": "once", "run_at": due_at + timedelta(seconds=1)},
+        ).model_copy(
+            update={
+                "created_at": created_at + timedelta(seconds=1),
+                "updated_at": created_at + timedelta(seconds=1),
+            },
+            deep=True,
+        )
+        await store.save_task(task_b)
+        await store.save_task(task_a)
+
+        assert [task.task_id for task in await store.list_tasks()] == [
+            "task-a",
+            "task-b",
+        ]
+        due = await store.get_due_schedules(datetime.now(timezone.utc), limit=10)
+        assert [task.task_id for task, _state, _occurrence in due] == [
+            "task-a",
+            "task-b",
+        ]
+
+        later = await store.create_run_with_overlap_guard(
+            background_run(
+                "task-a",
+                occurrence_id="later",
+                queued_at=created_at - timedelta(seconds=5),
+            ),
+            OverlapPolicy.ALLOW_PARALLEL,
+        )
+        earlier = await store.create_run_with_overlap_guard(
+            background_run(
+                "task-b",
+                occurrence_id="earlier",
+                queued_at=created_at - timedelta(seconds=10),
+            ),
+            OverlapPolicy.ALLOW_PARALLEL,
+        )
+        assert [run.run_id for run in await store.list_claimable_runs(limit=10)] == [
+            earlier.run_id,
+            later.run_id,
+        ]
+
+        claimed = await store.claim_run(earlier.run_id, "worker", lease_seconds=30)
+        await store.create_attempt(
+            BackgroundAttempt(
+                run_id=claimed.run_id,
+                attempt_number=2,
+                worker_id="worker",
+                lease_token=claimed.lease_token,
+            )
+        )
+        await store.create_attempt(
+            BackgroundAttempt(
+                run_id=claimed.run_id,
+                attempt_number=1,
+                worker_id="worker",
+                lease_token=claimed.lease_token,
+            )
+        )
+        assert [
+            attempt.attempt_number for attempt in await store.list_attempts(claimed.run_id)
+        ] == [1, 2]
     finally:
         await close_store(store)
 
@@ -348,6 +620,15 @@ def redis_contract_url() -> str:
     return os.getenv(REDIS_CONTRACT_URL_ENV, DEFAULT_REDIS_CONTRACT_URL)
 
 
+def redis_unavailable_message(exc: Exception) -> str:
+    return (
+        "Redis task store unavailable. To run live Redis contract tests, "
+        f"set {REDIS_CONTRACT_URL_ENV}, or start a local Redis server at "
+        f"{DEFAULT_REDIS_CONTRACT_URL}. Configured URL: {redis_contract_url()}. "
+        f"Error: {_summarize_exception(exc)}"
+    )
+
+
 def mongodb_contract_uri() -> str:
     return os.getenv(MONGODB_CONTRACT_URI_ENV, DEFAULT_MONGODB_CONTRACT_URI)
 
@@ -359,14 +640,22 @@ def mongodb_contract_database() -> str:
 def mongodb_unavailable_message(exc: Exception) -> str:
     return (
         "MongoDB task store unavailable. To run live MongoDB contract tests, "
-        f"set {MONGODB_CONTRACT_URI_ENV}=mongodb://localhost:27017 and "
-        f"{MONGODB_CONTRACT_DATABASE_ENV}=omnicoreagent_test, or start a local "
-        f"MongoDB server at {DEFAULT_MONGODB_CONTRACT_URI}. Error: {exc}"
+        f"set {MONGODB_CONTRACT_URI_ENV} and {MONGODB_CONTRACT_DATABASE_ENV}, "
+        f"or start a local MongoDB server at {DEFAULT_MONGODB_CONTRACT_URI}. "
+        f"Configured URI: {mongodb_contract_uri()}; database: "
+        f"{mongodb_contract_database()}. Error: {_summarize_exception(exc)}"
     )
+
+
+def _summarize_exception(exc: Exception) -> str:
+    message = str(exc).splitlines()[0]
+    message = message.split(", Topology Description:", 1)[0]
+    return f"{type(exc).__name__}: {message[:240]}"
 
 
 @pytest.mark.asyncio
 async def test_redis_task_store_contract_persists_across_reconnect():
+    skip_if_backend_unavailable("redis")
     prefix = f"test:omnicoreagent:background:{uuid4().hex}"
     url = redis_contract_url()
     first = RedisTaskStore(
@@ -379,11 +668,12 @@ async def test_redis_task_store_contract_persists_across_reconnect():
         await first.initialize()
     except Exception as exc:
         await first.close()
-        pytest.skip(f"Redis task store unavailable: {exc}")
+        skip_backend("redis", redis_unavailable_message(exc))
 
     try:
         await first.save_agent(agent_spec())
-        await first.save_task(task_spec())
+        await save_mutated_schedule_state(first)
+        schedule_state = await first.get_schedule_state("task")
         run = await first.create_run_with_overlap_guard(
             background_run(), OverlapPolicy.ALLOW_PARALLEL
         )
@@ -396,6 +686,19 @@ async def test_redis_task_store_contract_persists_across_reconnect():
             "worker",
             claimed.lease_token,
         )
+        attempt = BackgroundAttempt(
+            run_id=running.run_id,
+            attempt_number=1,
+            worker_id="worker",
+            lease_token=running.lease_token,
+        )
+        await first.create_attempt(attempt)
+        await first.update_attempt(
+            attempt.attempt_id,
+            {"status": AttemptStatus.COMPLETED},
+            "worker",
+            running.lease_token,
+        )
         completed = await first.transition_run(
             running.run_id,
             {RunStatus.RUNNING},
@@ -405,6 +708,12 @@ async def test_redis_task_store_contract_persists_across_reconnect():
             running.lease_token,
         )
         assert completed.run_id == run.run_id
+
+        cancel_requested = await first.create_run_with_overlap_guard(
+            background_run(occurrence_id="cancel-requested"),
+            OverlapPolicy.ALLOW_PARALLEL,
+        )
+        await first.request_cancel(cancel_requested.run_id)
 
         restored = RedisTaskStore(
             url=url,
@@ -416,7 +725,21 @@ async def test_redis_task_store_contract_persists_across_reconnect():
         try:
             assert (await restored.get_agent("agent")).agent_id == "agent"
             assert (await restored.get_task("task")).task_id == "task"
+            restored_state = await restored.get_schedule_state("task")
+            assert restored_state.task_id == schedule_state.task_id
+            assert restored_state.next_due_at == schedule_state.next_due_at
+            assert restored_state.last_due_at == schedule_state.last_due_at
+            assert restored_state.last_dispatched_at == schedule_state.last_dispatched_at
+            assert restored_state.paused == schedule_state.paused
+            assert restored_state.schedule_revision == schedule_state.schedule_revision
             assert (await restored.get_run(run.run_id)).status == RunStatus.COMPLETED
+            attempts = await restored.list_attempts(run.run_id)
+            assert [(item.attempt_number, item.status) for item in attempts] == [
+                (1, AttemptStatus.COMPLETED)
+            ]
+            assert await restored.is_cancel_requested(cancel_requested.run_id) is True
+            restored_cancelled = await restored.get_run(cancel_requested.run_id)
+            assert restored_cancelled.cancel_requested_at is not None
         finally:
             await restored.close()
     finally:
@@ -441,6 +764,7 @@ async def cleanup_mongodb_prefix(store: MongoDbTaskStore) -> None:
 
 @pytest.mark.asyncio
 async def test_mongodb_task_store_contract_persists_across_reconnect():
+    skip_if_backend_unavailable("mongodb")
     collection_prefix = f"test_omnicoreagent_background_{uuid4().hex}"
     first = MongoDbTaskStore(
         uri=mongodb_contract_uri(),
@@ -453,11 +777,11 @@ async def test_mongodb_task_store_contract_persists_across_reconnect():
         await first.initialize()
     except Exception as exc:
         await first.close()
-        pytest.skip(mongodb_unavailable_message(exc))
+        skip_backend("mongodb", mongodb_unavailable_message(exc))
 
     try:
         await first.save_agent(agent_spec())
-        await first.save_task(task_spec())
+        await save_mutated_schedule_state(first)
         schedule_state = await first.get_schedule_state("task")
         run = await first.create_run_with_overlap_guard(
             background_run(), OverlapPolicy.ALLOW_PARALLEL
@@ -511,9 +835,13 @@ async def test_mongodb_task_store_contract_persists_across_reconnect():
         try:
             assert (await restored.get_agent("agent")).agent_id == "agent"
             assert (await restored.get_task("task")).task_id == "task"
-            assert (await restored.get_schedule_state("task")).task_id == (
-                schedule_state.task_id
-            )
+            restored_state = await restored.get_schedule_state("task")
+            assert restored_state.task_id == schedule_state.task_id
+            assert restored_state.next_due_at == schedule_state.next_due_at
+            assert restored_state.last_due_at == schedule_state.last_due_at
+            assert restored_state.last_dispatched_at == schedule_state.last_dispatched_at
+            assert restored_state.paused == schedule_state.paused
+            assert restored_state.schedule_revision == schedule_state.schedule_revision
             assert (await restored.get_run(run.run_id)).status == RunStatus.COMPLETED
             attempts = await restored.list_attempts(run.run_id)
             assert [(item.attempt_number, item.status) for item in attempts] == [
