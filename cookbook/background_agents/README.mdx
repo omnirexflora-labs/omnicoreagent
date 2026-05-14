@@ -125,11 +125,31 @@ finally:
         await agent.cleanup()
 ```
 
+The runnable scheduled example uses the same worker path without requiring an
+LLM API key:
+
+```bash
+python3 cookbook/background_agents/scheduled_task_example.py
+```
+
+It creates a due `once` task, starts the background worker, waits for the run to
+complete, then prints task status, manager status, lifecycle events, and the
+workspace files created for the run. By default it writes the demo workspace
+under your system temp directory. Set `OMNICOREAGENT_COOKBOOK_WORKSPACE_DIR` to
+choose a different location:
+
+```bash
+OMNICOREAGENT_COOKBOOK_WORKSPACE_DIR=/tmp/omnicoreagent-background-demo \
+  python3 cookbook/background_agents/scheduled_task_example.py
+```
+
 ## Runtime Controls
 
 ```python
 run = await manager.run_now("health_report", wait=True)
 status = await manager.get_run(run.run_id)
+task_status = await manager.get_task_status("health_report")
+manager_status = await manager.get_manager_status()
 attempts = await manager.list_attempts(run.run_id)
 events = await manager.get_run_events(run.run_id)
 workspace = await manager.get_run_workspace(run.run_id)
@@ -171,9 +191,14 @@ curl -X POST http://localhost:8000/background/tasks/health_report/run \
   -d '{"wait": true}'
 ```
 
-The background API includes task creation, task listing, pause, resume, delete,
-manual run, cancellation, run status, attempt history, event replay, and
-workspace inspection.
+The background API includes manager status, task creation, task status, task
+listing, pause, resume, delete, manual run, cancellation, run status, attempt
+history, event replay, and workspace inspection.
+
+```bash
+curl http://localhost:8000/background/status
+curl http://localhost:8000/background/tasks/health_report/status
+```
 
 ## Task Configuration
 

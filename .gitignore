@@ -20,6 +20,7 @@ venv/
 
 # ── Workspace (all agent runtime data) ──
 workspace/
+.omnicoreagent/
 
 .agents/skills/*
 omnistudio/web/node_modules/*
