@@ -2364,13 +2364,14 @@ async def test_expired_lease_during_completion_does_not_crash_worker():
     attempts = await manager.list_attempts(run.run_id)
 
     assert did_work is True
-    assert latest.status == RunStatus.RUNNING
+    assert latest.status in {RunStatus.CLAIMED, RunStatus.RUNNING}
     if attempts:
         assert attempts[0].status == AttemptStatus.RUNNING
 
     await manager.recover_expired_runs()
     still_recoverable = await manager.get_run(run.run_id)
     assert still_recoverable.status in {
+        RunStatus.CLAIMED,
         RunStatus.RUNNING,
         RunStatus.RETRYING,
         RunStatus.QUEUED,

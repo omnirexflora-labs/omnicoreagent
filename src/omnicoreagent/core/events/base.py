@@ -27,9 +27,6 @@ class EventType(str, Enum):
     SUB_AGENT_CALL_STARTED = "sub_agent_call_started"
     SUB_AGENT_CALL_RESULT = "sub_agent_call_result"
     SUB_AGENT_CALL_ERROR = "sub_agent_call_error"
-    BACKGROUND_TASK_STARTED = "background_task_started"
-    BACKGROUND_TASK_COMPLETED = "background_task_completed"
-    BACKGROUND_TASK_ERROR = "background_task_error"
     BACKGROUND_AGENT_STATUS = "background_agent_status"
 
 
@@ -113,33 +110,6 @@ class SubAgentCallErrorPayload(SerializableRecord):
 
 
 @dataclass
-class BackgroundTaskStartedPayload(SerializableRecord):
-    agent_id: str
-    session_id: str
-    timestamp: str
-    run_count: int
-    kwargs: dict[str, Any]
-
-
-@dataclass
-class BackgroundTaskCompletedPayload(SerializableRecord):
-    agent_id: str
-    session_id: str
-    timestamp: str
-    run_count: int
-    result: Any
-
-
-@dataclass
-class BackgroundTaskErrorPayload(SerializableRecord):
-    agent_id: str
-    session_id: str
-    timestamp: str
-    error: str
-    error_count: int
-
-
-@dataclass
 class BackgroundAgentStatusPayload(SerializableRecord):
     agent_id: str
     status: str
@@ -175,9 +145,6 @@ EventPayload = (
     | SubAgentCallStartedPayload
     | SubAgentCallResultPayload
     | SubAgentCallErrorPayload
-    | BackgroundTaskStartedPayload
-    | BackgroundTaskCompletedPayload
-    | BackgroundTaskErrorPayload
     | BackgroundAgentStatusPayload
 )
 
@@ -193,9 +160,6 @@ EVENT_PAYLOAD_MAP: dict[EventType, Type[Any]] = {
     EventType.SUB_AGENT_CALL_STARTED: SubAgentCallStartedPayload,
     EventType.SUB_AGENT_CALL_RESULT: SubAgentCallResultPayload,
     EventType.SUB_AGENT_CALL_ERROR: SubAgentCallErrorPayload,
-    EventType.BACKGROUND_TASK_STARTED: BackgroundTaskStartedPayload,
-    EventType.BACKGROUND_TASK_COMPLETED: BackgroundTaskCompletedPayload,
-    EventType.BACKGROUND_TASK_ERROR: BackgroundTaskErrorPayload,
     EventType.BACKGROUND_AGENT_STATUS: BackgroundAgentStatusPayload,
 }
 
