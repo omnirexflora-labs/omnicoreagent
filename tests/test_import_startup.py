@@ -300,6 +300,45 @@ asyncio.run(main())
     }
 
 
+def test_agent_initialize_has_no_per_agent_background_helper(tmp_path):
+    result = _run_import_probe(
+        tmp_path,
+        """
+import asyncio
+import json
+import sys
+
+from omnicoreagent import OmniCoreAgent
+
+async def main():
+    agent = OmniCoreAgent(
+        name="startup",
+        system_instruction="You are fast to initialize.",
+        model_config={"provider": "openai", "model": "gpt-4o", "api_key": "test"},
+        agent_config={"guardrail_mode": "off"},
+    )
+    await agent.initialize()
+
+    react_agent = agent.agent
+    old_attr = "_".join(["background", "task", "manager"])
+    old_module = ".".join(
+        ["omnicoreagent", "core", "agents", "_".join(["background", "tasks"])]
+    )
+    print(json.dumps({
+        "has_legacy_manager": hasattr(react_agent, old_attr),
+        "legacy_module_loaded": old_module in sys.modules,
+    }))
+
+asyncio.run(main())
+""",
+    )
+
+    assert result == {
+        "has_legacy_manager": False,
+        "legacy_module_loaded": False,
+    }
+
+
 def test_background_import_does_not_load_backend_clients(tmp_path):
     result = _run_import_probe(
         tmp_path,

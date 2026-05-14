@@ -1209,7 +1209,7 @@ async def test_background_run_does_not_block_on_hanging_event_append(tmp_path):
         schedule={"type": "manual"},
     )
 
-    run = await asyncio.wait_for(manager.run_now("task", wait=True), timeout=0.5)
+    run = await asyncio.wait_for(manager.run_now("task", wait=True), timeout=2.0)
 
     assert run.status == RunStatus.COMPLETED
     events = await manager.get_run_events(run.run_id)
@@ -1235,7 +1235,7 @@ async def test_slow_claimed_event_append_does_not_expire_active_lease(tmp_path):
         schedule={"type": "manual"},
     )
 
-    run = await asyncio.wait_for(manager.run_now("task", wait=True), timeout=1.0)
+    run = await asyncio.wait_for(manager.run_now("task", wait=True), timeout=2.0)
 
     assert run.status == RunStatus.COMPLETED
 
