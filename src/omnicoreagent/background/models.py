@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+import hashlib
 import re
 from typing import Any
 from uuid import uuid4
@@ -303,7 +304,7 @@ def initial_schedule_due(schedule: ScheduleSpec, now: datetime | None = None) ->
         return None
     if schedule.end_at and due > schedule.end_at:
         return None
-    return due
+    return apply_schedule_jitter(schedule, due)
 
 
 def next_schedule_due(
@@ -313,7 +314,11 @@ def next_schedule_due(
 ) -> datetime | None:
     previous = ensure_utc(previous_due_at) or utc_now()
     reference = ensure_utc(now) or utc_now()
-    if schedule.misfire_policy == MisfirePolicy.SKIP_MISSED and previous < reference:
+    if (
+        schedule.misfire_policy
+        in {MisfirePolicy.SKIP_MISSED, MisfirePolicy.RUN_ONCE}
+        and previous < reference
+    ):
         previous = reference
     if schedule.type in {ScheduleType.MANUAL, ScheduleType.ONCE}:
         return None
@@ -327,7 +332,65 @@ def next_schedule_due(
         return None
     if schedule.end_at and due > schedule.end_at:
         return None
-    return due
+    return apply_schedule_jitter(schedule, due)
+
+
+def schedule_due_occurrences(
+    schedule: ScheduleSpec,
+    first_due_at: datetime | None,
+    now: datetime | None = None,
+    limit: int = 1,
+) -> tuple[list[datetime], datetime | None]:
+    """Return due occurrences to dispatch and the next schedule cursor."""
+    if first_due_at is None or limit <= 0:
+        return [], ensure_utc(first_due_at)
+    current_due = ensure_utc(first_due_at)
+    reference = ensure_utc(now) or utc_now()
+    if current_due is None or current_due > reference:
+        return [], current_due
+
+    occurrences = [current_due]
+    if schedule.type in {ScheduleType.MANUAL, ScheduleType.ONCE}:
+        return occurrences, None
+
+    if schedule.misfire_policy != MisfirePolicy.QUEUE_ALL:
+        return occurrences, next_schedule_due(schedule, current_due, reference)
+
+    next_due = next_schedule_due(schedule, current_due, current_due)
+    while next_due is not None and next_due <= reference and len(occurrences) < limit:
+        occurrences.append(next_due)
+        next_due = next_schedule_due(schedule, next_due, next_due)
+    return occurrences, next_due
+
+
+def apply_schedule_jitter(
+    schedule: ScheduleSpec, due_at: datetime | None
+) -> datetime | None:
+    due = ensure_utc(due_at)
+    if due is None or not schedule.jitter_seconds:
+        return due
+    offset = deterministic_jitter_seconds(schedule, due)
+    jittered = due + timedelta(seconds=offset)
+    if schedule.end_at and jittered > schedule.end_at:
+        return None
+    return jittered
+
+
+def deterministic_jitter_seconds(schedule: ScheduleSpec, due_at: datetime) -> int:
+    if not schedule.jitter_seconds:
+        return 0
+    due = ensure_utc(due_at) or utc_now()
+    key = "|".join(
+        [
+            schedule.type.value,
+            str(schedule.seconds),
+            str(schedule.expression),
+            schedule.timezone,
+            due.isoformat(),
+        ]
+    )
+    digest = hashlib.sha256(key.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") % (schedule.jitter_seconds + 1)
 
 
 class BackgroundAgentSpec(StrictModel):

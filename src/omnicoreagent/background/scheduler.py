@@ -5,8 +5,14 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from omnicoreagent.background.event_log import BackgroundEventLog
-from omnicoreagent.background.models import BackgroundRun
-from omnicoreagent.background.models import RunStatus, TriggerType, next_schedule_due, utc_now
+from omnicoreagent.background.models import (
+    BackgroundRun,
+    RunStatus,
+    TriggerType,
+    build_occurrence_id,
+    schedule_due_occurrences,
+    utc_now,
+)
 from omnicoreagent.background.run_helpers import build_run
 from omnicoreagent.background.store.base import AbstractTaskStore
 
@@ -33,36 +39,59 @@ class BackgroundScheduleDispatcher:
 
     async def dispatch_due_schedules(self, limit: int = 25) -> bool:
         dispatched_any = False
-        due_items = await self.task_store.get_due_schedules(utc_now(), limit=limit)
+        remaining = max(limit, 0)
+        now = utc_now()
+        due_items = await self.task_store.get_due_schedules(now, limit=remaining)
         for task, state, occurrence_id in due_items:
-            if state.next_due_at is None:
+            if remaining <= 0 or state.next_due_at is None:
                 continue
             trigger = TriggerType(task.schedule.type.value)
-            run = build_run(
-                task,
-                trigger,
-                task.query,
-                due_at=state.next_due_at,
-                occurrence_id=occurrence_id,
+            occurrences, final_next_due_at = schedule_due_occurrences(
+                task.schedule,
+                state.next_due_at,
+                now,
+                limit=remaining,
             )
-            existing_run_ids = {
-                item.run_id for item in await self.task_store.list_runs(task.task_id)
-            }
-            next_due_at = next_schedule_due(task.schedule, state.next_due_at, utc_now())
-            created = await self.task_store.dispatch_scheduled_run(
-                run,
-                task.overlap_policy,
-                state.schedule_revision,
-                next_due_at,
-            )
-            dispatched_any = True
-            if created.run_id in existing_run_ids:
+            if not occurrences:
                 continue
-            await self.emit_run("background_task_scheduled", created)
-            await self.emit_run(
-                "background_run_skipped"
-                if created.status == RunStatus.SKIPPED
-                else "background_run_queued",
-                created,
-            )
+            for index, due_at in enumerate(occurrences):
+                occurrence_for_due = (
+                    occurrence_id
+                    if index == 0
+                    else build_occurrence_id(
+                        task.schedule.type, state.schedule_revision, due_at
+                    )
+                )
+                run = build_run(
+                    task,
+                    trigger,
+                    task.query,
+                    due_at=due_at,
+                    occurrence_id=occurrence_for_due,
+                )
+                existing_run_ids = {
+                    item.run_id for item in await self.task_store.list_runs(task.task_id)
+                }
+                next_due_at = (
+                    occurrences[index + 1]
+                    if index + 1 < len(occurrences)
+                    else final_next_due_at
+                )
+                created = await self.task_store.dispatch_scheduled_run(
+                    run,
+                    task.overlap_policy,
+                    state.schedule_revision,
+                    next_due_at,
+                )
+                dispatched_any = True
+                remaining -= 1
+                if created.run_id in existing_run_ids:
+                    continue
+                await self.emit_run("background_task_scheduled", created)
+                await self.emit_run(
+                    "background_run_skipped"
+                    if created.status == RunStatus.SKIPPED
+                    else "background_run_queued",
+                    created,
+                )
         return dispatched_any

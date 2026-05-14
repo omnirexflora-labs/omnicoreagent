@@ -33,12 +33,16 @@ from omnicoreagent.background.models import (
     AttemptReason,
     AttemptStatus,
     BackoffPolicy,
+    MisfirePolicy,
     ScheduleType,
     TriggerType,
     build_occurrence_id,
     build_session_id,
     build_workspace_path,
+    deterministic_jitter_seconds,
+    initial_schedule_due,
     next_cron_due,
+    next_schedule_due,
 )
 from omnicoreagent.background.recovery import BackgroundRunRecovery
 from omnicoreagent.background.transitions import BackgroundRunTransitions
@@ -2967,6 +2971,120 @@ async def test_skip_missed_interval_advances_from_now_not_stale_due():
     updated = await manager.task_store.get_schedule_state("task")
 
     assert updated.next_due_at > datetime.now(timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_run_once_misfire_dispatches_one_run_and_advances_from_now():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    await manager.register_agent("agent", FakeAgent())
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "interval", "seconds": 60, "misfire_policy": "run_once"},
+        overlap_policy=OverlapPolicy.ALLOW_PARALLEL,
+    )
+    stale_due = datetime.now(timezone.utc) - timedelta(hours=1)
+    state = await manager.task_store.get_schedule_state("task")
+    await manager.task_store.save_schedule_state(
+        state.model_copy(update={"next_due_at": stale_due})
+    )
+
+    await manager._dispatch_due_schedules()
+
+    runs = await manager.list_runs(task_id="task")
+    updated = await manager.task_store.get_schedule_state("task")
+    assert len(runs) == 1
+    assert runs[0].due_at == stale_due
+    assert updated.next_due_at > datetime.now(timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_queue_all_misfire_dispatches_due_occurrences_until_limit():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    await manager.register_agent("agent", FakeAgent())
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "interval", "seconds": 60, "misfire_policy": "queue_all"},
+        overlap_policy=OverlapPolicy.ALLOW_PARALLEL,
+    )
+    now = datetime.now(timezone.utc)
+    first_due = now - timedelta(minutes=5)
+    state = await manager.task_store.get_schedule_state("task")
+    await manager.task_store.save_schedule_state(
+        state.model_copy(update={"next_due_at": first_due})
+    )
+
+    await manager._dispatch_due_schedules(limit=3)
+
+    runs = await manager.list_runs(task_id="task")
+    updated = await manager.task_store.get_schedule_state("task")
+    assert [run.due_at for run in runs] == [
+        first_due,
+        first_due + timedelta(seconds=60),
+        first_due + timedelta(seconds=120),
+    ]
+    assert updated.next_due_at == first_due + timedelta(seconds=180)
+    assert updated.next_due_at < datetime.now(timezone.utc)
+
+    await manager._dispatch_due_schedules(limit=10)
+
+    runs = await manager.list_runs(task_id="task")
+    assert len(runs) >= 6
+    assert len({run.occurrence_id for run in runs}) == len(runs)
+    assert (await manager.task_store.get_schedule_state("task")).next_due_at > (
+        datetime.now(timezone.utc) - timedelta(seconds=1)
+    )
+
+
+def test_schedule_jitter_is_bounded_and_stable():
+    base = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    schedule = ScheduleSpec(
+        type="interval",
+        seconds=60,
+        jitter_seconds=30,
+        misfire_policy=MisfirePolicy.RUN_ONCE,
+    )
+
+    initial_due = initial_schedule_due(schedule, base)
+    initial_offset = deterministic_jitter_seconds(
+        schedule, base + timedelta(seconds=60)
+    )
+    assert initial_due == base + timedelta(seconds=60 + initial_offset)
+    assert 0 <= initial_offset <= 30
+    assert initial_due == initial_schedule_due(schedule, base)
+
+    next_due = next_schedule_due(schedule, initial_due, initial_due)
+    next_offset = deterministic_jitter_seconds(
+        schedule, initial_due + timedelta(seconds=60)
+    )
+    assert next_due == initial_due + timedelta(seconds=60 + next_offset)
+
+
+def test_schedule_jitter_respects_end_at_boundary():
+    base = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    for seconds in range(1, 120):
+        schedule = ScheduleSpec(
+            type="interval",
+            seconds=seconds,
+            jitter_seconds=30,
+        )
+        raw_due = base + timedelta(seconds=seconds)
+        offset = deterministic_jitter_seconds(schedule, raw_due)
+        if offset <= 0:
+            continue
+        bounded = ScheduleSpec(
+            type="interval",
+            seconds=seconds,
+            jitter_seconds=30,
+            end_at=raw_due + timedelta(seconds=offset - 1),
+        )
+        assert initial_schedule_due(bounded, base) is None
+        assert next_schedule_due(bounded, base, base) is None
+        return
+    raise AssertionError("expected at least one deterministic jitter offset > 0")
 
 
 def test_cron_due_uses_configured_timezone():
