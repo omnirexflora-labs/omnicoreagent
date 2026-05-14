@@ -314,7 +314,7 @@ Fields:
 | `timezone` | `str` | no | Defaults to UTC |
 | `start_at` | `datetime | None` | no | Earliest due time |
 | `end_at` | `datetime | None` | no | Latest due time |
-| `jitter_seconds` | `int | None` | no | Random schedule jitter |
+| `jitter_seconds` | `int | None` | no | Deterministic per-occurrence jitter delay |
 | `misfire_policy` | `skip_missed | run_once | queue_all` | no | Missed trigger behavior |
 
 Validation:
@@ -325,6 +325,26 @@ Validation:
 - `manual` does not require scheduler fields.
 - `end_at` must be after `start_at` when both exist.
 - `jitter_seconds` must be non-negative when provided.
+
+Misfire behavior:
+
+- `skip_missed`: dispatch the currently due occurrence once, then advance the
+  next due cursor from the current scheduler time so older missed intervals are
+  skipped.
+- `run_once`: dispatch one run for a missed interval window, then advance the
+  next due cursor from the current scheduler time.
+- `queue_all`: dispatch each missed occurrence in due-time order up to the
+  dispatcher limit. If more missed occurrences remain after the limit, the
+  schedule cursor remains due so the next dispatcher pass continues from the
+  next undispatched occurrence.
+
+Jitter behavior:
+
+- `jitter_seconds` applies a deterministic delay between `0` and
+  `jitter_seconds` to computed due times.
+- The jitter value is derived from the schedule fields and due timestamp so
+  schedule cursors remain stable across process restarts.
+- Jitter never creates extra occurrences; it only delays a computed occurrence.
 
 ### `RetryPolicy`
 

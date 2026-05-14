@@ -467,6 +467,15 @@ Schedule state tracks:
 - jitter
 - enabled/paused state
 
+Misfire handling is deterministic:
+
+- `skip_missed` and `run_once` create at most one run per dispatcher pass for a
+  stale cursor and advance the next due time from the scheduler's current time.
+- `queue_all` creates due occurrences in order until the dispatcher limit is
+  reached, leaving the cursor due when more missed work remains.
+- `jitter_seconds` is a stable per-occurrence delay derived from schedule data
+  and due time, so restarted managers compute the same cursor.
+
 ### Schedule State
 
 `BackgroundScheduleState` records mutable scheduling progress for one task.
