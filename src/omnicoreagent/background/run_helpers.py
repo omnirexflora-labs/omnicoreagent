@@ -41,12 +41,19 @@ def build_run(
 
 
 def build_run_context(run: BackgroundRun) -> str:
+    workspace_root = f"/workspace/{run.workspace_path}"
     return (
         "This is a background run.\n"
         f"run_id: {run.run_id}\n"
         f"task_id: {run.task_id}\n"
-        f"workspace_path: /workspace/{run.workspace_path}\n"
-        "Use output.md for the final durable result.\n\n"
+        f"workspace_path: {workspace_root}\n"
+        "Write durable background output inside this workspace.\n"
+        f"- final result: {workspace_root}/output.md\n"
+        f"- progress, notes, todos, and resumable work: {workspace_root}/scratchpad/\n"
+        f"- logs: {workspace_root}/logs/\n"
+        f"- generated artifacts and data files: {workspace_root}/artifacts/\n"
+        f"- delegated subagent outputs: {workspace_root}/subagents/\n"
+        "Keep your final response concise; put durable detail in workspace files.\n\n"
         f"{run.query_snapshot}"
     )
 

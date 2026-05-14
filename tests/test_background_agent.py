@@ -985,7 +985,14 @@ async def test_manager_run_now_executes_agent_and_records_events():
     assert run.status == RunStatus.COMPLETED
     assert run.result_preview == "complete"
     assert agent.calls[0]["session_id"] == "background:agent:task"
-    assert "workspace_path: /workspace/background/agent/task/" in agent.calls[0]["query"]
+    query = agent.calls[0]["query"]
+    assert "workspace_path: /workspace/background/agent/task/" in query
+    assert "/output.md" in query
+    assert "/scratchpad/" in query
+    assert "/logs/" in query
+    assert "/artifacts/" in query
+    assert "/subagents/" in query
+    assert query.endswith("do work")
     events = await manager.get_run_events(run.run_id)
     assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
     assert events[-1]["event"] == "background_run_completed"
