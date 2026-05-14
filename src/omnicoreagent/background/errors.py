@@ -37,6 +37,10 @@ class TaskStoreError(BackgroundAgentError):
     """Raised when task-store operations fail."""
 
 
+class RunCancellationRequestedError(TaskStoreError):
+    """Raised when a cancellation request wins a non-terminal transition race."""
+
+
 class RunLeaseError(BackgroundAgentError):
     """Raised when a run lease cannot be acquired or verified."""
 

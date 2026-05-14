@@ -100,6 +100,7 @@ RunNotFoundError
 InvalidScheduleError
 InvalidTaskStoreError
 TaskStoreError
+RunCancellationRequestedError
 RunLeaseError
 RunCancelledError
 RunTimeoutError
@@ -705,6 +706,9 @@ Store requirements:
 - writes are atomic at record level.
 - IDs are unique.
 - state transitions are validated.
+- cancellation-requested active runs reject non-terminal progress transitions
+  such as completion, retrying, and retry requeue with
+  `RunCancellationRequestedError`.
 - terminal status is written exactly once.
 - claim operations are atomic.
 - scheduled dispatch creates the run, applies overlap, handles
@@ -1006,6 +1010,7 @@ RunNotFoundError
 InvalidScheduleError
 InvalidTaskStoreError
 TaskStoreError
+RunCancellationRequestedError
 RunLeaseError
 RunCancelledError
 RunTimeoutError
