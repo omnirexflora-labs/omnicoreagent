@@ -10,7 +10,11 @@ from typing import Any
 
 from omnicoreagent.core.events.base import reset_event_run_id, set_event_run_id
 from omnicoreagent.background.agent_specs import resolve_agent
-from omnicoreagent.background.errors import RunLeaseError, RunNotFoundError, TaskStoreError
+from omnicoreagent.background.errors import (
+    RunCancellationRequestedError,
+    RunLeaseError,
+    RunNotFoundError,
+)
 from omnicoreagent.background.event_log import BackgroundEventLog
 from omnicoreagent.background.models import (
     TERMINAL_RUN_STATUSES,
@@ -221,7 +225,7 @@ class BackgroundSupervisor:
         for run in expired:
             try:
                 await self.recover_expired_run(run)
-            except RunLeaseError:
+            except (RunLeaseError, RunCancellationRequestedError):
                 continue
 
     async def recover_expired_run(self, run: BackgroundRun) -> None:
@@ -252,14 +256,14 @@ class BackgroundSupervisor:
             return
 
         if stolen.status == RunStatus.CLAIMED:
-            recovered = await self.task_store.transition_run(
-                stolen.run_id,
-                {RunStatus.CLAIMED},
-                RunStatus.QUEUED,
-                release_lease_patch(),
-                self.worker_id,
-                stolen.lease_token,
+            recovered = await self.transition_or_cancel_without_attempt(
+                run=stolen,
+                expected={RunStatus.CLAIMED},
+                next_status=RunStatus.QUEUED,
+                patch=release_lease_patch(),
             )
+            if recovered is None:
+                return
             await self.emit_run("background_run_recovered", recovered)
             return
 
@@ -267,22 +271,22 @@ class BackgroundSupervisor:
         if can_retry:
             retrying = stolen
             if stolen.status == RunStatus.RUNNING:
-                retrying = await self.task_store.transition_run(
-                    stolen.run_id,
-                    {RunStatus.RUNNING},
-                    RunStatus.RETRYING,
-                    {"error": "lease expired"},
-                    self.worker_id,
-                    stolen.lease_token,
+                retrying = await self.transition_or_cancel_without_attempt(
+                    run=stolen,
+                    expected={RunStatus.RUNNING},
+                    next_status=RunStatus.RETRYING,
+                    patch={"error": "lease expired"},
                 )
-            recovered = await self.task_store.transition_run(
-                retrying.run_id,
-                {RunStatus.RETRYING},
-                RunStatus.QUEUED,
-                release_lease_patch(),
-                self.worker_id,
-                retrying.lease_token,
+                if retrying is None:
+                    return
+            recovered = await self.transition_or_cancel_without_attempt(
+                run=retrying,
+                expected={RunStatus.RETRYING},
+                next_status=RunStatus.QUEUED,
+                patch=release_lease_patch(),
             )
+            if recovered is None:
+                return
             await self.emit_run("background_run_recovered", recovered)
             return
 
@@ -297,14 +301,14 @@ class BackgroundSupervisor:
             or latest.lease_token is None
         ):
             return
-        released = await self.task_store.transition_run(
-            latest.run_id,
-            {RunStatus.CLAIMED},
-            RunStatus.QUEUED,
-            release_lease_patch(),
-            self.worker_id,
-            latest.lease_token,
+        released = await self.transition_or_cancel_without_attempt(
+            run=latest,
+            expected={RunStatus.CLAIMED},
+            next_status=RunStatus.QUEUED,
+            patch=release_lease_patch(),
         )
+        if released is None:
+            return
         await self.emit_run("background_run_queued", released)
 
     async def run_claimed(self, claimed: BackgroundRun) -> None:
@@ -492,10 +496,32 @@ class BackgroundSupervisor:
                 self.worker_id,
                 run.lease_token,
             )
-        except TaskStoreError:
+        except RunCancellationRequestedError:
             if await self.cancel_if_requested(run, attempt):
                 return None
             raise
+
+    async def transition_or_cancel_without_attempt(
+        self,
+        *,
+        run: BackgroundRun,
+        expected: set[RunStatus],
+        next_status: RunStatus,
+        patch: dict[str, Any] | None = None,
+    ) -> BackgroundRun | None:
+        try:
+            return await self.task_store.transition_run(
+                run.run_id,
+                expected,
+                next_status,
+                patch,
+                self.worker_id,
+                run.lease_token,
+            )
+        except RunCancellationRequestedError:
+            latest = await self.task_store.get_run(run.run_id)
+            await self.mark_terminal(latest or run, RunStatus.CANCELLED, "cancelled")
+            return None
 
     async def mark_completed_if_not_cancelled(
         self, running: _RunningAttempt, preview: str | None
@@ -516,7 +542,7 @@ class BackgroundSupervisor:
                 self.worker_id,
                 latest.lease_token,
             )
-        except TaskStoreError:
+        except RunCancellationRequestedError:
             if await self.cancel_if_requested(running.run, running.attempt):
                 return
             raise

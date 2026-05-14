@@ -410,4 +410,5 @@ def _raise_run_timeout(
 def _background_wait_timeout(request_timeout: float | None) -> float | None:
     if request_timeout is None or request_timeout <= 0:
         return None
-    return max(request_timeout - 0.25, 0.001)
+    response_margin = min(max(request_timeout * 0.25, 0.5), 2.0)
+    return max(request_timeout - response_margin, 0.001)

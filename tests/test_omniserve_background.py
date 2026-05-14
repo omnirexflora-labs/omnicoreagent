@@ -364,7 +364,7 @@ def test_background_api_wait_true_without_worker_times_out_on_delayed_retry(tmp_
         assert timeout_detail["task_id"] == "retry_later"
         assert timeout_detail["status"] == "queued"
         assert timeout_detail["run_id"].startswith("run_")
-        assert timeout_detail["wait_timeout_seconds"] == 0.75
+        assert timeout_detail["wait_timeout_seconds"] == 0.5
         assert timeout_detail["request_timeout_seconds"] == 1
         runs = client.get("/background/runs", params={"task_id": "retry_later"})
         assert runs.status_code == 200
@@ -451,7 +451,7 @@ def test_background_api_wait_true_times_out_before_slow_inline_run_finishes(tmp_
         assert timeout_detail["task_id"] == "slow_inline"
         assert timeout_detail["run_id"].startswith("run_")
         assert timeout_detail["status"] in {"claimed", "running"}
-        assert timeout_detail["wait_timeout_seconds"] == 0.75
+        assert timeout_detail["wait_timeout_seconds"] == 0.5
         assert timeout_detail["request_timeout_seconds"] == 1
 
     assert len(agent.calls) == 1

@@ -20,6 +20,7 @@ from omnicoreagent.background import (
     OverlapPolicy,
     RedisTaskStore,
     RetryPolicy,
+    RunCancellationRequestedError,
     RunLeaseError,
     RunStatus,
     ScheduleSpec,
@@ -508,6 +509,72 @@ class CancellingBeforeRetryRequeueStore(InMemoryTaskStore):
         )
 
 
+class CancellingBeforeRecoveryRetryingStore(InMemoryTaskStore):
+    async def transition_run(
+        self,
+        run_id,
+        expected,
+        next_status,
+        patch=None,
+        worker_id=None,
+        lease_token=None,
+    ):
+        if next_status == RunStatus.RETRYING:
+            await self.request_cancel(run_id)
+        return await super().transition_run(
+            run_id,
+            expected,
+            next_status,
+            patch,
+            worker_id,
+            lease_token,
+        )
+
+
+class CancellingBeforeRecoveryRequeueStore(InMemoryTaskStore):
+    async def transition_run(
+        self,
+        run_id,
+        expected,
+        next_status,
+        patch=None,
+        worker_id=None,
+        lease_token=None,
+    ):
+        if next_status == RunStatus.QUEUED:
+            await self.request_cancel(run_id)
+        return await super().transition_run(
+            run_id,
+            expected,
+            next_status,
+            patch,
+            worker_id,
+            lease_token,
+        )
+
+
+class CancellingBeforeClaimReleaseStore(InMemoryTaskStore):
+    async def transition_run(
+        self,
+        run_id,
+        expected,
+        next_status,
+        patch=None,
+        worker_id=None,
+        lease_token=None,
+    ):
+        if expected == {RunStatus.CLAIMED} and next_status == RunStatus.QUEUED:
+            await self.request_cancel(run_id)
+        return await super().transition_run(
+            run_id,
+            expected,
+            next_status,
+            patch,
+            worker_id,
+            lease_token,
+        )
+
+
 class CancelOnStartedManager(BackgroundAgentManager):
     async def _emit_run(self, event_name, run, **extra_payload):
         await super()._emit_run(event_name, run, **extra_payload)
@@ -793,6 +860,40 @@ async def test_expired_lease_blocks_stale_worker_mutation():
             RunStatus.RUNNING,
             worker_id="worker",
             lease_token=claimed.lease_token,
+        )
+
+
+@pytest.mark.asyncio
+async def test_store_rejects_cancelled_non_terminal_transition():
+    store = InMemoryTaskStore()
+    await store.save_agent(agent_spec())
+    await store.save_task(task_spec())
+    run = BackgroundRun(
+        task_id="task",
+        agent_id="agent",
+        query_snapshot="one",
+        trigger_type=TriggerType.MANUAL,
+        session_id="s1",
+        workspace_path="w1",
+    )
+    await store.create_run_with_overlap_guard(run, OverlapPolicy.ALLOW_PARALLEL)
+    claimed = await store.claim_next_run("worker", lease_seconds=30)
+    running = await store.transition_run(
+        claimed.run_id,
+        {RunStatus.CLAIMED},
+        RunStatus.RUNNING,
+        worker_id="worker",
+        lease_token=claimed.lease_token,
+    )
+    await store.request_cancel(running.run_id)
+
+    with pytest.raises(RunCancellationRequestedError):
+        await store.transition_run(
+            running.run_id,
+            {RunStatus.RUNNING},
+            RunStatus.COMPLETED,
+            worker_id="worker",
+            lease_token=running.lease_token,
         )
 
 
@@ -1990,6 +2091,32 @@ async def test_execute_one_releases_claim_when_cancelled_before_run_starts():
 
 
 @pytest.mark.asyncio
+async def test_execute_one_release_claim_honors_cancelled_transition_race():
+    store = CancellingBeforeClaimReleaseStore()
+    manager = BackgroundAgentManager(task_store=store)
+    await manager.register_agent("agent", FakeAgent())
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    run = await manager.run_now("task")
+
+    async def cancelled_before_start(claimed):
+        raise asyncio.CancelledError
+
+    manager._supervisor.run_claimed = cancelled_before_start
+
+    with pytest.raises(asyncio.CancelledError):
+        await manager._execute_one()
+
+    cancelled = await manager.get_run(run.run_id)
+    assert cancelled.status == RunStatus.CANCELLED
+    assert cancelled.cancel_requested_at is not None
+
+
+@pytest.mark.asyncio
 async def test_recover_expired_running_run_requeues_when_retry_available():
     store = InMemoryTaskStore()
     manager = BackgroundAgentManager(task_store=store, worker_id="recovery")
@@ -2029,6 +2156,54 @@ async def test_recover_expired_running_run_requeues_when_retry_available():
 
     assert recovered.status == RunStatus.QUEUED
     assert recovered.lease_token is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "store_factory",
+    [CancellingBeforeRecoveryRetryingStore, CancellingBeforeRecoveryRequeueStore],
+)
+async def test_recover_expired_running_run_honors_cancelled_transition_race(
+    store_factory,
+):
+    store = store_factory()
+    manager = BackgroundAgentManager(task_store=store, worker_id="recovery")
+    await manager.register_agent("agent", FakeAgent())
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=1, initial_delay_seconds=0),
+    )
+    run = await manager.run_now("task", wait=False)
+    claimed = await store.claim_run(run.run_id, "lost_worker", lease_seconds=30)
+    running = await store.transition_run(
+        claimed.run_id,
+        {RunStatus.CLAIMED},
+        RunStatus.RUNNING,
+        {"attempt": 1},
+        "lost_worker",
+        claimed.lease_token,
+    )
+    await store.create_attempt(
+        BackgroundAttempt(
+            run_id=running.run_id,
+            attempt_number=1,
+            worker_id="lost_worker",
+            lease_token=running.lease_token,
+        )
+    )
+    async with store._lock:
+        store._runs[run.run_id] = running.model_copy(
+            update={"lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)}
+        )
+
+    await manager.recover_expired_runs()
+    recovered = await manager.get_run(run.run_id)
+
+    assert recovered.status == RunStatus.CANCELLED
+    assert recovered.cancel_requested_at is not None
 
 
 @pytest.mark.asyncio

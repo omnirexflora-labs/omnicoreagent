@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from omnicoreagent.background.errors import (
     AgentNotFoundError,
+    RunCancellationRequestedError,
     RunLeaseError,
     RunNotFoundError,
     TaskNotFoundError,
@@ -304,7 +305,9 @@ class InMemoryTaskStore(AbstractTaskStore):
                 next_status in {RunStatus.COMPLETED, RunStatus.RETRYING, RunStatus.QUEUED}
                 and run.cancel_requested_at is not None
             ):
-                raise TaskStoreError("Run cancellation requested before completion")
+                raise RunCancellationRequestedError(
+                    "Run cancellation requested before non-terminal transition"
+                )
             update = {**(patch or {}), "status": next_status}
             if next_status in TERMINAL_RUN_STATUSES:
                 update.setdefault("finished_at", _now())
