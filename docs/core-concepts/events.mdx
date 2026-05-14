@@ -62,10 +62,7 @@ async for event in agent.stream_events(session_id):
 | `sub_agent_call_started` | Sub-agent delegation begins |
 | `sub_agent_call_result` | Sub-agent returns result |
 | `sub_agent_call_error` | Sub-agent encountered an error |
-| `background_task_started` | Background task begins |
-| `background_task_completed` | Background task completes |
-| `background_task_error` | Background task failed |
-| `background_agent_status` | Background agent status changed |
+| `background_agent_status` | Background run lifecycle event routed through the event system |
 
 ---
 
@@ -106,6 +103,35 @@ and debugging deterministic without requiring a full tracing system.
 final `complete` event. That keeps concurrent runs on the same session from
 mixing in one live response while the session event feed can still show the full
 session history.
+
+## Background Run Events
+
+Background agents have their own run-local lifecycle event names. These are
+stored in the background event log, mirrored to workspace `events.jsonl` when
+enabled, and forwarded through `EventRouter` as `background_agent_status`
+events with the lifecycle name in `payload.event`.
+
+Common background lifecycle names include:
+
+| Lifecycle Event | Meaning |
+|-----------------|---------|
+| `background_task_scheduled` | A scheduled occurrence created a run. |
+| `background_run_queued` | A run was created and queued. |
+| `background_run_claimed` | A worker claimed the run with a lease. |
+| `background_run_started` | Agent execution started. |
+| `background_run_heartbeat` | Active worker refreshed the run lease. |
+| `background_run_retrying` | Failed attempt entered retry state. |
+| `background_run_recovered` | Expired lease was recovered and requeued. |
+| `background_run_completed` | Run completed successfully. |
+| `background_run_failed` | Run failed terminally. |
+| `background_run_timeout` | Run exceeded its timeout. |
+| `background_run_cancelled` | Run was cancelled. |
+| `background_run_skipped` | Overlap policy skipped a scheduled run. |
+
+Use `BackgroundAgentManager.get_run_events(run_id)` or
+`GET /background/runs/{run_id}/events` in OmniServe to replay a run trajectory.
+Each returned event has a run-local integer `sequence`, `run_id`, `task_id`,
+`status`, and the lease/worker fields available for that transition.
 
 ---
 

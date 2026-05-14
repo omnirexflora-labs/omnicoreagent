@@ -1,7 +1,7 @@
-# Background Agents: Tracked Agent Tasks
+# Background Agents: Durable Agent Tasks
 
-Background Agents run OmniCoreAgent tasks outside the foreground request path.
-They are built around tracked runs, task-store state, retries, cancellation,
+Background Agents run OmniCoreAgent work outside the foreground request path.
+They are durable tracked tasks with schedules, retries, cancellation, leases,
 workspace output, and inspectable lifecycle events. Use the default in-memory
 store for local development, or `sql`, `redis`, or `mongodb` when runs must
 survive restarts.
@@ -11,12 +11,14 @@ survive restarts.
 * **BackgroundAgentManager**: Registers agents, tasks, runs, and lifecycle operations.
 * **Task store**: Operational state for agents, tasks, schedule state, runs, attempts, leases, retries, and cancellation flags. It defaults to in-memory and is separate from conversation memory.
 * **Run**: One concrete execution of a task. Runs have stable IDs, statuses, attempts, workspace paths, and event history.
-* **Workspace output**: Every background run gets a workspace namespace for output.
+* **Worker lifecycle**: A worker claims queued runs with leases, heartbeats while work is active, and recovers expired leases.
+* **Workspace output**: Every background run gets a workspace namespace for lifecycle files and agent output.
 
 You can run the background manager without storage configuration. Use
 `BackgroundAgentManager()` for the default zero-config in-memory task store. Use
 `task_store="sql"`, `task_store="redis"`, or `task_store="mongodb"` when task
-state must survive process restarts.
+state must survive process restarts. The task store is not conversation memory;
+it is the control plane for background work.
 
 Redis and MongoDB task stores use optional backend drivers:
 
@@ -37,40 +39,141 @@ async def main():
     agent = OmniCoreAgent(
         name="system_monitor",
         system_instruction="Check system health and write concise reports.",
-        model_config={"provider": "openai", "model": "gpt-4o-mini"},
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
     )
 
     manager = BackgroundAgentManager()
-    await manager.register_agent(agent_id="system_monitor", agent=agent)
-    await manager.register_task(
-        task_id="health_report",
-        agent_id="system_monitor",
-        query="Check system health and summarize anything that needs attention.",
-        schedule={"type": "manual"},
-        timeout_seconds=60,
-        retry_policy={"max_retries": 1, "initial_delay_seconds": 0},
-    )
+    try:
+        await manager.register_agent(agent_id="system_monitor", agent=agent)
+        await manager.register_task(
+            task_id="health_report",
+            agent_id="system_monitor",
+            query="Check system health and summarize anything that needs attention.",
+            schedule={"type": "manual"},
+            timeout_seconds=60,
+            retry_policy={"max_retries": 1, "initial_delay_seconds": 0},
+        )
 
-    run = await manager.run_now("health_report", wait=True)
-    print(run.status)
-    print(run.result_preview)
+        run = await manager.run_now("health_report", wait=True)
+        print(run.status)
+        print(run.result_preview)
+    finally:
+        await manager.shutdown()
 
 
 asyncio.run(main())
 ```
 
+## Durable Task Stores
+
+The default task store is in-memory. It needs no database and is right for local
+development, tests, and single-process experiments:
+
+```python
+manager = BackgroundAgentManager()
+```
+
+Use a durable task store when background runs must survive process restarts:
+
+```python
+manager = BackgroundAgentManager(task_store="sql")
+
+manager = BackgroundAgentManager(
+    task_store={"backend": "redis", "url": "redis://localhost:6379/0"}
+)
+
+manager = BackgroundAgentManager(
+    task_store={
+        "backend": "mongodb",
+        "uri": "mongodb://localhost:27017",
+        "database": "omnicoreagent",
+    }
+)
+```
+
+Redis durable deployments need persistence enabled and a no-eviction policy for
+task-store keys. MongoDB task-store writes use majority write concern.
+
+## Scheduled Runs
+
+Manual tasks run only when you call `run_now`. Scheduled tasks are dispatched by
+the manager worker after `start()` is called:
+
+```python
+await manager.register_task(
+    task_id="hourly_report",
+    agent_id="system_monitor",
+    query="Write the hourly operational report.",
+    schedule={"type": "interval", "seconds": 3600},
+    overlap_policy="queue_next",
+)
+
+await manager.start()
+```
+
+`start()` creates the manager worker and returns immediately. Keep the process
+alive while scheduled work should continue, and use `shutdown()` when the
+process exits so worker loops and active background resources close cleanly:
+
+```python
+try:
+    await manager.start()
+    await asyncio.Event().wait()
+finally:
+    await manager.shutdown()
+    if hasattr(agent, "cleanup"):
+        await agent.cleanup()
+```
+
 ## Runtime Controls
 
 ```python
-run = await manager.run_now("health_report")
+run = await manager.run_now("health_report", wait=True)
 status = await manager.get_run(run.run_id)
 attempts = await manager.list_attempts(run.run_id)
 events = await manager.get_run_events(run.run_id)
+workspace = await manager.get_run_workspace(run.run_id)
 
 await manager.cancel_run(run.run_id)
 await manager.pause_task("health_report")
 await manager.resume_task("health_report")
 ```
+
+`get_run_events(run_id)` returns ordered lifecycle events for that run. These
+events use run-local names such as `background_task_scheduled`,
+`background_run_queued`, `background_run_claimed`, `background_run_started`,
+`background_run_heartbeat`, `background_run_retrying`,
+`background_run_recovered`, `background_run_completed`,
+`background_run_failed`, `background_run_timeout`,
+`background_run_cancelled`, and `background_run_skipped`.
+
+When an `EventRouter` is attached, the background manager forwards lifecycle
+events as `background_agent_status` events. The specific lifecycle name is
+available as `event.payload.event` in Python, and as `payload.event` after JSON
+serialization.
+
+## OmniServe Endpoints
+
+OmniServe exposes the same background task lifecycle over HTTP:
+
+```bash
+curl -X POST http://localhost:8000/background/tasks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task_id": "health_report",
+    "query": "Check system health and write the report.",
+    "schedule": {"type": "manual"},
+    "timeout_seconds": 60
+  }'
+
+curl -X POST http://localhost:8000/background/tasks/health_report/run \
+  -H "Content-Type: application/json" \
+  -d '{"wait": true}'
+```
+
+The background API includes task creation, task listing, pause, resume, delete,
+manual run, cancellation, run status, attempt history, event replay, and
+workspace inspection.
 
 ## Task Configuration
 
@@ -85,23 +188,4 @@ await manager.resume_task("health_report")
 | `overlap_policy` | `skip_if_running`, `queue_next`, `cancel_previous`, or `allow_parallel`. |
 | `session_policy` | `task`, `run`, or `fixed` memory-session behavior. |
 
-The current implementation includes the tracked run model, in-memory, SQL,
-Redis, and MongoDB task stores, manager lifecycle, manual and scheduled runs,
-retries with delay/backoff, lease fencing, expired-lease recovery, cancellation,
-workspace lifecycle files, and event history. State is restart-persistent when
-the task store is SQL, Redis, or MongoDB.
-
-Redis durable deployments need persistence enabled and a no-eviction policy for
-task-store keys. MongoDB task-store writes use majority write concern.
-
-```python
-BackgroundAgentManager(task_store="sql")
-BackgroundAgentManager(task_store={"backend": "redis", "url": "redis://localhost:6379/0"})
-BackgroundAgentManager(
-    task_store={
-        "backend": "mongodb",
-        "uri": "mongodb://localhost:27017",
-        "database": "omnicoreagent",
-    }
-)
-```
+State is restart-persistent when the task store is SQL, Redis, or MongoDB.

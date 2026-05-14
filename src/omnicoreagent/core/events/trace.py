@@ -124,9 +124,18 @@ def _build_summary(session_id: str, events: list[Event]) -> TraceSummary:
         tool_errors=counts.get(EventType.TOOL_CALL_ERROR.value, 0),
         sub_agent_calls=counts.get(EventType.SUB_AGENT_CALL_STARTED.value, 0),
         sub_agent_errors=counts.get(EventType.SUB_AGENT_CALL_ERROR.value, 0),
-        background_errors=counts.get(EventType.BACKGROUND_TASK_ERROR.value, 0),
+        background_errors=sum(1 for event in events if _is_background_error(event)),
         final_answer=final_answer,
     )
+
+
+def _is_background_error(event: Event) -> bool:
+    if event.type != EventType.BACKGROUND_AGENT_STATUS:
+        return False
+    lifecycle_event = getattr(event.payload, "event", None) or getattr(
+        event.payload, "status", None
+    )
+    return lifecycle_event in {"background_run_failed", "background_run_timeout"}
 
 
 def _duration_ms(start: datetime, end: datetime) -> float:

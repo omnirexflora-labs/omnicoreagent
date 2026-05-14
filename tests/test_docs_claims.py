@@ -144,3 +144,47 @@ def test_background_docs_show_optional_extras_for_remote_task_stores():
         text = path.read_text(encoding="utf-8")
         assert 'omnicoreagent[redis]' in text
         assert 'omnicoreagent[mongodb]' in text
+
+
+def test_background_docs_use_current_event_vocabulary():
+    stale_events = {
+        "background_task_started",
+        "background_task_completed",
+        "background_task_error",
+    }
+    docs = [
+        Path("docs/core-concepts/events.mdx"),
+        Path("docs/core-concepts/background-agents.mdx"),
+        Path("cookbook/background_agents/README.mdx"),
+    ]
+
+    offenders = []
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        found = sorted(event for event in stale_events if event in text)
+        if found:
+            offenders.append(f"{path}: {', '.join(found)}")
+
+    assert not offenders, (
+        "Background docs must use current run lifecycle events and "
+        "background_agent_status, not stale background task event names:\n"
+        + "\n".join(offenders)
+    )
+
+    events_doc = Path("docs/core-concepts/events.mdx").read_text(encoding="utf-8")
+    for expected in {
+        "background_agent_status",
+        "background_task_scheduled",
+        "background_run_queued",
+        "background_run_claimed",
+        "background_run_started",
+        "background_run_completed",
+    }:
+        assert expected in events_doc
+
+
+def test_background_cookbook_uses_typed_event_payload_access():
+    text = Path("cookbook/background_agents/README.mdx").read_text(encoding="utf-8")
+
+    assert 'event.payload["event"]' not in text
+    assert "event.payload.event" in text

@@ -49,6 +49,15 @@ def test_background_status_payload_keeps_positional_compatibility():
     assert payload.run_id is None
 
 
+def test_event_type_uses_current_background_status_event():
+    event_values = {event_type.value for event_type in EventType}
+
+    assert "background_agent_status" in event_values
+    assert "background_task_started" not in event_values
+    assert "background_task_completed" not in event_values
+    assert "background_task_error" not in event_values
+
+
 def test_event_serializes_and_parses_without_pydantic():
     event = Event(
         type=EventType.TOOL_CALL_STARTED,
@@ -156,6 +165,41 @@ def test_build_event_trace_orders_events_and_summarizes_runtime():
     assert trace.summary.sub_agent_errors == 1
     assert trace.summary.final_answer == "done"
     assert dumped["summary"]["event_counts"]["tool_call_error"] == 1
+
+
+def test_build_event_trace_counts_background_status_failures():
+    start = datetime(2026, 5, 6, 12, 0, tzinfo=timezone.utc)
+    events = [
+        Event(
+            type=EventType.BACKGROUND_AGENT_STATUS,
+            payload=BackgroundAgentStatusPayload(
+                agent_id="agent",
+                status="background_run_started",
+                timestamp=start.isoformat(),
+                run_id="run_1",
+                event="background_run_started",
+            ),
+            agent_name="agent",
+            timestamp=start,
+        ),
+        Event(
+            type=EventType.BACKGROUND_AGENT_STATUS,
+            payload=BackgroundAgentStatusPayload(
+                agent_id="agent",
+                status="background_run_failed",
+                timestamp=(start + timedelta(milliseconds=10)).isoformat(),
+                run_id="run_1",
+                event="background_run_failed",
+            ),
+            agent_name="agent",
+            timestamp=start + timedelta(milliseconds=10),
+        ),
+    ]
+
+    trace = build_event_trace(session_id="run_1", events=events)
+
+    assert trace.summary.event_counts["background_agent_status"] == 2
+    assert trace.summary.background_errors == 1
 
 
 @pytest.mark.asyncio
