@@ -12,6 +12,7 @@ from omnicoreagent.background import (
     BackgroundRun,
     BackgroundTaskSpec,
     InMemoryTaskStore,
+    MongoDbTaskStore,
     OverlapPolicy,
     RedisTaskStore,
     RetryPolicy,
@@ -31,6 +32,11 @@ from omnicoreagent.background.models import (
 
 REDIS_CONTRACT_URL_ENV = "OMNICOREAGENT_TEST_REDIS_URL"
 DEFAULT_REDIS_CONTRACT_URL = "redis://localhost:6379/0"
+MONGODB_CONTRACT_URI_ENV = "OMNICOREAGENT_TEST_MONGODB_URI"
+MONGODB_CONTRACT_DATABASE_ENV = "OMNICOREAGENT_TEST_MONGODB_DATABASE"
+DEFAULT_MONGODB_CONTRACT_URI = "mongodb://localhost:27017"
+DEFAULT_MONGODB_CONTRACT_DATABASE = "omnicoreagent_test"
+SHARED_CONTRACT_BACKENDS = ["in_memory", "sql", "mongodb"]
 
 
 def agent_spec(agent_id: str = "agent") -> BackgroundAgentSpec:
@@ -77,14 +83,38 @@ async def create_store(kind: str, tmp_path):
         store = InMemoryTaskStore()
     elif kind == "sql":
         store = SqlTaskStore(url=f"sqlite:///{tmp_path / 'background.db'}")
+    elif kind == "mongodb":
+        store = MongoDbTaskStore(
+            uri=mongodb_contract_uri(),
+            database=mongodb_contract_database(),
+            collection_prefix=f"test_omnicoreagent_background_{uuid4().hex}",
+            connect_timeout=0.2,
+            lock_timeout=0.5,
+        )
     else:  # pragma: no cover
         raise AssertionError(f"unknown store kind: {kind}")
-    await store.initialize()
+    try:
+        await store.initialize()
+    except Exception as exc:
+        await store.close()
+        if kind == "mongodb":
+            pytest.skip(mongodb_unavailable_message(exc))
+        raise
     return store
 
 
+async def close_store(store) -> None:
+    if isinstance(store, MongoDbTaskStore):
+        try:
+            await cleanup_mongodb_prefix(store)
+        finally:
+            await store.close()
+        return
+    await store.close()
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("store_kind", ["in_memory", "sql"])
+@pytest.mark.parametrize("store_kind", SHARED_CONTRACT_BACKENDS)
 async def test_task_store_contract_core_records_and_deterministic_lists(
     store_kind, tmp_path
 ):
@@ -131,11 +161,11 @@ async def test_task_store_contract_core_records_and_deterministic_lists(
             second.run_id,
         ]
     finally:
-        await store.close()
+        await close_store(store)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("store_kind", ["in_memory", "sql"])
+@pytest.mark.parametrize("store_kind", SHARED_CONTRACT_BACKENDS)
 async def test_task_store_contract_claim_lease_attempt_and_cancel(
     store_kind, tmp_path
 ):
@@ -222,11 +252,11 @@ async def test_task_store_contract_claim_lease_attempt_and_cancel(
                 RunStatus.QUEUED,
             )
     finally:
-        await store.close()
+        await close_store(store)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("store_kind", ["in_memory", "sql"])
+@pytest.mark.parametrize("store_kind", SHARED_CONTRACT_BACKENDS)
 async def test_task_store_contract_overlap_queue_and_expired_lease(
     store_kind, tmp_path
 ):
@@ -279,7 +309,7 @@ async def test_task_store_contract_overlap_queue_and_expired_lease(
         next_claim = await store.claim_next_run("worker-c", lease_seconds=30)
         assert next_claim.run_id == second.run_id
     finally:
-        await store.close()
+        await close_store(store)
 
 
 @pytest.mark.asyncio
@@ -318,6 +348,23 @@ def redis_contract_url() -> str:
     return os.getenv(REDIS_CONTRACT_URL_ENV, DEFAULT_REDIS_CONTRACT_URL)
 
 
+def mongodb_contract_uri() -> str:
+    return os.getenv(MONGODB_CONTRACT_URI_ENV, DEFAULT_MONGODB_CONTRACT_URI)
+
+
+def mongodb_contract_database() -> str:
+    return os.getenv(MONGODB_CONTRACT_DATABASE_ENV, DEFAULT_MONGODB_CONTRACT_DATABASE)
+
+
+def mongodb_unavailable_message(exc: Exception) -> str:
+    return (
+        "MongoDB task store unavailable. To run live MongoDB contract tests, "
+        f"set {MONGODB_CONTRACT_URI_ENV}=mongodb://localhost:27017 and "
+        f"{MONGODB_CONTRACT_DATABASE_ENV}=omnicoreagent_test, or start a local "
+        f"MongoDB server at {DEFAULT_MONGODB_CONTRACT_URI}. Error: {exc}"
+    )
+
+
 @pytest.mark.asyncio
 async def test_redis_task_store_contract_persists_across_reconnect():
     prefix = f"test:omnicoreagent:background:{uuid4().hex}"
@@ -331,6 +378,7 @@ async def test_redis_task_store_contract_persists_across_reconnect():
     try:
         await first.initialize()
     except Exception as exc:
+        await first.close()
         pytest.skip(f"Redis task store unavailable: {exc}")
 
     try:
@@ -374,5 +422,110 @@ async def test_redis_task_store_contract_persists_across_reconnect():
     finally:
         try:
             await cleanup_redis_prefix(first)
+        finally:
+            await first.close()
+
+
+async def cleanup_mongodb_prefix(store: MongoDbTaskStore) -> None:
+    try:
+        db = store._db
+        if db is None:
+            return
+        collection_names = await db.list_collection_names()
+        for name in collection_names:
+            if name.startswith(f"{store.collection_prefix}_"):
+                await db.drop_collection(name)
+    except Exception:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_mongodb_task_store_contract_persists_across_reconnect():
+    collection_prefix = f"test_omnicoreagent_background_{uuid4().hex}"
+    first = MongoDbTaskStore(
+        uri=mongodb_contract_uri(),
+        database=mongodb_contract_database(),
+        collection_prefix=collection_prefix,
+        connect_timeout=0.2,
+        lock_timeout=0.5,
+    )
+    try:
+        await first.initialize()
+    except Exception as exc:
+        await first.close()
+        pytest.skip(mongodb_unavailable_message(exc))
+
+    try:
+        await first.save_agent(agent_spec())
+        await first.save_task(task_spec())
+        schedule_state = await first.get_schedule_state("task")
+        run = await first.create_run_with_overlap_guard(
+            background_run(), OverlapPolicy.ALLOW_PARALLEL
+        )
+        claimed = await first.claim_next_run("worker", lease_seconds=30)
+        running = await first.transition_run(
+            claimed.run_id,
+            {RunStatus.CLAIMED},
+            RunStatus.RUNNING,
+            {"attempt": 1},
+            "worker",
+            claimed.lease_token,
+        )
+        attempt = BackgroundAttempt(
+            run_id=running.run_id,
+            attempt_number=1,
+            worker_id="worker",
+            lease_token=running.lease_token,
+        )
+        await first.create_attempt(attempt)
+        await first.update_attempt(
+            attempt.attempt_id,
+            {"status": AttemptStatus.COMPLETED},
+            "worker",
+            running.lease_token,
+        )
+        completed = await first.transition_run(
+            running.run_id,
+            {RunStatus.RUNNING},
+            RunStatus.COMPLETED,
+            {"result_preview": "done"},
+            "worker",
+            running.lease_token,
+        )
+        assert completed.run_id == run.run_id
+
+        cancel_requested = await first.create_run_with_overlap_guard(
+            background_run(occurrence_id="cancel-requested"),
+            OverlapPolicy.ALLOW_PARALLEL,
+        )
+        await first.request_cancel(cancel_requested.run_id)
+
+        restored = MongoDbTaskStore(
+            uri=mongodb_contract_uri(),
+            database=mongodb_contract_database(),
+            collection_prefix=collection_prefix,
+            connect_timeout=0.2,
+            lock_timeout=0.5,
+        )
+        await restored.initialize()
+        try:
+            assert (await restored.get_agent("agent")).agent_id == "agent"
+            assert (await restored.get_task("task")).task_id == "task"
+            assert (await restored.get_schedule_state("task")).task_id == (
+                schedule_state.task_id
+            )
+            assert (await restored.get_run(run.run_id)).status == RunStatus.COMPLETED
+            attempts = await restored.list_attempts(run.run_id)
+            assert [(item.attempt_number, item.status) for item in attempts] == [
+                (1, AttemptStatus.COMPLETED)
+            ]
+            assert await restored.is_cancel_requested(cancel_requested.run_id) is True
+            restored_cancelled = await restored.get_run(cancel_requested.run_id)
+            assert restored_cancelled.cancel_requested_at is not None
+        finally:
+            await restored.close()
+    finally:
+        try:
+            await cleanup_mongodb_prefix(first)
         finally:
             await first.close()
