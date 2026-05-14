@@ -421,6 +421,93 @@ class CancellingCompletedAttemptStore(InMemoryTaskStore):
         return updated
 
 
+class CancellingFailedAttemptStore(InMemoryTaskStore):
+    def __init__(self, cancel_on_retry_delay=False):
+        super().__init__()
+        self.cancel_on_retry_delay = cancel_on_retry_delay
+
+    async def update_attempt(self, attempt_id, patch, worker_id=None, lease_token=None):
+        updated = await super().update_attempt(
+            attempt_id,
+            patch,
+            worker_id,
+            lease_token,
+        )
+        if patch.get("status") in {AttemptStatus.FAILED, AttemptStatus.TIMEOUT} or (
+            self.cancel_on_retry_delay and "retry_delay_seconds" in patch
+        ):
+            await self.request_cancel(updated.run_id)
+        return updated
+
+
+class CancellingBeforeCompletedTransitionStore(InMemoryTaskStore):
+    async def transition_run(
+        self,
+        run_id,
+        expected,
+        next_status,
+        patch=None,
+        worker_id=None,
+        lease_token=None,
+    ):
+        if next_status == RunStatus.COMPLETED:
+            await self.request_cancel(run_id)
+        return await super().transition_run(
+            run_id,
+            expected,
+            next_status,
+            patch,
+            worker_id,
+            lease_token,
+        )
+
+
+class CancellingBeforeRetryTransitionStore(InMemoryTaskStore):
+    async def transition_run(
+        self,
+        run_id,
+        expected,
+        next_status,
+        patch=None,
+        worker_id=None,
+        lease_token=None,
+    ):
+        if next_status == RunStatus.RETRYING:
+            await self.request_cancel(run_id)
+        return await super().transition_run(
+            run_id,
+            expected,
+            next_status,
+            patch,
+            worker_id,
+            lease_token,
+        )
+
+
+class CancellingBeforeRetryRequeueStore(InMemoryTaskStore):
+    async def transition_run(
+        self,
+        run_id,
+        expected,
+        next_status,
+        patch=None,
+        worker_id=None,
+        lease_token=None,
+    ):
+        if next_status == RunStatus.QUEUED:
+            latest = await self.get_run(run_id)
+            if latest and latest.status == RunStatus.RETRYING:
+                await self.request_cancel(run_id)
+        return await super().transition_run(
+            run_id,
+            expected,
+            next_status,
+            patch,
+            worker_id,
+            lease_token,
+        )
+
+
 class CancelOnStartedManager(BackgroundAgentManager):
     async def _emit_run(self, event_name, run, **extra_payload):
         await super()._emit_run(event_name, run, **extra_payload)
@@ -1177,7 +1264,8 @@ async def test_queue_next_equal_queued_at_uses_stable_ordering():
 @pytest.mark.asyncio
 async def test_manager_run_now_wait_timeout_does_not_block_on_running_agent():
     manager = BackgroundAgentManager(task_store="in_memory")
-    agent = FakeAgent(response="complete", delay=0.2)
+    agent_delay = 1.0
+    agent = FakeAgent(response="complete", delay=agent_delay)
     await manager.register_agent("agent", agent)
     await manager.register_task(
         task_id="task",
@@ -1190,11 +1278,11 @@ async def test_manager_run_now_wait_timeout_does_not_block_on_running_agent():
     run = await manager.run_now("task", wait=True, timeout_seconds=0.01)
     elapsed = asyncio.get_running_loop().time() - started
 
-    assert elapsed < 0.3
+    assert elapsed < agent_delay / 2
     assert run.status in {RunStatus.QUEUED, RunStatus.CLAIMED, RunStatus.RUNNING}
     completed = await wait_for(
         lambda: manager.list_runs(status=RunStatus.COMPLETED),
-        timeout=0.5,
+        timeout=1.5,
     )
     assert completed[0].run_id == run.run_id
 
@@ -1539,6 +1627,143 @@ async def test_cancel_after_agent_result_before_completion_marks_cancelled():
     assert attempts[-1].status == AttemptStatus.CANCELLED
     assert agent.calls
     assert queued.run_id not in manager._active_agent_tasks
+
+
+@pytest.mark.asyncio
+async def test_cancel_before_completed_transition_marks_cancelled():
+    store = CancellingBeforeCompletedTransitionStore()
+    manager = BackgroundAgentManager(task_store=store, lease_seconds=1)
+    agent = FakeAgent(response="complete")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    queued = await manager.run_now("task")
+    did_work = await manager._execute_run(queued.run_id)
+    latest = await manager.get_run(queued.run_id)
+    attempts = await manager.list_attempts(queued.run_id)
+    events = await manager.get_run_events(queued.run_id)
+
+    assert did_work is True
+    assert latest.status == RunStatus.CANCELLED
+    assert latest.cancel_requested_at is not None
+    assert attempts[-1].status == AttemptStatus.CANCELLED
+    assert [event["event"] for event in events][-1] == "background_run_cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_after_failed_attempt_blocks_retry_requeue():
+    store = CancellingFailedAttemptStore()
+    manager = BackgroundAgentManager(task_store=store, lease_seconds=1)
+    agent = FakeAgent(fail_times=1)
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=1, initial_delay_seconds=0),
+    )
+
+    queued = await manager.run_now("task")
+    did_work = await manager._execute_run(queued.run_id)
+    latest = await manager.get_run(queued.run_id)
+    attempts = await manager.list_attempts(queued.run_id)
+    events = await manager.get_run_events(queued.run_id)
+
+    assert did_work is True
+    assert latest.status == RunStatus.CANCELLED
+    assert latest.cancel_requested_at is not None
+    assert len(attempts) == 1
+    assert attempts[-1].status == AttemptStatus.CANCELLED
+    assert [event["event"] for event in events] == [
+        "background_run_queued",
+        "background_run_claimed",
+        "background_run_started",
+        "background_run_cancelled",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cancel_after_retry_delay_blocks_retry_requeue():
+    store = CancellingFailedAttemptStore(cancel_on_retry_delay=True)
+    manager = BackgroundAgentManager(task_store=store, lease_seconds=1)
+    agent = FakeAgent(fail_times=1)
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=1, initial_delay_seconds=0),
+    )
+
+    queued = await manager.run_now("task")
+    did_work = await manager._execute_run(queued.run_id)
+    latest = await manager.get_run(queued.run_id)
+    attempts = await manager.list_attempts(queued.run_id)
+
+    assert did_work is True
+    assert latest.status == RunStatus.CANCELLED
+    assert latest.cancel_requested_at is not None
+    assert len(attempts) == 1
+    assert attempts[-1].status == AttemptStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_cancel_before_retrying_transition_blocks_retry_requeue():
+    store = CancellingBeforeRetryTransitionStore()
+    manager = BackgroundAgentManager(task_store=store, lease_seconds=1)
+    agent = FakeAgent(fail_times=1)
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=1, initial_delay_seconds=0),
+    )
+
+    queued = await manager.run_now("task")
+    did_work = await manager._execute_run(queued.run_id)
+    latest = await manager.get_run(queued.run_id)
+    attempts = await manager.list_attempts(queued.run_id)
+
+    assert did_work is True
+    assert latest.status == RunStatus.CANCELLED
+    assert latest.cancel_requested_at is not None
+    assert len(attempts) == 1
+    assert attempts[-1].status == AttemptStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_cancel_before_retry_requeue_transition_blocks_retry_requeue():
+    store = CancellingBeforeRetryRequeueStore()
+    manager = BackgroundAgentManager(task_store=store, lease_seconds=1)
+    agent = FakeAgent(fail_times=1)
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=1, initial_delay_seconds=0),
+    )
+
+    queued = await manager.run_now("task")
+    did_work = await manager._execute_run(queued.run_id)
+    latest = await manager.get_run(queued.run_id)
+    attempts = await manager.list_attempts(queued.run_id)
+
+    assert did_work is True
+    assert latest.status == RunStatus.CANCELLED
+    assert latest.cancel_requested_at is not None
+    assert len(attempts) == 1
+    assert attempts[-1].status == AttemptStatus.CANCELLED
 
 
 @pytest.mark.asyncio
