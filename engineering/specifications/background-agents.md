@@ -56,6 +56,7 @@ over smaller services:
 | `BackgroundWorkspaceIO` | Background workspace file reads and writes |
 | `BackgroundScheduleDispatcher` | Convert due schedules into durable queued or skipped runs |
 | `BackgroundSupervisor` | Claim, attempt lifecycle, execution, heartbeat, cancel, retry, timeout, and recover runs |
+| `BackgroundRunTransitions` | Lease refresh, terminal writes, cancelled-attempt writes, and cancellation-aware progress transitions |
 | `AbstractTaskStore` | Durable operational state and lease fencing |
 
 `BackgroundAgentManager` must not execute agent runs directly. It registers
@@ -706,9 +707,15 @@ Store requirements:
 - writes are atomic at record level.
 - IDs are unique.
 - state transitions are validated.
-- cancellation-requested active runs reject non-terminal progress transitions
-  such as completion, retrying, and retry requeue with
+- cancellation-requested active runs reject progress transitions such as
+  completion, retrying, and retry requeue with
   `RunCancellationRequestedError`.
+- cancellation precedence is compare-and-set based: if `request_cancel()` is
+  committed before a progress transition, cancellation wins and the worker
+  marks the run cancelled; if a terminal transition commits first, the terminal
+  state wins and later cancellation requests do not rewrite it.
+- lifecycle events are emitted only after the corresponding state transition
+  succeeds.
 - terminal status is written exactly once.
 - claim operations are atomic.
 - scheduled dispatch creates the run, applies overlap, handles

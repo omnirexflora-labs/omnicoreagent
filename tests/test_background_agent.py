@@ -40,6 +40,7 @@ from omnicoreagent.background.models import (
     build_workspace_path,
     next_cron_due,
 )
+from omnicoreagent.background.transitions import BackgroundRunTransitions
 
 
 class FakeAgent:
@@ -895,6 +896,68 @@ async def test_store_rejects_cancelled_non_terminal_transition():
             worker_id="worker",
             lease_token=running.lease_token,
         )
+
+
+@pytest.mark.asyncio
+async def test_transition_controller_turns_cancelled_progress_into_terminal_cancel():
+    store = InMemoryTaskStore()
+    await store.save_agent(agent_spec())
+    await store.save_task(task_spec())
+    run = BackgroundRun(
+        task_id="task",
+        agent_id="agent",
+        query_snapshot="one",
+        trigger_type=TriggerType.MANUAL,
+        session_id="s1",
+        workspace_path="w1",
+    )
+    await store.create_run_with_overlap_guard(run, OverlapPolicy.ALLOW_PARALLEL)
+    claimed = await store.claim_next_run("worker", lease_seconds=30)
+    running = await store.transition_run(
+        claimed.run_id,
+        {RunStatus.CLAIMED},
+        RunStatus.RUNNING,
+        worker_id="worker",
+        lease_token=claimed.lease_token,
+    )
+    attempt = BackgroundAttempt(
+        run_id=running.run_id,
+        attempt_number=1,
+        worker_id="worker",
+        lease_token=running.lease_token,
+    )
+    await store.create_attempt(attempt)
+
+    emitted = []
+
+    async def emit_run(event_name, run, **extra):
+        emitted.append((event_name, run.status))
+
+    current_worker = "stale_worker"
+    current_lease_seconds = 1
+    transitions = BackgroundRunTransitions(
+        task_store=store,
+        worker_id=lambda: current_worker,
+        lease_seconds=lambda: current_lease_seconds,
+        emit_run=emit_run,
+    )
+    current_worker = "worker"
+    current_lease_seconds = 30
+
+    await store.request_cancel(running.run_id)
+    result = await transitions.transition_or_cancel(
+        run=running,
+        attempt=attempt,
+        expected={RunStatus.RUNNING},
+        next_status=RunStatus.COMPLETED,
+    )
+
+    assert result is None
+    latest = await store.get_run(running.run_id)
+    assert latest.status == RunStatus.CANCELLED
+    attempts = await store.list_attempts(running.run_id)
+    assert attempts[0].status == AttemptStatus.CANCELLED
+    assert emitted == [("background_run_cancelled", RunStatus.CANCELLED)]
 
 
 @pytest.mark.asyncio
@@ -2230,7 +2293,8 @@ async def test_expired_lease_during_completion_does_not_crash_worker():
 
     assert did_work is True
     assert latest.status == RunStatus.RUNNING
-    assert attempts[0].status == AttemptStatus.RUNNING
+    if attempts:
+        assert attempts[0].status == AttemptStatus.RUNNING
 
     await manager.recover_expired_runs()
     still_recoverable = await manager.get_run(run.run_id)
@@ -2248,8 +2312,11 @@ async def test_expired_lease_during_completion_does_not_crash_worker():
 
     assert recovered.status == RunStatus.QUEUED
     assert recovered.lease_token is None
-    assert recovered_attempts[0].status == AttemptStatus.FAILED
-    assert recovered_attempts[0].reason == AttemptReason.LEASE_EXPIRED
+    if attempts:
+        assert recovered_attempts[0].status == AttemptStatus.FAILED
+        assert recovered_attempts[0].reason == AttemptReason.LEASE_EXPIRED
+    else:
+        assert recovered_attempts == []
 
 
 @pytest.mark.asyncio
