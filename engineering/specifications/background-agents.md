@@ -55,7 +55,8 @@ over smaller services:
 | `BackgroundEventLog` | Lifecycle event ordering, workspace persistence, event-router fanout, replay |
 | `BackgroundWorkspaceIO` | Background workspace file reads and writes |
 | `BackgroundScheduleDispatcher` | Convert due schedules into durable queued or skipped runs |
-| `BackgroundSupervisor` | Claim, attempt lifecycle, execution, heartbeat, cancel, retry, timeout, and recover runs |
+| `BackgroundSupervisor` | Claim, attempt lifecycle, execution, heartbeat, cancel, retry, and timeout runs |
+| `BackgroundRunRecovery` | Expired lease recovery, abandoned attempt closure, and recovery requeue/failure decisions |
 | `BackgroundRunTransitions` | Lease refresh, terminal writes, cancelled-attempt writes, and cancellation-aware progress transitions |
 | `AbstractTaskStore` | Durable operational state and lease fencing |
 
