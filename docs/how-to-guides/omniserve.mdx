@@ -215,6 +215,7 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
+| `GET` | `/background/status` | Yes* | Inspect background manager counts and run status totals |
 | `POST` | `/background/agents` | Yes* | Register the served agent or an agent spec for background execution |
 | `GET` | `/background/agents` | Yes* | List registered background agents |
 | `GET` | `/background/agents/{agent_id}` | Yes* | Inspect a background agent spec |
@@ -222,6 +223,7 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 | `POST` | `/background/tasks` | Yes* | Create a background task |
 | `GET` | `/background/tasks` | Yes* | List background tasks |
 | `GET` | `/background/tasks/{task_id}` | Yes* | Inspect a background task |
+| `GET` | `/background/tasks/{task_id}/status` | Yes* | Inspect schedule state, run counts, and latest run |
 | `PATCH` | `/background/tasks/{task_id}` | Yes* | Patch a background task |
 | `POST` | `/background/tasks/{task_id}/run` | Yes* | Queue a manual background run, optionally waiting for terminal state |
 | `POST` | `/background/tasks/{task_id}/pause` | Yes* | Pause scheduled dispatch |

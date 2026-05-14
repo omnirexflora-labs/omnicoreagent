@@ -894,6 +894,8 @@ OmniServe exposes background execution through the runtime contract.
 API shape:
 
 ```text
+GET    /background/status
+
 POST   /background/agents
 GET    /background/agents
 GET    /background/agents/{agent_id}
@@ -902,6 +904,7 @@ DELETE /background/agents/{agent_id}
 POST   /background/tasks
 GET    /background/tasks
 GET    /background/tasks/{task_id}
+GET    /background/tasks/{task_id}/status
 PATCH  /background/tasks/{task_id}
 POST   /background/tasks/{task_id}/pause
 POST   /background/tasks/{task_id}/resume
