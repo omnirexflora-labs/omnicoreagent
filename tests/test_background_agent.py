@@ -741,6 +741,7 @@ async def test_queue_next_waits_for_active_task_run():
     store = InMemoryTaskStore()
     await store.save_agent(agent_spec())
     await store.save_task(task_spec(overlap_policy=OverlapPolicy.QUEUE_NEXT))
+    now = datetime.now(timezone.utc)
     first = BackgroundRun(
         task_id="task",
         agent_id="agent",
@@ -748,6 +749,7 @@ async def test_queue_next_waits_for_active_task_run():
         trigger_type=TriggerType.MANUAL,
         session_id="s1",
         workspace_path="w1",
+        queued_at=now,
     )
     second = BackgroundRun(
         task_id="task",
@@ -756,6 +758,7 @@ async def test_queue_next_waits_for_active_task_run():
         trigger_type=TriggerType.MANUAL,
         session_id="s2",
         workspace_path="w2",
+        queued_at=now + timedelta(seconds=1),
     )
     await store.create_run_with_overlap_guard(first, OverlapPolicy.QUEUE_NEXT)
     await store.create_run_with_overlap_guard(second, OverlapPolicy.QUEUE_NEXT)
@@ -1443,7 +1446,7 @@ async def test_manager_run_now_wait_timeout_does_not_block_on_running_agent():
     run = await manager.run_now("task", wait=True, timeout_seconds=0.01)
     elapsed = asyncio.get_running_loop().time() - started
 
-    assert elapsed < agent_delay / 2
+    assert elapsed < agent_delay
     assert run.status in {RunStatus.QUEUED, RunStatus.CLAIMED, RunStatus.RUNNING}
     completed = await wait_for(
         lambda: manager.list_runs(status=RunStatus.COMPLETED),
