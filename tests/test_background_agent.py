@@ -2347,9 +2347,9 @@ async def test_expired_lease_during_completion_does_not_crash_worker():
     manager = BackgroundAgentManager(
         task_store=store,
         worker_id="worker",
-        lease_seconds=0.01,
+        lease_seconds=0.05,
     )
-    await manager.register_agent("agent", BlockingAgent(response="done", delay=0.05))
+    await manager.register_agent("agent", BlockingAgent(response="done", delay=0.1))
     await manager.register_task(
         task_id="task",
         agent_id="agent",
