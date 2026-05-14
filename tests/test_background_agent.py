@@ -40,6 +40,7 @@ from omnicoreagent.background.models import (
     build_workspace_path,
     next_cron_due,
 )
+from omnicoreagent.background.recovery import BackgroundRunRecovery
 from omnicoreagent.background.transitions import BackgroundRunTransitions
 
 
@@ -2219,6 +2220,74 @@ async def test_recover_expired_running_run_requeues_when_retry_available():
 
     assert recovered.status == RunStatus.QUEUED
     assert recovered.lease_token is None
+
+
+@pytest.mark.asyncio
+async def test_recovery_service_requeues_expired_running_run_directly():
+    store = InMemoryTaskStore()
+    await store.save_agent(agent_spec())
+    await store.save_task(
+        task_spec(retry_policy=RetryPolicy(max_retries=1, initial_delay_seconds=0))
+    )
+    run = BackgroundRun(
+        task_id="task",
+        agent_id="agent",
+        query_snapshot="one",
+        trigger_type=TriggerType.MANUAL,
+        session_id="s1",
+        workspace_path="w1",
+    )
+    created = await store.create_run_with_overlap_guard(run, OverlapPolicy.ALLOW_PARALLEL)
+    claimed = await store.claim_run(created.run_id, "lost_worker", lease_seconds=30)
+    running = await store.transition_run(
+        claimed.run_id,
+        {RunStatus.CLAIMED},
+        RunStatus.RUNNING,
+        {"attempt": 1},
+        "lost_worker",
+        claimed.lease_token,
+    )
+    await store.create_attempt(
+        BackgroundAttempt(
+            run_id=running.run_id,
+            attempt_number=1,
+            worker_id="lost_worker",
+            lease_token=running.lease_token,
+        )
+    )
+    async with store._lock:
+        store._runs[run.run_id] = running.model_copy(
+            update={"lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)}
+        )
+
+    emitted = []
+
+    async def emit_run(event_name, run, **extra):
+        emitted.append((event_name, run.status))
+
+    transitions = BackgroundRunTransitions(
+        task_store=store,
+        worker_id=lambda: "recovery",
+        lease_seconds=lambda: 30,
+        emit_run=emit_run,
+    )
+    recovery = BackgroundRunRecovery(
+        task_store=store,
+        transitions=transitions,
+        worker_id=lambda: "recovery",
+        lease_seconds=lambda: 30,
+        emit_run=emit_run,
+    )
+
+    await recovery.recover_expired_runs()
+
+    recovered = await store.get_run(run.run_id)
+    attempts = await store.list_attempts(run.run_id)
+    assert recovered.status == RunStatus.QUEUED
+    assert recovered.lease_token is None
+    assert attempts[0].status == AttemptStatus.FAILED
+    assert attempts[0].reason == AttemptReason.LEASE_EXPIRED
+    assert emitted == [("background_run_recovered", RunStatus.QUEUED)]
 
 
 @pytest.mark.asyncio

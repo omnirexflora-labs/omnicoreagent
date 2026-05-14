@@ -10,11 +10,7 @@ from typing import Any
 
 from omnicoreagent.core.events.base import reset_event_run_id, set_event_run_id
 from omnicoreagent.background.agent_specs import resolve_agent
-from omnicoreagent.background.errors import (
-    RunCancellationRequestedError,
-    RunLeaseError,
-    RunNotFoundError,
-)
+from omnicoreagent.background.errors import RunLeaseError, RunNotFoundError
 from omnicoreagent.background.event_log import BackgroundEventLog
 from omnicoreagent.background.models import (
     TERMINAL_RUN_STATUSES,
@@ -26,6 +22,7 @@ from omnicoreagent.background.models import (
     RunStatus,
     utc_now,
 )
+from omnicoreagent.background.recovery import BackgroundRunRecovery
 from omnicoreagent.background.run_helpers import (
     build_run_context,
     is_run_due,
@@ -75,6 +72,13 @@ class BackgroundSupervisor:
         self._emit_run = emit_run
         self.transitions = BackgroundRunTransitions(
             task_store=self.task_store,
+            worker_id=lambda: self.worker_id,
+            lease_seconds=lambda: self.lease_seconds,
+            emit_run=self.emit_run,
+        )
+        self.recovery = BackgroundRunRecovery(
+            task_store=self.task_store,
+            transitions=self.transitions,
             worker_id=lambda: self.worker_id,
             lease_seconds=lambda: self.lease_seconds,
             emit_run=self.emit_run,
@@ -228,76 +232,10 @@ class BackgroundSupervisor:
                 active_task.cancel()
 
     async def recover_expired_runs(self) -> None:
-        expired = await self.task_store.list_expired_leases(utc_now())
-        for run in expired:
-            try:
-                await self.recover_expired_run(run)
-            except (RunLeaseError, RunCancellationRequestedError):
-                continue
+        await self.recovery.recover_expired_runs()
 
     async def recover_expired_run(self, run: BackgroundRun) -> None:
-        stolen = await self.task_store.steal_expired_run(
-            run.run_id, self.worker_id, self.lease_seconds
-        )
-        if await self.task_store.is_cancel_requested(stolen.run_id):
-            await self.mark_terminal(stolen, RunStatus.CANCELLED, "cancelled")
-            return
-
-        attempts = await self.task_store.list_attempts(stolen.run_id)
-        running = [item for item in attempts if item.status == AttemptStatus.RUNNING]
-        for attempt in running:
-            await self.task_store.update_attempt(
-                attempt.attempt_id,
-                {
-                    "status": AttemptStatus.FAILED,
-                    "reason": AttemptReason.LEASE_EXPIRED,
-                    "finished_at": utc_now(),
-                    "error": "lease expired",
-                },
-                self.worker_id,
-                stolen.lease_token,
-            )
-        task = await self.task_store.get_task(stolen.task_id)
-        if not task:
-            await self.mark_terminal(stolen, RunStatus.FAILED, "task missing")
-            return
-
-        if stolen.status == RunStatus.CLAIMED:
-            recovered = await self.transition_or_cancel_without_attempt(
-                run=stolen,
-                expected={RunStatus.CLAIMED},
-                next_status=RunStatus.QUEUED,
-                patch=release_lease_patch(),
-            )
-            if recovered is None:
-                return
-            await self.emit_run("background_run_recovered", recovered)
-            return
-
-        can_retry = stolen.attempt <= task.retry_policy.max_retries
-        if can_retry:
-            retrying = stolen
-            if stolen.status == RunStatus.RUNNING:
-                retrying = await self.transition_or_cancel_without_attempt(
-                    run=stolen,
-                    expected={RunStatus.RUNNING},
-                    next_status=RunStatus.RETRYING,
-                    patch={"error": "lease expired"},
-                )
-                if retrying is None:
-                    return
-            recovered = await self.transition_or_cancel_without_attempt(
-                run=retrying,
-                expected={RunStatus.RETRYING},
-                next_status=RunStatus.QUEUED,
-                patch=release_lease_patch(),
-            )
-            if recovered is None:
-                return
-            await self.emit_run("background_run_recovered", recovered)
-            return
-
-        await self.mark_terminal(stolen, RunStatus.FAILED, "lease expired")
+        await self.recovery.recover_expired_run(run)
 
     async def release_claimed_before_start(self, run_id: str) -> None:
         latest = await self.task_store.get_run(run_id)
