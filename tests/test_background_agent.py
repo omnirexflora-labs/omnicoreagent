@@ -1000,6 +1000,45 @@ async def test_manager_run_now_executes_agent_and_records_events():
 
 
 @pytest.mark.asyncio
+async def test_manager_status_payloads_are_inspectable_without_events():
+    manager = BackgroundAgentManager(task_store="in_memory", worker_id="worker")
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "interval", "seconds": 60},
+    )
+
+    before = await manager.get_task_status("task")
+    assert before["task_id"] == "task"
+    assert before["agent_id"] == "agent"
+    assert before["enabled"] is True
+    assert before["runs"] == 0
+    assert before["active_runs"] == 0
+    assert before["latest_run"] is None
+    assert before["schedule"]["type"] == "interval"
+    assert before["schedule_state"]["next_due_at"] is not None
+
+    run = await manager.run_now("task", wait=True)
+
+    task_status = await manager.get_task_status("task")
+    manager_status = await manager.get_manager_status()
+
+    assert task_status["runs"] == 1
+    assert task_status["active_runs"] == 0
+    assert task_status["status_counts"]["completed"] == 1
+    assert task_status["latest_run"]["run_id"] == run.run_id
+    assert task_status["latest_run"]["status"] == "completed"
+    assert manager_status["worker_id"] == "worker"
+    assert manager_status["agents"] == 1
+    assert manager_status["tasks"] == 1
+    assert manager_status["runs"] == 1
+    assert manager_status["active_runs"] == 0
+    assert manager_status["status_counts"]["completed"] == 1
+
+
+@pytest.mark.asyncio
 async def test_background_run_events_replay_from_event_router():
     event_router = EventRouter()
     manager = BackgroundAgentManager(task_store="in_memory", event_router=event_router)

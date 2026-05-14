@@ -642,6 +642,10 @@ task-store or execution semantics.
 
 Rules:
 
+- `GET /background/status` returns manager-level counts, active-run count,
+  worker identity, lease settings, and run status counts from the task store.
+- `GET /background/tasks/{task_id}/status` returns task-level schedule state,
+  run counts, status counts, and latest run metadata from the task store.
 - `POST /background/tasks/{task_id}/run` with `wait=false` returns the queued
   or skipped run immediately.
 - `POST /background/tasks/{task_id}/run` with `wait=true` returns terminal run

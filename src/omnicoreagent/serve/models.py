@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnicoreagent.background import (
     BackgroundAgentSpec,
     BackgroundRun,
+    BackgroundScheduleState,
     BackgroundTaskSpec,
     OverlapPolicy,
     RetryPolicy,
@@ -187,6 +188,34 @@ class BackgroundStatusResponse(BaseModel):
     """Simple status response for background control endpoints."""
 
     status: str = Field(..., description="Operation status")
+
+
+class BackgroundManagerStatusResponse(BaseModel):
+    """Inspectable background manager state."""
+
+    running: bool
+    initialized: bool
+    worker_id: str
+    lease_seconds: float
+    agents: int
+    tasks: int
+    runs: int
+    active_runs: int
+    status_counts: dict[str, int]
+
+
+class BackgroundTaskStatusResponse(BaseModel):
+    """Inspectable status for one background task."""
+
+    task_id: str
+    agent_id: str
+    enabled: bool
+    schedule: ScheduleSpec
+    schedule_state: BackgroundScheduleState | None
+    runs: int
+    active_runs: int
+    status_counts: dict[str, int]
+    latest_run: BackgroundRun | None
 
 
 class BackgroundAgentsResponse(BaseModel):

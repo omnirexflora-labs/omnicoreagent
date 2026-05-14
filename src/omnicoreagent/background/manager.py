@@ -348,21 +348,45 @@ class BackgroundAgentManager:
         task = await self.task_store.get_task(task_id)
         if not task:
             raise TaskNotFoundError(f"Task not found: {task_id}")
+        schedule_state = await self.task_store.get_schedule_state(task_id)
         runs = await self.task_store.list_runs(task_id=task_id)
-        active = [run for run in runs if run.status not in {
-            RunStatus.COMPLETED,
-            RunStatus.FAILED,
-            RunStatus.CANCELLED,
-            RunStatus.TIMEOUT,
-            RunStatus.SKIPPED,
-        }]
-        return {"task_id": task_id, "enabled": task.enabled, "runs": len(runs), "active": len(active)}
+        active = [run for run in runs if run.status not in TERMINAL_RUN_STATUSES]
+        status_counts = {status.value: 0 for status in RunStatus}
+        for run in runs:
+            status_counts[run.status.value] += 1
+        latest_run = runs[-1] if runs else None
+        return {
+            "task_id": task_id,
+            "agent_id": task.agent_id,
+            "enabled": task.enabled,
+            "schedule": task.schedule.model_dump(mode="json"),
+            "schedule_state": (
+                schedule_state.model_dump(mode="json") if schedule_state else None
+            ),
+            "runs": len(runs),
+            "active_runs": len(active),
+            "status_counts": status_counts,
+            "latest_run": latest_run.model_dump(mode="json") if latest_run else None,
+        }
 
     async def get_manager_status(self) -> dict[str, Any]:
+        agents = await self.task_store.list_agents()
+        tasks = await self.task_store.list_tasks()
+        runs = await self.task_store.list_runs()
+        active = [run for run in runs if run.status not in TERMINAL_RUN_STATUSES]
+        status_counts = {status.value: 0 for status in RunStatus}
+        for run in runs:
+            status_counts[run.status.value] += 1
         return {
             "running": self._running,
-            "agents": len(await self.task_store.list_agents()),
-            "tasks": len(await self.task_store.list_tasks()),
+            "initialized": self._initialized,
+            "worker_id": self.worker_id,
+            "lease_seconds": self.lease_seconds,
+            "agents": len(agents),
+            "tasks": len(tasks),
+            "runs": len(runs),
+            "active_runs": len(active),
+            "status_counts": status_counts,
         }
 
     async def get_run_events(self, run_id: str) -> list[dict[str, Any]]:

@@ -22,10 +22,12 @@ from ..models import (
     BackgroundRunTimeoutResponse,
     BackgroundRunWorkspaceResponse,
     BackgroundRunsResponse,
+    BackgroundManagerStatusResponse,
     BackgroundStatusResponse,
     BackgroundTaskCreateRequest,
     BackgroundTaskPatchRequest,
     BackgroundTaskRunRequest,
+    BackgroundTaskStatusResponse,
     BackgroundTasksResponse,
     HttpErrorResponse,
 )
@@ -38,6 +40,16 @@ _HTTP_ERROR = {"model": HttpErrorResponse}
 def create_background_router() -> APIRouter:
     """Create durable background execution endpoints."""
     router = APIRouter(prefix="/background", tags=["Background"])
+
+    @router.get(
+        "/status",
+        response_model=BackgroundManagerStatusResponse,
+        summary="Inspect background manager status",
+        responses={503: _HTTP_ERROR},
+    )
+    async def get_background_status(request: Request) -> BackgroundManagerStatusResponse:
+        manager = _require_background_manager(request)
+        return BackgroundManagerStatusResponse(**await manager.get_manager_status())
 
     @router.post(
         "/agents",
@@ -175,6 +187,23 @@ def create_background_router() -> APIRouter:
         if not task:
             raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
         return task
+
+    @router.get(
+        "/tasks/{task_id}/status",
+        response_model=BackgroundTaskStatusResponse,
+        summary="Inspect background task status",
+        responses={404: _HTTP_ERROR, 503: _HTTP_ERROR},
+    )
+    async def get_background_task_status(
+        request: Request, task_id: str
+    ) -> BackgroundTaskStatusResponse:
+        manager = _require_background_manager(request)
+        try:
+            return BackgroundTaskStatusResponse(
+                **await manager.get_task_status(task_id)
+            )
+        except TaskNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @router.patch(
         "/tasks/{task_id}",

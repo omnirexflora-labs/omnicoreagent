@@ -141,6 +141,13 @@ def test_background_api_runs_task_and_exposes_events_and_workspace(tmp_path):
     )
 
     with TestClient(server.app) as client:
+        status = client.get("/background/status")
+        assert status.status_code == 200
+        assert status.json()["agents"] == 1
+        assert status.json()["tasks"] == 0
+        assert status.json()["runs"] == 0
+        assert status.json()["active_runs"] == 0
+
         agents = client.get("/background/agents")
         assert agents.status_code == 200
         assert agents.json()["agents"][0]["agent_id"] == "served"
@@ -163,6 +170,13 @@ def test_background_api_runs_task_and_exposes_events_and_workspace(tmp_path):
         assert task.status_code == 200
         assert task.json()["enabled"] is False
 
+        task_status = client.get("/background/tasks/daily_report/status")
+        assert task_status.status_code == 200
+        assert task_status.json()["task_id"] == "daily_report"
+        assert task_status.json()["enabled"] is False
+        assert task_status.json()["runs"] == 0
+        assert task_status.json()["schedule_state"]["task_id"] == "daily_report"
+
         patched = client.patch(
             "/background/tasks/daily_report",
             json={"enabled": True, "metadata": {"owner": "ops"}},
@@ -183,6 +197,19 @@ def test_background_api_runs_task_and_exposes_events_and_workspace(tmp_path):
         latest = client.get(f"/background/runs/{run['run_id']}")
         assert latest.status_code == 200
         assert latest.json()["status"] == "completed"
+
+        task_status = client.get("/background/tasks/daily_report/status")
+        assert task_status.status_code == 200
+        assert task_status.json()["runs"] == 1
+        assert task_status.json()["active_runs"] == 0
+        assert task_status.json()["status_counts"]["completed"] == 1
+        assert task_status.json()["latest_run"]["run_id"] == run["run_id"]
+
+        status = client.get("/background/status")
+        assert status.status_code == 200
+        assert status.json()["tasks"] == 1
+        assert status.json()["runs"] == 1
+        assert status.json()["status_counts"]["completed"] == 1
 
         runs = client.get("/background/runs", params={"task_id": "daily_report"})
         assert runs.status_code == 200
@@ -226,6 +253,7 @@ def test_background_api_runs_task_and_exposes_events_and_workspace(tmp_path):
         assert workspace.status_code == 200
         workspace_files = {item["name"] for item in workspace.json()["files"]}
         assert {"run.json", "events.jsonl"}.issubset(workspace_files)
+        assert client.get("/background/tasks/missing/status").status_code == 404
 
         deleted = client.delete("/background/tasks/daily_report", params={"delete_runs": True})
         assert deleted.status_code == 200
@@ -542,6 +570,9 @@ def test_background_openapi_matches_http_exception_response_shapes(tmp_path):
         run_responses = schema["paths"]["/background/tasks/{task_id}/run"][
             "post"
         ]["responses"]
+        task_status_schema = schema["components"]["schemas"][
+            "BackgroundTaskStatusResponse"
+        ]["properties"]
 
         assert (
             delete_task_responses["404"]["content"]["application/json"]["schema"][
@@ -552,4 +583,13 @@ def test_background_openapi_matches_http_exception_response_shapes(tmp_path):
         assert (
             run_responses["504"]["content"]["application/json"]["schema"]["$ref"]
             == "#/components/schemas/BackgroundRunTimeoutResponse"
+        )
+        assert task_status_schema["schedule"]["$ref"] == "#/components/schemas/ScheduleSpec"
+        assert (
+            task_status_schema["schedule_state"]["anyOf"][0]["$ref"]
+            == "#/components/schemas/BackgroundScheduleState"
+        )
+        assert (
+            task_status_schema["latest_run"]["anyOf"][0]["$ref"]
+            == "#/components/schemas/BackgroundRun"
         )
