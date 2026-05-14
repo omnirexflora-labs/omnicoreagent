@@ -22,7 +22,6 @@ from omnicoreagent.core.tools.tool_batch_runner import ToolBatchRunner
 from omnicoreagent.core.tools.tool_call_resolver import ToolCallResolver
 from omnicoreagent.core.tools.tool_failure_handler import ToolFailureHandler
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
-from omnicoreagent.core.agents.background_tasks import BackgroundTaskManager
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.events.base import Event
 from omnicoreagent.core.context_manager import (
@@ -93,7 +92,6 @@ class BaseReactAgent:
 
         self.session_state_store = AgentSessionStateStore(agent_name=self.agent_name)
         self._session_states = self.session_state_store.states
-        self.background_task_manager = BackgroundTaskManager()
         self.init_skills()
         self.register_internal_tool = ToolRegistry()
 
