@@ -188,3 +188,98 @@ def test_background_cookbook_uses_typed_event_payload_access():
 
     assert 'event.payload["event"]' not in text
     assert "event.payload.event" in text
+
+
+def test_ci_enforces_live_background_task_store_backends():
+    workflow = Path(".github/workflows/python-app.yml").read_text(encoding="utf-8")
+
+    for expected in {
+        "redis:7-alpine",
+        "mongo:7",
+        "OMNICOREAGENT_TEST_REDIS_URL",
+        "OMNICOREAGENT_TEST_MONGODB_URI",
+        "OMNICOREAGENT_TEST_MONGODB_DATABASE",
+        "Run live background manager backend tests",
+        "tests/test_background_durable_manager_integration.py",
+    }:
+        assert expected in workflow
+
+
+def test_background_docs_explain_durable_restart_behavior():
+    docs = [
+        Path("docs/core-concepts/background-agents.mdx"),
+        Path("docs/how-to-guides/omniserve.mdx"),
+        Path("cookbook/background_agents/README.mdx"),
+    ]
+
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        assert "queued run" in text
+        assert "same task store" in text or (
+            "same SQL, Redis, or" in text and "MongoDB task store" in text
+        )
+        assert "in-memory" in text.lower()
+
+
+def test_background_docs_show_public_status_and_run_endpoints():
+    docs = [
+        Path("docs/core-concepts/background-agents.mdx"),
+        Path("docs/how-to-guides/omniserve.mdx"),
+        Path("cookbook/background_agents/README.mdx"),
+    ]
+    endpoints = {
+        "/background/status",
+        "/background/tasks/",
+        "/background/runs/$RUN_ID",
+        "/background/runs/$RUN_ID/events",
+        "/background/runs/$RUN_ID/workspace",
+    }
+
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        missing = sorted(endpoint for endpoint in endpoints if endpoint not in text)
+        assert not missing, f"{path} is missing background endpoints: {missing}"
+        assert "curl http://localhost:8000/background/runs/{run_id}" not in text
+
+
+def test_background_task_store_env_examples_are_documented():
+    docs = [
+        Path("docs/how-to-guides/configuration.mdx"),
+        Path("docs/how-to-guides/omniserve.mdx"),
+        Path("cookbook/background_agents/README.mdx"),
+    ]
+    expected = {
+        "OMNICOREAGENT_BACKGROUND_TASK_STORE=sql",
+        "OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=sqlite:///.omnicoreagent/background.db",
+        "OMNICOREAGENT_BACKGROUND_TASK_STORE=redis",
+        "OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=redis://localhost:6379/0",
+        "OMNICOREAGENT_BACKGROUND_TASK_STORE=mongodb",
+        "OMNICOREAGENT_BACKGROUND_TASK_STORE_URI=mongodb://localhost:27017",
+        "OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE=omnicoreagent",
+    }
+
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        missing = sorted(name for name in expected if name not in text)
+        assert not missing, f"{path} is missing task-store env examples: {missing}"
+        assert "Pick one backend" in text or ("Pick" in text and "one backend" in text)
+
+
+def test_background_docs_include_durable_backend_selection_guidance():
+    docs = [
+        Path("docs/core-concepts/background-agents.mdx"),
+        Path("docs/how-to-guides/configuration.mdx"),
+        Path("docs/how-to-guides/omniserve.mdx"),
+        Path("cookbook/background_agents/README.mdx"),
+    ]
+    expected = {
+        "Use SQL/SQLite for local durability",
+        "Use Redis when your deployment already operates",
+        "Use MongoDB when",
+        "MongoDB is your durable operational store",
+    }
+
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        missing = sorted(phrase for phrase in expected if phrase not in text)
+        assert not missing, f"{path} is missing backend selection guidance: {missing}"

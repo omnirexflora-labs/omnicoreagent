@@ -299,7 +299,24 @@ If auth is enabled with `--auth-token` or
 Each run stores operational state in the task store and writes lifecycle files
 into the configured workspace namespace. Use the default in-memory task store
 for local development, or choose `sql`, `redis`, or `mongodb` when runs must
-survive restarts.
+survive restarts. Durable stores preserve queued runs across server restarts:
+OmniServe can queue a run, stop, start again with the same task store, and the
+new manager can claim and complete that run.
+
+Choose one durable backend per deployment. Use SQL/SQLite for local durability
+or simple single-node services. Use Redis when your deployment already operates
+Redis with persistence and no eviction for task-store keys. Use MongoDB when
+MongoDB is your durable operational store.
+
+Common inspection endpoints:
+
+```bash
+curl http://localhost:8000/background/status
+curl http://localhost:8000/background/tasks/daily_report/status
+curl http://localhost:8000/background/runs/$RUN_ID
+curl http://localhost:8000/background/runs/$RUN_ID/events
+curl http://localhost:8000/background/runs/$RUN_ID/workspace
+```
 
 ---
 
@@ -370,6 +387,21 @@ export OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS=100
 export OMNICOREAGENT_SERVE_CORS_ORIGINS=https://myapp.com,https://api.myapp.com
 export OMNICOREAGENT_SERVE_CORS_METHODS=GET,POST,OPTIONS
 export OMNICOREAGENT_SERVE_CORS_HEADERS=Authorization,Content-Type
+
+# Optional durable background task store. Pick one backend.
+export OMNICOREAGENT_BACKGROUND_TASK_STORE=sql
+export OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=sqlite:///.omnicoreagent/background.db
+```
+
+```bash
+export OMNICOREAGENT_BACKGROUND_TASK_STORE=redis
+export OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=redis://localhost:6379/0
+```
+
+```bash
+export OMNICOREAGENT_BACKGROUND_TASK_STORE=mongodb
+export OMNICOREAGENT_BACKGROUND_TASK_STORE_URI=mongodb://localhost:27017
+export OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE=omnicoreagent
 ```
 
 ---

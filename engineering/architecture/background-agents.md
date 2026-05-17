@@ -377,6 +377,13 @@ state is stateful by design. Moving from one backend to another requires an
 explicit export/import or transfer utility so task definitions, schedule state,
 run records, attempts, leases, and cancellation flags move together.
 
+Durable backend behavior is tested at the manager boundary, not only at the
+store boundary. The integration contract queues a run, shuts the manager down,
+constructs a new manager over the same task store, then executes the queued run
+through `BackgroundAgentManager.run_until_terminal()`. CI provides Redis and
+MongoDB service containers for this manager-level restart path; local developer
+runs may skip those live tests when the services are unavailable.
+
 ### Source Of Truth
 
 The task store is the source of truth for:
@@ -945,6 +952,8 @@ The background execution system is ready when:
 - every task is persisted through `AbstractTaskStore`
 - `in_memory` and `sql` conform to the same store tests
 - SQL backend supports local SQLite durability
+- Redis and MongoDB manager-level restart tests run against live backend
+  services in CI
 - enabled schedules survive manager restart on durable stores
 - schedule state stores next due, last due, dispatch cursor, and occurrence IDs
 - every run has a durable `run_id`

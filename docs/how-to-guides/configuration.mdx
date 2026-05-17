@@ -116,8 +116,34 @@ tasks, schedule cursors, runs, attempts, leases, heartbeats, retries, and
 cancellation flags. Defaults are intentionally light. Use `sql`, `redis`, or
 `mongodb` when background tasks must survive process restarts.
 
+Choose one durable backend per deployment. Use SQL/SQLite for local durability
+or simple single-node services. Use Redis when your deployment already operates
+Redis with persistence and no eviction for task-store keys. Use MongoDB when
+MongoDB is your durable operational store.
+
 For Redis durability, enable Redis persistence and keep task-store keys out of
 eviction. MongoDB task-store writes use majority write concern.
+
+Durable background examples. Pick one backend:
+
+```bash
+# Local SQLite durability
+export OMNICOREAGENT_BACKGROUND_TASK_STORE=sql
+export OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=sqlite:///.omnicoreagent/background.db
+```
+
+```bash
+# Redis durability
+export OMNICOREAGENT_BACKGROUND_TASK_STORE=redis
+export OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=redis://localhost:6379/0
+```
+
+```bash
+# MongoDB durability
+export OMNICOREAGENT_BACKGROUND_TASK_STORE=mongodb
+export OMNICOREAGENT_BACKGROUND_TASK_STORE_URI=mongodb://localhost:27017
+export OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE=omnicoreagent
+```
 
 ## 2. Agent Configuration
 

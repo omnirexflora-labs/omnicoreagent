@@ -19,6 +19,8 @@ DEFAULT_REDIS_URL = "redis://localhost:6379/0"
 DEFAULT_MONGODB_URI = "mongodb://localhost:27017"
 DEFAULT_MONGODB_DATABASE = "omnicoreagent_test"
 
+pytestmark = pytest.mark.requires_network
+
 
 class RestartAgent:
     async def run(self, query: str, session_id: str | None = None):
@@ -136,7 +138,7 @@ async def require_redis_available(config: dict) -> None:
     try:
         from redis.asyncio import Redis
     except Exception as exc:
-        pytest.skip(redis_unavailable_message(config, exc))
+        skip_or_fail_unavailable(redis_unavailable_message(config, exc))
 
     client = Redis.from_url(
         config["url"],
@@ -146,7 +148,7 @@ async def require_redis_available(config: dict) -> None:
     try:
         await client.ping()
     except Exception as exc:
-        pytest.skip(redis_unavailable_message(config, exc))
+        skip_or_fail_unavailable(redis_unavailable_message(config, exc))
     finally:
         await client.aclose()
 
@@ -155,7 +157,7 @@ async def require_mongodb_available(config: dict) -> None:
     try:
         from motor.motor_asyncio import AsyncIOMotorClient
     except Exception as exc:
-        pytest.skip(mongodb_unavailable_message(config, exc))
+        skip_or_fail_unavailable(mongodb_unavailable_message(config, exc))
 
     client = AsyncIOMotorClient(
         config["uri"],
@@ -164,7 +166,7 @@ async def require_mongodb_available(config: dict) -> None:
     try:
         await client[config["database"]].command("ping")
     except Exception as exc:
-        pytest.skip(mongodb_unavailable_message(config, exc))
+        skip_or_fail_unavailable(mongodb_unavailable_message(config, exc))
     finally:
         client.close()
 
@@ -209,6 +211,12 @@ def _summarize_exception(exc: Exception) -> str:
     message = str(exc).splitlines()[0]
     message = message.split(", Topology Description:", 1)[0]
     return f"{type(exc).__name__}: {message[:240]}"
+
+
+def skip_or_fail_unavailable(message: str) -> None:
+    if os.getenv("CI", "").lower() == "true":
+        raise AssertionError(message)
+    pytest.skip(message)
 
 
 def redis_unavailable_message(config: dict, exc: Exception) -> str:

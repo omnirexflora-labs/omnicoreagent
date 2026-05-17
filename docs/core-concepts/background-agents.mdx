@@ -170,6 +170,14 @@ The background API includes manager status, task creation, task status, task
 listing, pause, resume, delete, manual run, cancellation, run status, attempt
 history, event replay, and workspace inspection.
 
+```bash
+curl http://localhost:8000/background/status
+curl http://localhost:8000/background/tasks/health_report/status
+curl http://localhost:8000/background/runs/$RUN_ID
+curl http://localhost:8000/background/runs/$RUN_ID/events
+curl http://localhost:8000/background/runs/$RUN_ID/workspace
+```
+
 ## Task Configuration
 
 | Field | Purpose |
@@ -201,6 +209,16 @@ and run event replay. Task, schedule, run, attempt, lease, retry, and
 cancellation state is restart-persistent when the task store is SQL, Redis, or
 MongoDB. Event history follows the replay rules above and needs either a
 replay-capable event router or the workspace `events.jsonl` mirror.
+
+Durable stores are tested at the manager boundary. A queued run can be created,
+the manager can shut down, and a new manager over the same SQL, Redis, or
+MongoDB task store can claim and complete that run. The in-memory store is only
+for local development, tests, and single-process experiments.
+
+Choose one durable backend per deployment. Use SQL/SQLite for local durability
+or simple single-node services. Use Redis when your deployment already operates
+Redis with persistence and no eviction for task-store keys. Use MongoDB when
+MongoDB is your durable operational store.
 
 Redis durable deployments need persistence enabled and a no-eviction policy for
 task-store keys. MongoDB task-store writes use majority write concern.

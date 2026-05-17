@@ -17,6 +17,26 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python 3.12
@@ -65,6 +85,18 @@ jobs:
     - name: Run unit tests with pytest
       run: |
         uv run pytest -v tests -m "not requires_api_key and not requires_network and not broken_upstream"
+      env:
+        OMNICOREAGENT_TEST_REDIS_URL: redis://localhost:6379/0
+        OMNICOREAGENT_TEST_MONGODB_URI: mongodb://localhost:27017
+        OMNICOREAGENT_TEST_MONGODB_DATABASE: omnicoreagent_test
+
+    - name: Run live background manager backend tests
+      run: |
+        uv run pytest -v tests/test_background_durable_manager_integration.py -rs
+      env:
+        OMNICOREAGENT_TEST_REDIS_URL: redis://localhost:6379/0
+        OMNICOREAGENT_TEST_MONGODB_URI: mongodb://localhost:27017
+        OMNICOREAGENT_TEST_MONGODB_DATABASE: omnicoreagent_test
 
     # TODO: Re-enable these test sections when API keys are configured in CI secrets
     # and broken_upstream tests are fixed to match current source code.
