@@ -6,6 +6,7 @@ from importlib.metadata import PackageNotFoundError, version
 from fastapi import APIRouter, Request
 
 from ..models import HealthResponse, ReadinessResponse
+from ..readiness import evaluate_readiness
 from ..state import get_agent, get_agent_name
 
 
@@ -37,15 +38,13 @@ def create_health_router() -> APIRouter:
         description="Check if the agent is ready to accept requests.",
     )
     async def readiness_check(request: Request) -> ReadinessResponse:
-        agent = get_agent(request)
-        initialized = getattr(agent, "_initialized", True)
-        mcp_connected = not hasattr(agent, "mcp_client") or agent.mcp_client is not None
+        readiness = evaluate_readiness(request)
 
         return ReadinessResponse(
-            ready=initialized,
-            agent_name=get_agent_name(agent),
-            initialized=initialized,
-            mcp_connected=mcp_connected,
+            ready=readiness.ready,
+            agent_name=readiness.agent_name,
+            initialized=readiness.initialized,
+            mcp_connected=readiness.mcp_connected,
         )
 
     return router

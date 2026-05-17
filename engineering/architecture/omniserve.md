@@ -100,15 +100,21 @@ while running with defaults.
 OmniServe owns the HTTP lifespan around one served agent:
 
 1. store agent/config/background manager in app state.
-2. connect MCP servers when the served agent exposes `connect_mcp_servers`.
-3. initialize the background manager when background execution is enabled.
-4. register the served agent under `background_agent_id`.
-5. start the background worker when configured.
-6. on shutdown, stop the background manager before agent cleanup.
-7. call agent cleanup when the served agent exposes `cleanup`.
+2. keep `omniserve_startup_complete` false while startup is in progress.
+3. connect MCP servers when the served agent exposes `connect_mcp_servers`.
+4. initialize the background manager when background execution is enabled.
+5. register the served agent under `background_agent_id`.
+6. start the background worker when configured.
+7. mark startup complete only after dependencies are ready.
+8. on shutdown, mark startup incomplete before stopping the background manager.
+9. call agent cleanup when the served agent exposes `cleanup`.
 
 Lifespan errors should fail startup or shutdown clearly. They should not leave a
 half-started server that reports readiness while core dependencies failed.
+
+Readiness is intentionally cheap. `/ready` combines the startup-complete flag,
+agent initialization state, and MCP client presence. It never performs model
+calls, tool calls, background work, or network probes.
 
 ## HTTP API Boundary
 

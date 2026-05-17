@@ -42,6 +42,7 @@ def create_omniserve_app(
     app.state.agent = agent
     app.state.config = config
     app.state.start_time = time.time()
+    app.state.omniserve_startup_complete = False
     app.state.background_manager = _build_background_manager(
         config=config,
         background_manager=background_manager,

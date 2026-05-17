@@ -5,6 +5,7 @@ Async context manager for agent lifecycle management.
 Handles initialization, MCP server connections, and cleanup.
 """
 
+import sys
 import time
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
@@ -45,6 +46,7 @@ async def agent_lifespan(app: FastAPI):
 
     # Record start time for uptime tracking
     app.state.start_time = time.time()
+    app.state.omniserve_startup_complete = False
 
     try:
         if hasattr(agent, "connect_mcp_servers"):
@@ -60,17 +62,32 @@ async def agent_lifespan(app: FastAPI):
             if config.background_start_worker:
                 await background_manager.start()
 
+        app.state.omniserve_startup_complete = True
         logger.info(f"OmniServe: Agent '{agent_name}' is ready")
 
         yield
 
     finally:
+        app.state.omniserve_startup_complete = False
         logger.info(f"OmniServe: Shutting down agent '{agent_name}'...")
 
+        cleanup_error: BaseException | None = None
+        active_exception = sys.exc_info()[0] is not None
+
         if background_manager is not None:
-            await background_manager.shutdown()
+            try:
+                await background_manager.shutdown()
+            except Exception as exc:
+                cleanup_error = exc
+                logger.error(f"OmniServe: Background manager shutdown failed: {exc}")
 
         if hasattr(agent, "cleanup"):
-            await agent.cleanup()
+            try:
+                await agent.cleanup()
+            except Exception as exc:
+                cleanup_error = cleanup_error or exc
+                logger.error(f"OmniServe: Agent cleanup failed: {exc}")
 
         logger.info(f"OmniServe: Agent '{agent_name}' cleanup complete")
+        if cleanup_error is not None and not active_exception:
+            raise cleanup_error

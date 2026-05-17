@@ -352,6 +352,147 @@ class TestEndpoints:
         assert resp.json()["agent_name"] == "EndpointTestAgent"
         assert resp.json()["version"] == version("omnicoreagent")
 
+    def test_readiness_requires_lifespan_startup(self):
+        agent = MagicMock(spec=OmniCoreAgent)
+        agent.name = "ReadinessAgent"
+        agent.generate_session_id.return_value = "readiness-session"
+
+        server = OmniServe(
+            agent=agent,
+            config=OmniServeConfig(background_enabled=False),
+        )
+        client = TestClient(server.app)
+
+        resp = client.get("/ready")
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "ready": False,
+            "agent_name": "ReadinessAgent",
+            "initialized": True,
+            "mcp_connected": True,
+        }
+
+    def test_readiness_true_after_successful_lifespan_startup(self):
+        agent = MagicMock(spec=OmniCoreAgent)
+        agent.name = "ReadyAgent"
+        agent.generate_session_id.return_value = "ready-session"
+
+        server = OmniServe(
+            agent=agent,
+            config=OmniServeConfig(background_enabled=False),
+        )
+
+        with TestClient(server.app) as client:
+            resp = client.get("/ready")
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "ready": True,
+            "agent_name": "ReadyAgent",
+            "initialized": True,
+            "mcp_connected": True,
+        }
+
+    def test_readiness_reflects_uninitialized_agent(self):
+        agent = MagicMock(spec=OmniCoreAgent)
+        agent.name = "UninitializedAgent"
+        agent.generate_session_id.return_value = "uninitialized-session"
+        agent._initialized = False
+
+        server = OmniServe(
+            agent=agent,
+            config=OmniServeConfig(background_enabled=False),
+        )
+
+        with TestClient(server.app) as client:
+            resp = client.get("/ready")
+
+        assert resp.status_code == 200
+        assert resp.json()["ready"] is False
+        assert resp.json()["initialized"] is False
+
+    def test_readiness_reflects_mcp_connection_state(self):
+        agent = MagicMock(spec=OmniCoreAgent)
+        agent.name = "MCPReadinessAgent"
+        agent.generate_session_id.return_value = "mcp-readiness-session"
+        agent.mcp_client = None
+
+        server = OmniServe(
+            agent=agent,
+            config=OmniServeConfig(background_enabled=False),
+        )
+
+        with TestClient(server.app) as client:
+            resp = client.get("/ready")
+
+        assert resp.status_code == 200
+        assert resp.json()["ready"] is False
+        assert resp.json()["mcp_connected"] is False
+
+    def test_lifespan_cleanup_runs_after_startup_failure(self):
+        class FailingStartupAgent:
+            name = "FailingStartupAgent"
+
+            def __init__(self):
+                self.cleaned = False
+
+            async def connect_mcp_servers(self):
+                raise RuntimeError("mcp startup failed")
+
+            async def cleanup(self):
+                self.cleaned = True
+
+        agent = FailingStartupAgent()
+        server = OmniServe(
+            agent=agent,
+            config=OmniServeConfig(background_enabled=False),
+        )
+
+        with pytest.raises(RuntimeError, match="mcp startup failed"):
+            with TestClient(server.app):
+                pass
+
+        assert agent.cleaned is True
+        assert server.app.state.omniserve_startup_complete is False
+
+    def test_lifespan_agent_cleanup_runs_when_background_shutdown_fails(self):
+        class CleanupAgent:
+            name = "CleanupAgent"
+
+            def __init__(self):
+                self.cleaned = False
+
+            async def cleanup(self):
+                self.cleaned = True
+
+        class FailingShutdownManager:
+            async def initialize(self):
+                return None
+
+            async def register_agent(self, *args, **kwargs):
+                return None
+
+            async def start(self):
+                return None
+
+            async def shutdown(self):
+                raise RuntimeError("background shutdown failed")
+
+        agent = CleanupAgent()
+        server = OmniServe(
+            agent=agent,
+            config=OmniServeConfig(background_start_worker=True),
+            background_manager=FailingShutdownManager(),
+        )
+
+        with pytest.raises(RuntimeError, match="background shutdown failed"):
+            with TestClient(server.app):
+                assert server.app.state.omniserve_startup_complete is True
+
+        assert agent.cleaned is True
+        assert server.app.state.omniserve_startup_complete is False
+
     def test_openapi_uses_package_version(self, server_client):
         resp = server_client.get("/openapi.json")
 
@@ -424,6 +565,29 @@ class TestEndpoints:
 
         assert resp.status_code == 504
         assert "timed out" in resp.json()["detail"]
+
+    def test_unhandled_route_errors_return_stable_json(self):
+        agent = MagicMock(spec=OmniCoreAgent)
+        agent.name = "ErrorAgent"
+        agent.generate_session_id.return_value = "error-session"
+        server = OmniServe(
+            agent=agent,
+            config=OmniServeConfig(background_enabled=False),
+        )
+
+        @server.app.get("/boom")
+        async def boom():
+            raise RuntimeError("route exploded")
+
+        client = TestClient(server.app, raise_server_exceptions=False)
+        resp = client.get("/boom")
+
+        assert resp.status_code == 500
+        assert resp.json() == {
+            "error": "InternalServerError",
+            "message": "An internal server error occurred",
+            "detail": "route exploded",
+        }
 
     def test_request_metrics_are_per_app_instance(self):
         agent_one = MagicMock(spec=OmniCoreAgent)
