@@ -134,6 +134,10 @@ OmniServe exposes one agent through a stable API surface:
 - `/prometheus`
 - `/background/*` when background execution is enabled
 
+When background execution is disabled, the background router is not mounted.
+Disabled background execution should not expose dead `/background/*` endpoints
+or stale OpenAPI paths.
+
 `api_prefix` applies to API routes mounted by the agent router. Global FastAPI
 documentation and Prometheus paths remain global unless a deliberate design
 changes that.

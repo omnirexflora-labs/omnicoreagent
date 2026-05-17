@@ -180,6 +180,9 @@ When `background_enabled` is true, background routes expose:
 | `GET` | `/background/runs/{run_id}/events` | Replay run lifecycle events |
 | `GET` | `/background/runs/{run_id}/workspace` | Inspect run workspace files |
 
+When `background_enabled` is false, OmniServe does not mount `/background/*`
+routes and does not include background paths in the OpenAPI schema.
+
 `api_prefix` applies to these agent router paths.
 
 Global FastAPI routes are not mounted through the agent router:

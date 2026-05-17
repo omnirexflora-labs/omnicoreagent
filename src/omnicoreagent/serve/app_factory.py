@@ -51,7 +51,7 @@ def create_omniserve_app(
     setup_all_middleware(app, config)
     setup_metrics(app, config)
 
-    app.include_router(create_agent_router(), prefix=config.api_prefix)
+    app.include_router(create_agent_router(config), prefix=config.api_prefix)
 
     logger.info(f"OmniServe: Created FastAPI app for agent '{get_agent_name(agent)}'")
     return app

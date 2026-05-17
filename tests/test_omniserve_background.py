@@ -546,8 +546,10 @@ def test_background_api_can_be_disabled():
 
     response = client.get("/background/agents")
 
-    assert response.status_code == 503
-    assert response.json()["detail"] == "Background execution is disabled"
+    assert response.status_code == 404
+
+    schema = client.get("/openapi.json").json()
+    assert not any(path.startswith("/background") for path in schema["paths"])
 
 
 def test_background_openapi_matches_http_exception_response_shapes(tmp_path):
