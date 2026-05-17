@@ -315,15 +315,19 @@ Runtime events normalize to JSON-ready dictionaries using:
 Startup:
 
 1. set `app.state.start_time`.
-2. call `agent.connect_mcp_servers()` when present.
-3. initialize background manager when enabled.
-4. register the served agent under `background_agent_id`.
-5. start background worker when `background_start_worker` is true.
+2. mark `app.state.omniserve_startup_complete` false.
+3. call `agent.connect_mcp_servers()` when present.
+4. initialize background manager when enabled.
+5. register the served agent under `background_agent_id`.
+6. start background worker when `background_start_worker` is true.
+7. mark `app.state.omniserve_startup_complete` true only after startup
+   dependencies succeed.
 
 Shutdown:
 
-1. shut down background manager when present.
-2. call `agent.cleanup()` when present.
+1. mark `app.state.omniserve_startup_complete` false.
+2. shut down background manager when present.
+3. call `agent.cleanup()` when present.
 
 Startup failures must not report readiness as healthy.
 
@@ -337,6 +341,11 @@ Startup failures must not report readiness as healthy.
 - `agent_name`
 - `initialized`
 - `mcp_connected`
+
+`ready` is true only when lifespan startup completed, the agent is initialized,
+and an exposed MCP client is present. If startup has not completed, startup
+failed, the agent reports `_initialized=False`, or an exposed `mcp_client` is
+`None`, readiness is false.
 
 Readiness must remain cheap. It should not execute model calls, tool calls, or
 background work.
