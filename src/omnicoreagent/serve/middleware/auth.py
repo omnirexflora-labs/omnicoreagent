@@ -67,8 +67,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 def add_auth_middleware(app: FastAPI, config: OmniServeConfig) -> None:
     """Install bearer-token auth when enabled."""
-    if not config.auth_enabled or not config.auth_token:
+    if not config.auth_enabled:
         return
+    if not config.auth_token or not config.auth_token.strip():
+        raise ValueError(
+            "OmniServe auth is enabled but no bearer token is configured"
+        )
 
     app.add_middleware(
         AuthMiddleware,

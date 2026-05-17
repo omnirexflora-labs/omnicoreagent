@@ -41,6 +41,7 @@ class TestConfiguration:
             {
                 "OMNICOREAGENT_SERVE_PORT": "7777",
                 "OMNICOREAGENT_SERVE_AUTH_ENABLED": "true",
+                "OMNICOREAGENT_SERVE_AUTH_TOKEN": "env-secret",
                 "OMNICOREAGENT_SERVE_LOG_LEVEL": "DEBUG",
                 "OMNICOREAGENT_BACKGROUND_TASK_STORE": "sql",
             },
@@ -52,6 +53,7 @@ class TestConfiguration:
 
             assert config.port == 7777
             assert config.auth_enabled is True
+            assert config.auth_token == "env-secret"
             assert config.log_level == "DEBUG"
             assert config.background_task_store == "sql"
 
@@ -70,6 +72,18 @@ class TestConfiguration:
     def test_invalid_env_values_fail_clearly(self, env_name, env_value, message):
         with patch.dict(os.environ, {env_name: env_value}):
             with pytest.raises(ValidationError, match=message):
+                OmniServeConfig()
+
+    def test_auth_enabled_requires_non_empty_token(self):
+        with pytest.raises(ValidationError, match="AUTH_TOKEN is required"):
+            OmniServeConfig(auth_enabled=True)
+
+        with pytest.raises(ValidationError, match="AUTH_TOKEN is required"):
+            OmniServeConfig(auth_enabled=True, auth_token="   ")
+
+    def test_auth_env_enabled_requires_token(self):
+        with patch.dict(os.environ, {"OMNICOREAGENT_SERVE_AUTH_ENABLED": "true"}):
+            with pytest.raises(ValidationError, match="AUTH_TOKEN is required"):
                 OmniServeConfig()
 
     def test_background_task_store_url_infers_sql(self):
