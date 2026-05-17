@@ -1159,6 +1159,8 @@ Run the same contract tests against every backend:
 
 - in-memory end-to-end background run with fake agent
 - SQL SQLite end-to-end restart recovery
+- Redis manager-level restart recovery with a live Redis service
+- MongoDB manager-level restart recovery with a live MongoDB service
 - workspace lifecycle files and task outputs persist for local workspace when written
 - event trace can be built for a background run
 - cookbook background example runs with a short schedule and clean shutdown
@@ -1175,6 +1177,8 @@ The implementation satisfies this specification when:
 - `redis` supports durable Redis state through a serialized snapshot and backend lock.
 - `mongodb` supports durable MongoDB state through a serialized snapshot and lock document.
 - durable stores survive manager restart.
+- CI runs live Redis and MongoDB manager restart tests; backend-unavailable
+  skips are local-development behavior only and must fail in CI.
 - every run has a durable `run_id`.
 - every run has a durable `query_snapshot`.
 - every scheduled occurrence has a stable `occurrence_id`.

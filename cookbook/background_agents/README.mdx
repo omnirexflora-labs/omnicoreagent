@@ -94,6 +94,35 @@ manager = BackgroundAgentManager(
 Redis durable deployments need persistence enabled and a no-eviction policy for
 task-store keys. MongoDB task-store writes use majority write concern.
 
+Choose one durable backend per deployment. Use SQL/SQLite for local durability
+or simple single-node services. Use Redis when your deployment already operates
+Redis with persistence and no eviction for task-store keys. Use MongoDB when
+MongoDB is your durable operational store.
+
+Durable stores preserve queued runs across manager restarts. You can queue a
+manual run, stop the process, construct a new manager with the same task store,
+and complete the queued run from that new manager. The in-memory store does not
+provide that guarantee.
+
+OmniServe uses the same task-store settings through environment variables. Pick
+one backend:
+
+```bash
+export OMNICOREAGENT_BACKGROUND_TASK_STORE=sql
+export OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=sqlite:///.omnicoreagent/background.db
+```
+
+```bash
+export OMNICOREAGENT_BACKGROUND_TASK_STORE=redis
+export OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=redis://localhost:6379/0
+```
+
+```bash
+export OMNICOREAGENT_BACKGROUND_TASK_STORE=mongodb
+export OMNICOREAGENT_BACKGROUND_TASK_STORE_URI=mongodb://localhost:27017
+export OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE=omnicoreagent
+```
+
 ## Scheduled Runs
 
 Manual tasks run only when you call `run_now`. Scheduled tasks are dispatched by
@@ -198,6 +227,9 @@ history, event replay, and workspace inspection.
 ```bash
 curl http://localhost:8000/background/status
 curl http://localhost:8000/background/tasks/health_report/status
+curl http://localhost:8000/background/runs/$RUN_ID
+curl http://localhost:8000/background/runs/$RUN_ID/events
+curl http://localhost:8000/background/runs/$RUN_ID/workspace
 ```
 
 ## Task Configuration
