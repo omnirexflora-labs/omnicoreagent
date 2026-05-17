@@ -1,6 +1,7 @@
 """FastAPI application factory for OmniServe."""
 
 import time
+from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
@@ -32,7 +33,7 @@ def create_omniserve_app(
     app = FastAPI(
         title=title,
         description=description,
-        version="1.0.0",
+        version=_package_version(),
         lifespan=agent_lifespan,
         docs_url="/docs" if config.enable_docs else None,
         redoc_url="/redoc" if config.enable_redoc else None,
@@ -53,6 +54,13 @@ def create_omniserve_app(
 
     logger.info(f"OmniServe: Created FastAPI app for agent '{get_agent_name(agent)}'")
     return app
+
+
+def _package_version() -> str:
+    try:
+        return version("omnicoreagent")
+    except PackageNotFoundError:
+        return "0+unknown"
 
 
 def _build_background_manager(

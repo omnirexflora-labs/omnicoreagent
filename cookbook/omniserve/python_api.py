@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-OmniServe v0.0.1 - Python API Example (Full Configuration)
+OmniServe - Python API Example (Full Configuration)
 
 =============================================================================
 HOW TO RUN
@@ -200,7 +200,7 @@ if __name__ == "__main__":
     # Startup banner
     print()
     print("=" * 70)
-    print("🚀 OmniServe v0.0.1 - Python API Example")
+    print("🚀 OmniServe - Python API Example")
     print("=" * 70)
     print()
     print("ENDPOINTS:")

@@ -8,9 +8,9 @@ global:
 
 scrape_configs:
   # OmniServe metrics
-  - job_name: "omniserver"
+  - job_name: "omnicoreagent-serve"
     static_configs:
-      - targets: ["omniserver:8000"]
+      - targets: ["omnicoreagent-serve:8000"]
     metrics_path: "/prometheus"
     scrape_interval: 10s
     scrape_timeout: 5s

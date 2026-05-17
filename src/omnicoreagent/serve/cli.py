@@ -10,10 +10,18 @@ Usage:
 import os
 import sys
 import importlib.util
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Optional
 
 import click
+
+
+def _package_version() -> str:
+    try:
+        return version("omnicoreagent")
+    except PackageNotFoundError:
+        return "0+unknown"
 
 
 def _load_agent_from_file(path: str):
@@ -54,7 +62,7 @@ def _load_agent_from_file(path: str):
 
 
 @click.group()
-@click.version_option(version="0.0.1", prog_name="omniserve")
+@click.version_option(version=_package_version(), prog_name="omniserve")
 def cli():
     """OmniServe - Production-ready API server for AI agents.
 
@@ -125,7 +133,8 @@ def run(
     # Start server
     click.echo("")
     click.echo("=" * 50)
-    click.echo("🚀 OmniServe v0.0.1")
+    click.echo("OmniServe")
+    click.echo(f"OmniCoreAgent {_package_version()}")
     click.echo("=" * 50)
     click.echo(f"Agent: {loaded_agent.name}")
     click.echo(f"Server: http://{config.host}:{config.port}")
@@ -211,7 +220,8 @@ def quickstart(
 
     click.echo("")
     click.echo("=" * 50)
-    click.echo("🚀 OmniServe v0.0.1 - Quickstart")
+    click.echo("OmniServe Quickstart")
+    click.echo(f"OmniCoreAgent {_package_version()}")
     click.echo("=" * 50)
     click.echo(f"Agent: {name}")
     click.echo(f"Model: {provider}/{model}")
@@ -268,10 +278,17 @@ export LLM_API_KEY=your_api_key_here
 # Optional background task persistence
 # Background APIs and the worker are enabled by default with in-memory task state.
 # Use SQL, Redis, or MongoDB when task control-plane state must survive restarts.
+# Choose one backend:
+#
+# SQL / SQLite
 # export OMNICOREAGENT_BACKGROUND_TASK_STORE=sql
 # export OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=sqlite:///.omnicoreagent/background.db
+#
+# Redis
 # export OMNICOREAGENT_BACKGROUND_TASK_STORE=redis
 # export OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=redis://localhost:6379/0
+#
+# MongoDB
 # export OMNICOREAGENT_BACKGROUND_TASK_STORE=mongodb
 # export OMNICOREAGENT_BACKGROUND_TASK_STORE_URI=mongodb://localhost:27017
 # export OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE=omnicoreagent
@@ -391,10 +408,12 @@ CMD ["sh", "-c", "omniserve run --agent $AGENT_PATH"]
 
     console.print("\n[bold]Next Steps:[/bold]")
     console.print("1. Build the image:")
-    console.print("   docker build -t omniserver .")
+    console.print("   docker build -t omnicoreagent-serve .")
 
     console.print("\n2. Run with local workspace:")
-    console.print("   docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omniserver")
+    console.print(
+        "   docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omnicoreagent-serve"
+    )
 
     console.print("\n   Or run with S3/R2 workspace persistence:")
     console.print("   docker run -p 8000:8000 \\")
@@ -403,7 +422,7 @@ CMD ["sh", "-c", "omniserve run --agent $AGENT_PATH"]
     console.print("     -e AWS_S3_BUCKET=your-bucket \\")
     console.print("     -e AWS_ACCESS_KEY_ID=... \\")
     console.print("     -e AWS_SECRET_ACCESS_KEY=... \\")
-    console.print("     omniserver")
+    console.print("     omnicoreagent-serve")
 
     console.print(
         "\n[yellow]⚠ Local workspace is ephemeral unless you mount a volume.[/yellow]"

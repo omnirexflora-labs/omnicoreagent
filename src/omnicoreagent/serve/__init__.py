@@ -8,7 +8,7 @@ Transforms an OmniCoreAgent into a REST/SSE API server with:
 - Metrics and tools listing
 - Configurable middleware (CORS, auth, logging, rate limiting)
 - Prometheus metrics endpoint
-- Agent event streaming and compact event trace summaries
+- Agent event streaming and compact event summaries
 - Proper lifecycle management
 
 Usage:

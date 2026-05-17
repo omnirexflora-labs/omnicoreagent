@@ -49,8 +49,8 @@ def create_sessions_router() -> APIRouter:
     @router.get(
         "/events/{session_id}/trace",
         response_model=TraceResponse,
-        summary="Get session trace summary",
-        description="Build a compact trace summary from stored session events.",
+        summary="Get session event summary",
+        description="Build a compact summary from stored session events.",
     )
     async def get_trace(request: Request, session_id: str) -> TraceResponse:
         agent = get_agent(request)

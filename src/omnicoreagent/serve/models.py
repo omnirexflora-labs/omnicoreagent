@@ -117,7 +117,7 @@ class HealthResponse(BaseModel):
     status: str = Field(..., description="Health status ('healthy' or 'unhealthy')")
     agent_name: str = Field(..., description="Name of the agent")
     uptime: float = Field(..., description="Server uptime in seconds")
-    version: str = Field(default="1.0.0", description="OmniServe version")
+    version: str = Field(default="0+unknown", description="OmniCoreAgent version")
 
 
 class ReadinessResponse(BaseModel):
@@ -177,11 +177,11 @@ class EventsResponse(BaseModel):
 
 
 class TraceResponse(BaseModel):
-    """Response model for session trace endpoint."""
+    """Response model for session event summary endpoint."""
 
     session_id: str = Field(..., description="Session ID")
-    summary: dict[str, Any] = Field(..., description="Trace summary")
-    steps: list[dict[str, Any]] = Field(..., description="Ordered trace steps")
+    summary: dict[str, Any] = Field(..., description="Event summary")
+    steps: list[dict[str, Any]] = Field(..., description="Ordered event steps")
 
 
 class BackgroundStatusResponse(BaseModel):

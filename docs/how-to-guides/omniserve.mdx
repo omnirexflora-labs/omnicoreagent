@@ -207,7 +207,7 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 | `GET` | `/metrics` | Yes* | Agent usage metrics |
 | `GET` | `/events/{session_id}` | Yes* | Replay stored session events, then follow live events over SSE |
 | `GET` | `/events/{session_id}/list` | Yes* | Return stored session events as JSON |
-| `GET` | `/events/{session_id}/trace` | Yes* | Compact agent trace summary |
+| `GET` | `/events/{session_id}/trace` | Yes* | Compact session event summary |
 | `GET` | `/docs` | No | Swagger UI |
 | `GET` | `/redoc` | No | ReDoc UI |
 
@@ -417,8 +417,8 @@ omniserve generate-dockerfile --file my_agent.py
 ### Build and run
 
 ```bash
-docker build -t omniserver .
-docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omniserver
+docker build -t omnicoreagent-serve .
+docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omnicoreagent-serve
 ```
 
 **Smart Configuration** — The generator inspects your agent and configures storage automatically:
@@ -432,7 +432,7 @@ docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omniserver
 
 ```bash
 # Local workspace (ephemeral)
-docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omniserver
+docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omnicoreagent-serve
 
 # AWS S3 workspace (persistent)
 docker run -p 8000:8000 \
@@ -442,7 +442,7 @@ docker run -p 8000:8000 \
   -e AWS_ACCESS_KEY_ID=... \
   -e AWS_SECRET_ACCESS_KEY=... \
   -e AWS_REGION=us-east-1 \
-  omniserver
+  omnicoreagent-serve
 
 # Cloudflare R2 workspace (persistent)
 docker run -p 8000:8000 \
@@ -452,7 +452,7 @@ docker run -p 8000:8000 \
   -e R2_ACCOUNT_ID=... \
   -e R2_ACCESS_KEY_ID=... \
   -e R2_SECRET_ACCESS_KEY=... \
-  omniserver
+  omnicoreagent-serve
 ```
 
 ---

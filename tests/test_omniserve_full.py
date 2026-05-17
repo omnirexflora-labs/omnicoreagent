@@ -1,9 +1,11 @@
 import os
 import pytest
 import asyncio
+from importlib.metadata import version
 from unittest.mock import MagicMock, patch, AsyncMock
 from fastapi.testclient import TestClient
 from click.testing import CliRunner
+from pydantic import ValidationError
 from omnicoreagent import OmniCoreAgent, OmniServe, OmniServeConfig
 from omnicoreagent.serve.cli import cli
 
@@ -53,6 +55,23 @@ class TestConfiguration:
             assert config.log_level == "DEBUG"
             assert config.background_task_store == "sql"
 
+    @pytest.mark.parametrize(
+        ("env_name", "env_value", "message"),
+        [
+            ("OMNICOREAGENT_SERVE_PORT", "not-a-port", "must be an integer"),
+            ("OMNICOREAGENT_SERVE_AUTH_ENABLED", "maybe", "must be a boolean"),
+            (
+                "OMNICOREAGENT_BACKGROUND_TASK_STORE_CONNECT_TIMEOUT",
+                "slow",
+                "must be a number",
+            ),
+        ],
+    )
+    def test_invalid_env_values_fail_clearly(self, env_name, env_value, message):
+        with patch.dict(os.environ, {env_name: env_value}):
+            with pytest.raises(ValidationError, match=message):
+                OmniServeConfig()
+
     def test_background_task_store_url_infers_sql(self):
         config = OmniServeConfig(
             background_task_store_url="sqlite:///custom-background.db"
@@ -79,21 +98,32 @@ class TestConfiguration:
             "connect_timeout": None,
         }
 
-    def test_background_task_store_redis_keeps_tuning_without_url(self):
+    def test_background_task_store_redis_requires_prefixed_url(self):
         with patch.dict(os.environ, {"REDIS_URL": "redis://localhost:6379/3"}):
             config = OmniServeConfig(
                 background_task_store="redis",
                 background_task_store_prefix="tasks",
                 background_task_store_connect_timeout=1.25,
             )
-            assert config.background_task_store_config() == {
-                "backend": "redis",
-                "url": "redis://localhost:6379/3",
-                "prefix": "tasks",
-                "connect_timeout": 1.25,
-            }
+            with pytest.raises(ValueError, match="TASK_STORE_URL"):
+                config.background_task_store_config()
 
-    def test_background_task_store_mongodb_keeps_tuning_without_uri(self):
+    def test_background_task_store_redis_uses_prefixed_url(self):
+        config = OmniServeConfig(
+            background_task_store="redis",
+            background_task_store_url="redis://localhost:6379/3",
+            background_task_store_prefix="tasks",
+            background_task_store_connect_timeout=1.25,
+        )
+
+        assert config.background_task_store_config() == {
+            "backend": "redis",
+            "url": "redis://localhost:6379/3",
+            "prefix": "tasks",
+            "connect_timeout": 1.25,
+        }
+
+    def test_background_task_store_mongodb_requires_prefixed_uri(self):
         with patch.dict(os.environ, {"MONGODB_URI": "mongodb://localhost:27017"}):
             config = OmniServeConfig(
                 background_task_store="mongodb",
@@ -101,14 +131,43 @@ class TestConfiguration:
                 background_task_store_collection_prefix="background_tasks",
                 background_task_store_connect_timeout=2.5,
             )
-            assert config.background_task_store_config() == {
-                "backend": "mongodb",
-                "uri": "mongodb://localhost:27017",
-                "database": "tasks",
-                "prefix": None,
-                "collection_prefix": "background_tasks",
-                "connect_timeout": 2.5,
-            }
+            with pytest.raises(ValueError, match="TASK_STORE_URI"):
+                config.background_task_store_config()
+
+    def test_background_task_store_mongodb_uses_prefixed_uri(self):
+        config = OmniServeConfig(
+            background_task_store="mongodb",
+            background_task_store_uri="mongodb://localhost:27017",
+            background_task_store_database="tasks",
+            background_task_store_collection_prefix="background_tasks",
+            background_task_store_connect_timeout=2.5,
+        )
+
+        assert config.background_task_store_config() == {
+            "backend": "mongodb",
+            "uri": "mongodb://localhost:27017",
+            "database": "tasks",
+            "collection_prefix": "background_tasks",
+            "connect_timeout": 2.5,
+        }
+
+    def test_background_task_store_rejects_mismatched_url_backend(self):
+        config = OmniServeConfig(
+            background_task_store="mongodb",
+            background_task_store_url="sqlite:///wrong.db",
+        )
+
+        with pytest.raises(ValueError, match="TASK_STORE_URL"):
+            config.background_task_store_config()
+
+    def test_background_task_store_rejects_mismatched_uri_backend(self):
+        config = OmniServeConfig(
+            background_task_store="redis",
+            background_task_store_uri="mongodb://localhost:27017",
+        )
+
+        with pytest.raises(ValueError, match="TASK_STORE_URI"):
+            config.background_task_store_config()
 
     def test_env_example_includes_background_settings(self):
         result = CliRunner().invoke(cli, ["config", "--env-example"])
@@ -122,6 +181,42 @@ class TestConfiguration:
         ]:
             assert key in result.output
         assert "export LLM_API_KEY=your_api_key_here" in result.output
+        assert "Choose one backend" in result.output
+        assert "REDIS_URL" not in result.output
+        assert "MONGODB_URI" not in result.output
+
+    def test_cli_version_uses_omnicoreagent_package_version(self):
+        result = CliRunner().invoke(cli, ["--version"])
+
+        assert result.exit_code == 0
+        assert result.output.strip() == f"omniserve, version {version('omnicoreagent')}"
+
+    def test_generate_dockerfile_uses_current_image_name(self, tmp_path):
+        agent_file = tmp_path / "agent.py"
+        agent_file.write_text(
+            "class Agent:\n"
+            "    name = 'GeneratedAgent'\n"
+            "    agent_config = {}\n\n"
+            "agent = Agent()\n",
+            encoding="utf-8",
+        )
+        output_dir = tmp_path / "docker"
+
+        result = CliRunner().invoke(
+            cli,
+            [
+                "generate-dockerfile",
+                "--file",
+                str(agent_file),
+                "--output-dir",
+                str(output_dir),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "omnicoreagent-serve" in result.output
+        assert "omniserver" not in result.output
+        assert (output_dir / "Dockerfile").exists()
 
 
 # =============================================================================
@@ -201,6 +296,30 @@ class TestMiddleware:
         assert resp.status_code == 200
         assert resp.headers["access-control-allow-origin"] == "https://example.com"
 
+    def test_rate_limit_middleware_allows_then_denies_protected_routes(self, mock_agent):
+        config = OmniServeConfig(
+            rate_limit_enabled=True,
+            rate_limit_requests=1,
+            rate_limit_window=60,
+        )
+        mock_agent.run = AsyncMock(return_value={"response": "test"})
+        server = OmniServe(agent=mock_agent, config=config)
+        client = TestClient(server.app)
+
+        public_response = client.get("/health")
+        assert public_response.status_code == 200
+        assert "X-RateLimit-Limit" not in public_response.headers
+
+        allowed = client.post("/run/sync", json={"query": "first"})
+        denied = client.post("/run/sync", json={"query": "second"})
+
+        assert allowed.status_code == 200
+        assert allowed.headers["X-RateLimit-Limit"] == "1"
+        assert allowed.headers["X-RateLimit-Remaining"] == "0"
+        assert denied.status_code == 429
+        assert denied.headers["Retry-After"]
+        assert denied.json()["error"] == "TooManyRequests"
+
 
 # =============================================================================
 # Test Endpoints
@@ -231,6 +350,13 @@ class TestEndpoints:
         assert resp.status_code == 200
         assert resp.json()["status"] == "healthy"
         assert resp.json()["agent_name"] == "EndpointTestAgent"
+        assert resp.json()["version"] == version("omnicoreagent")
+
+    def test_openapi_uses_package_version(self, server_client):
+        resp = server_client.get("/openapi.json")
+
+        assert resp.status_code == 200
+        assert resp.json()["info"]["version"] == version("omnicoreagent")
 
     def test_sync_run(self, server_client):
         resp = server_client.post("/run/sync", json={"query": "Hello"})
