@@ -5,8 +5,8 @@
 <h1 align="center">OmniCoreAgent</h1>
 
 <p align="center">
-  <strong>Open Python Agent Harness and Runtime for Production AI Agents</strong><br />
-  <em>Everything around the model: parallel tool batches, structured observations, loop detection, memory, workspace files, MCP tools, subagents, background tasks, and serving.</em>
+  <strong>The Open Production Agent Harness for Python</strong><br />
+  <em>Parallel tool batches, structured observations, signature loop detection, MCP tools, memory, workspace files, subagents, background tasks, and REST/SSE serving.</em>
 </p>
 
 <p align="center">
@@ -17,14 +17,60 @@
 </p>
 
 <p align="center">
+  <a href="#what-it-is">What It Is</a> -
   <a href="#quick-start">Quick Start</a> -
   <a href="#choose-your-path">Choose Your Path</a> -
-  <a href="#what-makes-it-different">What Makes It Different</a> -
+  <a href="#what-you-can-build">Use Cases</a> -
+  <a href="#why-it-matters">Why It Matters</a> -
   <a href="#install-only-what-you-need">Install</a> -
   <a href="./cookbook">Cookbook</a> -
   <a href="#features">Features</a> -
   <a href="https://docs-omnicoreagent.omnirexfloralabs.com/docs">Docs</a>
 </p>
+
+---
+
+## What It Is
+
+An LLM is not an agent by itself. The model provides intelligence; the harness
+gives that intelligence a working environment.
+
+OmniCoreAgent is the application-facing harness layer around a model:
+
+```text
+model
+  + prompt contract
+  + reasoning loop
+  + local tools
+  + MCP tools
+  + parallel tool batches
+  + structured observations
+  + memory
+  + context control
+  + workspace files
+  + tool-output offloading
+  + guardrails
+  + events
+  + subagents
+  + background tasks
+  + REST/SSE serving
+```
+
+That is the difference between an agent harness and a generic agent library.
+A library gives you pieces to assemble. A harness gives you the runtime boundary
+that makes a model usable inside an application.
+
+OmniCoreAgent keeps that boundary explicit:
+
+| Layer | What It Owns |
+|-------|--------------|
+| **Agent harness** | Model loop, prompt contract, tools, observations, memory, context, workspace, guardrails, events, subagents |
+| **Serving boundary** | OmniServe REST/SSE APIs, request lifecycle, readiness, auth, rate limits, metrics |
+| **Background boundary** | Durable scheduled/manual task execution with task state, run history, leases, retries, and workspace output |
+| **External tool boundary** | MCP server tools and local Python tools exposed through one runtime surface |
+
+Start with the core harness. Turn on heavier production pieces only when the
+workload needs them.
 
 ---
 
@@ -83,12 +129,34 @@ small.
 
 ---
 
-## What Makes It Different
+## What You Can Build
 
-Most agent libraries stop at "LLM plus tool loop." OmniCoreAgent is built around
-the runtime problems that show up after that: slow sequential tools, noisy
-observations, stuck loops, context exhaustion, MCP server tools, durable
-workspace files, and runtime serving.
+OmniCoreAgent is for application builders who need the agent runtime to hold
+together after the prototype works.
+
+| Build | Harness Pieces You Use |
+|-------|------------------------|
+| **MCP-connected product agents** | MCP tools, local tools, structured observations, guardrails, session memory |
+| **Research and analysis agents** | Parallel tool batches, workspace files, tool offloading, context management, artifact readback |
+| **Long-running worker agents** | Background tasks, durable task stores, run history, workspace output, retries, cancellation |
+| **Multi-agent task systems** | Dynamic subagents, shared workspace output, workflow orchestration, event streams |
+| **Agent APIs** | OmniServe REST/SSE, readiness, auth, request timeout, rate limits, metrics |
+| **Production app integrations** | Optional Redis, MongoDB, SQL, S3, and R2 backends without making the core install heavy |
+
+The core idea is simple: one harness entry point, many application membranes.
+You bring the domain instructions, tools, and business logic. OmniCoreAgent
+provides the execution boundary around them.
+
+---
+
+## Why It Matters
+
+Most demos stop at "LLM plus tool loop." Production agents fail in the layer
+around that loop: slow sequential tool calls, noisy observations, repeated
+actions, context exhaustion, unsafe tool output, missing workspace state,
+uninspectable background work, and weak serving boundaries.
+
+OmniCoreAgent exists for that layer.
 
 ### 1. Agents call tools in batches instead of forced sequences
 
@@ -145,7 +213,7 @@ agent behavior much easier than "max iterations reached."
 
 ### 4. The harness is already assembled
 
-OmniCoreAgent ships as a working agent harness, not a bag of disconnected pieces:
+OmniCoreAgent ships as a working harness, not a bag of disconnected pieces:
 
 ```text
 model + prompt + loop + tools + memory + context + workspace + guardrails + events
@@ -262,8 +330,8 @@ uses.
 | **Guardrails** | Adds prompt-injection screening inside the observation path with configurable behavior. |
 | **Event System** | Emits structured runtime events for agent runs, tool calls, and streaming integrations. |
 | **Workflow Orchestration** | Provides sequential, parallel, and router agents for multi-step application workflows. |
-| **Background Agents** | Supports scheduled autonomous tasks for interval-based workloads. |
-| **Universal Models** | Routes through LiteLLM to OpenAI, Anthropic, Gemini, Groq, Ollama, DeepSeek, Mistral, OpenRouter, Azure, and Cencori. |
+| **Durable Background Tasks** | Runs manual or scheduled agent work with task state, run history, retries, cancellation, and workspace output. |
+| **Universal Models** | Supports OpenAI, Anthropic, Gemini, Groq, Ollama, DeepSeek, Mistral, OpenRouter, Azure, and Cencori through the runtime model layer. |
 | **OmniServe** | Turns an agent into a REST/SSE service with lifecycle management and metrics. |
 
 ---
