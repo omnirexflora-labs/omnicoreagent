@@ -348,8 +348,8 @@ authentication, rate limits, or background storage.
 | `OMNICOREAGENT_SERVE_CORS_METHODS` | `*` | Allowed methods (comma-separated) |
 | `OMNICOREAGENT_SERVE_CORS_HEADERS` | `*` | Allowed headers (comma-separated) |
 | `OMNICOREAGENT_SERVE_CORS_CREDENTIALS` | `true` | Allow credentials |
-| `OMNICOREAGENT_SERVE_AUTH_ENABLED` | `false` | Enable Bearer token auth |
-| `OMNICOREAGENT_SERVE_AUTH_TOKEN` | — | Bearer token value |
+| `OMNICOREAGENT_SERVE_AUTH_ENABLED` | `false` | Enable Bearer token auth. Requires a non-empty auth token |
+| `OMNICOREAGENT_SERVE_AUTH_TOKEN` | — | Bearer token value used when auth is enabled |
 | `OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED` | `false` | Enable rate limiting |
 | `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per window |
 | `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Window in seconds |

@@ -268,7 +268,15 @@ class OmniServeConfig(BaseModel):
         if (val := _get_env_bool(background_prefix, "START_WORKER")) is not None:
             self.background_start_worker = val
 
+        self._validate_auth_config()
         return self
+
+    def _validate_auth_config(self) -> None:
+        if self.auth_enabled and not _has_value(self.auth_token):
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_AUTH_TOKEN is required when "
+                "OMNICOREAGENT_SERVE_AUTH_ENABLED=true"
+            )
 
     @classmethod
     def from_env(cls) -> "OmniServeConfig":
@@ -318,3 +326,7 @@ class OmniServeConfig(BaseModel):
                 "OMNICOREAGENT_BACKGROUND_TASK_STORE_URL"
             )
         return self.background_task_store
+
+
+def _has_value(value: str | None) -> bool:
+    return value is not None and value.strip() != ""

@@ -202,6 +202,7 @@ When auth is disabled, all routes are accessible.
 
 When auth is enabled:
 
+- a non-empty `auth_token` is required during configuration creation.
 - `/health` and `/ready` bypass auth.
 - prefixed health/readiness paths bypass auth when `api_prefix` is set.
 - `/docs`, `/redoc`, `/openapi.json`, and `/prometheus` bypass auth.
