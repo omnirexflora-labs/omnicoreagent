@@ -169,8 +169,8 @@ inspected through `/background/runs/{run_id}`.
 omniserve generate-dockerfile --file cookbook/omniserve/cli_agent.py
 
 # Build and run
-docker build -t omniserver .
-docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omniserver
+docker build -t omnicoreagent-serve .
+docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omnicoreagent-serve
 ```
 
 ### Cloud Deployment (Cloud Run, AWS Fargate, Railway)
@@ -188,5 +188,5 @@ docker run -p 8000:8000 \
   -e AWS_S3_BUCKET=my-bucket \
   -e AWS_ACCESS_KEY_ID=... \
   -e AWS_SECRET_ACCESS_KEY=... \
-  omniserver
+  omnicoreagent-serve
 ```

@@ -1,6 +1,7 @@
 """Health and readiness routes for OmniServe."""
 
 import time
+from importlib.metadata import PackageNotFoundError, version
 
 from fastapi import APIRouter, Request
 
@@ -26,7 +27,7 @@ def create_health_router() -> APIRouter:
             status="healthy",
             agent_name=get_agent_name(agent),
             uptime=time.time() - start_time,
-            version="1.0.0",
+            version=_package_version(),
         )
 
     @router.get(
@@ -48,3 +49,10 @@ def create_health_router() -> APIRouter:
         )
 
     return router
+
+
+def _package_version() -> str:
+    try:
+        return version("omnicoreagent")
+    except PackageNotFoundError:
+        return "0+unknown"

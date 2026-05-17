@@ -107,6 +107,42 @@ def test_omniserve_docs_include_all_public_env_vars():
         assert not missing, f"{path} is missing OmniServe env vars: {missing}"
 
 
+def test_omniserve_docs_do_not_show_separate_or_stale_serve_version():
+    docs = [
+        Path("docs/how-to-guides/omniserve.mdx"),
+        Path("cookbook/omniserve/README.mdx"),
+        Path("cookbook/omniserve/python_api.py"),
+        Path("cookbook/omniserve/cli_agent.py"),
+    ]
+
+    offenders = []
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        found = [phrase for phrase in ("OmniServe v", "v0.0.1") if phrase in text]
+        if found:
+            offenders.append(f"{path}: {', '.join(found)}")
+
+    assert not offenders, (
+        "OmniServe inherits OmniCoreAgent package versioning and must not show "
+        "a separate stale version:\n" + "\n".join(offenders)
+    )
+
+
+def test_omniserve_docs_use_consistent_docker_image_name():
+    docs = [
+        Path("docs/how-to-guides/omniserve.mdx"),
+        Path("cookbook/omniserve/README.mdx"),
+        Path("docker/Dockerfile"),
+        Path("docker/docker-compose.yml"),
+        Path("docker/prometheus.yml"),
+    ]
+
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        assert "omnicoreagent-serve" in text
+        assert "omniserver" not in text
+
+
 def test_background_docs_do_not_claim_sql_is_only_durable_store():
     docs = [
         Path("docs/how-to-guides/omniserve.mdx"),

@@ -34,4 +34,5 @@ Current records:
 - `architecture/workspace.md`
 - `specifications/background-agents.md`
 - `specifications/events.md`
+- `specifications/omniserve.md`
 - `specifications/workspace.md`

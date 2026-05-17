@@ -2,8 +2,8 @@
 #
 # Multi-stage build for smaller production image
 #
-# Build:  docker build -t omniserver:latest -f docker/Dockerfile .
-# Run:    docker run -p 8000:8000 -e LLM_API_KEY=xxx omniserver:latest
+# Build:  docker build -t omnicoreagent-serve:latest -f docker/Dockerfile .
+# Run:    docker run -p 8000:8000 -e LLM_API_KEY=xxx omnicoreagent-serve:latest
 
 FROM python:3.12-slim AS builder
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-OmniServe v0.0.1 - CLI Agent Example
+OmniServe - CLI Agent Example
 
 =============================================================================
 HOW TO RUN (CLI)

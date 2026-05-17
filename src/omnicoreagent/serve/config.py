@@ -55,7 +55,12 @@ def _get_env_bool(prefix: str, key: str) -> Optional[bool]:
     val = _get_env(prefix, key)
     if val is None:
         return None
-    return val.lower() in ("true", "1", "yes", "on")
+    normalized = val.lower()
+    if normalized in ("true", "1", "yes", "on"):
+        return True
+    if normalized in ("false", "0", "no", "off"):
+        return False
+    raise ValueError(f"{prefix}_{key} must be a boolean value")
 
 
 def _get_env_int(prefix: str, key: str) -> Optional[int]:
@@ -66,7 +71,18 @@ def _get_env_int(prefix: str, key: str) -> Optional[int]:
     try:
         return int(val)
     except ValueError:
+        raise ValueError(f"{prefix}_{key} must be an integer") from None
+
+
+def _get_env_float(prefix: str, key: str) -> Optional[float]:
+    """Get float environment variable. Returns None if not set."""
+    val = _get_env(prefix, key)
+    if val is None:
         return None
+    try:
+        return float(val)
+    except ValueError:
+        raise ValueError(f"{prefix}_{key} must be a number") from None
 
 
 def _get_env_list(prefix: str, key: str) -> Optional[list[str]]:
@@ -247,11 +263,8 @@ class OmniServeConfig(BaseModel):
             self.background_task_store_prefix = val
         if (val := _get_env(background_prefix, "TASK_STORE_COLLECTION_PREFIX")) is not None:
             self.background_task_store_collection_prefix = val
-        if (val := _get_env(background_prefix, "TASK_STORE_CONNECT_TIMEOUT")) is not None:
-            try:
-                self.background_task_store_connect_timeout = float(val)
-            except ValueError:
-                pass
+        if (val := _get_env_float(background_prefix, "TASK_STORE_CONNECT_TIMEOUT")) is not None:
+            self.background_task_store_connect_timeout = val
         if (val := _get_env_bool(background_prefix, "START_WORKER")) is not None:
             self.background_start_worker = val
 
@@ -266,7 +279,13 @@ class OmniServeConfig(BaseModel):
         """Return normalized task-store config for BackgroundAgentManager."""
         if isinstance(self.background_task_store, dict):
             return self.background_task_store
+        backend = self.background_task_store or "in_memory"
         if self.background_task_store_uri:
+            if backend not in {"in_memory", "mongodb"}:
+                raise ValueError(
+                    "OMNICOREAGENT_BACKGROUND_TASK_STORE_URI can only be used "
+                    "with the MongoDB background task store"
+                )
             return {
                 "backend": "mongodb",
                 "uri": self.background_task_store_uri,
@@ -275,9 +294,13 @@ class OmniServeConfig(BaseModel):
                 "connect_timeout": self.background_task_store_connect_timeout,
             }
         if self.background_task_store_url:
-            backend = self.background_task_store or "sql"
             if backend == "in_memory":
                 backend = "sql"
+            if backend not in {"sql", "redis"}:
+                raise ValueError(
+                    "OMNICOREAGENT_BACKGROUND_TASK_STORE_URL can only be used "
+                    "with the SQL or Redis background task store"
+                )
             return {
                 "backend": backend,
                 "url": self.background_task_store_url,
@@ -285,19 +308,13 @@ class OmniServeConfig(BaseModel):
                 "connect_timeout": self.background_task_store_connect_timeout,
             }
         if self.background_task_store == "mongodb":
-            return {
-                "backend": "mongodb",
-                "uri": os.getenv("MONGODB_URI"),
-                "database": self.background_task_store_database or "omnicoreagent",
-                "prefix": self.background_task_store_prefix,
-                "collection_prefix": self.background_task_store_collection_prefix,
-                "connect_timeout": self.background_task_store_connect_timeout,
-            }
+            raise ValueError(
+                "MongoDB background task store requires "
+                "OMNICOREAGENT_BACKGROUND_TASK_STORE_URI"
+            )
         if self.background_task_store == "redis":
-            return {
-                "backend": "redis",
-                "url": os.getenv("REDIS_URL"),
-                "prefix": self.background_task_store_prefix,
-                "connect_timeout": self.background_task_store_connect_timeout,
-            }
+            raise ValueError(
+                "Redis background task store requires "
+                "OMNICOREAGENT_BACKGROUND_TASK_STORE_URL"
+            )
         return self.background_task_store
