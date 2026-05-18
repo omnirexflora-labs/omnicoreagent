@@ -21,4 +21,5 @@ Current specifications:
 - `background-agents.md`
 - `events.md`
 - `omniserve.md`
+- `telemetry.md`
 - `workspace.md`

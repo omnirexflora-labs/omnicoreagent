@@ -31,8 +31,10 @@ Current records:
 - `architecture/background-agents.md`
 - `architecture/events.md`
 - `architecture/omniserve.md`
+- `architecture/telemetry.md`
 - `architecture/workspace.md`
 - `specifications/background-agents.md`
 - `specifications/events.md`
 - `specifications/omniserve.md`
+- `specifications/telemetry.md`
 - `specifications/workspace.md`
