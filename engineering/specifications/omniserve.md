@@ -103,6 +103,15 @@ Environment variables override code values:
 Invalid env values must fail clearly during configuration creation. They must
 not be silently ignored.
 
+Serving bounds must also fail clearly during configuration creation:
+
+- `port` must be between `1` and `65535`.
+- `workers` must be at least `1`.
+- when rate limiting is enabled, `rate_limit_requests` must be at least `1`.
+- when rate limiting is enabled, `rate_limit_window` must be at least `1`.
+- `request_timeout <= 0` remains valid and disables OmniServe request timeout
+  behavior.
+
 Generic env fallbacks such as `REDIS_URL`, `MONGODB_URI`, `OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `GROQ_API_KEY` are not part of the
 OmniServe public configuration contract.

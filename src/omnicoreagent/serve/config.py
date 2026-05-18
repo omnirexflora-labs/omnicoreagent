@@ -268,14 +268,36 @@ class OmniServeConfig(BaseModel):
         if (val := _get_env_bool(background_prefix, "START_WORKER")) is not None:
             self.background_start_worker = val
 
+        self._validate_server_config()
         self._validate_auth_config()
+        self._validate_rate_limit_config()
         return self
+
+    def _validate_server_config(self) -> None:
+        if self.port < 1 or self.port > 65535:
+            raise ValueError("OMNICOREAGENT_SERVE_PORT must be between 1 and 65535")
+        if self.workers < 1:
+            raise ValueError("OMNICOREAGENT_SERVE_WORKERS must be at least 1")
 
     def _validate_auth_config(self) -> None:
         if self.auth_enabled and not _has_value(self.auth_token):
             raise ValueError(
                 "OMNICOREAGENT_SERVE_AUTH_TOKEN is required when "
                 "OMNICOREAGENT_SERVE_AUTH_ENABLED=true"
+            )
+
+    def _validate_rate_limit_config(self) -> None:
+        if not self.rate_limit_enabled:
+            return
+        if self.rate_limit_requests < 1:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS must be at least 1 "
+                "when rate limiting is enabled"
+            )
+        if self.rate_limit_window < 1:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW must be at least 1 "
+                "when rate limiting is enabled"
             )
 
     @classmethod

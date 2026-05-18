@@ -86,6 +86,57 @@ class TestConfiguration:
             with pytest.raises(ValidationError, match="AUTH_TOKEN is required"):
                 OmniServeConfig()
 
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"port": 0}, "PORT must be between 1 and 65535"),
+            ({"port": 65536}, "PORT must be between 1 and 65535"),
+            ({"workers": 0}, "WORKERS must be at least 1"),
+            (
+                {"rate_limit_enabled": True, "rate_limit_requests": 0},
+                "RATE_LIMIT_REQUESTS must be at least 1",
+            ),
+            (
+                {"rate_limit_enabled": True, "rate_limit_window": 0},
+                "RATE_LIMIT_WINDOW must be at least 1",
+            ),
+        ],
+    )
+    def test_invalid_serving_bounds_fail_clearly(self, kwargs, message):
+        with pytest.raises(ValidationError, match=message):
+            OmniServeConfig(**kwargs)
+
+    @pytest.mark.parametrize(
+        ("env_name", "env_value", "message"),
+        [
+            ("OMNICOREAGENT_SERVE_PORT", "0", "PORT must be between 1 and 65535"),
+            ("OMNICOREAGENT_SERVE_WORKERS", "0", "WORKERS must be at least 1"),
+            (
+                "OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS",
+                "0",
+                "RATE_LIMIT_REQUESTS must be at least 1",
+            ),
+            (
+                "OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW",
+                "0",
+                "RATE_LIMIT_WINDOW must be at least 1",
+            ),
+        ],
+    )
+    def test_invalid_serving_bounds_from_env_fail_clearly(
+        self, env_name, env_value, message
+    ):
+        env = {env_name: env_value}
+        if "RATE_LIMIT" in env_name:
+            env["OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED"] = "true"
+        with patch.dict(os.environ, env):
+            with pytest.raises(ValidationError, match=message):
+                OmniServeConfig()
+
+    def test_non_positive_request_timeout_remains_allowed_to_disable_timeout(self):
+        assert OmniServeConfig(request_timeout=0).request_timeout == 0
+        assert OmniServeConfig(request_timeout=-1).request_timeout == -1
+
     def test_background_task_store_url_infers_sql(self):
         config = OmniServeConfig(
             background_task_store_url="sqlite:///custom-background.db"

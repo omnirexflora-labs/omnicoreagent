@@ -81,8 +81,8 @@ and use an in-memory task store. Set only the values you want to override.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `OMNICOREAGENT_SERVE_HOST` | `0.0.0.0` | Server bind host. |
-| `OMNICOREAGENT_SERVE_PORT` | `8000` | Server port. |
-| `OMNICOREAGENT_SERVE_WORKERS` | `1` | Uvicorn worker count. |
+| `OMNICOREAGENT_SERVE_PORT` | `8000` | Server port. Must be `1`-`65535`. |
+| `OMNICOREAGENT_SERVE_WORKERS` | `1` | Uvicorn worker count. Must be at least `1`. |
 | `OMNICOREAGENT_SERVE_API_PREFIX` | `""` | API route prefix, such as `/api/v1`. |
 | `OMNICOREAGENT_SERVE_ENABLE_DOCS` | `true` | Enable Swagger UI. |
 | `OMNICOREAGENT_SERVE_ENABLE_REDOC` | `true` | Enable ReDoc. |
@@ -97,8 +97,8 @@ and use an in-memory task store. Set only the values you want to override.
 | `OMNICOREAGENT_SERVE_LOG_LEVEL` | `INFO` | Server log level. |
 | `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` | `300` | Request timeout in seconds. Set `0` to disable timeout middleware. |
 | `OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED` | `false` | Enable in-process rate limiting. |
-| `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per rate-limit window. |
-| `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Rate-limit window in seconds. |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per rate-limit window. Must be at least `1` when rate limiting is enabled. |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Rate-limit window in seconds. Must be at least `1` when rate limiting is enabled. |
 | `OMNICOREAGENT_BACKGROUND_ENABLED` | `true` | Expose background task endpoints. |
 | `OMNICOREAGENT_BACKGROUND_AGENT_ID` | `default` | Agent id used when OmniServe registers the served agent for background work. |
 | `OMNICOREAGENT_BACKGROUND_TASK_STORE` | `in_memory` | Background control-plane store: `in_memory`, `sql`, `redis`, or `mongodb`. |

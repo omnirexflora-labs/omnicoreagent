@@ -77,8 +77,8 @@ limiting until you opt in.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OMNICOREAGENT_SERVE_HOST` | `0.0.0.0` | Server host |
-| `OMNICOREAGENT_SERVE_PORT` | `8000` | Server port |
-| `OMNICOREAGENT_SERVE_WORKERS` | `1` | Worker processes |
+| `OMNICOREAGENT_SERVE_PORT` | `8000` | Server port. Must be `1`-`65535` |
+| `OMNICOREAGENT_SERVE_WORKERS` | `1` | Worker processes. Must be at least `1` |
 | `OMNICOREAGENT_SERVE_API_PREFIX` | `""` | API path prefix |
 | `OMNICOREAGENT_SERVE_ENABLE_DOCS` | `true` | Swagger UI at `/docs` |
 | `OMNICOREAGENT_SERVE_ENABLE_REDOC` | `true` | ReDoc at `/redoc` |
@@ -90,8 +90,8 @@ limiting until you opt in.
 | `OMNICOREAGENT_SERVE_AUTH_ENABLED` | `false` | Enable Bearer auth. Requires a non-empty auth token |
 | `OMNICOREAGENT_SERVE_AUTH_TOKEN` | — | Bearer token value used when auth is enabled |
 | `OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED` | `false` | Rate limiting |
-| `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests/window |
-| `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Window seconds |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests/window. Must be at least `1` when enabled |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Window seconds. Must be at least `1` when enabled |
 | `OMNICOREAGENT_SERVE_REQUEST_LOGGING` | `true` | Log requests |
 | `OMNICOREAGENT_SERVE_LOG_LEVEL` | `INFO` | Log level |
 | `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` | `300` | Timeout seconds |
