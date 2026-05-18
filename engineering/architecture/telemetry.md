@@ -186,6 +186,44 @@ OmniServe / application call
             -> future evaluators attach evidence-linked judgments
 ```
 
+## Implementation Status
+
+Telemetry is being moved into the runtime in phases.
+
+The foundation phase provides:
+
+- canonical telemetry dataclasses for traces, spans, events, actors, token usage,
+  errors, and trace metadata
+- async context propagation through `TelemetryContext`
+- `TelemetryRecorder`
+- in-memory telemetry storage
+- JSONL telemetry storage
+- `TelemetryStream`
+- deterministic trace normalization
+- legacy event conversion helpers for migration
+
+The runtime facade wiring phase provides:
+
+- automatic telemetry initialization on `OmniCoreAgent`
+- one `agent.run` trace for every `OmniCoreAgent.run(...)` call
+- a unique `run_id` for every run, even when multiple runs share one
+  `session_id`
+- explicit `run_id` injection for serving/event/telemetry correlation during
+  migration
+- `user_message`, `guardrail_violation`, `final_answer`, and `runtime_error`
+  events at the facade boundary
+- completed, failed, cancelled, and safety-aborted trace statuses
+- runtime helper methods for trace lookup and telemetry stream replay/follow
+- public `run(...)` responses include `trace_id` and `run_id` so application
+  code can retrieve or stream the exact trace it just created
+- injected `telemetry_store`, `telemetry_recorder`, and `telemetry_stream`
+  components must share the same store instance
+
+The runtime loop, model calls, tool batches, MCP calls, memory operations,
+workspace operations, subagents, background runs, and OmniServe SSE are still
+migration work. They must emit telemetry directly instead of adding new
+`EventRouter` dependencies.
+
 Runtime controls may also emit telemetry:
 
 - resource guard warning
@@ -429,7 +467,10 @@ Short-term:
 
 - current `Event` records can be adapted into telemetry events
 - `EventRouter` may remain temporarily while call sites are moved
-- `get_trace()` remains a compact event summary until replaced
+- `get_event_trace(session_id)` remains the explicit compact event summary
+  accessor until replaced
+- `get_trace(trace_id)` and positional `get_trace("trace_...")` return
+  canonical telemetry traces
 
 Target:
 

@@ -54,7 +54,10 @@ def create_sessions_router() -> APIRouter:
     )
     async def get_trace(request: Request, session_id: str) -> TraceResponse:
         agent = get_agent(request)
-        trace = await agent.get_trace(session_id)
+        if hasattr(agent, "get_event_trace"):
+            trace = await agent.get_event_trace(session_id)
+        else:
+            trace = await agent.get_trace(session_id=session_id)
 
         return TraceResponse(
             session_id=session_id,

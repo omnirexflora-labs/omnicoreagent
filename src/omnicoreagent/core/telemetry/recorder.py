@@ -28,6 +28,16 @@ from omnicoreagent.core.telemetry.redaction import TelemetryConfig, redact_paylo
 from omnicoreagent.core.telemetry.store import AbstractTelemetryStore
 
 
+def _span_status_for_trace_status(status: TraceStatus) -> SpanStatus:
+    if status == TraceStatus.COMPLETED:
+        return SpanStatus.OK
+    if status == TraceStatus.CANCELLED:
+        return SpanStatus.CANCELLED
+    if status == TraceStatus.TIMEOUT:
+        return SpanStatus.TIMEOUT
+    return SpanStatus.ERROR
+
+
 class TelemetryRecorder:
     def __init__(
         self,
@@ -126,11 +136,8 @@ class TelemetryRecorder:
             )
             parent_context = self._span_parent_contexts.get(trace.root_span_id)
             ended_at = utc_now()
-            terminal_span_status = (
-                SpanStatus.OK
-                if TraceStatus(status) == TraceStatus.COMPLETED
-                else SpanStatus.ERROR
-            )
+            trace_status = TraceStatus(status)
+            terminal_span_status = _span_status_for_trace_status(trace_status)
             for span in sorted(
                 trace.spans,
                 key=lambda item: item.started_at,

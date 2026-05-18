@@ -39,6 +39,8 @@ def normalize_run_result(result: Any, *, agent_name: str) -> dict[str, Any]:
             "response": result.get("response", ""),
             "agent_name": result.get("agent_name", agent_name),
             "metric": normalize_metric(result.get("metric")),
+            "trace_id": result.get("trace_id"),
+            "run_id": result.get("run_id"),
         }
 
     return {

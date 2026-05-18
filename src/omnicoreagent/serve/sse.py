@@ -318,14 +318,15 @@ async def run_agent_stream(
                     response,
                     agent_name=get_agent_name(agent),
                 )
+                complete_payload = {
+                    "session_id": session_id,
+                    **normalized,
+                }
+                complete_payload["run_id"] = normalized.get("run_id") or run_id
 
                 yield format_sse_event(
                     "complete",
-                    {
-                        "session_id": session_id,
-                        "run_id": run_id,
-                        **normalized,
-                    },
+                    complete_payload,
                 )
                 break
 

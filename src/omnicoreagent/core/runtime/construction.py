@@ -13,6 +13,12 @@ def default_event_router() -> Any:
     return runtime("EventRouter")(event_store_type="in_memory")
 
 
+def default_telemetry_store() -> Any:
+    from omnicoreagent.core.telemetry import InMemoryTelemetryStore
+
+    return InMemoryTelemetryStore()
+
+
 def build_guardrail(agent_name: str, agent_config: dict[str, Any]) -> tuple[str, Any]:
     guardrail_mode = agent_config.get("guardrail_mode", "full")
     if guardrail_mode == "off":
