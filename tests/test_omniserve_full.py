@@ -34,6 +34,18 @@ class TestConfiguration:
         assert config.port == 9090
         assert config.host == "127.0.0.1"
 
+    def test_api_prefix_is_normalized(self):
+        assert OmniServeConfig(api_prefix="api").api_prefix == "/api"
+        assert OmniServeConfig(api_prefix="/api/").api_prefix == "/api"
+        assert OmniServeConfig(api_prefix="/").api_prefix == ""
+
+    def test_env_api_prefix_is_normalized(self):
+        with patch.dict(os.environ, {"OMNICOREAGENT_SERVE_API_PREFIX": "api/v1/"}):
+            assert OmniServeConfig().api_prefix == "/api/v1"
+
+    def test_log_level_is_normalized(self):
+        assert OmniServeConfig(log_level="debug").log_level == "DEBUG"
+
     def test_env_vars_override_code(self):
         """Verify public env vars override code values."""
         with patch.dict(
@@ -62,6 +74,12 @@ class TestConfiguration:
         [
             ("OMNICOREAGENT_SERVE_PORT", "not-a-port", "must be an integer"),
             ("OMNICOREAGENT_SERVE_AUTH_ENABLED", "maybe", "must be a boolean"),
+            ("OMNICOREAGENT_SERVE_LOG_LEVEL", "LOUD", "LOG_LEVEL must be one of"),
+            (
+                "OMNICOREAGENT_SERVE_API_PREFIX",
+                "bad prefix",
+                "API_PREFIX must not contain whitespace",
+            ),
             (
                 "OMNICOREAGENT_BACKGROUND_TASK_STORE_CONNECT_TIMEOUT",
                 "slow",
@@ -91,7 +109,11 @@ class TestConfiguration:
         [
             ({"port": 0}, "PORT must be between 1 and 65535"),
             ({"port": 65536}, "PORT must be between 1 and 65535"),
-            ({"workers": 0}, "WORKERS must be at least 1"),
+            ({"host": ""}, "HOST must not be empty"),
+            ({"workers": 0}, "WORKERS must be 1 for direct OmniServe"),
+            ({"workers": 2}, "WORKERS must be 1 for direct OmniServe"),
+            ({"api_prefix": "bad prefix"}, "API_PREFIX must not contain whitespace"),
+            ({"log_level": "LOUD"}, "LOG_LEVEL must be one of"),
             (
                 {"rate_limit_enabled": True, "rate_limit_requests": 0},
                 "RATE_LIMIT_REQUESTS must be at least 1",
@@ -110,7 +132,16 @@ class TestConfiguration:
         ("env_name", "env_value", "message"),
         [
             ("OMNICOREAGENT_SERVE_PORT", "0", "PORT must be between 1 and 65535"),
-            ("OMNICOREAGENT_SERVE_WORKERS", "0", "WORKERS must be at least 1"),
+            (
+                "OMNICOREAGENT_SERVE_WORKERS",
+                "0",
+                "WORKERS must be 1 for direct OmniServe",
+            ),
+            (
+                "OMNICOREAGENT_SERVE_WORKERS",
+                "2",
+                "WORKERS must be 1 for direct OmniServe",
+            ),
             (
                 "OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS",
                 "0",
@@ -136,6 +167,134 @@ class TestConfiguration:
     def test_non_positive_request_timeout_remains_allowed_to_disable_timeout(self):
         assert OmniServeConfig(request_timeout=0).request_timeout == 0
         assert OmniServeConfig(request_timeout=-1).request_timeout == -1
+
+    def test_server_start_overrides_are_validated_before_uvicorn(self):
+        agent = MagicMock(spec=OmniCoreAgent)
+        agent.name = "StartValidationAgent"
+        server = OmniServe(agent, OmniServeConfig(background_enabled=False))
+
+        with patch("uvicorn.run") as run:
+            with pytest.raises(ValueError, match="PORT must be between 1 and 65535"):
+                server.start(port=0)
+            run.assert_not_called()
+
+        with patch("uvicorn.run") as run:
+            with pytest.raises(ValueError, match="WORKERS must be 1"):
+                server.start(workers=0)
+            run.assert_not_called()
+
+        with patch("uvicorn.run") as run:
+            with pytest.raises(ValueError, match="WORKERS must be 1"):
+                server.start(workers=2)
+            run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_server_start_async_overrides_are_validated_before_uvicorn(self):
+        agent = MagicMock(spec=OmniCoreAgent)
+        agent.name = "AsyncStartValidationAgent"
+        server = OmniServe(agent, OmniServeConfig(background_enabled=False))
+
+        with patch("uvicorn.Server") as uvicorn_server:
+            with pytest.raises(ValueError, match="PORT must be between 1 and 65535"):
+                await server.start_async(port=0)
+            uvicorn_server.assert_not_called()
+
+    def test_cli_run_invalid_rate_limit_fails_before_serving(self, tmp_path):
+        agent_file = tmp_path / "agent.py"
+        marker_file = tmp_path / "loaded.txt"
+        agent_file.write_text(
+            "from pathlib import Path\n"
+            f"Path({str(marker_file)!r}).write_text('loaded', encoding='utf-8')\n"
+            "class Agent:\n"
+            "    name = 'CliValidationAgent'\n"
+            "    agent_config = {}\n\n"
+            "agent = Agent()\n",
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            cli,
+            ["run", "--agent", str(agent_file), "--rate-limit", "0"],
+        )
+
+        assert result.exit_code != 0
+        assert "RATE_LIMIT_REQUESTS must be at least 1" in result.output
+        assert not marker_file.exists()
+
+    def test_cli_run_invalid_port_fails_before_serving(self, tmp_path):
+        agent_file = tmp_path / "agent.py"
+        marker_file = tmp_path / "loaded.txt"
+        agent_file.write_text(
+            "from pathlib import Path\n"
+            f"Path({str(marker_file)!r}).write_text('loaded', encoding='utf-8')\n"
+            "class Agent:\n"
+            "    name = 'CliPortValidationAgent'\n"
+            "    agent_config = {}\n\n"
+            "agent = Agent()\n",
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            cli,
+            ["run", "--agent", str(agent_file), "--port", "0"],
+        )
+
+        assert result.exit_code != 0
+        assert "PORT must be between 1 and 65535" in result.output
+        assert not marker_file.exists()
+
+    def test_cli_run_invalid_env_port_fails_before_loading_agent(self, tmp_path):
+        agent_file = tmp_path / "agent.py"
+        marker_file = tmp_path / "loaded.txt"
+        agent_file.write_text(
+            "from pathlib import Path\n"
+            f"Path({str(marker_file)!r}).write_text('loaded', encoding='utf-8')\n"
+            "class Agent:\n"
+            "    name = 'CliEnvPortValidationAgent'\n"
+            "    agent_config = {}\n\n"
+            "agent = Agent()\n",
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            cli,
+            ["run", "--agent", str(agent_file)],
+            env={"OMNICOREAGENT_SERVE_PORT": "0"},
+        )
+
+        assert result.exit_code != 0
+        assert "PORT must be between 1 and 65535" in result.output
+        assert not marker_file.exists()
+
+    def test_cli_run_invalid_workers_fails_before_loading_agent(self, tmp_path):
+        agent_file = tmp_path / "agent.py"
+        marker_file = tmp_path / "loaded.txt"
+        agent_file.write_text(
+            "from pathlib import Path\n"
+            f"Path({str(marker_file)!r}).write_text('loaded', encoding='utf-8')\n"
+            "class Agent:\n"
+            "    name = 'CliWorkerValidationAgent'\n"
+            "    agent_config = {}\n\n"
+            "agent = Agent()\n",
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            cli,
+            ["run", "--agent", str(agent_file), "--workers", "2"],
+        )
+
+        assert result.exit_code != 0
+        assert "WORKERS must be 1 for direct OmniServe" in result.output
+        assert not marker_file.exists()
+
+    def test_cli_quickstart_invalid_port_fails_before_creating_agent(self):
+        with patch("omnicoreagent.OmniCoreAgent") as agent_cls:
+            result = CliRunner().invoke(cli, ["quickstart", "--port", "0"])
+
+        assert result.exit_code != 0
+        assert "PORT must be between 1 and 65535" in result.output
+        agent_cls.assert_not_called()
 
     def test_background_task_store_url_infers_sql(self):
         config = OmniServeConfig(

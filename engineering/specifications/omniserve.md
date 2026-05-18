@@ -44,8 +44,8 @@ Defaults:
 |-------|---------|---------|
 | `host` | `0.0.0.0` | Bind address |
 | `port` | `8000` | Bind port |
-| `workers` | `1` | Uvicorn worker processes |
-| `api_prefix` | `""` | Prefix for agent API routes |
+| `workers` | `1` | Direct OmniServe worker process count. Must be `1` |
+| `api_prefix` | `""` | Prefix for agent API routes. Normalized to `""` or a leading-slash path |
 | `enable_docs` | `true` | Enable `/docs` |
 | `enable_redoc` | `true` | Enable `/redoc` |
 | `cors_enabled` | `true` | Enable CORS middleware |
@@ -56,7 +56,7 @@ Defaults:
 | `auth_enabled` | `false` | Require bearer auth on protected routes |
 | `auth_token` | `None` | Bearer token |
 | `request_logging` | `true` | Log requests |
-| `log_level` | `INFO` | Uvicorn log level |
+| `log_level` | `INFO` | Uvicorn log level: `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG`, or `TRACE` |
 | `request_timeout` | `300` | HTTP request timeout seconds |
 | `rate_limit_enabled` | `false` | Enable in-process rate limiting |
 | `rate_limit_requests` | `100` | Requests per window |
@@ -105,8 +105,16 @@ not be silently ignored.
 
 Serving bounds must also fail clearly during configuration creation:
 
+- `host` must not be empty.
 - `port` must be between `1` and `65535`.
-- `workers` must be at least `1`.
+- `workers` must be `1` for direct OmniServe because the served agent object is
+  bound to the current process. Horizontal scaling should run multiple
+  OmniServe processes behind a process manager or load balancer.
+- `api_prefix` is normalized by trimming whitespace, converting `"/"` to `""`,
+  adding a leading slash when missing, and removing trailing slashes. Whitespace
+  inside the prefix is invalid.
+- `log_level` is uppercased and must be one of `CRITICAL`, `ERROR`, `WARNING`,
+  `INFO`, `DEBUG`, or `TRACE`.
 - when rate limiting is enabled, `rate_limit_requests` must be at least `1`.
 - when rate limiting is enabled, `rate_limit_window` must be at least `1`.
 - `request_timeout <= 0` remains valid and disables OmniServe request timeout

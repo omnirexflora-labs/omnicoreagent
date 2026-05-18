@@ -146,7 +146,7 @@ config = OmniServeConfig(
     # -------------------------------------------------------------------------
     host="0.0.0.0",  # OMNICOREAGENT_SERVE_HOST
     port=8000,  # OMNICOREAGENT_SERVE_PORT
-    workers=1,  # OMNICOREAGENT_SERVE_WORKERS
+    workers=1,  # OMNICOREAGENT_SERVE_WORKERS - direct OmniServe requires 1
     api_prefix="",  # OMNICOREAGENT_SERVE_API_PREFIX (e.g., "/api/v1")
     # -------------------------------------------------------------------------
     # DOCUMENTATION
@@ -176,7 +176,7 @@ config = OmniServeConfig(
     # LOGGING
     # -------------------------------------------------------------------------
     request_logging=True,  # OMNICOREAGENT_SERVE_REQUEST_LOGGING
-    log_level="INFO",  # OMNICOREAGENT_SERVE_LOG_LEVEL (DEBUG/INFO/WARNING/ERROR)
+    log_level="INFO",  # OMNICOREAGENT_SERVE_LOG_LEVEL
     # -------------------------------------------------------------------------
     # TIMEOUTS
     # -------------------------------------------------------------------------

@@ -33,7 +33,7 @@ CLI OPTIONS
     --agent, -a         Path to agent file (required)
     --host, -h          Host to bind (default: 0.0.0.0)
     --port, -p          Port to bind (default: 8000)
-    --workers, -w       Worker processes (default: 1)
+    --workers, -w       Worker processes (direct OmniServe requires 1)
     --auth-token        Enable auth with this token
     --rate-limit        Rate limit (requests per minute)
     --cors-origins      Comma-separated CORS origins
