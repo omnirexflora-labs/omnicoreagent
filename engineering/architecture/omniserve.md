@@ -8,6 +8,12 @@ OmniServe is the optional HTTP serving layer for an already-built
 `OmniCoreAgent`. It must not become a second agent runtime, tracing system,
 evaluation system, or workflow engine.
 
+Telemetry migration note: sections that mention SSE over runtime events describe
+current serving behavior. Target live/replay streaming is
+`TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE`.
+New serving work should target telemetry and should not add new `EventRouter`
+dependencies.
+
 ## Purpose
 
 OmniServe exists to expose an agent over HTTP:

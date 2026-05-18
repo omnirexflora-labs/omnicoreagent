@@ -16,9 +16,17 @@ Specifications are stricter than architecture records. Architecture explains
 the system shape and decisions. A specification defines the contract that code
 must obey.
 
-Current specifications:
+Target specifications:
 
 - `background-agents.md`
-- `events.md`
 - `omniserve.md`
+- `telemetry.md`
 - `workspace.md`
+
+Current implementation contract during telemetry migration:
+
+- `events.md`
+
+The events specification documents the current legacy runtime event and SSE
+contract. New telemetry work should use `telemetry.md` as the target
+specification.

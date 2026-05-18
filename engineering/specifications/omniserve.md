@@ -7,6 +7,11 @@ implement and test. Public docs live under `docs/` and `cookbook/`.
 
 OmniServe turns one existing `OmniCoreAgent` instance into a REST/SSE API.
 
+Telemetry migration note: current SSE/runtime-event behavior is documented for
+the shipped serving layer. Target streaming and replay must be backed by
+`TelemetryStream`, with `EventRouter` limited to migration adapters until it is
+removed.
+
 It owns the HTTP serving contract:
 
 - configuration

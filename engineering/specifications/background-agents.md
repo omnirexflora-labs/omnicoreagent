@@ -11,8 +11,14 @@ Read this with:
 - `src/omnicoreagent/core/workspace`
 - `src/omnicoreagent/core/events`
 - `src/omnicoreagent/core/memory_store`
+- `engineering/specifications/telemetry.md`
 
 When this specification changes, implementation and tests must change with it.
+
+Telemetry migration note: current event behavior remains documented here for
+the shipped background system. Future background visibility, replay, and trace
+evidence must move to telemetry. New work should not add new `EventRouter`
+dependencies.
 
 ---
 
