@@ -3,6 +3,13 @@
 This specification defines the behavior contract for OmniCoreAgent runtime
 events.
 
+Migration status: this specification documents the current legacy event/SSE
+contract only. The target streaming, replay, trace, and evaluation evidence
+contract is `engineering/specifications/telemetry.md`.
+
+Do not add new `EventRouter` dependencies except inside explicitly marked
+telemetry migration adapters.
+
 Read this with:
 
 - `engineering/architecture/events.md`
@@ -12,7 +19,8 @@ Read this with:
 - `src/omnicoreagent/serve/routes/runs.py`
 - `src/omnicoreagent/serve/routes/sessions.py`
 
-When this specification changes, implementation and tests must change with it.
+When this current implementation contract changes, implementation and tests must
+change with it. New telemetry work must follow `telemetry.md`.
 
 ---
 

@@ -18,6 +18,12 @@ Read this before changing:
 - `src/omnicoreagent/core/events`
 - `src/omnicoreagent/core/memory_store`
 - `engineering/specifications/background-agents.md`
+- `engineering/architecture/telemetry.md`
+
+Telemetry migration note: sections that mention `EventRouter` describe current
+visibility wiring. Target background execution evidence and live/replay
+streaming must use telemetry. Do not add new background features that depend on
+`EventRouter`.
 
 ---
 

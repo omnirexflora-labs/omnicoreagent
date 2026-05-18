@@ -8,12 +8,11 @@ during agent execution in a form that can later support debugging,
 observability, regression analysis, and the future OmniCoreAgent Agentic
 Evaluation system.
 
-This document replaces the older event-only architecture model. Runtime events
-remain useful for SSE streaming and lightweight debugging, but they are not a
-complete trace system and must not be treated as the evaluation evidence model.
-The current runtime event contract remains documented in
-`engineering/architecture/events.md` and `engineering/specifications/events.md`
-until telemetry becomes the canonical runtime path.
+This document replaces the older event-only architecture model. Live streaming
+and replay remain required harness capabilities, but they should be served from
+telemetry rather than from a separate permanent `EventRouter` subsystem.
+`EventRouter` is a legacy implementation detail to remove during migration, not
+the long-term owner of execution evidence.
 
 ## Purpose
 
@@ -24,7 +23,8 @@ OmniCoreAgent telemetry exists to:
 - preserve point-in-time facts as append-only events
 - build complete traces for one logical run
 - provide stable evidence references for future evaluation
-- support local debugging without requiring an observability product
+- support local debugging and live streaming without requiring an observability
+  product
 - make future observability, exports, and evals consumers of the same evidence
 
 Telemetry is runtime infrastructure. Observability is a later product layer on
@@ -33,10 +33,9 @@ top of telemetry. Evaluation is a later consumer of normalized telemetry.
 ```text
 runtime execution
   -> telemetry recorder
-  -> events + spans
-  -> trace store
-  -> trace normalizer
-  -> future observability / future evaluation / future exporters
+  -> telemetry store
+       -> telemetry stream -> OmniServe SSE / live clients
+       -> trace normalizer -> future observability / future evaluation / future exporters
 ```
 
 ## Non-Goals
@@ -94,6 +93,16 @@ That model is useful, but incomplete. It does not provide:
 The current `/events/{session_id}/trace` endpoint is therefore a compact event
 summary, not a full trace. Future docs and code should avoid using it as the
 canonical trace model.
+
+The replacement is not "EventRouter plus telemetry." The replacement is
+telemetry owning the full path:
+
+```text
+TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE
+```
+
+Anything still using `EventRouter` after telemetry lands is transitional code
+and should have a removal plan.
 
 ## Core Concepts
 
@@ -170,10 +179,11 @@ OmniServe / application call
   -> TelemetryRecorder starts root span
   -> agent runtime starts agent.run span
   -> model/tool/memory/workspace/context/subagent spans emit events
-  -> TraceStore persists events and spans
-  -> TraceNormalizer builds stable normalized trace
-  -> future BehaviorExtractor consumes normalized trace
-  -> future evaluators attach evidence-linked judgments
+  -> TelemetryStore persists events and spans
+       -> TelemetryStream serves replay/follow to OmniServe SSE
+       -> TraceNormalizer builds stable normalized trace
+            -> future BehaviorExtractor consumes normalized trace
+            -> future evaluators attach evidence-linked judgments
 ```
 
 Runtime controls may also emit telemetry:
@@ -335,8 +345,28 @@ Later storage backends:
 - PostgreSQL for production querying
 - object storage for archival
 
-Redis streams remain useful for live runtime events, but Redis streams are not
-the canonical long-term trace store.
+Redis streams may be a live fanout implementation for `TelemetryStream`, but
+Redis streams are not the canonical long-term trace store.
+
+## Telemetry Stream
+
+The telemetry stream is the live/replay adapter over telemetry records.
+
+It replaces the long-term need for `EventRouter`.
+
+Responsibilities:
+
+- stream selected telemetry events for one session, run, or trace
+- replay stored telemetry events from a cursor
+- support SSE consumers without requiring dashboards or observability services
+- preserve session and run isolation
+- expose cursors for reconnect and catch-up
+- avoid creating another evidence source outside telemetry
+
+The stream is a view over `TelemetryStore`; it is not a separate truth source.
+
+Initial stream backends may reuse implementation ideas from current in-memory
+queues and Redis streams, but the public contract should be telemetry-native.
 
 ## Trace Normalizer
 
@@ -391,24 +421,28 @@ object storage by reference.
 
 Telemetry must never force secrets into traces.
 
-## Relationship to Current Runtime Events
+## Relationship to Legacy Runtime Events
 
-Runtime events remain as a lightweight streaming layer during migration.
+Legacy runtime events are only a migration concern.
 
 Short-term:
 
-- existing `EventRouter` continues powering SSE and event replay
 - current `Event` records can be adapted into telemetry events
-- `get_trace()` remains a compact event summary
+- `EventRouter` may remain temporarily while call sites are moved
+- `get_trace()` remains a compact event summary until replaced
 
 Target:
 
 - runtime emits through `TelemetryRecorder`
-- SSE can stream selected telemetry events
+- `TelemetryStream` powers live/replay streaming
+- OmniServe SSE streams selected telemetry events
 - event summary becomes a derived view
 - trace retrieval reads canonical telemetry traces
+- `EventRouter` and legacy event stores are removed once no call sites require
+  them
 
-The migration should avoid maintaining two unrelated truth sources.
+The migration must avoid maintaining two unrelated truth sources. New runtime
+work should not add new dependencies on `EventRouter`.
 
 ## Relationship to OmniServe
 
@@ -473,7 +507,7 @@ only ensure the evidence exists.
 ## Invariants
 
 - Telemetry is the source of execution evidence.
-- Runtime events are not the full trace model.
+- Legacy runtime events are not the full trace model.
 - Every trace has a `trace_id`.
 - Every span belongs to one trace.
 - Every event belongs to one trace or is explicitly marked legacy/unbound.
@@ -498,5 +532,5 @@ Each implementation phase must include:
 - concurrent tool batch tests
 - redaction tests
 - partial trace tests
-- migration tests from current runtime events
+- migration tests from legacy runtime events
 - documentation updates

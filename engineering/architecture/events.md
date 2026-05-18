@@ -4,12 +4,21 @@ This is an internal architecture record under `engineering/architecture`, not
 public product documentation. It defines the current runtime event boundary for
 OmniCoreAgent.
 
+Migration status: this document describes the current legacy runtime event and
+SSE implementation only. The target execution evidence, replay, and streaming
+architecture is `engineering/architecture/telemetry.md`.
+
+Do not build new features on `EventRouter`. New runtime, serving, background,
+trace, observability, or evaluation work must target telemetry.
+
 Runtime events are the lightweight execution signal emitted while an agent is
 running. They power live UIs, debugging, session history, compact trace
-summaries, background task lifecycle inspection, and future observability work.
+summaries, and background task lifecycle inspection in the current
+implementation.
 
-Runtime events are not the future trace/evaluation system. They are the ordered
-execution facts that future trace/eval layers can build from.
+Runtime events are not the future trace/evaluation system. During migration,
+current runtime events may be adapted into telemetry records, but telemetry is
+the canonical future evidence model.
 
 ## Purpose
 

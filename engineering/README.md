@@ -26,15 +26,22 @@ engineering/
 Architecture records explain how to think about a subsystem.
 Specifications define what that subsystem must do exactly.
 
-Current records:
+Target architecture and specification records:
 
 - `architecture/background-agents.md`
-- `architecture/events.md`
 - `architecture/omniserve.md`
 - `architecture/telemetry.md`
 - `architecture/workspace.md`
 - `specifications/background-agents.md`
-- `specifications/events.md`
 - `specifications/omniserve.md`
 - `specifications/telemetry.md`
 - `specifications/workspace.md`
+
+Current implementation contracts during telemetry migration:
+
+- `architecture/events.md`
+- `specifications/events.md`
+
+The event records describe the current legacy runtime event and SSE behavior.
+They are kept so maintainers can migrate safely. They are not the future
+telemetry architecture.

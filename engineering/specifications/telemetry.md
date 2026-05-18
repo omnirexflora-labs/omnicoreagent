@@ -29,9 +29,10 @@ This specification covers:
 - recorder behavior
 - context propagation
 - storage contracts
+- live/replay stream contract
 - normalization contract
 - redaction and payload policy
-- migration from current runtime events
+- migration from legacy runtime events and `EventRouter`
 - required tests
 
 This specification does not cover:
@@ -75,7 +76,8 @@ Rules:
 | Telemetry span | Timed unit of work with parent/child relationship. |
 | Telemetry trace | Complete execution graph for one logical run. |
 | Trace recorder | Runtime API that records events and spans. |
-| Trace store | Persistence boundary for traces, spans, and events. |
+| Telemetry store | Persistence boundary for traces, spans, and events. |
+| Telemetry stream | Live/replay adapter over telemetry records. |
 | Trace normalizer | Converts runtime telemetry into stable evaluator-ready schema. |
 | Evidence reference | Stable reference to `trace_id`, `span_id`, `event_id`, or `sequence_number`. |
 
@@ -399,7 +401,7 @@ Rules:
 
 ---
 
-## Storage Contract
+## Telemetry Store Contract
 
 Foundation stores:
 
@@ -453,6 +455,54 @@ Required indexes for durable stores:
 - `tool_schema_version`
 - `memory_config_version`
 - `constraint_config_version`
+
+---
+
+## Telemetry Stream Contract
+
+The telemetry stream replaces `EventRouter` as the long-term streaming and
+replay boundary.
+
+Interface:
+
+```python
+get_stream_cursor(scope: TelemetryStreamScope) -> str | None
+stream_after(scope: TelemetryStreamScope, cursor: str | None) -> AsyncIterator[TelemetryEvent]
+get_events_after(scope: TelemetryStreamScope, cursor: str | None) -> list[TelemetryEvent]
+```
+
+Scope:
+
+```yaml
+trace_id: string | null
+run_id: string | null
+session_id: string | null
+task_id: string | null
+event_types: list[string] | null
+```
+
+Rules:
+
+- the stream reads from telemetry records, not a separate event source.
+- stream cursors must support replay/follow behavior for SSE reconnect.
+- stream scopes must isolate sessions, runs, and traces.
+- `/run` SSE streams events for the trace/run it started.
+- `/events/{session_id}` can remain during migration but should become a
+  telemetry stream view.
+- stream failures must not corrupt the stored trace.
+- Redis streams may be used as an implementation backend for live fanout, but
+  Redis stream records are not a separate canonical evidence model.
+
+Replay/follow behavior:
+
+- capture the current stream cursor before replay begins.
+- replay stored telemetry events after the client cursor and up to the captured
+  cursor.
+- switch to live follow after the captured cursor.
+- de-duplicate by `event_id` when replay and live follow overlap.
+- preserve trace-local `sequence_number` ordering for replayed records.
+- never mix records from another `trace_id`, `run_id`, `session_id`, or
+  `task_id` outside the requested scope.
 
 ---
 
@@ -539,9 +589,22 @@ from the start.
 
 ---
 
-## Migration From Runtime Events
+## Migration From Legacy Runtime Events
 
-Existing runtime events continue to exist during migration.
+Existing runtime events and `EventRouter` exist only during migration.
+
+Target ownership:
+
+```text
+TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE
+```
+
+There must not be a permanent parallel stack:
+
+```text
+EventRouter -> EventStore
+TelemetryRecorder -> TelemetryStore
+```
 
 Mapping examples:
 
@@ -560,11 +623,14 @@ Mapping examples:
 
 Rules:
 
-- old `/events/{session_id}` behavior must keep working until the serving API is
-  deliberately changed.
+- old `/events/{session_id}` behavior must keep working until it is deliberately
+  reimplemented on `TelemetryStream` or replaced by a new route.
 - current `get_trace()` should be documented as event summary until replaced.
 - migration must avoid two unrelated sources of truth.
-- once telemetry becomes canonical, SSE should stream selected telemetry events.
+- once telemetry becomes canonical, SSE must stream selected telemetry events.
+- no new feature should depend on `EventRouter`.
+- `EventRouter` and legacy event stores should be removed after OmniServe,
+  background agents, and runtime emission are telemetry-native.
 
 ---
 
@@ -622,7 +688,11 @@ Telemetry implementation phases require tests for:
 - redaction of configured keys
 - payload size truncation/offload references
 - JSONL append/read behavior
-- current runtime event compatibility
+- legacy runtime event migration
+- telemetry stream replay/follow behavior
+- guard test or review check that new telemetry, serving, and background code
+  does not import or instantiate `EventRouter` except inside explicitly named
+  migration adapters
 - normalized trace deterministic ordering
 - missing evidence markers
 
@@ -631,15 +701,29 @@ and failed execution paths.
 
 ---
 
-## Acceptance Criteria For Foundation Design
+## Acceptance Criteria For This Design PR
 
-The telemetry foundation is acceptable when:
+This design PR is acceptable when:
 
 - architecture and specification are accepted
+- telemetry owns the target streaming path:
+  `TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE`
+- legacy runtime events and `EventRouter` are documented only as migration
+  concerns
+- the spec defines the schema, recorder, store, stream, normalizer, redaction,
+  migration, and future evaluation evidence contracts
+- docs clearly separate telemetry from observability and evaluation
+
+## Acceptance Criteria For Future Foundation Implementation
+
+The future telemetry foundation implementation is acceptable when:
+
 - implementation has a canonical event/span/trace schema
 - recorder can capture agent/model/tool/final-answer basics
-- trace store can persist and retrieve traces locally
+- telemetry store can persist and retrieve traces locally
+- telemetry stream can replay/follow selected telemetry events
+- OmniServe SSE is backed by `TelemetryStream`
+- the implementation PR includes an explicit `EventRouter` removal or migration
+  completion plan for remaining call sites
 - normalizer can produce deterministic normalized traces
-- current runtime event streaming still works
 - future evaluation can reference `trace_id`, `span_id`, and `event_id`
-- docs clearly separate telemetry from observability and evaluation
