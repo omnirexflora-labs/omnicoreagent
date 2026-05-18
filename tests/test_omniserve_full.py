@@ -603,7 +603,7 @@ class TestEndpoints:
         agent.run = AsyncMock(return_value={"response": "Agent response"})
         # Mock get_metrics
         agent.get_metrics = AsyncMock(return_value={"total_tokens": 100})
-        agent.get_trace = AsyncMock(
+        agent.get_event_trace = AsyncMock(
             return_value={
                 "session_id": "test-endpoint-session",
                 "summary": {"total_events": 2, "tool_calls": 1},
@@ -794,6 +794,11 @@ class TestEndpoints:
         assert data["summary"]["tool_calls"] == 1
         assert data["steps"][0]["event_type"] == "user_message"
 
+    def test_trace_endpoint_uses_legacy_event_trace_accessor(self, server_client):
+        server_client.get("/events/trace_like_session/trace")
+        agent = server_client.app.state.agent
+        agent.get_event_trace.assert_awaited_once_with("trace_like_session")
+
     def test_run_normalizes_string_agent_result(self):
         agent = MagicMock(spec=OmniCoreAgent)
         agent.name = "StringAgent"
@@ -811,6 +816,8 @@ class TestEndpoints:
             "session_id": "string-session",
             "agent_name": "StringAgent",
             "metric": None,
+            "trace_id": None,
+            "run_id": None,
         }
 
     def test_request_timeout_is_enforced_for_sync_run(self):

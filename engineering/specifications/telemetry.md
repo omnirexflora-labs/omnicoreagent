@@ -587,6 +587,49 @@ Telemetry must eventually capture:
 Foundation implementation can phase these in, but the schema must support them
 from the start.
 
+Current runtime facade coverage:
+
+- `OmniCoreAgent.run(...)` starts one `agent.run` trace per call.
+- every run receives a `run_id`. The caller may provide it explicitly, the
+  runtime may adopt the current legacy event run context, or the runtime may
+  generate a new one.
+- a single `session_id` may contain multiple traces and run ids.
+- successful runs emit `user_message` and `final_answer`, then complete the
+  trace.
+- input guardrail blocks emit `user_message`, `guardrail_violation`, and
+  `final_answer`, then abort the trace with `aborted_safety_guard`.
+- runtime exceptions emit `user_message` and `runtime_error`, then fail the
+  trace before re-raising the original exception.
+- initialization failures inside `OmniCoreAgent.run(...)` emit `user_message`
+  and `runtime_error`, then fail the trace before re-raising the original
+  exception.
+- cancellations emit `user_message` and `final_state`, then mark the trace
+  `cancelled` before re-raising the cancellation.
+- `OmniCoreAgent` exposes telemetry trace lookup and telemetry stream
+  replay/follow helpers.
+- successful and guardrail-blocked public run responses include `trace_id` and
+  `run_id`.
+- `get_trace(trace_id)` returns a telemetry trace when passed a returned
+  telemetry `trace_id`; `get_trace(session_id=...)` and `get_event_trace(...)`
+  remain legacy event-summary accessors during migration.
+- if callers inject telemetry components directly, `telemetry_store`,
+  `telemetry_recorder.store`, and `telemetry_stream.store` must refer to the
+  same store instance. The runtime rejects mismatches instead of silently
+  writing to one store and reading from another.
+
+Current uncovered runtime internals:
+
+- model call spans and events
+- agent step spans
+- tool batch and tool call spans
+- MCP tool spans
+- memory read/write spans
+- workspace read/write/offload spans
+- observation pipeline spans
+- subagent spans
+- background run spans
+- OmniServe request spans and SSE streaming from `TelemetryStream`
+
 ---
 
 ## Migration From Legacy Runtime Events

@@ -109,6 +109,12 @@ class RunResponse(BaseModel):
     metric: Optional[dict[str, Any]] = Field(
         None, description="Optional metrics for this run"
     )
+    trace_id: Optional[str] = Field(
+        None, description="Telemetry trace ID for this run"
+    )
+    run_id: Optional[str] = Field(
+        None, description="Runtime run ID for this run"
+    )
 
 
 class HealthResponse(BaseModel):
