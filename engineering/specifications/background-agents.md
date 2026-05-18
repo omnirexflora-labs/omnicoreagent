@@ -992,8 +992,9 @@ Common payload fields:
 
 Run-scoped events are always captured in the manager process cache. When
 workspace event mirroring is enabled, they are also appended to the run
-workspace `events.jsonl` file. When an telemetry stream is configured, the manager
-mirrors events to it on a best-effort bounded path.
+workspace `events.jsonl` file. The background event-log adapter also writes
+normalized lifecycle evidence to `TelemetryStore` on a best-effort bounded path;
+`TelemetryStream` serves live and replay clients over that store.
 
 Every background event includes `run_id` for run-scoped events. Telemetry and
 workspace replay must filter by `run_id` when returning a run trace.
@@ -1011,8 +1012,8 @@ Selection rules:
   `background_run_timeout`, `background_run_cancelled`, or
   `background_run_skipped`.
 - If one or more complete sources exist, return the longest complete trace.
-- If no complete source exists, prefer telemetry stream, then process cache, then
-  workspace mirror.
+- If no complete source exists, prefer the process cache, then the workspace
+  mirror.
 - Returned events must be ordered by `sequence`, then `timestamp`.
 - Sources with missing, non-positive, malformed, or duplicate run-local
   `sequence` values are ignored during replay selection. A valid replay source
@@ -1147,7 +1148,7 @@ Run the same contract tests against every backend:
 - cancels run
 - lists runs
 - lists attempts
-- reads run events from telemetry stream or workspace mirror
+- reads run events from the process cache or workspace mirror
 - shuts down scheduler and workers
 - does not import optional scheduler/storage dependencies during root import
 - does not import optional scheduler/storage dependencies during

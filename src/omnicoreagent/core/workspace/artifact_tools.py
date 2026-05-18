@@ -48,10 +48,14 @@ def build_tool_registry_artifact_tool(
             "additionalProperties": False,
         },
     )
-    def read_artifact(artifact_id: str) -> str:
+    def read_artifact(artifact_id: str) -> str | dict[str, str | None]:
         content = offloader.read_artifact(artifact_id)
         if content is None:
-            return f"Error: Artifact '{artifact_id}' not found. Check the artifact ID and try again."
+            return {
+                "status": "error",
+                "data": None,
+                "message": f"Artifact '{artifact_id}' not found. Check the artifact ID and try again.",
+            }
         return content
 
     @registry.register_tool(
@@ -79,10 +83,14 @@ def build_tool_registry_artifact_tool(
             "additionalProperties": False,
         },
     )
-    def tail_artifact(artifact_id: str, lines: int = 50) -> str:
+    def tail_artifact(artifact_id: str, lines: int = 50) -> str | dict[str, str | None]:
         content = offloader.tail_artifact(artifact_id, lines)
         if content is None:
-            return f"Error: Artifact '{artifact_id}' not found."
+            return {
+                "status": "error",
+                "data": None,
+                "message": f"Artifact '{artifact_id}' not found.",
+            }
         return content
 
     @registry.register_tool(
@@ -110,10 +118,14 @@ def build_tool_registry_artifact_tool(
             "additionalProperties": False,
         },
     )
-    def search_artifact(artifact_id: str, query: str) -> str:
+    def search_artifact(artifact_id: str, query: str) -> str | dict[str, str | None]:
         content = offloader.search_artifact(artifact_id, query)
         if content is None:
-            return f"Error: Artifact '{artifact_id}' not found."
+            return {
+                "status": "error",
+                "data": None,
+                "message": f"Artifact '{artifact_id}' not found.",
+            }
         return content
 
     @registry.register_tool(

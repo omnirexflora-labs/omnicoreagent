@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
+from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.telemetry import (
     InMemoryTelemetryStore,
     TelemetryStream,
@@ -154,6 +155,32 @@ async def test_run_records_guardrail_block_as_aborted_trace() -> None:
     ]
     assert trace.events[1].output == {"is_safe": False, "message": "blocked"}
     assert trace.events[2].output == {"is_safe": False, "message": "blocked"}
+
+
+@pytest.mark.asyncio
+async def test_run_records_resource_guard_halt_as_aborted_trace() -> None:
+    store = InMemoryTelemetryStore()
+    agent = _initialized_agent(store=store)
+    agent.agent.run = AsyncMock(
+        return_value={
+            "answer": "Usage limit error: request limit reached",
+            "usage": Usage(requests=1),
+            "_trace_status": TraceStatus.ABORTED_RESOURCE_GUARD.value,
+        }
+    )
+
+    result = await agent.run("too much", session_id="session-resource-guard")
+
+    assert result["response"] == "Usage limit error: request limit reached"
+    assert "_trace_status" not in result
+    traces = await store.list_traces(TraceFilter(session_id="session-resource-guard"))
+    assert len(traces) == 1
+    trace = traces[0]
+    assert trace.status == TraceStatus.ABORTED_RESOURCE_GUARD
+    assert [event.event_type for event in trace.events] == [
+        "user_message",
+        "final_answer",
+    ]
 
 
 @pytest.mark.asyncio

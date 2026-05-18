@@ -7,7 +7,7 @@ from omnicoreagent.core.agents.llm_response import (
     extract_response_content,
     extract_response_usage,
 )
-from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
+from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor, TraceStatus
 from omnicoreagent.core.system_prompts import FAST_CONVERSATION_SUMMARY_PROMPT
 from omnicoreagent.core.token_usage import (
     Usage,
@@ -138,8 +138,18 @@ class AgentLlmStepRunner:
         except UsageLimitExceeded as e:
             error_message = f"Usage limit error: {e}"
             logger.error(error_message)
+            if telemetry_recorder is not None:
+                await self._record_resource_guard_halt(
+                    telemetry_recorder=telemetry_recorder,
+                    error_message=error_message,
+                    run_usage=run_usage,
+                )
             return AgentLlmStepResult(
-                error_result={"answer": error_message, "usage": run_usage}
+                error_result={
+                    "answer": error_message,
+                    "usage": run_usage,
+                    "_trace_status": TraceStatus.ABORTED_RESOURCE_GUARD.value,
+                }
             )
 
         except Exception as e:
@@ -222,6 +232,37 @@ class AgentLlmStepRunner:
             return extract_response_content(response, default="")
 
         return summarize_for_context
+
+    async def _record_resource_guard_halt(
+        self,
+        *,
+        telemetry_recorder: Any,
+        error_message: str,
+        run_usage: Usage,
+    ) -> None:
+        span = await telemetry_recorder.start_span(
+            name="runtime.control",
+            kind="runtime.control",
+            actor=TelemetryActor(type=ActorType.SYSTEM),
+            input={
+                "control": "usage_limit",
+                "usage": self._usage_payload(run_usage),
+            },
+        )
+        await telemetry_recorder.emit_event(
+            "resource_guard_halt",
+            actor=TelemetryActor(type=ActorType.SYSTEM),
+            input={
+                "control": "usage_limit",
+                "usage": self._usage_payload(run_usage),
+            },
+            error={"type": "UsageLimitExceeded", "message": error_message},
+        )
+        await telemetry_recorder.end_span(
+            span.span_id,
+            status=SpanStatus.ERROR,
+            error={"type": "UsageLimitExceeded", "message": error_message},
+        )
 
     async def _record_response(
         self,

@@ -187,7 +187,7 @@ Responsibilities:
 - keep the process-local event cache
 - persist lifecycle events to workspace `events.jsonl`
 - write run snapshots to workspace `run.json`
-- append lifecycle events into telemetry stream
+- append normalized lifecycle evidence into `TelemetryStore`
 - replay the strongest complete event source for a run
 - tolerate workspace or telemetry visibility failures without blocking task
   execution

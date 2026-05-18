@@ -42,6 +42,7 @@ from omnicoreagent.background.models import (
     next_cron_due,
     next_schedule_due,
 )
+from omnicoreagent.background.event_log import BackgroundEventLog
 from omnicoreagent.background.recovery import BackgroundRunRecovery
 from omnicoreagent.background.transitions import BackgroundRunTransitions
 from omnicoreagent.core.telemetry import TelemetryStreamScope
@@ -1051,7 +1052,11 @@ async def test_background_run_lifecycle_events_emit_to_telemetry():
         None,
     )
 
-    event_names = [event.event_type for event in events]
+    event_names = [
+        event.event_type
+        for event in events
+        if event.event_type.startswith("background_")
+    ]
     assert event_names == [
         "background_run_queued",
         "background_run_claimed",
@@ -1063,6 +1068,12 @@ async def test_background_run_lifecycle_events_emit_to_telemetry():
     assert trace is not None
     assert trace.run_id == run.run_id
     assert trace.status.value == "completed"
+    assert trace.events[-1].event_type == "background_run_completed"
+    assert any(
+        event.event_type == "workspace_write"
+        and event.output["path"].endswith(("run.json", "events.jsonl"))
+        for event in trace.events
+    )
 
 
 @pytest.mark.asyncio
@@ -1086,6 +1097,123 @@ async def test_background_run_events_replay_from_workspace_when_cache_cleared(tm
         ("background_run_claimed", 2),
         ("background_run_started", 3),
         ("background_run_completed", 4),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_terminal_background_event_waits_for_pending_event_write():
+    class FakeWorkspaceIO:
+        def __init__(self):
+            self.written_events = []
+
+        def read_events(self, workspace_path):
+            return []
+
+        def append_event(self, event):
+            self.written_events.append(event["event"])
+
+    workspace_io = FakeWorkspaceIO()
+    event_log = BackgroundEventLog(
+        task_store=InMemoryTaskStore(),
+        workspace_io=workspace_io,
+        replay_timeout_seconds=1,
+    )
+    original_write_run_event = event_log.write_run_event
+    pending_started = asyncio.Event()
+    release_started = asyncio.Event()
+
+    async def slow_write_run_event(event):
+        if event["event"] == "background_run_started":
+            pending_started.set()
+            await release_started.wait()
+        await original_write_run_event(event)
+
+    event_log.write_run_event = slow_write_run_event
+
+    payload = {
+        "agent_id": "agent",
+        "task_id": "task",
+        "run_id": "run-terminal-order",
+        "session_id": "session",
+        "status": "running",
+        "workspace_path": "background/task/run-terminal-order",
+    }
+    await event_log.emit("background_run_queued", **payload)
+    await event_log.emit("background_run_started", **payload)
+    await asyncio.wait_for(pending_started.wait(), timeout=1)
+
+    terminal_task = asyncio.create_task(
+        event_log.emit(
+            "background_run_completed",
+            **{**payload, "status": "completed"},
+        )
+    )
+    await asyncio.sleep(0)
+    assert not terminal_task.done()
+
+    release_started.set()
+    await asyncio.wait_for(terminal_task, timeout=1)
+
+    assert workspace_io.written_events == [
+        "background_run_queued",
+        "background_run_started",
+        "background_run_completed",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_terminal_background_event_does_not_write_gap_after_drain_timeout():
+    class FakeWorkspaceIO:
+        def __init__(self):
+            self.written_events = []
+
+        def read_events(self, workspace_path):
+            return []
+
+        def append_event(self, event):
+            self.written_events.append(
+                {"event": event["event"], "sequence": event["sequence"]}
+            )
+
+    workspace_io = FakeWorkspaceIO()
+    event_log = BackgroundEventLog(
+        task_store=InMemoryTaskStore(),
+        workspace_io=workspace_io,
+        replay_timeout_seconds=0.01,
+    )
+    original_write_run_event = event_log.write_run_event
+    pending_started = asyncio.Event()
+
+    async def stuck_write_run_event(event):
+        if event["event"] == "background_run_started":
+            pending_started.set()
+            await asyncio.Event().wait()
+        await original_write_run_event(event)
+
+    event_log.write_run_event = stuck_write_run_event
+
+    payload = {
+        "agent_id": "agent",
+        "task_id": "task",
+        "run_id": "run-terminal-gap",
+        "session_id": "session",
+        "status": "running",
+        "workspace_path": "background/task/run-terminal-gap",
+    }
+    await event_log.emit("background_run_queued", **payload)
+    await event_log.emit("background_run_started", **payload)
+    await asyncio.wait_for(pending_started.wait(), timeout=1)
+
+    await event_log.emit(
+        "background_run_completed",
+        **{**payload, "status": "completed"},
+    )
+
+    assert workspace_io.written_events == [
+        {"event": "background_run_queued", "sequence": 1}
+    ]
+    assert event_log.prepare_event_trace(workspace_io.written_events) == [
+        {"event": "background_run_queued", "sequence": 1}
     ]
 
 

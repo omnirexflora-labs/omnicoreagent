@@ -688,8 +688,9 @@ class TestArtifactToolRegistration:
         tool = self.registry.tools["read_artifact"]
         result = tool.function(artifact_id="nonexistent")
 
-        assert "Error" in result
-        assert "not found" in result
+        assert result["status"] == "error"
+        assert result["data"] is None
+        assert "not found" in result["message"]
 
     def test_list_artifacts_tool_works(self):
         """Test registered list_artifacts tool function works."""
