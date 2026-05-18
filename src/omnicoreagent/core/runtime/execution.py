@@ -70,11 +70,14 @@ def format_run_response(
     if isinstance(response, dict) and "usage" in response:
         usage = response["usage"]
         usage_getter().incr(usage)
-        return {
+        normalized = {
             "response": response["answer"],
             "session_id": session_id,
             "agent_name": agent_name,
             "metric": usage,
         }
+        if response.get("_trace_status"):
+            normalized["_trace_status"] = response["_trace_status"]
+        return normalized
 
     return {"response": response, "session_id": session_id, "agent_name": agent_name}

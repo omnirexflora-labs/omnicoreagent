@@ -375,11 +375,14 @@ class TelemetryRecorder:
                 "workspace.read",
                 "workspace.write",
                 "workspace.delete",
+                "observation.pipeline",
+                "tool.batch",
                 "tool_result",
                 "mcp_tool_result",
                 "workspace_read",
                 "workspace_write",
                 "workspace_delete",
+                "observation_pipeline_end",
             }
             and not self.config.record_tool_results
         ):

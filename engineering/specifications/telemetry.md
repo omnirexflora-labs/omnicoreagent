@@ -576,7 +576,7 @@ Telemetry must eventually capture:
 - context compression and dropped/restored fields
 - workspace reads/writes/offloads
 - subagent spawn/result/error
-- background task/run lifecycle and heartbeat
+- background run lifecycle and heartbeat
 - OmniServe request start/end/error
 - final answer
 - final state when available
@@ -634,9 +634,14 @@ Current runtime loop coverage:
 - parsed tool observations emit `observation_pipeline_start`,
   `observation_pipeline_end`, and `observation_pipeline_error` events.
 - workspace offloading emits `workspace_offload`.
+- artifact access tools (`read_artifact`, `tail_artifact`, `search_artifact`,
+  `list_artifacts`) are recorded as workspace reads because artifacts live in
+  the workspace artifacts namespace.
 - dynamic subagent execution creates `subagent.run` spans and emits
   `subagent_spawn`, `subagent_result`, and `subagent_error` events.
-- background task/run lifecycle emits background spans and events.
+- usage-limit halts emit `resource_guard_halt` and a `runtime.control` span.
+- background run lifecycle emits `background.run` spans and events. Background
+  run workspace snapshots and event-log appends emit `workspace_write` events.
 - OmniServe synchronous and SSE run boundaries create `serve.request` traces and
   emit `serve_request_start`, `serve_request_end`, and `serve_request_error`
   events. Serve traces are correlated to agent traces by `session_id` and
@@ -644,10 +649,9 @@ Current runtime loop coverage:
 
 Current remaining runtime internals:
 
-- direct workspace storage internals outside workspace file tools and offload
-- artifact-specific read/tail/search operations that still appear as generic
-  tools until artifact telemetry is specified
-- approval/resource guard telemetry paths that are reserved but not fully wired
+- direct workspace storage internals outside workspace file tools, artifact
+  tools, offload, and background run workspace writes
+- approval telemetry paths that are reserved but not fully wired
 - cross-trace links between `serve.request`, background runs, subagents, and
   agent traces
 - durable telemetry stores beyond in-memory and JSONL
@@ -661,6 +665,11 @@ Runtime evidence has one canonical ownership path:
 ```text
 TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE
 ```
+
+Background run lifecycle events are emitted by the background event-log adapter
+directly into `TelemetryStore`. That adapter is the runtime boundary that already
+owns background event ordering and workspace mirrors; it must still write the
+same normalized telemetry models and feed the same `TelemetryStream` path.
 
 There must not be a parallel event stack:
 
@@ -687,10 +696,11 @@ Canonical event mapping:
 | memory history read | `memory_read` | `memory.read` |
 | memory history write | `memory_write` | `memory.write` |
 | context compressed | `context_compression` | `context.compression` |
-| observation formatted | `observation_pipeline_end` | `tool.batch` |
+| observation formatted | `observation_pipeline_end` | `observation.pipeline` |
 | workspace file read | `workspace_read` | `workspace.read` |
 | workspace file write | `workspace_write` | `workspace.write` |
 | workspace file delete | `workspace_delete` | `workspace.delete` |
+| background workspace persistence | `workspace_write` | `background.run` |
 | subagent starts | `subagent_spawn` | `subagent.run` |
 | subagent completes | `subagent_result` | `subagent.run` |
 | serve request starts | `serve_request_start` | `serve.request` |

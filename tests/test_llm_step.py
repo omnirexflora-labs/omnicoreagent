@@ -173,6 +173,35 @@ async def test_llm_step_returns_usage_limit_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_llm_step_records_usage_limit_as_resource_guard_halt(monkeypatch):
+    monkeypatch.setattr(llm_step, "usage", Usage())
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    context = await recorder.start_trace(
+        trace_id="trace-resource-guard",
+        run_id="run-resource-guard",
+        session_id="chat-resource",
+        actor=TelemetryActor(type=ActorType.AGENT, name="agent"),
+    )
+
+    result = await make_runner(limits_enabled=True, request_limit=1).run(
+        session_state=make_session_state(),
+        llm_connection=SimpleNamespace(llm_call=None),
+        run_usage=Usage(requests=1),
+        session_id="chat-resource",
+        telemetry_recorder=recorder,
+    )
+    await recorder.end_trace(status="failed")
+
+    trace = await store.get_trace(context.trace_id)
+    assert result.response is None
+    assert result.error_result["answer"].startswith("Usage limit error:")
+    assert any(span.kind == "runtime.control" for span in trace.spans)
+    event = next(event for event in trace.events if event.event_type == "resource_guard_halt")
+    assert event.error.type == "UsageLimitExceeded"
+
+
+@pytest.mark.asyncio
 async def test_llm_step_returns_model_error(monkeypatch):
     monkeypatch.setattr(llm_step, "usage", Usage())
 

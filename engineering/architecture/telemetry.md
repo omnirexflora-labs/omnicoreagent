@@ -11,6 +11,9 @@ Evaluation system.
 Live streaming and replay are required harness capabilities. They are served
 from telemetry: `TelemetryRecorder` writes evidence, `TelemetryStore` holds the
 trace records, and `TelemetryStream` is the live/replay adapter over that store.
+Background run lifecycle evidence is the one runtime adapter exception:
+`BackgroundEventLog` writes normalized background events and spans directly to
+`TelemetryStore` because it owns background event ordering and workspace mirrors.
 
 ## Purpose
 
@@ -34,6 +37,10 @@ runtime execution
   -> telemetry store
        -> telemetry stream -> OmniServe SSE / live clients
        -> trace normalizer -> future observability / future evaluation / future exporters
+
+background event log
+  -> telemetry store
+       -> telemetry stream -> OmniServe SSE / live clients
 ```
 
 ## Non-Goals
@@ -209,9 +216,13 @@ The runtime loop instrumentation phase provides:
   the model sees formatted observations
 - workspace offload events when large tool results are replaced by workspace
   references
+- artifact read/tail/search/list tools recorded as workspace reads because
+  offloaded artifacts live inside the workspace artifacts namespace
 - subagent execution spans with `subagent_spawn`, `subagent_result`, and
   `subagent_error` events
-- background task/run lifecycle spans and events
+- usage-limit halts as `runtime.control` spans and `resource_guard_halt` events
+- background run lifecycle spans and events, including workspace writes for
+  run snapshots and event-log appends
 - OmniServe `serve.request` traces/events for synchronous and SSE run
   boundaries, correlated to the same `session_id` and `run_id` as the agent run
 
@@ -490,7 +501,9 @@ the subset of telemetry events needed by clients.
 Background agents already persist lifecycle events, run ids, attempts,
 workspace paths, and heartbeat records.
 
-Telemetry should unify these facts into the trace model:
+Telemetry should unify these facts into the trace model. Current runtime
+coverage emits `background.run`; `background.task` is reserved for task-level
+schedule/config telemetry when that layer is wired.
 
 - `background.task`
 - `background.run`

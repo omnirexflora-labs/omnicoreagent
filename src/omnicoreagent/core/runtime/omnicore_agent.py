@@ -348,13 +348,16 @@ class OmniCoreAgent:
                 agent_name=self.name,
                 usage_getter=self._usage,
             )
+            trace_status = TraceStatus(
+                formatted_response.pop("_trace_status", TraceStatus.COMPLETED.value)
+            )
             await self.telemetry_recorder.emit_event(
                 "final_answer",
                 actor=self._telemetry_actor(),
                 output={"response": formatted_response.get("response")},
             )
             await self.telemetry_recorder.end_trace(
-                status=TraceStatus.COMPLETED,
+                status=trace_status,
                 output={"response": formatted_response.get("response")},
             )
             formatted_response["trace_id"] = trace_context.trace_id

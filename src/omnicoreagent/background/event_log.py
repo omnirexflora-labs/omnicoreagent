@@ -53,6 +53,13 @@ class BackgroundEventLog:
     async def emit_run(
         self, event_name: str, run: BackgroundRun, **extra_payload: Any
     ) -> None:
+        snapshot_written_before_terminal = False
+        if event_name in TERMINAL_EVENT_NAMES:
+            try:
+                await self.write_run_snapshot(run)
+                snapshot_written_before_terminal = True
+            except Exception:
+                pass
         try:
             await self.emit(
                 event_name,
@@ -75,7 +82,10 @@ class BackgroundEventLog:
             )
         except Exception:
             pass
-        if event_name != "background_run_heartbeat":
+        if (
+            event_name != "background_run_heartbeat"
+            and not snapshot_written_before_terminal
+        ):
             try:
                 await self.write_run_snapshot(run)
             except Exception:
@@ -96,6 +106,18 @@ class BackgroundEventLog:
             run_id, event_name, events
         )
         events.append(event)
+        if event_name in TERMINAL_EVENT_NAMES:
+            pending_events_drained = await self.drain_event_tasks(
+                run_id, cancel_on_timeout=True
+            )
+            if pending_events_drained:
+                try:
+                    await self.write_run_event(event)
+                except Exception:
+                    pass
+            await self.append_telemetry_event(event_name, event)
+            return
+
         await self.append_telemetry_event(event_name, event)
         if event_name in INITIAL_EVENT_NAMES:
             try:
@@ -131,7 +153,9 @@ class BackgroundEventLog:
         self.event_tasks.add(task)
         task.add_done_callback(self.event_tasks.discard)
 
-    async def drain_event_tasks(self, run_id: str) -> None:
+    async def drain_event_tasks(
+        self, run_id: str, *, cancel_on_timeout: bool = False
+    ) -> bool:
         pending = [
             task
             for task in self.event_tasks
@@ -139,14 +163,19 @@ class BackgroundEventLog:
             and getattr(task, "_omnicoreagent_run_id", None) == run_id
         ]
         if not pending:
-            return
+            return True
         try:
             await asyncio.wait_for(
                 asyncio.shield(asyncio.gather(*pending, return_exceptions=True)),
                 timeout=self.replay_timeout_seconds,
             )
         except asyncio.TimeoutError:
-            return
+            if cancel_on_timeout:
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+            return False
+        return True
 
     async def cancel_event_tasks(self) -> None:
         pending = [task for task in self.event_tasks if not task.done()]
@@ -194,6 +223,12 @@ class BackgroundEventLog:
         if task and not task.workspace_policy.write_run_json:
             return
         self.workspace_io.write_run_snapshot(run)
+        await self.append_workspace_telemetry_event(
+            run=run,
+            event_type="workspace_write",
+            path=f"{run.workspace_path}/run.json",
+            operation="background_run_snapshot",
+        )
 
     async def write_run_event(self, event: dict[str, Any]) -> None:
         task_id = event.get("task_id")
@@ -202,6 +237,15 @@ class BackgroundEventLog:
             if task and not task.workspace_policy.write_events_jsonl:
                 return
         self.workspace_io.append_event(event)
+        run_id = event.get("run_id")
+        run = await self.task_store.get_run(run_id) if run_id else None
+        if run is not None:
+            await self.append_workspace_telemetry_event(
+                run=run,
+                event_type="workspace_write",
+                path=f"{run.workspace_path}/events.jsonl",
+                operation="background_run_event",
+            )
 
     async def append_telemetry_event(
         self,
@@ -217,6 +261,73 @@ class BackgroundEventLog:
             )
         except Exception:
             return
+
+    async def append_workspace_telemetry_event(
+        self,
+        *,
+        run: BackgroundRun,
+        event_type: str,
+        path: str,
+        operation: str,
+    ) -> None:
+        if self.telemetry_store is None:
+            return
+        try:
+            await asyncio.wait_for(
+                self._append_workspace_telemetry_event(
+                    run=run,
+                    event_type=event_type,
+                    path=path,
+                    operation=operation,
+                ),
+                timeout=self.append_timeout_seconds,
+            )
+        except Exception:
+            return
+
+    async def _append_workspace_telemetry_event(
+        self,
+        *,
+        run: BackgroundRun,
+        event_type: str,
+        path: str,
+        operation: str,
+    ) -> None:
+        if self.telemetry_store is None:
+            return
+        trace_id = self._telemetry_trace_id(run.run_id)
+        span_id = self._telemetry_span_id(run.run_id)
+        await self._ensure_telemetry_trace(
+            trace_id,
+            span_id,
+            {
+                "run_id": run.run_id,
+                "session_id": run.session_id,
+                "task_id": run.task_id,
+                "agent_id": run.agent_id,
+                "workspace_path": run.workspace_path,
+                "status": run.status.value,
+                "attempt": run.attempt,
+            },
+        )
+        await self.telemetry_store.append_event(
+            trace_id,
+            TelemetryEvent(
+                trace_id=trace_id,
+                span_id=span_id,
+                event_type=event_type,
+                actor=TelemetryActor(type=ActorType.WORKSPACE),
+                output={"path": path, "operation": operation},
+                metadata={
+                    "run_id": run.run_id,
+                    "session_id": run.session_id,
+                    "task_id": run.task_id,
+                    "agent_id": run.agent_id,
+                    "workspace_path": run.workspace_path,
+                    "operation": operation,
+                },
+            ),
+        )
 
     async def _append_telemetry_event(
         self,
