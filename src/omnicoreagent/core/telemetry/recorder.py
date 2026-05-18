@@ -281,6 +281,24 @@ class TelemetryRecorder:
         parent_event_id: str | None = None,
     ) -> TelemetryEvent:
         context = self._require_context()
+        event_metadata = dict(metadata or {})
+        correlation_metadata: dict[str, Any] = {}
+        for key in (
+            "run_id",
+            "session_id",
+            "task_id",
+            "suite_id",
+            "agent_id",
+            "workflow_id",
+        ):
+            value = getattr(context, key)
+            if value is not None:
+                correlation_metadata[key] = value
+                event_metadata.setdefault(key, value)
+        recorded_metadata = self._record_metadata(event_metadata)
+        if not isinstance(recorded_metadata, dict):
+            recorded_metadata = {}
+        recorded_metadata.update(correlation_metadata)
         event = TelemetryEvent(
             trace_id=context.trace_id,
             span_id=context.span_id,
@@ -291,7 +309,7 @@ class TelemetryRecorder:
             output=self._record_output(output, source=event_type),
             error=self._record_error(error),
             duration_ms=duration_ms,
-            metadata=self._record_metadata(metadata or {}),
+            metadata=recorded_metadata,
         )
         await self._write(self.store.append_event(context.trace_id, event))
         return event

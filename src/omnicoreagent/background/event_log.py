@@ -1,4 +1,4 @@
-"""Background run event persistence and runtime event routing."""
+"""Background run lifecycle event persistence."""
 
 from __future__ import annotations
 
@@ -10,31 +10,45 @@ from omnicoreagent.background.models import (
     INITIAL_EVENT_NAMES,
     TERMINAL_EVENT_NAMES,
     BackgroundRun,
+    RunStatus,
 )
 from omnicoreagent.background.store.base import AbstractTaskStore
 from omnicoreagent.background.workspace_io import BackgroundWorkspaceIO
+from omnicoreagent.core.telemetry import (
+    AbstractTelemetryStore,
+    ActorType,
+    SpanStatus,
+    TelemetryActor,
+    TelemetryEvent,
+    TelemetrySpan,
+    TelemetryTrace,
+    TelemetryTraceMetadata,
+    TraceStatus,
+)
+from omnicoreagent.core.telemetry.models import utc_now
 
 
 class BackgroundEventLog:
-    """Owns background lifecycle event ordering, storage, and event-router fanout."""
+    """Owns background lifecycle event ordering and workspace-backed replay."""
 
     def __init__(
         self,
         *,
         task_store: AbstractTaskStore,
         workspace_io: BackgroundWorkspaceIO,
-        event_router: Any = None,
+        telemetry_store: AbstractTelemetryStore | None = None,
         replay_timeout_seconds: float = 2.0,
         append_timeout_seconds: float = 2.0,
     ) -> None:
         self.task_store = task_store
         self.workspace_io = workspace_io
-        self.event_router = event_router
+        self.telemetry_store = telemetry_store
         self.replay_timeout_seconds = replay_timeout_seconds
         self.append_timeout_seconds = append_timeout_seconds
         self.local_events: dict[str, list[dict[str, Any]]] = {}
         self.event_sequences: dict[str, int] = {}
-        self.router_tasks: set[asyncio.Task] = set()
+        self.event_tasks: set[asyncio.Task] = set()
+        self._telemetry_traces: set[str] = set()
 
     async def emit_run(
         self, event_name: str, run: BackgroundRun, **extra_payload: Any
@@ -82,28 +96,24 @@ class BackgroundEventLog:
             run_id, event_name, events
         )
         events.append(event)
+        await self.append_telemetry_event(event_name, event)
         if event_name in INITIAL_EVENT_NAMES:
             try:
                 await self.write_run_event(event)
             except Exception:
                 pass
-            if self.event_router is not None:
-                self.schedule_router_task(self.append_event_router(event), event)
             return
-        self.schedule_router_task(self.write_and_route_event(event), event)
+        self.schedule_event_task(self.write_run_event(event), event)
 
     async def get_run_events(self, run: BackgroundRun | None) -> list[dict[str, Any]]:
         if not run:
             return []
-        await self.drain_router_tasks(run.run_id)
+        await self.drain_event_tasks(run.run_id)
         events = self.prepare_event_trace(self.local_events.get(run.run_id) or [])
         workspace_events = self.prepare_event_trace(
             self.workspace_io.read_events(run.workspace_path)
         )
-        router_events = self.prepare_event_trace(
-            await self.read_event_router_events(run)
-        )
-        candidates = [router_events, events, workspace_events]
+        candidates = [events, workspace_events]
         complete = [
             candidate
             for candidate in candidates
@@ -111,29 +121,20 @@ class BackgroundEventLog:
         ]
         if complete:
             return max(complete, key=len)
-        if router_events:
-            return router_events
         if events:
             return events
         return workspace_events
 
-    async def write_and_route_event(self, event: dict[str, Any]) -> None:
-        try:
-            await self.write_run_event(event)
-        except Exception:
-            pass
-        await self.append_event_router(event)
-
-    def schedule_router_task(self, coroutine, event: dict[str, Any]) -> None:
+    def schedule_event_task(self, coroutine, event: dict[str, Any]) -> None:
         task = asyncio.create_task(coroutine)
         task._omnicoreagent_run_id = event.get("run_id")  # type: ignore[attr-defined]
-        self.router_tasks.add(task)
-        task.add_done_callback(self.router_tasks.discard)
+        self.event_tasks.add(task)
+        task.add_done_callback(self.event_tasks.discard)
 
-    async def drain_router_tasks(self, run_id: str) -> None:
+    async def drain_event_tasks(self, run_id: str) -> None:
         pending = [
             task
-            for task in self.router_tasks
+            for task in self.event_tasks
             if not task.done()
             and getattr(task, "_omnicoreagent_run_id", None) == run_id
         ]
@@ -147,15 +148,15 @@ class BackgroundEventLog:
         except asyncio.TimeoutError:
             return
 
-    async def cancel_router_tasks(self) -> None:
-        pending = [task for task in self.router_tasks if not task.done()]
+    async def cancel_event_tasks(self) -> None:
+        pending = [task for task in self.event_tasks if not task.done()]
         if not pending:
-            self.router_tasks.clear()
+            self.event_tasks.clear()
             return
         for task in pending:
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
-        self.router_tasks.clear()
+        self.event_tasks.clear()
 
     async def next_run_event_sequence(
         self, run_id: str, event_name: str, local_events: list[dict[str, Any]]
@@ -179,15 +180,11 @@ class BackgroundEventLog:
 
         run = await self.task_store.get_run(run_id)
         if run:
-            for source in (
-                await self.read_event_router_events(run),
-                self.workspace_io.read_events(run.workspace_path),
-            ):
-                sequences.extend(
-                    int(event["sequence"])
-                    for event in source
-                    if isinstance(event.get("sequence"), int)
-                )
+            sequences.extend(
+                int(event["sequence"])
+                for event in self.workspace_io.read_events(run.workspace_path)
+                if isinstance(event.get("sequence"), int)
+            )
         next_sequence = (max(sequences) if sequences else 0) + 1
         self.event_sequences[run_id] = next_sequence
         return next_sequence
@@ -206,95 +203,154 @@ class BackgroundEventLog:
                 return
         self.workspace_io.append_event(event)
 
-    async def append_event_router(self, event: dict[str, Any]) -> None:
-        if self.event_router is None:
+    async def append_telemetry_event(
+        self,
+        event_name: str,
+        event: dict[str, Any],
+    ) -> None:
+        if self.telemetry_store is None:
             return
         try:
-            from omnicoreagent.core.events.base import Event, EventType
-
             await asyncio.wait_for(
-                self.event_router.append(
-                    session_id=event.get("session_id") or event.get("run_id"),
-                    event=Event(
-                        type=EventType.BACKGROUND_AGENT_STATUS,
-                        payload={
-                            "agent_id": event.get("agent_id") or "background",
-                            "status": event["event"],
-                            "event": event["event"],
-                            "timestamp": event["timestamp"],
-                            "session_id": event.get("session_id"),
-                            "task_id": event.get("task_id"),
-                            "run_id": event.get("run_id"),
-                            "run_status": event.get("status"),
-                            "attempt": event.get("attempt"),
-                            "sequence": event.get("sequence"),
-                            "workspace_path": event.get("workspace_path"),
-                            "last_run": event.get("run_id"),
-                            "run_count": event.get("sequence"),
-                            "error": event.get("error"),
-                            "worker_id": event.get("worker_id"),
-                            "lease_generation": event.get("lease_generation"),
-                            "heartbeat_at": event.get("heartbeat_at"),
-                            "lease_expires_at": event.get("lease_expires_at"),
-                            "occurrence_id": event.get("occurrence_id"),
-                            "due_at": event.get("due_at"),
-                        },
-                        agent_name=event.get("agent_id") or "background",
-                    ),
-                ),
+                self._append_telemetry_event(event_name, event),
                 timeout=self.append_timeout_seconds,
             )
         except Exception:
             return
 
-    async def read_event_router_events(self, run: BackgroundRun) -> list[dict[str, Any]]:
-        if self.event_router is None:
-            return []
-        try:
-            router_events = await asyncio.wait_for(
-                self.event_router.get_events(session_id=run.session_id),
-                timeout=self.replay_timeout_seconds,
-            )
-        except Exception:
-            return []
-
-        events: list[dict[str, Any]] = []
-        for item in router_events:
-            raw = item.model_dump() if hasattr(item, "model_dump") else dict(item)
-            payload = raw.get("payload", {})
-            if hasattr(payload, "model_dump"):
-                payload = payload.model_dump()
-            if payload.get("run_id") != run.run_id and payload.get("last_run") != run.run_id:
-                continue
-            event = {
-                "event": payload.get("event") or payload.get("status"),
-                "timestamp": payload.get("timestamp") or raw.get("timestamp"),
-                "agent_id": payload.get("agent_id"),
-                "task_id": payload.get("task_id"),
-                "run_id": payload.get("run_id") or payload.get("last_run"),
-                "session_id": payload.get("session_id"),
-                "status": payload.get("run_status"),
-                "attempt": payload.get("attempt"),
-                "sequence": payload.get("sequence") or payload.get("run_count"),
-                "workspace_path": payload.get("workspace_path"),
-                "worker_id": payload.get("worker_id"),
-                "lease_generation": payload.get("lease_generation"),
-                "heartbeat_at": payload.get("heartbeat_at"),
-                "lease_expires_at": payload.get("lease_expires_at"),
-                "occurrence_id": payload.get("occurrence_id"),
-                "due_at": payload.get("due_at"),
-            }
-            if payload.get("error"):
-                event["error"] = payload["error"]
-            events.append({key: value for key, value in event.items() if value is not None})
-
-        return sorted(
-            events,
-            key=lambda event: (
-                event.get("sequence", 0),
-                event.get("timestamp", ""),
+    async def _append_telemetry_event(
+        self,
+        event_name: str,
+        event: dict[str, Any],
+    ) -> None:
+        if self.telemetry_store is None:
+            return
+        run_id = str(event["run_id"])
+        trace_id = self._telemetry_trace_id(run_id)
+        span_id = self._telemetry_span_id(run_id)
+        await self._ensure_telemetry_trace(trace_id, span_id, event)
+        await self.telemetry_store.append_event(
+            trace_id,
+            TelemetryEvent(
+                trace_id=trace_id,
+                span_id=span_id,
+                event_type=event_name,
+                actor=TelemetryActor(
+                    type=ActorType.BACKGROUND,
+                    id=event.get("agent_id"),
+                    name=event.get("agent_id"),
+                ),
+                output={"event": event_name, "status": event.get("status")},
+                metadata=dict(event),
             ),
         )
+        if event_name in TERMINAL_EVENT_NAMES:
+            await self._finish_telemetry_trace(trace_id, span_id, event)
+
+    async def _ensure_telemetry_trace(
+        self,
+        trace_id: str,
+        span_id: str,
+        event: dict[str, Any],
+    ) -> None:
+        if self.telemetry_store is None or trace_id in self._telemetry_traces:
+            return
+        self._telemetry_traces.add(trace_id)
+        await self.telemetry_store.upsert_trace(
+            TelemetryTrace(
+                trace_id=trace_id,
+                root_span_id=span_id,
+                run_id=event.get("run_id"),
+                session_id=event.get("session_id"),
+                task_id=event.get("task_id"),
+                agent_id=event.get("agent_id"),
+                metadata=TelemetryTraceMetadata(
+                    agent_name=event.get("agent_id"),
+                    tags=["background"],
+                ),
+                spans=[
+                    TelemetrySpan(
+                        trace_id=trace_id,
+                        span_id=span_id,
+                        name="background.run",
+                        kind="background.run",
+                        actor=TelemetryActor(
+                            type=ActorType.BACKGROUND,
+                            id=event.get("agent_id"),
+                            name=event.get("agent_id"),
+                        ),
+                        input={
+                            "run_id": event.get("run_id"),
+                            "task_id": event.get("task_id"),
+                            "trigger": event.get("trigger"),
+                        },
+                        attributes={
+                            "worker_id": event.get("worker_id"),
+                            "workspace_path": event.get("workspace_path"),
+                        },
+                    )
+                ],
+            )
+        )
+
+    async def _finish_telemetry_trace(
+        self,
+        trace_id: str,
+        span_id: str,
+        event: dict[str, Any],
+    ) -> None:
+        if self.telemetry_store is None:
+            return
+        ended_at = utc_now()
+        await self.telemetry_store.end_span(
+            trace_id,
+            span_id,
+            {
+                "status": self._span_status_for_event(event).value,
+                "ended_at": ended_at,
+                "output": {
+                    "status": event.get("status"),
+                    "error": event.get("error"),
+                    "result_preview": event.get("result_preview"),
+                },
+            },
+        )
+        await self.telemetry_store.update_trace(
+            trace_id,
+            {"status": self._trace_status_for_event(event).value, "ended_at": ended_at},
+        )
+
+    @staticmethod
+    def _trace_status_for_event(event: dict[str, Any]) -> TraceStatus:
+        status = event.get("status")
+        if status == RunStatus.FAILED.value:
+            return TraceStatus.FAILED
+        if status == RunStatus.CANCELLED.value:
+            return TraceStatus.CANCELLED
+        if status == RunStatus.TIMEOUT.value:
+            return TraceStatus.TIMEOUT
+        return TraceStatus.COMPLETED
+
+    @staticmethod
+    def _span_status_for_event(event: dict[str, Any]) -> SpanStatus:
+        status = event.get("status")
+        if status == RunStatus.FAILED.value:
+            return SpanStatus.ERROR
+        if status == RunStatus.CANCELLED.value:
+            return SpanStatus.CANCELLED
+        if status == RunStatus.TIMEOUT.value:
+            return SpanStatus.TIMEOUT
+        if status == RunStatus.SKIPPED.value:
+            return SpanStatus.SKIPPED
+        return SpanStatus.OK
+
+    @staticmethod
+    def _telemetry_trace_id(run_id: str) -> str:
+        return f"trace_background_{run_id}"
+
+    @staticmethod
+    def _telemetry_span_id(run_id: str) -> str:
+        return f"span_background_{run_id}"
 
     @staticmethod
     def prepare_event_trace(events: list[dict[str, Any]]) -> list[dict[str, Any]]:

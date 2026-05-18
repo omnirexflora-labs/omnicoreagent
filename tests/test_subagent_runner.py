@@ -7,7 +7,7 @@ from omnicoreagent.core.agents.subagent_helpers import (
     build_sub_agents_observation_xml,
 )
 from omnicoreagent.core.agents.subagent_runner import SubAgentCallRunner
-from omnicoreagent.core.events.base import EventType
+from omnicoreagent.core.telemetry import InMemoryTelemetryStore, TelemetryActor, TelemetryRecorder
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.types import AgentState, SessionState
 from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
@@ -43,13 +43,17 @@ async def test_subagent_runner_records_successful_outputs():
     runner = SubAgentCallRunner(agent_name="parent")
     sub_agent = FakeAgent("research", {"response": "done"})
     history = []
-    events = []
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    context = await recorder.start_trace(
+        trace_id="trace-subagent-success",
+        run_id="run-subagent-success",
+        session_id="s1",
+        actor=TelemetryActor(type="agent", name="parent"),
+    )
 
     async def add_message_to_history(**kwargs):
         history.append(kwargs)
-
-    async def event_router(session_id, event):
-        events.append((session_id, event))
 
     state = _session_state()
     await runner.execute(
@@ -60,17 +64,19 @@ async def test_subagent_runner_records_successful_outputs():
         session_state=state,
         add_message_to_history=add_message_to_history,
         run_usage=Usage(),
-        event_router=event_router,
+        telemetry_recorder=recorder,
     )
+    await recorder.end_trace()
 
     assert sub_agent.kwargs == {"task": "look", "session_id": "s1"}
     assert sub_agent.cleaned is True
     assert history[0]["role"] == "assistant"
     assert history[1]["role"] == "user"
     assert "done" in history[1]["content"]
-    assert [event.type for _, event in events] == [
-        EventType.SUB_AGENT_CALL_STARTED,
-        EventType.SUB_AGENT_CALL_RESULT,
+    trace = await store.get_trace(context.trace_id)
+    assert [event.event_type for event in trace.events] == [
+        "subagent_spawn",
+        "subagent_result",
     ]
     assert len(state.messages) == 2
 
@@ -80,13 +86,17 @@ async def test_subagent_runner_returns_error_observation_for_failed_agent():
     runner = SubAgentCallRunner(agent_name="parent")
     failing_agent = FakeAgent("worker", RuntimeError("boom"))
     history = []
-    events = []
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    context = await recorder.start_trace(
+        trace_id="trace-subagent-error",
+        run_id="run-subagent-error",
+        session_id="s1",
+        actor=TelemetryActor(type="agent", name="parent"),
+    )
 
     async def add_message_to_history(**kwargs):
         history.append(kwargs)
-
-    async def event_router(session_id, event):
-        events.append(event)
 
     await runner.execute(
         response="<agent_calls />",
@@ -96,13 +106,15 @@ async def test_subagent_runner_returns_error_observation_for_failed_agent():
         session_state=_session_state(),
         add_message_to_history=add_message_to_history,
         run_usage=Usage(),
-        event_router=event_router,
+        telemetry_recorder=recorder,
     )
+    await recorder.end_trace()
 
     assert "boom" in history[-1]["content"]
-    assert [event.type for event in events] == [
-        EventType.SUB_AGENT_CALL_STARTED,
-        EventType.SUB_AGENT_CALL_ERROR,
+    trace = await store.get_trace(context.trace_id)
+    assert [event.event_type for event in trace.events] == [
+        "subagent_spawn",
+        "subagent_error",
     ]
 
 

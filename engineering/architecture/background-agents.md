@@ -15,15 +15,15 @@ Read this before changing:
 - `src/omnicoreagent/background`
 - `src/omnicoreagent/core/runtime`
 - `src/omnicoreagent/core/workspace`
-- `src/omnicoreagent/core/events`
+- `src/omnicoreagent/core/telemetry`
 - `src/omnicoreagent/core/memory_store`
 - `engineering/specifications/background-agents.md`
 - `engineering/architecture/telemetry.md`
 
-Telemetry migration note: sections that mention `EventRouter` describe current
-visibility wiring. Target background execution evidence and live/replay
+Telemetry note: sections that mention telemetry stream describe current
+visibility wiring. Background execution evidence and live/replay
 streaming must use telemetry. Do not add new background features that depend on
-`EventRouter`.
+telemetry stream.
 
 ---
 
@@ -107,14 +107,14 @@ BackgroundAgentManager
                 |
                 +--> MemoryRouter
                 +--> Workspace
-                +--> EventRouter
+                +--> telemetry stream
                 +--> Tools / MCP / Subagents / Guardrails
 ```
 
 The manager owns the public facade and orchestration flow. The store owns
 operational truth. `run_helpers` owns pure run construction and retry helpers.
 `BackgroundEventLog` owns lifecycle event ordering, workspace event persistence,
-and event-router fanout. `BackgroundWorkspaceIO` owns background workspace file
+and telemetry emission. `BackgroundWorkspaceIO` owns background workspace file
 access. `BackgroundScheduleDispatcher` owns due-schedule dispatch.
 `BackgroundSupervisor` owns queue claiming, execution, cancellation, heartbeat,
 retry, and recovery. `OmniCoreAgent` owns reasoning, tool calls, workspace
@@ -175,7 +175,7 @@ Responsibilities:
 - produce lease-release patches
 - create safe result previews
 
-These helpers do not touch the task store, workspace, event router, or model.
+These helpers do not touch the task store, workspace, telemetry stream, or model.
 
 ### `BackgroundEventLog`
 
@@ -187,9 +187,9 @@ Responsibilities:
 - keep the process-local event cache
 - persist lifecycle events to workspace `events.jsonl`
 - write run snapshots to workspace `run.json`
-- append lifecycle events into `EventRouter`
+- append lifecycle events into telemetry stream
 - replay the strongest complete event source for a run
-- tolerate workspace or event-router visibility failures without blocking task
+- tolerate workspace or telemetry visibility failures without blocking task
   execution
 
 Events are still visibility, not source of truth. Task-store state remains the
@@ -250,10 +250,10 @@ It does not store:
 - workspace files
 - tool definitions
 - MCP clients
-- raw event streams
+- raw telemetry streams
 
 Conversation memory belongs to `MemoryRouter`. Files and artifacts belong to
-workspace storage. Events belong to `EventRouter`. The task store owns
+workspace storage. Events belong to telemetry. The task store owns
 operational state.
 
 ### `BackgroundScheduleDispatcher`
@@ -298,7 +298,7 @@ be the source of truth.
 Executes queued runs under operational control.
 
 The supervisor depends on `AbstractTaskStore`, registered agent specs/objects,
-memory/event routers, and the manager event emission boundary. It owns running
+memory routers, telemetry recording, and the manager event emission boundary. It owns running
 agent tasks and inline execution work. The manager delegates execution control
 to this service instead of carrying execution logic directly.
 
@@ -802,7 +802,7 @@ The supervisor injects a short run-context instruction into the request with the
 run workspace namespace. The agent writes durable task output through workspace
 tools. Lifecycle files such as `run.json` and `events.jsonl` are best-effort
 visibility artifacts and must not stop execution if workspace IO is temporarily
-unavailable. `EventRouter` remains the runtime event service.
+unavailable. telemetry stream remains the runtime event service.
 
 The final response returned by `OmniCoreAgent.run()` is stored as
 `result_preview`. The durable result of background work should live in the run
@@ -816,10 +816,9 @@ system.
 
 ## Event Model
 
-Run-scoped background lifecycle events are captured in the process cache and,
-when enabled, the run workspace `events.jsonl` mirror. If an `EventRouter` is
-configured, the manager also mirrors those run events to the router on a
-best-effort bounded path.
+Run-scoped background lifecycle events are captured in the process cache,
+mirrored to telemetry, and, when enabled, written to the run workspace
+`events.jsonl` mirror on a best-effort bounded path.
 
 Current emitted run-scoped events:
 
@@ -838,20 +837,14 @@ Current emitted run-scoped events:
 
 Events make the run observable. They do not replace the task store.
 
-Run event replay is best-effort across the event router, process cache, and the
-workspace `events.jsonl` mirror. `get_run_events(run_id)` returns the most
-complete terminal trace available; while a run is still active, it prefers the
-event router, then cache, then workspace mirror. Event-router replay is always
-filtered by `run_id` because the same task can intentionally reuse one memory
-session across many runs. Replay reads from the event router are bounded so a
-slow event backend cannot prevent fallback to process cache or workspace mirror.
-Sources with duplicate or malformed run-local sequence numbers are ignored
-during source selection. A valid replay source uses contiguous integer sequence
-numbers starting at `1`.
-
-Event-router appends are also bounded. A slow event backend can delay lifecycle
-emission only up to the append timeout; it must not hold the run lifecycle or
-agent execution indefinitely.
+Run event replay is best-effort across the process cache and workspace
+`events.jsonl` mirror. `get_run_events(run_id)` returns the most complete
+terminal trace available; while a run is still active, it prefers the process
+cache, then the workspace mirror. Replay is filtered by `run_id` because the
+same task can intentionally reuse one memory session across many runs. Sources
+with duplicate or malformed run-local sequence numbers are ignored during source
+selection. A valid replay source uses contiguous integer sequence numbers
+starting at `1`.
 
 The sequence allocator is run-local. Fresh run events start at sequence `1`
 without scanning historical task events. If a manager restarts and continues an
@@ -971,7 +964,7 @@ The background execution system is ready when:
 - queued runs remain claimable after restart
 - cancellation, timeout, retry, and overlap policies are tested
 - every background run has a workspace namespace
-- run status can be inspected without reading event streams
+- run status can be inspected without reading telemetry streams
 - lifecycle events can reconstruct the run trajectory
 - optional dependencies do not load during root or background-package import
 - public docs describe shipped behavior only

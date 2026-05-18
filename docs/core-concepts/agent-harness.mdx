@@ -74,7 +74,7 @@ Every capability below maps to code in the repository.
 | **Dynamic subagents** | The lead agent spawns one or many focused workers; workers inherit model/tools/config and write output to workspace files. | `src/omnicoreagent/core/subagents.py` |
 | **MCP tools** | MCP servers are loaded as external tool providers over supported transports. | `src/omnicoreagent/mcp_clients_connection/client.py` |
 | **Guardrails** | User input and tool output are screened according to guardrail mode; full mode passes guardrails into the ReAct agent for output scrubbing. | `src/omnicoreagent/core/guardrails/`, `src/omnicoreagent/core/tools/tool_observation_guardrail.py` |
-| **Events and metrics** | Runs and tool actions emit events and return request metrics. | `src/omnicoreagent/core/events/`, `src/omnicoreagent/core/agents/llm_step.py` |
+| **Telemetry and metrics** | Runs and tool actions emit typed telemetry events and return request metrics. | `src/omnicoreagent/core/telemetry/`, `src/omnicoreagent/core/agents/llm_step.py` |
 | **OmniServe** | The same agent is exposed through REST/SSE with shared server state and lifecycle handling. | `src/omnicoreagent/serve/` |
 
 ---

@@ -36,6 +36,7 @@ from omnicoreagent.background.store.base import AbstractTaskStore
 from omnicoreagent.background.store.router import TaskStoreRouter
 from omnicoreagent.background.supervisor import BackgroundSupervisor
 from omnicoreagent.background.workspace_io import BackgroundWorkspaceIO
+from omnicoreagent.core.telemetry import InMemoryTelemetryStore, TelemetryStream
 
 
 _EVENT_REPLAY_TIMEOUT_SECONDS = 2.0
@@ -49,14 +50,22 @@ class BackgroundAgentManager:
         self,
         task_store: str | dict[str, Any] | AbstractTaskStore | None = None,
         memory_router: Any = None,
-        event_router: Any = None,
         workspace: Any = None,
+        telemetry_store: Any = None,
+        telemetry_stream: Any = None,
         worker_id: str | None = None,
         lease_seconds: int = 30,
     ) -> None:
         self.task_store = TaskStoreRouter.create(task_store)
         self.memory_router = memory_router
-        self.event_router = event_router
+        self.telemetry_store = telemetry_store or (
+            telemetry_stream.store if telemetry_stream is not None else InMemoryTelemetryStore()
+        )
+        self.telemetry_stream = telemetry_stream or TelemetryStream(self.telemetry_store)
+        if self.telemetry_stream.store is not self.telemetry_store:
+            raise ValueError(
+                "telemetry_stream.store must be the same object as telemetry_store"
+            )
         self.worker_id = worker_id or f"worker_{uuid4().hex}"
         self.lease_seconds = lease_seconds
 
@@ -70,7 +79,7 @@ class BackgroundAgentManager:
         self._event_log = BackgroundEventLog(
             task_store=self.task_store,
             workspace_io=self._workspace_io,
-            event_router=self.event_router,
+            telemetry_store=self.telemetry_store,
             replay_timeout_seconds=self._event_replay_timeout_seconds,
             append_timeout_seconds=self._event_append_timeout_seconds,
         )
@@ -85,7 +94,6 @@ class BackgroundAgentManager:
             worker_id=self.worker_id,
             lease_seconds=self.lease_seconds,
             memory_router=self.memory_router,
-            event_router=self.event_router,
             event_log=self._event_log,
             emit_run=self._emit_run,
         )
@@ -93,7 +101,7 @@ class BackgroundAgentManager:
         self._active_agent_tasks = self._supervisor.active_agent_tasks
         self._events = self._event_log.local_events
         self._event_sequences = self._event_log.event_sequences
-        self._event_router_tasks = self._event_log.router_tasks
+        self._event_tasks = self._event_log.event_tasks
         self._initialized = False
 
     async def register_agent(
@@ -227,7 +235,7 @@ class BackgroundAgentManager:
             self._worker_task = None
         await self._cancel_active_agent_tasks()
         await self._cancel_inline_execution_tasks()
-        await self._event_log.cancel_router_tasks()
+        await self._event_log.cancel_event_tasks()
         await self.task_store.close()
         self._initialized = False
 
@@ -438,7 +446,7 @@ class BackgroundAgentManager:
         self._sync_services_config()
         await self._supervisor.run_claimed(claimed)
 
-    async def _run_agent_with_event_context(
+    async def _run_agent_with_run_context(
         self,
         *,
         agent: Any,
@@ -446,7 +454,7 @@ class BackgroundAgentManager:
         run: BackgroundRun,
         timeout_seconds: int | None,
     ) -> Any:
-        return await self._supervisor.run_agent_with_event_context(
+        return await self._supervisor.run_agent_with_run_context(
             agent=agent,
             query=query,
             run=run,
@@ -489,7 +497,6 @@ class BackgroundAgentManager:
             agents=self._agents,
             task_store=self.task_store,
             memory_router=self.memory_router,
-            event_router=self.event_router,
         )
 
     async def _emit_run(
@@ -502,27 +509,19 @@ class BackgroundAgentManager:
         self._sync_event_log_config()
         await self._event_log.emit(event_name, **payload)
 
-    async def _drain_event_router_tasks(self, run_id: str) -> None:
+    async def _drain_event_tasks(self, run_id: str) -> None:
         self._sync_event_log_config()
-        await self._event_log.drain_router_tasks(run_id)
+        await self._event_log.drain_event_tasks(run_id)
 
-    async def _cancel_event_router_tasks(self) -> None:
+    async def _cancel_event_tasks(self) -> None:
         self._sync_event_log_config()
-        await self._event_log.cancel_router_tasks()
+        await self._event_log.cancel_event_tasks()
 
     async def _write_run_snapshot(self, run: BackgroundRun) -> None:
         await self._event_log.write_run_snapshot(run)
 
     async def _write_run_event(self, event: dict[str, Any]) -> None:
         await self._event_log.write_run_event(event)
-
-    async def _append_event_router(self, event: dict[str, Any]) -> None:
-        self._sync_event_log_config()
-        await self._event_log.append_event_router(event)
-
-    async def _read_event_router_events(self, run: BackgroundRun) -> list[dict[str, Any]]:
-        self._sync_event_log_config()
-        return await self._event_log.read_event_router_events(run)
 
     @staticmethod
     def _prepare_event_trace(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -538,10 +537,8 @@ class BackgroundAgentManager:
         self._sync_event_log_config()
         self._supervisor.worker_id = self.worker_id
         self._supervisor.memory_router = self.memory_router
-        self._supervisor.event_router = self.event_router
         self._supervisor.lease_seconds = self.lease_seconds
 
     def _sync_event_log_config(self) -> None:
-        self._event_log.event_router = self.event_router
         self._event_log.replay_timeout_seconds = self._event_replay_timeout_seconds
         self._event_log.append_timeout_seconds = self._event_append_timeout_seconds

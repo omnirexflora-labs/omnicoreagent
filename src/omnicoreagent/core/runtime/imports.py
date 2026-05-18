@@ -11,7 +11,6 @@ _RUNTIME_EXPORTS = {
     ),
     "AgentConfig": ("omnicoreagent.core.runtime.config", "AgentConfig"),
     "DetectionConfig": ("omnicoreagent.core.guardrails", "DetectionConfig"),
-    "EventRouter": ("omnicoreagent.core.events.event_router", "EventRouter"),
     "FAST_CONVERSATION_SUMMARY_PROMPT": (
         "omnicoreagent.core.system_prompts",
         "FAST_CONVERSATION_SUMMARY_PROMPT",

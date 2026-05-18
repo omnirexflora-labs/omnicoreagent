@@ -1,4 +1,3 @@
-from unittest.mock import AsyncMock
 import pytest
 import json
 from omnicoreagent.core.agents.base import BaseReactAgent
@@ -20,18 +19,14 @@ def agent():
 @pytest.mark.asyncio
 async def test_extract_action_or_answer_with_final_answer(agent):
     response = "<final_answer>It is sunny today.</final_answer>"
-    result = await agent.extract_action_or_answer(
-        response, session_id="test", event_router=AsyncMock()
-    )
+    result = await agent.extract_action_or_answer(response, session_id="test")
     assert result.answer == "It is sunny today."
 
 
 @pytest.mark.asyncio
 async def test_extract_action_or_answer_with_action(agent):
     response = '<tool_call><tool_name>search</tool_name><parameters>{"input": "news"}</parameters></tool_call>'
-    result = await agent.extract_action_or_answer(
-        response, session_id="test", event_router=AsyncMock()
-    )
+    result = await agent.extract_action_or_answer(response, session_id="test")
     assert result.action is True
     assert result.tool_calls is True
     # data is a json string
@@ -42,9 +37,7 @@ async def test_extract_action_or_answer_with_action(agent):
 
 @pytest.mark.asyncio
 async def test_extract_action_or_answer_error_mentions_parallel_tool_calls(agent):
-    result = await agent.extract_action_or_answer(
-        "plain text", session_id="test", event_router=AsyncMock()
-    )
+    result = await agent.extract_action_or_answer("plain text", session_id="test")
 
     assert result.error is not None
     assert "<tool_calls>" in result.error

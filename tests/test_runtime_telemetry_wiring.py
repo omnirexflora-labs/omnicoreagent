@@ -6,11 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from omnicoreagent.core.events.base import (
-    current_event_run_id,
-    reset_event_run_id,
-    set_event_run_id,
-)
 from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
 from omnicoreagent.core.telemetry import (
     InMemoryTelemetryStore,
@@ -45,8 +40,6 @@ def _initialized_agent(
     agent.memory_router = MagicMock()
     agent.memory_router.store_message = AsyncMock()
     agent.memory_router.get_messages = AsyncMock(return_value=[])
-    agent.event_router = MagicMock()
-    agent.event_router.append = AsyncMock()
     return agent
 
 
@@ -77,9 +70,6 @@ async def test_run_records_completed_telemetry_trace() -> None:
     assert trace.spans[0].kind == "agent.run"
     assert trace.spans[0].output == {"response": "done"}
     agent.agent.run.assert_awaited_once()
-    # Migration contract: the legacy loop still receives EventRouter while
-    # runtime callers can already read canonical facade telemetry.
-    assert agent.agent.run.await_args.kwargs["event_router"] is agent.event_router.append
 
 
 @pytest.mark.asyncio
@@ -115,14 +105,9 @@ async def test_run_records_completed_trace_when_initializing_normally() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_uses_supplied_run_id_for_telemetry_and_event_context() -> None:
+async def test_run_uses_supplied_run_id_for_telemetry() -> None:
     store = InMemoryTelemetryStore()
     agent = _initialized_agent(store=store)
-
-    async def fake_run(**kwargs):
-        return current_event_run_id()
-
-    agent.agent.run = AsyncMock(side_effect=fake_run)
 
     result = await agent.run(
         "hello",
@@ -131,28 +116,11 @@ async def test_run_uses_supplied_run_id_for_telemetry_and_event_context() -> Non
     )
 
     assert result["run_id"] == "run_external"
-    assert result["response"] == "run_external"
-    assert current_event_run_id() is None
+    assert result["response"] == "done"
 
     traces = await store.list_traces(TraceFilter(session_id="session-external-run"))
     assert len(traces) == 1
     assert traces[0].run_id == "run_external"
-
-
-@pytest.mark.asyncio
-async def test_run_adopts_existing_legacy_event_run_context() -> None:
-    store = InMemoryTelemetryStore()
-    agent = _initialized_agent(store=store)
-
-    token = set_event_run_id("run_from_sse")
-    try:
-        result = await agent.run("hello", session_id="session-sse")
-    finally:
-        reset_event_run_id(token)
-
-    assert result["run_id"] == "run_from_sse"
-    traces = await store.list_traces(TraceFilter(session_id="session-sse"))
-    assert traces[0].run_id == "run_from_sse"
 
 
 @pytest.mark.asyncio
@@ -318,30 +286,23 @@ def test_ensure_telemetry_derives_store_from_supplied_stream() -> None:
 async def test_get_trace_accepts_returned_trace_id_and_session_id_keyword() -> None:
     store = InMemoryTelemetryStore()
     agent = _initialized_agent(store=store)
-    legacy_trace = SimpleNamespace(model_dump=MagicMock(return_value={"legacy": True}))
-    agent.event_router.get_trace = AsyncMock(return_value=legacy_trace)
 
     result = await agent.run("hello", session_id="session-trace")
 
     telemetry_trace = await agent.get_trace(result["trace_id"])
-    event_trace = await agent.get_trace(session_id="session-trace")
+    session_trace = await agent.get_trace(session_id="session-trace")
 
     assert telemetry_trace["trace_id"] == result["trace_id"]
-    assert event_trace == {"legacy": True}
-    agent.event_router.get_trace.assert_awaited_once_with(session_id="session-trace")
+    assert session_trace["trace_id"] == result["trace_id"]
 
 
 @pytest.mark.asyncio
 async def test_get_trace_missing_trace_id_does_not_fall_back_to_event_summary() -> None:
     agent = _initialized_agent()
-    agent.event_router.get_trace = AsyncMock(
-        return_value=SimpleNamespace(model_dump=lambda: {"legacy": True})
-    )
 
     trace = await agent.get_trace("trace_missing")
 
     assert trace is None
-    agent.event_router.get_trace.assert_not_called()
 
 
 @pytest.mark.asyncio

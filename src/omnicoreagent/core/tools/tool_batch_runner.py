@@ -2,16 +2,12 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from omnicoreagent.core.events.base import Event
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.tools.tool_batch_events import (
     assign_tool_call_ids,
     build_tool_batch_args,
     build_tool_batch_name,
-    build_tool_call_error_event,
     build_tool_call_history_metadata,
-    build_tool_call_result_event,
-    build_tool_call_started_event,
 )
 from omnicoreagent.core.types import (
     Message,
@@ -55,8 +51,8 @@ class ToolBatchRunner:
         session_state: SessionState,
         add_message_to_history: Callable[[str, str, dict | None], Any],
         session_id: str | None,
-        event_router: Callable[[str, Event], Any] | None,
         tool_batch_name: str,
+        telemetry_recorder: Any = None,
     ) -> list[dict[str, Any]]:
         for single_tool in tool_call_results:
             session_state.loop_detector.record_tool_call(
@@ -78,13 +74,13 @@ class ToolBatchRunner:
                 session_id=session_id,
             )
 
-        event = build_tool_call_error_event(
-            agent_name=self.agent_name,
-            tool_batch_name=tool_batch_name,
-            error_message=error_message,
-        )
-        if event_router:
-            await event_router(session_id=session_id, event=event)
+        if telemetry_recorder is not None:
+            await telemetry_recorder.emit_event(
+                "tool_batch_error",
+                actor=TelemetryActor(type=ActorType.TOOL),
+                input={"tool_batch_name": tool_batch_name},
+                error={"type": "ToolBatchExecutionError", "message": error_message},
+            )
 
         return self.build_error_results(
             tool_call_results=tool_call_results,
@@ -98,7 +94,6 @@ class ToolBatchRunner:
         session_state: SessionState,
         add_message_to_history: Callable[[str, str, dict | None], Any],
         session_id: str | None,
-        event_router: Callable[[str, Event], Any] | None,
         telemetry_recorder: Any = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         tool_batch_name = build_tool_batch_name(tool_call_results)
@@ -108,15 +103,6 @@ class ToolBatchRunner:
             agent_name=self.agent_name,
             tool_call_results=tool_call_results,
         )
-
-        event = build_tool_call_started_event(
-            agent_name=self.agent_name,
-            tool_batch_name=tool_batch_name,
-            tool_batch_args=tool_batch_args,
-            first_tool_call_id=tool_call_results[0].tool_call_id,
-        )
-        if event_router:
-            await event_router(session_id=session_id, event=event)
 
         await add_message_to_history(
             role="assistant",
@@ -134,7 +120,6 @@ class ToolBatchRunner:
         session_state: SessionState,
         add_message_to_history: Callable[[str, str, dict | None], Any],
         session_id: str | None,
-        event_router: Callable[[str, Event], Any] | None,
         tool_batch_name: str,
         tool_batch_args: list[dict[str, Any]],
         parse_tool_observation: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
@@ -200,15 +185,6 @@ class ToolBatchRunner:
                 session_id,
             )
 
-            event = build_tool_call_result_event(
-                agent_name=self.agent_name,
-                tool_batch_name=tool_batch_name,
-                tool_batch_args=tool_batch_args,
-                result=obs_text,
-                first_tool_call_id=tool_call_results[0].tool_call_id,
-            )
-            if event_router:
-                await event_router(session_id=session_id, event=event)
             if telemetry_recorder is not None:
                 await telemetry_recorder.emit_event(
                     "observation_pipeline_end",
@@ -251,8 +227,8 @@ class ToolBatchRunner:
                 session_state=session_state,
                 add_message_to_history=add_message_to_history,
                 session_id=session_id,
-                event_router=event_router,
                 tool_batch_name=tool_batch_name,
+                telemetry_recorder=telemetry_recorder,
             )
             return obs_text, tools_results
 
@@ -276,8 +252,8 @@ class ToolBatchRunner:
                 session_state=session_state,
                 add_message_to_history=add_message_to_history,
                 session_id=session_id,
-                event_router=event_router,
                 tool_batch_name=tool_batch_name,
+                telemetry_recorder=telemetry_recorder,
             )
             return obs_text, tools_results
 

@@ -15,10 +15,10 @@ def create_sessions_router() -> APIRouter:
 
     @router.get(
         "/events/{session_id}",
-        summary="Stream session events (SSE)",
-        description="Stream events for a specific session via SSE.",
+        summary="Stream telemetry events (SSE)",
+        description="Replay stored telemetry events for a session, then follow live telemetry events over SSE.",
     )
-    async def stream_events(request: Request, session_id: str):
+    async def stream_telemetry_events(request: Request, session_id: str):
         agent = get_agent(request)
         return StreamingResponse(
             stream_session_events(agent, session_id),
@@ -33,12 +33,14 @@ def create_sessions_router() -> APIRouter:
     @router.get(
         "/events/{session_id}/list",
         response_model=EventsResponse,
-        summary="Get session events",
-        description="Get all events for a specific session as JSON.",
+        summary="Get telemetry events",
+        description="Get stored telemetry events for a specific session as JSON.",
     )
-    async def get_events(request: Request, session_id: str) -> EventsResponse:
+    async def list_telemetry_events(request: Request, session_id: str) -> EventsResponse:
         agent = get_agent(request)
-        events = normalize_events(await agent.get_events(session_id))
+        events = normalize_events(
+            await agent.get_telemetry_events_after(cursor=None, session_id=session_id)
+        )
 
         return EventsResponse(
             session_id=session_id,
@@ -49,20 +51,26 @@ def create_sessions_router() -> APIRouter:
     @router.get(
         "/events/{session_id}/trace",
         response_model=TraceResponse,
-        summary="Get session event summary",
-        description="Build a compact summary from stored session events.",
+        summary="Get telemetry trace summary",
+        description="Build a compact summary from the latest stored telemetry trace for the session.",
     )
     async def get_trace(request: Request, session_id: str) -> TraceResponse:
         agent = get_agent(request)
-        if hasattr(agent, "get_event_trace"):
-            trace = await agent.get_event_trace(session_id)
-        else:
-            trace = await agent.get_trace(session_id=session_id)
+        traces = await agent.list_telemetry_traces(session_id=session_id)
+        trace = traces[-1] if traces else {}
+        events = trace.get("events", [])
+        spans = trace.get("spans", [])
 
         return TraceResponse(
             session_id=session_id,
-            summary=trace.get("summary", {}),
-            steps=trace.get("steps", []),
+            summary={
+                "trace_id": trace.get("trace_id"),
+                "run_id": trace.get("run_id"),
+                "status": trace.get("status"),
+                "event_count": len(events),
+                "span_count": len(spans),
+            },
+            steps=events,
         )
 
     @router.get(

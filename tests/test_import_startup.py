@@ -80,7 +80,6 @@ import json
 import sys
 
 from omnicoreagent import (
-    EventRouter,
     LLMConnection,
     MemoryRouter,
     OmniCoreAgent,
@@ -89,7 +88,6 @@ from omnicoreagent import (
 
 print(json.dumps({
     "exports": [
-        EventRouter.__name__,
         LLMConnection.__name__,
         MemoryRouter.__name__,
         OmniCoreAgent.__name__,
@@ -104,7 +102,6 @@ print(json.dumps({
 
     assert result == {
         "exports": [
-            "EventRouter",
             "LLMConnection",
             "MemoryRouter",
             "OmniCoreAgent",
@@ -129,7 +126,6 @@ runtime_modules = [
     "omnicoreagent.agent",
     "omnicoreagent.core.agents.base",
     "omnicoreagent.core.agents.react_agent",
-    "omnicoreagent.core.events.event_router",
     "omnicoreagent.core.guardrails",
     "omnicoreagent.core.llm",
     "omnicoreagent.core.memory_store.memory_router",
@@ -201,7 +197,6 @@ agent = OmniCoreAgent(
 watched_modules = [
     "omnicoreagent.core.agents.react_agent",
     "omnicoreagent.core.constants",
-    "omnicoreagent.core.events.event_router",
     "omnicoreagent.core.guardrails",
     "omnicoreagent.core.llm",
     "omnicoreagent.core.memory_store.memory_router",

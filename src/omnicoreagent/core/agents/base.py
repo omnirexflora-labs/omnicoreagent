@@ -24,7 +24,6 @@ from omnicoreagent.core.tools.tool_failure_handler import ToolFailureHandler
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.logging import logger
-from omnicoreagent.core.events.base import Event
 from omnicoreagent.core.context_manager import (
     AgentLoopContextManager,
     ContextManagementConfig,
@@ -37,7 +36,6 @@ from omnicoreagent.core.agents.initial_messages import AgentInitialMessagePrepar
 from omnicoreagent.core.agents.llm_step import AgentLlmStepRunner
 from omnicoreagent.core.agents.loop_step import AgentLoopStepHandler
 from omnicoreagent.core.agents.message_history import AgentMessageHistoryLoader
-from omnicoreagent.core.agents import events as agent_events
 from omnicoreagent.core.agents.run_outcome import AgentRunOutcomeHandler
 from omnicoreagent.core.agents.session_state import AgentSessionStateStore
 from omnicoreagent.core.agents.subagent_runner import SubAgentCallRunner
@@ -184,16 +182,9 @@ class BaseReactAgent:
         self,
         response: str,
         session_id: str,
-        event_router: Callable,
         debug: bool = False,
     ) -> ParsedResponse:
         """Parse LLM response to extract a final answer, tool call, or agent call using XML format only."""
-        await agent_events.emit_agent_thought_from_response(
-            event_router=event_router,
-            session_id=session_id,
-            agent_name=self.agent_name,
-            response=response,
-        )
         return parse_action_or_answer(response, debug=debug)
 
     async def resolve_tool_call_request(
@@ -223,7 +214,6 @@ class BaseReactAgent:
         mcp_tools: dict = None,
         local_tools: Any = None,
         session_id: str = None,
-        event_router: Callable[[str, Event], Any] = None,
         sub_agents: list = None,
     ):
         await self.tool_action_runner.run(
@@ -238,7 +228,6 @@ class BaseReactAgent:
             mcp_tools=mcp_tools,
             local_tools=local_tools,
             session_id=session_id,
-            event_router=event_router,
             sub_agents=sub_agents,
         )
 
@@ -288,7 +277,7 @@ class BaseReactAgent:
         session_state: Any,
         add_message_to_history: Callable[[str, str, dict | None], Any],
         run_usage: Usage,
-        event_router: Callable[[str, Event], Any] = None,
+        telemetry_recorder: Any = None,
         debug: bool = False,
     ):
         """
@@ -308,7 +297,7 @@ class BaseReactAgent:
             session_state=session_state,
             add_message_to_history=add_message_to_history,
             run_usage=run_usage,
-            event_router=event_router,
+            telemetry_recorder=telemetry_recorder,
             debug=debug,
         )
 
@@ -324,7 +313,6 @@ class BaseReactAgent:
         mcp_tools: dict = None,
         local_tools: Any = None,
         session_id: str = None,
-        event_router: Callable[[str, Event], Any] = None,
         telemetry_recorder: Any = None,
         sub_agents: list = None,
     ) -> Any:
@@ -336,13 +324,6 @@ class BaseReactAgent:
         )
         start_time = time.perf_counter()
         run_usage = Usage()
-
-        await agent_events.emit_user_message(
-            event_router=event_router,
-            session_id=session_id,
-            agent_name=self.agent_name,
-            message=query,
-        )
 
         runtime_local_tools = await self.tool_runtime_registry.prepare_tools(
             local_tools=local_tools
@@ -403,7 +384,6 @@ class BaseReactAgent:
                         llm_connection=llm_connection,
                         run_usage=run_usage,
                         session_id=session_id,
-                        event_router=event_router,
                         telemetry_recorder=telemetry_recorder,
                         debug=debug,
                     )
@@ -421,7 +401,6 @@ class BaseReactAgent:
                         response=response,
                         debug=debug,
                         session_id=session_id,
-                        event_router=event_router,
                     )
                     step_result = await self.loop_step_handler.handle(
                         parsed_response=parsed_response,
@@ -438,7 +417,6 @@ class BaseReactAgent:
                         sessions=sessions,
                         mcp_tools=mcp_tools,
                         local_tools=runtime_local_tools,
-                        event_router=event_router,
                         telemetry_recorder=telemetry_recorder,
                         sub_agents=sub_agents,
                     )

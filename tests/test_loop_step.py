@@ -152,7 +152,6 @@ async def test_loop_step_dispatches_tool_action():
         sessions={"server": "session"},
         mcp_tools={"server": [{"name": "search"}]},
         local_tools="registry",
-        event_router=SimpleNamespace(),
         sub_agents=["worker"],
     )
 

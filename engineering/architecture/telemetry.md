@@ -8,11 +8,9 @@ during agent execution in a form that can later support debugging,
 observability, regression analysis, and the future OmniCoreAgent Agentic
 Evaluation system.
 
-This document replaces the older event-only architecture model. Live streaming
-and replay remain required harness capabilities, but they should be served from
-telemetry rather than from a separate permanent `EventRouter` subsystem.
-`EventRouter` is a legacy implementation detail to remove during migration, not
-the long-term owner of execution evidence.
+Live streaming and replay are required harness capabilities. They are served
+from telemetry: `TelemetryRecorder` writes evidence, `TelemetryStore` holds the
+trace records, and `TelemetryStream` is the live/replay adapter over that store.
 
 ## Purpose
 
@@ -57,12 +55,12 @@ This architecture does not implement or design:
 Those systems will be designed separately. They must consume telemetry instead
 of bypassing it.
 
-## Current Limitation Being Replaced
+## Current Telemetry Ownership
 
-Current runtime events are session-scoped records:
+Runtime evidence is emitted as trace-scoped telemetry:
 
 ```text
-EventRouter -> EventStore -> Event -> compact event summary
+TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE
 ```
 
 They contain:
@@ -94,14 +92,14 @@ The current `/events/{session_id}/trace` endpoint is therefore a compact event
 summary, not a full trace. Future docs and code should avoid using it as the
 canonical trace model.
 
-The replacement is not "EventRouter plus telemetry." The replacement is
+The replacement is not "telemetry stream plus telemetry." The replacement is
 telemetry owning the full path:
 
 ```text
 TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE
 ```
 
-Anything still using `EventRouter` after telemetry lands is transitional code
+Anything still using telemetry stream after telemetry lands is transitional code
 and should have a removal plan.
 
 ## Core Concepts
@@ -147,8 +145,9 @@ Examples:
 - `background.run`
 - `serve.request`
 
-Spans form a parent/child tree. This hierarchy is the main difference between
-runtime events and real telemetry.
+Spans form a parent/child tree. This hierarchy lets OmniCoreAgent preserve both
+live progress updates and durable execution evidence without a separate event
+router.
 
 ### Telemetry Trace
 
@@ -200,7 +199,7 @@ The foundation phase provides:
 - JSONL telemetry storage
 - `TelemetryStream`
 - deterministic trace normalization
-- legacy event conversion helpers for migration
+- runtime evidence emission helpers
 
 The runtime facade wiring phase provides:
 
@@ -232,7 +231,7 @@ The runtime loop instrumentation phase provides:
 
 MCP-specific tool spans, memory operations, workspace operations, subagents,
 background runs, and OmniServe SSE are still migration work. They must emit
-telemetry directly instead of adding new `EventRouter` dependencies.
+telemetry directly instead of adding new telemetry stream dependencies.
 
 Runtime controls may also emit telemetry:
 
@@ -358,7 +357,7 @@ Telemetry events should cover these groups:
 - errors
 
 The event registry must stay explicit. Arbitrary string events can be accepted
-during migration, but stable telemetry requires documented event names.
+, but stable telemetry requires documented event names.
 
 ## Trace Recorder
 
@@ -400,7 +399,7 @@ Redis streams are not the canonical long-term trace store.
 
 The telemetry stream is the live/replay adapter over telemetry records.
 
-It replaces the long-term need for `EventRouter`.
+It replaces the long-term need for telemetry stream.
 
 Responsibilities:
 
@@ -422,7 +421,7 @@ The normalizer converts raw runtime telemetry into a stable schema for future
 evaluation.
 
 Evaluators must consume normalized traces only. They must not depend on
-runtime-specific payload shapes, internal class names, or legacy event types.
+runtime-specific payload shapes or internal class names.
 
 The normalizer should:
 
@@ -469,31 +468,19 @@ object storage by reference.
 
 Telemetry must never force secrets into traces.
 
-## Relationship to Legacy Runtime Events
+## Runtime Evidence Ownership
 
-Legacy runtime events are only a migration concern.
-
-Short-term:
-
-- current `Event` records can be adapted into telemetry events
-- `EventRouter` may remain temporarily while call sites are moved
-- `get_event_trace(session_id)` remains the explicit compact event summary
-  accessor until replaced
-- `get_trace(trace_id)` and positional `get_trace("trace_...")` return
-  canonical telemetry traces
-
-Target:
+Runtime evidence has one canonical path:
 
 - runtime emits through `TelemetryRecorder`
+- `TelemetryStore` owns durable trace/span/event records
 - `TelemetryStream` powers live/replay streaming
 - OmniServe SSE streams selected telemetry events
-- event summary becomes a derived view
+- compact event summaries are derived views
 - trace retrieval reads canonical telemetry traces
-- `EventRouter` and legacy event stores are removed once no call sites require
-  them
 
-The migration must avoid maintaining two unrelated truth sources. New runtime
-work should not add new dependencies on `EventRouter`.
+There is no separate runtime event layer or old event store. New runtime work
+must emit telemetry directly instead of adding a parallel visibility stack.
 
 ## Relationship to OmniServe
 
@@ -558,10 +545,9 @@ only ensure the evidence exists.
 ## Invariants
 
 - Telemetry is the source of execution evidence.
-- Legacy runtime events are not the full trace model.
 - Every trace has a `trace_id`.
 - Every span belongs to one trace.
-- Every event belongs to one trace or is explicitly marked legacy/unbound.
+- Every event belongs to one trace.
 - Spans preserve parent/child relationships.
 - Events preserve stable ids and sequence numbers.
 - Partial traces are valid traces.
@@ -583,5 +569,5 @@ Each implementation phase must include:
 - concurrent tool batch tests
 - redaction tests
 - partial trace tests
-- migration tests from legacy runtime events
+- telemetry stream tests from runtime telemetry events
 - documentation updates

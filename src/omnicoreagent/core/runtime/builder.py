@@ -24,7 +24,6 @@ def build_agent_runtime(
     local_tools: Any,
     agent_config: dict[str, Any],
     memory_router: Any,
-    event_router: Any,
     prompt_builder: Any,
     existing_subagent_factory: Any,
     guardrail: Any,
@@ -60,7 +59,6 @@ def build_agent_runtime(
         local_tools=local_tools,
         agent_config=agent_config,
         prompt_builder=prompt_builder,
-        event_router=event_router,
         memory_router=memory_router,
         debug=debug,
     )

@@ -9,7 +9,7 @@ import re
 class RouterAgent:
     """
     Routes a task to the most suitable sub-agent using XML-based LLM decisions.
-    - Accepts developer model_config, agent_config, memory_router, event_router.
+    - Accepts developer model_config, agent_config, and memory_router.
     - Builds an internal RouterAgent OmniCoreAgent with those configs.
     - Eagerly connects MCP servers at startup.
     - Routes user task and executes chosen agent.
@@ -23,7 +23,6 @@ class RouterAgent:
         model_config: dict,
         agent_config: dict,
         memory_router=None,
-        event_router=None,
         debug: bool = False,
         max_retries: int = 3,
     ):
@@ -38,7 +37,6 @@ class RouterAgent:
         self.model_config = model_config
         self.agent_config = agent_config
         self.memory_router = memory_router
-        self.event_router = event_router
         self.debug = debug
 
         self._initialized = False
@@ -67,7 +65,6 @@ class RouterAgent:
                 model_config=self.model_config,
                 agent_config=self.agent_config,
                 memory_router=self.memory_router,
-                event_router=self.event_router,
                 debug=self.debug,
             )
 

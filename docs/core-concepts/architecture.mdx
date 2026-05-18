@@ -42,7 +42,7 @@ graph TD
     Tools --> Retrieval["BM25 tool retrieval"]
 
     State --> Memory["Memory router"]
-    State --> Events["Event router"]
+    State --> Telemetry["Telemetry stream"]
     State --> Workspace["Workspace storage"]
 
     Harness --> Context["Context management"]
@@ -116,7 +116,7 @@ The runtime construction layer normalizes:
 - model configuration
 - MCP tool configuration
 - agent configuration
-- memory and event routers
+- memory routers and telemetry streams
 - workspace configuration
 - harness capability setup
 
@@ -192,7 +192,7 @@ State is split by responsibility:
 | Service | Responsibility |
 |---------|----------------|
 | Memory router | Conversation/session history. |
-| Event router | Runtime events for runs, tool calls, streaming, and service integrations. |
+| Telemetry stream | Typed run, tool, background, and service events for live streaming and replay. |
 | Workspace storage | Files used by agents, subagents, tools, artifacts, scratchpads, and offloaded payloads. |
 
 Workspace storage is separate from memory storage. Memory stores conversation

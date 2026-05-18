@@ -49,12 +49,8 @@ def make_runner(context_manager=None, *, limits_enabled=False, request_limit=0):
 
 
 @pytest.mark.asyncio
-async def test_llm_step_calls_model_emits_message_and_records_usage(monkeypatch):
+async def test_llm_step_calls_model_and_records_usage(monkeypatch):
     monkeypatch.setattr(llm_step, "usage", Usage())
-    emitted = []
-
-    async def event_router(session_id, event):
-        emitted.append({"session_id": session_id, "event": event})
 
     class LlmConnection:
         async def llm_call(self, messages):
@@ -75,15 +71,12 @@ async def test_llm_step_calls_model_emits_message_and_records_usage(monkeypatch)
         llm_connection=LlmConnection(),
         run_usage=run_usage,
         session_id="chat1",
-        event_router=event_router,
     )
 
     assert result.response == "<final_answer>done</final_answer>"
     assert result.error_result is None
     assert run_usage.requests == 1
     assert run_usage.total_tokens == 7
-    assert emitted[0]["session_id"] == "chat1"
-    assert emitted[0]["event"].payload.message == "<final_answer>done</final_answer>"
 
 
 @pytest.mark.asyncio

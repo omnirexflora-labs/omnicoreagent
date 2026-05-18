@@ -84,7 +84,7 @@ These invariants are mandatory.
 | `files/` is agent-managed state | The model can intentionally create, read, update, and organize these files |
 | `artifacts/` is runtime-managed output | Tool offloading writes here automatically; the model reads through artifact tools |
 | Workspace access tool outputs stay inline | Retrieval tools must not recursively offload their own retrieved content |
-| Workspace storage is selected with `workspace_backend` | The name must stay distinct from memory backends, event backends, and MCP transports |
+| Workspace storage is selected with `workspace_backend` | The name must stay distinct from memory backends, telemetry streams, and MCP transports |
 | Runtime tools register through the same tool registry path as local tools | The model must call workspace tools like any other local/internal tool |
 | New files under `src/omnicoreagent/core/workspace` must be tracked explicitly | `.gitignore` ignores directories named `workspace/`; missing files break CI |
 
@@ -171,7 +171,7 @@ Workspace must not own:
 - local tool definitions
 - tool registry mechanics
 - conversation memory stores such as Redis, Postgres, Mongo, or vector memory
-- event streams
+- telemetry streams
 - tracing, evaluation, or observability systems
 - prompt assembly itself
 
@@ -200,7 +200,7 @@ WorkspaceConfig(workspace_backend="r2")
 ```
 
 Do not shorten this to `backend`. OmniCoreAgent has several systems that can
-have their own backends or transports: memory stores, event streams, MCP
+have their own backends or transports: memory stores, telemetry streams, MCP
 transports, and workspace storage. The field name must say that it selects the
 workspace storage driver only.
 
@@ -543,7 +543,7 @@ harder to reason about.
 
 ### Why `workspace_backend`
 
-The codebase also has memory backends, event streams, and MCP transports. A
+The codebase also has memory backends, telemetry streams, and MCP transports. A
 generic field named `backend` is ambiguous. `workspace_backend` states that the
 selected driver is for workspace storage only.
 

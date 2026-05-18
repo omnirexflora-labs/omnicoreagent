@@ -33,7 +33,6 @@ class SubagentFactory:
         local_tools: Optional[ToolRegistry] = None,
         agent_config: Optional[Dict[str, Any]] = None,
         prompt_builder: Optional[Any] = None,
-        event_router: Optional[Any] = None,
         memory_router: Optional[Any] = None,
         debug: Optional[bool] = False,
     ):
@@ -46,14 +45,12 @@ class SubagentFactory:
             local_tools: Local tools subagents can use
             agent_config: Full agent config (context_management, tool_offload, etc.)
             prompt_builder: Optional prompt builder with build_subagent_prompt support
-            event_router: EventRouter instance
             memory_router: MemoryRouter instance
             debug: Debug mode
         """
         self.base_model_config = base_model_config
         self.mcp_tools = mcp_tools
         self.local_tools = local_tools
-        self.event_router = event_router
         self.memory_router = memory_router
         self.debug = debug
         self.agent_config = agent_config or {}
@@ -169,7 +166,6 @@ When you have completed the task:
             agent_config=subagent_config,
             mcp_tools=self.mcp_tools,
             local_tools=self._build_subagent_local_tools(),
-            event_router=self.event_router,
             memory_router=self.memory_router,
             debug=self.debug,
         )

@@ -1,7 +1,6 @@
 from omnicoreagent import (
     OmniCoreAgent,
     MemoryRouter,
-    EventRouter,
     ToolRegistry,
     RouterAgent,
 )
@@ -35,7 +34,6 @@ renewable_energy_agent = OmniCoreAgent(
     agent_config={"max_steps": 8, "tool_call_timeout": 30},
     local_tools=build_tool_registry_google_search(),
     memory_router=MemoryRouter("in_memory"),
-    event_router=EventRouter("in_memory"),
     debug=True,
 )
 
@@ -52,7 +50,6 @@ ev_agent = OmniCoreAgent(
     agent_config={"max_steps": 8, "tool_call_timeout": 30},
     local_tools=build_tool_registry_google_search(),
     memory_router=MemoryRouter("in_memory"),
-    event_router=EventRouter("in_memory"),
     debug=True,
 )
 
@@ -69,18 +66,16 @@ carbon_capture_agent = OmniCoreAgent(
     agent_config={"max_steps": 8, "tool_call_timeout": 30},
     local_tools=build_tool_registry_google_search(),
     memory_router=MemoryRouter("in_memory"),
-    event_router=EventRouter("in_memory"),
     debug=True,
 )
 
 
-# --- RouterAgent (correctly receives model_config, agent_config, memory_router, event_router) ---
+# --- RouterAgent (receives model_config, agent_config, and memory_router) ---
 router_agent = RouterAgent(
     sub_agents=[renewable_energy_agent, ev_agent, carbon_capture_agent],
     model_config=model_config(temperature=0.3, max_tokens=600),
     agent_config={"max_steps": 8, "tool_call_timeout": 30},
     memory_router=MemoryRouter("in_memory"),
-    event_router=EventRouter("in_memory"),
     debug=True,
 )
 

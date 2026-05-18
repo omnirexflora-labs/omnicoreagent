@@ -6,7 +6,7 @@ icon: 'chart-line'
 
 # Runtime Visibility & Metrics
 
-Monitor your agents with built-in metrics, event streams, and in-house trace summaries.
+Monitor your agents with built-in metrics, telemetry streams, and in-house trace summaries.
 
 ---
 
@@ -40,9 +40,9 @@ tracing service.
 
 ---
 
-## Runtime Events
+## Telemetry Events
 
-OmniCoreAgent emits typed runtime events for user messages, tool calls, tool
+OmniCoreAgent emits typed telemetry events for user messages, tool calls, tool
 results, final answers, subagent calls, and background task lifecycle changes.
 Use events when you need a live UI, session debugging, or a lightweight
 execution record.
@@ -50,14 +50,18 @@ execution record.
 ```python
 result = await agent.run("Research this topic", session_id="research_1")
 
-events = await agent.get_events("research_1")
+events = await agent.get_telemetry_events_after(
+    cursor=None,
+    session_id="research_1",
+    run_id=result["run_id"],
+)
 for event in events:
-    print(event.type, event.payload)
+    print(event.event_type, event.model_dump())
 ```
 
 When serving through OmniServe, `POST /run` streams the live run over SSE and
-`GET /events/{session_id}` replays stored events for that session before
-following new live events.
+`GET /events/{session_id}` replays stored telemetry events for that session
+before following new live telemetry events.
 
 ```bash
 curl -N -X POST http://localhost:8000/run \
@@ -71,23 +75,23 @@ curl -N http://localhost:8000/events/research_1
 
 ## Agent Trace
 
-Every run emits typed events. You can retrieve the full event history or ask
-OmniCoreAgent to build a compact trace summary from those events.
+Every run emits typed telemetry. Retrieve the trace by the `trace_id` returned
+from `agent.run(...)`.
 
 ```python
-trace = await agent.get_trace(session_id=result["session_id"])
+trace = await agent.get_trace(result["trace_id"])
 
-print(trace["summary"]["duration_ms"])
-print(trace["summary"]["tool_calls"])
-print(trace["summary"]["tool_errors"])
+print(trace["status"])
+print(len(trace["events"]))
+print(len(trace["spans"]))
 
-for step in trace["steps"]:
-    print(step["event_type"], step["elapsed_ms"], step["payload"])
+for event in trace["events"]:
+    print(event["event_type"], event.get("input"), event.get("output"))
 ```
 
 The trace is intentionally internal and dependency-free. It is a compact
-debugging view built from session events, not a full tracing or evaluation
-system.
+debugging view built from telemetry events and spans, not a full tracing or
+evaluation system.
 
 <Tip>
 Use metrics for cost and performance monitoring, events for live UI streaming,

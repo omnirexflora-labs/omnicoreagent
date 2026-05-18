@@ -129,7 +129,6 @@ def test_prepare_dynamic_subagents_skips_when_disabled():
         local_tools=local_tools,
         agent_config={},
         prompt_builder=None,
-        event_router=None,
         memory_router=None,
         debug=False,
     ) == (factory, local_tools)
@@ -194,7 +193,6 @@ def test_build_agent_runtime_wires_components(monkeypatch):
         local_tools="input-local-tools",
         agent_config={"enable_subagents": True},
         memory_router="memory-router",
-        event_router="event-router",
         prompt_builder="prompt-builder",
         existing_subagent_factory=None,
         guardrail="guardrail",
@@ -210,7 +208,6 @@ def test_build_agent_runtime_wires_components(monkeypatch):
         local_tools="local-tools",
         subagent_factory="subagent-factory",
     )
-    assert calls["subagents"]["event_router"] == "event-router"
     assert calls["subagents"]["memory_router"] == "memory-router"
     assert calls["memory"]["summarize_fn"] == "summarize"
     assert calls["react_agent"]["guardrail"] == "guardrail"
