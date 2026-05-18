@@ -82,7 +82,13 @@ def cli():
 @click.option(
     "--port", "-p", default=None, type=int, help="Port to bind to (default: 8000)"
 )
-@click.option("--workers", "-w", default=1, type=int, help="Number of workers")
+@click.option(
+    "--workers",
+    "-w",
+    default=1,
+    type=int,
+    help="Worker processes. Direct OmniServe requires 1.",
+)
 @click.option("--no-docs", is_flag=True, help="Disable Swagger UI")
 @click.option("--cors-origins", default="*", help="Comma-separated CORS origins")
 @click.option("--auth-token", default=None, help="Enable auth with this token")
@@ -111,24 +117,26 @@ def run(
             "Please specify an agent file with --agent or use 'omniserve quickstart'"
         )
 
-    # Load the agent
+    try:
+        config = OmniServeConfig(
+            host=host if host is not None else "0.0.0.0",
+            port=port if port is not None else 8000,
+            workers=workers,
+            enable_docs=not no_docs,
+            cors_origins=[o.strip() for o in cors_origins.split(",") if o.strip()],
+            auth_enabled=auth_token is not None,
+            auth_token=auth_token,
+            rate_limit_enabled=rate_limit is not None,
+            rate_limit_requests=rate_limit if rate_limit is not None else 100,
+            rate_limit_window=60,
+        )
+    except Exception as exc:
+        raise click.ClickException(f"Invalid OmniServe config: {exc}") from exc
+
+    # Load the agent after config validation so invalid serving config fails first.
     click.echo(f"📦 Loading agent from: {agent}")
     loaded_agent = _load_agent_from_file(agent)
     click.echo(f"✅ Loaded agent: {loaded_agent.name}")
-
-    # Build config
-    config = OmniServeConfig(
-        host=host or "0.0.0.0",
-        port=port or 8000,
-        workers=workers,
-        enable_docs=not no_docs,
-        cors_origins=[o.strip() for o in cors_origins.split(",")],
-        auth_enabled=auth_token is not None,
-        auth_token=auth_token,
-        rate_limit_enabled=rate_limit is not None,
-        rate_limit_requests=rate_limit or 100,
-        rate_limit_window=60,
-    )
 
     # Start server
     click.echo("")
@@ -198,9 +206,19 @@ def quickstart(
     """
     from omnicoreagent import OmniCoreAgent, OmniServe, OmniServeConfig
 
+    try:
+        config = OmniServeConfig(
+            host=host,
+            port=port,
+            enable_docs=True,
+            cors_origins=["*"],
+        )
+    except Exception as exc:
+        raise click.ClickException(f"Invalid OmniServe config: {exc}") from exc
+
     click.echo(f"🚀 Creating {provider}/{model} agent...")
 
-    # Create agent
+    # Create agent after config validation so invalid serving config fails first.
     agent = OmniCoreAgent(
         name=name,
         system_instruction=instruction,
@@ -211,13 +229,6 @@ def quickstart(
         debug=False,
     )
 
-    config = OmniServeConfig(
-        host=host,
-        port=port,
-        enable_docs=True,
-        cors_origins=["*"],
-    )
-
     click.echo("")
     click.echo("=" * 50)
     click.echo("OmniServe Quickstart")
@@ -225,9 +236,9 @@ def quickstart(
     click.echo("=" * 50)
     click.echo(f"Agent: {name}")
     click.echo(f"Model: {provider}/{model}")
-    click.echo(f"Server: http://{host}:{port}")
-    click.echo(f"Docs: http://{host}:{port}/docs")
-    click.echo(f"Metrics: http://{host}:{port}/prometheus")
+    click.echo(f"Server: http://{config.host}:{config.port}")
+    click.echo(f"Docs: http://{config.host}:{config.port}/docs")
+    click.echo(f"Metrics: http://{config.host}:{config.port}/prometheus")
     click.echo("")
     click.echo("Features (default):")
     click.echo("  • Auth: ✗ (use 'omniserve run' with --auth-token to enable)")
@@ -239,7 +250,7 @@ def quickstart(
     click.echo("=" * 50)
     click.echo("")
     click.echo("Test with:")
-    click.echo(f"  curl -X POST http://{host}:{port}/run/sync \\")
+    click.echo(f"  curl -X POST http://{config.host}:{config.port}/run/sync \\")
     click.echo('    -H "Content-Type: application/json" \\')
     click.echo('    -d \'{"query": "Hello!"}\'')
     click.echo("")

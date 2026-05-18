@@ -228,6 +228,9 @@ of the production agent harness.
   clients.
 - `omnicoreagent[serve]` owns FastAPI and Uvicorn dependencies.
 - Multiple `OmniServe` app instances must not share request metrics state.
+- Direct `OmniServe` serves an in-process agent object and therefore runs with
+  one Uvicorn worker. Horizontal scaling is done by running multiple OmniServe
+  processes behind a process manager or load balancer.
 - `api_prefix` must apply consistently to API routes.
 - Background routes must use the same `api_prefix`, auth, rate-limit, logging,
   and timeout middleware as other protected API routes.

@@ -337,10 +337,10 @@ authentication, rate limits, or background storage.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OMNICOREAGENT_SERVE_HOST` | `0.0.0.0` | Server host |
-| `OMNICOREAGENT_SERVE_PORT` | `8000` | Server port |
-| `OMNICOREAGENT_SERVE_WORKERS` | `1` | Worker processes |
-| `OMNICOREAGENT_SERVE_API_PREFIX` | `""` | API path prefix (e.g., `/api/v1`) |
+| `OMNICOREAGENT_SERVE_HOST` | `0.0.0.0` | Server host. Must not be empty |
+| `OMNICOREAGENT_SERVE_PORT` | `8000` | Server port. Must be `1`-`65535` |
+| `OMNICOREAGENT_SERVE_WORKERS` | `1` | Direct OmniServe worker count. Must be `1`; scale by running multiple processes |
+| `OMNICOREAGENT_SERVE_API_PREFIX` | `""` | API path prefix (e.g., `/api/v1`). Normalized to a leading slash with no trailing slash; whitespace is invalid |
 | `OMNICOREAGENT_SERVE_ENABLE_DOCS` | `true` | Swagger UI at `/docs` |
 | `OMNICOREAGENT_SERVE_ENABLE_REDOC` | `true` | ReDoc at `/redoc` |
 | `OMNICOREAGENT_SERVE_CORS_ENABLED` | `true` | Enable CORS |
@@ -351,10 +351,10 @@ authentication, rate limits, or background storage.
 | `OMNICOREAGENT_SERVE_AUTH_ENABLED` | `false` | Enable Bearer token auth. Requires a non-empty auth token |
 | `OMNICOREAGENT_SERVE_AUTH_TOKEN` | — | Bearer token value used when auth is enabled |
 | `OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED` | `false` | Enable rate limiting |
-| `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per window |
-| `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Window in seconds |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per window. Must be at least `1` when enabled |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Window in seconds. Must be at least `1` when enabled |
 | `OMNICOREAGENT_SERVE_REQUEST_LOGGING` | `true` | Log requests |
-| `OMNICOREAGENT_SERVE_LOG_LEVEL` | `INFO` | Log level (DEBUG/INFO/WARNING/ERROR) |
+| `OMNICOREAGENT_SERVE_LOG_LEVEL` | `INFO` | Log level: `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG`, or `TRACE` |
 | `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` | `300` | Request timeout in seconds |
 | `OMNICOREAGENT_BACKGROUND_ENABLED` | `true` | Expose background task endpoints |
 | `OMNICOREAGENT_BACKGROUND_AGENT_ID` | `default` | Agent id for the served agent in background tasks |

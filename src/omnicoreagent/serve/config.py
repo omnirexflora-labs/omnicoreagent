@@ -8,7 +8,7 @@ OMNICOREAGENT_BACKGROUND_* environment variables.
 Environment Variables (OVERRIDE code values):
     OMNICOREAGENT_SERVE_HOST: Host to bind to (default: 0.0.0.0)
     OMNICOREAGENT_SERVE_PORT: Port to bind to (default: 8000)
-    OMNICOREAGENT_SERVE_WORKERS: Number of worker processes (default: 1)
+    OMNICOREAGENT_SERVE_WORKERS: Worker processes. Direct OmniServe requires 1.
     OMNICOREAGENT_SERVE_API_PREFIX: API path prefix (default: "")
     OMNICOREAGENT_SERVE_ENABLE_DOCS: Enable Swagger UI (default: true)
     OMNICOREAGENT_SERVE_ENABLE_REDOC: Enable ReDoc UI (default: true)
@@ -42,6 +42,8 @@ Priority: Environment variables ALWAYS override code values.
 import os
 from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+_VALID_LOG_LEVELS = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "TRACE"}
 
 
 def _get_env(prefix: str, key: str) -> Optional[str]:
@@ -93,6 +95,32 @@ def _get_env_list(prefix: str, key: str) -> Optional[list[str]]:
     return [item.strip() for item in val.split(",") if item.strip()]
 
 
+def normalize_api_prefix(value: str | None) -> str:
+    """Normalize a FastAPI router prefix from code or environment."""
+    prefix = (value or "").strip()
+    if prefix in {"", "/"}:
+        return ""
+    if any(char.isspace() for char in prefix):
+        raise ValueError("OMNICOREAGENT_SERVE_API_PREFIX must not contain whitespace")
+    if not prefix.startswith("/"):
+        prefix = f"/{prefix}"
+    return prefix.rstrip("/")
+
+
+def validate_server_bind_config(*, host: str, port: int, workers: int) -> None:
+    """Validate server bind values used by config and runtime overrides."""
+    if not host or not host.strip():
+        raise ValueError("OMNICOREAGENT_SERVE_HOST must not be empty")
+    if port < 1 or port > 65535:
+        raise ValueError("OMNICOREAGENT_SERVE_PORT must be between 1 and 65535")
+    if workers != 1:
+        raise ValueError(
+            "OMNICOREAGENT_SERVE_WORKERS must be 1 for direct OmniServe. "
+            "Run multiple OmniServe processes behind a process manager for "
+            "horizontal scaling."
+        )
+
+
 class OmniServeConfig(BaseModel):
     """
     Configuration for OmniServe server.
@@ -105,7 +133,10 @@ class OmniServeConfig(BaseModel):
     # Server settings
     host: str = Field(default="0.0.0.0", description="Host to bind the server to")
     port: int = Field(default=8000, description="Port to bind the server to")
-    workers: int = Field(default=1, description="Number of worker processes")
+    workers: int = Field(
+        default=1,
+        description="Worker processes. Direct OmniServe requires one process.",
+    )
 
     # API settings
     api_prefix: str = Field(default="", description="API path prefix (e.g., '/api/v1')")
@@ -268,14 +299,47 @@ class OmniServeConfig(BaseModel):
         if (val := _get_env_bool(background_prefix, "START_WORKER")) is not None:
             self.background_start_worker = val
 
+        self.api_prefix = normalize_api_prefix(self.api_prefix)
+        self.log_level = self.log_level.upper()
+        self._validate_server_config()
+        self._validate_log_level()
         self._validate_auth_config()
+        self._validate_rate_limit_config()
         return self
+
+    def _validate_server_config(self) -> None:
+        validate_server_bind_config(
+            host=self.host,
+            port=self.port,
+            workers=self.workers,
+        )
+
+    def _validate_log_level(self) -> None:
+        if self.log_level not in _VALID_LOG_LEVELS:
+            allowed = ", ".join(sorted(_VALID_LOG_LEVELS))
+            raise ValueError(
+                f"OMNICOREAGENT_SERVE_LOG_LEVEL must be one of: {allowed}"
+            )
 
     def _validate_auth_config(self) -> None:
         if self.auth_enabled and not _has_value(self.auth_token):
             raise ValueError(
                 "OMNICOREAGENT_SERVE_AUTH_TOKEN is required when "
                 "OMNICOREAGENT_SERVE_AUTH_ENABLED=true"
+            )
+
+    def _validate_rate_limit_config(self) -> None:
+        if not self.rate_limit_enabled:
+            return
+        if self.rate_limit_requests < 1:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS must be at least 1 "
+                "when rate limiting is enabled"
+            )
+        if self.rate_limit_window < 1:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW must be at least 1 "
+                "when rate limiting is enabled"
             )
 
     @classmethod

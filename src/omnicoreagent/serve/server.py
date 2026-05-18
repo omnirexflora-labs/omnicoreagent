@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from omnicoreagent.core.logging import logger
 
 from .app_factory import create_omniserve_app
-from .config import OmniServeConfig
+from .config import OmniServeConfig, validate_server_bind_config
 from .state import get_agent_name
 
 if TYPE_CHECKING:
@@ -108,13 +108,19 @@ class OmniServe:
         Args:
             host: Host to bind to (overrides config)
             port: Port to bind to (overrides config)
-            workers: Number of worker processes (overrides config)
+            workers: Worker process count. Direct OmniServe requires 1 because
+                the served agent instance lives in the current process.
         """
         import uvicorn
 
-        final_host = host or self.config.host
-        final_port = port or self.config.port
-        final_workers = workers or self.config.workers
+        final_host = self.config.host if host is None else host
+        final_port = self.config.port if port is None else port
+        final_workers = self.config.workers if workers is None else workers
+        validate_server_bind_config(
+            host=final_host,
+            port=final_port,
+            workers=final_workers,
+        )
 
         logger.info(f"OmniServe: Starting server at http://{final_host}:{final_port}")
         logger.info(
@@ -145,8 +151,13 @@ class OmniServe:
         """
         import uvicorn
 
-        final_host = host or self.config.host
-        final_port = port or self.config.port
+        final_host = self.config.host if host is None else host
+        final_port = self.config.port if port is None else port
+        validate_server_bind_config(
+            host=final_host,
+            port=final_port,
+            workers=self.config.workers,
+        )
 
         logger.info(
             f"OmniServe: Starting async server at http://{final_host}:{final_port}"
