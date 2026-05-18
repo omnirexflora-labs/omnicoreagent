@@ -179,11 +179,15 @@ docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omnicoreagent-serve
 
 ### Cloud Deployment (Cloud Run, AWS Fargate, Railway)
 
-The generated Dockerfile sets:
+The generated Dockerfile is deterministic. It does not import or execute the
+agent file. It sets:
+
+- `AGENT_PATH` to the in-container agent path
 - `OMNICOREAGENT_WORKSPACE_BACKEND=local`
 - `OMNICOREAGENT_WORKSPACE_DIR=/tmp/workspace`
 
-For S3/R2 workspace persistence, pass backend and credentials at runtime:
+The agent file must be inside the current Docker build context. For S3/R2
+workspace persistence, pass backend and credentials at runtime:
 
 ```bash
 docker run -p 8000:8000 \

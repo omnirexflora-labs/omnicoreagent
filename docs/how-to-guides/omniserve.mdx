@@ -425,12 +425,18 @@ docker build -t omnicoreagent-serve .
 docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omnicoreagent-serve
 ```
 
-**Smart Configuration** — The generator inspects your agent and configures storage automatically:
+The generator creates a Dockerfile for the current project directory and stores
+only non-sensitive defaults in the image:
 
-| Your Agent Uses | Dockerfile Sets |
-|-----------------|-----------------|
-| Local workspace | `AGENT_PATH`, `OMNICOREAGENT_WORKSPACE_BACKEND=local`, `OMNICOREAGENT_WORKSPACE_DIR=/tmp/workspace` |
-| S3/R2 workspace | Pass workspace backend and credentials at runtime with `-e` |
+| Setting | Value |
+|---------|-------|
+| `AGENT_PATH` | In-container path to the selected agent file |
+| `OMNICOREAGENT_WORKSPACE_BACKEND` | `local` |
+| `OMNICOREAGENT_WORKSPACE_DIR` | `/tmp/workspace` |
+
+The agent file must be inside the current Docker build context. The generator
+does not import or execute the agent file. S3/R2 workspace credentials are
+passed at runtime with `-e`, never baked into the image.
 
 ### Cloud deployment examples
 

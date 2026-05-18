@@ -415,9 +415,15 @@ class TestConfiguration:
         assert result.exit_code == 0
         assert result.output.strip() == f"omniserve, version {version('omnicoreagent')}"
 
-    def test_generate_dockerfile_uses_current_image_name(self, tmp_path):
-        agent_file = tmp_path / "agent.py"
+    def test_generate_dockerfile_uses_current_image_name(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        agent_dir = tmp_path / "agents"
+        agent_dir.mkdir()
+        agent_file = agent_dir / "agent file.py"
+        marker_file = tmp_path / "loaded.txt"
         agent_file.write_text(
+            "from pathlib import Path\n"
+            f"Path({str(marker_file)!r}).write_text('loaded', encoding='utf-8')\n"
             "class Agent:\n"
             "    name = 'GeneratedAgent'\n"
             "    agent_config = {}\n\n"
@@ -440,7 +446,46 @@ class TestConfiguration:
         assert result.exit_code == 0
         assert "omnicoreagent-serve" in result.output
         assert "omniserver" not in result.output
+        assert "Agent path inside image: /app/agents/agent file.py" in result.output
+        assert "docker build -f docker/Dockerfile -t omnicoreagent-serve ." in result.output
         assert (output_dir / "Dockerfile").exists()
+        assert not marker_file.exists()
+
+        dockerfile = (output_dir / "Dockerfile").read_text(encoding="utf-8")
+        assert 'AGENT_PATH="/app/agents/agent file.py"' in dockerfile
+        assert 'omniserve run --agent \\"$AGENT_PATH\\"' in dockerfile
+        assert "HEALTHCHECK" in dockerfile
+        assert "OMNICOREAGENT_SERVE_PORT:-8000" in dockerfile
+        assert "OMNICOREAGENT_SERVE_API_PREFIX" in dockerfile
+        assert "${prefix}/health" in dockerfile
+        assert "USER appuser" in dockerfile
+        assert "OMNICOREAGENT_WORKSPACE_BACKEND=local" in dockerfile
+        assert "OMNICOREAGENT_WORKSPACE_DIR=/tmp/workspace" in dockerfile
+        assert "LLM_API_KEY" not in dockerfile
+
+    def test_generate_dockerfile_rejects_agent_outside_build_context(
+        self, tmp_path, monkeypatch
+    ):
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        external_agent = tmp_path / "agent.py"
+        external_agent.write_text("agent = object()\n", encoding="utf-8")
+        monkeypatch.chdir(project_root)
+
+        result = CliRunner().invoke(
+            cli,
+            [
+                "generate-dockerfile",
+                "--file",
+                str(external_agent),
+                "--output-dir",
+                str(project_root / "docker"),
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "Agent file must be inside the current Docker build context" in result.output
+        assert not (project_root / "docker" / "Dockerfile").exists()
 
 
 # =============================================================================
