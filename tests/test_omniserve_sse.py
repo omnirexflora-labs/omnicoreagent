@@ -10,6 +10,7 @@ from omnicoreagent.core.telemetry import (
     TelemetryConfig,
     TelemetryRecorder,
     TelemetryStream,
+    TraceStatus,
 )
 from omnicoreagent.serve.sse import run_agent_stream, stream_session_events
 
@@ -113,10 +114,11 @@ class _NoRunIdAgent:
 
 @pytest.mark.asyncio
 async def test_run_agent_stream_yields_telemetry_before_complete():
+    agent = _TelemetryAgent()
     chunks = [
         chunk
         async for chunk in run_agent_stream(
-            _TelemetryAgent(),
+            agent,
             "hello",
             "session-a",
             timeout_seconds=1,
@@ -135,6 +137,46 @@ async def test_run_agent_stream_yields_telemetry_before_complete():
     assert event_names.index("final_answer") < event_names.index("complete")
     assert _event_data(chunks[1])["session_id"] == "session-a"
     assert _event_data(chunks[3])["response"] == "done:hello"
+
+    traces = await agent.store.list_traces()
+    serve_trace = next(
+        trace for trace in traces if any(span.kind == "serve.request" for span in trace.spans)
+    )
+    assert serve_trace.run_id == _event_data(chunks[3])["run_id"]
+    assert [event.event_type for event in serve_trace.events] == [
+        "serve_request_start",
+        "serve_request_end",
+    ]
+    assert serve_trace.events[-1].output["agent_trace_id"] == _event_data(chunks[3])[
+        "trace_id"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_finishes_serve_trace_before_terminal_chunk_close():
+    agent = _TelemetryAgent()
+    stream = run_agent_stream(
+        agent,
+        "hello",
+        "session-close-after-complete",
+        timeout_seconds=1,
+    )
+    chunks = []
+    async for chunk in stream:
+        chunks.append(chunk)
+        if _event_name(chunk) == "complete":
+            break
+    await stream.aclose()
+
+    traces = await agent.store.list_traces()
+    serve_trace = next(
+        trace for trace in traces if any(span.kind == "serve.request" for span in trace.spans)
+    )
+    assert serve_trace.status == TraceStatus.COMPLETED
+    assert [event.event_type for event in serve_trace.events] == [
+        "serve_request_start",
+        "serve_request_end",
+    ]
 
 
 @pytest.mark.asyncio

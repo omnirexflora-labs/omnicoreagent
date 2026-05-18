@@ -8,7 +8,7 @@ import asyncio
 import contextlib
 import json
 from dataclasses import dataclass
-from inspect import Parameter, isawaitable, signature
+from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, AsyncGenerator
 from uuid import uuid4
 
@@ -16,6 +16,7 @@ from omnicoreagent.core.logging import logger
 
 from .serialization import normalize_event, normalize_run_result
 from .state import get_agent_name
+from .telemetry import build_run_kwargs, finish_serve_trace, start_serve_trace
 
 if TYPE_CHECKING:
     from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent as AgentType
@@ -169,24 +170,10 @@ async def _run_agent_with_timeout(
     timeout_seconds: int | None,
     run_id: str,
 ) -> Any:
-    kwargs: dict[str, Any] = {"session_id": session_id}
-    try:
-        run_signature = signature(agent.run)
-        if _accepts_keyword(run_signature, "run_id"):
-            kwargs["run_id"] = run_id
-    except (TypeError, ValueError):
-        kwargs["run_id"] = run_id
-    run_coro = agent.run(query, **kwargs)
+    run_coro = agent.run(query, **build_run_kwargs(agent, session_id=session_id, run_id=run_id))
     if timeout_seconds and timeout_seconds > 0:
         return await asyncio.wait_for(run_coro, timeout=timeout_seconds)
     return await run_coro
-
-
-def _accepts_keyword(run_signature, name: str) -> bool:
-    return name in run_signature.parameters or any(
-        parameter.kind == Parameter.VAR_KEYWORD
-        for parameter in run_signature.parameters.values()
-    )
 
 
 async def _drain_event_queue(
@@ -240,8 +227,18 @@ async def run_agent_stream(
     next_event_task: asyncio.Task[Any] | None = None
     seen_event_ids: set[str] = set()
     run_id = f"run_{uuid4().hex}"
+    serve_trace = None
 
     try:
+        serve_trace = await start_serve_trace(
+            agent,
+            method="POST",
+            path="/run",
+            session_id=session_id,
+            run_id=run_id,
+            query=query,
+            streaming=True,
+        )
         cursor = await _get_telemetry_stream_cursor(agent, session_id)
         pump_task = asyncio.create_task(
             _pump_session_events(agent, session_id, event_queue, cursor, run_id)
@@ -327,6 +324,14 @@ async def run_agent_stream(
                 }
                 complete_payload["run_id"] = normalized.get("run_id") or run_id
 
+                await finish_serve_trace(
+                    serve_trace,
+                    output={
+                        "status": "completed",
+                        "agent_trace_id": complete_payload.get("trace_id"),
+                    },
+                )
+                serve_trace = None
                 yield format_sse_event(
                     "complete",
                     complete_payload,
@@ -349,6 +354,12 @@ async def run_agent_stream(
 
     except asyncio.TimeoutError:
         logger.error(f"OmniServe SSE: Agent run timed out after {timeout_seconds}s")
+        await finish_serve_trace(
+            serve_trace,
+            status="timeout",
+            error={"type": "TimeoutError", "message": "Request timed out"},
+        )
+        serve_trace = None
         yield format_sse_event(
             "error",
             {
@@ -360,6 +371,12 @@ async def run_agent_stream(
 
     except Exception as e:
         logger.error(f"OmniServe SSE: Agent run error: {e}")
+        await finish_serve_trace(
+            serve_trace,
+            status="failed",
+            error={"type": e.__class__.__name__, "message": str(e)},
+        )
+        serve_trace = None
         yield format_sse_event(
             "error",
             {
@@ -369,6 +386,12 @@ async def run_agent_stream(
             },
         )
     finally:
+        if serve_trace is not None:
+            await finish_serve_trace(
+                serve_trace,
+                status="cancelled",
+                error={"type": "CancelledError", "message": "SSE stream closed"},
+            )
         await _cancel_task(next_event_task)
         await _cancel_task(run_task)
         await _cancel_task(pump_task)

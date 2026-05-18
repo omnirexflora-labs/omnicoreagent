@@ -32,7 +32,7 @@ This specification covers:
 - live/replay stream contract
 - normalization contract
 - redaction and payload policy
-- migration from runtime telemetry events and telemetry stream
+- removal of the old event-router path in favor of telemetry-owned streaming
 - required tests
 
 This specification does not cover:
@@ -268,6 +268,7 @@ memory.read
 memory.write
 workspace.read
 workspace.write
+workspace.delete
 tool.offload
 guardrail.check
 subagent.run
@@ -483,8 +484,8 @@ Rules:
 - stream cursors must support replay/follow behavior for SSE reconnect.
 - stream scopes must isolate sessions, runs, and traces.
 - `/run` SSE streams events for the trace/run it started.
-- `/events/{session_id}` can remain  but should become a
-  telemetry stream view.
+- `/events/{session_id}` remains as an HTTP route shape, but it must read from
+  telemetry records.
 - stream failures must not corrupt the stored trace.
 - Redis streams may be used as an implementation backend for live fanout, but
   Redis stream records are not a separate canonical evidence model.
@@ -620,20 +621,36 @@ Current runtime loop coverage:
 - parallel tool batches create one `tool.batch` span.
 - tool batches emit `tool_batch_start`, `tool_batch_end`, and
   `tool_batch_error` events.
-- each individual tool in a batch creates a `tool.call` span.
-- individual tool calls emit `tool_call`, `tool_result`, and `tool_error`
-  events.
-- parsed tool observations emit `observation_pipeline_end`.
+- local tools create `tool.call` spans and emit `tool_call`, `tool_result`, and
+  `tool_error` events.
+- MCP tools create `mcp.tool.call` spans and emit `mcp_tool_call`,
+  `mcp_tool_result`, and `mcp_tool_error` events.
+- workspace file tools create `workspace.read`, `workspace.write`, or
+  `workspace.delete` spans and emit matching workspace events.
+- memory history reads and writes create `memory.read` / `memory.write` spans
+  and emit `memory_read` / `memory_write` events.
+- context compression creates `context.compression` spans and emits
+  `context_compression`; compression failure emits `context_dropped`.
+- parsed tool observations emit `observation_pipeline_start`,
+  `observation_pipeline_end`, and `observation_pipeline_error` events.
+- workspace offloading emits `workspace_offload`.
+- dynamic subagent execution creates `subagent.run` spans and emits
+  `subagent_spawn`, `subagent_result`, and `subagent_error` events.
+- background task/run lifecycle emits background spans and events.
+- OmniServe synchronous and SSE run boundaries create `serve.request` traces and
+  emit `serve_request_start`, `serve_request_end`, and `serve_request_error`
+  events. Serve traces are correlated to agent traces by `session_id` and
+  `run_id`.
 
-Current uncovered runtime internals:
+Current remaining runtime internals:
 
-- MCP tool spans
-- memory read/write spans
-- workspace read/write/offload spans
-- full observation pipeline start/error spans
-- subagent spans
-- background run spans
-- OmniServe request spans and SSE streaming from `TelemetryStream`
+- direct workspace storage internals outside workspace file tools and offload
+- artifact-specific read/tail/search operations that still appear as generic
+  tools until artifact telemetry is specified
+- approval/resource guard telemetry paths that are reserved but not fully wired
+- cross-trace links between `serve.request`, background runs, subagents, and
+  agent traces
+- durable telemetry stores beyond in-memory and JSONL
 
 ---
 
@@ -648,7 +665,7 @@ TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE
 There must not be a parallel event stack:
 
 ```text
-telemetry stream -> EventStore
+EventRouter -> EventStore
 TelemetryRecorder -> TelemetryStore
 ```
 
@@ -664,8 +681,20 @@ Canonical event mapping:
 | individual tool starts | `tool_call` | `tool.call` |
 | individual tool succeeds | `tool_result` | `tool.call` |
 | individual tool fails | `tool_error` | `tool.call` |
+| MCP tool starts | `mcp_tool_call` | `mcp.tool.call` |
+| MCP tool succeeds | `mcp_tool_result` | `mcp.tool.call` |
+| MCP tool fails | `mcp_tool_error` | `mcp.tool.call` |
+| memory history read | `memory_read` | `memory.read` |
+| memory history write | `memory_write` | `memory.write` |
+| context compressed | `context_compression` | `context.compression` |
+| observation formatted | `observation_pipeline_end` | `tool.batch` |
+| workspace file read | `workspace_read` | `workspace.read` |
+| workspace file write | `workspace_write` | `workspace.write` |
+| workspace file delete | `workspace_delete` | `workspace.delete` |
 | subagent starts | `subagent_spawn` | `subagent.run` |
 | subagent completes | `subagent_result` | `subagent.run` |
+| serve request starts | `serve_request_start` | `serve.request` |
+| serve request completes | `serve_request_end` | `serve.request` |
 | background lifecycle changes | background lifecycle event | `background.run` |
 | final answer produced | `final_answer` | `agent.run` |
 
@@ -754,22 +783,20 @@ This design PR is acceptable when:
 - architecture and specification are accepted
 - telemetry owns the target streaming path:
   `TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE`
-- runtime telemetry events and telemetry stream are documented only as migration
-  concerns
+- old event-router concerns are removed from the target architecture
 - the spec defines the schema, recorder, store, stream, normalizer, redaction,
-  migration, and future evaluation evidence contracts
+  streaming, and future evaluation evidence contracts
 - docs clearly separate telemetry from observability and evaluation
 
-## Acceptance Criteria For Future Foundation Implementation
+## Acceptance Criteria For Foundation Implementation
 
-The future telemetry foundation implementation is acceptable when:
+The telemetry foundation implementation is acceptable when:
 
 - implementation has a canonical event/span/trace schema
 - recorder can capture agent/model/tool/final-answer basics
 - telemetry store can persist and retrieve traces locally
 - telemetry stream can replay/follow selected telemetry events
 - OmniServe SSE is backed by `TelemetryStream`
-- the implementation PR includes an explicit telemetry stream removal or migration
-  completion plan for remaining call sites
+- no code path writes to a separate EventRouter/EventStore
 - normalizer can produce deterministic normalized traces
 - future evaluation can reference `trace_id`, `span_id`, and `event_id`

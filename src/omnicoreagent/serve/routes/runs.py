@@ -1,16 +1,19 @@
 """Agent run routes for OmniServe."""
 
 import asyncio
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.telemetry import TraceStatus
 
 from ..models import ErrorResponse, RunRequest, RunResponse
 from ..serialization import normalize_run_result
 from ..sse import run_agent_stream
 from ..state import get_agent, get_agent_name, get_config, resolve_session_id
+from ..telemetry import build_run_kwargs, finish_serve_trace, start_serve_trace
 
 
 def create_runs_router() -> APIRouter:
@@ -68,8 +71,22 @@ def create_runs_router() -> APIRouter:
             f"query_length={len(body.query)}"
         )
 
+        serve_trace = None
         try:
-            run_coro = agent.run(body.query, session_id=session_id)
+            run_id = f"run_{uuid4().hex}"
+            serve_trace = await start_serve_trace(
+                agent,
+                method="POST",
+                path="/run/sync",
+                session_id=session_id,
+                run_id=run_id,
+                query=body.query,
+                streaming=False,
+            )
+            run_coro = agent.run(
+                body.query,
+                **build_run_kwargs(agent, session_id=session_id, run_id=run_id),
+            )
             if config.request_timeout > 0:
                 result = await asyncio.wait_for(
                     run_coro,
@@ -78,14 +95,32 @@ def create_runs_router() -> APIRouter:
             else:
                 result = await run_coro
             normalized = normalize_run_result(result, agent_name=get_agent_name(agent))
+            normalized["run_id"] = normalized.get("run_id") or run_id
+            await finish_serve_trace(
+                serve_trace,
+                output={
+                    "status": "completed",
+                    "agent_trace_id": normalized.get("trace_id"),
+                },
+            )
             return RunResponse(session_id=session_id, **normalized)
         except asyncio.TimeoutError:
+            await finish_serve_trace(
+                serve_trace,
+                status=TraceStatus.TIMEOUT,
+                error={"type": "TimeoutError", "message": "Request timed out"},
+            )
             raise HTTPException(
                 status_code=504,
                 detail=f"Request timed out after {config.request_timeout} seconds",
             )
         except Exception as exc:
             logger.error(f"OmniServe: Run error - {exc}")
+            await finish_serve_trace(
+                serve_trace,
+                status=TraceStatus.FAILED,
+                error={"type": exc.__class__.__name__, "message": str(exc)},
+            )
             raise HTTPException(status_code=500, detail=str(exc))
 
     return router

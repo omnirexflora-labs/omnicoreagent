@@ -132,6 +132,8 @@ class ToolCallResult(SerializableRecord):
     tool_name: str
     tool_args: dict
     tool_call_id: str | None = None
+    tool_provider: str = "local"
+    tool_server: str | None = None
 
 
 @dataclass

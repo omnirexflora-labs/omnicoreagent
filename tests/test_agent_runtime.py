@@ -10,6 +10,12 @@ from omnicoreagent.core.runtime.harness_tools import (
 )
 from omnicoreagent.core.runtime import builder, execution
 from omnicoreagent.core.runtime.normalization import normalize_local_tools
+from omnicoreagent.core.telemetry import (
+    ActorType,
+    InMemoryTelemetryStore,
+    TelemetryActor,
+    TelemetryRecorder,
+)
 from omnicoreagent.core.runtime.summaries import extract_summary_text, render_history
 from omnicoreagent.core.tools.local_tools_registry import Tool
 
@@ -217,35 +223,49 @@ def test_build_agent_runtime_wires_components(monkeypatch):
     }
 
 
-def test_blocked_guardrail_response_returns_none_without_guardrail():
-    assert (
-        execution.blocked_guardrail_response(
-            guardrail=None,
-            query="hello",
-            session_id="session",
-            agent_name="agent",
-        )
-        is None
+@pytest.mark.asyncio
+async def test_blocked_guardrail_response_returns_none_without_guardrail():
+    response = await execution.blocked_guardrail_response(
+        guardrail=None,
+        query="hello",
+        session_id="session",
+        agent_name="agent",
     )
 
+    assert response is None
 
-def test_blocked_guardrail_response_returns_none_for_safe_input():
+
+@pytest.mark.asyncio
+async def test_blocked_guardrail_response_returns_none_for_safe_input():
     guardrail = SimpleNamespace(
         check=lambda query: SimpleNamespace(is_safe=True, message="", to_dict=dict)
     )
-
-    assert (
-        execution.blocked_guardrail_response(
-            guardrail=guardrail,
-            query="hello",
-            session_id="session",
-            agent_name="agent",
-        )
-        is None
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    context = await recorder.start_trace(
+        trace_id="trace-guardrail-safe",
+        run_id="run-guardrail-safe",
+        session_id="session",
+        actor=TelemetryActor(type=ActorType.AGENT, name="agent"),
     )
 
+    response = await execution.blocked_guardrail_response(
+        guardrail=guardrail,
+        query="hello",
+        session_id="session",
+        agent_name="agent",
+        telemetry_recorder=recorder,
+    )
+    await recorder.end_trace()
 
-def test_blocked_guardrail_response_formats_unsafe_input():
+    trace = await store.get_trace(context.trace_id)
+    assert response is None
+    assert [event.event_type for event in trace.events] == ["guardrail_check"]
+    assert trace.events[0].actor.type == ActorType.GUARDRAIL
+
+
+@pytest.mark.asyncio
+async def test_blocked_guardrail_response_formats_unsafe_input():
     result = SimpleNamespace(
         is_safe=False,
         message="unsafe",
@@ -253,7 +273,7 @@ def test_blocked_guardrail_response_formats_unsafe_input():
     )
     guardrail = SimpleNamespace(check=lambda query: result)
 
-    response = execution.blocked_guardrail_response(
+    response = await execution.blocked_guardrail_response(
         guardrail=guardrail,
         query="bad",
         session_id="session",

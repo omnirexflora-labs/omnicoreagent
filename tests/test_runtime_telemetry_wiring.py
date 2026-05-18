@@ -148,10 +148,12 @@ async def test_run_records_guardrail_block_as_aborted_trace() -> None:
     assert trace.status == TraceStatus.ABORTED_SAFETY_GUARD
     assert [event.event_type for event in trace.events] == [
         "user_message",
+        "guardrail_check",
         "guardrail_violation",
         "final_answer",
     ]
     assert trace.events[1].output == {"is_safe": False, "message": "blocked"}
+    assert trace.events[2].output == {"is_safe": False, "message": "blocked"}
 
 
 @pytest.mark.asyncio

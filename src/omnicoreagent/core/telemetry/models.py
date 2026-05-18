@@ -65,6 +65,7 @@ FOUNDATION_SPAN_KINDS = frozenset(
         "memory.write",
         "workspace.read",
         "workspace.write",
+        "workspace.delete",
         "tool.offload",
         "guardrail.check",
         "subagent.run",

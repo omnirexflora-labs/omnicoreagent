@@ -60,10 +60,60 @@ class AgentLlmStepRunner:
                 self.usage_limits.check_before_request(usage=run_usage)
 
             if self.context_manager.should_trigger(session_state.messages):
-                session_state.messages = await self.context_manager.manage_context(
-                    messages=session_state.messages,
-                    summarize_fn=self._build_context_summarizer(llm_connection),
-                )
+                before_count = len(session_state.messages)
+                context_span = None
+                try:
+                    if telemetry_recorder is not None:
+                        context_span = await telemetry_recorder.start_span(
+                            name="context.compression",
+                            kind="context.compression",
+                            actor=TelemetryActor(type=ActorType.SYSTEM),
+                            input={"message_count": before_count},
+                        )
+                    session_state.messages = await self.context_manager.manage_context(
+                        messages=session_state.messages,
+                        summarize_fn=self._build_context_summarizer(llm_connection),
+                    )
+                    after_count = len(session_state.messages)
+                    if telemetry_recorder is not None:
+                        await telemetry_recorder.emit_event(
+                            "context_compression",
+                            actor=TelemetryActor(type=ActorType.SYSTEM),
+                            input={"message_count": before_count},
+                            output={
+                                "message_count": after_count,
+                                "stats": self.context_manager.get_stats(),
+                            },
+                        )
+                        if context_span is not None:
+                            await telemetry_recorder.end_span(
+                                context_span.span_id,
+                                status=SpanStatus.OK,
+                                output={
+                                    "message_count": after_count,
+                                    "stats": self.context_manager.get_stats(),
+                                },
+                            )
+                except Exception as exc:
+                    if telemetry_recorder is not None and context_span is not None:
+                        await telemetry_recorder.emit_event(
+                            "context_dropped",
+                            actor=TelemetryActor(type=ActorType.SYSTEM),
+                            input={"message_count": before_count},
+                            error={
+                                "type": exc.__class__.__name__,
+                                "message": str(exc),
+                            },
+                        )
+                        await telemetry_recorder.end_span(
+                            context_span.span_id,
+                            status=SpanStatus.ERROR,
+                            error={
+                                "type": exc.__class__.__name__,
+                                "message": str(exc),
+                            },
+                        )
+                    raise
                 if debug:
                     logger.info(
                         f"Context managed: now {len(session_state.messages)} messages"
