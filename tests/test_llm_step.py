@@ -6,6 +6,12 @@ import pytest
 
 from omnicoreagent.core.agents import llm_step
 from omnicoreagent.core.agents.llm_step import AgentLlmStepRunner
+from omnicoreagent.core.telemetry import (
+    ActorType,
+    InMemoryTelemetryStore,
+    TelemetryActor,
+    TelemetryRecorder,
+)
 from omnicoreagent.core.token_usage import Usage, UsageLimits
 from omnicoreagent.core.types import AgentState, Message, SessionState
 from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
@@ -33,6 +39,9 @@ class TriggeringContextManager:
     async def manage_context(self, *, messages, summarize_fn):
         summary = await summarize_fn(messages)
         return [Message(role="system", content=summary)]
+
+    def get_stats(self):
+        return {"compressions": 1}
 
 
 def make_runner(context_manager=None, *, limits_enabled=False, request_limit=0):
@@ -102,6 +111,49 @@ async def test_llm_step_manages_context_before_model_call(monkeypatch):
     assert result.response == "<final_answer>done</final_answer>"
     assert session_state.messages == [Message(role="system", content="summary")]
     assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_llm_step_records_context_compression_telemetry(monkeypatch):
+    monkeypatch.setattr(llm_step, "usage", Usage())
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    context = await recorder.start_trace(
+        trace_id="trace-context-compression",
+        run_id="run-context-compression",
+        session_id="chat-context",
+        actor=TelemetryActor(type=ActorType.AGENT, name="agent"),
+    )
+
+    class LlmConnection:
+        async def llm_call(self, messages):
+            if isinstance(messages[0], dict):
+                return "summary"
+            return "<final_answer>done</final_answer>"
+
+    session_state = make_session_state()
+    result = await make_runner(TriggeringContextManager()).run(
+        session_state=session_state,
+        llm_connection=LlmConnection(),
+        run_usage=Usage(),
+        session_id="chat-context",
+        telemetry_recorder=recorder,
+    )
+    await recorder.end_trace()
+
+    trace = await store.get_trace(context.trace_id)
+    assert result.response == "<final_answer>done</final_answer>"
+    assert session_state.messages == [Message(role="system", content="summary")]
+    assert {span.kind for span in trace.spans} >= {
+        "context.compression",
+        "model.call",
+    }
+    event = next(
+        event for event in trace.events if event.event_type == "context_compression"
+    )
+    assert event.input == {"message_count": 1}
+    assert event.output["message_count"] == 1
+    assert event.output["stats"] == {"compressions": 1}
 
 
 @pytest.mark.asyncio

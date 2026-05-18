@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -22,10 +23,18 @@ class FakeAgent:
 
     async def run(self, task=None, session_id=None):
         self.kwargs = {"task": task, "session_id": session_id}
+        if isinstance(self.result, Exception):
+            raise self.result
         return self.result
 
     async def cleanup_mcp_servers(self):
         self.cleaned = True
+
+
+class CancellingAgent(FakeAgent):
+    async def run(self, task=None, session_id=None):
+        self.kwargs = {"task": task, "session_id": session_id}
+        raise asyncio.CancelledError
 
 
 def _session_state():
@@ -78,6 +87,11 @@ async def test_subagent_runner_records_successful_outputs():
         "subagent_spawn",
         "subagent_result",
     ]
+    subagent_spans = [span for span in trace.spans if span.kind == "subagent.run"]
+    assert len(subagent_spans) == 1
+    assert subagent_spans[0].status == "ok"
+    assert trace.events[0].span_id == subagent_spans[0].span_id
+    assert trace.events[1].span_id == subagent_spans[0].span_id
     assert len(state.messages) == 2
 
 
@@ -111,11 +125,51 @@ async def test_subagent_runner_returns_error_observation_for_failed_agent():
     await recorder.end_trace()
 
     assert "boom" in history[-1]["content"]
+    assert failing_agent.cleaned is True
     trace = await store.get_trace(context.trace_id)
     assert [event.event_type for event in trace.events] == [
         "subagent_spawn",
         "subagent_error",
     ]
+    subagent_spans = [span for span in trace.spans if span.kind == "subagent.run"]
+    assert len(subagent_spans) == 1
+    assert subagent_spans[0].status == "error"
+    assert subagent_spans[0].error.message == "boom"
+    assert trace.events[0].span_id == subagent_spans[0].span_id
+    assert trace.events[1].span_id == subagent_spans[0].span_id
+
+
+@pytest.mark.asyncio
+async def test_subagent_runner_cleans_up_cancelled_agent():
+    runner = SubAgentCallRunner(agent_name="parent")
+    cancelling_agent = CancellingAgent("worker", None)
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    context = await recorder.start_trace(
+        trace_id="trace-subagent-cancelled",
+        run_id="run-subagent-cancelled",
+        session_id="s1",
+        actor=TelemetryActor(type="agent", name="parent"),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await runner._execute_single_agent(
+            {"agent": "worker", "parameters": {"task": "stop"}},
+            [cancelling_agent],
+            "s1",
+            telemetry_recorder=recorder,
+        )
+    await recorder.end_trace(status="cancelled")
+
+    trace = await store.get_trace(context.trace_id)
+    subagent_span = next(span for span in trace.spans if span.kind == "subagent.run")
+    assert cancelling_agent.cleaned is True
+    assert subagent_span.status == "cancelled"
+    assert [event.event_type for event in trace.events] == [
+        "subagent_spawn",
+        "subagent_error",
+    ]
+    assert all(event.span_id == subagent_span.span_id for event in trace.events)
 
 
 def test_subagent_runner_extracts_result_output():

@@ -295,11 +295,12 @@ class OmniCoreAgent:
             if not self._initialized:
                 await self.initialize()
 
-            blocked_response = execution.blocked_guardrail_response(
+            blocked_response = await execution.blocked_guardrail_response(
                 guardrail=self.guardrail,
                 query=query,
                 session_id=session_id,
                 agent_name=self.name,
+                telemetry_recorder=self.telemetry_recorder,
             )
             if blocked_response:
                 await self.telemetry_recorder.emit_event(
@@ -329,8 +330,8 @@ class OmniCoreAgent:
                 system_prompt=runtime_prompt,
                 query=query,
                 llm_connection=self.llm_connection,
-                add_message_to_history=self.memory_router.store_message,
-                message_history=self.memory_router.get_messages,
+                add_message_to_history=self._store_message_with_telemetry,
+                message_history=self._get_messages_with_telemetry,
                 debug=self.debug,
                 telemetry_recorder=self.telemetry_recorder,
                 **execution.build_agent_run_kwargs(
@@ -383,6 +384,94 @@ class OmniCoreAgent:
                     status=TraceStatus.FAILED,
                     error={"type": exc.__class__.__name__, "message": str(exc)},
                 )
+            raise
+
+    async def _store_message_with_telemetry(
+        self,
+        role: str,
+        content: str,
+        metadata: dict | None = None,
+        session_id: str | None = None,
+    ) -> None:
+        if self.telemetry_recorder is None:
+            await self.memory_router.store_message(role, content, metadata, session_id)
+            return
+        span = await self.telemetry_recorder.start_span(
+            name="memory.write",
+            kind="memory.write",
+            actor=TelemetryActor(type=ActorType.MEMORY),
+            input={
+                "role": role,
+                "session_id": session_id,
+                "metadata_keys": sorted((metadata or {}).keys()),
+            },
+        )
+        try:
+            await self.memory_router.store_message(role, content, metadata, session_id)
+            await self.telemetry_recorder.emit_event(
+                "memory_write",
+                actor=TelemetryActor(type=ActorType.MEMORY),
+                input={"role": role, "session_id": session_id},
+                output={"stored": True},
+            )
+            await self.telemetry_recorder.end_span(
+                span.span_id,
+                status="ok",
+                output={"stored": True},
+            )
+        except Exception as exc:
+            await self.telemetry_recorder.emit_event(
+                "memory_write",
+                actor=TelemetryActor(type=ActorType.MEMORY),
+                input={"role": role, "session_id": session_id},
+                error={"type": exc.__class__.__name__, "message": str(exc)},
+            )
+            await self.telemetry_recorder.end_span(
+                span.span_id,
+                status="error",
+                error={"type": exc.__class__.__name__, "message": str(exc)},
+            )
+            raise
+
+    async def _get_messages_with_telemetry(
+        self,
+        session_id: str,
+        agent_name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if self.telemetry_recorder is None:
+            return await self.memory_router.get_messages(session_id, agent_name)
+        span = await self.telemetry_recorder.start_span(
+            name="memory.read",
+            kind="memory.read",
+            actor=TelemetryActor(type=ActorType.MEMORY),
+            input={"session_id": session_id, "agent_name": agent_name},
+        )
+        try:
+            messages = await self.memory_router.get_messages(session_id, agent_name)
+            await self.telemetry_recorder.emit_event(
+                "memory_read",
+                actor=TelemetryActor(type=ActorType.MEMORY),
+                input={"session_id": session_id, "agent_name": agent_name},
+                output={"message_count": len(messages)},
+            )
+            await self.telemetry_recorder.end_span(
+                span.span_id,
+                status="ok",
+                output={"message_count": len(messages)},
+            )
+            return messages
+        except Exception as exc:
+            await self.telemetry_recorder.emit_event(
+                "memory_read",
+                actor=TelemetryActor(type=ActorType.MEMORY),
+                input={"session_id": session_id, "agent_name": agent_name},
+                error={"type": exc.__class__.__name__, "message": str(exc)},
+            )
+            await self.telemetry_recorder.end_span(
+                span.span_id,
+                status="error",
+                error={"type": exc.__class__.__name__, "message": str(exc)},
+            )
             raise
 
     async def get_metrics(self) -> Dict[str, Any]:

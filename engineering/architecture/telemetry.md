@@ -55,7 +55,7 @@ This architecture does not implement or design:
 Those systems will be designed separately. They must consume telemetry instead
 of bypassing it.
 
-## Current Telemetry Ownership
+## Telemetry Ownership
 
 Runtime evidence is emitted as trace-scoped telemetry:
 
@@ -63,44 +63,13 @@ Runtime evidence is emitted as trace-scoped telemetry:
 TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE
 ```
 
-They contain:
+`TelemetryRecorder` is the only runtime write path. `TelemetryStore` is the
+canonical evidence store. `TelemetryStream` is a live/replay adapter over that
+same store. It is not a second event system.
 
-- `type`
-- `payload`
-- `agent_name`
-- `timestamp`
-- `event_id`
-- `sequence`
-- `run_id`
-
-That model is useful, but incomplete. It does not provide:
-
-- `trace_id`
-- `span_id`
-- `parent_span_id`
-- `parent_event_id`
-- standard `input`, `output`, and `error` fields
-- duration for timed work
-- token usage and estimated cost
-- normalized actor identity
-- trace-level metadata
-- version metadata
-- first-class memory, context, workspace, guardrail, model, and MCP records
-- stable normalized evidence for future evaluators
-
-The current `/events/{session_id}/trace` endpoint is therefore a compact event
-summary, not a full trace. Future docs and code should avoid using it as the
-canonical trace model.
-
-The replacement is not "telemetry stream plus telemetry." The replacement is
-telemetry owning the full path:
-
-```text
-TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE
-```
-
-Anything still using telemetry stream after telemetry lands is transitional code
-and should have a removal plan.
+The old event-router idea is removed from the architecture. Routes such as
+`/events/{session_id}/trace` may keep their HTTP shape for developer ergonomics,
+but their data must be derived from telemetry traces and events.
 
 ## Core Concepts
 
@@ -154,7 +123,8 @@ router.
 A telemetry trace is one logical execution graph.
 
 For a normal interactive request, the trace usually starts at `agent.run`.
-For OmniServe, it may start at `serve.request` and contain `agent.run`.
+For OmniServe, the serving boundary starts a `serve.request` trace correlated
+to the agent trace through `session_id` and `run_id`.
 For a background task, it may start at `background.run` and contain `agent.run`.
 
 ### Telemetry Context
@@ -227,11 +197,27 @@ The runtime loop instrumentation phase provides:
   `tool_batch_error` events
 - child `tool.call` spans with `tool_call`, `tool_result`, and `tool_error`
   events for each tool in a parallel batch
-- `observation_pipeline_end` events after tool output parsing and formatting
+- child `mcp.tool.call` spans with `mcp_tool_call`, `mcp_tool_result`, and
+  `mcp_tool_error` events for MCP server tools
+- workspace file tool spans as `workspace.read`, `workspace.write`, or
+  `workspace.delete` with matching workspace events
+- memory read/write spans and `memory_read` / `memory_write` events around the
+  memory router
+- context compression spans with `context_compression` and `context_dropped`
+  events
+- observation pipeline start/end/error events after tool execution and before
+  the model sees formatted observations
+- workspace offload events when large tool results are replaced by workspace
+  references
+- subagent execution spans with `subagent_spawn`, `subagent_result`, and
+  `subagent_error` events
+- background task/run lifecycle spans and events
+- OmniServe `serve.request` traces/events for synchronous and SSE run
+  boundaries, correlated to the same `session_id` and `run_id` as the agent run
 
-MCP-specific tool spans, memory operations, workspace operations, subagents,
-background runs, and OmniServe SSE are still migration work. They must emit
-telemetry directly instead of adding new telemetry stream dependencies.
+Remaining runtime coverage should be added directly through telemetry. No new
+event router, side-channel stream, or feature-specific event store should be
+introduced.
 
 Runtime controls may also emit telemetry:
 
@@ -313,6 +299,7 @@ memory.read
 memory.write
 workspace.read
 workspace.write
+workspace.delete
 tool.offload
 guardrail.check
 subagent.run
@@ -357,7 +344,8 @@ Telemetry events should cover these groups:
 - errors
 
 The event registry must stay explicit. Arbitrary string events can be accepted
-, but stable telemetry requires documented event names.
+only when marked experimental, but stable telemetry requires documented event
+names.
 
 ## Trace Recorder
 
@@ -399,7 +387,8 @@ Redis streams are not the canonical long-term trace store.
 
 The telemetry stream is the live/replay adapter over telemetry records.
 
-It replaces the long-term need for telemetry stream.
+It replaces the old event-router responsibility without becoming another
+truth source.
 
 Responsibilities:
 
@@ -484,14 +473,14 @@ must emit telemetry directly instead of adding a parallel visibility stack.
 
 ## Relationship to OmniServe
 
-OmniServe should eventually create `serve.request` spans for:
+OmniServe creates `serve.request` traces for:
 
 - `/run`
 - `/run/sync`
-- background task API calls
 
-The served agent run should become a child of the serving span when the request
-starts the agent directly.
+The served agent run is correlated through `session_id` and `run_id`. Direct
+parent-child trace linking between `serve.request` and `agent.run` is a later
+trace-link feature, not required for the foundation telemetry phase.
 
 SSE streaming should not require the full observability stack. It should stream
 the subset of telemetry events needed by clients.
@@ -569,5 +558,5 @@ Each implementation phase must include:
 - concurrent tool batch tests
 - redaction tests
 - partial trace tests
-- telemetry stream tests from runtime telemetry events
+- telemetry stream replay/follow tests from stored telemetry events
 - documentation updates

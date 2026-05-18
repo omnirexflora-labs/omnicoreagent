@@ -801,6 +801,23 @@ class TestEndpoints:
         assert data["response"] == "Agent response"
         assert data["agent_name"] == "EndpointTestAgent"
 
+    def test_sync_run_records_serve_request_trace(self, server_client):
+        resp = server_client.post("/run/sync", json={"query": "Hello"})
+
+        assert resp.status_code == 200
+        traces = asyncio.run(server_client.app.state.agent.telemetry_store.list_traces())
+        serve_trace = next(
+            trace
+            for trace in traces
+            if any(span.kind == "serve.request" for span in trace.spans)
+        )
+        assert serve_trace.session_id == "test-endpoint-session"
+        assert serve_trace.run_id == resp.json()["run_id"]
+        assert [event.event_type for event in serve_trace.events] == [
+            "serve_request_start",
+            "serve_request_end",
+        ]
+
     def test_metrics_endpoint(self, server_client):
         resp = server_client.get("/metrics")
         assert resp.status_code == 200
@@ -852,14 +869,37 @@ class TestEndpoints:
         resp = client.post("/run/sync", json={"query": "Hello"})
 
         assert resp.status_code == 200
-        assert resp.json() == {
+        data = resp.json()
+        assert data["run_id"].startswith("run_")
+        assert data == {
             "response": "plain response",
             "session_id": "string-session",
             "agent_name": "StringAgent",
             "metric": None,
             "trace_id": None,
-            "run_id": None,
+            "run_id": data["run_id"],
         }
+
+    def test_sync_run_ignores_non_telemetry_business_store(self):
+        class LightweightAgent:
+            name = "BusinessStoreAgent"
+
+            def __init__(self):
+                self.store = {"business": "state"}
+
+            def generate_session_id(self):
+                return "business-store-session"
+
+            async def run(self, query, *, session_id):
+                return {"response": f"ok:{query}", "session_id": session_id}
+
+        server = OmniServe(agent=LightweightAgent(), config=OmniServeConfig())
+        client = TestClient(server.app)
+
+        resp = client.post("/run/sync", json={"query": "Hello"})
+
+        assert resp.status_code == 200
+        assert resp.json()["response"] == "ok:Hello"
 
     def test_request_timeout_is_enforced_for_sync_run(self):
         agent = MagicMock(spec=OmniCoreAgent)

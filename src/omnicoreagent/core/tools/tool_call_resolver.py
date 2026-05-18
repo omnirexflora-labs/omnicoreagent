@@ -59,6 +59,8 @@ class ToolCallResolver:
             tool_executor=ToolExecutor(tool_handler=mcp_tool_handler),
             tool_name=match.tool_name,
             tool_args=normalize_tool_args(action.parameters),
+            tool_provider="mcp",
+            tool_server=match.server_name,
         )
 
     def resolve_local_tool_action(
@@ -78,6 +80,7 @@ class ToolCallResolver:
             tool_executor=ToolExecutor(tool_handler=local_tool_handler),
             tool_name=local_tool_name,
             tool_args=normalize_tool_args(action.parameters),
+            tool_provider="local",
         )
 
     async def resolve_single_action(

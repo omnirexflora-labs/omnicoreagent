@@ -368,7 +368,19 @@ class TelemetryRecorder:
         ):
             return None
         if (
-            source in {"tool.call", "mcp.tool.call", "tool_result", "mcp_tool_result"}
+            source
+            in {
+                "tool.call",
+                "mcp.tool.call",
+                "workspace.read",
+                "workspace.write",
+                "workspace.delete",
+                "tool_result",
+                "mcp_tool_result",
+                "workspace_read",
+                "workspace_write",
+                "workspace_delete",
+            }
             and not self.config.record_tool_results
         ):
             return None

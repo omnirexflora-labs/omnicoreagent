@@ -1,6 +1,13 @@
 import pytest
 import asyncio
 
+from omnicoreagent.core.telemetry import (
+    ActorType,
+    InMemoryTelemetryStore,
+    TelemetryConfig,
+    TelemetryActor,
+    TelemetryRecorder,
+)
 from omnicoreagent.core.tools.tool_batch_runner import (
     TOOL_CALL_TIMEOUT_MESSAGE,
     ToolBatchRunner,
@@ -277,3 +284,203 @@ async def test_execute_timeout_records_error_for_each_tool(session_state):
     assert obs_text == TOOL_CALL_TIMEOUT_MESSAGE
     assert [result["status"] for result in tools_results] == ["error", "error"]
     assert [item["metadata"]["tool"] for item in history] == ["alpha", "beta"]
+
+
+@pytest.mark.asyncio
+async def test_execute_records_mcp_workspace_and_observation_telemetry(
+    runner, session_state
+):
+    history = []
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    context = await recorder.start_trace(
+        trace_id="trace-tool-batch-shapes",
+        run_id="run-tool-batch-shapes",
+        session_id="chat800",
+        actor=TelemetryActor(type=ActorType.AGENT, name="test_agent"),
+    )
+
+    class FakeExecutor:
+        async def execute(
+            self,
+            agent_name,
+            tool_args,
+            tool_name,
+            tool_call_id,
+            add_message_to_history,
+            session_id,
+        ):
+            await add_message_to_history(
+                role="tool",
+                content=f"{tool_name}:ok",
+                metadata={
+                    "tool_call_id": tool_call_id,
+                    "tool": tool_name,
+                    "args": tool_args,
+                    "agent_name": agent_name,
+                },
+                session_id=session_id,
+            )
+            return {
+                "tool_name": tool_name,
+                "args": tool_args,
+                "status": "success",
+                "data": f"{tool_name}:ok",
+                "message": None,
+            }
+
+    tool_calls = [
+        ToolCallResult(
+            tool_executor=FakeExecutor(),
+            tool_name="search_docs",
+            tool_args={"query": "telemetry"},
+            tool_call_id="tool-call-mcp",
+            tool_provider="mcp",
+            tool_server="docs-server",
+        ),
+        ToolCallResult(
+            tool_executor=FakeExecutor(),
+            tool_name="workspace_file_view",
+            tool_args={"path": "notes.md"},
+            tool_call_id="tool-call-workspace",
+        ),
+    ]
+
+    async def add_message_to_history(role, content, metadata=None, session_id=None):
+        history.append(
+            {
+                "role": role,
+                "content": content,
+                "metadata": metadata or {},
+                "session_id": session_id,
+            }
+        )
+
+    async def parse_tool_observation(raw_output):
+        return raw_output
+
+    def build_tool_results_observation(
+        tool_call_results, tools_results, session_state, session_id
+    ):
+        return "[TOOL RESPONSE OFFLOADED] workspace://tool-output"
+
+    obs_text, tools_results = await runner.execute(
+        tool_call_results=tool_calls,
+        session_state=session_state,
+        add_message_to_history=add_message_to_history,
+        session_id="chat800",
+        tool_batch_name="search_docs, workspace_file_view",
+        tool_batch_args=[{"query": "telemetry"}, {"path": "notes.md"}],
+        parse_tool_observation=parse_tool_observation,
+        build_tool_results_observation=build_tool_results_observation,
+        telemetry_recorder=recorder,
+    )
+    await recorder.end_trace()
+
+    trace = await store.get_trace(context.trace_id)
+    assert obs_text == "[TOOL RESPONSE OFFLOADED] workspace://tool-output"
+    assert [result["tool_name"] for result in tools_results] == [
+        "search_docs",
+        "workspace_file_view",
+    ]
+    assert {span.kind for span in trace.spans} >= {
+        "tool.batch",
+        "mcp.tool.call",
+        "workspace.read",
+    }
+    assert {event.event_type for event in trace.events} >= {
+        "tool_batch_start",
+        "mcp_tool_call",
+        "mcp_tool_result",
+        "workspace_read",
+        "observation_pipeline_start",
+        "observation_pipeline_end",
+        "workspace_offload",
+        "tool_batch_end",
+    }
+    assert [event.event_type for event in trace.events].count("workspace_read") == 1
+    mcp_call = next(event for event in trace.events if event.event_type == "mcp_tool_call")
+    assert mcp_call.actor.type == ActorType.MCP_SERVER
+    assert mcp_call.actor.name == "docs-server"
+
+
+@pytest.mark.asyncio
+async def test_workspace_tool_telemetry_respects_tool_result_suppression(
+    runner, session_state
+):
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store, TelemetryConfig(record_tool_results=False))
+    context = await recorder.start_trace(
+        trace_id="trace-workspace-redaction",
+        run_id="run-workspace-redaction",
+        session_id="chat801",
+        actor=TelemetryActor(type=ActorType.AGENT, name="test_agent"),
+    )
+
+    class FakeExecutor:
+        async def execute(
+            self,
+            agent_name,
+            tool_args,
+            tool_name,
+            tool_call_id,
+            add_message_to_history,
+            session_id,
+        ):
+            await add_message_to_history(
+                role="tool",
+                content="secret file contents",
+                metadata={
+                    "tool_call_id": tool_call_id,
+                    "tool": tool_name,
+                    "args": tool_args,
+                    "agent_name": agent_name,
+                },
+                session_id=session_id,
+            )
+            return {
+                "tool_name": tool_name,
+                "args": tool_args,
+                "status": "success",
+                "data": "secret file contents",
+                "message": None,
+            }
+
+    async def add_message_to_history(role, content, metadata=None, session_id=None):
+        return None
+
+    async def parse_tool_observation(raw_output):
+        return raw_output
+
+    def build_tool_results_observation(
+        tool_call_results, tools_results, session_state, session_id
+    ):
+        return "workspace observation"
+
+    await runner.execute(
+        tool_call_results=[
+            ToolCallResult(
+                tool_executor=FakeExecutor(),
+                tool_name="workspace_file_view",
+                tool_args={"path": "notes.md"},
+                tool_call_id="tool-call-workspace-redacted",
+            )
+        ],
+        session_state=session_state,
+        add_message_to_history=add_message_to_history,
+        session_id="chat801",
+        tool_batch_name="workspace_file_view",
+        tool_batch_args=[{"path": "notes.md"}],
+        parse_tool_observation=parse_tool_observation,
+        build_tool_results_observation=build_tool_results_observation,
+        telemetry_recorder=recorder,
+    )
+    await recorder.end_trace()
+
+    trace = await store.get_trace(context.trace_id)
+    workspace_span = next(span for span in trace.spans if span.kind == "workspace.read")
+    workspace_event = next(
+        event for event in trace.events if event.event_type == "workspace_read"
+    )
+    assert workspace_span.output is None
+    assert workspace_event.output is None

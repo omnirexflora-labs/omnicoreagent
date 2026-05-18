@@ -3,21 +3,30 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from omnicoreagent.core.telemetry import ActorType, TelemetryActor
 from omnicoreagent.core.runtime.imports import runtime_logger
 
 
-def blocked_guardrail_response(
+async def blocked_guardrail_response(
     *,
     guardrail: Any,
     query: str,
     session_id: str | None,
     agent_name: str,
+    telemetry_recorder: Any = None,
 ) -> dict[str, Any] | None:
     """Return a blocked response when input guardrails reject the query."""
     if not guardrail:
         return None
 
     result = guardrail.check(query)
+    if telemetry_recorder is not None:
+        await telemetry_recorder.emit_event(
+            "guardrail_check",
+            actor=TelemetryActor(type=ActorType.GUARDRAIL),
+            input={"target": "user_input", "agent_name": agent_name},
+            output=result.to_dict() if hasattr(result, "to_dict") else {"safe": result.is_safe},
+        )
     if result.is_safe:
         return None
 
