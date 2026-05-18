@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from omnicoreagent import OmniCoreAgent, MemoryRouter, EventRouter, ToolRegistry, logger
+from omnicoreagent import OmniCoreAgent, MemoryRouter, ToolRegistry, logger
 
 from _bootstrap import model_config, require_llm_api_key, response_text
 
@@ -239,7 +239,6 @@ class AirlineAgentCLI:
     def __init__(self):
         self.agent: Optional[OmniCoreAgent] = None
         self.memory_router: Optional[MemoryRouter] = None
-        self.event_router: Optional[EventRouter] = None
 
     async def initialize(self):
         """Initialize the airline agent (instantiate routers and the OmniCoreAgent)."""
@@ -248,7 +247,6 @@ class AirlineAgentCLI:
         print("🚀 Initializing Flight Booking Agent...")
 
         self.memory_router = MemoryRouter("in_memory")
-        self.event_router = EventRouter("in_memory")
 
         self.agent = OmniCoreAgent(
             name="flight_booking_agent",
@@ -295,7 +293,6 @@ class AirlineAgentCLI:
                 "memory_config": {"mode": "token_budget", "value": 8000},
             },
             memory_router=self.memory_router,
-            event_router=self.event_router,
             debug=False,
         )
 

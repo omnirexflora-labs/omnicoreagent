@@ -1,12 +1,8 @@
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from omnicoreagent.core.events.base import (
-    Event,
-    EventType,
-    ToolCallErrorPayload,
-)
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.telemetry import ActorType, TelemetryActor
 from omnicoreagent.core.types import AgentState, Message, SessionState, ToolError
 
 
@@ -80,7 +76,7 @@ class ToolFailureHandler:
         tool_error: ToolError,
         session_state: SessionState,
         session_id: str | None,
-        event_router: Callable[[str | None, Event], Awaitable[Any]] | None,
+        telemetry_recorder: Any = None,
     ) -> tuple[str, list[dict[str, Any]], str, list[dict[str, Any]]]:
         obs_text = tool_error.observation
         tool_errors = [tool_error]
@@ -90,17 +86,13 @@ class ToolFailureHandler:
             tool_args = getattr(single_tool, "tool_args", {})
             error_message = getattr(single_tool, "observation", obs_text)
 
-            event = Event(
-                type=EventType.TOOL_CALL_ERROR,
-                payload=ToolCallErrorPayload(
-                    tool_name=tool_name,
-                    error_message=error_message,
-                ),
-                agent_name=self.agent_name,
-            )
-
-            if event_router:
-                await event_router(session_id=session_id, event=event)
+            if telemetry_recorder is not None:
+                await telemetry_recorder.emit_event(
+                    "tool_error",
+                    actor=TelemetryActor(type=ActorType.TOOL, name=str(tool_name)),
+                    input={"tool_name": tool_name, "tool_args": tool_args},
+                    error={"type": "ToolValidationError", "message": error_message},
+                )
             session_state.loop_detector.record_tool_call(
                 str(tool_name),
                 str(tool_args),
@@ -133,9 +125,9 @@ class ToolFailureHandler:
         session_state: SessionState,
         system_prompt: str,
         session_id: str | None,
-        event_router: Callable[[str | None, Event], Awaitable[Any]] | None,
         debug: bool,
         reset_system_prompt: Callable[..., Awaitable[list[Message]]],
+        telemetry_recorder: Any = None,
     ) -> None:
         for single_tool in tool_call_results:
             tool_name = getattr(single_tool, "tool_name", None)
@@ -173,16 +165,13 @@ class ToolFailureHandler:
                 "\nYou MUST respond with <final_answer> tags now.\n"
             )
 
-            event = Event(
-                type=EventType.TOOL_CALL_ERROR,
-                payload=ToolCallErrorPayload(
-                    tool_name=tool_name,
-                    error_message=loop_message,
-                ),
-                agent_name=self.agent_name,
-            )
-            if event_router:
-                await event_router(session_id=session_id, event=event)
+            if telemetry_recorder is not None:
+                await telemetry_recorder.emit_event(
+                    "tool_error",
+                    actor=TelemetryActor(type=ActorType.TOOL, name=str(tool_name)),
+                    input={"tool_name": tool_name},
+                    error={"type": "ToolLoopDetected", "message": loop_message},
+                )
 
             session_state.messages.append(Message(role="user", content=loop_message))
 

@@ -22,7 +22,6 @@ from omnicoreagent import (
     SequentialAgent,
     ToolRegistry,
     MemoryRouter,
-    EventRouter,
 )
 
 from _bootstrap import model_config as cookbook_model_config
@@ -97,7 +96,7 @@ def create_research_tools() -> ToolRegistry:
         return (
             f"Research notes for {topic}:\n"
             "- AI coding agents combine model reasoning, tool execution, memory, and workspace files.\n"
-            "- Production agent systems need guardrails, loop detection, event streams, and metrics.\n"
+            "- Production agent systems need guardrails, loop detection, telemetry events, and metrics.\n"
             "- Teams adopt agents faster when examples show concrete tool use and operational boundaries.\n"
             "- Strong agent harnesses keep tool output structured so the model receives clean signal."
         )
@@ -192,7 +191,6 @@ async def create_pipeline() -> SequentialAgent:
         agent_config=internal_agent_config,
         local_tools=create_research_tools(),
         memory_router=MemoryRouter("in_memory"),
-        event_router=EventRouter("in_memory"),
         debug=False,
     )
 
@@ -211,7 +209,6 @@ async def create_pipeline() -> SequentialAgent:
         agent_config=internal_agent_config,
         local_tools=create_writer_tools(),
         memory_router=MemoryRouter("in_memory"),
-        event_router=EventRouter("in_memory"),
         debug=False,
     )
 
@@ -230,7 +227,6 @@ async def create_pipeline() -> SequentialAgent:
         agent_config=internal_agent_config,
         local_tools=create_editor_tools(),
         memory_router=MemoryRouter("in_memory"),
-        event_router=EventRouter("in_memory"),
         debug=False,
     )
 

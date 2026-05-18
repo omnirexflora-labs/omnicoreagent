@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import os
-import threading
 
 from fastapi.testclient import TestClient
 import pytest
 
 from omnicoreagent import OmniServe, OmniServeConfig
 from omnicoreagent.background import BackgroundAgentManager
-from omnicoreagent.core.events.event_router import EventRouter
 from omnicoreagent.core.workspace.manager import Workspace
 
 
@@ -33,8 +31,6 @@ class ServedAgent:
         self.cleaned = False
         self.delay_seconds = 0.0
         self.fail_times = 0
-        self.wait_until: threading.Event | None = None
-        self.wait_timeout_seconds = 2.0
 
     async def connect_mcp_servers(self) -> None:
         self.connected = True
@@ -45,30 +41,16 @@ class ServedAgent:
     def generate_session_id(self) -> str:
         return "serve-background-session"
 
-    async def run(self, query: str, session_id: str | None = None) -> dict:
-        self.calls.append({"query": query, "session_id": session_id})
-        if self.wait_until is not None:
-            loop = asyncio.get_running_loop()
-            deadline = loop.time() + self.wait_timeout_seconds
-            while not self.wait_until.is_set() and loop.time() < deadline:
-                await asyncio.sleep(0.01)
+    async def run(
+        self, query: str, session_id: str | None = None, run_id: str | None = None
+    ) -> dict:
+        self.calls.append({"query": query, "session_id": session_id, "run_id": run_id})
         if self.delay_seconds:
             await asyncio.sleep(self.delay_seconds)
         if self.fail_times:
             self.fail_times -= 1
             raise RuntimeError("planned failure")
         return {"response": f"completed:{session_id}:{query[-16:]}"}
-
-
-class HeartbeatEventRouter(EventRouter):
-    def __init__(self):
-        super().__init__()
-        self.heartbeat_seen = threading.Event()
-
-    async def append(self, session_id, event):
-        await super().append(session_id=session_id, event=event)
-        if getattr(event.payload, "status", None) == "background_run_heartbeat":
-            self.heartbeat_seen.set()
 
 
 class SpyBackgroundAgentManager(BackgroundAgentManager):
@@ -106,7 +88,7 @@ class SpyBackgroundAgentManager(BackgroundAgentManager):
         )
 
 
-def make_background_manager(tmp_path, *, lease_seconds=30, event_router=None):
+def make_background_manager(tmp_path, *, lease_seconds=30):
     workspace = Workspace.from_config(
         {
             "workspace_backend": "local",
@@ -115,7 +97,6 @@ def make_background_manager(tmp_path, *, lease_seconds=30, event_router=None):
     ).ensure()
     return BackgroundAgentManager(
         task_store="in_memory",
-        event_router=event_router,
         workspace=workspace,
         lease_seconds=lease_seconds,
     )
@@ -123,12 +104,10 @@ def make_background_manager(tmp_path, *, lease_seconds=30, event_router=None):
 
 def test_background_api_runs_task_and_exposes_events_and_workspace(tmp_path):
     agent = ServedAgent()
-    event_router = HeartbeatEventRouter()
-    agent.wait_until = event_router.heartbeat_seen
+    agent.delay_seconds = 0.35
     manager = make_background_manager(
         tmp_path,
         lease_seconds=1,
-        event_router=event_router,
     )
     server = OmniServe(
         agent,

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from omnicoreagent.core.agents import events as agent_events
 from omnicoreagent.core.agents.llm_response import (
     extract_response_content,
     extract_response_usage,
@@ -50,7 +49,6 @@ class AgentLlmStepRunner:
         llm_connection: Any,
         run_usage: Usage,
         session_id: str,
-        event_router: Any = None,
         telemetry_recorder: Any = None,
         debug: bool = False,
     ) -> AgentLlmStepResult:
@@ -81,7 +79,6 @@ class AgentLlmStepRunner:
                     response=response,
                     run_usage=run_usage,
                     session_id=session_id,
-                    event_router=event_router,
                     telemetry_recorder=telemetry_recorder,
                     debug=debug,
                 )
@@ -182,18 +179,9 @@ class AgentLlmStepRunner:
         response: Any,
         run_usage: Usage,
         session_id: str,
-        event_router: Any,
         telemetry_recorder: Any = None,
         debug: bool,
     ):
-        message_content = extract_response_content(response, strip=False)
-        await agent_events.emit_agent_message(
-            event_router=event_router,
-            session_id=session_id,
-            agent_name=self.agent_name,
-            message=message_content,
-        )
-
         request_usage = extract_response_usage(response)
         if not request_usage:
             return

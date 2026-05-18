@@ -3,16 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
-from datetime import datetime
 from typing import Any
 
-from omnicoreagent.core.events.base import (
-    Event,
-    EventType,
-    SubAgentCallErrorPayload,
-    SubAgentCallResultPayload,
-    SubAgentCallStartedPayload,
-)
+from omnicoreagent.core.telemetry import ActorType, TelemetryActor
 from omnicoreagent.core.token_usage import Usage, usage
 from omnicoreagent.core.types import Message
 from omnicoreagent.core.agents.display import show_sub_agent_call_result
@@ -39,14 +32,14 @@ class SubAgentCallRunner:
         session_state: Any,
         add_message_to_history: Callable[..., Any],
         run_usage: Usage,
-        event_router: Callable[..., Any] | None = None,
+        telemetry_recorder: Any = None,
         debug: bool = False,
     ):
         agent_calls = self._normalize_agent_calls(agent_calls)
         await self._emit_started(
             agent_calls=agent_calls,
             session_id=session_id,
-            event_router=event_router,
+            telemetry_recorder=telemetry_recorder,
         )
         await self._record_assistant_call(
             response=response,
@@ -71,7 +64,7 @@ class SubAgentCallRunner:
             results=results,
             run_usage=run_usage,
             session_id=session_id,
-            event_router=event_router,
+            telemetry_recorder=telemetry_recorder,
         )
 
         await self._append_observation_block(
@@ -92,22 +85,15 @@ class SubAgentCallRunner:
         self,
         agent_calls: list[dict[str, Any]],
         session_id: str,
-        event_router: Callable[..., Any] | None,
+        telemetry_recorder: Any = None,
     ):
-        if not event_router:
+        if telemetry_recorder is None:
             return
-        event = Event(
-            type=EventType.SUB_AGENT_CALL_STARTED,
-            payload=SubAgentCallStartedPayload(
-                agent_name=self.agent_name,
-                session_id=session_id,
-                timestamp=str(datetime.now()),
-                run_count=0,
-                kwargs={"agent_calls": agent_calls},
-            ),
-            agent_name=self.agent_name,
+        await telemetry_recorder.emit_event(
+            "subagent_spawn",
+            actor=TelemetryActor(type=ActorType.AGENT, name=self.agent_name),
+            input={"agent_calls": agent_calls, "session_id": session_id},
         )
-        await event_router(session_id=session_id, event=event)
 
     async def _record_assistant_call(
         self,
@@ -159,7 +145,7 @@ class SubAgentCallRunner:
         results: list[Any],
         run_usage: Usage,
         session_id: str,
-        event_router: Callable[..., Any] | None,
+        telemetry_recorder: Any = None,
     ) -> list[dict[str, Any]]:
         observations = []
         for result in results:
@@ -181,7 +167,7 @@ class SubAgentCallRunner:
                         agent_name=agent_name,
                         error=obs_data,
                         session_id=session_id,
-                        event_router=event_router,
+                        telemetry_recorder=telemetry_recorder,
                     )
                 )
                 continue
@@ -192,7 +178,7 @@ class SubAgentCallRunner:
                     result=obs_data,
                     session_id=session_id,
                     run_usage=run_usage,
-                    event_router=event_router,
+                    telemetry_recorder=telemetry_recorder,
                 )
             )
         return observations
@@ -202,22 +188,16 @@ class SubAgentCallRunner:
         agent_name: str,
         error: Exception,
         session_id: str,
-        event_router: Callable[..., Any] | None,
+        telemetry_recorder: Any = None,
     ) -> dict[str, Any]:
         logger.error(f"Agent {agent_name} execution failed: {error}")
-        if event_router:
-            event = Event(
-                type=EventType.SUB_AGENT_CALL_ERROR,
-                payload=SubAgentCallErrorPayload(
-                    agent_name=agent_name,
-                    session_id=session_id,
-                    timestamp=str(datetime.now()),
-                    error=str(error),
-                    error_count=0,
-                ),
-                agent_name=self.agent_name,
+        if telemetry_recorder is not None:
+            await telemetry_recorder.emit_event(
+                "subagent_error",
+                actor=TelemetryActor(type=ActorType.AGENT, name=agent_name),
+                input={"session_id": session_id, "agent_name": agent_name},
+                error={"type": error.__class__.__name__, "message": str(error)},
             )
-            await event_router(session_id=session_id, event=event)
         return {
             "agent_name": agent_name,
             "status": "error",
@@ -230,7 +210,7 @@ class SubAgentCallRunner:
         result: Any,
         session_id: str,
         run_usage: Usage,
-        event_router: Callable[..., Any] | None,
+        telemetry_recorder: Any = None,
     ) -> dict[str, Any]:
         output = self._extract_agent_output(result)
         logger.info(f"Agent {agent_name} completed successfully")
@@ -240,19 +220,13 @@ class SubAgentCallRunner:
                 run_usage.incr(sub_usage)
                 usage.incr(sub_usage)
 
-        if event_router:
-            event = Event(
-                type=EventType.SUB_AGENT_CALL_RESULT,
-                payload=SubAgentCallResultPayload(
-                    agent_name=agent_name,
-                    session_id=session_id,
-                    timestamp=str(datetime.now()),
-                    run_count=0,
-                    result=result,
-                ),
-                agent_name=self.agent_name,
+        if telemetry_recorder is not None:
+            await telemetry_recorder.emit_event(
+                "subagent_result",
+                actor=TelemetryActor(type=ActorType.AGENT, name=agent_name),
+                input={"session_id": session_id, "agent_name": agent_name},
+                output={"result": result},
             )
-            await event_router(session_id=session_id, event=event)
 
         return {
             "agent_name": agent_name,

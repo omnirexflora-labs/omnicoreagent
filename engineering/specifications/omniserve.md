@@ -9,7 +9,7 @@ OmniServe turns one existing `OmniCoreAgent` instance into a REST/SSE API.
 
 Telemetry migration note: current SSE/runtime-event behavior is documented for
 the shipped serving layer. Target streaming and replay must be backed by
-`TelemetryStream`, with `EventRouter` limited to migration adapters until it is
+`TelemetryStream`, with telemetry stream limited to telemetry adapters until it is
 removed.
 
 It owns the HTTP serving contract:
@@ -169,9 +169,9 @@ The agent router exposes:
 | `GET` | `/ready` | Readiness |
 | `POST` | `/run` | Agent run with SSE stream |
 | `POST` | `/run/sync` | Agent run with JSON response |
-| `GET` | `/events/{session_id}` | Replay/follow session events over SSE |
-| `GET` | `/events/{session_id}/list` | List stored session events |
-| `GET` | `/events/{session_id}/trace` | Agent-provided compact event summary |
+| `GET` | `/events/{session_id}` | Replay/follow telemetry events over SSE |
+| `GET` | `/events/{session_id}/list` | List stored telemetry events |
+| `GET` | `/events/{session_id}/trace` | Agent-provided compact telemetry trace summary |
 | `GET` | `/sessions/{session_id}/history` | Session messages |
 | `DELETE` | `/sessions/{session_id}` | Clear session messages |
 | `GET` | `/tools` | List available tools |
@@ -282,7 +282,7 @@ Background `wait=true`:
 `/run` SSE sequence:
 
 1. session-started event.
-2. zero or more runtime events for the current `run_id`.
+2. zero or more telemetry events for the current `run_id`.
 3. `complete` event with normalized run result and same `run_id`.
 4. session-ended event.
 
@@ -292,20 +292,20 @@ On handled timeout/error:
 2. `error` event with `session_id` and `run_id`.
 3. session-ended event.
 
-Every runtime event emitted through `/run` includes:
+Every telemetry event emitted through `/run` includes:
 
 - `session_id`
 - the request `run_id`
-- normalized event fields from the runtime event object
+- normalized event fields from the telemetry event object
 
 Concurrent `/run` streams using the same `session_id` must not stream each
-other's runtime events.
+other's telemetry events.
 
 `/events/{session_id}`:
 
 - starts with a session-streaming event.
-- replays stored events for that session.
-- follows live events for that session.
+- replays stored telemetry events for that session.
+- follows live telemetry events for that session.
 - deduplicates by `event_id` when available.
 - ends with a session-ended event when the client disconnects or the generator
   closes.

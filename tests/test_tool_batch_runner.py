@@ -1,7 +1,6 @@
 import pytest
 import asyncio
 
-from omnicoreagent.core.events.base import EventType
 from omnicoreagent.core.tools.tool_batch_runner import (
     TOOL_CALL_TIMEOUT_MESSAGE,
     ToolBatchRunner,
@@ -27,9 +26,8 @@ def session_state():
 
 
 @pytest.mark.asyncio
-async def test_handle_execution_error_records_history_and_event(runner, session_state):
+async def test_handle_execution_error_records_history(runner, session_state):
     history = []
-    events = []
     tool_calls = [
         ToolCallResult(
             tool_executor=None,
@@ -55,16 +53,12 @@ async def test_handle_execution_error_records_history_and_event(runner, session_
             }
         )
 
-    async def event_router(session_id, event):
-        events.append({"session_id": session_id, "event": event})
-
     results = await runner.handle_execution_error(
         tool_call_results=tool_calls,
         error_message=TOOL_CALL_TIMEOUT_MESSAGE,
         session_state=session_state,
         add_message_to_history=add_message_to_history,
         session_id="chat795",
-        event_router=event_router,
         tool_batch_name="alpha, beta",
     )
 
@@ -90,16 +84,11 @@ async def test_handle_execution_error_records_history_and_event(runner, session_
             "message": TOOL_CALL_TIMEOUT_MESSAGE,
         },
     ]
-    assert len(events) == 1
-    assert events[0]["session_id"] == "chat795"
-    assert events[0]["event"].type == EventType.TOOL_CALL_ERROR
-    assert events[0]["event"].payload.tool_name == "alpha, beta"
 
 
 @pytest.mark.asyncio
-async def test_start_records_assistant_and_started_event(runner, session_state):
+async def test_start_records_assistant_tool_call_metadata(runner, session_state):
     history = []
-    events = []
     tool_calls = [
         ToolCallResult(tool_executor=None, tool_name="alpha", tool_args={"value": "1"}),
         ToolCallResult(tool_executor=None, tool_name="beta", tool_args={"value": "2"}),
@@ -115,16 +104,12 @@ async def test_start_records_assistant_and_started_event(runner, session_state):
             }
         )
 
-    async def event_router(session_id, event):
-        events.append({"session_id": session_id, "event": event})
-
     tool_batch_name, tool_batch_args = await runner.start(
         tool_call_results=tool_calls,
         response="<tool_calls>...</tool_calls>",
         session_state=session_state,
         add_message_to_history=add_message_to_history,
         session_id="chat797",
-        event_router=event_router,
     )
 
     assert tool_batch_name == "alpha, beta"
@@ -139,15 +124,11 @@ async def test_start_records_assistant_and_started_event(runner, session_state):
         "beta",
     ]
     assert session_state.messages[-1].role == "assistant"
-    assert len(events) == 1
-    assert events[0]["event"].type == EventType.TOOL_CALL_STARTED
-    assert events[0]["event"].payload.tool_name == "alpha, beta"
 
 
 @pytest.mark.asyncio
-async def test_execute_returns_observation_and_result_event(runner, session_state):
+async def test_execute_returns_observation_and_results(runner, session_state):
     history = []
-    events = []
 
     class FakeExecutor:
         async def execute(
@@ -203,9 +184,6 @@ async def test_execute_returns_observation_and_result_event(runner, session_stat
             }
         )
 
-    async def event_router(session_id, event):
-        events.append({"session_id": session_id, "event": event})
-
     async def parse_tool_observation(raw_output):
         return raw_output
 
@@ -221,7 +199,6 @@ async def test_execute_returns_observation_and_result_event(runner, session_stat
         session_state=session_state,
         add_message_to_history=add_message_to_history,
         session_id="chat798",
-        event_router=event_router,
         tool_batch_name="alpha, beta",
         tool_batch_args=[{"value": "one"}, {"value": "two"}],
         parse_tool_observation=parse_tool_observation,
@@ -234,16 +211,12 @@ async def test_execute_returns_observation_and_result_event(runner, session_stat
         "tool-call-alpha",
         "tool-call-beta",
     ]
-    assert len(events) == 1
-    assert events[0]["event"].type == EventType.TOOL_CALL_RESULT
-    assert events[0]["event"].payload.tool_name == "alpha, beta"
 
 
 @pytest.mark.asyncio
 async def test_execute_timeout_records_error_for_each_tool(session_state):
     runner = ToolBatchRunner(agent_name="test_agent", tool_call_timeout=0.01)
     history = []
-    events = []
 
     class SlowExecutor:
         async def execute(
@@ -282,9 +255,6 @@ async def test_execute_timeout_records_error_for_each_tool(session_state):
             }
         )
 
-    async def event_router(session_id, event):
-        events.append({"session_id": session_id, "event": event})
-
     async def parse_tool_observation(raw_output):
         raise AssertionError("Timed out tools should not be parsed")
 
@@ -298,7 +268,6 @@ async def test_execute_timeout_records_error_for_each_tool(session_state):
         session_state=session_state,
         add_message_to_history=add_message_to_history,
         session_id="chat799",
-        event_router=event_router,
         tool_batch_name="alpha, beta",
         tool_batch_args=[{"value": "one"}, {"value": "two"}],
         parse_tool_observation=parse_tool_observation,
@@ -308,5 +277,3 @@ async def test_execute_timeout_records_error_for_each_tool(session_state):
     assert obs_text == TOOL_CALL_TIMEOUT_MESSAGE
     assert [result["status"] for result in tools_results] == ["error", "error"]
     assert [item["metadata"]["tool"] for item in history] == ["alpha", "beta"]
-    assert len(events) == 1
-    assert events[0]["event"].type == EventType.TOOL_CALL_ERROR

@@ -130,12 +130,17 @@ FOUNDATION_EVENT_TYPES = frozenset(
         "workflow_handoff",
         "workflow_join",
         "background_run_queued",
+        "background_run_claimed",
         "background_run_started",
         "background_run_heartbeat",
+        "background_run_retrying",
         "background_run_completed",
         "background_run_failed",
         "background_run_cancelled",
         "background_run_timeout",
+        "background_run_skipped",
+        "background_run_recovered",
+        "background_task_scheduled",
         "serve_request_start",
         "serve_request_end",
         "serve_request_error",
@@ -274,7 +279,6 @@ class TelemetryEvent(SerializableTelemetryRecord):
         if (
             self.event_type not in FOUNDATION_EVENT_TYPES
             and not self.metadata.get("experimental")
-            and not self.metadata.get("legacy_unbound")
         ):
             raise ValueError(f"Unknown telemetry event type: {self.event_type}")
 

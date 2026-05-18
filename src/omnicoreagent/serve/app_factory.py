@@ -44,6 +44,7 @@ def create_omniserve_app(
     app.state.start_time = time.time()
     app.state.omniserve_startup_complete = False
     app.state.background_manager = _build_background_manager(
+        agent=agent,
         config=config,
         background_manager=background_manager,
     )
@@ -66,6 +67,7 @@ def _package_version() -> str:
 
 def _build_background_manager(
     *,
+    agent: AgentType,
     config: OmniServeConfig,
     background_manager: Any | None,
 ) -> Any | None:
@@ -76,4 +78,14 @@ def _build_background_manager(
 
     from omnicoreagent.background import BackgroundAgentManager
 
-    return BackgroundAgentManager(task_store=config.background_task_store_config())
+    _ensure_agent_telemetry(agent)
+    return BackgroundAgentManager(
+        task_store=config.background_task_store_config(),
+        telemetry_store=getattr(agent, "telemetry_store", None),
+    )
+
+
+def _ensure_agent_telemetry(agent: AgentType) -> None:
+    ensure_telemetry = getattr(agent, "_ensure_telemetry", None)
+    if callable(ensure_telemetry):
+        ensure_telemetry()

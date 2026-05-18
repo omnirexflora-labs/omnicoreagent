@@ -7,8 +7,6 @@ import time
 import pytest
 
 from omnicoreagent.core.workspace.manager import Workspace
-from omnicoreagent.core.events.base import current_event_run_id
-from omnicoreagent.core.events.event_router import EventRouter
 from omnicoreagent.background import (
     BackgroundAgentManager,
     BackgroundAgentSpec,
@@ -46,6 +44,7 @@ from omnicoreagent.background.models import (
 )
 from omnicoreagent.background.recovery import BackgroundRunRecovery
 from omnicoreagent.background.transitions import BackgroundRunTransitions
+from omnicoreagent.core.telemetry import TelemetryStreamScope
 
 
 class FakeAgent:
@@ -60,8 +59,8 @@ class FakeAgent:
         self.delay = delay
         self.calls = []
 
-    async def run(self, query: str, session_id: str):
-        self.calls.append({"query": query, "session_id": session_id})
+    async def run(self, query: str, session_id: str, run_id: str | None = None):
+        self.calls.append({"query": query, "session_id": session_id, "run_id": run_id})
         if self.delay:
             await asyncio.sleep(self.delay)
         if self.fail_times:
@@ -70,23 +69,25 @@ class FakeAgent:
         return {"response": self.response, "session_id": session_id}
 
 
-class RunIdRecordingAgent(FakeAgent):
-    async def run(self, query: str, session_id: str):
+class BlockingAgent(FakeAgent):
+    async def run(self, query: str, session_id: str, run_id: str | None = None):
+        self.calls.append({"query": query, "session_id": session_id, "run_id": run_id})
+        if self.delay:
+            time.sleep(self.delay)
+        return {"response": self.response, "session_id": session_id}
+
+
+class KwargsAgent(FakeAgent):
+    async def run(self, query: str, session_id: str, **kwargs):
         self.calls.append(
-            {
-                "query": query,
-                "session_id": session_id,
-                "event_run_id": current_event_run_id(),
-            }
+            {"query": query, "session_id": session_id, "run_id": kwargs.get("run_id")}
         )
         return {"response": self.response, "session_id": session_id}
 
 
-class BlockingAgent(FakeAgent):
+class NoRunIdAgent(FakeAgent):
     async def run(self, query: str, session_id: str):
         self.calls.append({"query": query, "session_id": session_id})
-        if self.delay:
-            time.sleep(self.delay)
         return {"response": self.response, "session_id": session_id}
 
 
@@ -324,89 +325,6 @@ class FakeMongoTaskStore(MongoDbTaskStore):
     async def close(self):
         self.close_count += 1
         self._db = None
-
-
-class BrokenEventRouter:
-    async def append(self, session_id, event):
-        raise RuntimeError("event backend down")
-
-    async def get_events(self, session_id):
-        raise RuntimeError("event backend down")
-
-
-class DroppingEventRouter(EventRouter):
-    async def append(self, session_id, event):
-        if getattr(event.payload, "status", None) == "background_run_completed":
-            return
-        await super().append(session_id, event)
-
-
-class DuplicatingEventRouter(EventRouter):
-    async def get_events(self, session_id):
-        events = await super().get_events(session_id)
-        for index, event in enumerate(events):
-            if getattr(event.payload, "status", None) == "background_run_started":
-                return [*events[: index + 1], event, *events[index + 1 :]]
-        return events
-
-
-class MalformedSequenceEventRouter(EventRouter):
-    async def get_events(self, session_id):
-        events = await super().get_events(session_id)
-        if len(events) >= 3:
-            events[1].payload.sequence = 1.5
-            events[1].payload.run_count = 1.5
-        return events
-
-
-class GappedSequenceEventRouter(EventRouter):
-    async def get_events(self, session_id):
-        events = await super().get_events(session_id)
-        if len(events) >= 3:
-            events[1].payload.sequence = 3
-            events[1].payload.run_count = 3
-            events[2].payload.sequence = 4
-            events[2].payload.run_count = 4
-        return events
-
-
-class HangingEventRouter:
-    async def append(self, session_id, event):
-        return None
-
-    async def get_events(self, session_id):
-        await asyncio.sleep(60)
-        return []
-
-
-class HangingAppendEventRouter:
-    async def append(self, session_id, event):
-        await asyncio.sleep(60)
-
-    async def get_events(self, session_id):
-        return []
-
-
-class HangingClaimAppendEventRouter:
-    async def append(self, session_id, event):
-        if getattr(event.payload, "status", None) in {
-            "background_run_claimed",
-            "background_run_heartbeat",
-        }:
-            await asyncio.sleep(60)
-
-    async def get_events(self, session_id):
-        return []
-
-
-class CountingEventRouter(EventRouter):
-    def __init__(self):
-        super().__init__()
-        self.get_events_count = 0
-
-    async def get_events(self, session_id):
-        self.get_events_count += 1
-        return await super().get_events(session_id)
 
 
 class CancellingAttemptStore(InMemoryTaskStore):
@@ -1039,9 +957,8 @@ async def test_manager_status_payloads_are_inspectable_without_events():
 
 
 @pytest.mark.asyncio
-async def test_background_run_events_replay_from_event_router():
-    event_router = EventRouter()
-    manager = BackgroundAgentManager(task_store="in_memory", event_router=event_router)
+async def test_background_run_events_replay_from_manager_cache():
+    manager = BackgroundAgentManager(task_store="in_memory")
     agent = FakeAgent(response="complete")
     await manager.register_agent("agent", agent)
     await manager.register_task(
@@ -1049,10 +966,8 @@ async def test_background_run_events_replay_from_event_router():
         agent_id="agent",
         query="do work",
         schedule={"type": "manual"},
-        workspace_policy={"write_events_jsonl": False},
     )
     run = await manager.run_now("task", wait=True)
-    manager._events.clear()
 
     events = await manager.get_run_events(run.run_id)
 
@@ -1065,9 +980,9 @@ async def test_background_run_events_replay_from_event_router():
 
 
 @pytest.mark.asyncio
-async def test_background_run_sets_event_run_id_context():
+async def test_background_run_passes_run_id_to_agent():
     manager = BackgroundAgentManager(task_store="in_memory")
-    agent = RunIdRecordingAgent(response="complete")
+    agent = FakeAgent(response="complete")
     await manager.register_agent("agent", agent)
     await manager.register_task(
         task_id="task",
@@ -1079,42 +994,49 @@ async def test_background_run_sets_event_run_id_context():
     run = await manager.run_now("task", wait=True)
 
     assert run.status == RunStatus.COMPLETED
-    assert agent.calls[0]["event_run_id"] == run.run_id
-    assert current_event_run_id() is None
+    assert agent.calls[0]["run_id"] == run.run_id
 
 
 @pytest.mark.asyncio
-async def test_background_event_router_filters_same_session_runs():
-    event_router = EventRouter()
-    manager = BackgroundAgentManager(task_store="in_memory", event_router=event_router)
-    await manager.register_agent("agent", FakeAgent(response="complete"))
-    for task_id in ("first", "second"):
-        await manager.register_task(
-            task_id=task_id,
-            agent_id="agent",
-            query=f"{task_id} work",
-            schedule={"type": "manual"},
-            session_policy={"mode": "fixed", "session_id": "shared-session"},
-            workspace_policy={"write_events_jsonl": False},
-        )
-    first = await manager.run_now("first", wait=True)
-    second = await manager.run_now("second", wait=True)
-    manager._events.clear()
-
-    events = await manager.get_run_events(second.run_id)
-
-    assert {event["run_id"] for event in events} == {second.run_id}
-    assert first.run_id not in {event["run_id"] for event in events}
-
-
-@pytest.mark.asyncio
-async def test_background_event_router_failure_keeps_workspace_replay(tmp_path):
-    workspace = Workspace.from_config(workspace_dir=tmp_path).ensure()
-    manager = BackgroundAgentManager(
-        task_store="in_memory",
-        event_router=BrokenEventRouter(),
-        workspace=workspace,
+async def test_background_run_passes_run_id_to_kwargs_agent():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    agent = KwargsAgent(response="complete")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
     )
+
+    run = await manager.run_now("task", wait=True)
+
+    assert run.status == RunStatus.COMPLETED
+    assert agent.calls[0]["run_id"] == run.run_id
+
+
+@pytest.mark.asyncio
+async def test_background_run_supports_agent_without_run_id_keyword():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    agent = NoRunIdAgent(response="complete")
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    run = await manager.run_now("task", wait=True)
+
+    assert run.status == RunStatus.COMPLETED
+    assert agent.calls[0]["session_id"] == run.session_id
+    assert "run_id" not in agent.calls[0]
+
+
+@pytest.mark.asyncio
+async def test_background_run_lifecycle_events_emit_to_telemetry():
+    manager = BackgroundAgentManager(task_store="in_memory")
     await manager.register_agent("agent", FakeAgent(response="complete"))
     await manager.register_task(
         task_id="task",
@@ -1122,47 +1044,31 @@ async def test_background_event_router_failure_keeps_workspace_replay(tmp_path):
         query="do work",
         schedule={"type": "manual"},
     )
+
     run = await manager.run_now("task", wait=True)
-    manager._events.clear()
+    events = await manager.telemetry_stream.get_events_after(
+        TelemetryStreamScope(run_id=run.run_id, session_id=run.session_id),
+        None,
+    )
 
-    events = await manager.get_run_events(run.run_id)
-
-    assert events[0]["event"] == "background_run_queued"
-    assert events[-1]["event"] == "background_run_completed"
+    event_names = [event.event_type for event in events]
+    assert event_names == [
+        "background_run_queued",
+        "background_run_claimed",
+        "background_run_started",
+        "background_run_completed",
+    ]
+    assert events[-1].metadata["run_id"] == run.run_id
+    trace = await manager.telemetry_store.get_trace(f"trace_background_{run.run_id}")
+    assert trace is not None
+    assert trace.run_id == run.run_id
+    assert trace.status.value == "completed"
 
 
 @pytest.mark.asyncio
-async def test_background_event_replay_uses_complete_workspace_over_partial_router(tmp_path):
+async def test_background_run_events_replay_from_workspace_when_cache_cleared(tmp_path):
     workspace = Workspace.from_config(workspace_dir=tmp_path).ensure()
-    manager = BackgroundAgentManager(
-        task_store="in_memory",
-        event_router=DroppingEventRouter(),
-        workspace=workspace,
-    )
-    await manager.register_agent("agent", FakeAgent(response="complete"))
-    await manager.register_task(
-        task_id="task",
-        agent_id="agent",
-        query="do work",
-        schedule={"type": "manual"},
-    )
-    run = await manager.run_now("task", wait=True)
-    manager._events.clear()
-
-    events = await manager.get_run_events(run.run_id)
-
-    assert events[-1]["event"] == "background_run_completed"
-    assert len(events) > len(await manager._read_event_router_events(run))
-
-
-@pytest.mark.asyncio
-async def test_background_event_replay_ignores_duplicate_sequence_sources(tmp_path):
-    workspace = Workspace.from_config(workspace_dir=tmp_path).ensure()
-    manager = BackgroundAgentManager(
-        task_store="in_memory",
-        event_router=DuplicatingEventRouter(),
-        workspace=workspace,
-    )
+    manager = BackgroundAgentManager(task_store="in_memory", workspace=workspace)
     await manager.register_agent("agent", FakeAgent(response="complete"))
     await manager.register_task(
         task_id="task",
@@ -1181,146 +1087,14 @@ async def test_background_event_replay_ignores_duplicate_sequence_sources(tmp_pa
         ("background_run_started", 3),
         ("background_run_completed", 4),
     ]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "router_cls",
-    [MalformedSequenceEventRouter, GappedSequenceEventRouter],
-)
-async def test_background_event_replay_ignores_invalid_sequence_sources(
-    tmp_path, router_cls
-):
-    workspace = Workspace.from_config(workspace_dir=tmp_path).ensure()
-    manager = BackgroundAgentManager(
-        task_store="in_memory",
-        event_router=router_cls(),
-        workspace=workspace,
-    )
-    await manager.register_agent("agent", FakeAgent(response="complete"))
-    await manager.register_task(
-        task_id="task",
-        agent_id="agent",
-        query="do work",
-        schedule={"type": "manual"},
-    )
-    run = await manager.run_now("task", wait=True)
-    manager._events.clear()
-
-    events = await manager.get_run_events(run.run_id)
-
-    assert [(event["event"], event["sequence"]) for event in events] == [
-        ("background_run_queued", 1),
-        ("background_run_claimed", 2),
-        ("background_run_started", 3),
-        ("background_run_completed", 4),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_background_event_replay_falls_back_when_router_hangs(tmp_path):
-    workspace = Workspace.from_config(workspace_dir=tmp_path).ensure()
-    manager = BackgroundAgentManager(
-        task_store="in_memory",
-        event_router=HangingEventRouter(),
-        workspace=workspace,
-    )
-    manager._event_replay_timeout_seconds = 0.01
-    await manager.register_agent("agent", FakeAgent(response="complete"))
-    await manager.register_task(
-        task_id="task",
-        agent_id="agent",
-        query="do work",
-        schedule={"type": "manual"},
-    )
-    run = await manager.run_now("task", wait=True)
-
-    events = await asyncio.wait_for(manager.get_run_events(run.run_id), timeout=0.5)
-
-    assert events[0]["event"] == "background_run_queued"
-    assert events[-1]["event"] == "background_run_completed"
-
-
-@pytest.mark.asyncio
-async def test_background_run_does_not_block_on_hanging_event_append(tmp_path):
-    workspace = Workspace.from_config(workspace_dir=tmp_path).ensure()
-    manager = BackgroundAgentManager(
-        task_store="in_memory",
-        event_router=HangingAppendEventRouter(),
-        workspace=workspace,
-        lease_seconds=1,
-    )
-    manager._event_append_timeout_seconds = 0.01
-    await manager.register_agent("agent", FakeAgent(response="complete"))
-    await manager.register_task(
-        task_id="task",
-        agent_id="agent",
-        query="do work",
-        schedule={"type": "manual"},
-    )
-
-    run = await asyncio.wait_for(manager.run_now("task", wait=True), timeout=2.0)
-
-    assert run.status == RunStatus.COMPLETED
-    events = await manager.get_run_events(run.run_id)
-    assert events[0]["event"] == "background_run_queued"
-    assert events[-1]["event"] == "background_run_completed"
-
-
-@pytest.mark.asyncio
-async def test_slow_claimed_event_append_does_not_expire_active_lease(tmp_path):
-    workspace = Workspace.from_config(workspace_dir=tmp_path).ensure()
-    manager = BackgroundAgentManager(
-        task_store="in_memory",
-        event_router=HangingClaimAppendEventRouter(),
-        workspace=workspace,
-        lease_seconds=1,
-    )
-    manager._event_append_timeout_seconds = 0.2
-    await manager.register_agent("agent", FakeAgent(response="complete"))
-    await manager.register_task(
-        task_id="task",
-        agent_id="agent",
-        query="do work",
-        schedule={"type": "manual"},
-    )
-
-    run = await asyncio.wait_for(manager.run_now("task", wait=True), timeout=2.0)
-
-    assert run.status == RunStatus.COMPLETED
-
-
-@pytest.mark.asyncio
-async def test_background_initial_event_sequence_does_not_scan_history():
-    event_router = CountingEventRouter()
-    manager = BackgroundAgentManager(
-        task_store="in_memory",
-        event_router=event_router,
-    )
-    await manager.register_agent("agent", FakeAgent(response="complete"))
-    await manager.register_task(
-        task_id="task",
-        agent_id="agent",
-        query="do work",
-        schedule={"type": "manual"},
-        workspace_policy={"write_events_jsonl": False},
-    )
-
-    run = await manager.run_now("task")
-
-    assert event_router.get_events_count == 0
-    assert manager._events[run.run_id][0]["event"] == "background_run_queued"
-    assert manager._events[run.run_id][0]["sequence"] == 1
 
 
 @pytest.mark.asyncio
 async def test_background_event_sequence_continues_after_manager_restart(tmp_path):
     url = f"sqlite:///{tmp_path / 'background.db'}"
     workspace = Workspace.from_config(workspace_dir=tmp_path / "workspace").ensure()
-    event_router = EventRouter()
     first = BackgroundAgentManager(
         task_store={"backend": "sql", "url": url},
-        event_router=event_router,
         workspace=workspace,
     )
     await first.register_agent("agent", FakeAgent(response="first"))
@@ -1334,7 +1108,6 @@ async def test_background_event_sequence_continues_after_manager_restart(tmp_pat
 
     second = BackgroundAgentManager(
         task_store={"backend": "sql", "url": url},
-        event_router=event_router,
         workspace=workspace,
     )
     await second.register_agent("agent", FakeAgent(response="second"), replace=True)

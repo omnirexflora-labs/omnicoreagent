@@ -139,7 +139,7 @@ together after the prototype works.
 | **MCP-connected product agents** | MCP tools, local tools, structured observations, guardrails, session memory |
 | **Research and analysis agents** | Parallel tool batches, workspace files, tool offloading, context management, artifact readback |
 | **Long-running worker agents** | Background tasks, durable task stores, run history, workspace output, retries, cancellation |
-| **Multi-agent task systems** | Dynamic subagents, shared workspace output, workflow orchestration, event streams |
+| **Multi-agent task systems** | Dynamic subagents, shared workspace output, workflow orchestration, telemetry events |
 | **Agent APIs** | OmniServe REST/SSE, readiness, auth, request timeout, rate limits, metrics |
 | **Production app integrations** | Optional Redis, MongoDB, SQL, S3, and R2 backends without making the core install heavy |
 
@@ -216,12 +216,12 @@ agent behavior much easier than "max iterations reached."
 OmniCoreAgent ships as a working harness, not a bag of disconnected pieces:
 
 ```text
-model + prompt + loop + tools + memory + context + workspace + guardrails + events
+model + prompt + loop + tools + memory + context + workspace + guardrails + telemetry
 ```
 
 Keep it small for simple agents, then turn on the heavier harness pieces when the
 workload needs them: MCP tools, BM25 tool retrieval, dynamic subagents, skills,
-cloud workspace storage, Redis/Postgres/MongoDB memory, event streams, and
+cloud workspace storage, Redis/Postgres/MongoDB memory, telemetry events, and
 OmniServe.
 
 ### 5. Context is managed before the model call
@@ -297,7 +297,7 @@ results together, and continues from one structured observation.
 
 ```bash
 pip install omnicoreagent                    # Core runtime
-pip install "omnicoreagent[redis]"           # Redis memory + event streams
+pip install "omnicoreagent[redis]"           # Redis memory backend
 pip install "omnicoreagent[postgres]"        # PostgreSQL / SQL memory
 pip install "omnicoreagent[mongodb]"         # MongoDB memory
 pip install "omnicoreagent[s3]"              # S3 / R2 workspace storage
@@ -320,7 +320,7 @@ uses.
 | **MCP Native Tools** | Connects MCP servers over stdio, SSE, and Streamable HTTP, including OAuth-capable remote servers. |
 | **Local Tool Registry** | Registers Python functions as tools with inferred schemas and async/sync execution support. |
 | **Multi-Tier Memory** | Uses in-memory, Redis, MongoDB, or SQL-backed session history through the memory router. |
-| **Runtime Backend Switching** | Switches memory and event backends at runtime when configured. |
+| **Runtime Backend Switching** | Switches memory backends at runtime when configured. |
 | **Workspace Files** | Gives agents a local, S3, or R2-backed file workspace for notes, scratchpads, artifacts, and tool offloads. |
 | **Context Engineering** | Checks context before each model call and automatically truncates or summarizes when the configured budget threshold is crossed. |
 | **Tool Output Offloading** | Writes large tool results to workspace files and gives the model a preview plus a file reference. |
@@ -328,7 +328,7 @@ uses.
 | **Agent Skills** | Loads packaged capabilities implemented with Python, Bash, or Node.js. |
 | **BM25 Tool Retrieval** | Selects relevant tools from large tool sets so the prompt stays focused. |
 | **Guardrails** | Adds prompt-injection screening inside the observation path with configurable behavior. |
-| **Event System** | Emits structured runtime events for agent runs, tool calls, and streaming integrations. |
+| **Telemetry Events** | Emits typed telemetry events for agent runs, tool calls, background work, and streaming integrations. |
 | **Workflow Orchestration** | Provides sequential, parallel, and router agents for multi-step application workflows. |
 | **Durable Background Tasks** | Runs manual or scheduled agent work with task state, run history, retries, cancellation, and workspace output. |
 | **Universal Models** | Supports OpenAI, Anthropic, Gemini, Groq, Ollama, DeepSeek, Mistral, OpenRouter, Azure, and Cencori through the runtime model layer. |

@@ -1,115 +1,106 @@
 ---
-title: Event System
-description: 'Real-time event streaming and in-house trace summaries for observability and debugging'
+title: Telemetry Events
+description: 'Real-time telemetry events for streaming, debugging, and future trace surfaces'
 icon: 'signal-stream'
 ---
 
-# Event System
+# Telemetry Events
 
-Real-time event streaming with runtime switching. OmniCoreAgent records typed
-runtime events for messages, tool calls, agent thoughts, subagents, final
-answers, and background task lifecycle changes. Those events can be listed,
-streamed live, or summarized into a compact in-house trace.
+OmniCoreAgent records typed telemetry events for user messages, model calls,
+tool batches, tool calls, observation handling, subagents, final answers, and
+background run lifecycle changes.
+
+Telemetry is available by default. Simple apps use the in-memory telemetry
+store automatically. Serving integrations can replay stored telemetry and follow
+new events through Server-Sent Events.
 
 ---
 
 ## Quick Start
 
-Runtime event streaming supports two event stores:
-
-- `in_memory` for local development, tests, and single-process apps
-- `redis_stream` for production or multi-process live streaming
-
-Redis Streams require the Redis extra:
-
-```bash
-pip install "omnicoreagent[redis]"
-```
-
 ```python
-from omnicoreagent import OmniCoreAgent, EventRouter
+result = await agent.run("Research three AI agent runtimes.", session_id="user_1")
 
-# Start with in-memory
-agent = OmniCoreAgent(
-    event_router=EventRouter("in_memory"),
-    ...
+events = await agent.get_telemetry_events_after(
+    cursor=None,
+    session_id=result["session_id"],
+    run_id=result["run_id"],
 )
 
-# Switch to Redis Streams for production
-await agent.switch_event_store("redis_stream")
-
-# Check current event store type
-await agent.get_event_store_type()
-
-# Stream events in real-time
-async for event in agent.stream_events(session_id):
-    print(f"{event.type}: {event.payload}")
+for event in events:
+    print(event.event_type, event.model_dump())
 ```
 
 ---
 
-## Event Types
+## Common Event Types
 
 | Event | Description |
 |-------|-------------|
 | `user_message` | User input received |
-| `agent_message` | Agent response generated |
-| `agent_thought` | Agent's internal reasoning step |
-| `tool_call_started` | Tool execution begins |
-| `tool_call_result` | Tool execution completes |
-| `tool_call_error` | Tool validation or execution failed |
-| `final_answer` | Agent produces final response |
-| `sub_agent_call_started` | Sub-agent delegation begins |
-| `sub_agent_call_result` | Sub-agent returns result |
-| `sub_agent_call_error` | Sub-agent encountered an error |
-| `background_agent_status` | Background run lifecycle event routed through the event system |
+| `model_call` | Model request started |
+| `model_response` | Model returned content and usage |
+| `model_error` | Model call failed |
+| `agent_step` | ReAct loop step started |
+| `tool_batch_start` | Parallel tool batch started |
+| `tool_call` | Individual tool execution started |
+| `tool_result` | Individual tool returned successfully |
+| `tool_error` | Tool validation or execution failed |
+| `observation_pipeline_end` | Tool output was parsed, cleaned, and formatted |
+| `subagent_spawn` | One or more subagents were delegated work |
+| `subagent_result` | Subagent returned output |
+| `subagent_error` | Subagent execution failed |
+| `guardrail_violation` | Guardrail blocked unsafe input |
+| `final_answer` | Agent produced final response |
+| `runtime_error` | Runtime failed |
 
 ---
 
-## Retrieving Events
+## Streaming
 
 ```python
-# Get event history for a session
-events = await agent.get_events(session_id="user_1")
+session_id = "user_1"
+run_id = "run_ui_1"
+cursor = await agent.get_telemetry_stream_cursor(session_id=session_id)
 
-for event in events:
-    print(f"[{event.timestamp}] {event.type}: {event.payload}")
+task = asyncio.create_task(
+    agent.run("Use tools if needed.", session_id=session_id, run_id=run_id)
+)
+
+async for event in agent.stream_telemetry_after(
+    cursor=cursor,
+    session_id=session_id,
+    run_id=run_id,
+):
+    print(event.event_type)
+    if event.event_type == "final_answer":
+        break
+
+await task
 ```
+
+OmniServe uses the same telemetry stream:
+
+- `POST /run` streams telemetry for the run it starts and finishes with
+  `complete`.
+- `GET /events/{session_id}` replays stored telemetry for a session and follows
+  new telemetry.
+- `GET /events/{session_id}/list` returns stored telemetry events as JSON.
+- `GET /events/{session_id}/trace` returns a compact telemetry summary for the
+  latest session trace.
+
+Every telemetry event includes its `trace_id`. Runtime-created events also carry
+correlation metadata such as `run_id`, `session_id`, and `agent_id` when that
+context exists.
 
 ---
-
-## Streaming Events
-
-Stream live events from a running session:
-
-```python
-async for event in agent.stream_events(session_id="user_1"):
-    print(event.type, event.payload)
-```
-
-When using OmniServe:
-
-- `POST /run` streams runtime events as the agent runs and then sends a final
-  `complete` event with the normalized run result.
-- `GET /events/{session_id}` replays stored events for that session, then keeps
-  following new live events.
-
-Every OmniServe SSE runtime event includes the route `session_id` in the JSON
-payload so clients can keep streams separated. Events appended through the
-runtime event store also include a per-session `sequence`, which makes replay
-and debugging deterministic without requiring a full tracing system.
-
-`POST /run` also adds a run-scoped `run_id` to streamed runtime events and the
-final `complete` event. That keeps concurrent runs on the same session from
-mixing in one live response while the session event feed can still show the full
-session history.
 
 ## Background Run Events
 
-Background agents have their own run-local lifecycle event names. These are
-stored in the background event log, mirrored to workspace `events.jsonl` when
-enabled, and forwarded through `EventRouter` as `background_agent_status`
-events with the lifecycle name in `payload.event`.
+Background agents expose run-local lifecycle events through
+`get_run_events(run_id)` and OmniServe's `/background/runs/{run_id}/events`.
+These events are emitted into telemetry, stored in the manager cache, and
+mirrored to workspace `events.jsonl` when the task workspace policy allows it.
 
 Common background lifecycle names include:
 
@@ -127,31 +118,3 @@ Common background lifecycle names include:
 | `background_run_timeout` | Run exceeded its timeout. |
 | `background_run_cancelled` | Run was cancelled. |
 | `background_run_skipped` | Overlap policy skipped a scheduled run. |
-
-Use `BackgroundAgentManager.get_run_events(run_id)` or
-`GET /background/runs/{run_id}/events` in OmniServe to replay a run trajectory.
-Each returned event has a run-local integer `sequence`, `run_id`, `task_id`,
-`status`, and the lease/worker fields available for that transition.
-
----
-
-## Agent Trace
-
-```python
-trace = await agent.get_trace(session_id="user_1")
-
-print(trace["summary"]["total_events"])
-print(trace["summary"]["tool_calls"])
-print(trace["summary"]["tool_errors"])
-
-for step in trace["steps"]:
-    print(step["index"], step["event_type"], step["elapsed_ms"])
-```
-
-The trace is built from the event history. It gives you ordered steps, elapsed
-time between steps, event counts, tool/sub-agent error counts, and the latest
-final answer.
-
-<Tip>
-Enable events when you need real-time monitoring, debugging, or building UIs that show agent progress. Use traces when you need a compact session-level view for debugging or session review.
-</Tip>

@@ -7,6 +7,12 @@ from fastapi.testclient import TestClient
 from click.testing import CliRunner
 from pydantic import ValidationError
 from omnicoreagent import OmniCoreAgent, OmniServe, OmniServeConfig
+from omnicoreagent.core.telemetry import (
+    ActorType,
+    InMemoryTelemetryStore,
+    TelemetryActor,
+    TelemetryEvent,
+)
 from omnicoreagent.serve.cli import cli
 
 
@@ -603,12 +609,32 @@ class TestEndpoints:
         agent.run = AsyncMock(return_value={"response": "Agent response"})
         # Mock get_metrics
         agent.get_metrics = AsyncMock(return_value={"total_tokens": 100})
-        agent.get_event_trace = AsyncMock(
-            return_value={
-                "session_id": "test-endpoint-session",
-                "summary": {"total_events": 2, "tool_calls": 1},
-                "steps": [{"index": 1, "event_type": "user_message"}],
-            }
+        agent.list_telemetry_traces = AsyncMock(
+            return_value=[
+                {
+                    "trace_id": "trace_endpoint",
+                    "run_id": "run_endpoint",
+                    "status": "completed",
+                    "events": [{"event_type": "user_message"}],
+                    "spans": [{"kind": "agent.run"}],
+                }
+            ]
+        )
+        store = InMemoryTelemetryStore()
+        agent.telemetry_store = store
+        agent.get_telemetry_events_after = AsyncMock(
+            return_value=[
+                TelemetryEvent(
+                    trace_id="trace_endpoint",
+                    span_id="span_endpoint",
+                    event_type="user_message",
+                    actor=TelemetryActor(type=ActorType.USER),
+                    metadata={
+                        "session_id": "test-endpoint-session",
+                        "run_id": "run_endpoint",
+                    },
+                )
+            ]
         )
 
         server = OmniServe(agent=agent, config=OmniServeConfig())
@@ -791,13 +817,28 @@ class TestEndpoints:
         assert resp.status_code == 200
         data = resp.json()
         assert data["session_id"] == "test-endpoint-session"
-        assert data["summary"]["tool_calls"] == 1
+        assert data["summary"]["event_count"] == 1
+        assert data["summary"]["span_count"] == 1
         assert data["steps"][0]["event_type"] == "user_message"
 
-    def test_trace_endpoint_uses_legacy_event_trace_accessor(self, server_client):
+    def test_trace_endpoint_uses_telemetry_trace_accessor(self, server_client):
         server_client.get("/events/trace_like_session/trace")
         agent = server_client.app.state.agent
-        agent.get_event_trace.assert_awaited_once_with("trace_like_session")
+        agent.list_telemetry_traces.assert_awaited_with(session_id="trace_like_session")
+
+    def test_events_list_endpoint_uses_telemetry_events_accessor(self, server_client):
+        resp = server_client.get("/events/test-endpoint-session/list")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["session_id"] == "test-endpoint-session"
+        assert data["count"] == 1
+        assert data["events"][0]["event_type"] == "user_message"
+        agent = server_client.app.state.agent
+        agent.get_telemetry_events_after.assert_awaited_with(
+            cursor=None,
+            session_id="test-endpoint-session",
+        )
 
     def test_run_normalizes_string_agent_result(self):
         agent = MagicMock(spec=OmniCoreAgent)

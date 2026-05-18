@@ -196,10 +196,8 @@ events use run-local names such as `background_task_scheduled`,
 `background_run_failed`, `background_run_timeout`,
 `background_run_cancelled`, and `background_run_skipped`.
 
-When an `EventRouter` is attached, the background manager forwards lifecycle
-events as `background_agent_status` events. The specific lifecycle name is
-available as `event.payload.event` in Python, and as `payload.event` after JSON
-serialization.
+When workspace event mirroring is enabled, lifecycle events are also written to
+the run workspace `events.jsonl` file for durable replay and debugging.
 
 ## OmniServe Endpoints
 

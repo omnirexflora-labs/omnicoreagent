@@ -56,7 +56,7 @@ enabled explicitly through `agent_config` or installable extras.
 | **Context management** | Checks message history before each model call and automatically truncates or summarizes when the configured budget threshold is crossed. |
 | **Memory** | Stores and retrieves session history through the configured memory router. |
 | **Workspace** | Provides agent-accessible files for notes, scratchpads, artifacts, subagent output, and tool offloads. |
-| **Events** | Emits runtime events for runs, tool calls, streaming, and server integrations. |
+| **Telemetry Events** | Emits typed telemetry events for runs, tool calls, streaming, and server integrations. |
 | **Serving** | Runs the agent through OmniServe when you need REST/SSE endpoints. |
 
 ---
@@ -91,7 +91,7 @@ artifacts that the lead agent reads back.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `name` | `str` | Agent name used for session tracking, events, metrics, and logs. |
+| `name` | `str` | Agent name used for session tracking, telemetry, metrics, and logs. |
 | `system_instruction` | `str` | The high-level role, objective, or policy for the agent. |
 | `model_config` | `dict` or `ModelConfig` | LLM provider and model configuration. |
 | `mcp_tools` | `list` | Optional MCP tool server definitions. OmniCoreAgent loads tools from these servers. |
@@ -99,14 +99,13 @@ artifacts that the lead agent reads back.
 | `sub_agents` | `list` | Optional predefined agents available for delegation. |
 | `agent_config` | `dict` or `AgentConfig` | Runtime behavior: steps, timeouts, context, offload, subagents, skills, workspace. |
 | `memory_router` | `MemoryRouter` | Optional conversation memory backend. Defaults to in-memory. |
-| `event_router` | `EventRouter` | Optional event backend. Defaults to in-memory. |
 
 ---
 
 ## Full Harness Configuration
 
 ```python
-from omnicoreagent import EventRouter, MemoryRouter, OmniCoreAgent, ToolRegistry
+from omnicoreagent import MemoryRouter, OmniCoreAgent, ToolRegistry
 
 tools = ToolRegistry()
 
@@ -117,7 +116,6 @@ agent = OmniCoreAgent(
     local_tools=tools,
     mcp_tools=[...],
     memory_router=MemoryRouter("redis"),
-    event_router=EventRouter("redis_stream"),
     agent_config={
         "max_steps": 20,
         "tool_call_timeout": 30,
@@ -208,17 +206,14 @@ await agent.clear_session_history()  # clear all sessions for this agent
 
 ## Runtime Switching
 
-Switch configured memory and event backends without rebuilding the agent object:
+Switch configured memory backends without rebuilding the agent object:
 
 ```python
 await agent.switch_memory_store("mongodb")
 await agent.switch_memory_store("database")
 await agent.switch_memory_store("redis")
 
-await agent.switch_event_store("redis_stream")
-
 await agent.get_memory_store_type()
-await agent.get_event_store_type()
 ```
 
 ---

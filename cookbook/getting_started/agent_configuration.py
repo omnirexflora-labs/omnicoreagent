@@ -15,7 +15,7 @@ Features covered:
 - Context Management
 - Guardrails
 
-Build on: agent_with_event_switching.py
+Build on: agent_with_events.py
 This is a reference for advanced usage.
 
 Run:

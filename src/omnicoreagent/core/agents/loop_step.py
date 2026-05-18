@@ -4,7 +4,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from omnicoreagent.core.events.base import Event
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.types import AgentState, Message, ParsedResponse, SessionState
 from omnicoreagent.core.logging import logger
@@ -55,7 +54,6 @@ class AgentLoopStepHandler:
         sessions: dict | None = None,
         mcp_tools: dict | None = None,
         local_tools: Any = None,
-        event_router: Callable[[str, Event], Any] | None = None,
         telemetry_recorder: Any = None,
         sub_agents: list | None = None,
     ) -> AgentLoopStepResult:
@@ -70,7 +68,6 @@ class AgentLoopStepHandler:
                     session_state=session_state,
                     add_message_to_history=add_message_to_history,
                     session_id=session_id,
-                    event_router=event_router,
                     run_usage=run_usage,
                     start_time=start_time,
                 ),
@@ -87,7 +84,7 @@ class AgentLoopStepHandler:
                     session_state=session_state,
                     add_message_to_history=add_message_to_history,
                     run_usage=run_usage,
-                    event_router=event_router,
+                    telemetry_recorder=telemetry_recorder,
                     debug=debug,
                 )
             else:
@@ -103,7 +100,6 @@ class AgentLoopStepHandler:
                     mcp_tools=mcp_tools,
                     local_tools=local_tools,
                     session_id=session_id,
-                    event_router=event_router,
                     telemetry_recorder=telemetry_recorder,
                     sub_agents=sub_agents,
                 )

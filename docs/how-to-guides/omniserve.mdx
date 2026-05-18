@@ -205,9 +205,9 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 | `GET` | `/prometheus` | No | Prometheus metrics |
 | `GET` | `/tools` | Yes* | List available tools |
 | `GET` | `/metrics` | Yes* | Agent usage metrics |
-| `GET` | `/events/{session_id}` | Yes* | Replay stored session events, then follow live events over SSE |
-| `GET` | `/events/{session_id}/list` | Yes* | Return stored session events as JSON |
-| `GET` | `/events/{session_id}/trace` | Yes* | Compact session event summary |
+| `GET` | `/events/{session_id}` | Yes* | Replay stored telemetry events, then follow live telemetry events over SSE |
+| `GET` | `/events/{session_id}/list` | Yes* | Return stored telemetry events as JSON |
+| `GET` | `/events/{session_id}/trace` | Yes* | Compact telemetry trace summary |
 | `GET` | `/docs` | No | Swagger UI |
 | `GET` | `/redoc` | No | ReDoc UI |
 

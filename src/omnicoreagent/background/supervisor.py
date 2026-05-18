@@ -6,9 +6,10 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import timedelta
+import inspect
+from inspect import Parameter
 from typing import Any
 
-from omnicoreagent.core.events.base import reset_event_run_id, set_event_run_id
 from omnicoreagent.background.agent_specs import resolve_agent
 from omnicoreagent.background.errors import RunLeaseError, RunNotFoundError
 from omnicoreagent.background.event_log import BackgroundEventLog
@@ -58,7 +59,6 @@ class BackgroundSupervisor:
         worker_id: str,
         lease_seconds: int,
         memory_router: Any = None,
-        event_router: Any = None,
         event_log: BackgroundEventLog,
         emit_run: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
@@ -67,7 +67,6 @@ class BackgroundSupervisor:
         self.worker_id = worker_id
         self.lease_seconds = lease_seconds
         self.memory_router = memory_router
-        self.event_router = event_router
         self.event_log = event_log
         self._emit_run = emit_run
         self.transitions = BackgroundRunTransitions(
@@ -322,7 +321,6 @@ class BackgroundSupervisor:
             agents=self.agents,
             task_store=self.task_store,
             memory_router=self.memory_router,
-            event_router=self.event_router,
         )
         if agent is None:
             await self.mark_terminal(claimed, RunStatus.FAILED, "agent missing")
@@ -385,7 +383,7 @@ class BackgroundSupervisor:
             return _ATTEMPT_ALREADY_TERMINAL
         query = build_run_context(running.run)
         agent_task = asyncio.create_task(
-            self.run_agent_with_event_context(
+            self.run_agent_with_run_context(
                 agent=running.agent,
                 query=query,
                 run=running.run,
@@ -474,7 +472,7 @@ class BackgroundSupervisor:
         running.heartbeat_task.cancel()
         await self.drain_cancelled_task(running.heartbeat_task)
 
-    async def run_agent_with_event_context(
+    async def run_agent_with_run_context(
         self,
         *,
         agent: Any,
@@ -482,16 +480,19 @@ class BackgroundSupervisor:
         run: BackgroundRun,
         timeout_seconds: int | None,
     ) -> Any:
-        token = set_event_run_id(run.run_id)
+        kwargs = {"query": query, "session_id": run.session_id}
         try:
-            coro = agent.run(query=query, session_id=run.session_id)
-            return (
-                await asyncio.wait_for(coro, timeout=timeout_seconds)
-                if timeout_seconds
-                else await coro
-            )
-        finally:
-            reset_event_run_id(token)
+            signature = inspect.signature(agent.run)
+            if _accepts_keyword(signature, "run_id"):
+                kwargs["run_id"] = run.run_id
+        except (TypeError, ValueError):
+            kwargs["run_id"] = run.run_id
+        coro = agent.run(**kwargs)
+        return (
+            await asyncio.wait_for(coro, timeout=timeout_seconds)
+            if timeout_seconds
+            else await coro
+        )
 
     async def handle_attempt_failure(
         self,
@@ -609,3 +610,10 @@ class BackgroundSupervisor:
         self, attempt: BackgroundAttempt, run: BackgroundRun
     ) -> None:
         await self.transitions.mark_attempt_cancelled(attempt, run)
+
+
+def _accepts_keyword(signature: inspect.Signature, name: str) -> bool:
+    return name in signature.parameters or any(
+        parameter.kind == Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )

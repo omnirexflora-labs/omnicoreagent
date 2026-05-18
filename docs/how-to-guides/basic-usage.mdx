@@ -148,24 +148,21 @@ specific to your application.
 
 ## Event Streaming
 
-Listen to agent events in real-time — useful for building UIs, logging, or debugging:
+Read telemetry events for UIs, logging, and debugging:
 
 ```python
-from omnicoreagent import EventRouter
-
 agent = OmniCoreAgent(
     name="streaming_agent",
     system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    event_router=EventRouter("in_memory")
+    model_config={"provider": "openai", "model": "gpt-4o"}
 )
 
 result = await agent.run("What can you do?")
 session_id = result["session_id"]
 
-events = await agent.get_events(session_id)
+events = await agent.get_telemetry_events_after(cursor=None, session_id=session_id)
 for event in events:
-    print(event.type, event.payload)
+    print(event.event_type, event.model_dump())
 ```
 
 ---

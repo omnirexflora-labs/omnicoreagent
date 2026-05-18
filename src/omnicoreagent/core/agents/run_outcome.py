@@ -4,8 +4,6 @@ from collections.abc import Callable
 import time
 from typing import Any
 
-from omnicoreagent.core.agents import events as agent_events
-from omnicoreagent.core.events.base import Event
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.types import AgentState, Message, SessionState
 
@@ -21,17 +19,10 @@ class AgentRunOutcomeHandler:
         session_state: SessionState,
         add_message_to_history: Callable[[str, str, dict | None], Any],
         session_id: str,
-        event_router: Callable[[str, Event], Any] | None,
         run_usage: Usage,
         start_time: float,
     ) -> dict[str, Any]:
         session_state.messages.append(Message(role="assistant", content=answer))
-        await agent_events.emit_final_answer(
-            event_router=event_router,
-            session_id=session_id,
-            agent_name=self.agent_name,
-            message=str(answer),
-        )
         await add_message_to_history(
             role="assistant",
             content=answer,

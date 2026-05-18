@@ -1,18 +1,17 @@
 """
 OmniServe SSE (Server-Sent Events) Utilities.
 
-Provides utilities for streaming agent events via SSE.
+Provides utilities for streaming telemetry events via SSE.
 """
 
 import asyncio
 import contextlib
 import json
 from dataclasses import dataclass
-from inspect import isawaitable
+from inspect import Parameter, isawaitable, signature
 from typing import TYPE_CHECKING, Any, AsyncGenerator
 from uuid import uuid4
 
-from omnicoreagent.core.events.base import reset_event_run_id, set_event_run_id
 from omnicoreagent.core.logging import logger
 
 from .serialization import normalize_event, normalize_run_result
@@ -49,13 +48,19 @@ def format_sse_event(event_type: str, data: dict) -> str:
 
 
 def _normalize_event_for_sse(event: Any, session_id: str) -> tuple[str, dict[str, Any]]:
-    """Normalize a runtime event and attach the serving session boundary."""
+    """Normalize a telemetry event and attach the serving session boundary."""
     event_data = normalize_event(event)
     event_data["session_id"] = session_id
+    metadata = event_data.get("metadata") or {}
+    if isinstance(metadata, dict):
+        for key in ("run_id", "task_id", "agent_id", "workflow_id"):
+            if metadata.get(key) is not None:
+                event_data.setdefault(key, metadata[key])
 
-    event_type = event_data.get("type", "event")
+    event_type = event_data.get("event_type") or event_data.get("type", "event")
     if hasattr(event_type, "value"):
         event_type = event_type.value
+    event_data.setdefault("type", str(event_type))
 
     return str(event_type), event_data
 
@@ -71,10 +76,11 @@ async def _pump_session_events(
     session_id: str,
     queue: asyncio.Queue[Any],
     cursor: str | None,
+    run_id: str | None = None,
 ) -> None:
-    """Forward live agent events into a local queue for the SSE generator."""
+    """Forward live telemetry events into a local queue for the SSE generator."""
     try:
-        async for event in _stream_events_after(agent, session_id, cursor):
+        async for event in _stream_telemetry_after(agent, session_id, cursor, run_id):
             if not await _put_stream_item(queue, event):
                 return
     except asyncio.CancelledError:
@@ -98,63 +104,48 @@ async def _put_stream_item(queue: asyncio.Queue[Any], item: Any) -> bool:
         return False
 
 
-async def _get_event_stream_cursor(agent: AgentType, session_id: str) -> str | None:
-    cursor_method = getattr(agent, "get_event_stream_cursor", None)
+async def _get_telemetry_stream_cursor(agent: AgentType, session_id: str) -> str | None:
+    cursor_method = getattr(agent, "get_telemetry_stream_cursor", None)
     if callable(cursor_method):
-        result = cursor_method(session_id)
+        result = cursor_method(session_id=session_id)
         if isawaitable(result):
             return await result
         return result
-
-    event_router = getattr(agent, "event_router", None)
-    if event_router is not None and hasattr(event_router, "get_stream_cursor"):
-        return await event_router.get_stream_cursor(session_id=session_id)
 
     return None
 
 
-async def _stream_events_after(
+async def _stream_telemetry_after(
     agent: AgentType,
     session_id: str,
     cursor: str | None,
+    run_id: str | None = None,
 ) -> AsyncGenerator[Any, None]:
-    stream_after_method = getattr(agent, "stream_events_after", None)
+    stream_after_method = getattr(agent, "stream_telemetry_after", None)
     if callable(stream_after_method):
-        async for event in stream_after_method(session_id, cursor):
-            yield event
-        return
-
-    event_router = getattr(agent, "event_router", None)
-    if event_router is not None and hasattr(event_router, "stream_after"):
-        async for event in event_router.stream_after(
-            session_id=session_id,
+        async for event in stream_after_method(
             cursor=cursor,
+            session_id=session_id,
+            run_id=run_id,
         ):
             yield event
         return
 
-    async for event in agent.stream_events(session_id):
-        yield event
+    return
 
 
-async def _get_events_after_cursor(
+async def _get_telemetry_events_after_cursor(
     agent: AgentType,
     session_id: str,
     cursor: str | None,
+    run_id: str | None = None,
 ) -> list[Any]:
-    events_after_method = getattr(agent, "get_events_after", None)
+    events_after_method = getattr(agent, "get_telemetry_events_after", None)
     if callable(events_after_method):
-        result = events_after_method(session_id, cursor)
+        result = events_after_method(cursor=cursor, session_id=session_id, run_id=run_id)
         if isawaitable(result):
             return await result
         return result
-
-    event_router = getattr(agent, "event_router", None)
-    if event_router is not None and hasattr(event_router, "get_events_after"):
-        return await event_router.get_events_after(
-            session_id=session_id,
-            cursor=cursor,
-        )
 
     return []
 
@@ -178,14 +169,24 @@ async def _run_agent_with_timeout(
     timeout_seconds: int | None,
     run_id: str,
 ) -> Any:
-    token = set_event_run_id(run_id)
+    kwargs: dict[str, Any] = {"session_id": session_id}
     try:
-        run_coro = agent.run(query, session_id=session_id)
-        if timeout_seconds and timeout_seconds > 0:
-            return await asyncio.wait_for(run_coro, timeout=timeout_seconds)
-        return await run_coro
-    finally:
-        reset_event_run_id(token)
+        run_signature = signature(agent.run)
+        if _accepts_keyword(run_signature, "run_id"):
+            kwargs["run_id"] = run_id
+    except (TypeError, ValueError):
+        kwargs["run_id"] = run_id
+    run_coro = agent.run(query, **kwargs)
+    if timeout_seconds and timeout_seconds > 0:
+        return await asyncio.wait_for(run_coro, timeout=timeout_seconds)
+    return await run_coro
+
+
+def _accepts_keyword(run_signature, name: str) -> bool:
+    return name in run_signature.parameters or any(
+        parameter.kind == Parameter.VAR_KEYWORD
+        for parameter in run_signature.parameters.values()
+    )
 
 
 async def _drain_event_queue(
@@ -221,7 +222,7 @@ async def run_agent_stream(
     timeout_seconds: int | None = None,
 ) -> AsyncGenerator[str, None]:
     """
-    Run the agent and stream live runtime events plus the final result via SSE.
+    Run the agent and stream live telemetry events plus the final result via SSE.
 
     Args:
         agent: The OmniCoreAgent instance to run
@@ -241,9 +242,9 @@ async def run_agent_stream(
     run_id = f"run_{uuid4().hex}"
 
     try:
-        cursor = await _get_event_stream_cursor(agent, session_id)
+        cursor = await _get_telemetry_stream_cursor(agent, session_id)
         pump_task = asyncio.create_task(
-            _pump_session_events(agent, session_id, event_queue, cursor)
+            _pump_session_events(agent, session_id, event_queue, cursor, run_id)
         )
         run_task = asyncio.create_task(
             _run_agent_with_timeout(agent, query, session_id, timeout_seconds, run_id)
@@ -281,7 +282,9 @@ async def run_agent_stream(
 
                 try:
                     events_after_cursor = await asyncio.wait_for(
-                        _get_events_after_cursor(agent, session_id, cursor),
+                        _get_telemetry_events_after_cursor(
+                            agent, session_id, cursor, run_id
+                        ),
                         timeout=_EVENT_REPLAY_TIMEOUT_SECONDS,
                     )
                 except Exception as exc:
@@ -378,7 +381,7 @@ async def stream_session_events(
     session_id: str,
 ) -> AsyncGenerator[str, None]:
     """
-    Replay stored session events, then stream live session events via SSE.
+    Replay stored telemetry events, then stream live session telemetry via SSE.
 
     The live subscriber starts before historical replay to avoid a gap where
     events can be written after the snapshot but before the stream is active.
@@ -397,14 +400,14 @@ async def stream_session_events(
     seen_event_ids: set[str] = set()
 
     try:
-        cursor = await _get_event_stream_cursor(agent, session_id)
+        cursor = await _get_telemetry_stream_cursor(agent, session_id)
         pump_task = asyncio.create_task(
             _pump_session_events(agent, session_id, event_queue, cursor)
         )
 
         try:
             replay_events = await asyncio.wait_for(
-                agent.get_events(session_id),
+                _get_telemetry_events_after_cursor(agent, session_id, None),
                 timeout=_EVENT_REPLAY_TIMEOUT_SECONDS,
             )
         except Exception as exc:

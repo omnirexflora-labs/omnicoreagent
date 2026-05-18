@@ -9,10 +9,6 @@ def default_memory_router() -> Any:
     return runtime("MemoryRouter")(memory_store_type="in_memory")
 
 
-def default_event_router() -> Any:
-    return runtime("EventRouter")(event_store_type="in_memory")
-
-
 def default_telemetry_store() -> Any:
     from omnicoreagent.core.telemetry import InMemoryTelemetryStore
 

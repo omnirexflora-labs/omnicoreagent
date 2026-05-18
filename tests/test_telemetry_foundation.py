@@ -1,9 +1,7 @@
 import asyncio
-from pathlib import Path
 
 import pytest
 
-from omnicoreagent.core.events.base import Event, EventType, ToolCallResultPayload
 from omnicoreagent.core.telemetry import (
     ActorType,
     InMemoryTelemetryStore,
@@ -23,7 +21,6 @@ from omnicoreagent.core.telemetry import (
     TraceStatus,
     current_telemetry_context,
 )
-from omnicoreagent.core.telemetry.migration import legacy_event_to_telemetry_event
 
 
 def test_telemetry_records_serialize_and_validate():
@@ -265,48 +262,6 @@ def test_normalizer_is_idempotent_for_missing_and_incomplete_trace():
     assert "incomplete_trace" in second.metadata.tags
 
 
-def test_legacy_event_maps_to_telemetry_event():
-    legacy = Event(
-        type=EventType.TOOL_CALL_RESULT,
-        payload=ToolCallResultPayload(
-            tool_name="search",
-            tool_args={"query": "ai"},
-            result="result",
-        ),
-        agent_name="assistant",
-        sequence=3,
-        run_id="run-legacy",
-    )
-
-    event = legacy_event_to_telemetry_event(
-        legacy,
-        trace_id="trace-legacy",
-        span_id="span-tool",
-    )
-
-    assert event.trace_id == "trace-legacy"
-    assert event.span_id == "span-tool"
-    assert event.event_type == "tool_result"
-    assert event.output["result"] == "result"
-    assert event.metadata["legacy_run_id"] == "run-legacy"
-
-
-def test_legacy_background_status_maps_lifecycle_event():
-    legacy = Event(
-        type=EventType.BACKGROUND_AGENT_STATUS,
-        payload={
-            "agent_id": "agent-1",
-            "status": "failed",
-            "timestamp": "2026-05-18T00:00:00+00:00",
-        },
-        agent_name="assistant",
-    )
-
-    event = legacy_event_to_telemetry_event(legacy, trace_id="trace-bg")
-
-    assert event.event_type == "background_run_failed"
-
-
 @pytest.mark.asyncio
 async def test_recorder_strict_mode_raises_store_errors():
     class BrokenStore(InMemoryTelemetryStore):
@@ -330,20 +285,6 @@ async def test_recorder_best_effort_suppresses_store_errors():
     context = await recorder.start_trace(trace_id="trace-best-effort")
 
     assert context.trace_id == "trace-best-effort"
-
-
-def test_telemetry_package_does_not_depend_on_event_router():
-    telemetry_dir = Path("src/omnicoreagent/core/telemetry")
-
-    references = []
-    for path in telemetry_dir.glob("*.py"):
-        if path.name == "migration.py":
-            continue
-        text = path.read_text()
-        if "EventRouter" in text or "event_router" in text:
-            references.append(path.name)
-
-    assert references == []
 
 
 @pytest.mark.asyncio

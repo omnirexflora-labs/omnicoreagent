@@ -203,13 +203,12 @@ def test_background_docs_use_current_event_vocabulary():
 
     assert not offenders, (
         "Background docs must use current run lifecycle events and "
-        "background_agent_status, not stale background task event names:\n"
+        "not stale background task event names:\n"
         + "\n".join(offenders)
     )
 
     events_doc = Path("docs/core-concepts/events.mdx").read_text(encoding="utf-8")
     for expected in {
-        "background_agent_status",
         "background_task_scheduled",
         "background_run_queued",
         "background_run_claimed",
@@ -219,11 +218,12 @@ def test_background_docs_use_current_event_vocabulary():
         assert expected in events_doc
 
 
-def test_background_cookbook_uses_typed_event_payload_access():
+def test_background_cookbook_describes_workspace_event_replay():
     text = Path("cookbook/background_agents/README.mdx").read_text(encoding="utf-8")
 
     assert 'event.payload["event"]' not in text
-    assert "event.payload.event" in text
+    assert "events.jsonl" in text
+    assert "get_run_events(run_id)" in text
 
 
 def test_ci_enforces_live_background_task_store_backends():

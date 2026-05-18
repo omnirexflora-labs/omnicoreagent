@@ -9,7 +9,7 @@ Read this with:
 - `src/omnicoreagent/background`
 - `src/omnicoreagent/core/runtime`
 - `src/omnicoreagent/core/workspace`
-- `src/omnicoreagent/core/events`
+- `src/omnicoreagent/core/telemetry`
 - `src/omnicoreagent/core/memory_store`
 - `engineering/specifications/telemetry.md`
 
@@ -17,7 +17,7 @@ When this specification changes, implementation and tests must change with it.
 
 Telemetry migration note: current event behavior remains documented here for
 the shipped background system. Future background visibility, replay, and trace
-evidence must move to telemetry. New work should not add new `EventRouter`
+evidence must move to telemetry. New work should not add new telemetry stream
 dependencies.
 
 ---
@@ -58,7 +58,7 @@ over smaller services:
 |--------|----------------|
 | `agent_specs` | Convert and resolve durable agent specs |
 | `run_helpers` | Pure run construction, retry, lease-release, sleep, and preview helpers |
-| `BackgroundEventLog` | Lifecycle event ordering, workspace persistence, event-router fanout, replay |
+| `BackgroundEventLog` | Lifecycle event ordering, workspace persistence, telemetry emission, replay |
 | `BackgroundWorkspaceIO` | Background workspace file reads and writes |
 | `BackgroundScheduleDispatcher` | Convert due schedules into durable queued or skipped runs |
 | `BackgroundSupervisor` | Claim, attempt lifecycle, execution, heartbeat, cancel, retry, and timeout runs |
@@ -182,7 +182,7 @@ MongoDB requirements:
 manager = BackgroundAgentManager(
     task_store=None,
     memory_router=None,
-    event_router=None,
+    telemetry_stream=None,
     workspace=None,
     worker_id=None,
 )
@@ -192,7 +192,7 @@ Defaults:
 
 - `task_store`: `None` selects `in_memory`
 - `memory_router`: normal OmniCoreAgent default memory router
-- `event_router`: normal OmniCoreAgent default event router
+- `telemetry_stream`: normal OmniCoreAgent telemetry stream
 - `workspace`: normal OmniCoreAgent default workspace
 - `worker_id`: generated stable process identifier
 
@@ -992,19 +992,17 @@ Common payload fields:
 
 Run-scoped events are always captured in the manager process cache. When
 workspace event mirroring is enabled, they are also appended to the run
-workspace `events.jsonl` file. When an `EventRouter` is configured, the manager
+workspace `events.jsonl` file. When an telemetry stream is configured, the manager
 mirrors events to it on a best-effort bounded path.
 
-Every background event includes `run_id` for run-scoped events. Event backends
-that store task-level streams must filter by `run_id` when returning a run
-trace.
+Every background event includes `run_id` for run-scoped events. Telemetry and
+workspace replay must filter by `run_id` when returning a run trace.
 
 `get_run_events(run_id)` is a run-scoped replay helper. It reads the available
 event sources in this order:
 
-1. `EventRouter`, when configured and replay-capable
-2. current process event cache
-3. run workspace `events.jsonl` mirror, when enabled
+1. current process event cache
+2. run workspace `events.jsonl` mirror, when enabled
 
 Selection rules:
 
@@ -1013,24 +1011,20 @@ Selection rules:
   `background_run_timeout`, `background_run_cancelled`, or
   `background_run_skipped`.
 - If one or more complete sources exist, return the longest complete trace.
-- If no complete source exists, prefer `EventRouter`, then process cache, then
+- If no complete source exists, prefer telemetry stream, then process cache, then
   workspace mirror.
 - Returned events must be ordered by `sequence`, then `timestamp`.
 - Sources with missing, non-positive, malformed, or duplicate run-local
   `sequence` values are ignored during replay selection. A valid replay source
   uses contiguous integer sequence numbers starting at `1`.
-- Event-router reads must filter by `run_id` because one background task can run
+- Replay reads must filter by `run_id` because one background task can run
   multiple times under the same memory `session_id`.
-- Event-router replay reads are bounded. A slow or unavailable event backend
-  must not block replay from process cache or workspace mirror sources.
-- Event-router appends are bounded. A slow or unavailable event backend can
-  delay lifecycle emission only up to the append timeout; it must not hold task
-  execution indefinitely.
+- Replay reads must not block fallback between process cache and workspace
+  mirror sources.
 - Missing event history returns an empty list; it does not change run state.
 
-Durable restart replay requires a replay-capable event backend or the workspace
-`events.jsonl` mirror. The task store remains the source of truth for run state
-even when event replay is unavailable.
+Durable restart replay uses the workspace `events.jsonl` mirror. The task store
+remains the source of truth for run state even when event replay is unavailable.
 
 ---
 
@@ -1153,7 +1147,7 @@ Run the same contract tests against every backend:
 - cancels run
 - lists runs
 - lists attempts
-- reads run events from EventRouter or workspace mirror
+- reads run events from telemetry stream or workspace mirror
 - shuts down scheduler and workers
 - does not import optional scheduler/storage dependencies during root import
 - does not import optional scheduler/storage dependencies during

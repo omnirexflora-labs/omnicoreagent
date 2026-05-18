@@ -6,7 +6,7 @@ telemetry.
 Read this with:
 
 - `engineering/architecture/telemetry.md`
-- `src/omnicoreagent/core/events`
+- `src/omnicoreagent/core/telemetry`
 - `src/omnicoreagent/background/event_log.py`
 - `src/omnicoreagent/serve/sse.py`
 - `src/omnicoreagent/serve/routes/runs.py`
@@ -32,7 +32,7 @@ This specification covers:
 - live/replay stream contract
 - normalization contract
 - redaction and payload policy
-- migration from legacy runtime events and `EventRouter`
+- migration from runtime telemetry events and telemetry stream
 - required tests
 
 This specification does not cover:
@@ -107,9 +107,7 @@ Rules:
 - A session may contain many traces.
 - `run_id` may equal `trace_id` in simple cases, but this must not be required.
 - Every span belongs to exactly one trace.
-- Every canonical telemetry event belongs to exactly one trace.
-- Legacy runtime events that cannot be assigned to a trace must be marked
-  `legacy_unbound=true` by the normalizer.
+- Every telemetry event belongs to exactly one trace.
 
 ---
 
@@ -317,15 +315,13 @@ Foundation event groups:
 | Reasoning | `planning_step`, `reflection`, `retry` |
 | Subagents | `subagent_spawn`, `subagent_result`, `subagent_error` |
 | Workflow | `workflow_route`, `workflow_handoff`, `workflow_join` |
-| Background | `background_run_queued`, `background_run_started`, `background_run_heartbeat`, `background_run_completed`, `background_run_failed`, `background_run_cancelled`, `background_run_timeout` |
+| Background | `background_task_scheduled`, `background_run_queued`, `background_run_claimed`, `background_run_started`, `background_run_heartbeat`, `background_run_retrying`, `background_run_completed`, `background_run_failed`, `background_run_cancelled`, `background_run_timeout`, `background_run_skipped`, `background_run_recovered` |
 | Serving | `serve_request_start`, `serve_request_end`, `serve_request_error` |
 | Finalization | `final_answer`, `final_state` |
 | Errors | `runtime_error`, `uncaught_exception`, `telemetry_error` |
 
 Rules:
 
-- current legacy `EventType` values can be adapted into these names during
-  migration.
 - arbitrary string events must be marked experimental and should not be used by
   future evaluators.
 - event types must not encode dynamic ids.
@@ -460,8 +456,8 @@ Required indexes for durable stores:
 
 ## Telemetry Stream Contract
 
-The telemetry stream replaces `EventRouter` as the long-term streaming and
-replay boundary.
+`TelemetryStream` is the long-term streaming and replay adapter over
+`TelemetryStore`.
 
 Interface:
 
@@ -487,7 +483,7 @@ Rules:
 - stream cursors must support replay/follow behavior for SSE reconnect.
 - stream scopes must isolate sessions, runs, and traces.
 - `/run` SSE streams events for the trace/run it started.
-- `/events/{session_id}` can remain during migration but should become a
+- `/events/{session_id}` can remain  but should become a
   telemetry stream view.
 - stream failures must not corrupt the stored trace.
 - Redis streams may be used as an implementation backend for live fanout, but
@@ -526,8 +522,8 @@ Rules:
 - evaluators consume normalized traces only.
 - normalizer must not discard errors.
 - normalizer must not hide incomplete traces.
-- unsupported legacy events must be preserved as `legacy_event` records with
-  metadata explaining the source type.
+- unsupported experimental events must be preserved with metadata explaining the
+  source type.
 
 ---
 
@@ -590,9 +586,8 @@ from the start.
 Current runtime facade coverage:
 
 - `OmniCoreAgent.run(...)` starts one `agent.run` trace per call.
-- every run receives a `run_id`. The caller may provide it explicitly, the
-  runtime may adopt the current legacy event run context, or the runtime may
-  generate a new one.
+- every run receives a `run_id`. The caller may provide it explicitly or the
+  runtime may generate a new one.
 - a single `session_id` may contain multiple traces and run ids.
 - successful runs emit `user_message` and `final_answer`, then complete the
   trace.
@@ -610,8 +605,8 @@ Current runtime facade coverage:
 - successful and guardrail-blocked public run responses include `trace_id` and
   `run_id`.
 - `get_trace(trace_id)` returns a telemetry trace when passed a returned
-  telemetry `trace_id`; `get_trace(session_id=...)` and `get_event_trace(...)`
-  remain legacy event-summary accessors during migration.
+  telemetry `trace_id`; `get_trace(session_id=...)` returns the latest telemetry
+  trace for that session.
 - if callers inject telemetry components directly, `telemetry_store`,
   `telemetry_recorder.store`, and `telemetry_stream.store` must refer to the
   same store instance. The runtime rejects mismatches instead of silently
@@ -642,48 +637,46 @@ Current uncovered runtime internals:
 
 ---
 
-## Migration From Legacy Runtime Events
+## Runtime Evidence Ownership
 
-Existing runtime events and `EventRouter` exist only during migration.
-
-Target ownership:
+Runtime evidence has one canonical ownership path:
 
 ```text
 TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE
 ```
 
-There must not be a permanent parallel stack:
+There must not be a parallel event stack:
 
 ```text
-EventRouter -> EventStore
+telemetry stream -> EventStore
 TelemetryRecorder -> TelemetryStore
 ```
 
-Mapping examples:
+Canonical event mapping:
 
-| Legacy Runtime Event | Telemetry Event | Span |
-|----------------------|-----------------|------|
-| `user_message` | `user_message` | `agent.run` |
-| `agent_message` | `model_response` | `model.call` |
-| `agent_thought` | `planning_step` or metadata event | `agent.step` |
-| `tool_call_started` | `tool_batch_start` plus child `tool_call` events | `tool.batch` |
-| `tool_call_result` | `tool_result` | `tool.call` |
-| `tool_call_error` | `tool_error` | `tool.call` |
-| `sub_agent_call_started` | `subagent_spawn` | `subagent.run` |
-| `sub_agent_call_result` | `subagent_result` | `subagent.run` |
-| `background_agent_status` | background lifecycle event | `background.run` |
-| `final_answer` | `final_answer` | `agent.run` |
+| Runtime Moment | Telemetry Event | Span |
+|----------------|-----------------|------|
+| user input accepted | `user_message` | `agent.run` |
+| model request starts | `model_call` | `model.call` |
+| model response received | `model_response` | `model.call` |
+| step boundary reached | `agent_step` | `agent.step` |
+| tool batch starts | `tool_batch_start` | `tool.batch` |
+| individual tool starts | `tool_call` | `tool.call` |
+| individual tool succeeds | `tool_result` | `tool.call` |
+| individual tool fails | `tool_error` | `tool.call` |
+| subagent starts | `subagent_spawn` | `subagent.run` |
+| subagent completes | `subagent_result` | `subagent.run` |
+| background lifecycle changes | background lifecycle event | `background.run` |
+| final answer produced | `final_answer` | `agent.run` |
 
 Rules:
 
-- old `/events/{session_id}` behavior must keep working until it is deliberately
-  reimplemented on `TelemetryStream` or replaced by a new route.
-- current `get_trace()` should be documented as event summary until replaced.
-- migration must avoid two unrelated sources of truth.
-- once telemetry becomes canonical, SSE must stream selected telemetry events.
-- no new feature should depend on `EventRouter`.
-- `EventRouter` and legacy event stores should be removed after OmniServe,
-  background agents, and runtime emission are telemetry-native.
+- `/events/{session_id}` is telemetry-backed and keeps the route name for HTTP
+  ergonomics only.
+- `get_trace()` returns canonical telemetry trace data or the latest trace for a
+  session.
+- SSE streams selected telemetry events.
+- no new feature should introduce a separate visibility router or store.
 
 ---
 
@@ -741,11 +734,11 @@ Telemetry implementation phases require tests for:
 - redaction of configured keys
 - payload size truncation/offload references
 - JSONL append/read behavior
-- legacy runtime event migration
+- telemetry event replay/follow behavior
 - telemetry stream replay/follow behavior
 - guard test or review check that new telemetry, serving, and background code
-  does not import or instantiate `EventRouter` except inside explicitly named
-  migration adapters
+  does not import or instantiate telemetry stream except inside explicitly named
+  telemetry adapters
 - normalized trace deterministic ordering
 - missing evidence markers
 
@@ -761,7 +754,7 @@ This design PR is acceptable when:
 - architecture and specification are accepted
 - telemetry owns the target streaming path:
   `TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE`
-- legacy runtime events and `EventRouter` are documented only as migration
+- runtime telemetry events and telemetry stream are documented only as migration
   concerns
 - the spec defines the schema, recorder, store, stream, normalizer, redaction,
   migration, and future evaluation evidence contracts
@@ -776,7 +769,7 @@ The future telemetry foundation implementation is acceptable when:
 - telemetry store can persist and retrieve traces locally
 - telemetry stream can replay/follow selected telemetry events
 - OmniServe SSE is backed by `TelemetryStream`
-- the implementation PR includes an explicit `EventRouter` removal or migration
+- the implementation PR includes an explicit telemetry stream removal or migration
   completion plan for remaining call sites
 - normalizer can produce deterministic normalized traces
 - future evaluation can reference `trace_id`, `span_id`, and `event_id`

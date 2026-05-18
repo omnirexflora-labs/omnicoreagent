@@ -227,20 +227,17 @@ mcp_tools = [
 
 ## 5. Persistence Configuration
 
-Pass a `MemoryRouter` to customize conversation memory, and an `EventRouter` to
-customize runtime event streaming.
+Pass a `MemoryRouter` to customize conversation memory. Runtime evidence is
+recorded through telemetry, which defaults to in-memory storage.
 
 ```python
-from omnicoreagent import MemoryRouter, EventRouter
+from omnicoreagent import MemoryRouter
 
 agent = OmniCoreAgent(
     ...
-    memory_router=MemoryRouter("redis"),
-    event_router=EventRouter("redis_stream")
+    memory_router=MemoryRouter("redis")
 )
 ```
-
-Event streaming supports `in_memory` and `redis_stream`.
 
 ---
 

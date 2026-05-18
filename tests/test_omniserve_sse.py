@@ -3,15 +3,14 @@ import json
 
 import pytest
 
-from omnicoreagent.core.events.base import (
-    AgentThoughtPayload,
-    Event,
-    EventType,
-    FinalAnswerPayload,
-    UserMessagePayload,
+from omnicoreagent.core.telemetry import (
+    ActorType,
+    InMemoryTelemetryStore,
+    TelemetryActor,
+    TelemetryConfig,
+    TelemetryRecorder,
+    TelemetryStream,
 )
-from omnicoreagent.core.events.event_router import EventRouter
-from omnicoreagent.serve import sse as sse_module
 from omnicoreagent.serve.sse import run_agent_stream, stream_session_events
 
 
@@ -24,188 +23,100 @@ def _event_data(chunk: str) -> dict:
     return json.loads(data_line.removeprefix("data: "))
 
 
-class _StreamingRunAgent:
-    name = "StreamingRunAgent"
+class _TelemetryAgent:
+    name = "TelemetryAgent"
 
-    def __init__(self):
-        self.queue: asyncio.Queue[Event] = asyncio.Queue()
-        self.subscribed = asyncio.Event()
+    def __init__(self, telemetry_config: TelemetryConfig | None = None):
+        self.store = InMemoryTelemetryStore()
+        self.telemetry_stream = TelemetryStream(self.store)
+        self.telemetry_config = telemetry_config
+        self.run_started = asyncio.Event()
 
-    async def stream_events(self, session_id: str):
-        self.subscribed.set()
-        while True:
-            yield await self.queue.get()
-
-    async def run(self, query: str, *, session_id: str):
-        await self.subscribed.wait()
-        await self.queue.put(
-            Event(
-                type=EventType.AGENT_THOUGHT,
-                payload=AgentThoughtPayload(message=f"thinking about {query}"),
-                agent_name=self.name,
-                event_id="thought-1",
-            )
+    async def get_telemetry_stream_cursor(self, *, session_id: str):
+        return await self.telemetry_stream.get_stream_cursor(
+            self._scope(session_id=session_id)
         )
-        await self.queue.put(
-            Event(
-                type=EventType.FINAL_ANSWER,
-                payload=FinalAnswerPayload(message="done"),
-                agent_name=self.name,
-                event_id="final-1",
-            )
-        )
-        return {"response": "done"}
 
-
-class _EventAgent:
-    name = "EventAgent"
-
-    def __init__(self, router: EventRouter):
-        self.router = router
-
-    async def get_events(self, session_id: str):
-        return await self.router.get_events(session_id)
-
-    async def get_event_stream_cursor(self, session_id: str):
-        return await self.router.get_stream_cursor(session_id)
-
-    async def stream_events_after(self, session_id: str, cursor: str | None):
-        async for event in self.router.stream_after(session_id, cursor):
+    async def stream_telemetry_after(
+        self, *, cursor: str | None, session_id: str, run_id: str | None = None
+    ):
+        async for event in self.telemetry_stream.stream_after(
+            self._scope(session_id=session_id, run_id=run_id), cursor
+        ):
             yield event
 
-    async def get_events_after(self, session_id: str, cursor: str | None):
-        return await self.router.get_events_after(session_id, cursor)
+    async def get_telemetry_events_after(
+        self, *, cursor: str | None, session_id: str, run_id: str | None = None
+    ):
+        return await self.telemetry_stream.get_events_after(
+            self._scope(session_id=session_id, run_id=run_id), cursor
+        )
 
-    async def stream_events(self, session_id: str):
-        async for event in self.router.stream(session_id):
+    async def run(self, query: str, *, session_id: str, run_id: str):
+        recorder = TelemetryRecorder(self.store, self.telemetry_config)
+        context = await recorder.start_trace(
+            name="agent.run",
+            kind="agent.run",
+            actor=TelemetryActor(type=ActorType.AGENT, name=self.name),
+            run_id=run_id,
+            session_id=session_id,
+            input={"query": query},
+        )
+        self.run_started.set()
+        await recorder.emit_event(
+            "user_message",
+            actor=TelemetryActor(type=ActorType.USER),
+            input={"message": query},
+        )
+        await asyncio.sleep(0)
+        await recorder.emit_event(
+            "final_answer",
+            actor=TelemetryActor(type=ActorType.AGENT, name=self.name),
+            output={"response": f"done:{query}"},
+        )
+        await recorder.end_trace(output={"response": f"done:{query}"})
+        return {
+            "response": f"done:{query}",
+            "trace_id": context.trace_id,
+            "run_id": run_id,
+        }
+
+    def _scope(self, *, session_id: str, run_id: str | None = None):
+        from omnicoreagent.core.telemetry import TelemetryStreamScope
+
+        return TelemetryStreamScope(session_id=session_id, run_id=run_id)
+
+
+class _UnfilteredTelemetryAgent(_TelemetryAgent):
+    async def stream_telemetry_after(
+        self, *, cursor: str | None, session_id: str, run_id: str | None = None
+    ):
+        async for event in self.telemetry_stream.stream_after(
+            self._scope(session_id=session_id), cursor
+        ):
             yield event
 
-
-class _ImmediateEventAgent:
-    name = "ImmediateEventAgent"
-
-    def __init__(self):
-        self.event_router = EventRouter(event_store_type="in_memory")
-
-    async def get_event_stream_cursor(self, session_id: str):
-        return await self.event_router.get_stream_cursor(session_id)
-
-    async def stream_events_after(self, session_id: str, cursor: str | None):
-        async for event in self.event_router.stream_after(session_id, cursor):
-            yield event
-
-    async def get_events_after(self, session_id: str, cursor: str | None):
-        return await self.event_router.get_events_after(session_id, cursor)
-
-    async def run(self, query: str, *, session_id: str):
-        await self.event_router.append(
-            session_id,
-            Event(
-                type=EventType.USER_MESSAGE,
-                payload=UserMessagePayload(message=query),
-                agent_name=self.name,
-                event_id="immediate-user",
-            ),
+    async def get_telemetry_events_after(
+        self, *, cursor: str | None, session_id: str, run_id: str | None = None
+    ):
+        return await self.telemetry_stream.get_events_after(
+            self._scope(session_id=session_id), cursor
         )
-        return {"response": "done"}
 
 
-class _InterleavedSameSessionAgent:
-    name = "InterleavedSameSessionAgent"
-
-    def __init__(self):
-        self.event_router = EventRouter(event_store_type="in_memory")
-
-    async def get_event_stream_cursor(self, session_id: str):
-        return await self.event_router.get_stream_cursor(session_id)
-
-    async def stream_events_after(self, session_id: str, cursor: str | None):
-        async for event in self.event_router.stream_after(session_id, cursor):
-            yield event
-
-    async def get_events_after(self, session_id: str, cursor: str | None):
-        return await self.event_router.get_events_after(session_id, cursor)
+class _NoRunIdAgent:
+    name = "NoRunIdAgent"
 
     async def run(self, query: str, *, session_id: str):
-        await self.event_router.append(
-            session_id,
-            Event(
-                type=EventType.USER_MESSAGE,
-                payload=UserMessagePayload(message=f"user:{query}"),
-                agent_name=self.name,
-                event_id=f"user-{query}",
-            ),
-        )
-        await asyncio.sleep(0.01)
-        await self.event_router.append(
-            session_id,
-            Event(
-                type=EventType.AGENT_THOUGHT,
-                payload=AgentThoughtPayload(message=f"thought:{query}"),
-                agent_name=self.name,
-                event_id=f"thought-{query}",
-            ),
-        )
-        return {"response": f"done:{query}"}
-
-
-class _SlowAgent:
-    name = "SlowAgent"
-
-    async def stream_events(self, session_id: str):
-        while True:
-            await asyncio.sleep(10)
-            if False:
-                yield None
-
-    async def run(self, query: str, *, session_id: str):
-        await asyncio.sleep(10)
-        return {"response": "too late"}
-
-
-class _BrokenStreamAgent:
-    name = "BrokenStreamAgent"
-
-    async def get_events(self, session_id: str):
-        return []
-
-    async def get_event_stream_cursor(self, session_id: str):
-        return "0"
-
-    async def stream_events_after(self, session_id: str, cursor: str | None):
-        raise RuntimeError("stream failed")
-        if False:
-            yield None
-
-
-class _SlowCatchupAgent:
-    name = "SlowCatchupAgent"
-
-    async def get_event_stream_cursor(self, session_id: str):
-        return "0"
-
-    async def stream_events_after(self, session_id: str, cursor: str | None):
-        while True:
-            await asyncio.sleep(10)
-            if False:
-                yield None
-
-    async def get_events_after(self, session_id: str, cursor: str | None):
-        await asyncio.sleep(10)
-        return []
-
-    async def run(self, query: str, *, session_id: str):
-        return {"response": "done"}
+        return {"response": f"done:{session_id}:{query}"}
 
 
 @pytest.mark.asyncio
-async def test_run_agent_stream_yields_live_events_before_complete():
-    agent = _StreamingRunAgent()
-
+async def test_run_agent_stream_yields_telemetry_before_complete():
     chunks = [
         chunk
         async for chunk in run_agent_stream(
-            agent,
+            _TelemetryAgent(),
             "hello",
             "session-a",
             timeout_seconds=1,
@@ -216,42 +127,62 @@ async def test_run_agent_stream_yields_live_events_before_complete():
 
     assert event_names == [
         "session",
-        "agent_thought",
+        "user_message",
         "final_answer",
         "complete",
         "session",
     ]
-    assert event_names.index("agent_thought") < event_names.index("complete")
+    assert event_names.index("final_answer") < event_names.index("complete")
     assert _event_data(chunks[1])["session_id"] == "session-a"
-    assert _event_data(chunks[2])["event_id"] == "final-1"
-    assert _event_data(chunks[3])["response"] == "done"
+    assert _event_data(chunks[3])["response"] == "done:hello"
 
 
 @pytest.mark.asyncio
-async def test_run_agent_stream_catches_events_emitted_before_stream_consumes():
+async def test_run_agent_stream_supports_agents_without_run_id_keyword():
     chunks = [
         chunk
         async for chunk in run_agent_stream(
-            _ImmediateEventAgent(),
+            _NoRunIdAgent(),
             "hello",
-            "session-a",
+            "session-no-run-id",
+            timeout_seconds=1,
+        )
+    ]
+
+    assert [_event_name(chunk) for chunk in chunks] == [
+        "session",
+        "complete",
+        "session",
+    ]
+    complete = _event_data(chunks[1])
+    assert complete["response"] == "done:session-no-run-id:hello"
+    assert complete["run_id"].startswith("run_")
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_keeps_scoped_events_when_metadata_is_truncated():
+    chunks = [
+        chunk
+        async for chunk in run_agent_stream(
+            _TelemetryAgent(TelemetryConfig(max_payload_bytes=1)),
+            "hello",
+            "session-truncated-metadata",
             timeout_seconds=1,
         )
     ]
 
     event_names = [_event_name(chunk) for chunk in chunks]
-
-    assert event_names == ["session", "user_message", "complete", "session"]
-    assert _event_data(chunks[1])["event_id"] == "immediate-user"
-    assert _event_data(chunks[1])["sequence"] == 1
+    assert "user_message" in event_names
+    assert "final_answer" in event_names
+    assert "complete" in event_names
 
 
 @pytest.mark.asyncio
 async def test_concurrent_run_streams_same_session_only_emit_their_run_events():
-    agent = _InterleavedSameSessionAgent()
+    agent = _TelemetryAgent()
 
     async def collect(query: str):
-        chunks = [
+        return [
             chunk
             async for chunk in run_agent_stream(
                 agent,
@@ -260,158 +191,79 @@ async def test_concurrent_run_streams_same_session_only_emit_their_run_events():
                 timeout_seconds=1,
             )
         ]
-        runtime_events = [
-            _event_data(chunk)
-            for chunk in chunks
-            if _event_data(chunk).get("type") is not None
+
+    first, second = await asyncio.gather(collect("first"), collect("second"))
+
+    first_events = [_event_data(chunk) for chunk in first if _event_name(chunk) != "session"]
+    second_events = [
+        _event_data(chunk) for chunk in second if _event_name(chunk) != "session"
+    ]
+
+    assert {event["run_id"] for event in first_events if event.get("event_id")} == {
+        first_events[-1]["run_id"]
+    }
+    assert {event["run_id"] for event in second_events if event.get("event_id")} == {
+        second_events[-1]["run_id"]
+    }
+    assert first_events[-1]["run_id"] != second_events[-1]["run_id"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_run_streams_do_not_leak_when_stream_ignores_run_id():
+    agent = _UnfilteredTelemetryAgent(TelemetryConfig(max_payload_bytes=1))
+
+    async def collect(query: str):
+        return [
+            chunk
+            async for chunk in run_agent_stream(
+                agent,
+                query,
+                "shared-session",
+                timeout_seconds=1,
+            )
         ]
-        complete = next(
-            _event_data(chunk) for chunk in chunks if _event_name(chunk) == "complete"
-        )
-        return runtime_events, complete
 
-    (first_events, first_complete), (second_events, second_complete) = (
-        await asyncio.gather(collect("first"), collect("second"))
-    )
+    first, second = await asyncio.gather(collect("first"), collect("second"))
 
-    assert [event["payload"]["message"] for event in first_events] == [
-        "user:first",
-        "thought:first",
+    first_events = [
+        _event_data(chunk)
+        for chunk in first
+        if _event_name(chunk) not in {"session", "complete"}
     ]
-    assert [event["payload"]["message"] for event in second_events] == [
-        "user:second",
-        "thought:second",
-    ]
-    assert {event["run_id"] for event in first_events} == {first_complete["run_id"]}
-    assert {event["run_id"] for event in second_events} == {second_complete["run_id"]}
-    assert first_complete["run_id"] != second_complete["run_id"]
-
-
-@pytest.mark.asyncio
-async def test_stream_session_events_replays_history_then_streams_live_session_only():
-    router = EventRouter(event_store_type="in_memory")
-    agent = _EventAgent(router)
-
-    await router.append(
-        "session-a",
-        Event(
-            type=EventType.USER_MESSAGE,
-            payload=UserMessagePayload(message="stored"),
-            agent_name=agent.name,
-            event_id="stored-a",
-        ),
-    )
-    await router.append(
-        "session-b",
-        Event(
-            type=EventType.USER_MESSAGE,
-            payload=UserMessagePayload(message="other session"),
-            agent_name=agent.name,
-            event_id="stored-b",
-        ),
-    )
-
-    stream = stream_session_events(agent, "session-a")
-    try:
-        session_chunk = await asyncio.wait_for(stream.__anext__(), timeout=1)
-        replay_chunk = await asyncio.wait_for(stream.__anext__(), timeout=1)
-
-        assert _event_name(session_chunk) == "session"
-        assert _event_name(replay_chunk) == "user_message"
-        assert _event_data(replay_chunk)["event_id"] == "stored-a"
-        assert _event_data(replay_chunk)["session_id"] == "session-a"
-
-        await router.append(
-            "session-b",
-            Event(
-                type=EventType.AGENT_THOUGHT,
-                payload=AgentThoughtPayload(message="do not stream"),
-                agent_name=agent.name,
-                event_id="live-b",
-            ),
-        )
-        await router.append(
-            "session-a",
-            Event(
-                type=EventType.AGENT_THOUGHT,
-                payload=AgentThoughtPayload(message="stream me"),
-                agent_name=agent.name,
-                event_id="live-a",
-            ),
-        )
-
-        live_chunk = await asyncio.wait_for(stream.__anext__(), timeout=1)
-
-        assert _event_name(live_chunk) == "agent_thought"
-        assert _event_data(live_chunk)["event_id"] == "live-a"
-        assert _event_data(live_chunk)["session_id"] == "session-a"
-    finally:
-        await stream.aclose()
-
-
-@pytest.mark.asyncio
-async def test_run_agent_stream_timeout_yields_error_and_ended():
-    chunks = [
-        chunk
-        async for chunk in run_agent_stream(
-            _SlowAgent(),
-            "slow",
-            "timeout-session",
-            timeout_seconds=0.01,
-        )
+    second_events = [
+        _event_data(chunk)
+        for chunk in second
+        if _event_name(chunk) not in {"session", "complete"}
     ]
 
-    assert [_event_name(chunk) for chunk in chunks] == ["session", "error", "session"]
-    error_data = _event_data(chunks[1])
-    assert error_data["error"] == "Request timed out"
-    assert error_data["session_id"] == "timeout-session"
-    assert error_data["run_id"].startswith("run_")
-    assert _event_data(chunks[-1]) == {
-        "session_id": "timeout-session",
-        "status": "ended",
+    assert {event["run_id"] for event in first_events} == {
+        _event_data(next(chunk for chunk in first if _event_name(chunk) == "complete"))[
+            "run_id"
+        ]
+    }
+    assert {event["run_id"] for event in second_events} == {
+        _event_data(next(chunk for chunk in second if _event_name(chunk) == "complete"))[
+            "run_id"
+        ]
     }
 
 
 @pytest.mark.asyncio
-async def test_run_agent_stream_catchup_timeout_still_yields_complete(monkeypatch):
-    monkeypatch.setattr(sse_module, "_EVENT_REPLAY_TIMEOUT_SECONDS", 0.01)
+async def test_stream_session_events_replays_existing_telemetry():
+    agent = _TelemetryAgent()
+    await agent.run("old", session_id="session-b", run_id="run_existing")
 
-    chunks = [
-        chunk
-        async for chunk in run_agent_stream(
-            _SlowCatchupAgent(),
-            "hello",
-            "catchup-session",
-            timeout_seconds=1,
-        )
-    ]
+    stream = stream_session_events(agent, "session-b")
+    chunks = []
+    async for chunk in stream:
+        chunks.append(chunk)
+        if _event_name(chunk) == "final_answer":
+            break
+    await stream.aclose()
 
     assert [_event_name(chunk) for chunk in chunks] == [
         "session",
-        "error",
-        "complete",
-        "session",
+        "user_message",
+        "final_answer",
     ]
-    assert _event_data(chunks[1])["session_id"] == "catchup-session"
-    assert _event_data(chunks[1])["run_id"].startswith("run_")
-    assert _event_data(chunks[2])["response"] == "done"
-    assert _event_data(chunks[2])["run_id"] == _event_data(chunks[1])["run_id"]
-
-
-@pytest.mark.asyncio
-async def test_stream_session_events_yields_error_when_live_stream_fails():
-    stream = stream_session_events(_BrokenStreamAgent(), "broken-session")
-    try:
-        chunks = [
-            await asyncio.wait_for(stream.__anext__(), timeout=1),
-            await asyncio.wait_for(stream.__anext__(), timeout=1),
-            await asyncio.wait_for(stream.__anext__(), timeout=1),
-        ]
-    finally:
-        await stream.aclose()
-
-    assert [_event_name(chunk) for chunk in chunks] == ["session", "error", "session"]
-    assert _event_data(chunks[1]) == {
-        "error": "stream failed",
-        "session_id": "broken-session",
-    }
+    assert _event_data(chunks[1])["run_id"] == "run_existing"

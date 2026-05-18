@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from omnicoreagent.core.events.base import Event
 from omnicoreagent.core.types import (
     ParsedResponse,
     SessionState,
@@ -60,7 +59,6 @@ class AgentToolActionRunner:
         mcp_tools: dict | None = None,
         local_tools: Any = None,
         session_id: str | None = None,
-        event_router: Callable[[str | None, Event], Any] | None = None,
         telemetry_recorder: Any = None,
         sub_agents: list | None = None,
     ):
@@ -83,7 +81,6 @@ class AgentToolActionRunner:
             session_state=session_state,
             add_message_to_history=add_message_to_history,
             session_id=session_id,
-            event_router=event_router,
             telemetry_recorder=telemetry_recorder,
         )
 
@@ -108,7 +105,7 @@ class AgentToolActionRunner:
             session_state=session_state,
             system_prompt=system_prompt,
             session_id=session_id,
-            event_router=event_router,
+            telemetry_recorder=telemetry_recorder,
             debug=debug,
             reset_system_prompt=reset_system_prompt,
         )
@@ -121,7 +118,6 @@ class AgentToolActionRunner:
         session_state: SessionState,
         add_message_to_history: Callable[[str, str, dict | None], Any],
         session_id: str | None,
-        event_router: Callable[[str | None, Event], Any] | None,
         telemetry_recorder: Any = None,
     ) -> tuple[str, list[dict[str, Any]], str | None, list[dict[str, Any]]]:
         if isinstance(tool_call_result, ToolError):
@@ -129,7 +125,7 @@ class AgentToolActionRunner:
                 tool_error=tool_call_result,
                 session_state=session_state,
                 session_id=session_id,
-                event_router=event_router,
+                telemetry_recorder=telemetry_recorder,
             )
 
         tool_call_results = list(tool_call_result)
@@ -139,7 +135,6 @@ class AgentToolActionRunner:
             session_state=session_state,
             add_message_to_history=add_message_to_history,
             session_id=session_id,
-            event_router=event_router,
             telemetry_recorder=telemetry_recorder,
         )
         obs_text, tools_results = await self.tool_batch_runner.execute(
@@ -147,7 +142,6 @@ class AgentToolActionRunner:
             session_state=session_state,
             add_message_to_history=add_message_to_history,
             session_id=session_id,
-            event_router=event_router,
             telemetry_recorder=telemetry_recorder,
             tool_batch_name=tool_batch_name,
             tool_batch_args=tool_batch_args,

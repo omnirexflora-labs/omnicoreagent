@@ -14,7 +14,6 @@ def prepare_dynamic_subagents(
     local_tools: Any,
     agent_config: dict[str, Any],
     prompt_builder: Any,
-    event_router: Any,
     memory_router: Any,
     debug: bool,
 ) -> tuple[Any, Any]:
@@ -34,7 +33,6 @@ def prepare_dynamic_subagents(
         local_tools=local_tools,
         agent_config=agent_config,
         prompt_builder=prompt_builder,
-        event_router=event_router,
         memory_router=memory_router,
         debug=debug,
     )

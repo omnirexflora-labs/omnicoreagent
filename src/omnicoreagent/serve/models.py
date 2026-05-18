@@ -175,19 +175,19 @@ class SessionHistoryResponse(BaseModel):
 
 
 class EventsResponse(BaseModel):
-    """Response model for events endpoint."""
+    """Response model for telemetry events endpoint."""
 
     session_id: str = Field(..., description="Session ID")
-    events: list[dict[str, Any]] = Field(..., description="Events list")
-    count: int = Field(..., description="Number of events")
+    events: list[dict[str, Any]] = Field(..., description="Telemetry events list")
+    count: int = Field(..., description="Number of telemetry events")
 
 
 class TraceResponse(BaseModel):
-    """Response model for session event summary endpoint."""
+    """Response model for session telemetry trace summary endpoint."""
 
     session_id: str = Field(..., description="Session ID")
-    summary: dict[str, Any] = Field(..., description="Event summary")
-    steps: list[dict[str, Any]] = Field(..., description="Ordered event steps")
+    summary: dict[str, Any] = Field(..., description="Telemetry trace summary")
+    steps: list[dict[str, Any]] = Field(..., description="Ordered telemetry events")
 
 
 class BackgroundStatusResponse(BaseModel):

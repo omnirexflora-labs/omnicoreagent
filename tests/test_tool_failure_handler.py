@@ -3,7 +3,6 @@ import json
 import pytest
 
 from omnicoreagent.core.agents.base import BaseReactAgent
-from omnicoreagent.core.events.base import EventType
 from omnicoreagent.core.tools.tool_failure_handler import ToolFailureHandler
 from omnicoreagent.core.types import (
     AgentState,
@@ -33,12 +32,7 @@ def session_state():
 
 
 @pytest.mark.asyncio
-async def test_handle_validation_error_records_loop_and_event(handler, session_state):
-    events = []
-
-    async def event_router(session_id, event):
-        events.append({"session_id": session_id, "event": event})
-
+async def test_handle_validation_error_records_loop(handler, session_state):
     (
         tool_batch_name,
         tool_batch_args,
@@ -52,7 +46,6 @@ async def test_handle_validation_error_records_loop_and_event(handler, session_s
         ),
         session_state=session_state,
         session_id="chat796",
-        event_router=event_router,
     )
 
     assert tool_batch_name == "missing_tool"
@@ -67,15 +60,9 @@ async def test_handle_validation_error_records_loop_and_event(handler, session_s
             "message": "The tool named 'missing_tool' does not exist.",
         }
     ]
-    assert len(events) == 1
-    assert events[0]["session_id"] == "chat796"
-    assert events[0]["event"].type == EventType.TOOL_CALL_ERROR
-    assert events[0]["event"].payload.tool_name == "missing_tool"
-
 
 @pytest.mark.asyncio
 async def test_handle_loop_state_marks_session_stuck(handler, session_state):
-    events = []
     session_state.messages = [Message(role="system", content="system")]
 
     class FakeLoopDetector:
@@ -93,9 +80,6 @@ async def test_handle_loop_state_marks_session_stuck(handler, session_state):
 
     session_state.loop_detector = FakeLoopDetector()
 
-    async def event_router(session_id, event):
-        events.append({"session_id": session_id, "event": event})
-
     async def reset_system_prompt(messages, system_prompt):
         old_messages = messages[1:]
         return [Message(role="system", content=system_prompt), *old_messages]
@@ -112,7 +96,6 @@ async def test_handle_loop_state_marks_session_stuck(handler, session_state):
         session_state=session_state,
         system_prompt="system",
         session_id="chat800",
-        event_router=event_router,
         debug=False,
         reset_system_prompt=reset_system_prompt,
     )
@@ -121,10 +104,6 @@ async def test_handle_loop_state_marks_session_stuck(handler, session_state):
     assert session_state.loop_detector.reset_tool_name == "alpha"
     assert session_state.messages[0].role == "system"
     assert "Tool call loop detected" in session_state.messages[-1].content
-    assert len(events) == 1
-    assert events[0]["session_id"] == "chat800"
-    assert events[0]["event"].type == EventType.TOOL_CALL_ERROR
-    assert events[0]["event"].payload.tool_name == "alpha"
 
 
 @pytest.mark.asyncio
@@ -147,7 +126,6 @@ async def test_handle_loop_state_ignores_malformed_tool_call_results(
         session_state=session_state,
         system_prompt="system",
         session_id="chat800",
-        event_router=None,
         debug=False,
         reset_system_prompt=reset_system_prompt,
     )
@@ -164,7 +142,6 @@ async def test_act_routes_tool_validation_error_through_failure_handler():
         tool_call_timeout=10,
     )
     history = []
-    events = []
 
     async def add_message_to_history(role, content, metadata=None, session_id=None):
         history.append(
@@ -175,9 +152,6 @@ async def test_act_routes_tool_validation_error_through_failure_handler():
                 "session_id": session_id,
             }
         )
-
-    async def event_router(session_id, event):
-        events.append({"session_id": session_id, "event": event})
 
     parsed_response = ParsedResponse(
         action=True,
@@ -193,13 +167,9 @@ async def test_act_routes_tool_validation_error_through_failure_handler():
         sessions={},
         local_tools=None,
         session_id="chat802",
-        event_router=event_router,
     )
 
     observation_messages = [item for item in history if item["role"] == "user"]
 
     assert observation_messages
     assert "missing_tool" in observation_messages[-1]["content"]
-    assert events
-    assert events[0]["event"].type == EventType.TOOL_CALL_ERROR
-    assert events[0]["event"].payload.tool_name == "missing_tool"

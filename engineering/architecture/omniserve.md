@@ -8,11 +8,10 @@ OmniServe is the optional HTTP serving layer for an already-built
 `OmniCoreAgent`. It must not become a second agent runtime, tracing system,
 evaluation system, or workflow engine.
 
-Telemetry migration note: sections that mention SSE over runtime events describe
-current serving behavior. Target live/replay streaming is
+OmniServe live and replay streaming is telemetry-backed:
 `TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE`.
-New serving work should target telemetry and should not add new `EventRouter`
-dependencies.
+New serving work should target telemetry and should not reintroduce a parallel
+visibility stack.
 
 ## Purpose
 
@@ -129,10 +128,10 @@ OmniServe exposes one agent through a stable API surface:
 - `/health` and `/ready`
 - `/run` for SSE execution
 - `/run/sync` for JSON execution
-- `/events/{session_id}` for session event replay/follow streams
-- `/events/{session_id}/list` for stored session events
-- `/events/{session_id}/trace` for the current compact event summary exposed by
-  the agent runtime
+- `/events/{session_id}` for telemetry event replay/follow streams
+- `/events/{session_id}/list` for stored telemetry events
+- `/events/{session_id}/trace` for the current compact telemetry trace summary
+  exposed by the agent runtime
 - `/sessions/{session_id}/history`
 - `/sessions/{session_id}` delete
 - `/tools`
@@ -150,12 +149,12 @@ changes that.
 
 ## SSE Boundary
 
-SSE is a serving transport over runtime events.
+SSE is a serving transport over telemetry events.
 
 `/run` must:
 
 - create a fresh `run_id` for the request.
-- attach that `run_id` to runtime event emission.
+- attach that `run_id` to telemetry event emission.
 - stream only events matching that `run_id`.
 - include the route `session_id` in every event payload.
 - stream final `complete` with the same `run_id`.

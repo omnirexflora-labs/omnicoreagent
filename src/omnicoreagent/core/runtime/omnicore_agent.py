@@ -32,7 +32,7 @@ class OmniCoreAgent:
     """
     Public facade for the OmniCoreAgent runtime.
 
-    The facade owns lifecycle, session, memory, event, and execution APIs while
+    The facade owns lifecycle, session, memory, telemetry, and execution APIs while
     delegating construction details to runtime helper modules.
     """
 
@@ -46,7 +46,6 @@ class OmniCoreAgent:
         sub_agents: Optional[Dict[str, Any]] = None,
         agent_config: Optional[Any] = None,
         memory_router: Optional[Any] = None,
-        event_router: Optional[Any] = None,
         telemetry_store: Optional[Any] = None,
         telemetry_recorder: Optional[Any] = None,
         telemetry_stream: Optional[Any] = None,
@@ -66,7 +65,6 @@ class OmniCoreAgent:
             agent_config: Optional agent configuration
             embedding_config: Optional embedding configuration
             memory_router: Optional memory router (MemoryRouter)
-            event_router: Optional event router (EventRouter)
             telemetry_store: Optional telemetry store
             telemetry_recorder: Optional telemetry recorder
             telemetry_stream: Optional telemetry stream
@@ -85,7 +83,6 @@ class OmniCoreAgent:
         self._cumulative_usage = None
 
         self.memory_router = memory_router
-        self.event_router = event_router
         self.telemetry_store = telemetry_store
         self.telemetry_recorder = telemetry_recorder
         self.telemetry_stream = telemetry_stream
@@ -110,9 +107,6 @@ class OmniCoreAgent:
         if not self.memory_router:
             self.memory_router = construction.default_memory_router()
 
-        if not self.event_router:
-            self.event_router = construction.default_event_router()
-
         self._ensure_telemetry()
 
         agent_cfg = self.agent_config
@@ -131,7 +125,6 @@ class OmniCoreAgent:
             local_tools=self.local_tools,
             agent_config=self.agent_config,
             memory_router=self.memory_router,
-            event_router=self.event_router,
             prompt_builder=self.prompt_builder,
             existing_subagent_factory=self._subagent_factory,
             guardrail=self.guardrail,
@@ -195,7 +188,7 @@ class OmniCoreAgent:
         return f"run_{uuid.uuid4().hex}"
 
     def _ensure_telemetry(self) -> None:
-        """Attach default telemetry components without touching legacy events."""
+        """Attach default telemetry components."""
         if self.telemetry_store is None:
             if self.telemetry_recorder is not None:
                 self.telemetry_store = self.telemetry_recorder.store
@@ -270,7 +263,7 @@ class OmniCoreAgent:
         Args:
             query: The user query
             session_id: Optional session ID for session continuity
-            run_id: Optional run ID for serving/event/telemetry correlation
+            run_id: Optional run ID for serving/telemetry correlation
 
         Returns:
             Dict containing response, session_id, trace_id, and run_id.
@@ -280,14 +273,7 @@ class OmniCoreAgent:
 
         self._ensure_telemetry()
 
-        from omnicoreagent.core.events.base import (
-            current_event_run_id,
-            reset_event_run_id,
-            set_event_run_id,
-        )
-
-        run_id = run_id or current_event_run_id() or self.generate_run_id()
-        event_run_token = set_event_run_id(run_id)
+        run_id = run_id or self.generate_run_id()
         trace_context = None
         try:
             trace_context = await self.telemetry_recorder.start_trace(
@@ -346,7 +332,6 @@ class OmniCoreAgent:
                 add_message_to_history=self.memory_router.store_message,
                 message_history=self.memory_router.get_messages,
                 debug=self.debug,
-                event_router=self.event_router.append,
                 telemetry_recorder=self.telemetry_recorder,
                 **execution.build_agent_run_kwargs(
                     mcp_client=self.mcp_client,
@@ -399,8 +384,6 @@ class OmniCoreAgent:
                     error={"type": exc.__class__.__name__, "message": str(exc)},
                 )
             raise
-        finally:
-            reset_event_run_id(event_run_token)
 
     async def get_metrics(self) -> Dict[str, Any]:
         """
@@ -457,33 +440,6 @@ class OmniCoreAgent:
         else:
             await self.memory_router.clear_memory(agent_name=self.name)
 
-    async def stream_events(self, session_id: str):
-        async for event in self.event_router.stream(session_id=session_id):
-            yield event
-
-    async def get_event_stream_cursor(self, session_id: str) -> str | None:
-        return await self.event_router.get_stream_cursor(session_id=session_id)
-
-    async def stream_events_after(self, session_id: str, cursor: str | None):
-        async for event in self.event_router.stream_after(
-            session_id=session_id,
-            cursor=cursor,
-        ):
-            yield event
-
-    async def get_events_after(self, session_id: str, cursor: str | None):
-        return await self.event_router.get_events_after(
-            session_id=session_id,
-            cursor=cursor,
-        )
-
-    async def get_events(self, session_id: str):
-        return await self.event_router.get_events(session_id=session_id)
-
-    async def get_event_trace(self, session_id: str) -> Dict[str, Any]:
-        trace = await self.event_router.get_trace(session_id=session_id)
-        return trace.model_dump()
-
     async def get_trace(
         self,
         identifier: str | None = None,
@@ -492,20 +448,19 @@ class OmniCoreAgent:
         trace_id: str | None = None,
     ) -> Dict[str, Any] | None:
         """
-        Return a telemetry trace by trace_id, or a legacy event summary by session_id.
-
-        Passing a returned ``run()`` trace_id uses telemetry. Passing session_id keeps
-        the legacy event-summary behavior until EventRouter migration is complete.
+        Return telemetry trace data.
         """
         if trace_id is not None:
             return await self.get_telemetry_trace(trace_id)
         if session_id is not None:
-            return await self.get_event_trace(session_id)
+            traces = await self.list_telemetry_traces(session_id=session_id)
+            return traces[-1] if traces else None
         if identifier is None:
             raise TypeError("get_trace() requires trace_id or session_id")
         if identifier.startswith("trace_"):
             return await self.get_telemetry_trace(identifier)
-        return await self.get_event_trace(identifier)
+        traces = await self.list_telemetry_traces(session_id=identifier)
+        return traces[-1] if traces else None
 
     async def get_telemetry_trace(self, trace_id: str) -> Dict[str, Any] | None:
         self._ensure_telemetry()
@@ -618,22 +573,6 @@ class OmniCoreAgent:
             ),
             cursor,
         )
-
-    async def get_event_store_type(self) -> str:
-        """Get the current event store type."""
-        return self.event_router.get_event_store_type()
-
-    async def is_event_store_available(self) -> bool:
-        """Check if the event store is available."""
-        return self.event_router.is_available()
-
-    async def get_event_store_info(self) -> Dict[str, Any]:
-        """Get information about the current event store."""
-        return self.event_router.get_event_store_info()
-
-    async def switch_event_store(self, event_store_type: str):
-        """Switch to a different event store type."""
-        self.event_router.switch_event_store(event_store_type)
 
     async def get_memory_store_type(self) -> str:
         """Get the current memory store type."""

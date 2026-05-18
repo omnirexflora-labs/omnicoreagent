@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from omnicoreagent.core.agents.run_outcome import AgentRunOutcomeHandler
-from omnicoreagent.core.events.base import EventType
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.types import AgentState, SessionState
 from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
@@ -20,25 +19,20 @@ def make_session_state():
 
 
 @pytest.mark.asyncio
-async def test_handle_final_answer_updates_state_history_event_and_usage():
+async def test_handle_final_answer_updates_state_history_and_usage():
     handler = AgentRunOutcomeHandler(agent_name="agent")
     session_state = make_session_state()
     history = []
-    events = []
     run_usage = Usage()
 
     async def add_message_to_history(**kwargs):
         history.append(kwargs)
-
-    async def event_router(session_id, event):
-        events.append({"session_id": session_id, "event": event})
 
     result = await handler.handle_final_answer(
         answer="done",
         session_state=session_state,
         add_message_to_history=add_message_to_history,
         session_id="chat1",
-        event_router=event_router,
         run_usage=run_usage,
         start_time=0,
     )
@@ -56,8 +50,6 @@ async def test_handle_final_answer_updates_state_history_event_and_usage():
             "metadata": {"agent_name": "agent"},
         }
     ]
-    assert events[0]["event"].type == EventType.FINAL_ANSWER
-    assert events[0]["event"].payload.message == "done"
 
 
 def test_max_steps_result_preserves_last_valid_response():

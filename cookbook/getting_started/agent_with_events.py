@@ -2,11 +2,11 @@
 """
 Agent with Event Streaming
 
-Stream real-time events from your agent.
-Track: user messages, agent thoughts, tool calls, final answers.
+Stream real-time telemetry events from your agent.
+Track: user messages, model calls, tool calls, observations, and final answers.
 
 Build on: agent_with_memory_switching.py
-Next: agent_with_event_switching.py
+Next: agent_with_metrics.py
 
 Run:
     python cookbook/getting_started/agent_with_events.py
@@ -15,7 +15,7 @@ Run:
 import asyncio
 
 
-from omnicoreagent import OmniCoreAgent, MemoryRouter, EventRouter
+from omnicoreagent import OmniCoreAgent, MemoryRouter
 
 from _bootstrap import model_config, require_llm_api_key, response_text
 
@@ -27,15 +27,11 @@ async def main():
     print("AGENT WITH EVENT STREAMING")
     print("=" * 50)
 
-    # Create event router (in-memory for development)
-    event_router = EventRouter("in_memory")
-
     agent = OmniCoreAgent(
         name="event_agent",
         system_instruction="You are a helpful assistant.",
         model_config=model_config(max_tokens=700),
         memory_router=MemoryRouter("in_memory"),
-        event_router=event_router,  # <- Add event router
     )
 
     # Run a query
@@ -46,14 +42,14 @@ async def main():
     )
     print(f"Response: {response_text(result)[:200]}...")
 
-    # Get events after the query
+    # Get telemetry events after the query
     print("\n" + "=" * 50)
     print("EVENTS FROM SESSION")
     print("=" * 50)
 
-    events = await agent.get_events(session_id)
+    events = await agent.get_telemetry_events_after(cursor=None, session_id=session_id)
     for event in events:
-        print(f"  [{event.type}]: {str(event.payload)[:80]}...")
+        print(f"  [{event.event_type}]: {event.model_dump()}")
 
     await agent.cleanup()
 
@@ -68,29 +64,39 @@ async def demo_streaming():
     print("REAL-TIME EVENT STREAMING")
     print("=" * 50)
 
-    event_router = EventRouter("in_memory")
-
     agent = OmniCoreAgent(
         name="streaming_agent",
         system_instruction="You are a helpful assistant.",
         model_config=model_config(max_tokens=500),
         memory_router=MemoryRouter("in_memory"),
-        event_router=event_router,
     )
 
     session_id = "streaming_session"
 
+    run_id = "run_streaming_demo"
+    cursor = await agent.get_telemetry_stream_cursor(session_id=session_id)
+
     # Start the query in background
     async def run_query():
-        await agent.run("Tell me a short joke.", session_id=session_id)
+        await agent.run(
+            "Tell me a short joke.",
+            session_id=session_id,
+            run_id=run_id,
+        )
 
     query_task = asyncio.create_task(run_query())
 
     # Stream events in real-time
     print("\nStreaming events as they happen:")
     try:
-        async for event in agent.stream_events(session_id):
-            print(f"  [{event.type}]: {str(event.payload)[:60]}...")
+        async for event in agent.stream_telemetry_after(
+            cursor=cursor,
+            session_id=session_id,
+            run_id=run_id,
+        ):
+            print(f"  [{event.event_type}]: {event.model_dump()}")
+            if event.event_type == "final_answer":
+                break
     except asyncio.CancelledError:
         pass
 
@@ -99,22 +105,24 @@ async def demo_streaming():
 
 
 async def show_event_types():
-    """Show all available event types."""
+    """Show common telemetry event types."""
     print("\n" + "=" * 50)
-    print("AVAILABLE EVENT TYPES")
+    print("COMMON TELEMETRY EVENT TYPES")
     print("=" * 50)
     print("""
 | Event Type         | Description                           |
 |--------------------|---------------------------------------|
 | user_message       | User's input query                    |
-| agent_message      | Agent's response text                 |
-| agent_thought      | Agent's reasoning/thinking            |
-| tool_call_started  | Tool execution started                |
-| tool_call_result   | Tool returned a result                |
+| model_call         | Model request started                 |
+| model_response     | Model returned content/usage          |
+| tool_call          | Tool execution started                |
+| tool_result        | Tool returned a result                |
+| tool_error         | Tool failed                           |
+| observation_pipeline_end | Cleaned observation is ready    |
 | final_answer       | Agent's final answer                  |
-| sub_agent_started  | Sub-agent began execution             |
-| sub_agent_result   | Sub-agent returned result             |
-| sub_agent_error    | Sub-agent encountered error           |
+| subagent_spawn     | Sub-agent began execution             |
+| subagent_result    | Sub-agent returned result             |
+| subagent_error     | Sub-agent encountered error           |
 """)
 
 
