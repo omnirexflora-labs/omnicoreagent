@@ -617,15 +617,25 @@ Current runtime facade coverage:
   same store instance. The runtime rejects mismatches instead of silently
   writing to one store and reading from another.
 
+Current runtime loop coverage:
+
+- every ReAct iteration creates an `agent.step` child span.
+- every model call creates a `model.call` child span.
+- model calls emit `model_call`, `model_response`, and `model_error` events.
+- parallel tool batches create one `tool.batch` span.
+- tool batches emit `tool_batch_start`, `tool_batch_end`, and
+  `tool_batch_error` events.
+- each individual tool in a batch creates a `tool.call` span.
+- individual tool calls emit `tool_call`, `tool_result`, and `tool_error`
+  events.
+- parsed tool observations emit `observation_pipeline_end`.
+
 Current uncovered runtime internals:
 
-- model call spans and events
-- agent step spans
-- tool batch and tool call spans
 - MCP tool spans
 - memory read/write spans
 - workspace read/write/offload spans
-- observation pipeline spans
+- full observation pipeline start/error spans
 - subagent spans
 - background run spans
 - OmniServe request spans and SSE streaming from `TelemetryStream`

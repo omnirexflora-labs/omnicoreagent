@@ -219,10 +219,20 @@ The runtime facade wiring phase provides:
 - injected `telemetry_store`, `telemetry_recorder`, and `telemetry_stream`
   components must share the same store instance
 
-The runtime loop, model calls, tool batches, MCP calls, memory operations,
-workspace operations, subagents, background runs, and OmniServe SSE are still
-migration work. They must emit telemetry directly instead of adding new
-`EventRouter` dependencies.
+The runtime loop instrumentation phase provides:
+
+- child `agent.step` spans under the active `agent.run` trace
+- child `model.call` spans and `model_call` / `model_response` /
+  `model_error` events
+- child `tool.batch` spans with `tool_batch_start`, `tool_batch_end`, and
+  `tool_batch_error` events
+- child `tool.call` spans with `tool_call`, `tool_result`, and `tool_error`
+  events for each tool in a parallel batch
+- `observation_pipeline_end` events after tool output parsing and formatting
+
+MCP-specific tool spans, memory operations, workspace operations, subagents,
+background runs, and OmniServe SSE are still migration work. They must emit
+telemetry directly instead of adding new `EventRouter` dependencies.
 
 Runtime controls may also emit telemetry:
 

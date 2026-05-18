@@ -22,6 +22,7 @@ from omnicoreagent.core.tools.tool_batch_runner import ToolBatchRunner
 from omnicoreagent.core.tools.tool_call_resolver import ToolCallResolver
 from omnicoreagent.core.tools.tool_failure_handler import ToolFailureHandler
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
+from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.events.base import Event
 from omnicoreagent.core.context_manager import (
@@ -324,6 +325,7 @@ class BaseReactAgent:
         local_tools: Any = None,
         session_id: str = None,
         event_router: Callable[[str, Event], Any] = None,
+        telemetry_recorder: Any = None,
         sub_agents: list = None,
     ) -> Any:
         """Execute ReAct loop with JSON communication
@@ -382,45 +384,90 @@ class BaseReactAgent:
                 and current_steps < self.max_steps
             ):
                 current_steps += 1
-                llm_step = await self.llm_step_runner.run(
-                    session_state=session_state,
-                    llm_connection=llm_connection,
-                    run_usage=run_usage,
-                    session_id=session_id,
-                    event_router=event_router,
-                    debug=debug,
-                )
-                if llm_step.error_result is not None:
-                    return llm_step.error_result
-                response = llm_step.response
+                step_span = None
+                if telemetry_recorder is not None:
+                    step_span = await telemetry_recorder.start_span(
+                        name="agent.step",
+                        kind="agent.step",
+                        actor=TelemetryActor(type=ActorType.AGENT, name=self.agent_name),
+                        input={"step": current_steps},
+                    )
+                    await telemetry_recorder.emit_event(
+                        "agent_step",
+                        actor=TelemetryActor(type=ActorType.AGENT, name=self.agent_name),
+                        input={"step": current_steps},
+                    )
+                try:
+                    llm_step = await self.llm_step_runner.run(
+                        session_state=session_state,
+                        llm_connection=llm_connection,
+                        run_usage=run_usage,
+                        session_id=session_id,
+                        event_router=event_router,
+                        telemetry_recorder=telemetry_recorder,
+                        debug=debug,
+                    )
+                    if llm_step.error_result is not None:
+                        if telemetry_recorder is not None and step_span is not None:
+                            await telemetry_recorder.end_span(
+                                step_span.span_id,
+                                status=SpanStatus.ERROR,
+                                output={"error_result": llm_step.error_result},
+                            )
+                        return llm_step.error_result
+                    response = llm_step.response
 
-                parsed_response = await self.extract_action_or_answer(
-                    response=response,
-                    debug=debug,
-                    session_id=session_id,
-                    event_router=event_router,
-                )
-                step_result = await self.loop_step_handler.handle(
-                    parsed_response=parsed_response,
-                    response=response,
-                    session_state=session_state,
-                    add_message_to_history=add_message_to_history,
-                    system_prompt=system_prompt,
-                    session_id=session_id,
-                    run_usage=run_usage,
-                    start_time=start_time,
-                    current_steps=current_steps,
-                    last_valid_response=last_valid_response,
-                    debug=debug,
-                    sessions=sessions,
-                    mcp_tools=mcp_tools,
-                    local_tools=runtime_local_tools,
-                    event_router=event_router,
-                    sub_agents=sub_agents,
-                )
-                last_valid_response = step_result.last_valid_response
-                if step_result.should_return:
-                    return step_result.run_result
+                    parsed_response = await self.extract_action_or_answer(
+                        response=response,
+                        debug=debug,
+                        session_id=session_id,
+                        event_router=event_router,
+                    )
+                    step_result = await self.loop_step_handler.handle(
+                        parsed_response=parsed_response,
+                        response=response,
+                        session_state=session_state,
+                        add_message_to_history=add_message_to_history,
+                        system_prompt=system_prompt,
+                        session_id=session_id,
+                        run_usage=run_usage,
+                        start_time=start_time,
+                        current_steps=current_steps,
+                        last_valid_response=last_valid_response,
+                        debug=debug,
+                        sessions=sessions,
+                        mcp_tools=mcp_tools,
+                        local_tools=runtime_local_tools,
+                        event_router=event_router,
+                        telemetry_recorder=telemetry_recorder,
+                        sub_agents=sub_agents,
+                    )
+                    last_valid_response = step_result.last_valid_response
+                    if step_result.should_return:
+                        if telemetry_recorder is not None and step_span is not None:
+                            await telemetry_recorder.end_span(
+                                step_span.span_id,
+                                status=SpanStatus.OK,
+                                output={"returned": True},
+                            )
+                        return step_result.run_result
+                    if telemetry_recorder is not None and step_span is not None:
+                        await telemetry_recorder.end_span(
+                            step_span.span_id,
+                            status=SpanStatus.OK,
+                            output={"returned": False},
+                        )
+                except Exception as exc:
+                    if telemetry_recorder is not None and step_span is not None:
+                        await telemetry_recorder.end_span(
+                            step_span.span_id,
+                            status=SpanStatus.ERROR,
+                            error={
+                                "type": exc.__class__.__name__,
+                                "message": str(exc),
+                            },
+                        )
+                    raise
 
         if session_state.state == AgentState.STUCK and last_valid_response:
             return self.run_outcome_handler.loop_stuck_result(

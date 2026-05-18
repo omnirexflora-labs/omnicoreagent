@@ -8,6 +8,7 @@ from omnicoreagent.core.agents.llm_response import (
     extract_response_content,
     extract_response_usage,
 )
+from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.system_prompts import FAST_CONVERSATION_SUMMARY_PROMPT
 from omnicoreagent.core.token_usage import (
     Usage,
@@ -50,6 +51,7 @@ class AgentLlmStepRunner:
         run_usage: Usage,
         session_id: str,
         event_router: Any = None,
+        telemetry_recorder: Any = None,
         debug: bool = False,
     ) -> AgentLlmStepResult:
         if debug:
@@ -69,13 +71,18 @@ class AgentLlmStepRunner:
                         f"Context managed: now {len(session_state.messages)} messages"
                     )
 
-            response = await llm_connection.llm_call(session_state.messages)
+            response = await self._call_model(
+                llm_connection=llm_connection,
+                messages=session_state.messages,
+                telemetry_recorder=telemetry_recorder,
+            )
             if response:
                 await self._record_response(
                     response=response,
                     run_usage=run_usage,
                     session_id=session_id,
                     event_router=event_router,
+                    telemetry_recorder=telemetry_recorder,
                     debug=debug,
                 )
                 response = extract_response_content(response)
@@ -94,6 +101,56 @@ class AgentLlmStepRunner:
             return AgentLlmStepResult(
                 error_result={"answer": error_message, "usage": run_usage}
             )
+
+    async def _call_model(
+        self,
+        *,
+        llm_connection: Any,
+        messages: list[Any],
+        telemetry_recorder: Any = None,
+    ) -> Any:
+        if telemetry_recorder is None:
+            return await llm_connection.llm_call(messages)
+
+        span_context = await telemetry_recorder.start_span(
+            name="model.call",
+            kind="model.call",
+            actor=TelemetryActor(type=ActorType.MODEL),
+            input={"message_count": len(messages)},
+        )
+        try:
+            await telemetry_recorder.emit_event(
+                "model_call",
+                actor=TelemetryActor(type=ActorType.MODEL),
+                input={"message_count": len(messages)},
+            )
+            response = await llm_connection.llm_call(messages)
+            await telemetry_recorder.emit_event(
+                "model_response",
+                actor=TelemetryActor(type=ActorType.MODEL),
+                output={
+                    "content": extract_response_content(response, strip=False),
+                    "usage": self._usage_payload(extract_response_usage(response)),
+                },
+            )
+            await telemetry_recorder.end_span(
+                span_context.span_id,
+                status=SpanStatus.OK,
+                output={"usage": self._usage_payload(extract_response_usage(response))},
+            )
+            return response
+        except Exception as exc:
+            await telemetry_recorder.record_exception(
+                exc,
+                event_type="model_error",
+                actor=TelemetryActor(type=ActorType.MODEL),
+            )
+            await telemetry_recorder.end_span(
+                span_context.span_id,
+                status=SpanStatus.ERROR,
+                error={"type": exc.__class__.__name__, "message": str(exc)},
+            )
+            raise
 
     def _build_context_summarizer(self, llm_connection: Any):
         async def summarize_for_context(messages):
@@ -126,6 +183,7 @@ class AgentLlmStepRunner:
         run_usage: Usage,
         session_id: str,
         event_router: Any,
+        telemetry_recorder: Any = None,
         debug: bool,
     ):
         message_content = extract_response_content(response, strip=False)
@@ -172,3 +230,15 @@ class AgentLlmStepRunner:
                 f"Remaining Requests: {remaining_requests}, "
                 f"Remaining Tokens: {remaining_tokens}"
             )
+
+    def _usage_payload(self, request_usage: Usage | None) -> dict[str, Any] | None:
+        if request_usage is None:
+            return None
+        return {
+            "requests": request_usage.requests,
+            "request_tokens": request_usage.request_tokens,
+            "response_tokens": request_usage.response_tokens,
+            "total_tokens": request_usage.total_tokens,
+            "total_time": request_usage.total_time,
+            "details": request_usage.details,
+        }

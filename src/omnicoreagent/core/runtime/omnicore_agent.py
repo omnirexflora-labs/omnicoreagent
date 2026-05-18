@@ -347,6 +347,7 @@ class OmniCoreAgent:
                 message_history=self.memory_router.get_messages,
                 debug=self.debug,
                 event_router=self.event_router.append,
+                telemetry_recorder=self.telemetry_recorder,
                 **execution.build_agent_run_kwargs(
                     mcp_client=self.mcp_client,
                     local_tools=self.local_tools,
