@@ -433,6 +433,9 @@ acceptable.
 
 The Docker generator creates a Dockerfile for a provided agent file.
 
+The agent file must be inside the current Docker build context. The generator
+must not import or execute the agent file while generating deployment artifacts.
+
 It may set non-sensitive defaults such as:
 
 - `AGENT_PATH`
@@ -442,6 +445,8 @@ It must not bake credentials into the image.
 
 Generated usage examples should use the same image tag consistently and should
 not introduce stale names that conflict with OmniServe or OmniCoreAgent docs.
+Generated images should include a `/health` healthcheck and run the server as a
+non-root user.
 
 ## Documentation Contract
 

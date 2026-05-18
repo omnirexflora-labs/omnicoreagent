@@ -7,9 +7,9 @@ Usage:
     omniserve config --show
 """
 
-import os
 import sys
 import importlib.util
+from collections.abc import Sequence
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Optional
@@ -320,6 +320,88 @@ export LLM_API_KEY=your_api_key_here
     click.echo("Use --show to view current config or --env-example for template")
 
 
+def _agent_path_for_dockerfile(file_path: str, project_root: Path) -> str:
+    """Return the in-container agent path for a file inside the build context."""
+    resolved_agent_path = Path(file_path).resolve()
+    resolved_project_root = project_root.resolve()
+
+    try:
+        relative_path = resolved_agent_path.relative_to(resolved_project_root)
+    except ValueError as exc:
+        raise click.ClickException(
+            "Agent file must be inside the current Docker build context"
+        ) from exc
+
+    return f"/app/{relative_path.as_posix()}"
+
+
+def _quote_docker_env_value(value: str) -> str:
+    """Quote a Dockerfile ENV value while preserving ordinary path characters."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _build_dockerfile_content(agent_path: str) -> str:
+    """Build the OmniServe Dockerfile content."""
+    quoted_agent_path = _quote_docker_env_value(agent_path)
+    return f"""FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \\
+    PIP_NO_CACHE_DIR=1 \\
+    AGENT_PATH={quoted_agent_path} \\
+    OMNICOREAGENT_WORKSPACE_BACKEND=local \\
+    OMNICOREAGENT_WORKSPACE_DIR=/tmp/workspace
+
+WORKDIR /app
+
+RUN apt-get update \\
+    && apt-get install -y --no-install-recommends curl \\
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser
+RUN pip install --no-cache-dir "omnicoreagent[serve]"
+
+COPY --chown=appuser:appuser . /app
+
+USER appuser
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \\
+    CMD port="${{OMNICOREAGENT_SERVE_PORT:-8000}}"; \\
+        prefix="${{OMNICOREAGENT_SERVE_API_PREFIX:-}}"; \\
+        prefix="${{prefix%/}}"; \\
+        [ "$prefix" = "/" ] && prefix=""; \\
+        case "$prefix" in ""|/*) ;; *) prefix="/$prefix" ;; esac; \\
+        curl -fsS "http://127.0.0.1:${{port}}${{prefix}}/health" || exit 1
+
+CMD ["sh", "-c", "omniserve run --agent \\"$AGENT_PATH\\""]
+"""
+
+
+def _docker_run_lines(image_name: str, env_vars: Sequence[str]) -> list[str]:
+    """Return a copy-pasteable docker run command."""
+    lines = ["   docker run -p 8000:8000 \\"]
+    for env_var in env_vars:
+        lines.append(f"     -e {env_var} \\")
+    lines.append(f"     {image_name}")
+    return lines
+
+
+def _docker_build_command(dockerfile_path: Path, project_root: Path) -> str:
+    """Return a build command that uses the generated Dockerfile."""
+    try:
+        relative_dockerfile = dockerfile_path.resolve().relative_to(
+            project_root.resolve()
+        )
+    except ValueError:
+        return f"docker build -f {dockerfile_path} -t omnicoreagent-serve ."
+
+    if relative_dockerfile == Path("Dockerfile"):
+        return "docker build -t omnicoreagent-serve ."
+    return f"docker build -f {relative_dockerfile.as_posix()} -t omnicoreagent-serve ."
+
+
 @cli.command("generate-dockerfile")
 @click.option(
     "--file",
@@ -344,82 +426,29 @@ def generate_dockerfile(file_path: str, output_dir: str):
     from rich.console import Console
 
     console = Console()
-    console.print("[bold blue]🚀 OmniServe Cloud Deployment Generator[/bold blue]")
+    console.print("[bold blue]OmniServe Cloud Deployment Generator[/bold blue]")
     console.print(
         "Generates a cloud-ready Dockerfile for Cloud Run, AWS Fargate, Railway.\n"
     )
 
     if not file_path:
-        console.print(
-            "[bold red]Error:[/bold red] Please specify agent file with --file"
-        )
-        return
+        raise click.ClickException("Please specify agent file with --file")
 
-    # Calculate relative path from project root to agent
-    try:
-        rel_path = os.path.relpath(Path(file_path).resolve(), Path.cwd())
-    except ValueError:
-        rel_path = os.path.basename(file_path)
+    agent_path = _agent_path_for_dockerfile(file_path, Path.cwd())
+    out_path = Path(output_dir).resolve()
+    out_path.mkdir(parents=True, exist_ok=True)
 
-    # Inspect agent to detect workspace file tools
-    workspace_files_enabled = False
-    try:
-        loaded_agent = _load_agent_from_file(file_path)
-        if loaded_agent.agent_config and isinstance(loaded_agent.agent_config, dict):
-            workspace_files_enabled = bool(
-                loaded_agent.agent_config.get("enable_workspace_files", True)
-            )
-        console.print(f"[green]✓ Detected agent: {loaded_agent.name}[/green]")
-        if workspace_files_enabled:
-            console.print("[dim]Workspace file tools enabled[/dim]")
-        else:
-            console.print("[dim]No workspace file tools configured[/dim]")
-    except Exception as e:
-        console.print(f"[yellow]Warning: Could not inspect agent ({e})[/yellow]")
-
-    out_path = Path(output_dir)
-    out_path.mkdir(exist_ok=True)
-
-    # Build Dockerfile content
-    # Only non-sensitive defaults go in Dockerfile
-    # Secrets (API keys, S3/R2 creds) are passed at runtime with -e
-    env_lines = [
-        "# Agent path",
-        f"ENV AGENT_PATH=/app/{rel_path}",
-        "",
-        "# Workspace storage for artifacts and workspace files",
-        "ENV OMNICOREAGENT_WORKSPACE_BACKEND=local",
-        "ENV OMNICOREAGENT_WORKSPACE_DIR=/tmp/workspace",
-    ]
-
-    env_block = "\n".join(env_lines)
-
-    dockerfile_content = f"""FROM python:3.12-slim
-
-WORKDIR /app
-
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir "omnicoreagent[serve]"
-
-# Copy entire project into image
-COPY . /app
-
-{env_block}
-
-EXPOSE 8000
-
-CMD ["sh", "-c", "omniserve run --agent $AGENT_PATH"]
-"""
+    dockerfile_content = _build_dockerfile_content(agent_path)
 
     dockerfile_path = out_path / "Dockerfile"
-    with open(dockerfile_path, "w") as f:
-        f.write(dockerfile_content)
+    dockerfile_path.write_text(dockerfile_content, encoding="utf-8")
 
     console.print(f"\n[bold green]✓ Generated {dockerfile_path}[/bold green]")
+    console.print(f"[dim]Agent path inside image: {agent_path}[/dim]")
 
     console.print("\n[bold]Next Steps:[/bold]")
     console.print("1. Build the image:")
-    console.print("   docker build -t omnicoreagent-serve .")
+    console.print(f"   {_docker_build_command(dockerfile_path, Path.cwd())}")
 
     console.print("\n2. Run with local workspace:")
     console.print(
@@ -427,13 +456,17 @@ CMD ["sh", "-c", "omniserve run --agent $AGENT_PATH"]
     )
 
     console.print("\n   Or run with S3/R2 workspace persistence:")
-    console.print("   docker run -p 8000:8000 \\")
-    console.print("     -e LLM_API_KEY=$LLM_API_KEY \\")
-    console.print("     -e OMNICOREAGENT_WORKSPACE_BACKEND=s3 \\")
-    console.print("     -e AWS_S3_BUCKET=your-bucket \\")
-    console.print("     -e AWS_ACCESS_KEY_ID=... \\")
-    console.print("     -e AWS_SECRET_ACCESS_KEY=... \\")
-    console.print("     omnicoreagent-serve")
+    for line in _docker_run_lines(
+        "omnicoreagent-serve",
+        [
+            "LLM_API_KEY=$LLM_API_KEY",
+            "OMNICOREAGENT_WORKSPACE_BACKEND=s3",
+            "AWS_S3_BUCKET=your-bucket",
+            "AWS_ACCESS_KEY_ID=...",
+            "AWS_SECRET_ACCESS_KEY=...",
+        ],
+    ):
+        console.print(line)
 
     console.print(
         "\n[yellow]⚠ Local workspace is ephemeral unless you mount a volume.[/yellow]"
