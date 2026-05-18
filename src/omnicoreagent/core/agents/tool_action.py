@@ -61,6 +61,7 @@ class AgentToolActionRunner:
         local_tools: Any = None,
         session_id: str | None = None,
         event_router: Callable[[str | None, Event], Any] | None = None,
+        telemetry_recorder: Any = None,
         sub_agents: list | None = None,
     ):
         tool_call_result = await self.resolve_tool_call_request(
@@ -83,6 +84,7 @@ class AgentToolActionRunner:
             add_message_to_history=add_message_to_history,
             session_id=session_id,
             event_router=event_router,
+            telemetry_recorder=telemetry_recorder,
         )
 
         if debug:
@@ -120,6 +122,7 @@ class AgentToolActionRunner:
         add_message_to_history: Callable[[str, str, dict | None], Any],
         session_id: str | None,
         event_router: Callable[[str | None, Event], Any] | None,
+        telemetry_recorder: Any = None,
     ) -> tuple[str, list[dict[str, Any]], str | None, list[dict[str, Any]]]:
         if isinstance(tool_call_result, ToolError):
             return await self.tool_failure_handler.handle_validation_error(
@@ -137,6 +140,7 @@ class AgentToolActionRunner:
             add_message_to_history=add_message_to_history,
             session_id=session_id,
             event_router=event_router,
+            telemetry_recorder=telemetry_recorder,
         )
         obs_text, tools_results = await self.tool_batch_runner.execute(
             tool_call_results=tool_call_results,
@@ -144,6 +148,7 @@ class AgentToolActionRunner:
             add_message_to_history=add_message_to_history,
             session_id=session_id,
             event_router=event_router,
+            telemetry_recorder=telemetry_recorder,
             tool_batch_name=tool_batch_name,
             tool_batch_args=tool_batch_args,
             parse_tool_observation=self.tool_observation_handler.parse,

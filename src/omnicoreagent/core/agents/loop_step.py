@@ -56,6 +56,7 @@ class AgentLoopStepHandler:
         mcp_tools: dict | None = None,
         local_tools: Any = None,
         event_router: Callable[[str, Event], Any] | None = None,
+        telemetry_recorder: Any = None,
         sub_agents: list | None = None,
     ) -> AgentLoopStepResult:
         if debug:
@@ -103,6 +104,7 @@ class AgentLoopStepHandler:
                     local_tools=local_tools,
                     session_id=session_id,
                     event_router=event_router,
+                    telemetry_recorder=telemetry_recorder,
                     sub_agents=sub_agents,
                 )
 

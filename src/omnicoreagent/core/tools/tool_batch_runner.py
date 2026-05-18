@@ -3,6 +3,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from omnicoreagent.core.events.base import Event
+from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.tools.tool_batch_events import (
     assign_tool_call_ids,
     build_tool_batch_args,
@@ -98,6 +99,7 @@ class ToolBatchRunner:
         add_message_to_history: Callable[[str, str, dict | None], Any],
         session_id: str | None,
         event_router: Callable[[str, Event], Any] | None,
+        telemetry_recorder: Any = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         tool_batch_name = build_tool_batch_name(tool_call_results)
         tool_batch_args = build_tool_batch_args(tool_call_results)
@@ -140,18 +142,38 @@ class ToolBatchRunner:
             [list[ToolCallResult], list[dict[str, Any]], SessionState, str | None],
             str,
         ],
+        telemetry_recorder: Any = None,
     ) -> tuple[str, list[dict[str, Any]]]:
+        batch_span = None
+        if telemetry_recorder is not None:
+            batch_span = await telemetry_recorder.start_span(
+                name="tool.batch",
+                kind="tool.batch",
+                actor=TelemetryActor(type=ActorType.TOOL),
+                input={
+                    "tool_batch_name": tool_batch_name,
+                    "tool_batch_args": tool_batch_args,
+                    "tool_count": len(tool_call_results),
+                },
+            )
+            await telemetry_recorder.emit_event(
+                "tool_batch_start",
+                actor=TelemetryActor(type=ActorType.TOOL),
+                input={
+                    "tool_batch_name": tool_batch_name,
+                    "tool_batch_args": tool_batch_args,
+                    "tool_count": len(tool_call_results),
+                },
+            )
         try:
             async with asyncio.timeout(self.tool_call_timeout):
                 tool_outputs = await asyncio.gather(
                     *[
-                        single_tool.tool_executor.execute(
-                            agent_name=self.agent_name,
-                            tool_args=single_tool.tool_args,
-                            tool_name=single_tool.tool_name,
-                            tool_call_id=single_tool.tool_call_id,
+                        self._execute_single_tool(
+                            single_tool=single_tool,
                             add_message_to_history=add_message_to_history,
                             session_id=session_id,
+                            telemetry_recorder=telemetry_recorder,
                         )
                         for single_tool in tool_call_results
                     ]
@@ -187,12 +209,42 @@ class ToolBatchRunner:
             )
             if event_router:
                 await event_router(session_id=session_id, event=event)
+            if telemetry_recorder is not None:
+                await telemetry_recorder.emit_event(
+                    "observation_pipeline_end",
+                    actor=TelemetryActor(type=ActorType.SYSTEM),
+                    output={"observation": obs_text},
+                )
+                await telemetry_recorder.emit_event(
+                    "tool_batch_end",
+                    actor=TelemetryActor(type=ActorType.TOOL),
+                    output={"tool_count": len(tools_results), "status": "completed"},
+                )
+                await telemetry_recorder.end_span(
+                    batch_span.span_id,
+                    status=SpanStatus.OK,
+                    output={"tool_count": len(tools_results), "observation": obs_text},
+                )
 
             return obs_text, tools_results
 
         except asyncio.TimeoutError:
             obs_text = TOOL_CALL_TIMEOUT_MESSAGE
             logger.warning(obs_text)
+            if telemetry_recorder is not None and batch_span is not None:
+                await telemetry_recorder.emit_event(
+                    "tool_batch_error",
+                    actor=TelemetryActor(type=ActorType.TOOL),
+                    error={
+                        "type": "TimeoutError",
+                        "message": obs_text,
+                    },
+                )
+                await telemetry_recorder.end_span(
+                    batch_span.span_id,
+                    status=SpanStatus.TIMEOUT,
+                    error={"type": "TimeoutError", "message": obs_text},
+                )
             tools_results = await self.handle_execution_error(
                 tool_call_results=tool_call_results,
                 error_message=obs_text,
@@ -207,6 +259,17 @@ class ToolBatchRunner:
         except Exception as e:
             obs_text = f"Error executing tool: {str(e)}"
             logger.error(obs_text)
+            if telemetry_recorder is not None and batch_span is not None:
+                await telemetry_recorder.emit_event(
+                    "tool_batch_error",
+                    actor=TelemetryActor(type=ActorType.TOOL),
+                    error={"type": e.__class__.__name__, "message": str(e)},
+                )
+                await telemetry_recorder.end_span(
+                    batch_span.span_id,
+                    status=SpanStatus.ERROR,
+                    error={"type": e.__class__.__name__, "message": str(e)},
+                )
             tools_results = await self.handle_execution_error(
                 tool_call_results=tool_call_results,
                 error_message=obs_text,
@@ -217,3 +280,97 @@ class ToolBatchRunner:
                 tool_batch_name=tool_batch_name,
             )
             return obs_text, tools_results
+
+    async def _execute_single_tool(
+        self,
+        *,
+        single_tool: ToolCallResult,
+        add_message_to_history: Callable[[str, str, dict | None], Any],
+        session_id: str | None,
+        telemetry_recorder: Any = None,
+    ) -> dict[str, Any]:
+        if telemetry_recorder is None:
+            return await single_tool.tool_executor.execute(
+                agent_name=self.agent_name,
+                tool_args=single_tool.tool_args,
+                tool_name=single_tool.tool_name,
+                tool_call_id=single_tool.tool_call_id,
+                add_message_to_history=add_message_to_history,
+                session_id=session_id,
+            )
+
+        span = await telemetry_recorder.start_span(
+            name=single_tool.tool_name,
+            kind="tool.call",
+            actor=TelemetryActor(type=ActorType.TOOL, name=single_tool.tool_name),
+            input={
+                "tool_name": single_tool.tool_name,
+                "tool_args": single_tool.tool_args,
+                "tool_call_id": single_tool.tool_call_id,
+            },
+        )
+        try:
+            await telemetry_recorder.emit_event(
+                "tool_call",
+                actor=TelemetryActor(type=ActorType.TOOL, name=single_tool.tool_name),
+                input={
+                    "tool_name": single_tool.tool_name,
+                    "tool_args": single_tool.tool_args,
+                    "tool_call_id": single_tool.tool_call_id,
+                },
+            )
+            result = await single_tool.tool_executor.execute(
+                agent_name=self.agent_name,
+                tool_args=single_tool.tool_args,
+                tool_name=single_tool.tool_name,
+                tool_call_id=single_tool.tool_call_id,
+                add_message_to_history=add_message_to_history,
+                session_id=session_id,
+            )
+            if result.get("status") == "error":
+                await telemetry_recorder.emit_event(
+                    "tool_error",
+                    actor=TelemetryActor(
+                        type=ActorType.TOOL, name=single_tool.tool_name
+                    ),
+                    output=result,
+                    error={
+                        "type": "ToolError",
+                        "message": result.get("message") or "Tool returned error",
+                    },
+                )
+                await telemetry_recorder.end_span(
+                    span.span_id,
+                    status=SpanStatus.ERROR,
+                    output=result,
+                    error={
+                        "type": "ToolError",
+                        "message": result.get("message") or "Tool returned error",
+                    },
+                )
+            else:
+                await telemetry_recorder.emit_event(
+                    "tool_result",
+                    actor=TelemetryActor(
+                        type=ActorType.TOOL, name=single_tool.tool_name
+                    ),
+                    output=result,
+                )
+                await telemetry_recorder.end_span(
+                    span.span_id,
+                    status=SpanStatus.OK,
+                    output=result,
+                )
+            return result
+        except Exception as exc:
+            await telemetry_recorder.record_exception(
+                exc,
+                event_type="tool_error",
+                actor=TelemetryActor(type=ActorType.TOOL, name=single_tool.tool_name),
+            )
+            await telemetry_recorder.end_span(
+                span.span_id,
+                status=SpanStatus.ERROR,
+                error={"type": exc.__class__.__name__, "message": str(exc)},
+            )
+            raise
