@@ -20,12 +20,17 @@ from omnicoreagent.core.runtime.imports import (
 from omnicoreagent.core.telemetry import (
     ActorType,
     TelemetryActor,
+    TelemetryExportError,
+    TelemetryExporter,
+    TelemetryTrace,
     TelemetryNormalizer,
     TelemetryRecorder,
     TelemetryStream,
     TelemetryStreamScope,
     TraceFilter,
     TraceStatus,
+    build_telemetry_exporter,
+    export_trace_to_many,
 )
 
 
@@ -50,6 +55,7 @@ class OmniCoreAgent:
         telemetry_store: Optional[Any] = None,
         telemetry_recorder: Optional[Any] = None,
         telemetry_stream: Optional[Any] = None,
+        telemetry_exporters: Optional[List[Any]] = None,
         prompt_builder: Optional[Any] = None,
         debug: bool = False,
     ):
@@ -69,6 +75,7 @@ class OmniCoreAgent:
             telemetry_store: Optional telemetry store
             telemetry_recorder: Optional telemetry recorder
             telemetry_stream: Optional telemetry stream
+            telemetry_exporters: Optional telemetry exporters
             debug: Enable debug logging
         """
         self.name = name
@@ -87,6 +94,7 @@ class OmniCoreAgent:
         self.telemetry_store = telemetry_store
         self.telemetry_recorder = telemetry_recorder
         self.telemetry_stream = telemetry_stream
+        self.telemetry_exporters = self._build_telemetry_exporters(telemetry_exporters)
         if prompt_builder:
             self.prompt_builder = prompt_builder
         else:
@@ -199,11 +207,27 @@ class OmniCoreAgent:
                 self.telemetry_store = construction.default_telemetry_store()
 
         if self.telemetry_recorder is None:
-            self.telemetry_recorder = TelemetryRecorder(self.telemetry_store)
+            self.telemetry_recorder = TelemetryRecorder(
+                self.telemetry_store,
+                exporters=self.telemetry_exporters,
+            )
         elif self.telemetry_recorder.store is not self.telemetry_store:
             raise ValueError(
                 "telemetry_recorder.store must be the same object as telemetry_store"
             )
+        else:
+            existing_exporters = getattr(self.telemetry_recorder, "exporters", None)
+            if existing_exporters is None:
+                raise ValueError(
+                    "telemetry_recorder must expose exporters when telemetry_exporters "
+                    "are provided"
+                )
+            for exporter in existing_exporters:
+                if exporter not in self.telemetry_exporters:
+                    self.telemetry_exporters.append(exporter)
+            for exporter in self.telemetry_exporters:
+                if exporter not in existing_exporters:
+                    existing_exporters.append(exporter)
 
         if self.telemetry_stream is None:
             self.telemetry_stream = TelemetryStream(self.telemetry_store)
@@ -376,7 +400,11 @@ class OmniCoreAgent:
                     error={"type": exc.__class__.__name__, "message": str(exc)},
                 )
             raise
+        except TelemetryExportError:
+            raise
         except Exception as exc:
+            if self.telemetry_recorder.current_context() is None:
+                raise
             if trace_context is not None:
                 await self.telemetry_recorder.record_exception(
                     exc,
@@ -505,6 +533,34 @@ class OmniCoreAgent:
             self._cumulative_usage = runtime("Usage")()
         return self._cumulative_usage
 
+    def _build_telemetry_exporters(
+        self,
+        exporters: Optional[List[Any]],
+    ) -> list[TelemetryExporter]:
+        built: list[TelemetryExporter] = []
+        for exporter in exporters or []:
+            if isinstance(exporter, str):
+                built.append(build_telemetry_exporter(exporter))
+            elif isinstance(exporter, dict):
+                config = dict(exporter)
+                destination = (
+                    config.pop("destination", None)
+                    or config.pop("type", None)
+                    or config.pop("name", None)
+                )
+                if destination is None:
+                    raise ValueError(
+                        "Telemetry exporter config requires destination, type, or name"
+                    )
+                built.append(build_telemetry_exporter(str(destination), **config))
+            elif hasattr(exporter, "export_trace"):
+                built.append(exporter)
+            else:
+                raise ValueError(
+                    "Telemetry exporters must be exporter instances, names, or dicts"
+                )
+        return built
+
     async def list_all_available_tools(self):
         """List all available tools (MCP and local)"""
         if not self._initialized:
@@ -587,6 +643,79 @@ class OmniCoreAgent:
         if trace and normalize:
             trace = TelemetryNormalizer().normalize(trace)
         return trace.model_dump() if trace else None
+
+    async def export_trace(
+        self,
+        identifier: str | None = None,
+        *,
+        session_id: str | None = None,
+        trace_id: str | None = None,
+        run_id: str | None = None,
+        exporters: Optional[List[Any]] = None,
+        normalize: bool = True,
+        strict: bool = False,
+    ) -> list[Dict[str, Any]]:
+        """
+        Export a telemetry trace through configured or supplied exporters.
+        """
+        trace = await self._resolve_telemetry_trace(
+            identifier,
+            session_id=session_id,
+            trace_id=trace_id,
+            run_id=run_id,
+            normalize=normalize,
+        )
+        if trace is None:
+            return []
+        selected_exporters = (
+            self._build_telemetry_exporters(exporters)
+            if exporters is not None
+            else self.telemetry_exporters
+        )
+        results = await export_trace_to_many(
+            trace,
+            selected_exporters,
+            strict=strict,
+        )
+        return [result.model_dump() for result in results]
+
+    async def _resolve_telemetry_trace(
+        self,
+        identifier: str | None = None,
+        *,
+        session_id: str | None = None,
+        trace_id: str | None = None,
+        run_id: str | None = None,
+        normalize: bool = False,
+    ) -> TelemetryTrace | None:
+        self._ensure_telemetry()
+        filters = [value is not None for value in (session_id, trace_id, run_id)]
+        if identifier is not None and any(filters):
+            raise ValueError("Use either identifier or trace lookup keyword arguments")
+        if sum(filters) > 1:
+            raise ValueError("Use only one of trace_id, run_id, or session_id")
+        if trace_id is not None:
+            trace = await self.telemetry_store.get_trace(trace_id)
+        elif run_id is not None:
+            traces = await self.telemetry_store.list_traces(TraceFilter(run_id=run_id))
+            trace = traces[-1] if traces else None
+        elif session_id is not None:
+            traces = await self.telemetry_store.list_traces(
+                TraceFilter(session_id=session_id)
+            )
+            trace = traces[-1] if traces else None
+        elif identifier is not None:
+            trace = await self.telemetry_store.get_trace(identifier)
+            if trace is None:
+                traces = await self.telemetry_store.list_traces(
+                    TraceFilter(session_id=identifier)
+                )
+                trace = traces[-1] if traces else None
+        else:
+            raise TypeError("export_trace() requires trace_id or session_id")
+        if trace and normalize:
+            trace = TelemetryNormalizer().normalize(trace)
+        return trace
 
     async def list_telemetry_traces(
         self,

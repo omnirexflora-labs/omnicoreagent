@@ -107,11 +107,90 @@ normalized = await agent.get_trace(result["trace_id"], normalize=True)
 handle; when more than one trace is correlated to the same run, `get_trace(
 run_id=...)` returns the latest matching trace.
 
-The trace is intentionally internal and dependency-free. It is a compact
-debugging view built from telemetry events and spans, not a full tracing or
-evaluation system.
+The trace is intentionally dependency-free inside the runtime. Exporters are
+optional adapters layered on top of this internal trace model.
+
+---
+
+## Export Traces
+
+Install the OpenTelemetry extra when you want to send traces to an OTLP
+collector or an OTLP-compatible tracing backend:
+
+```bash
+pip install "omnicoreagent[otel]"
+```
+
+Export a specific trace manually:
+
+```python
+from omnicoreagent import build_telemetry_exporter
+
+result = await agent.run("Research this topic", session_id="research_1")
+
+otel = build_telemetry_exporter(
+    "otlp",
+    endpoint="http://localhost:4318/v1/traces",
+    service_name="research-agent",
+)
+
+exported = await agent.export_trace(
+    result["trace_id"],
+    exporters=[otel],
+)
+print(exported)
+```
+
+Configure exporters on the agent to export automatically when traces end:
+
+```python
+from omnicoreagent import OmniCoreAgent
+
+agent = OmniCoreAgent(
+    name="research-agent",
+    system_instruction="You are a research assistant.",
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    telemetry_exporters=[
+        {
+            "destination": "otlp",
+            "endpoint": "http://localhost:4318/v1/traces",
+            "service_name": "research-agent",
+        }
+    ],
+)
+```
+
+Vendor presets use the same OTLP exporter path:
+
+```python
+langsmith = build_telemetry_exporter(
+    "langsmith",
+    api_key="...",
+    project_name="production-agents",
+)
+
+opik = build_telemetry_exporter(
+    "opik",
+    api_key="...",
+    workspace="your-workspace",
+    project_name="production-agents",
+)
+```
+
+The presets also read common environment variables:
+
+| Exporter | Environment variables |
+|----------|-----------------------|
+| OTLP | `OTEL_EXPORTER_OTLP_ENDPOINT` or explicit `endpoint` |
+| LangSmith | `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, optional `LANGSMITH_OTEL_ENDPOINT` |
+| Opik | `OPIK_API_KEY`, `OPIK_WORKSPACE`, `OPIK_PROJECT_NAME`, optional `OPIK_OTEL_ENDPOINT` |
+| JSONL | explicit local `path` |
+
+`trace_id` remains the exact lookup and export handle. `run_id` can be used for
+correlated export, but when a serving trace and an agent trace share the same
+`run_id`, the latest matching trace is exported.
 
 <Tip>
 Use metrics for cost and performance monitoring, events for live UI streaming,
-and traces for compact session-level debugging.
+traces for debugging, and exporters when traces need to leave the process.
 </Tip>

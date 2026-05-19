@@ -26,6 +26,10 @@ from omnicoreagent.core.telemetry.models import (
 )
 from omnicoreagent.core.telemetry.redaction import TelemetryConfig, redact_payload
 from omnicoreagent.core.telemetry.store import AbstractTelemetryStore
+from omnicoreagent.core.telemetry.exporters import (
+    TelemetryExporter,
+    export_trace_to_many,
+)
 
 
 def _span_status_for_trace_status(status: TraceStatus) -> SpanStatus:
@@ -43,9 +47,11 @@ class TelemetryRecorder:
         self,
         store: AbstractTelemetryStore,
         config: TelemetryConfig | None = None,
+        exporters: list[TelemetryExporter] | None = None,
     ) -> None:
         self.store = store
         self.config = config or TelemetryConfig()
+        self.exporters = list(exporters or [])
         self._span_parent_contexts: dict[str, TelemetryContext | None] = {}
         self._span_sources: dict[str, str] = {}
 
@@ -166,6 +172,14 @@ class TelemetryRecorder:
                     {"status": TraceStatus(status).value, "ended_at": ended_at},
                 )
             )
+            if self.exporters:
+                trace = await self._read(self.store.get_trace(context.trace_id))
+                if trace is not None:
+                    await export_trace_to_many(
+                        trace,
+                        self.exporters,
+                        strict=self.config.strict,
+                    )
         finally:
             set_telemetry_context(parent_context)
 

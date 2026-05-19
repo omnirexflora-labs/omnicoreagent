@@ -4,6 +4,7 @@ import pytest
 
 from omnicoreagent.core.telemetry import (
     ActorType,
+    InMemoryTelemetryExporter,
     InMemoryTelemetryStore,
     JsonlTelemetryStore,
     SpanStatus,
@@ -17,6 +18,7 @@ from omnicoreagent.core.telemetry import (
     TelemetryStreamScope,
     TelemetryTrace,
     TelemetryTraceMetadata,
+    OTelTraceMapper,
     TraceFilter,
     TraceStatus,
     current_telemetry_context,
@@ -662,3 +664,5 @@ def test_root_and_core_exports_include_telemetry_companions():
         assert module.SpanStatus is SpanStatus
         assert module.TraceFilter is TraceFilter
         assert module.TelemetryTraceMetadata is TelemetryTraceMetadata
+        assert module.OTelTraceMapper is OTelTraceMapper
+        assert module.InMemoryTelemetryExporter is InMemoryTelemetryExporter

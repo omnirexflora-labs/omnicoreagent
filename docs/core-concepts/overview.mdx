@@ -56,7 +56,7 @@ enabled explicitly through `agent_config` or installable extras.
 | **Context management** | Checks message history before each model call and automatically truncates or summarizes when the configured budget threshold is crossed. |
 | **Memory** | Stores and retrieves session history through the configured memory router. |
 | **Workspace** | Provides agent-accessible files for notes, scratchpads, artifacts, subagent output, and tool offloads. |
-| **Telemetry Events** | Emits typed telemetry events for runs, tool calls, streaming, and server integrations. |
+| **Telemetry and Traces** | Emits typed events, stores traces, streams progress, and exports traces through OTLP-compatible adapters. |
 | **Serving** | Runs the agent through OmniServe when you need REST/SSE endpoints. |
 
 ---

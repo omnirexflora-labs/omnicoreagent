@@ -302,6 +302,9 @@ pip install "omnicoreagent[postgres]"        # PostgreSQL / SQL memory
 pip install "omnicoreagent[mongodb]"         # MongoDB memory
 pip install "omnicoreagent[s3]"              # S3 / R2 workspace storage
 pip install "omnicoreagent[serve]"           # OmniServe REST/SSE API
+pip install "omnicoreagent[otel]"            # OTLP trace export
+pip install "omnicoreagent[langsmith]"       # LangSmith trace export
+pip install "omnicoreagent[opik]"            # Comet Opik trace export
 pip install "omnicoreagent[all]"             # Everything
 ```
 
@@ -328,7 +331,7 @@ uses.
 | **Agent Skills** | Loads packaged capabilities implemented with Python, Bash, or Node.js. |
 | **BM25 Tool Retrieval** | Selects relevant tools from large tool sets so the prompt stays focused. |
 | **Guardrails** | Adds prompt-injection screening inside the observation path with configurable behavior. |
-| **Telemetry and Traces** | Emits typed telemetry events and retrieves traces by exact `trace_id`, latest session, or `run_id` correlation for debugging and streaming integrations. |
+| **Telemetry and Traces** | Emits typed telemetry events, retrieves traces by exact `trace_id`, latest session, or `run_id` correlation, and exports traces to OTLP, LangSmith, Opik, or JSONL. |
 | **Workflow Orchestration** | Provides sequential, parallel, and router agents for multi-step application workflows. |
 | **Durable Background Tasks** | Runs manual or scheduled agent work with task state, run history, retries, cancellation, and workspace output. |
 | **Universal Models** | Supports OpenAI, Anthropic, Gemini, Groq, Ollama, DeepSeek, Mistral, OpenRouter, Azure, and Cencori through the runtime model layer. |

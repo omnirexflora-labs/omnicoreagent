@@ -54,8 +54,7 @@ This architecture does not implement or design:
 - evaluator modules
 - benchmark suites
 - feedback UI
-- OpenTelemetry exporter implementation
-- LangSmith, Opik, Phoenix, Langfuse, Braintrust, or vendor integration
+- dashboards or vendor-specific observability UI
 - policy engine
 - sandbox logs
 
@@ -425,6 +424,34 @@ Trace retrieval follows the same evidence boundary:
   are returned as evidence, not hidden behind summaries
 - OmniServe trace summary endpoints read the latest telemetry trace, not a
   separate session event summary
+
+## Trace Exporters
+
+Exporters are adapters over normalized telemetry. They do not own trace
+identity, persistence, streaming, or evaluation.
+
+The exporter boundary is:
+
+```text
+TelemetryStore -> TelemetryNormalizer -> TelemetryExporter -> external backend
+```
+
+Supported exporter responsibilities:
+
+- map OmniCoreAgent spans/events to OpenTelemetry-shaped span records
+- send traces through OTLP/HTTP when the optional OpenTelemetry dependency is
+  installed
+- provide vendor presets for OTLP-compatible backends such as LangSmith and
+  Opik
+- support JSONL and in-memory exporters for local testing and debugging
+- preserve OmniCoreAgent identifiers as attributes:
+  `omnicoreagent.trace_id`, `omnicoreagent.span_id`, `omnicoreagent.run_id`,
+  `omnicoreagent.session_id`
+- fail independently from trace persistence unless strict telemetry mode is
+  enabled
+
+Exporters are intentionally outbound-only. They must not become another storage
+layer and must not change the internal telemetry schema to match one vendor.
 
 ## Trace Normalizer
 
