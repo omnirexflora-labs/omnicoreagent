@@ -123,6 +123,7 @@ small.
 | Connect MCP server tools | [MCP tools cookbook](./cookbook/getting_started/agent_with_mcp_tools.py) |
 | Manage memory and context | [Getting started cookbook](./cookbook/getting_started) |
 | Save files, artifacts, and large tool results | [Tool offload cookbook](./cookbook/getting_started/agent_with_tool_offload.py) |
+| Build a production-shaped app harness | [Real applications cookbook](./cookbook/real_applications) |
 | Build multi-step workflows | [Workflows cookbook](./cookbook/workflows) |
 | Serve an agent over HTTP/SSE | [OmniServe cookbook](./cookbook/omniserve) |
 | Understand the runtime internals | [Implementation Map](#implementation-map) |
@@ -368,6 +369,7 @@ All examples live in the **[Cookbook](./cookbook)** and are organized by use cas
 | Category | What You'll Build |
 |----------|-------------------|
 | [Getting Started](./cookbook/getting_started) | First agent, tools, memory, events |
+| [Real Applications](./cookbook/real_applications) | Due diligence, support operations, and workspace code review harnesses |
 | [Workflows](./cookbook/workflows) | Sequential, Parallel, Router agents |
 | [Background Agents](./cookbook/background_agents) | Scheduled autonomous tasks |
 | [Production](./cookbook/production) | Guardrails, serving, and production patterns |

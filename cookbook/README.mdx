@@ -46,6 +46,9 @@ print(result["response"])
 → **[getting_started/agent_with_sub_agents.py](./getting_started/agent_with_sub_agents.py)** — OmniCoreAgent dynamic subagents, workspace files, and orchestration.
 
 ### 🏭 I want to build a real application
+→ **[real_applications](./real_applications)** — Production-shaped app harness examples that show domain tools, workspace files, offloading, telemetry, guardrails, and workspace command tools across different apps.
+
+### 🧪 I want more domain demos
 → **[advanced_agent](./advanced_agent)** — E-commerce, flight booking, customer support, due diligence.
 
 ### 🌐 I want to deploy as an API
@@ -64,6 +67,7 @@ cookbook/
 ├── workflows/           # Multi-agent orchestration patterns
 ├── background_agents/   # Scheduled and autonomous agents
 ├── omniserve/           # 🆕 Deploy agents as REST/SSE APIs
+├── real_applications/   # End-to-end application harness examples
 ├── advanced_agent/      # Real-world application examples
 └── production/          # Production-ready configurations
 ```
@@ -74,6 +78,9 @@ cookbook/
 
 | Example | What You'll Build |
 |---------|-------------------|
+| [Research Due Diligence](./real_applications/research_due_diligence_agent.py) | Research agent with parallel tools, workspace reports, artifact readback, telemetry |
+| [Support Operations](./real_applications/support_operations_agent.py) | Support agent with customer/order tools, guardrails, escalation, workspace notes |
+| [Workspace Code Review](./real_applications/workspace_code_review_agent.py) | Code review agent using built-in workspace file commands instead of unrestricted shell |
 | [E-commerce Shopper](./advanced_agent/e_commerce_personal_shopper_agent.py) | Personal shopping assistant with cart, preferences, recommendations |
 | [Flight Booking](./advanced_agent/flightBooking_agent.py) | Travel agent with search, booking, and itinerary management |
 | [Customer Support](./advanced_agent/real_time_customer_support_agent.py) | Support agent with ticket handling and escalation |
