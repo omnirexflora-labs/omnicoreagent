@@ -1,0 +1,35 @@
+# Real Application Harness Examples
+
+These examples show OmniCoreAgent as an application-facing agent harness, not a toy loop. Each app combines domain behavior with the built-in runtime pieces it needs: local tools, workspace files, tool offloading, guardrails, telemetry identifiers, and file commands.
+
+## Examples
+
+| Example | What it demonstrates |
+|---------|----------------------|
+| [Research due diligence](./research_due_diligence_agent.py) | Parallel research tools, context management, large evidence offload, artifact readback, workspace report output, telemetry identifiers |
+| [Support operations](./support_operations_agent.py) | Customer/order tools, support knowledge retrieval, guardrails, workspace ticket notes, telemetry |
+| [Workspace code review](./workspace_code_review_agent.py) | Built-in workspace command tools for file discovery, grep-style search, reading, editing, and writing review output |
+
+## Run an Example
+
+```bash
+export LLM_API_KEY=your_key
+uv run python cookbook/real_applications/research_due_diligence_agent.py
+```
+
+The examples default to the provider/model from `cookbook/shared.py`. Override them with:
+
+```bash
+export OMNICOREAGENT_PROVIDER=openai
+export OMNICOREAGENT_MODEL=gpt-5.4-mini
+```
+
+## Why these examples exist
+
+Application builders need to see where OmniCoreAgent owns the base harness and where their application code plugs in.
+
+- App code provides domain tools, instructions, data sources, and business rules.
+- OmniCoreAgent provides the model loop, tool execution, workspace files, structured observations, offloading, telemetry, memory, and guardrails.
+- The same application pattern can be served later through OmniServe or run through background tasks when the app needs those boundaries.
+
+Use these examples as starting points for your own application harness.
