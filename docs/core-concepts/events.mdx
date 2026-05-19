@@ -29,6 +29,11 @@ events = await agent.get_telemetry_events_after(
 
 for event in events:
     print(event.event_type, event.model_dump())
+
+exact_trace = await agent.get_trace(result["trace_id"])
+latest_session_trace = await agent.get_latest_trace(result["session_id"])
+run_correlated_trace = await agent.get_trace(run_id=result["run_id"])
+normalized_trace = await agent.get_trace(result["trace_id"], normalize=True)
 ```
 
 ---
@@ -84,14 +89,19 @@ OmniServe uses the same telemetry stream:
 - `POST /run` streams telemetry for the run it starts and finishes with
   `complete`.
 - `GET /events/{session_id}` replays stored telemetry for a session and follows
-  new telemetry.
-- `GET /events/{session_id}/list` returns stored telemetry events as JSON.
+  new telemetry. Add `?run_id=...` to isolate one run inside that session.
+- `GET /events/{session_id}/list` returns stored telemetry events as JSON. Add
+  `?run_id=...` for the same run-scoped filtering.
 - `GET /events/{session_id}/trace` returns a compact telemetry summary for the
-  latest session trace.
+  latest session trace. Add `?run_id=...` to retrieve the trace for that run.
 
 Every telemetry event includes its `trace_id`. Runtime-created events also carry
 correlation metadata such as `run_id`, `session_id`, and `agent_id` when that
 context exists.
+
+Use `trace_id` for exact trace lookup. Use `run_id` to filter or correlate one
+runtime execution inside a session. If several traces share one `run_id`, the
+run lookup returns the latest matching trace.
 
 ---
 

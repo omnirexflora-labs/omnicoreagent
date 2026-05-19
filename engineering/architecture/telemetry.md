@@ -74,9 +74,9 @@ TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE
 canonical evidence store. `TelemetryStream` is a live/replay adapter over that
 same store. It is not a second event system.
 
-The old event-router idea is removed from the architecture. Routes such as
-`/events/{session_id}/trace` may keep their HTTP shape for developer ergonomics,
-but their data must be derived from telemetry traces and events.
+Routes such as `/events/{session_id}/trace` may keep their HTTP shape for
+developer ergonomics, but their data must be derived from telemetry traces and
+events.
 
 ## Core Concepts
 
@@ -192,6 +192,9 @@ The runtime facade wiring phase provides:
 - runtime helper methods for trace lookup and telemetry stream replay/follow
 - public `run(...)` responses include `trace_id` and `run_id` so application
   code can retrieve or stream the exact trace it just created
+- OmniServe session telemetry routes support `run_id` filtering so same-session
+  concurrent runs can be replayed, followed, and summarized without mixing
+  evidence
 - injected `telemetry_store`, `telemetry_recorder`, and `telemetry_stream`
   components must share the same store instance
 
@@ -226,8 +229,8 @@ The runtime loop instrumentation phase provides:
 - OmniServe `serve.request` traces/events for synchronous and SSE run
   boundaries, correlated to the same `session_id` and `run_id` as the agent run
 
-Remaining runtime coverage should be added directly through telemetry. No new
-event router, side-channel stream, or feature-specific event store should be
+Remaining runtime coverage should be added directly through telemetry. No
+parallel side-channel stream or feature-specific event store should be
 introduced.
 
 Runtime controls may also emit telemetry:
@@ -396,10 +399,8 @@ Redis streams are not the canonical long-term trace store.
 
 ## Telemetry Stream
 
-The telemetry stream is the live/replay adapter over telemetry records.
-
-It replaces the old event-router responsibility without becoming another
-truth source.
+The telemetry stream is the live/replay adapter over telemetry records. It is
+not another truth source.
 
 Responsibilities:
 

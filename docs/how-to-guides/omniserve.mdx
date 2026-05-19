@@ -205,9 +205,9 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 | `GET` | `/prometheus` | No | Prometheus metrics |
 | `GET` | `/tools` | Yes* | List available tools |
 | `GET` | `/metrics` | Yes* | Agent usage metrics |
-| `GET` | `/events/{session_id}` | Yes* | Replay stored telemetry events, then follow live telemetry events over SSE |
-| `GET` | `/events/{session_id}/list` | Yes* | Return stored telemetry events as JSON |
-| `GET` | `/events/{session_id}/trace` | Yes* | Compact telemetry trace summary |
+| `GET` | `/events/{session_id}` | Yes* | Replay stored telemetry events, then follow live telemetry events over SSE; add `?run_id=...` to isolate one run |
+| `GET` | `/events/{session_id}/list` | Yes* | Return stored telemetry events as JSON; add `?run_id=...` to isolate one run |
+| `GET` | `/events/{session_id}/trace` | Yes* | Compact telemetry trace summary for the latest session trace, or `?run_id=...` for one run |
 | `GET` | `/docs` | No | Swagger UI |
 | `GET` | `/redoc` | No | ReDoc UI |
 
@@ -263,10 +263,19 @@ curl -X POST http://localhost:8000/run \
 # Replay and follow one session's events
 curl -N http://localhost:8000/events/user123
 
+# Replay one run inside a shared session
+curl -N "http://localhost:8000/events/user123?run_id=RUN_ID"
+curl "http://localhost:8000/events/user123/list?run_id=RUN_ID"
+curl "http://localhost:8000/events/user123/trace?run_id=RUN_ID"
+
 # List tools
 curl http://localhost:8000/tools \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
+
+For telemetry traces, `trace_id` is the exact lookup handle returned by the
+agent runtime. OmniServe's `run_id` query parameter is a session-scoped
+correlation filter for event replay and trace summaries.
 
 ### Background Task Example
 

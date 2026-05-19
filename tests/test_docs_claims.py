@@ -319,3 +319,71 @@ def test_background_docs_include_durable_backend_selection_guidance():
         text = path.read_text(encoding="utf-8")
         missing = sorted(phrase for phrase in expected if phrase not in text)
         assert not missing, f"{path} is missing backend selection guidance: {missing}"
+
+
+def test_telemetry_docs_describe_trace_lookup_and_run_scoped_streaming():
+    docs = [
+        Path("docs/core-concepts/events.mdx"),
+        Path("docs/how-to-guides/basic-usage.mdx"),
+        Path("docs/how-to-guides/observability.mdx"),
+    ]
+    expected = {
+        'result["trace_id"]',
+        'result["run_id"]',
+        "get_trace",
+        "get_latest_trace",
+        "normalize=True",
+    }
+
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        missing = sorted(phrase for phrase in expected if phrase not in text)
+        assert not missing, f"{path} is missing telemetry contract docs: {missing}"
+
+    omniserve_text = Path("docs/how-to-guides/omniserve.mdx").read_text(
+        encoding="utf-8"
+    )
+    for expected_route in {
+        "/events/{session_id}",
+        "/events/{session_id}/list",
+        "/events/{session_id}/trace",
+        "?run_id=",
+    }:
+        assert expected_route in omniserve_text
+
+    for path in [
+        Path("docs/core-concepts/events.mdx"),
+        Path("docs/how-to-guides/observability.mdx"),
+        Path("docs/how-to-guides/omniserve.mdx"),
+    ]:
+        text = path.read_text(encoding="utf-8")
+        assert "?run_id=" in text
+
+
+def test_telemetry_docs_do_not_reference_old_event_router():
+    docs = [
+        Path("README.md"),
+        Path("docs"),
+        Path("cookbook"),
+        Path("engineering/architecture/telemetry.md"),
+        Path("engineering/specifications/telemetry.md"),
+    ]
+    forbidden = {
+        "EventRouter",
+        "event router",
+        "event-router",
+        "core/events",
+    }
+    offenders: list[str] = []
+
+    for path in docs:
+        files = [path] if path.is_file() else path.rglob("*")
+        for file_path in files:
+            if file_path.suffix not in {".md", ".mdx", ".py"}:
+                continue
+            text = file_path.read_text(encoding="utf-8")
+            found = sorted(phrase for phrase in forbidden if phrase in text)
+            if found:
+                offenders.append(f"{file_path}: {', '.join(found)}")
+
+    assert not offenders, "Old event-router wording remains:\n" + "\n".join(offenders)

@@ -32,7 +32,7 @@ This specification covers:
 - live/replay stream contract
 - normalization contract
 - redaction and payload policy
-- removal of the old event-router path in favor of telemetry-owned streaming
+- telemetry-owned streaming with no parallel event stack
 - required tests
 
 This specification does not cover:
@@ -492,7 +492,12 @@ Rules:
 - stream scopes must isolate sessions, runs, and traces.
 - `/run` SSE streams events for the trace/run it started.
 - `/events/{session_id}` remains as an HTTP route shape, but it must read from
-  telemetry records.
+  telemetry records. `?run_id=...` narrows replay and live follow to one run
+  inside that session.
+- `/events/{session_id}/list?run_id=...` returns stored telemetry events for
+  one run inside the session.
+- `/events/{session_id}/trace` returns the latest session trace; adding
+  `?run_id=...` returns the trace for that run.
 - stream failures must not corrupt the stored trace.
 - Redis streams may be used as an implementation backend for live fanout, but
   Redis stream records are not a separate canonical evidence model.
@@ -686,10 +691,9 @@ directly into `TelemetryStore`. That adapter is the runtime boundary that alread
 owns background event ordering and workspace mirrors; it must still write the
 same normalized telemetry models and feed the same `TelemetryStream` path.
 
-There must not be a parallel event stack:
+There must not be a parallel event stack. The canonical path is:
 
 ```text
-EventRouter -> EventStore
 TelemetryRecorder -> TelemetryStore
 ```
 
@@ -808,7 +812,7 @@ This design PR is acceptable when:
 - architecture and specification are accepted
 - telemetry owns the target streaming path:
   `TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE`
-- old event-router concerns are removed from the target architecture
+- the target architecture has no parallel event stack
 - the spec defines the schema, recorder, store, stream, normalizer, redaction,
   streaming, and future evaluation evidence contracts
 - docs clearly separate telemetry from observability and evaluation
@@ -822,6 +826,6 @@ The telemetry foundation implementation is acceptable when:
 - telemetry store can persist and retrieve traces locally
 - telemetry stream can replay/follow selected telemetry events
 - OmniServe SSE is backed by `TelemetryStream`
-- no code path writes to a separate EventRouter/EventStore
+- no code path writes to a separate event stack
 - normalizer can produce deterministic normalized traces
 - future evaluation can reference `trace_id`, `span_id`, and `event_id`

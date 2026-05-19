@@ -148,7 +148,8 @@ specific to your application.
 
 ## Event Streaming
 
-Read telemetry events for UIs, logging, and debugging:
+Read telemetry events for UIs, logging, and debugging. Use `run_id` when
+multiple runs can share the same `session_id`.
 
 ```python
 agent = OmniCoreAgent(
@@ -159,10 +160,20 @@ agent = OmniCoreAgent(
 
 result = await agent.run("What can you do?")
 session_id = result["session_id"]
+run_id = result["run_id"]
+trace_id = result["trace_id"]
 
-events = await agent.get_telemetry_events_after(cursor=None, session_id=session_id)
+events = await agent.get_telemetry_events_after(
+    cursor=None,
+    session_id=session_id,
+    run_id=run_id,
+)
 for event in events:
     print(event.event_type, event.model_dump())
+
+exact_trace = await agent.get_trace(trace_id)
+latest_session_trace = await agent.get_latest_trace(session_id)
+normalized_trace = await agent.get_trace(trace_id, normalize=True)
 ```
 
 ---
