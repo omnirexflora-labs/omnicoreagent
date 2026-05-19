@@ -9,6 +9,7 @@ These examples show OmniCoreAgent as an application-facing agent harness, not a 
 | [Research due diligence](./research_due_diligence_agent.py) | Parallel research tools, context management, large evidence offload, artifact readback, workspace report output, telemetry identifiers |
 | [Support operations](./support_operations_agent.py) | Customer/order tools, support knowledge retrieval, guardrails, workspace ticket notes, telemetry |
 | [Workspace code review](./workspace_code_review_agent.py) | Built-in workspace command tools for file discovery, grep-style search, reading, editing, and writing review output |
+| [Support background task](../background_agents/real_application_background_task.py) | The support operations app shape running through durable task state, attempts, lifecycle events, and workspace output |
 
 ## Run an Example
 
@@ -30,6 +31,7 @@ Application builders need to see where OmniCoreAgent owns the base harness and w
 
 - App code provides domain tools, instructions, data sources, and business rules.
 - OmniCoreAgent provides the model loop, tool execution, workspace files, structured observations, offloading, telemetry, memory, and guardrails.
-- The same application pattern can be served later through OmniServe or run through background tasks when the app needs those boundaries.
+- The same application pattern can be served through OmniServe with `cookbook/omniserve/real_application_agent.py`.
+- The same application pattern can run as a background task with `cookbook/background_agents/real_application_background_task.py`.
 
 Use these examples as starting points for your own application harness.

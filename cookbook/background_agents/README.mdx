@@ -172,6 +172,34 @@ OMNICOREAGENT_COOKBOOK_WORKSPACE_DIR=/tmp/omnicoreagent-background-demo \
   python3 cookbook/background_agents/scheduled_task_example.py
 ```
 
+## Real Application Background Task
+
+The real application example runs the support operations app shape through the
+background manager. It uses the same support domain tools as
+`cookbook/real_applications/support_operations_agent.py`, registers a manual
+task, waits for the run to finish, then prints the run id, status, attempts,
+lifecycle events, and workspace files.
+
+It is deterministic and does not require `LLM_API_KEY`, so it is safe to run in
+CI or locally when you only want to inspect the background execution boundary:
+
+```bash
+uv run python cookbook/background_agents/real_application_background_task.py
+```
+
+By default, the workspace root is under your system temp directory at
+`omnicoreagent_real_app_background_workspace`. The script prints both
+`workspace_root` and the run-local `workspace` path. Pass `workspace_dir` when
+calling `run_real_application_background_example(...)` from Python if you want a
+specific local root.
+
+The run workspace contains:
+
+- `output.md` with the durable support note
+- `tickets/tck-1042.md` with the ticket-specific record
+- `run.json` with the latest run snapshot
+- `events.jsonl` with ordered lifecycle events
+
 ## Runtime Controls
 
 ```python
