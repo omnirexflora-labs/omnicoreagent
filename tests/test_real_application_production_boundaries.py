@@ -21,7 +21,13 @@ def isolate_serving_env(monkeypatch):
     for key in list(os.environ):
         if key.startswith(("OMNICOREAGENT_SERVE_", "OMNICOREAGENT_BACKGROUND_")):
             monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+
+
+def attach_test_model_credentials(agent):
+    """Make runtime initialization explicit without depending on process env."""
+    agent.model_config = {**agent.model_config, "api_key": "test-key"}
+    return agent
 
 
 def test_real_application_examples_are_importable_agent_factories(tmp_path):
@@ -52,7 +58,9 @@ def test_omniserve_loads_real_application_agent_file():
 def test_omniserve_real_application_exposes_domain_and_workspace_tools(tmp_path):
     from cookbook.omniserve.real_application_agent import create_agent
 
-    agent = create_agent(workspace_dir=tmp_path / "served-support-app")
+    agent = attach_test_model_credentials(
+        create_agent(workspace_dir=tmp_path / "served-support-app")
+    )
     server = OmniServe(agent, OmniServeConfig(background_enabled=False))
 
     with TestClient(server.app) as client:
