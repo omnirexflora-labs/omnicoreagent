@@ -425,19 +425,30 @@ class TestRedisMemoryStore:
     @pytest_asyncio.fixture
     async def memory(self, mock_redis_client):
         """Create a RedisMemoryStore with mocked client."""
+        import omnicoreagent.core.memory_store.redis_memory as redis_memory_module
+
+        original_manager = redis_memory_module._redis_manager
+        redis_memory_module._redis_manager = None
         with patch(
             "omnicoreagent.core.memory_store.redis_memory.RedisConnectionManager"
         ) as MockManager:
-            mock_manager_instance = MagicMock()
-            mock_manager_instance.get_client = AsyncMock(return_value=mock_redis_client)
-            mock_manager_instance.release_client = MagicMock()
-            MockManager.return_value = mock_manager_instance
+            try:
+                mock_manager_instance = MagicMock()
+                mock_manager_instance.get_client = AsyncMock(
+                    return_value=mock_redis_client
+                )
+                mock_manager_instance.release_client = MagicMock()
+                MockManager.return_value = mock_manager_instance
 
-            from omnicoreagent.core.memory_store.redis_memory import RedisMemoryStore
+                from omnicoreagent.core.memory_store.redis_memory import (
+                    RedisMemoryStore,
+                )
 
-            store = RedisMemoryStore(redis_url="redis://localhost:6379")
-            store._connection_manager = mock_manager_instance
-            yield store
+                store = RedisMemoryStore(redis_url="redis://localhost:6379")
+                store._connection_manager = mock_manager_instance
+                yield store
+            finally:
+                redis_memory_module._redis_manager = original_manager
 
     async def test_set_memory_config(self, memory):
         """Test memory configuration."""
@@ -721,7 +732,10 @@ async def redis_memory_store_from_env_or_skip():
     finally:
         await client.aclose()
 
-    from omnicoreagent.core.memory_store.redis_memory import RedisMemoryStore
+    import omnicoreagent.core.memory_store.redis_memory as redis_memory_module
+
+    redis_memory_module._redis_manager = None
+    RedisMemoryStore = redis_memory_module.RedisMemoryStore
 
     return RedisMemoryStore(redis_url=url)
 
