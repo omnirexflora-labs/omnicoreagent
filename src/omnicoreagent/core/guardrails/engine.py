@@ -200,8 +200,17 @@ class DetectionEngine:
             "µ": "u",
             "°": "o",
         }
-        for leet, normal in leet_map.items():
-            normalized = normalized.replace(leet, normal)
+        def normalize_leet_token(match: re.Match[str]) -> str:
+            token = match.group(0)
+            has_alpha = any(char.isalpha() for char in token)
+            has_digit = any(char.isdigit() for char in token)
+            if not (has_alpha and has_digit):
+                return token
+            for leet, normal in leet_map.items():
+                token = token.replace(leet, normal)
+            return token
+
+        normalized = re.sub(r"[\w@$!|€©®£¥¢µ°]+", normalize_leet_token, normalized)
 
         normalized = re.sub(
             r"([a-z])[\.\-_,;:\/\\]+([a-z])", r"\1 \2", normalized, flags=re.IGNORECASE

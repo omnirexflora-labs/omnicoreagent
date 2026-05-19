@@ -99,11 +99,11 @@ async def demo_sql_database():
     # Examples:
     #   DATABASE_URL=postgresql://user:pass@localhost:5432/db
     #   DATABASE_URL=sqlite:///./memory.db
-    memory_router = MemoryRouter("database")
+    memory_router = MemoryRouter("sql")
 
     agent = OmniCoreAgent(
         name="db_agent",
-        system_instruction="You are a helpful assistant with database memory.",
+        system_instruction="You are a helpful assistant with SQL memory.",
         model_config=model_config(max_tokens=800),
         memory_router=memory_router,
     )

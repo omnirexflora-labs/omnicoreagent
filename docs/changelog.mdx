@@ -6,184 +6,41 @@ icon: 'clock-rotate-left'
 
 # Changelog
 
-All notable changes to OmniCoreAgent are documented here.
+OmniCoreAgent is being rebuilt around the production agent harness direction:
+runtime, tools, MCP, memory, workspace, guardrails, background tasks, telemetry,
+and OmniServe as one application-facing base layer.
 
----
+Detailed version history is published with GitHub releases:
 
-## [0.1.18] - 2025-06-19
+<Card
+  title="GitHub Releases"
+  href="https://github.com/omnirexflora-labs/omnicoreagent/releases"
+>
+  Review tagged releases, release notes, and package versions.
+</Card>
 
-### Changed
-- **BREAKING CHANGE**: Removed local ChromaDB support for performance optimization
-  - Local ChromaDB fallback system has been completely removed
-  - Users must now explicitly configure a vector database provider
-  - No more automatic fallback to local storage
-  - This eliminates the 81+ second startup delay from ChromaDB Rust bindings
-- **Performance Improvement**: Vector database modules now load only when explicitly needed
-  - Lazy loading prevents unnecessary imports during package initialization
-  - Faster startup when vector DB is disabled
-  - Better resource management
+## Current Package Direction
 
-### Added
-- **Required Configuration**: Users must set `OMNI_MEMORY_PROVIDER` to one of:
-  - `qdrant-remote` (recommended default)
-  - `chroma-remote`
-  - `chroma-cloud`
-- **Clear Error Messages**: Better feedback when vector DB configuration is missing
+- Agent harness positioning instead of generic framework positioning.
+- Single `LLM_API_KEY` public API-key variable for hosted model providers.
+- Optional extras for heavier production integrations.
+- Workspace files on local disk, S3, or Cloudflare R2.
+- Memory backends: `in_memory`, `sql`, `redis`, and `mongodb`.
+- Background task stores: `in_memory`, `sql`, `redis`, and `mongodb`.
+- Telemetry stores: in-memory and JSONL, with OTLP-compatible exporters for
+  OpenTelemetry, LangSmith, and Opik.
+- OmniServe configuration through `OMNICOREAGENT_SERVE_*`.
+- Background serving configuration through `OMNICOREAGENT_BACKGROUND_*`.
 
-### Removed
-- Local ChromaDB persistence and warmup system
-- Automatic fallback mechanisms
-- Module-level vector DB initialization
-- ChromaDB local client type
+## Configuration Source Of Truth
 
-### Migration Guide
-- **Before**: `ENABLE_VECTOR_DB=true` would automatically use local ChromaDB
-- **After**: Must set both `ENABLE_VECTOR_DB=true` AND `OMNI_MEMORY_PROVIDER=qdrant-remote` (or other provider)
-- **Impact**: Faster startup, but requires explicit configuration
+Use the configuration guide for current environment variables and runtime
+settings:
 
----
-
-## [0.1.17] - 2025-05-28
-
-### Added
-- OAuth Authentication Support:
-  - OAuth 2.0 authentication flow for MCP servers
-  - Support for multiple authentication methods (OAuth 2.0, Bearer token, Custom headers)
-  - Flexible authentication configuration in server settings
-  - Secure credential management
-- Enhanced Server Configuration:
-  - Updated server configuration format to support OAuth
-  - Improved server connection security
-
-### Changed
-- Updated server configuration examples to include OAuth support
-- Enhanced documentation for authentication methods
-
-### Fixed
-- Improved authentication error handling
-- Updated configuration validation for authentication methods
-
----
-
-## [0.1.16] - 2025-05-16
-
-### Added
-- **Streamable HTTP Transport**: New transport protocol with efficient data streaming, configurable timeouts, and header support
-- **Dynamic Server Management**:
-  - `/add_servers:<config.json>` — Add one or more servers
-  - `/remove_server:<server_name>` — Remove servers
-  - Real-time server capability updates after changes
-- Enhanced server configuration with streamable HTTP examples
-
-### Changed
-- Updated README with new server management commands
-- Improved documentation for transport protocols
-
-### Fixed
-- Improved server connection handling
-- Enhanced error messages for server management commands
-
----
-
-## [0.1.15] - 2025-05-05
-
-### Added
-- **Token & Usage Management**:
-  - `/api_stats` command for token/request tracking
-  - Configurable limits for total requests and token usage
-  - Configurable tool call timeout and max steps
-- **Developer Integration Enhancements**:
-  - FastAPI example for building custom API servers
-  - Minimal code snippets for custom MCP client integration
-- **FastAPI API Documentation**: `/chat/agent_chat` endpoint docs
-- **Environment Variables Reference**: Full table in README
-
-### Changed
-- Updated server configuration examples
-- Improved README structure
-
-### Fixed
-- Corrected typos in documentation
-- Improved code example consistency
-
----
-
-## [0.1.14] - 2025-04-18
-
-### Added
-- **DeepSeek model integration** with full tool execution support
-- **Orchestrator Agent Mode**:
-  - Advanced planning for complex multi-step tasks
-  - Strategic delegation across multiple MCP servers
-  - Parallel task execution capabilities
-  - Dynamic resource allocation
-  - Real-time progress monitoring
-- **Chat History File Storage**: Save/load conversations, persistent history
-
-### Changed
-- Enhanced Mode System with three distinct modes (Chat, Autonomous, Orchestrator)
-- Updated AI model integration documentation
-
-### Fixed
-- Improved mode switching reliability
-- Enhanced chat history persistence
-
----
-
-## [0.1.13] - 2025-04-14
-
-### Added
-- **Gemini model integration** with full tool execution support
-- **Redis-powered memory persistence**:
-  - Conversation history tracking
-  - State management across sessions
-  - Multi-server memory synchronization
-- **Agentic Mode capabilities**:
-  - Autonomous task execution
-  - Advanced reasoning and decision-making
-  - Complex task decomposition
-- **Advanced prompt features**: Dynamic discovery, JSON/key-value formats, nested arguments
-- Comprehensive troubleshooting guide
-- Detailed architecture documentation
-- Advanced server configuration examples
-
-### Changed
-- Enhanced installation process with UV package manager
-- Improved development quick start guide
-- Updated server configuration format for multiple LLM providers
-
-### Fixed
-- Standardized command formatting
-- Improved code block consistency
-
----
-
-## [0.1.1] - 2025-03-27
-
-### Added
-- Comprehensive Security & Privacy section
-- Detailed Model Support section (OpenAI, OpenRouter, Groq)
-- Structured Testing section with coverage reporting
-- Support for additional LLM providers (OpenRouter, Groq)
-
-### Changed
-- Improved AI-Powered Intelligence section with multi-provider support
-- Enhanced Server Configuration Examples
-- Updated Python version requirement from 3.12+ to 3.10+
-- Changed from provider-specific API-key names to `LLM_API_KEY` for broader provider support
-
-### Fixed
-- Various typos and formatting issues
-- Fixed typo in "client" command (was "cient")
-
-### Removed
-- Redundant security information
-- Specific OpenAI model references in favor of provider-agnostic examples
-
----
-
-## [0.1.0] - 2025-03-21
-- Initial release
-- Basic MCP server integration
-- OpenAI model support
-- Core CLI functionality
+<Card
+  title="Configuration"
+  href="/docs/how-to-guides/configuration"
+>
+  Current model, memory, workspace, background, telemetry, and OmniServe
+  settings.
+</Card>

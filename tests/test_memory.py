@@ -15,11 +15,15 @@ Each store is tested for:
 - Summarization integration with background persistence
 """
 
-import pytest
-import pytest_asyncio
 import asyncio
+import os
+import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+import pytest_asyncio
+
+from omnicoreagent.core.memory_store.memory_router import MemoryRouter
 from omnicoreagent.core.memory_store.in_memory import InMemoryStore
 from omnicoreagent.core.memory_store.sql_db_memory import DatabaseMessageStore
 
@@ -421,19 +425,30 @@ class TestRedisMemoryStore:
     @pytest_asyncio.fixture
     async def memory(self, mock_redis_client):
         """Create a RedisMemoryStore with mocked client."""
+        import omnicoreagent.core.memory_store.redis_memory as redis_memory_module
+
+        original_manager = redis_memory_module._redis_manager
+        redis_memory_module._redis_manager = None
         with patch(
             "omnicoreagent.core.memory_store.redis_memory.RedisConnectionManager"
         ) as MockManager:
-            mock_manager_instance = MagicMock()
-            mock_manager_instance.get_client = AsyncMock(return_value=mock_redis_client)
-            mock_manager_instance.release_client = MagicMock()
-            MockManager.return_value = mock_manager_instance
+            try:
+                mock_manager_instance = MagicMock()
+                mock_manager_instance.get_client = AsyncMock(
+                    return_value=mock_redis_client
+                )
+                mock_manager_instance.release_client = MagicMock()
+                MockManager.return_value = mock_manager_instance
 
-            from omnicoreagent.core.memory_store.redis_memory import RedisMemoryStore
+                from omnicoreagent.core.memory_store.redis_memory import (
+                    RedisMemoryStore,
+                )
 
-            store = RedisMemoryStore(redis_url="redis://localhost:6379")
-            store._connection_manager = mock_manager_instance
-            yield store
+                store = RedisMemoryStore(redis_url="redis://localhost:6379")
+                store._connection_manager = mock_manager_instance
+                yield store
+            finally:
+                redis_memory_module._redis_manager = original_manager
 
     async def test_set_memory_config(self, memory):
         """Test memory configuration."""
@@ -588,3 +603,187 @@ class TestBackgroundPersistence:
         assert len(messages_after) >= 2  # At least the recent messages
         # If summary was persisted, it would be first; otherwise we get recent messages
         # Skip type assertion due to timing variance in background thread
+
+
+async def assert_memory_store_contract(memory):
+    session_id = f"contract-{uuid.uuid4().hex}"
+    other_session_id = f"contract-other-{uuid.uuid4().hex}"
+
+    await memory.store_message(
+        "user",
+        "first",
+        {"agent_name": "primary"},
+        session_id,
+    )
+    await memory.store_message(
+        "assistant",
+        "second",
+        {"agent_name": "primary"},
+        session_id,
+    )
+    await memory.store_message(
+        "user",
+        "other agent",
+        {"agent_name": "secondary"},
+        session_id,
+    )
+    await memory.store_message(
+        "user",
+        "other session",
+        {"agent_name": "primary"},
+        other_session_id,
+    )
+
+    primary = await memory.get_messages(session_id, "primary")
+    assert [message["content"] for message in primary] == ["first", "second"]
+    assert {message["role"] for message in primary} == {"user", "assistant"}
+    assert all(message.get("id") for message in primary)
+    assert all(message.get("timestamp") for message in primary)
+
+    all_session = await memory.get_messages(session_id)
+    assert {message["content"] for message in all_session} == {
+        "first",
+        "second",
+        "other agent",
+    }
+
+    await memory.clear_memory(session_id, "secondary")
+    assert [message["content"] for message in await memory.get_messages(session_id)] == [
+        "first",
+        "second",
+    ]
+
+    message_ids = [message["id"] for message in await memory.get_messages(session_id)]
+    await memory.mark_messages_summarized(
+        message_ids,
+        summary_id="summary-contract",
+        retention_policy="keep",
+    )
+    assert await memory.get_messages(session_id) == []
+
+    await memory.clear_memory(session_id)
+    await memory.clear_memory(other_session_id)
+
+
+@pytest.mark.asyncio
+async def test_memory_router_uses_sql_backend_name(monkeypatch, tmp_path):
+    from omnicoreagent.core.memory_store.sql_db_memory import get_sql_manager
+
+    get_sql_manager().close_all()
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'router-memory.db'}")
+
+    router = MemoryRouter("sql")
+
+    assert router.get_memory_store_info()["type"] == "sql"
+    assert router.get_memory_store_info()["store_class"] == "DatabaseMessageStore"
+    await router.store_message(
+        "user",
+        "remember this",
+        {"agent_name": "router-agent"},
+        "router-session",
+    )
+
+    messages = await router.get_messages("router-session", "router-agent")
+    assert messages[0]["content"] == "remember this"
+    assert messages[0]["metadata"]["agent_name"] == "router-agent"
+
+    get_sql_manager().close_all()
+
+
+def test_memory_router_rejects_old_database_backend_name():
+    with pytest.raises(ValueError, match="in_memory, sql, redis, mongodb"):
+        MemoryRouter("database")
+
+
+@pytest.mark.asyncio
+async def test_in_memory_store_contract():
+    await assert_memory_store_contract(InMemoryStore())
+
+
+@pytest.mark.asyncio
+async def test_sql_memory_store_contract(tmp_path):
+    from omnicoreagent.core.memory_store.sql_db_memory import get_sql_manager
+
+    get_sql_manager().close_all()
+    memory = DatabaseMessageStore(db_url=f"sqlite:///{tmp_path / 'contract.db'}")
+    await assert_memory_store_contract(memory)
+    get_sql_manager().close_all()
+
+
+async def redis_memory_store_from_env_or_skip():
+    url = os.getenv("OMNICOREAGENT_TEST_REDIS_URL") or os.getenv("REDIS_URL")
+    if not url:
+        pytest.skip(
+            "Redis memory contract requires OMNICOREAGENT_TEST_REDIS_URL or REDIS_URL"
+        )
+
+    import redis.asyncio as redis
+
+    client = redis.from_url(
+        url,
+        decode_responses=True,
+        socket_connect_timeout=0.2,
+        socket_timeout=0.2,
+    )
+    try:
+        await client.ping()
+    except Exception as exc:
+        pytest.skip(f"Redis memory backend unavailable: {exc}")
+    finally:
+        await client.aclose()
+
+    import omnicoreagent.core.memory_store.redis_memory as redis_memory_module
+
+    redis_memory_module._redis_manager = None
+    RedisMemoryStore = redis_memory_module.RedisMemoryStore
+
+    return RedisMemoryStore(redis_url=url)
+
+
+async def mongodb_memory_store_from_env_or_skip():
+    uri = os.getenv("OMNICOREAGENT_TEST_MONGODB_URI") or os.getenv("MONGODB_URI")
+    database = (
+        os.getenv("OMNICOREAGENT_TEST_MONGODB_DATABASE")
+        or os.getenv("MONGODB_DB_NAME")
+        or "omnicoreagent_memory_test"
+    )
+    if not uri:
+        pytest.skip(
+            "MongoDB memory contract requires OMNICOREAGENT_TEST_MONGODB_URI or MONGODB_URI"
+        )
+
+    from motor.motor_asyncio import AsyncIOMotorClient
+    from omnicoreagent.core.memory_store.mongodb import MongoDb
+
+    client = AsyncIOMotorClient(
+        uri,
+        serverSelectionTimeoutMS=200,
+        connectTimeoutMS=200,
+        socketTimeoutMS=200,
+    )
+    try:
+        await client.admin.command("ping")
+    except Exception as exc:
+        pytest.skip(f"MongoDB memory backend unavailable: {exc}")
+    finally:
+        client.close()
+
+    collection = f"messages_{uuid.uuid4().hex}"
+    return MongoDb(uri=uri, db_name=database, collection=collection)
+
+
+@pytest.mark.asyncio
+async def test_redis_memory_store_live_contract():
+    memory = await redis_memory_store_from_env_or_skip()
+    await assert_memory_store_contract(memory)
+
+
+@pytest.mark.asyncio
+async def test_mongodb_memory_store_live_contract():
+    memory = await mongodb_memory_store_from_env_or_skip()
+    try:
+        await assert_memory_store_contract(memory)
+    finally:
+        if memory.client is not None:
+            await memory.collection.drop()
+            memory.client.close()

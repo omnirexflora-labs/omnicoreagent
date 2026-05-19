@@ -15,6 +15,7 @@ from omnicoreagent.core.workspace import (
 from omnicoreagent.core.workspace.config import WorkspaceConfig
 from omnicoreagent.core.workspace.manager import Workspace
 from omnicoreagent.core.workspace.storage import LocalWorkspaceStorage
+from omnicoreagent.core.workspace.storage import R2WorkspaceStorage
 from omnicoreagent.core.workspace.storage import S3WorkspaceStorage
 from omnicoreagent.core.workspace.storage import create_workspace_storage
 
@@ -75,6 +76,26 @@ def test_workspace_config_from_env_normalizes_values(monkeypatch, tmp_path):
     )
 
 
+def test_workspace_config_from_env_normalizes_r2_values(monkeypatch):
+    monkeypatch.setenv("OMNICOREAGENT_WORKSPACE_BACKEND", " R2 ")
+    monkeypatch.setenv("OMNICOREAGENT_WORKSPACE_PREFIX", "/agent-workspace/")
+    monkeypatch.setenv("R2_BUCKET_NAME", "bucket")
+    monkeypatch.setenv("R2_ACCOUNT_ID", "account")
+    monkeypatch.setenv("R2_ACCESS_KEY_ID", "access")
+    monkeypatch.setenv("R2_SECRET_ACCESS_KEY", "secret")
+
+    config = WorkspaceConfig.from_env()
+
+    assert config.workspace_backend == "r2"
+    assert config.namespace_prefix("files") == "agent-workspace/files"
+    assert config.cache_key(namespace="files") == (
+        "r2",
+        "bucket",
+        "account",
+        "agent-workspace/files",
+    )
+
+
 def test_workspace_config_uses_workspace_backend_name_only():
     try:
         WorkspaceConfig(backend="s3")
@@ -128,6 +149,55 @@ def test_workspace_storage_accepts_explicit_s3_config(monkeypatch):
         "aws_secret_access_key": None,
         "endpoint_url": "https://example.test",
     }
+
+
+def test_workspace_storage_accepts_explicit_r2_config(monkeypatch):
+    captured = {}
+
+    class FakeStorage:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "omnicoreagent.core.workspace.storage.R2WorkspaceStorage",
+        FakeStorage,
+    )
+
+    storage = create_workspace_storage(
+        namespace="files",
+        config=WorkspaceConfig(
+            workspace_backend="r2",
+            prefix="agent",
+            r2_bucket_name="bucket",
+            r2_account_id="account",
+            r2_access_key_id="access",
+            r2_secret_access_key="secret",
+        ),
+    )
+
+    assert isinstance(storage, FakeStorage)
+    assert captured == {
+        "bucket_name": "bucket",
+        "account_id": "account",
+        "access_key_id": "access",
+        "secret_access_key": "secret",
+        "prefix": "agent/files",
+    }
+
+
+def test_workspace_storage_requires_r2_configuration():
+    try:
+        create_workspace_storage(
+            namespace="files",
+            config=WorkspaceConfig(workspace_backend="r2", r2_bucket_name="bucket"),
+        )
+    except ValueError as exc:
+        message = str(exc)
+        assert "R2_ACCOUNT_ID" in message
+        assert "R2_ACCESS_KEY_ID" in message
+        assert "R2_SECRET_ACCESS_KEY" in message
+    else:
+        raise AssertionError("R2 workspace storage should require all R2 credentials")
 
 
 def test_create_workspace_storage_accepts_explicit_workspace_backend(monkeypatch):
@@ -292,6 +362,26 @@ def test_s3_workspace_storage_reads_writes_and_lists_files():
     assert storage.read_text("result.txt") == "hello"
     assert storage.location("result.txt") == "s3://bucket/workspace/artifacts/result.txt"
     assert [item.name for item in storage.list_files()] == ["result.txt"]
+
+
+def test_r2_workspace_storage_uses_s3_compatible_storage_without_sse():
+    client = FakeS3Client()
+    storage = R2WorkspaceStorage(
+        bucket_name="bucket",
+        account_id="account",
+        access_key_id="access",
+        secret_access_key="secret",
+        prefix="workspace/files",
+        client=client,
+    )
+
+    storage.write_text("result.txt", "hello")
+
+    assert storage.exists("result.txt")
+    assert storage.read_text("result.txt") == "hello"
+    assert storage.location("result.txt") == "s3://bucket/workspace/files/result.txt"
+    assert client.objects[("bucket", "workspace/files/result.txt")]["Body"] == b"hello"
+    assert storage.enable_encryption is False
 
 
 def test_s3_workspace_storage_rejects_path_traversal():

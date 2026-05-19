@@ -83,3 +83,14 @@ def test_non_string_input_is_coerced_deterministically():
 
     assert result.is_safe is True
     assert result.input_length == len(str({"status": "ok", "count": 1}))
+
+
+def test_guardrail_does_not_treat_iso_dates_as_obfuscated_text():
+    guard = PromptInjectionGuard(DetectionConfig(strict_mode=True))
+
+    result = guard.check(
+        "Prepare my day for 2026-05-19 and save the brief to briefs/2026-05-19.md."
+    )
+
+    assert result.threat_level in {ThreatLevel.SAFE, ThreatLevel.LOW_RISK}
+    assert not any("obfuscation_techniques" in flag for flag in result.flags)

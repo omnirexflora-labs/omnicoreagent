@@ -12,6 +12,7 @@ wheels/
 servers_config.json
 *.log
 *.log.*
+tmp/
 *.db
 # Generated docs site
 site/
