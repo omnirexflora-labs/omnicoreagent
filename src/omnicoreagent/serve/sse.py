@@ -459,7 +459,14 @@ async def stream_session_events(
             yield format_sse_event(event_type, event_data)
 
         while True:
-            event = await event_queue.get()
+            if pump_task.done() and event_queue.empty():
+                break
+            try:
+                event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+            except asyncio.TimeoutError:
+                if pump_task.done():
+                    break
+                continue
             if isinstance(event, _EventStreamFailure):
                 raise event.error
 

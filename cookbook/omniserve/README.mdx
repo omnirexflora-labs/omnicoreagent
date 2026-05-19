@@ -23,8 +23,8 @@ def create_agent():
 
 | Example | Description | How to Run |
 |---------|-------------|------------|
-| [cli_agent.py](./cli_agent.py) | Agent file for CLI deployment | `omniserve run --agent cli_agent.py` |
-| [python_api.py](./python_api.py) | Full Python API with all config options | `python python_api.py` |
+| [cli_agent.py](./cli_agent.py) | Agent file for CLI deployment | `omniserve run --agent cookbook/omniserve/cli_agent.py` |
+| [python_api.py](./python_api.py) | Full Python API with all config options | `python cookbook/omniserve/python_api.py` |
 
 ---
 
@@ -121,6 +121,10 @@ limiting until you opt in.
 | GET | `/prometheus` | No | Prometheus metrics |
 | GET | `/tools` | Yes* | List available tools |
 | GET | `/metrics` | Yes* | Agent usage metrics |
+| GET | `/events/{session_id}` | Yes* | Replay and follow telemetry events over SSE |
+| GET | `/events/{session_id}/list` | Yes* | Return stored telemetry events as JSON |
+| GET | `/events/{session_id}/trace` | Yes* | Return the latest telemetry trace summary |
+| GET | `/sessions/{session_id}/history` | Yes* | Return conversation history |
 | GET | `/docs` | No | Swagger UI |
 | GET | `/redoc` | No | ReDoc UI |
 

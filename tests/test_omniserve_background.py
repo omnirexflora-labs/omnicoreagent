@@ -341,7 +341,7 @@ def test_background_api_wait_true_without_worker_times_out_on_delayed_retry(tmp_
         OmniServeConfig(
             background_agent_id="served",
             background_start_worker=False,
-            request_timeout=1,
+            request_timeout=2,
         ),
         background_manager=manager,
     )
@@ -371,8 +371,8 @@ def test_background_api_wait_true_without_worker_times_out_on_delayed_retry(tmp_
         assert timeout_detail["task_id"] == "retry_later"
         assert timeout_detail["status"] == "queued"
         assert timeout_detail["run_id"].startswith("run_")
-        assert timeout_detail["wait_timeout_seconds"] == 0.5
-        assert timeout_detail["request_timeout_seconds"] == 1
+        assert timeout_detail["wait_timeout_seconds"] == 1.5
+        assert timeout_detail["request_timeout_seconds"] == 2
         runs = client.get("/background/runs", params={"task_id": "retry_later"})
         assert runs.status_code == 200
         assert runs.json()["total"] == 1
