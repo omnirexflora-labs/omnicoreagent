@@ -387,3 +387,36 @@ def test_telemetry_docs_do_not_reference_old_event_router():
                 offenders.append(f"{file_path}: {', '.join(found)}")
 
     assert not offenders, "Old event-router wording remains:\n" + "\n".join(offenders)
+
+
+def test_telemetry_export_docs_and_extras_are_grounded():
+    docs = [
+        Path("README.md"),
+        Path("docs/how-to-guides/observability.mdx"),
+        Path("docs/how-to-guides/configuration.mdx"),
+        Path("docs/getting-started/installation.mdx"),
+    ]
+    expected = {
+        "omnicoreagent[otel]",
+        "LangSmith",
+        "Opik",
+        "OTLP",
+    }
+
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        missing = sorted(phrase for phrase in expected if phrase not in text)
+        assert not missing, f"{path} is missing telemetry export docs: {missing}"
+
+    spec = Path("engineering/specifications/telemetry.md").read_text(encoding="utf-8")
+    for phrase in {"LangSmith", "Opik", "OTLP", "Export Contract"}:
+        assert phrase in spec
+
+    pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+    for extra in {
+        "otel = [",
+        "langsmith = [",
+        "opik = [",
+        "opentelemetry-exporter-otlp-proto-http",
+    }:
+        assert extra in pyproject

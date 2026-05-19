@@ -69,6 +69,44 @@ Optional workspace variables:
 | `AWS_REGION` | AWS region for S3 workspaces. |
 | `AWS_ENDPOINT_URL` | Custom S3-compatible endpoint. |
 
+### Optional Telemetry Export
+
+Telemetry events and traces work in-process by default. Set exporter variables
+only when traces should leave the process for an OTLP-compatible backend.
+
+| Exporter | Variables |
+|----------|-----------|
+| **OTLP/HTTP** | `OTEL_EXPORTER_OTLP_ENDPOINT` or explicit exporter `endpoint` |
+| **LangSmith** | `LANGSMITH_API_KEY`, optional `LANGSMITH_PROJECT`, optional `LANGSMITH_OTEL_ENDPOINT` |
+| **Opik** | `OPIK_API_KEY`, `OPIK_WORKSPACE`, optional `OPIK_PROJECT_NAME`, optional `OPIK_OTEL_ENDPOINT` |
+
+Install the matching extra before exporting:
+
+```bash
+pip install "omnicoreagent[otel]"
+pip install "omnicoreagent[langsmith]"
+pip install "omnicoreagent[opik]"
+```
+
+Python configuration can pass exporters directly:
+
+```python
+from omnicoreagent import OmniCoreAgent
+
+agent = OmniCoreAgent(
+    name="research-agent",
+    system_instruction="You are a research assistant.",
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    telemetry_exporters=[
+        {
+            "destination": "otlp",
+            "endpoint": "http://localhost:4318/v1/traces",
+            "service_name": "research-agent",
+        }
+    ],
+)
+```
+
 ### OmniServe
 
 OmniServe reads these variables through `OmniServeConfig`. Environment variables

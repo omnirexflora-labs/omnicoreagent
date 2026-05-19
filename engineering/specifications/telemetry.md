@@ -31,6 +31,7 @@ This specification covers:
 - storage contracts
 - live/replay stream contract
 - normalization contract
+- export contract
 - redaction and payload policy
 - telemetry-owned streaming with no parallel event stack
 - required tests
@@ -43,8 +44,7 @@ This specification does not cover:
 - eval runner
 - evaluator modules
 - eval suite execution
-- vendor exporters
-- OpenTelemetry exporter implementation
+- dashboards or vendor observability UI
 - policy engine
 - sandbox execution implementation
 
@@ -542,6 +542,41 @@ Rules:
 
 ---
 
+## Export Contract
+
+Exporter interface:
+
+```python
+export_trace(trace: TelemetryTrace) -> TelemetryExportResult
+```
+
+Built-in exporter targets:
+
+- `memory`: test/local exporter that stores exported traces in memory.
+- `jsonl`: appends normalized trace records to a local JSONL file.
+- `otlp`: maps traces to OpenTelemetry-shaped spans and sends them through
+  OTLP/HTTP.
+- `langsmith`: OTLP/HTTP preset for LangSmith.
+- `opik`: OTLP/HTTP preset for Comet Opik.
+
+Rules:
+
+- exporter input is a `TelemetryTrace`.
+- exporters normalize by default.
+- exporters must preserve OmniCoreAgent ids as attributes.
+- OTLP export is optional and requires the `otel` extra.
+- LangSmith and Opik presets are vendor configuration wrappers over OTLP, not
+  separate telemetry models.
+- exporter failure must not corrupt stored traces.
+- non-strict telemetry suppresses exporter exceptions and returns structured
+  export error results for manual exports.
+- strict telemetry raises exporter exceptions.
+- `OmniCoreAgent.export_trace(...)` supports exact `trace_id`, latest
+  `session_id`, and `run_id` correlation lookup.
+- automatic exporters configured on `OmniCoreAgent` run after trace completion.
+
+---
+
 ## Redaction and Payload Contract
 
 Telemetry configuration must support:
@@ -617,6 +652,8 @@ Current runtime facade coverage:
   `cancelled` before re-raising the cancellation.
 - `OmniCoreAgent` exposes telemetry trace lookup and telemetry stream
   replay/follow helpers.
+- `OmniCoreAgent` exposes manual telemetry export through `export_trace(...)`.
+- `TelemetryRecorder` can call configured exporters after trace completion.
 - successful and guardrail-blocked public run responses include `trace_id` and
   `run_id`.
 - `get_trace(trace_id=...)` returns an exact telemetry trace for any trace id

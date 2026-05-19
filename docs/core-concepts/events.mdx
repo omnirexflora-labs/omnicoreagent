@@ -103,6 +103,10 @@ Use `trace_id` for exact trace lookup. Use `run_id` to filter or correlate one
 runtime execution inside a session. If several traces share one `run_id`, the
 run lookup returns the latest matching trace.
 
+Telemetry traces can also be exported. The exporter layer maps normalized
+OmniCoreAgent traces to OpenTelemetry span records, then sends them through
+OTLP/HTTP or vendor presets such as LangSmith and Opik.
+
 ---
 
 ## Background Run Events

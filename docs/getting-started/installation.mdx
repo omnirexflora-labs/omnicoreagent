@@ -85,11 +85,15 @@ The base install stays focused on the core agent harness. Add heavier production
 | `s3` | AWS S3 and Cloudflare R2 workspace storage |
 | `serve` | OmniServe REST/SSE API server |
 | `tokenizer` | tiktoken token counting |
+| `otel` | OpenTelemetry OTLP/HTTP trace export |
+| `langsmith` | LangSmith trace export through OTLP |
+| `opik` | Comet Opik trace export through OTLP |
 | `all` | Every optional integration |
 
 ```bash
 pip install "omnicoreagent[redis]"
 pip install "omnicoreagent[serve]"
+pip install "omnicoreagent[otel]"
 pip install "omnicoreagent[all]"
 ```
 
@@ -143,7 +147,7 @@ python -c "import omnicoreagent; print(omnicoreagent.__version__)"
     pip install "omnicoreagent[redis]"
     ```
 
-    Use `postgres`, `mongodb`, `s3`, `serve`, `tokenizer`, or `all` for other optional integrations.
+    Use `postgres`, `mongodb`, `s3`, `serve`, `tokenizer`, `otel`, `langsmith`, `opik`, or `all` for other optional integrations.
   </Accordion>
   <Accordion title="Getting Help">
     If you encounter issues:
