@@ -145,10 +145,10 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
         async with self._lock:
             traces = [_copy_trace(trace) for trace in self._traces.values()]
         if filter is None:
-            return sorted(traces, key=lambda trace: trace.started_at)
+            return _sort_traces(traces)
         return sorted(
             [trace for trace in traces if filter.matches(trace)],
-            key=lambda trace: trace.started_at,
+            key=_trace_sort_key,
         )
 
     async def get_stream_cursor(self, scope: TelemetryStreamScope) -> str | None:
@@ -425,6 +425,14 @@ def _copy_span(span: TelemetrySpan) -> TelemetrySpan:
 
 def _copy_trace(trace: TelemetryTrace) -> TelemetryTrace:
     return TelemetryTrace.from_dict(trace.model_dump())
+
+
+def _trace_sort_key(trace: TelemetryTrace) -> tuple[Any, str]:
+    return (trace.started_at, trace.trace_id)
+
+
+def _sort_traces(traces: list[TelemetryTrace]) -> list[TelemetryTrace]:
+    return sorted(traces, key=_trace_sort_key)
 
 
 def _find_span(trace: TelemetryTrace, span_id: str) -> TelemetrySpan | None:

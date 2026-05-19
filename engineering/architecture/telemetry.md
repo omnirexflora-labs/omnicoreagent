@@ -415,6 +415,16 @@ The stream is a view over `TelemetryStore`; it is not a separate truth source.
 Initial stream backends may reuse implementation ideas from current in-memory
 queues and Redis streams, but the public contract should be telemetry-native.
 
+Trace retrieval follows the same evidence boundary:
+
+- exact trace lookup is by `trace_id`
+- run lookup is by `run_id`
+- latest session lookup is by deterministic trace ordering for `session_id`
+- partial, failed, cancelled, timeout, safety-halted, and resource-halted traces
+  are returned as evidence, not hidden behind summaries
+- OmniServe trace summary endpoints read the latest telemetry trace, not a
+  separate session event summary
+
 ## Trace Normalizer
 
 The normalizer converts raw runtime telemetry into a stable schema for future
@@ -428,9 +438,11 @@ The normalizer should:
 - sort spans and events deterministically
 - validate parent/child references
 - preserve evidence ids
+- generate deterministic evidence ids for synthetic normalizer findings
 - classify span and event kinds
 - produce behavior-relevant summaries
 - flag incomplete traces without hiding them
+- preserve errors and statuses exactly
 
 ## Evidence Contract
 

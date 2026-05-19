@@ -199,6 +199,40 @@ async def test_jsonl_store_persists_trace_events_and_spans(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_jsonl_store_reloads_stream_scope_by_run_id(tmp_path):
+    path = tmp_path / "telemetry.jsonl"
+    store = JsonlTelemetryStore(path)
+    first = TelemetryRecorder(store)
+    await first.start_trace(
+        trace_id="trace-jsonl-first",
+        session_id="session-jsonl-shared",
+        run_id="run-jsonl-first",
+    )
+    await first.emit_event("user_message", input={"message": "first"})
+    await first.end_trace()
+    second = TelemetryRecorder(store)
+    await second.start_trace(
+        trace_id="trace-jsonl-second",
+        session_id="session-jsonl-shared",
+        run_id="run-jsonl-second",
+    )
+    await second.emit_event("user_message", input={"message": "second"})
+    await second.end_trace()
+
+    reloaded = JsonlTelemetryStore(path)
+    events = await reloaded.get_events_after(
+        TelemetryStreamScope(
+            session_id="session-jsonl-shared",
+            run_id="run-jsonl-second",
+        ),
+        None,
+    )
+
+    assert [event.trace_id for event in events] == ["trace-jsonl-second"]
+    assert [event.input for event in events] == [{"message": "second"}]
+
+
+@pytest.mark.asyncio
 async def test_store_filters_traces():
     store = InMemoryTelemetryStore()
     recorder = TelemetryRecorder(store)
@@ -260,6 +294,100 @@ def test_normalizer_is_idempotent_for_missing_and_incomplete_trace():
     assert len(second.events) == len(first.events)
     assert "missing_evidence" in second.metadata.tags
     assert "incomplete_trace" in second.metadata.tags
+
+
+def test_normalizer_uses_stable_synthetic_event_ids_for_same_raw_trace():
+    trace = TelemetryTrace(trace_id="trace-stable-normalize", root_span_id="missing")
+    normalizer = TelemetryNormalizer()
+
+    first = normalizer.normalize(trace)
+    second = normalizer.normalize(trace)
+
+    assert first.model_dump() == second.model_dump()
+    assert {
+        event.event_id
+        for event in first.events
+        if event.metadata.get("normalizer")
+    } == {
+        "event_normalizer_trace-stable-normalize_missing_evidence",
+        "event_normalizer_trace-stable-normalize_incomplete_trace",
+    }
+
+
+def test_normalizer_avoids_synthetic_event_id_collision_with_raw_events():
+    trace = TelemetryTrace(
+        trace_id="trace-collision",
+        root_span_id="missing",
+        events=[
+            TelemetryEvent(
+                trace_id="trace-collision",
+                event_id="event_normalizer_trace-collision_missing_evidence",
+                event_type="runtime_error",
+                actor=TelemetryActor(type=ActorType.SYSTEM),
+                metadata={"experimental": True},
+            )
+        ],
+    )
+
+    normalized = TelemetryNormalizer().normalize(trace)
+    event_ids = [event.event_id for event in normalized.events]
+
+    assert len(event_ids) == len(set(event_ids))
+    assert "event_normalizer_trace-collision_missing_evidence" in event_ids
+    assert "event_normalizer_trace-collision_missing_evidence_1" in event_ids
+
+
+def test_normalizer_preserves_errors_status_and_sorts_event_ids():
+    span = TelemetrySpan(
+        trace_id="trace-preserve",
+        span_id="span-root",
+        name="agent.run",
+        kind="agent.run",
+        actor=TelemetryActor(type=ActorType.AGENT),
+        status=SpanStatus.ERROR,
+        error={"type": "RuntimeError", "message": "boom"},
+        event_ids=["event-2", "event-1", "event-2"],
+    )
+    trace = TelemetryTrace(
+        trace_id="trace-preserve",
+        root_span_id="span-root",
+        status=TraceStatus.FAILED,
+        spans=[span],
+        events=[
+            TelemetryEvent(
+                trace_id="trace-preserve",
+                event_id="event-2",
+                span_id="span-root",
+                sequence_number=2,
+                event_type="runtime_error",
+                actor=TelemetryActor(type=ActorType.SYSTEM),
+                error={"type": "RuntimeError", "message": "boom"},
+            ),
+            TelemetryEvent(
+                trace_id="trace-preserve",
+                event_id="event-1",
+                span_id="span-root",
+                sequence_number=1,
+                event_type="user_message",
+                actor=TelemetryActor(type=ActorType.USER),
+            ),
+        ],
+    )
+
+    normalized = TelemetryNormalizer().normalize(trace)
+
+    assert normalized.status == TraceStatus.FAILED
+    assert normalized.spans[0].status == SpanStatus.ERROR
+    assert normalized.spans[0].error.type == "RuntimeError"
+    assert normalized.spans[0].event_ids == ["event-1", "event-2"]
+    assert [event.event_id for event in normalized.events[:2]] == [
+        "event-1",
+        "event-2",
+    ]
+    assert normalized.events[-1].event_id == (
+        "event_normalizer_trace-preserve_incomplete_trace"
+    )
+    assert normalized.events[1].error.type == "RuntimeError"
 
 
 @pytest.mark.asyncio

@@ -12,8 +12,12 @@ from omnicoreagent.core.telemetry import (
     InMemoryTelemetryStore,
     TelemetryStream,
     TelemetryRecorder,
+    TelemetryActor,
+    TelemetrySpan,
+    TelemetryTrace,
     TraceFilter,
     TraceStatus,
+    ActorType,
 )
 
 
@@ -323,6 +327,125 @@ async def test_get_trace_accepts_returned_trace_id_and_session_id_keyword() -> N
 
     assert telemetry_trace["trace_id"] == result["trace_id"]
     assert session_trace["trace_id"] == result["trace_id"]
+
+
+@pytest.mark.asyncio
+async def test_get_trace_treats_identifier_as_exact_trace_id_before_session() -> None:
+    store = InMemoryTelemetryStore()
+    agent = _initialized_agent(store=store)
+    recorder = TelemetryRecorder(store)
+    await recorder.start_trace(
+        trace_id="custom-trace-id",
+        session_id="custom-trace-id",
+        run_id="run-custom",
+    )
+    await recorder.end_trace()
+    await store.upsert_trace(
+        TelemetryTrace(
+            trace_id="other-trace",
+            root_span_id="other-root",
+            session_id="custom-trace-id",
+            run_id="run-other",
+            spans=[
+                TelemetrySpan(
+                    trace_id="other-trace",
+                    span_id="other-root",
+                    name="agent.run",
+                    kind="agent.run",
+                    actor=TelemetryActor(type=ActorType.AGENT),
+                )
+            ],
+        )
+    )
+
+    trace = await agent.get_trace("custom-trace-id")
+
+    assert trace["trace_id"] == "custom-trace-id"
+    assert trace["run_id"] == "run-custom"
+
+
+@pytest.mark.asyncio
+async def test_get_latest_trace_returns_latest_session_trace() -> None:
+    store = InMemoryTelemetryStore()
+    agent = _initialized_agent(store=store)
+    agent.agent.run = AsyncMock(side_effect=["first", "second"])
+
+    first = await agent.run("first", session_id="session-latest")
+    second = await agent.run("second", session_id="session-latest")
+
+    latest = await agent.get_latest_trace("session-latest")
+
+    assert latest["trace_id"] == second["trace_id"]
+    assert latest["trace_id"] != first["trace_id"]
+    assert latest["run_id"] == second["run_id"]
+
+
+@pytest.mark.asyncio
+async def test_get_trace_accepts_run_id_keyword() -> None:
+    store = InMemoryTelemetryStore()
+    agent = _initialized_agent(store=store)
+
+    result = await agent.run("hello", session_id="session-run-lookup")
+
+    trace = await agent.get_trace(run_id=result["run_id"])
+
+    assert trace["trace_id"] == result["trace_id"]
+    assert trace["run_id"] == result["run_id"]
+    assert trace["session_id"] == "session-run-lookup"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status",
+    [
+        TraceStatus.PARTIAL,
+        TraceStatus.FAILED,
+        TraceStatus.CANCELLED,
+        TraceStatus.TIMEOUT,
+        TraceStatus.ABORTED_RESOURCE_GUARD,
+    ],
+)
+async def test_get_trace_returns_non_completed_trace_statuses(status) -> None:
+    store = InMemoryTelemetryStore()
+    agent = _initialized_agent(store=store)
+    trace_id = f"trace-{status.value}"
+    await store.upsert_trace(
+        TelemetryTrace(
+            trace_id=trace_id,
+            root_span_id=f"span-{status.value}",
+            status=status,
+            session_id=f"session-{status.value}",
+            run_id=f"run-{status.value}",
+            spans=[
+                TelemetrySpan(
+                    trace_id=trace_id,
+                    span_id=f"span-{status.value}",
+                    name="agent.run",
+                    kind="agent.run",
+                    actor=TelemetryActor(type=ActorType.AGENT),
+                )
+            ],
+        )
+    )
+
+    trace = await agent.get_trace(trace_id=trace_id)
+    normalized = await agent.get_trace(trace_id=trace_id, normalize=True)
+
+    assert trace["status"] == status.value
+    assert normalized["status"] == status.value
+    if status == TraceStatus.PARTIAL:
+        assert "incomplete_trace" in normalized["metadata"]["tags"]
+
+
+@pytest.mark.asyncio
+async def test_get_trace_rejects_ambiguous_filter_keywords() -> None:
+    agent = _initialized_agent()
+
+    with pytest.raises(ValueError, match="Use only one"):
+        await agent.get_trace(trace_id="trace-one", session_id="session-one")
+
+    with pytest.raises(ValueError, match="Use either identifier"):
+        await agent.get_trace("trace-one", session_id="session-one")
 
 
 @pytest.mark.asyncio

@@ -6,13 +6,13 @@ from omnicoreagent.core.telemetry.models import (
     TelemetryActor,
     TelemetryEvent,
     TelemetryTrace,
-    telemetry_id,
 )
 
 
 class TelemetryNormalizer:
     def normalize(self, trace: TelemetryTrace) -> TelemetryTrace:
         normalized = TelemetryTrace.from_dict(trace.model_dump())
+        normalized.metadata.tags = sorted(set(normalized.metadata.tags))
         normalized.spans.sort(key=lambda span: (span.started_at, span.span_id))
         normalized.events.sort(
             key=lambda event: (event.sequence_number, event.timestamp, event.event_id)
@@ -22,6 +22,7 @@ class TelemetryNormalizer:
         normalized.events.sort(
             key=lambda event: (event.sequence_number, event.timestamp, event.event_id)
         )
+        _normalize_span_event_ids(normalized)
         return normalized
 
     def _mark_missing_references(self, trace: TelemetryTrace) -> None:
@@ -51,7 +52,7 @@ class TelemetryNormalizer:
                 return
             trace.events.append(
                 TelemetryEvent(
-                    event_id=telemetry_id("missing_evidence"),
+                    event_id=_normalizer_event_id(trace, "missing_evidence"),
                     trace_id=trace.trace_id,
                     sequence_number=_next_sequence(trace),
                     timestamp=trace.started_at,
@@ -70,7 +71,7 @@ class TelemetryNormalizer:
             return
         trace.events.append(
             TelemetryEvent(
-                event_id=telemetry_id("incomplete_trace"),
+                event_id=_normalizer_event_id(trace, "incomplete_trace"),
                 trace_id=trace.trace_id,
                 sequence_number=_next_sequence(trace),
                 timestamp=trace.started_at,
@@ -86,3 +87,30 @@ def _next_sequence(trace: TelemetryTrace) -> int:
     if not trace.events:
         return 1
     return max(event.sequence_number for event in trace.events) + 1
+
+
+def _normalize_span_event_ids(trace: TelemetryTrace) -> None:
+    event_order = {
+        event.event_id: index
+        for index, event in enumerate(trace.events)
+    }
+    for span in trace.spans:
+        deduped_ids = list(dict.fromkeys(span.event_ids))
+        span.event_ids = sorted(
+            deduped_ids,
+            key=lambda event_id: (
+                event_order.get(event_id, len(event_order)),
+                deduped_ids.index(event_id),
+            ),
+        )
+
+
+def _normalizer_event_id(trace: TelemetryTrace, reason: str) -> str:
+    base = f"event_normalizer_{trace.trace_id}_{reason}"
+    existing_ids = {event.event_id for event in trace.events}
+    if base not in existing_ids:
+        return base
+    index = 1
+    while f"{base}_{index}" in existing_ids:
+        index += 1
+    return f"{base}_{index}"

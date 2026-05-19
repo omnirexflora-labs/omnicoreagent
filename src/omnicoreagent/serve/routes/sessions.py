@@ -56,8 +56,8 @@ def create_sessions_router() -> APIRouter:
     )
     async def get_trace(request: Request, session_id: str) -> TraceResponse:
         agent = get_agent(request)
-        traces = await agent.list_telemetry_traces(session_id=session_id)
-        trace = traces[-1] if traces else {}
+        trace = await agent.get_latest_trace(session_id)
+        trace = trace or {}
         events = trace.get("events", [])
         spans = trace.get("spans", [])
 

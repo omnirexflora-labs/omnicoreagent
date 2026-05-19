@@ -105,10 +105,14 @@ async def _put_stream_item(queue: asyncio.Queue[Any], item: Any) -> bool:
         return False
 
 
-async def _get_telemetry_stream_cursor(agent: AgentType, session_id: str) -> str | None:
+async def _get_telemetry_stream_cursor(
+    agent: AgentType,
+    session_id: str,
+    run_id: str | None = None,
+) -> str | None:
     cursor_method = getattr(agent, "get_telemetry_stream_cursor", None)
     if callable(cursor_method):
-        result = cursor_method(session_id=session_id)
+        result = cursor_method(session_id=session_id, run_id=run_id)
         if isawaitable(result):
             return await result
         return result
@@ -239,7 +243,7 @@ async def run_agent_stream(
             query=query,
             streaming=True,
         )
-        cursor = await _get_telemetry_stream_cursor(agent, session_id)
+        cursor = await _get_telemetry_stream_cursor(agent, session_id, run_id)
         pump_task = asyncio.create_task(
             _pump_session_events(agent, session_id, event_queue, cursor, run_id)
         )

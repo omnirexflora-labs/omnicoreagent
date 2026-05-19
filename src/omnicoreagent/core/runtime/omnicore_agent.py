@@ -20,6 +20,7 @@ from omnicoreagent.core.runtime.imports import (
 from omnicoreagent.core.telemetry import (
     ActorType,
     TelemetryActor,
+    TelemetryNormalizer,
     TelemetryRecorder,
     TelemetryStream,
     TelemetryStreamScope,
@@ -538,25 +539,53 @@ class OmniCoreAgent:
         *,
         session_id: str | None = None,
         trace_id: str | None = None,
+        run_id: str | None = None,
+        normalize: bool = False,
     ) -> Dict[str, Any] | None:
         """
         Return telemetry trace data.
         """
+        filters = [value is not None for value in (session_id, trace_id, run_id)]
+        if identifier is not None and any(filters):
+            raise ValueError("Use either identifier or trace lookup keyword arguments")
+        if sum(filters) > 1:
+            raise ValueError("Use only one of trace_id, run_id, or session_id")
         if trace_id is not None:
-            return await self.get_telemetry_trace(trace_id)
-        if session_id is not None:
-            traces = await self.list_telemetry_traces(session_id=session_id)
+            return await self.get_telemetry_trace(trace_id, normalize=normalize)
+        if run_id is not None:
+            traces = await self.list_telemetry_traces(run_id=run_id, normalize=normalize)
             return traces[-1] if traces else None
+        if session_id is not None:
+            return await self.get_latest_trace(session_id, normalize=normalize)
         if identifier is None:
             raise TypeError("get_trace() requires trace_id or session_id")
-        if identifier.startswith("trace_"):
-            return await self.get_telemetry_trace(identifier)
-        traces = await self.list_telemetry_traces(session_id=identifier)
+        exact_trace = await self.get_telemetry_trace(identifier, normalize=normalize)
+        if exact_trace is not None:
+            return exact_trace
+        return await self.get_latest_trace(identifier, normalize=normalize)
+
+    async def get_latest_trace(
+        self,
+        session_id: str,
+        *,
+        normalize: bool = False,
+    ) -> Dict[str, Any] | None:
+        traces = await self.list_telemetry_traces(
+            session_id=session_id,
+            normalize=normalize,
+        )
         return traces[-1] if traces else None
 
-    async def get_telemetry_trace(self, trace_id: str) -> Dict[str, Any] | None:
+    async def get_telemetry_trace(
+        self,
+        trace_id: str,
+        *,
+        normalize: bool = False,
+    ) -> Dict[str, Any] | None:
         self._ensure_telemetry()
         trace = await self.telemetry_store.get_trace(trace_id)
+        if trace and normalize:
+            trace = TelemetryNormalizer().normalize(trace)
         return trace.model_dump() if trace else None
 
     async def list_telemetry_traces(
@@ -571,6 +600,7 @@ class OmniCoreAgent:
         workflow_id: str | None = None,
         model: str | None = None,
         status: TraceStatus | str | None = None,
+        normalize: bool = False,
     ) -> list[Dict[str, Any]]:
         self._ensure_telemetry()
         if trace_filter is not None and any(
@@ -601,6 +631,9 @@ class OmniCoreAgent:
                 status=status,
             )
         traces = await self.telemetry_store.list_traces(trace_filter)
+        if normalize:
+            normalizer = TelemetryNormalizer()
+            traces = [normalizer.normalize(trace) for trace in traces]
         return [trace.model_dump() for trace in traces]
 
     async def get_telemetry_stream_cursor(
