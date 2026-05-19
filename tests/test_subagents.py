@@ -538,8 +538,8 @@ class TestOmniCoreAgentSubagents:
 
         tool_names = [tool.name for tool in runtime_tools.list_tools()]
         assert "spawn_subagents" in tool_names
-        assert "workspace_file_write" in tool_names
-        assert "workspace_file_view" in tool_names
+        assert "write_file" in tool_names
+        assert "read_file" in tool_names
 
         await agent.cleanup()
 
@@ -580,8 +580,8 @@ class TestOmniCoreAgentSubagents:
         assert "<subagents_json>" in prompt
         assert '<extension name="workspace_files">' in prompt
         assert "spawn_subagents:" in prompt
-        assert "workspace_file_view:" in prompt
-        assert "workspace_file_write:" in prompt
+        assert "read_file:" in prompt
+        assert "write_file:" in prompt
 
         await agent.cleanup()
 

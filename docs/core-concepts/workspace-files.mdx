@@ -70,19 +70,27 @@ R2_SECRET_ACCESS_KEY=your-r2-secret
 
 ---
 
-## Workspace Files Tools
+## Workspace Command Tools
 
 OmniCoreAgent exposes these tools for the `files/` area:
 
 | Tool | Purpose |
 |------|---------|
-| `workspace_file_view` | View/list files in workspace files |
-| `workspace_file_write` | Create, append, or overwrite files |
-| `workspace_file_replace` | Find and replace text within files |
-| `workspace_file_insert` | Insert text at specific line numbers |
-| `workspace_file_delete` | Delete files from workspace files |
-| `workspace_file_rename` | Rename or move files |
-| `workspace_file_clear` | Clear the workspace files area |
+| `ls` | List files and directories |
+| `read_file` | Read file contents, like workspace-scoped `cat` |
+| `write_file` | Create, append, or overwrite files |
+| `edit_file` | Find and replace text within files |
+| `insert_file` | Insert text at specific line numbers |
+| `delete_file` | Delete files or directories |
+| `move_file` | Rename or move files |
+| `clear_files` | Clear the workspace files area |
+| `glob` | Find files by glob pattern |
+| `grep` | Search text inside workspace files |
+
+These are workspace tools, not host shell tools. They operate through the
+active workspace backend, so the same tool calls work on local disk, S3, and R2.
+When workspace files are enabled, these tool names are reserved for the harness.
+Use distinct names for application-owned local tools.
 
 ---
 

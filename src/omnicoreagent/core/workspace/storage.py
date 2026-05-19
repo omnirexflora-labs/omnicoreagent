@@ -309,40 +309,54 @@ class S3WorkspaceStorage:
         prefix = self._normalize_key(path, strip_prefixes=strip_prefixes)
         if prefix and not prefix.endswith("/"):
             prefix += "/"
-        response = self.s3.list_objects_v2(
-            Bucket=self.bucket,
-            Prefix=prefix,
-            Delimiter="/",
-        )
         files = []
-        for item in response.get("CommonPrefixes", []):
-            key = item["Prefix"]
-            name = key[len(prefix) :].rstrip("/")
-            if not name:
-                continue
-            files.append(
-                WorkspaceFile(
-                    path=key[len(self.prefix) :].rstrip("/"),
-                    name=name,
-                    modified_at=datetime.fromtimestamp(0),
-                    is_dir=True,
+        for response in self._list_objects(prefix=prefix, delimiter="/"):
+            for item in response.get("CommonPrefixes", []):
+                key = item["Prefix"]
+                name = key[len(prefix) :].rstrip("/")
+                if not name:
+                    continue
+                files.append(
+                    WorkspaceFile(
+                        path=key[len(self.prefix) :].rstrip("/"),
+                        name=name,
+                        modified_at=datetime.fromtimestamp(0),
+                        is_dir=True,
+                    )
                 )
-            )
-        for item in response.get("Contents", []):
-            key = item["Key"]
-            if key == prefix or key.endswith("/"):
-                continue
-            name = key[len(prefix) :]
-            if "/" in name:
-                continue
-            files.append(
-                WorkspaceFile(
-                    path=key[len(self.prefix) :],
-                    name=name,
-                    modified_at=item["LastModified"],
+            for item in response.get("Contents", []):
+                key = item["Key"]
+                if key == prefix or key.endswith("/"):
+                    continue
+                name = key[len(prefix) :]
+                if "/" in name:
+                    continue
+                files.append(
+                    WorkspaceFile(
+                        path=key[len(self.prefix) :],
+                        name=name,
+                        modified_at=item["LastModified"],
+                    )
                 )
-            )
         return files
+
+    def _list_objects(self, *, prefix: str, delimiter: str | None = None):
+        params = {
+            "Bucket": self.bucket,
+            "Prefix": prefix,
+        }
+        if delimiter is not None:
+            params["Delimiter"] = delimiter
+
+        while True:
+            response = self.s3.list_objects_v2(**params)
+            yield response
+            if not response.get("IsTruncated"):
+                break
+            token = response.get("NextContinuationToken")
+            if not token:
+                break
+            params["ContinuationToken"] = token
 
     def write_text(
         self,
@@ -383,10 +397,13 @@ class S3WorkspaceStorage:
             return f"File deleted: s3://{self.bucket}/{key}"
 
         prefix = key if key.endswith("/") else f"{key}/"
-        response = self.s3.list_objects_v2(Bucket=self.bucket, Prefix=prefix)
-        objects = [{"Key": item["Key"]} for item in response.get("Contents", [])]
+        objects = [
+            {"Key": item["Key"]}
+            for response in self._list_objects(prefix=prefix)
+            for item in response.get("Contents", [])
+        ]
         if objects:
-            self.s3.delete_objects(Bucket=self.bucket, Delete={"Objects": objects})
+            self._delete_object_keys([item["Key"] for item in objects])
             return f"Directory deleted: s3://{self.bucket}/{prefix}"
 
         self.s3.delete_object(Bucket=self.bucket, Key=key)
@@ -401,20 +418,52 @@ class S3WorkspaceStorage:
     ) -> tuple[str, str]:
         old_key = self._normalize_key(old_path, strip_prefixes=strip_prefixes)
         new_key = self._normalize_key(new_path, strip_prefixes=strip_prefixes)
-        self.s3.copy_object(
-            Bucket=self.bucket,
-            CopySource={"Bucket": self.bucket, "Key": old_key},
-            Key=new_key,
-            **self._put_params(),
-        )
-        self.s3.delete_object(Bucket=self.bucket, Key=old_key)
+
+        if self.exists(old_path, strip_prefixes=strip_prefixes):
+            self.s3.copy_object(
+                Bucket=self.bucket,
+                CopySource={"Bucket": self.bucket, "Key": old_key},
+                Key=new_key,
+                **self._put_params(),
+            )
+            self.s3.delete_object(Bucket=self.bucket, Key=old_key)
+            return old_key, new_key
+
+        old_prefix = old_key if old_key.endswith("/") else f"{old_key}/"
+        new_prefix = new_key if new_key.endswith("/") else f"{new_key}/"
+        objects = [
+            item["Key"]
+            for response in self._list_objects(prefix=old_prefix)
+            for item in response.get("Contents", [])
+        ]
+        if not objects:
+            raise FileNotFoundError(str(old_path))
+
+        for source_key in objects:
+            suffix = source_key[len(old_prefix) :]
+            self.s3.copy_object(
+                Bucket=self.bucket,
+                CopySource={"Bucket": self.bucket, "Key": source_key},
+                Key=f"{new_prefix}{suffix}",
+                **self._put_params(),
+            )
+        self._delete_object_keys(objects)
         return old_key, new_key
 
     def clear(self) -> None:
-        response = self.s3.list_objects_v2(Bucket=self.bucket, Prefix=self.prefix)
-        objects = [{"Key": item["Key"]} for item in response.get("Contents", [])]
+        objects = [
+            {"Key": item["Key"]}
+            for response in self._list_objects(prefix=self.prefix)
+            for item in response.get("Contents", [])
+        ]
         if objects:
-            self.s3.delete_objects(Bucket=self.bucket, Delete={"Objects": objects})
+            self._delete_object_keys([item["Key"] for item in objects])
+
+    def _delete_object_keys(self, keys: list[str]) -> None:
+        for index in range(0, len(keys), 1000):
+            batch = [{"Key": key} for key in keys[index : index + 1000]]
+            if batch:
+                self.s3.delete_objects(Bucket=self.bucket, Delete={"Objects": batch})
 
 
 class R2WorkspaceStorage(S3WorkspaceStorage):

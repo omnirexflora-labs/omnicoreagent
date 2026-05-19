@@ -254,9 +254,9 @@ def search_web(query: str) -> dict:
     """Search the web for information."""
     return {"results": [f"Result for: {query}"]}
 
-@tools.register_tool("read_file")
-def read_file(path: str) -> dict:
-    """Read a local project file."""
+@tools.register_tool("fetch_document")
+def fetch_document(path: str) -> dict:
+    """Fetch a domain document from an application-owned source."""
     return {"path": path, "content": f"Contents of {path}"}
 
 agent = OmniCoreAgent(
@@ -279,7 +279,7 @@ agent = OmniCoreAgent(
 
 async def main():
     result = await agent.run(
-        "Search for recent AI agent papers and read notes.md. Do both at once "
+        "Search for recent AI agent papers and fetch notes.md. Do both at once "
         "if neither depends on the other."
     )
     print(result["response"])
@@ -288,7 +288,7 @@ async def main():
 asyncio.run(main())
 ```
 
-The runtime accepts `search_web` and `read_file` in the same batch, returns both
+The runtime accepts `search_web` and `fetch_document` in the same batch, returns both
 results together, and continues from one structured observation.
 
 ---

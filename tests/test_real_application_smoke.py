@@ -41,7 +41,7 @@ class ScriptedHarnessLlm:
     <parameters>{"customer_id": "cust-001"}</parameters>
   </tool_call>
   <tool_call>
-    <tool_name>workspace_file_write</tool_name>
+    <tool_name>write_file</tool_name>
     <parameters>{"path": "notes/customer.md", "content": "customer cust-001 reviewed", "mode": "create"}</parameters>
   </tool_call>
   <tool_call>
@@ -169,7 +169,7 @@ async def test_full_stack_harness_run_uses_tools_workspace_offload_and_telemetry
         "tools_retriever",
         "customer_profile",
         "external_risk_lookup",
-        "workspace_file_write",
+        "write_file",
         "large_report",
         "read_artifact",
     }

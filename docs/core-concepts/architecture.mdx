@@ -36,7 +36,7 @@ graph TD
 
     Tools --> Local["Local ToolRegistry"]
     Tools --> MCP["MCP tools"]
-    Tools --> WorkspaceTools["Workspace file tools"]
+    Tools --> WorkspaceTools["Workspace command tools"]
     Tools --> SkillTools["Skill tools"]
     Tools --> SubagentTools["Subagent tools"]
     Tools --> Retrieval["BM25 tool retrieval"]
@@ -146,7 +146,8 @@ view:
 |--------|---------|
 | Local tools | Application-owned Python functions registered with `ToolRegistry`. |
 | MCP tools | External tool servers over stdio, SSE, or Streamable HTTP. |
-| Workspace tools | File operations for notes, scratchpads, artifacts, and offloads. |
+| Workspace command tools | File operations for notes, scratchpads, task progress, and generated files. |
+| Artifact tools | Read, tail, search, and list offloaded tool-result artifacts. |
 | Skills | Packaged capabilities implemented in Python, Bash, or Node.js. |
 | Subagent tools | Harness tools that let the lead agent spawn focused workers. |
 | BM25 retrieval | Optional tool filtering when the full tool set is too large for the prompt. |

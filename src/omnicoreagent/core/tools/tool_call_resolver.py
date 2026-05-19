@@ -14,6 +14,9 @@ from omnicoreagent.core.tools.arguments import normalize_tool_args
 if TYPE_CHECKING:
     from omnicoreagent.core.guardrails import PromptInjectionGuard
 
+WORKSPACE_TOOL_MARKER = "_omnicoreagent_builtin_workspace_tool"
+ARTIFACT_TOOL_MARKER = "_omnicoreagent_builtin_artifact_tool"
+
 
 class ToolCallResolver:
     """Resolve model tool-call requests into executable tool calls."""
@@ -75,12 +78,19 @@ class ToolCallResolver:
         if not local_tool_name:
             return None
 
+        tool_provider = "local"
+        tool = local_tools.get_tool(local_tool_name)
+        if tool and getattr(tool.function, WORKSPACE_TOOL_MARKER, False):
+            tool_provider = "workspace"
+        elif tool and getattr(tool.function, ARTIFACT_TOOL_MARKER, False):
+            tool_provider = "artifact"
+
         local_tool_handler = LocalToolHandler(local_tools=local_tools)
         return ToolCallResult(
             tool_executor=ToolExecutor(tool_handler=local_tool_handler),
             tool_name=local_tool_name,
             tool_args=normalize_tool_args(action.parameters),
-            tool_provider="local",
+            tool_provider=tool_provider,
         )
 
     async def resolve_single_action(

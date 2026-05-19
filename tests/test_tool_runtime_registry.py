@@ -91,7 +91,7 @@ async def test_prepare_tools_uses_workspace_config_for_workspace_files(
 
     prepared = await runtime.prepare_tools(local_tools=None)
     result = await prepared.execute_tool(
-        "workspace_file_write",
+        "write_file",
         {"path": "note.txt", "content": "hello", "mode": "create"},
     )
 
@@ -104,7 +104,7 @@ async def test_prepare_tools_uses_workspace_config_for_workspace_files(
 
 
 @pytest.mark.asyncio
-async def test_subagents_enable_workspace_file_tools(
+async def test_subagents_enable_workspace_command_tools(
     monkeypatch, tmp_path, internal_registry, offloader
 ):
     clear_workspace_files_backend_cache()
@@ -121,11 +121,38 @@ async def test_subagents_enable_workspace_file_tools(
     prepared = await runtime.prepare_tools(local_tools=None)
 
     tool_names = [tool.name for tool in prepared.list_tools()]
-    assert "workspace_file_write" in tool_names
-    assert "workspace_file_view" in tool_names
+    assert "write_file" in tool_names
+    assert "read_file" in tool_names
+    assert "grep" in tool_names
     assert runtime.workspace is not None
 
     clear_workspace_files_backend_cache()
+
+
+@pytest.mark.asyncio
+async def test_workspace_command_tool_names_are_reserved(
+    internal_registry, offloader
+):
+    local_tools = ToolRegistry()
+
+    @local_tools.register_tool(name="grep", description="App grep")
+    def app_grep(path: str) -> str:
+        return path
+
+    runtime = make_runtime(
+        internal_registry,
+        offloader,
+        enable_workspace_files=True,
+    )
+
+    with pytest.raises(ValueError, match="reserve these names"):
+        await runtime.prepare_tools(local_tools=local_tools)
+
+    tool_names = [tool.name for tool in local_tools.list_tools()]
+    assert tool_names == ["grep"]
+    assert runtime.workspace is None
+    assert offloader._storage is None
+    assert offloader._workspace is None
 
 
 @pytest.mark.asyncio

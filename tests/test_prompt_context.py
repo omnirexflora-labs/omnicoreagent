@@ -35,8 +35,9 @@ async def test_build_system_prompt_includes_enabled_harness_context():
         tools_section=(
             "tools_retriever: Discover tools\n"
             "spawn_subagents: Spawn focused workers\n"
-            "workspace_file_view: Read workspace files\n"
-            "workspace_file_write: Write workspace files\n"
+            "ls: List workspace files\n"
+            "read_file: Read workspace files\n"
+            "write_file: Write workspace files\n"
             "read_artifact: Read artifacts\n"
             "read_skill_file: Read skills\n"
             "run_skill_script: Run skill scripts"
@@ -62,7 +63,7 @@ async def test_build_system_prompt_includes_enabled_harness_context():
     assert "researcher" in prompt
     assert "query: str (REQUIRED)" in prompt
     assert "limit: int (optional, default=3)" in prompt
-    assert "workspace_file_write" in prompt
+    assert "write_file" in prompt
     assert 'area name="files"' in prompt
     assert 'area name="artifacts"' in prompt
     assert "read_artifact" in prompt
@@ -80,8 +81,9 @@ async def test_subagent_prompt_dynamic_only_matches_spawn_tool_surface():
         base_system_prompt="base system",
         tools_section=(
             "spawn_subagents: Spawn focused workers\n"
-            "workspace_file_view: Read workspace files\n"
-            "workspace_file_write: Write workspace files"
+            "ls: List workspace files\n"
+            "read_file: Read workspace files\n"
+            "write_file: Write workspace files"
         ),
         sub_agents=None,
     )
@@ -91,7 +93,7 @@ async def test_subagent_prompt_dynamic_only_matches_spawn_tool_surface():
     assert "<dynamic_spawn>" in prompt
     assert "<configured_subagents>" not in prompt
     assert "<agent_call>" not in prompt
-    assert "workspace_file_view" in prompt
+    assert "read_file" in prompt
     assert 'area name="files"' in prompt
     assert "[AVAILABLE SUB AGENTS REGISTRY]" not in prompt
 
@@ -189,8 +191,8 @@ def test_available_tool_names_extracts_rendered_registry_entries():
 
     assert builder.available_tool_names(
         "Available tools:\n\n"
-        "workspace_file_view: Inspect files\n"
+        "read_file: Inspect files\n"
         "  - path: string (required) - Path\n\n"
         "read_artifact: Read artifact\n"
         "No colon in this line"
-    ) == {"workspace_file_view", "read_artifact"}
+    ) == {"read_file", "read_artifact"}

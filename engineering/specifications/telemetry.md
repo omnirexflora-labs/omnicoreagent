@@ -682,8 +682,10 @@ Current runtime loop coverage:
   `tool_error` events.
 - MCP tools create `mcp.tool.call` spans and emit `mcp_tool_call`,
   `mcp_tool_result`, and `mcp_tool_error` events.
-- workspace file tools create `workspace.read`, `workspace.write`, or
-  `workspace.delete` spans and emit matching workspace events.
+- resolved built-in workspace command tools create `workspace.read`,
+  `workspace.write`, or `workspace.delete` spans and emit matching workspace
+  events. App-local tools with the same natural names are normal local tools
+  when workspace files are disabled.
 - memory history reads and writes create `memory.read` / `memory.write` spans
   and emit `memory_read` / `memory_write` events.
 - context compression creates `context.compression` spans and emits
@@ -706,7 +708,7 @@ Current runtime loop coverage:
 
 Current remaining runtime internals:
 
-- direct workspace storage internals outside workspace file tools, artifact
+- direct workspace storage internals outside workspace command tools, artifact
   tools, offload, and background run workspace writes
 - approval telemetry paths that are reserved but not fully wired
 - cross-trace links between `serve.request`, background runs, subagents, and

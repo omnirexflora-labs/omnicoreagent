@@ -33,7 +33,7 @@ def build_subagents_additional_prompt(
 
     <workspace_contract>
       Spawned subagents write their outputs to workspace file paths. After
-      spawning subagents, read the returned output paths with workspace_file_view
+      spawning subagents, read the returned output paths with read_file
       before synthesizing or acting on their results.
     </workspace_contract>
 
@@ -371,7 +371,7 @@ tools_retriever_additional_prompt = """
 
 workspace_files_additional_prompt = """
 <extension name="workspace_files">
-  <description>Workspace file tools for the agent-managed files area.</description>
+  <description>Workspace command tools for the agent-managed files area.</description>
 
   <workspace>
     <meta>
@@ -388,18 +388,21 @@ workspace_files_additional_prompt = """
       <area name="artifacts">
         Runtime-managed tool output artifacts. Large tool results are saved here
         automatically by tool offloading and must be accessed with artifact tools,
-        not workspace_file_* tools.
+        not workspace command tools.
       </area>
     </areas>
 
     <tools>
-      <tool>workspace_file_view(path)</tool>
-      <tool>workspace_file_write(path, content, mode=create|append|overwrite)</tool>
-      <tool>workspace_file_insert(path, insert_line, insert_text)</tool>
-      <tool>workspace_file_replace(path, old_str, new_str)</tool>
-      <tool>workspace_file_delete(path)</tool>
-      <tool>workspace_file_rename(old_path, new_path)</tool>
-      <tool>workspace_file_clear()</tool>
+      <tool>ls(path)</tool>
+      <tool>read_file(path)</tool>
+      <tool>write_file(path, content, mode=create|append|overwrite)</tool>
+      <tool>edit_file(path, old_str, new_str)</tool>
+      <tool>insert_file(path, insert_line, insert_text)</tool>
+      <tool>delete_file(path)</tool>
+      <tool>move_file(old_path, new_path)</tool>
+      <tool>clear_files()</tool>
+      <tool>glob(pattern, path)</tool>
+      <tool>grep(pattern, path, include, case_sensitive, max_matches)</tool>
     </tools>
 
     <path_policy>
@@ -410,7 +413,9 @@ workspace_files_additional_prompt = """
 
     <usage_policy>
       <rule>Use workspace files when a task is multi-step, parallel, long-running, or likely to exceed context.</rule>
-      <rule>Use workspace_file_view before editing an existing path.</rule>
+      <rule>Use ls and glob to discover files before reading many files.</rule>
+      <rule>Use grep to search files before reading large files.</rule>
+      <rule>Use read_file before editing an existing path.</rule>
       <rule>Use create for new files, append for ongoing logs/progress, and overwrite only when replacing a whole file intentionally.</rule>
       <rule>Subagents should write their output to workspace files; the lead agent must read those paths before synthesizing.</rule>
       <rule>Do not use workspace files as final-answer narration. Use them as internal task state and durable outputs.</rule>
@@ -419,7 +424,7 @@ workspace_files_additional_prompt = """
     <examples>
       <example name="create_plan">
         <tool_call>
-          <tool_name>workspace_file_write</tool_name>
+          <tool_name>write_file</tool_name>
           <parameters>
             <path>/workspace/tasks/data-analysis/plan.md</path>
             <mode>create</mode>
@@ -430,7 +435,7 @@ workspace_files_additional_prompt = """
 
       <example name="append_log">
         <tool_call>
-          <tool_name>workspace_file_write</tool_name>
+          <tool_name>write_file</tool_name>
           <parameters>
             <path>/workspace/tasks/data-analysis/progress.md</path>
             <mode>append</mode>

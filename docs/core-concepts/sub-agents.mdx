@@ -43,8 +43,8 @@ agent = OmniCoreAgent(
 
 Workspace files are available by default, and `enable_subagents` also keeps
 them enabled for worker output. Dynamic workers are expected to save output with
-`workspace_file_write`, and the lead agent reads those paths with
-`workspace_file_view` before synthesizing.
+`write_file`, and the lead agent reads those paths with `read_file` before
+synthesizing.
 
 ### `spawn_subagents`
 

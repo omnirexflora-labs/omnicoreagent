@@ -153,6 +153,7 @@ def test_maybe_offload_result_keeps_artifact_tool_output_inline(tmp_path):
     )
     result = {
         "tool_name": "read_artifact",
+        "tool_provider": "artifact",
         "args": {"artifact_id": "artifact_1"},
         "status": "success",
         "data": "x" * 80,
@@ -164,6 +165,74 @@ def test_maybe_offload_result_keeps_artifact_tool_output_inline(tmp_path):
     assert processed is result
     assert result["data"] == "x" * 80
     assert offloader.get_stats()["offload_count"] == 0
+
+
+def test_maybe_offload_result_keeps_workspace_provider_output_inline(tmp_path):
+    offloader = ToolResponseOffloader(
+        config={"enabled": True, "threshold_bytes": 20, "threshold_tokens": 10_000},
+        base_dir=str(tmp_path),
+    )
+    handler = ToolObservationHandler(
+        agent_name="test_agent",
+        tool_offloader=offloader,
+    )
+    result = {
+        "tool_name": "read_file",
+        "args": {"path": "notes.md"},
+        "status": "success",
+        "data": "x" * 80,
+        "message": None,
+    }
+    tool_call_result = ToolCallResult(
+        tool_executor=None,
+        tool_name="read_file",
+        tool_args={"path": "notes.md"},
+        tool_provider="workspace",
+    )
+
+    processed = handler.formatter.maybe_offload_result(
+        result=result,
+        session_id="chat-workspace",
+        tool_call_result=tool_call_result,
+    )
+
+    assert processed is result
+    assert result["data"] == "x" * 80
+    assert offloader.get_stats()["offload_count"] == 0
+
+
+def test_maybe_offload_result_offloads_app_tool_with_workspace_like_name(tmp_path):
+    offloader = ToolResponseOffloader(
+        config={"enabled": True, "threshold_bytes": 20, "threshold_tokens": 10_000},
+        base_dir=str(tmp_path),
+    )
+    handler = ToolObservationHandler(
+        agent_name="test_agent",
+        tool_offloader=offloader,
+    )
+    result = {
+        "tool_name": "read_file",
+        "args": {"path": "notes.md"},
+        "status": "success",
+        "data": "x" * 80,
+        "message": None,
+    }
+    tool_call_result = ToolCallResult(
+        tool_executor=None,
+        tool_name="read_file",
+        tool_args={"path": "notes.md"},
+        tool_provider="local",
+    )
+
+    processed = handler.formatter.maybe_offload_result(
+        result=result,
+        session_id="chat-local-read-file",
+        tool_call_result=tool_call_result,
+    )
+
+    assert processed is result
+    assert "[TOOL RESPONSE OFFLOADED]" in result["data"]
+    assert offloader.get_stats()["offload_count"] == 1
 
 
 def test_build_results_observation_formats_parallel_results(handler, session_state):
