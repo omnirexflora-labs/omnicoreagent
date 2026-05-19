@@ -7,7 +7,14 @@ from pathlib import Path
 
 from omnicoreagent import MemoryRouter, OmniCoreAgent, ToolRegistry
 
-from _bootstrap import model_config, require_llm_api_key, response_text
+try:
+    from cookbook.real_applications._bootstrap import (
+        model_config,
+        require_llm_api_key,
+        response_text,
+    )
+except ModuleNotFoundError:
+    from _bootstrap import model_config, require_llm_api_key, response_text
 
 
 def build_support_tools() -> ToolRegistry:

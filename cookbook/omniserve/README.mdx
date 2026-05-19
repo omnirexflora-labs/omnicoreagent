@@ -25,6 +25,7 @@ def create_agent():
 |---------|-------------|------------|
 | [cli_agent.py](./cli_agent.py) | Agent file for CLI deployment | `omniserve run --agent cookbook/omniserve/cli_agent.py` |
 | [python_api.py](./python_api.py) | Full Python API with all config options | `python cookbook/omniserve/python_api.py` |
+| [real_application_agent.py](./real_application_agent.py) | Serve the support operations real application harness | `uv run omniserve run --agent cookbook/omniserve/real_application_agent.py` |
 
 ---
 
@@ -38,6 +39,9 @@ omniserve quickstart --provider openai --model gpt-4o-mini
 
 # Run with your agent file
 omniserve run --agent cookbook/omniserve/cli_agent.py --port 8000
+
+# Run a real application harness
+uv run omniserve run --agent cookbook/omniserve/real_application_agent.py --port 8000
 
 # With authentication and rate limiting
 omniserve run --agent cookbook/omniserve/cli_agent.py \
