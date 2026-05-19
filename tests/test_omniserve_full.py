@@ -12,6 +12,9 @@ from omnicoreagent.core.telemetry import (
     InMemoryTelemetryStore,
     TelemetryActor,
     TelemetryEvent,
+    TelemetryRecorder,
+    TelemetryStream,
+    TelemetryStreamScope,
 )
 from omnicoreagent.serve.cli import cli
 
@@ -934,6 +937,263 @@ class TestEndpoints:
             session_id="test-endpoint-session",
             run_id="run_endpoint",
         )
+
+    def test_events_list_endpoint_defensively_filters_run_id(self):
+        class UnfilteredTelemetryAgent:
+            name = "UnfilteredTelemetryAgent"
+
+            def generate_session_id(self):
+                return "unfiltered-session"
+
+            def get_telemetry_events_after(self, *, cursor, session_id, run_id):
+                assert cursor is None
+                assert session_id == "unfiltered-session"
+                assert run_id == "run-keep"
+                return [
+                    {
+                        "event_type": "final_answer",
+                        "metadata": {"run_id": "run-keep"},
+                    },
+                    {
+                        "event_type": "final_answer",
+                        "metadata": {"run_id": "run-drop"},
+                    },
+                ]
+
+        server = OmniServe(
+            agent=UnfilteredTelemetryAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+        client = TestClient(server.app, raise_server_exceptions=False)
+
+        resp = client.get("/events/unfiltered-session/list?run_id=run-keep")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["count"] == 1
+        assert data["events"][0]["metadata"]["run_id"] == "run-keep"
+
+    def test_sync_telemetry_accessors_are_supported_by_json_endpoints(self):
+        class SyncTelemetryAgent:
+            name = "SyncTelemetryAgent"
+
+            def generate_session_id(self):
+                return "sync-telemetry-session"
+
+            def get_telemetry_events_after(self, *, cursor, session_id, run_id):
+                assert cursor is None
+                return [
+                    {
+                        "event_type": "user_message",
+                        "metadata": {"session_id": session_id, "run_id": run_id},
+                    }
+                ]
+
+            def get_latest_trace(self, session_id):
+                return {
+                    "trace_id": "trace-sync-latest",
+                    "run_id": "run-sync-latest",
+                    "session_id": session_id,
+                    "status": "completed",
+                    "events": [{"event_type": "user_message"}],
+                    "spans": [{"kind": "agent.run"}],
+                }
+
+            def get_trace(self, *, run_id):
+                return {
+                    "trace_id": "trace-sync-run",
+                    "run_id": run_id,
+                    "session_id": "sync-telemetry-session",
+                    "status": "completed",
+                    "events": [{"event_type": "final_answer"}],
+                    "spans": [{"kind": "agent.run"}],
+                }
+
+        server = OmniServe(
+            agent=SyncTelemetryAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+        client = TestClient(server.app, raise_server_exceptions=False)
+
+        events = client.get("/events/sync-telemetry-session/list?run_id=run-sync")
+        latest_trace = client.get("/events/sync-telemetry-session/trace")
+        run_trace = client.get("/events/sync-telemetry-session/trace?run_id=run-sync")
+
+        assert events.status_code == 200
+        assert events.json()["events"][0]["metadata"]["run_id"] == "run-sync"
+        assert latest_trace.status_code == 200
+        assert latest_trace.json()["summary"]["trace_id"] == "trace-sync-latest"
+        assert run_trace.status_code == 200
+        assert run_trace.json()["summary"]["trace_id"] == "trace-sync-run"
+
+    def test_telemetry_json_endpoints_return_empty_for_lightweight_agents(self):
+        class LightweightAgent:
+            name = "LightweightTelemetryAgent"
+
+            def generate_session_id(self):
+                return "lightweight-session"
+
+            async def run(self, query, *, session_id):
+                return {"response": f"ok:{query}", "session_id": session_id}
+
+        server = OmniServe(
+            agent=LightweightAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+        client = TestClient(server.app, raise_server_exceptions=False)
+
+        events = client.get("/events/lightweight-session/list")
+        trace = client.get("/events/lightweight-session/trace")
+
+        assert events.status_code == 200
+        assert events.json() == {
+            "session_id": "lightweight-session",
+            "events": [],
+            "count": 0,
+        }
+        assert trace.status_code == 200
+        assert trace.json() == {
+            "session_id": "lightweight-session",
+            "summary": {
+                "trace_id": None,
+                "run_id": None,
+                "status": None,
+                "event_count": 0,
+                "span_count": 0,
+            },
+            "steps": [],
+        }
+
+    def test_session_history_endpoints_tolerate_lightweight_agents(self):
+        class LightweightAgent:
+            name = "LightweightHistoryAgent"
+
+            def generate_session_id(self):
+                return "lightweight-history-session"
+
+        server = OmniServe(
+            agent=LightweightAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+        client = TestClient(server.app, raise_server_exceptions=False)
+
+        history = client.get("/sessions/lightweight-history-session/history")
+        cleared = client.delete("/sessions/lightweight-history-session")
+
+        assert history.status_code == 200
+        assert history.json() == {
+            "session_id": "lightweight-history-session",
+            "messages": [],
+            "count": 0,
+        }
+        assert cleared.status_code == 200
+        assert cleared.json() == {
+            "status": "cleared",
+            "session_id": "lightweight-history-session",
+        }
+
+    def test_run_sse_route_streams_for_lightweight_agents(self):
+        class LightweightAgent:
+            name = "LightweightSseAgent"
+
+            def generate_session_id(self):
+                return "lightweight-sse-session"
+
+            async def run(self, query, *, session_id):
+                return {"response": f"streamed:{query}", "session_id": session_id}
+
+        server = OmniServe(
+            agent=LightweightAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+        client = TestClient(server.app, raise_server_exceptions=False)
+
+        with client.stream("POST", "/run", json={"query": "hello"}) as response:
+            body = "".join(response.iter_text())
+
+        assert response.status_code == 200
+        assert "event: session" in body
+        assert "event: complete" in body
+        assert "streamed:hello" in body
+
+    def test_omniserve_sync_run_populates_telemetry_endpoints(self):
+        class TelemetryAgent:
+            name = "TelemetryHttpAgent"
+
+            def __init__(self):
+                self.store = InMemoryTelemetryStore()
+                self.telemetry_stream = TelemetryStream(self.store)
+
+            def generate_session_id(self):
+                return "telemetry-http-session"
+
+            async def run(self, query, *, session_id, run_id):
+                recorder = TelemetryRecorder(self.store)
+                context = await recorder.start_trace(
+                    name="agent.run",
+                    kind="agent.run",
+                    actor=TelemetryActor(type=ActorType.AGENT, name=self.name),
+                    session_id=session_id,
+                    run_id=run_id,
+                )
+                await recorder.emit_event(
+                    "user_message",
+                    actor=TelemetryActor(type=ActorType.USER),
+                    input={"message": query},
+                )
+                await recorder.emit_event(
+                    "final_answer",
+                    actor=TelemetryActor(type=ActorType.AGENT, name=self.name),
+                    output={"response": f"ok:{query}"},
+                )
+                await recorder.end_trace(output={"response": f"ok:{query}"})
+                return {
+                    "response": f"ok:{query}",
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "trace_id": context.trace_id,
+                }
+
+            async def get_telemetry_events_after(self, *, cursor, session_id, run_id):
+                stream = TelemetryStream(self.store)
+                return await stream.get_events_after(
+                    TelemetryStreamScope(session_id=session_id, run_id=run_id),
+                    cursor,
+                )
+
+            async def get_latest_trace(self, session_id):
+                traces = await self.store.list_traces()
+                traces = [trace for trace in traces if trace.session_id == session_id]
+                return traces[-1].model_dump() if traces else None
+
+            async def get_trace(self, *, run_id):
+                traces = await self.store.list_traces()
+                traces = [trace for trace in traces if trace.run_id == run_id]
+                return traces[-1].model_dump() if traces else None
+
+        server = OmniServe(
+            agent=TelemetryAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+        client = TestClient(server.app, raise_server_exceptions=False)
+
+        run = client.post(
+            "/run/sync",
+            json={"query": "hello", "session_id": "telemetry-http-session"},
+        )
+        assert run.status_code == 200
+        run_id = run.json()["run_id"]
+
+        events = client.get(f"/events/telemetry-http-session/list?run_id={run_id}")
+        trace = client.get(f"/events/telemetry-http-session/trace?run_id={run_id}")
+
+        assert events.status_code == 200
+        event_types = {event["event_type"] for event in events.json()["events"]}
+        assert {"user_message", "final_answer", "serve_request_start"}.issubset(
+            event_types
+        )
+        assert trace.status_code == 200
+        assert trace.json()["summary"]["run_id"] == run_id
 
     def test_run_normalizes_string_agent_result(self):
         agent = MagicMock(spec=OmniCoreAgent)

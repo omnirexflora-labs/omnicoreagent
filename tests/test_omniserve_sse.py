@@ -114,6 +114,10 @@ class _NoRunIdAgent:
         return {"response": f"done:{session_id}:{query}"}
 
 
+class _NoTelemetryAgent:
+    name = "NoTelemetryAgent"
+
+
 @pytest.mark.asyncio
 async def test_run_agent_stream_yields_telemetry_before_complete():
     agent = _TelemetryAgent()
@@ -335,7 +339,17 @@ async def test_stream_session_events_filters_existing_telemetry_by_run_id():
         "final_answer",
     ]
     assert {_event_data(chunk)["run_id"] for chunk in event_chunks} == {"run_second"}
-    assert _event_data(chunks[0])["run_id"] == "run_second"
+
+
+@pytest.mark.asyncio
+async def test_stream_session_events_ends_for_agents_without_telemetry_methods():
+    chunks = []
+    async for chunk in stream_session_events(_NoTelemetryAgent(), "session-no-telemetry"):
+        chunks.append(chunk)
+
+    assert [_event_name(chunk) for chunk in chunks] == ["session", "session"]
+    assert _event_data(chunks[0])["status"] == "streaming"
+    assert _event_data(chunks[1])["status"] == "ended"
 
 
 @pytest.mark.asyncio

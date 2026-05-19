@@ -1,5 +1,8 @@
 """Session and event routes for OmniServe."""
 
+from inspect import isawaitable
+from typing import Any
+
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
@@ -7,6 +10,60 @@ from ..models import EventsResponse, SessionHistoryResponse, TraceResponse
 from ..serialization import normalize_events
 from ..sse import stream_session_events
 from ..state import get_agent
+
+
+async def _get_telemetry_events(
+    agent: Any,
+    *,
+    session_id: str,
+    run_id: str | None,
+) -> list[Any]:
+    events_after = getattr(agent, "get_telemetry_events_after", None)
+    if not callable(events_after):
+        return []
+
+    result = events_after(cursor=None, session_id=session_id, run_id=run_id)
+    if isawaitable(result):
+        return await result
+    return list(result or [])
+
+
+async def _maybe_await(value: Any) -> Any:
+    if isawaitable(value):
+        return await value
+    return value
+
+
+def _event_matches_requested_run(event: dict[str, Any], run_id: str | None) -> bool:
+    if run_id is None:
+        return True
+    metadata = event.get("metadata") or {}
+    event_run_id = event.get("run_id")
+    if event_run_id is None and isinstance(metadata, dict):
+        event_run_id = metadata.get("run_id")
+    return event_run_id == run_id
+
+
+async def _get_session_trace(
+    agent: Any,
+    *,
+    session_id: str,
+    run_id: str | None,
+) -> dict[str, Any]:
+    if run_id is not None:
+        get_trace = getattr(agent, "get_trace", None)
+        if not callable(get_trace):
+            return {}
+        result = get_trace(run_id=run_id)
+    else:
+        get_latest_trace = getattr(agent, "get_latest_trace", None)
+        if not callable(get_latest_trace):
+            return {}
+        result = get_latest_trace(session_id)
+
+    if isawaitable(result):
+        result = await result
+    return result or {}
 
 
 def create_sessions_router() -> APIRouter:
@@ -52,13 +109,16 @@ def create_sessions_router() -> APIRouter:
         ),
     ) -> EventsResponse:
         agent = get_agent(request)
-        events = normalize_events(
-            await agent.get_telemetry_events_after(
-                cursor=None,
-                session_id=session_id,
-                run_id=run_id,
-            )
+        raw_events = await _get_telemetry_events(
+            agent,
+            session_id=session_id,
+            run_id=run_id,
         )
+        events = [
+            event
+            for event in normalize_events(raw_events)
+            if _event_matches_requested_run(event, run_id)
+        ]
 
         return EventsResponse(
             session_id=session_id,
@@ -81,12 +141,7 @@ def create_sessions_router() -> APIRouter:
         ),
     ) -> TraceResponse:
         agent = get_agent(request)
-        trace = (
-            await agent.get_trace(run_id=run_id)
-            if run_id is not None
-            else await agent.get_latest_trace(session_id)
-        )
-        trace = trace or {}
+        trace = await _get_session_trace(agent, session_id=session_id, run_id=run_id)
         if run_id is not None and trace.get("session_id") != session_id:
             trace = {}
         elif run_id is None and trace.get("session_id") not in {None, session_id}:
@@ -116,7 +171,11 @@ def create_sessions_router() -> APIRouter:
         request: Request, session_id: str
     ) -> SessionHistoryResponse:
         agent = get_agent(request)
-        messages = await agent.get_session_history(session_id)
+        history_method = getattr(agent, "get_session_history", None)
+        messages = []
+        if callable(history_method):
+            messages = await _maybe_await(history_method(session_id))
+            messages = messages or []
 
         return SessionHistoryResponse(
             session_id=session_id,
@@ -131,7 +190,9 @@ def create_sessions_router() -> APIRouter:
     )
     async def clear_session(request: Request, session_id: str):
         agent = get_agent(request)
-        await agent.clear_session_history(session_id)
+        clear_method = getattr(agent, "clear_session_history", None)
+        if callable(clear_method):
+            await _maybe_await(clear_method(session_id))
         return {"status": "cleared", "session_id": session_id}
 
     return router
