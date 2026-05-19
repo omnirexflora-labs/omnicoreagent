@@ -8,6 +8,7 @@ These examples show OmniCoreAgent as an application-facing agent harness, not a 
 |---------|----------------------|
 | [Research due diligence](./research_due_diligence_agent.py) | Parallel research tools, context management, large evidence offload, artifact readback, workspace report output, telemetry identifiers |
 | [Support operations](./support_operations_agent.py) | Customer/order tools, support knowledge retrieval, guardrails, workspace ticket notes, telemetry |
+| [Personal operations assistant](./personal_operations_assistant.py) | Calendar/task/preferences tools, selectable memory backend, private workspace brief, guardrails, telemetry identifiers |
 | [Workspace code review](./workspace_code_review_agent.py) | Built-in workspace command tools for file discovery, grep-style search, reading, editing, and writing review output |
 | [Support background task](../background_agents/real_application_background_task.py) | The support operations app shape running through durable task state, attempts, lifecycle events, and workspace output |
 
@@ -23,6 +24,14 @@ The examples default to the provider/model from `cookbook/shared.py`. Override t
 ```bash
 export OMNICOREAGENT_PROVIDER=openai
 export OMNICOREAGENT_MODEL=gpt-5.4-mini
+```
+
+The personal assistant example defaults to in-memory history. To prove durable
+local memory without any external service, run it with SQLite:
+
+```bash
+export OMNICOREAGENT_COOKBOOK_MEMORY_BACKEND=sql
+uv run python cookbook/real_applications/personal_operations_assistant.py
 ```
 
 ## Why these examples exist

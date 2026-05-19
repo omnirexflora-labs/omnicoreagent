@@ -35,10 +35,10 @@ class MemoryRouter:
     def initialize_memory_store(self):
         if self.memory_store_type == "in_memory":
             self.memory_store = InMemoryStore()
-        elif self.memory_store_type == "database":
+        elif self.memory_store_type == "sql":
             db_url = os.environ.get("DATABASE_URL")
             if db_url is None:
-                logger.info("Database not configured, using in_memory")
+                logger.info("SQL memory not configured, using in_memory")
                 self.memory_store = InMemoryStore()
             else:
                 DatabaseMessageStore = load_optional(
@@ -85,7 +85,10 @@ class MemoryRouter:
                     uri=uri, db_name=db_name, collection=collection
                 )
         else:
-            raise ValueError(f"Invalid memory store type: {self.memory_store_type}")
+            raise ValueError(
+                "Invalid memory store type: "
+                f"{self.memory_store_type}. Use one of: in_memory, sql, redis, mongodb"
+            )
 
     def switch_memory_store(self, memory_store_type: str):
         if memory_store_type != self.memory_store_type:

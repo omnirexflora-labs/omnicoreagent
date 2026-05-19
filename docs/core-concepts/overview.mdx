@@ -210,7 +210,7 @@ Switch configured memory backends without rebuilding the agent object:
 
 ```python
 await agent.switch_memory_store("mongodb")
-await agent.switch_memory_store("database")
+await agent.switch_memory_store("sql")
 await agent.switch_memory_store("redis")
 
 await agent.get_memory_store_type()

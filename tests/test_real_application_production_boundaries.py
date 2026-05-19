@@ -32,19 +32,38 @@ def attach_test_model_credentials(agent):
 
 def test_real_application_examples_are_importable_agent_factories(tmp_path):
     from cookbook.real_applications import (
+        personal_operations_assistant,
         research_due_diligence_agent,
         support_operations_agent,
         workspace_code_review_agent,
     )
 
+    personal = personal_operations_assistant.build_agent(tmp_path / "personal")
     research = research_due_diligence_agent.build_agent(tmp_path / "research")
     support = support_operations_agent.build_agent(tmp_path / "support")
     code_review = workspace_code_review_agent.build_agent(tmp_path / "code-review")
 
+    assert personal.name == "personal_operations_assistant"
     assert research.name == "due_diligence_agent"
     assert support.name == "support_operations_agent"
     assert code_review.name == "workspace_code_review_agent"
+    assert personal.agent_config["enable_workspace_files"] is True
     assert support.agent_config["enable_workspace_files"] is True
+
+
+def test_personal_assistant_can_use_sql_memory_by_default_path(monkeypatch, tmp_path):
+    from cookbook.real_applications import personal_operations_assistant
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    agent = personal_operations_assistant.build_agent(
+        tmp_path / "personal-sql",
+        memory_backend="sql",
+    )
+
+    assert agent.name == "personal_operations_assistant"
+    assert agent.memory_router.get_memory_store_info()["type"] == "sql"
+    assert (tmp_path / "personal-sql").is_dir()
 
 
 def test_omniserve_loads_real_application_agent_file():

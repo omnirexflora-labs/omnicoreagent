@@ -33,7 +33,7 @@ agent = OmniCoreAgent(
 
 # Switch at runtime — no restart needed!
 await agent.switch_memory_store("mongodb")     # Switch to MongoDB
-await agent.switch_memory_store("database")    # Switch to SQL database storage
+await agent.switch_memory_store("sql")         # Switch to SQL database storage
 await agent.switch_memory_store("in_memory")   # Switch to in-memory
 await agent.switch_memory_store("redis")       # Back to Redis
 ```

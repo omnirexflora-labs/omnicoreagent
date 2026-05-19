@@ -45,6 +45,8 @@ services:
       # =======================================================================
       - OMNICOREAGENT_SERVE_CORS_ENABLED=${OMNICOREAGENT_SERVE_CORS_ENABLED:-true}
       - OMNICOREAGENT_SERVE_CORS_ORIGINS=${OMNICOREAGENT_SERVE_CORS_ORIGINS:-*}
+      - OMNICOREAGENT_SERVE_CORS_METHODS=${OMNICOREAGENT_SERVE_CORS_METHODS:-*}
+      - OMNICOREAGENT_SERVE_CORS_HEADERS=${OMNICOREAGENT_SERVE_CORS_HEADERS:-*}
       - OMNICOREAGENT_SERVE_CORS_CREDENTIALS=${OMNICOREAGENT_SERVE_CORS_CREDENTIALS:-true}
       
       # =======================================================================
@@ -69,8 +71,31 @@ services:
       # =======================================================================
       # Timeouts
       # =======================================================================
+      - OMNICOREAGENT_SERVE_REQUEST_TIMEOUT=${OMNICOREAGENT_SERVE_REQUEST_TIMEOUT:-300}
+
       # =======================================================================
-      # Cloud Storage (Optional - Uncomment to use)
+      # Workspace Files
+      # =======================================================================
+      - OMNICOREAGENT_WORKSPACE_BACKEND=${OMNICOREAGENT_WORKSPACE_BACKEND:-local}
+      - OMNICOREAGENT_WORKSPACE_DIR=${OMNICOREAGENT_WORKSPACE_DIR:-/app/workspace}
+      - OMNICOREAGENT_WORKSPACE_PREFIX=${OMNICOREAGENT_WORKSPACE_PREFIX:-workspace}
+
+      # =======================================================================
+      # Background Agents
+      # =======================================================================
+      - OMNICOREAGENT_BACKGROUND_ENABLED=${OMNICOREAGENT_BACKGROUND_ENABLED:-true}
+      - OMNICOREAGENT_BACKGROUND_AGENT_ID=${OMNICOREAGENT_BACKGROUND_AGENT_ID:-default}
+      - OMNICOREAGENT_BACKGROUND_TASK_STORE=${OMNICOREAGENT_BACKGROUND_TASK_STORE:-in_memory}
+      - OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=${OMNICOREAGENT_BACKGROUND_TASK_STORE_URL:-}
+      - OMNICOREAGENT_BACKGROUND_TASK_STORE_URI=${OMNICOREAGENT_BACKGROUND_TASK_STORE_URI:-}
+      - OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE=${OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE:-omnicoreagent}
+      - OMNICOREAGENT_BACKGROUND_TASK_STORE_PREFIX=${OMNICOREAGENT_BACKGROUND_TASK_STORE_PREFIX:-}
+      - OMNICOREAGENT_BACKGROUND_TASK_STORE_COLLECTION_PREFIX=${OMNICOREAGENT_BACKGROUND_TASK_STORE_COLLECTION_PREFIX:-}
+      - OMNICOREAGENT_BACKGROUND_TASK_STORE_CONNECT_TIMEOUT=${OMNICOREAGENT_BACKGROUND_TASK_STORE_CONNECT_TIMEOUT:-}
+      - OMNICOREAGENT_BACKGROUND_START_WORKER=${OMNICOREAGENT_BACKGROUND_START_WORKER:-true}
+
+      # =======================================================================
+      # Cloud Storage (Optional)
       # =======================================================================
       # AWS S3
       # - AWS_S3_BUCKET=${AWS_S3_BUCKET:-}
@@ -84,11 +109,6 @@ services:
       # - R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
       # - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
       # - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
-
-      # =======================================================================
-      # Timeouts
-      # =======================================================================
-      - OMNICOREAGENT_SERVE_REQUEST_TIMEOUT=${OMNICOREAGENT_SERVE_REQUEST_TIMEOUT:-300}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

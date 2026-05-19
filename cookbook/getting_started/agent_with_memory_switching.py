@@ -71,7 +71,7 @@ async def main():
     # Note: Requires DATABASE_URL in .env before runtime switching
     print("\n4. Switching to Database...")
     try:
-        await agent.switch_memory_store("database")
+        await agent.switch_memory_store("sql")
         current_type = await agent.get_memory_store_type()
         print(f"   Now using: {current_type}")
     except Exception as e:

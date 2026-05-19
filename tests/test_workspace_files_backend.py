@@ -10,7 +10,11 @@ from omnicoreagent.core.workspace.factory import (
 from omnicoreagent.core.workspace.tools import WorkspaceFilesTool
 from omnicoreagent.core.workspace.files import WorkspaceFilesBackend
 from omnicoreagent.core.workspace.config import WorkspaceConfig
-from omnicoreagent.core.workspace.storage import LocalWorkspaceStorage, S3WorkspaceStorage
+from omnicoreagent.core.workspace.storage import (
+    LocalWorkspaceStorage,
+    R2WorkspaceStorage,
+    S3WorkspaceStorage,
+)
 
 
 class FakeS3Body:
@@ -211,6 +215,26 @@ def test_workspace_files_uses_s3_compatible_workspace_storage():
 
     assert "deleted" in memory.delete("renamed.txt").lower()
     assert ("bucket", "workspace/files/renamed.txt") not in client.objects
+
+
+def test_workspace_files_uses_r2_workspace_storage_without_sse():
+    client = FakeS3Client()
+    storage = R2WorkspaceStorage(
+        bucket_name="bucket",
+        account_id="account",
+        access_key_id="access",
+        secret_access_key="secret",
+        prefix="workspace/files",
+        client=client,
+    )
+    memory = WorkspaceFilesBackend(storage)
+
+    assert "created" in memory.write("notes/today.md", "hello", mode="create").lower()
+    assert ("bucket", "workspace/files/notes/today.md") in client.objects
+    assert "notes/" in memory.view("")
+    assert "hello" in memory.read("notes/today.md")
+    assert "notes/today.md:1:hello" in memory.grep("hello")
+    assert storage.enable_encryption is False
 
 
 def test_workspace_files_s3_glob_and_grep_follow_pagination():
