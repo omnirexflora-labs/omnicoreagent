@@ -6,6 +6,8 @@ import pytest
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.tool_action import ToolAction
 from omnicoreagent.core.tools.tool_call_resolver import ToolCallResolver
+from omnicoreagent.core.workspace.config import WorkspaceConfig
+from omnicoreagent.core.workspace.tools import build_tool_registry_workspace_files
 from omnicoreagent.core.types import ParsedResponse, ToolCallResult, ToolError
 
 
@@ -44,6 +46,31 @@ async def test_resolve_single_action_uses_local_registry(resolver):
     assert isinstance(resolved, ToolCallResult)
     assert resolved.tool_name == "local_ping"
     assert resolved.tool_args == {"value": "runtime"}
+    assert resolved.tool_provider == "local"
+
+
+@pytest.mark.asyncio
+async def test_resolve_single_action_marks_builtin_workspace_tools(resolver, tmp_path):
+    registry = ToolRegistry()
+    build_tool_registry_workspace_files(
+        registry=registry,
+        workspace_config=WorkspaceConfig(workspace_dir=tmp_path / "workspace"),
+    )
+
+    resolved = await resolver.resolve_single_action(
+        action=ToolAction(
+            tool_name="read_file",
+            parameters={"path": "notes.md"},
+            raw={"tool": "read_file", "parameters": {"path": "notes.md"}},
+        ),
+        sessions={},
+        mcp_tools=None,
+        local_tools=registry,
+    )
+
+    assert isinstance(resolved, ToolCallResult)
+    assert resolved.tool_name == "read_file"
+    assert resolved.tool_provider == "workspace"
 
 
 @pytest.mark.asyncio

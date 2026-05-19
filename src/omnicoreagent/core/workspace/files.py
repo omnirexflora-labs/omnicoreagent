@@ -1,9 +1,13 @@
 import json
+import fnmatch
 from pathlib import Path
 from typing import Any
 
 from omnicoreagent.core.workspace.base import AbstractWorkspaceFilesBackend
-from omnicoreagent.core.workspace.paths import WORKSPACE_FILE_PATH_PREFIXES
+from omnicoreagent.core.workspace.paths import (
+    WORKSPACE_FILE_PATH_PREFIXES,
+    normalize_workspace_path,
+)
 from omnicoreagent.core.workspace.storage import WorkspaceStorage
 
 
@@ -35,7 +39,26 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
     def _list_directory(self, path: str | None = None) -> list:
         return self.storage.list_files(path, **self._storage_kwargs())
 
-    def view(self, path: str | None = None) -> str:
+    def _walk_files(self, path: str | None = None) -> list[str]:
+        files: list[str] = []
+
+        for item in self._list_directory(path):
+            item_path = item.path
+            if item.is_dir:
+                files.extend(self._walk_files(item_path))
+            else:
+                files.append(item_path)
+
+        if not files and path and self.storage.exists(path, **self._storage_kwargs()):
+            try:
+                self.storage.read_text(path, **self._storage_kwargs())
+                files.append(path)
+            except IsADirectoryError:
+                pass
+
+        return files
+
+    def ls(self, path: str | None = None) -> str:
         try:
             items = self._list_directory(path)
             if items:
@@ -51,8 +74,11 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
 
             if path and self.storage.exists(path, **self._storage_kwargs()):
                 try:
-                    content = self.storage.read_text(path, **self._storage_kwargs())
-                    return f"Contents of file {self._location(path)}:\n{content}"
+                    self.storage.read_text(path, **self._storage_kwargs())
+                    return (
+                        f"{self._location(path)} is a file. "
+                        "Use read_file to read file contents."
+                    )
                 except IsADirectoryError:
                     return f"Contents of directory: {self._location(path)}\n(empty)"
 
@@ -70,7 +96,37 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
         except ValueError as e:
             return str(e)
         except Exception as e:
-            return f"Error viewing workspace files: {e}"
+            return f"Error listing workspace files: {e}"
+
+    def read(self, path: str) -> str:
+        try:
+            if self._list_directory(path):
+                return f"{self._location(path)} is a directory. Use ls to list it."
+
+            if not self.storage.exists(path, **self._storage_kwargs()):
+                return f"File not found: {path}"
+
+            try:
+                content = self.storage.read_text(path, **self._storage_kwargs())
+            except IsADirectoryError:
+                return f"{self._location(path)} is a directory. Use ls to list it."
+
+            return f"Contents of file {self._location(path)}:\n{content}"
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"Error reading workspace file: {e}"
+
+    def view(self, path: str | None = None) -> str:
+        if path and self.storage.exists(path, **self._storage_kwargs()):
+            try:
+                content = self.storage.read_text(path, **self._storage_kwargs())
+                return f"Contents of file {self._location(path)}:\n{content}"
+            except IsADirectoryError:
+                return self.ls(path)
+            except Exception:
+                pass
+        return self.ls(path)
 
     def write(self, path: str, content: Any, mode: str = "create") -> str:
         content = self._coerce_content(content)
@@ -165,7 +221,8 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
 
     def rename(self, old_path: str, new_path: str) -> str:
         try:
-            if not self.storage.exists(old_path, **self._storage_kwargs()):
+            has_children = bool(self._list_directory(old_path))
+            if not self.storage.exists(old_path, **self._storage_kwargs()) and not has_children:
                 return f"Path not found: {old_path}"
 
             old_location = self._location(old_path)
@@ -184,3 +241,87 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
             return f"All workspace files cleared in {root}"
         except Exception as e:
             return f"Error clearing workspace files: {e}"
+
+    def glob(self, pattern: str, path: str | None = None) -> str:
+        try:
+            pattern = normalize_workspace_path(
+                pattern,
+                strip_prefixes=self._PATH_PREFIXES,
+            )
+
+            root = path or ""
+            matches = [
+                file_path
+                for file_path in self._walk_files(root)
+                if fnmatch.fnmatch(file_path, pattern)
+                or fnmatch.fnmatch(Path(file_path).name, pattern)
+            ]
+            if not matches:
+                return f"No files matched pattern '{pattern}' under {root or '.'}."
+            return "Matched files:\n" + "\n".join(sorted(matches))
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"Error matching workspace files: {e}"
+
+    def grep(
+        self,
+        pattern: str,
+        path: str | None = None,
+        include: str | None = None,
+        case_sensitive: bool = False,
+        max_matches: int = 100,
+    ) -> str:
+        try:
+            candidates = self._walk_files(path or "")
+            if include:
+                include = normalize_workspace_path(
+                    include,
+                    strip_prefixes=self._PATH_PREFIXES,
+                )
+                candidates = [
+                    file_path
+                    for file_path in candidates
+                    if fnmatch.fnmatch(file_path, include)
+                    or fnmatch.fnmatch(Path(file_path).name, include)
+                ]
+
+            needle = pattern if case_sensitive else pattern.lower()
+            matches: list[str] = []
+            skipped = 0
+            omitted = 0
+            max_matches = max(1, int(max_matches))
+
+            for file_path in sorted(candidates):
+                try:
+                    content = self.storage.read_text(
+                        file_path,
+                        **self._storage_kwargs(),
+                    )
+                except (UnicodeDecodeError, IsADirectoryError):
+                    skipped += 1
+                    continue
+
+                for line_number, line in enumerate(content.splitlines(), start=1):
+                    haystack = line if case_sensitive else line.lower()
+                    if needle not in haystack:
+                        continue
+                    if len(matches) >= max_matches:
+                        omitted += 1
+                        continue
+                    matches.append(f"{file_path}:{line_number}:{line}")
+
+            if not matches:
+                suffix = f" Skipped {skipped} unreadable files." if skipped else ""
+                return f"No matches found for '{pattern}'.{suffix}"
+
+            result = "Matches:\n" + "\n".join(matches)
+            if omitted:
+                result += f"\n... {omitted} more matches omitted."
+            if skipped:
+                result += f"\nSkipped {skipped} unreadable files."
+            return result
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"Error searching workspace files: {e}"

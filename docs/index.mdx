@@ -114,9 +114,9 @@ def search_web(query: str) -> dict:
     """Search the web for information."""
     return {"results": [f"Result for: {query}"]}
 
-@tools.register_tool("read_file")
-def read_file(path: str) -> dict:
-    """Read a project file."""
+@tools.register_tool("fetch_document")
+def fetch_document(path: str) -> dict:
+    """Fetch a domain document from an application-owned source."""
     return {"path": path, "content": f"Contents of {path}"}
 
 async def main():

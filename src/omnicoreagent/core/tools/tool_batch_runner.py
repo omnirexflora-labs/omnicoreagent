@@ -506,10 +506,10 @@ def _tool_telemetry_shape(single_tool: ToolCallResult) -> dict[str, Any]:
             ),
         }
     workspace_shape = _workspace_tool_telemetry_shape(single_tool.tool_name)
-    if workspace_shape is not None:
+    if single_tool.tool_provider == "workspace" and workspace_shape is not None:
         return workspace_shape
     artifact_shape = _artifact_tool_telemetry_shape(single_tool.tool_name)
-    if artifact_shape is not None:
+    if single_tool.tool_provider == "artifact" and artifact_shape is not None:
         return artifact_shape
     return {
         "span_kind": "tool.call",
@@ -522,13 +522,23 @@ def _tool_telemetry_shape(single_tool: ToolCallResult) -> dict[str, Any]:
 
 
 def _workspace_tool_telemetry_shape(tool_name: str) -> dict[str, Any] | None:
-    if not tool_name.startswith("workspace_file_"):
+    if tool_name not in {
+        "ls",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "insert_file",
+        "delete_file",
+        "move_file",
+        "clear_files",
+        "glob",
+        "grep",
+    }:
         return None
-    operation = tool_name.removeprefix("workspace_file_")
-    if operation == "view":
+    if tool_name in {"ls", "read_file", "glob", "grep"}:
         span_kind = "workspace.read"
         event = "workspace_read"
-    elif operation in {"delete", "clear"}:
+    elif tool_name in {"delete_file", "clear_files"}:
         span_kind = "workspace.delete"
         event = "workspace_delete"
     else:

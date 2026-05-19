@@ -128,11 +128,14 @@ Large tool responses are automatically saved into the active workspace `artifact
 | Large API response | ~5,000 tokens | ~150 tokens |
 | File read (1000 lines) | ~8,000 tokens | ~200 tokens |
 
-**Agent gets 4 built-in tools:**
+**Tool offloading adds 4 artifact tools:**
 - `read_artifact(artifact_id)` - Read full content
 - `tail_artifact(artifact_id, lines)` - Read last N lines
 - `search_artifact(artifact_id, query)` - Search within artifact
 - `list_artifacts()` - List all offloaded artifacts
+
+Workspace files are separate and enabled by default with workspace-scoped command
+tools such as `ls`, `read_file`, `write_file`, `glob`, and `grep`.
 
 > 💡 *Inspired by Cursor's "dynamic context discovery" and Anthropic's context engineering patterns*
 

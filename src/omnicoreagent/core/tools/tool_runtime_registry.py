@@ -41,6 +41,14 @@ def build_tool_registry_workspace_files(
     )
 
 
+def validate_workspace_tool_name_conflicts(registry: ToolRegistry):
+    from omnicoreagent.core.workspace.tools import (
+        validate_workspace_tool_name_conflicts as validate_conflicts,
+    )
+
+    validate_conflicts(registry)
+
+
 def build_tool_registry_artifact_tool(
     *, offloader: ToolResponseOffloader, registry: ToolRegistry
 ):
@@ -107,6 +115,7 @@ class ToolRuntimeRegistry:
             return None
 
         if self.enable_workspace_files:
+            validate_workspace_tool_name_conflicts(registry)
             build_tool_registry_workspace_files(
                 registry=registry,
                 workspace_files_backend=None,

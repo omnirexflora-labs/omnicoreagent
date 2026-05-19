@@ -19,6 +19,7 @@ The architecture design means the full internal blueprint:
 - which code owns each part
 - how local, S3, and R2 storage are selected
 - how workspace tools are registered into the agent loop
+- how workspace command tools expose familiar file navigation, search, and edit operations
 - how tool offloading writes and reads artifacts
 - how subagents write output for the lead agent to read
 - what workspace must not own
@@ -65,7 +66,7 @@ Use these names consistently.
 | Workspace storage driver | The selected storage implementation for workspace data: local, S3, or R2 |
 | `files/` | Agent-managed durable files created intentionally by the model |
 | `artifacts/` | Runtime-managed large tool outputs created automatically by offloading |
-| Workspace file tools | Tools the model uses to create, view, edit, move, or delete files under `files/` |
+| Workspace command tools | Built-in local tools the model uses to list, read, search, create, edit, move, or delete files under `files/` |
 | Artifact tools | Tools the model uses to inspect offloaded content under `artifacts/` |
 
 Do not call `workspace_backend` a memory backend. It is the workspace storage
@@ -86,6 +87,8 @@ These invariants are mandatory.
 | Workspace access tool outputs stay inline | Retrieval tools must not recursively offload their own retrieved content |
 | Workspace storage is selected with `workspace_backend` | The name must stay distinct from memory backends, telemetry streams, and MCP transports |
 | Runtime tools register through the same tool registry path as local tools | The model must call workspace tools like any other local/internal tool |
+| Workspace command tools are storage-backed, not shell-backed | `ls`, `read_file`, `grep`, and related tools must work the same on local, S3, and R2 |
+| Workspace command tool names are reserved while workspace files are enabled | Avoid silent conflict between app local tools and built-in harness tools |
 | New files under `src/omnicoreagent/core/workspace` must be tracked explicitly | `.gitignore` ignores directories named `workspace/`; missing files break CI |
 
 ---
@@ -117,7 +120,7 @@ The agent uses `files/` for:
 - research summaries
 - subagent outputs
 
-The agent interacts with this area through `workspace_file_*` tools.
+The agent interacts with this area through workspace command tools.
 
 Example paths:
 
@@ -129,7 +132,7 @@ Example paths:
 ```
 
 The path prefixes `/workspace/...`, `/files/...`, and `...` are accepted by the
-workspace file tools and normalized into the `files/` area.
+workspace command tools and normalized into the `files/` area.
 
 ### `artifacts/`
 
@@ -143,7 +146,7 @@ Use it for:
 - long logs returned by tools
 - any tool result that must remain available later without staying fully in model context
 
-The agent does not write this area directly with `workspace_file_*` tools.
+The agent does not write this area directly with workspace command tools.
 Tool offloading writes here automatically, and the agent reads it with artifact
 tools:
 
@@ -244,7 +247,7 @@ core/workspace/
   paths.py           # Namespace constants and path normalization
   files.py           # Agent-managed file operations
   factory.py         # Workspace file adapter creation/cache
-  tools.py           # workspace_file_* tool registration
+  tools.py           # workspace command tool registration
   artifacts.py       # ToolResponseOffloader
   artifact_tools.py  # read_artifact/tail/search/list tool registration
   offload_policy.py  # Tools whose outputs must remain inline
@@ -303,7 +306,7 @@ When OmniCoreAgent prepares tools:
 
 1. User local tools can already exist in a `ToolRegistry`.
 2. Runtime/internal tools are added to that same registry.
-3. Workspace file tools are registered when workspace files are enabled.
+3. Workspace command tools are registered when workspace files are enabled.
 4. Artifact tools are registered when `tool_offload.enabled` is true.
 
 This preserves the existing local-tool model: internal tools are normal tools
@@ -316,15 +319,87 @@ agent work depend on this capability.
 
 ### Shared workspace binding
 
-The runtime binds workspace file tools and the tool offloader to the same
+The runtime binds workspace command tools and the tool offloader to the same
 `Workspace` object when runtime tools are prepared.
 
 Why this matters:
 
-- `workspace_file_write` uses `workspace.files`.
+- `write_file`, `edit_file`, `grep`, and the other workspace command tools use
+  `workspace.files`.
 - `ToolResponseOffloader` uses `workspace.artifacts`.
 - Both areas come from the same config and backend.
 - Local, S3, and R2 behavior stays equivalent.
+
+### Workspace command tools
+
+Workspace command tools are built-in local tools. They are not a host shell and
+they do not call `/bin/bash`. They expose familiar file operations over the
+active workspace storage driver.
+
+Canonical tool names:
+
+```text
+ls
+read_file
+write_file
+edit_file
+insert_file
+delete_file
+move_file
+clear_files
+glob
+grep
+```
+
+These names are intentionally close to the commands and file tools that models
+already know. The purpose is to improve tool selection and make workspace usage
+natural without asking app builders to define basic file navigation tools.
+
+Tool meaning:
+
+| Tool | Purpose |
+|------|---------|
+| `ls` | List immediate children under a workspace path |
+| `read_file` | Read a workspace file, equivalent to `cat` for agent use |
+| `write_file` | Create, append, or overwrite a workspace file |
+| `edit_file` | Replace text in a workspace file |
+| `insert_file` | Insert text at a line number |
+| `delete_file` | Delete a file or directory |
+| `move_file` | Rename or move a file or directory |
+| `clear_files` | Clear only the `files/` namespace |
+| `glob` | Find workspace paths by glob pattern |
+| `grep` | Search text inside workspace files |
+
+`read_file` is the canonical read tool. Do not add a separate `cat` tool unless
+there is strong evidence that alias improves model behavior without increasing
+prompt noise. The prompt may explain that `read_file` is the workspace equivalent
+of `cat`.
+
+`grep` and `glob` are first-class tools because search and path discovery are
+not the same as reading a known file.
+
+These tools must be registered only when workspace files are enabled. Workspace
+files are enabled by default, so the tool names above are reserved by the
+harness in that mode. If an application needs custom local tools with the same
+names, it should disable built-in workspace files or use distinct domain tool
+names. The runtime must not silently overwrite an app's tool or silently hide a
+built-in workspace tool.
+
+Full command execution is outside this workspace command tool scope.
+
+Do not add:
+
+```text
+execute
+run_shell
+bash
+sh
+python
+npm
+pip
+```
+
+Those belong to a later sandbox and immutable policy phase.
 
 ---
 
@@ -373,20 +448,11 @@ successful-looking messages.
 Some tools exist only to retrieve workspace content. Their outputs must not be
 offloaded again, otherwise the agent can get stuck in recursive retrieval.
 
-These outputs stay inline:
+These built-in tool providers stay inline:
 
 ```text
-read_artifact
-tail_artifact
-search_artifact
-list_artifacts
-workspace_file_view
-workspace_file_write
-workspace_file_replace
-workspace_file_insert
-workspace_file_delete
-workspace_file_rename
-workspace_file_clear
+workspace
+artifact
 ```
 
 The policy lives in:
@@ -395,8 +461,10 @@ The policy lives in:
 core/workspace/offload_policy.py
 ```
 
-Keep this policy centralized. Do not recreate a private frozen set inside tool
-observation code.
+Keep this policy centralized. Do not recreate private tool-name checks inside
+tool observation code. Natural names such as `read_file` and `grep` can exist
+as app-local tools when workspace files are disabled, so inline behavior must be
+based on the resolved built-in provider, not only the tool name.
 
 ---
 
@@ -430,8 +498,8 @@ Flow:
 
 1. Lead agent calls `spawn_subagents` with one or more specs.
 2. Each spec includes an `output_path`.
-3. Each subagent writes its work with `workspace_file_write`.
-4. The lead agent reads those paths with `workspace_file_view`.
+3. Each subagent writes its work with `write_file`.
+4. The lead agent reads those paths with `read_file`.
 5. The lead agent synthesizes from the saved outputs.
 
 This keeps subagent output durable and avoids forcing every worker to return a
@@ -454,6 +522,11 @@ The model must understand:
 
 - `files/` is for agent-managed files.
 - `artifacts/` is for runtime-managed large tool outputs.
+- Workspace command tools are storage-backed file tools, not a host shell.
+- Use `ls` and `glob` to discover files.
+- Use `grep` to search files before reading large or many files.
+- Use `read_file` to read a known file path.
+- Use `write_file`, `edit_file`, and `insert_file` to update files.
 - Workspace files are useful for multi-step work, parallel work, context
   recovery, and durable task state.
 - For substantial multi-step work, the agent should write plans, progress, and
@@ -527,9 +600,9 @@ If a new file is missing from that list, CI will not receive it.
 
 ## Design Decisions
 
-### Why workspace owns file tools
+### Why workspace owns command tools
 
-Workspace file operations used to live under `core/tools/workspace_files`.
+Workspace command operations used to live under `core/tools/workspace_files`.
 That made `core/tools` a dump ground for behavior that actually belongs to the
 workspace domain. The tool registry is only the exposure mechanism. The behavior
 belongs under `core/workspace`.
@@ -571,7 +644,7 @@ Before editing workspace code, check:
 - Does local behavior match S3/R2 behavior?
 - Does the path normalization still reject traversal?
 - Are retrieval tool outputs still kept inline?
-- Are workspace tools still registered into the same registry as local tools?
+- Are workspace command tools still registered into the same registry as local tools?
 - Are subagent outputs still written to readable workspace paths?
 - Did I update prompt/docs if the model contract changed?
 - Did I run focused tests and full tests?

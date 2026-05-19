@@ -39,6 +39,11 @@ agent = OmniCoreAgent(
 3. **Docstrings** become tool descriptions the LLM uses to decide when to call the tool
 4. **Pass** the `ToolRegistry` to your agent via `local_tools=`
 
+Workspace files are enabled by default and reserve these built-in tool names:
+`ls`, `read_file`, `write_file`, `edit_file`, `insert_file`, `delete_file`,
+`move_file`, `clear_files`, `glob`, and `grep`. Use domain-specific names for
+application tools, such as `fetch_invoice` or `query_knowledge_base`.
+
 ---
 
 ## Async Tools

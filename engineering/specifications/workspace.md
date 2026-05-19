@@ -26,7 +26,7 @@ This specification covers:
 - workspace storage drivers
 - workspace namespaces
 - path normalization and path safety
-- workspace file tools
+- workspace command tools
 - artifact tools
 - tool response offloading
 - runtime tool registration
@@ -279,7 +279,7 @@ src/omnicoreagent/core/workspace/paths.py
 - reject any `..` path segment
 - return a forward-slash relative path
 
-Workspace file tools must strip these accepted prefixes before resolving into
+Workspace command tools must strip these accepted prefixes before resolving into
 the `files` namespace:
 
 ```text
@@ -310,25 +310,34 @@ Required tests:
 
 ---
 
-## Workspace File Tool Contract
+## Workspace Command Tool Contract
 
-Workspace file tools operate only in the `files` namespace.
+Workspace command tools operate only in the `files` namespace. They are
+built-in local tools backed by the active workspace storage driver. They are
+not host shell tools and must not execute shell commands.
 
 Tool names:
 
 ```text
-workspace_file_view
-workspace_file_write
-workspace_file_replace
-workspace_file_insert
-workspace_file_delete
-workspace_file_rename
-workspace_file_clear
+ls
+read_file
+write_file
+edit_file
+insert_file
+delete_file
+move_file
+clear_files
+glob
+grep
 ```
+
+The tool names above are reserved while workspace files are enabled. If an app
+local tool registry already contains one of these names, runtime preparation
+must fail with a clear conflict error instead of overwriting either tool.
 
 ### Content Coercion
 
-`workspace_file_write` accepts content as any Python value at the backend layer.
+`write_file` accepts content as any Python value at the backend layer.
 The backend stores:
 
 | Input type | Stored text |
@@ -338,7 +347,27 @@ The backend stores:
 | `dict` | JSON formatted with indent `2` |
 | other | `str(value)` |
 
-### `workspace_file_view`
+### `ls`
+
+Input:
+
+```json
+{"path": "notes"}
+```
+
+Behavior:
+
+- if `path` is omitted, empty, `.`, `/workspace`, or `/files`, list the files
+  namespace root
+- if `path` points to a directory with children, return only immediate children
+- if `path` points to an empty directory, return directory header plus `(empty)`
+- if `path` points to a file, return a message telling the agent to use
+  `read_file`
+- if `path` does not exist, return a message containing the missing path and
+  workspace files root
+- unsafe paths return the path safety error string
+
+### `read_file`
 
 Input:
 
@@ -348,14 +377,16 @@ Input:
 
 Behavior:
 
-- if `path` points to a directory with children, return a directory listing
 - if `path` points to a file, return file contents
-- if `path` points to an empty directory, return directory header plus `(empty)`
-- if `path` does not exist, return a message containing the missing path,
-  workspace files root, and current root contents
+- if `path` points to a directory, return a message telling the agent to use
+  `ls`
+- if `path` does not exist, return `File not found: <path>`
 - unsafe paths return the path safety error string
 
-### `workspace_file_write`
+`read_file` is the canonical workspace equivalent of `cat`. Do not add a
+separate `cat` tool unless the architecture record is updated first.
+
+### `write_file`
 
 Input:
 
@@ -385,7 +416,7 @@ Invalid mode returns:
 Invalid mode '<mode>'. Allowed modes: create, append, overwrite.
 ```
 
-### `workspace_file_replace`
+### `edit_file`
 
 Behavior:
 
@@ -393,7 +424,7 @@ Behavior:
 - missing search string returns a not-found message
 - existing search string replaces all occurrences
 
-### `workspace_file_insert`
+### `insert_file`
 
 Behavior:
 
@@ -403,7 +434,7 @@ Behavior:
 - line numbers beyond the file end append at the end
 - result keeps a trailing newline when content exists
 
-### `workspace_file_delete`
+### `delete_file`
 
 Behavior:
 
@@ -411,19 +442,59 @@ Behavior:
 - existing file or directory is deleted
 - successful tool response starts with `Deleted:`
 
-### `workspace_file_rename`
+### `move_file`
 
 Behavior:
 
 - missing source path returns `Path not found: <old_path>`
 - successful rename returns old and new locations
 
-### `workspace_file_clear`
+### `clear_files`
 
 Behavior:
 
 - clears only the workspace `files` namespace
 - successful response names the cleared root
+
+### `glob`
+
+Input:
+
+```json
+{"pattern": "**/*.md", "path": "."}
+```
+
+Behavior:
+
+- searches workspace file paths, not artifact paths
+- `pattern` uses Python `fnmatch`/glob-style matching
+- `path` scopes the search to a subdirectory and defaults to the workspace
+  files root
+- returns matching relative paths sorted alphabetically
+- returns a clear no-matches message when nothing matches
+- unsafe `path` values return the path safety error string
+- pattern path traversal is rejected
+
+### `grep`
+
+Input:
+
+```json
+{"pattern": "TODO", "path": ".", "include": "*.md", "case_sensitive": false}
+```
+
+Behavior:
+
+- searches text files in the workspace files namespace
+- `path` can point to one file or a directory
+- when `path` is a directory, search files recursively under it
+- `include` optionally filters relative paths with a glob pattern
+- default search is case-insensitive
+- return matches as `path:line_number:line`
+- cap output to a bounded number of matches and say when more matches were
+  omitted
+- skip unreadable/binary files with a short skipped count where practical
+- unsafe paths return the path safety error string
 
 Required tests:
 
@@ -432,6 +503,10 @@ Required tests:
 - `tests/test_workspace_files_backend.py::test_workspace_files_views_empty_directory`
 - `tests/test_workspace_files_backend.py::test_workspace_files_replace_insert_delete_rename_and_clear`
 - `tests/test_workspace_files_backend.py::test_workspace_files_uses_s3_compatible_workspace_storage`
+- tests must cover `ls`, `read_file`, `glob`, and `grep` on local storage
+- tests must cover at least one `glob` and one `grep` flow on S3-compatible storage
+- tests must cover reserved-name conflict behavior during runtime tool
+  registration
 
 ---
 
@@ -528,20 +603,11 @@ Required tests:
 Workspace retrieval and mutation tools must stay inline and must not be
 recursively offloaded.
 
-Inline tools:
+Inline built-in tool providers:
 
 ```text
-read_artifact
-tail_artifact
-search_artifact
-list_artifacts
-workspace_file_view
-workspace_file_write
-workspace_file_replace
-workspace_file_insert
-workspace_file_delete
-workspace_file_rename
-workspace_file_clear
+workspace
+artifact
 ```
 
 The single source of truth is:
@@ -551,6 +617,8 @@ src/omnicoreagent/core/workspace/offload_policy.py
 ```
 
 No private duplicate frozen set is allowed in tool observation code.
+The policy must use the resolved built-in provider. It must not keep output
+inline only because an app-local tool has a name such as `read_file` or `grep`.
 
 Required tests:
 
@@ -565,18 +633,21 @@ local tools.
 
 Requirements:
 
-- workspace file tools register when workspace files are enabled
+- workspace command tools register when workspace files are enabled
 - artifact tools register when tool offload is enabled
 - internal/runtime tools are normal tools from the model point of view
-- workspace file tools and the tool offloader bind to the same `Workspace`
+- workspace command tools and the tool offloader bind to the same `Workspace`
   object
 - `ToolResponseOffloader.storage` must be `runtime.workspace.artifacts` after
   runtime preparation when both are enabled
+- if app local tools conflict with built-in workspace command tool names,
+  runtime preparation must raise a clear `ValueError`
 
 Required tests:
 
 - `tests/test_tool_runtime_registry.py::test_prepare_tools_uses_workspace_config_for_workspace_files`
 - `tests/test_tool_runtime_registry.py::test_prepare_tools_returns_none_without_any_tool_sources`
+- `tests/test_tool_runtime_registry.py::test_workspace_command_tool_names_are_reserved`
 
 ---
 
@@ -608,13 +679,16 @@ Required error behavior:
 | Case | Required behavior |
 |------|-------------------|
 | Unsafe path | return or raise message containing `outside workspace namespace` |
-| Missing workspace file view | return `Path not found: <path>` plus root context |
+| Missing workspace file list | return `Path not found: <path>` plus root context |
+| Missing workspace file read | return `File not found: <path>` |
 | Existing create target | return `File already exists` and do not overwrite |
 | Missing append target | return `Cannot append: File not found` |
 | Missing overwrite target | return `Cannot overwrite: File not found` |
 | Invalid write mode | return allowed modes |
-| Missing replace target | return `File not found: <path>` |
+| Missing edit target | return `File not found: <path>` |
 | Missing rename source | return `Path not found: <old_path>` |
+| No glob matches | return `No files matched pattern` |
+| No grep matches | return `No matches found` |
 | Missing artifact read | return artifact not found error |
 | Missing S3 bucket | raise `ValueError("S3 workspace backend requires AWS_S3_BUCKET")` |
 | Missing R2 config | raise `ValueError` listing missing R2 environment variables |

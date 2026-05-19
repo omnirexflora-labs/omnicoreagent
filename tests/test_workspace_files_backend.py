@@ -22,8 +22,10 @@ class FakeS3Body:
 
 
 class FakeS3Client:
-    def __init__(self):
+    def __init__(self, page_size=None):
         self.objects = {}
+        self.page_size = page_size
+        self.delete_batch_sizes = []
 
     def put_object(self, Bucket, Key, Body, **kwargs):
         self.objects[(Bucket, Key)] = {
@@ -55,9 +57,21 @@ class FakeS3Client:
                 prefixes.add(Prefix + remainder.split(delimiter, 1)[0] + delimiter)
                 continue
             contents.append({"Key": key, "LastModified": item["LastModified"]})
+        start = int(kwargs.get("ContinuationToken") or 0)
+        if self.page_size is not None:
+            end = start + self.page_size
+            paged_contents = contents[start:end]
+            is_truncated = end < len(contents)
+        else:
+            end = len(contents)
+            paged_contents = contents
+            is_truncated = False
+
         return {
-            "Contents": contents,
+            "Contents": paged_contents,
             "CommonPrefixes": [{"Prefix": prefix} for prefix in sorted(prefixes)],
+            "IsTruncated": is_truncated,
+            "NextContinuationToken": str(end) if is_truncated else None,
         }
 
     def delete_object(self, Bucket, Key):
@@ -70,6 +84,7 @@ class FakeS3Client:
         return {}
 
     def delete_objects(self, Bucket, Delete):
+        self.delete_batch_sizes.append(len(Delete["Objects"]))
         for item in Delete["Objects"]:
             self.delete_object(Bucket=Bucket, Key=item["Key"])
         return {}
@@ -96,7 +111,9 @@ def test_workspace_files_create_append_overwrite_and_view(local_workspace_files,
     assert "final" == (tmp_path / "files" / "notes" / "today.md").read_text()
 
     assert "final" in local_workspace_files.view("notes/today.md")
+    assert "final" in local_workspace_files.read("notes/today.md")
     assert "notes/" in local_workspace_files.view("")
+    assert "notes/" in local_workspace_files.ls("")
 
 
 def test_workspace_files_serializes_structured_content(local_workspace_files, tmp_path):
@@ -133,10 +150,36 @@ def test_workspace_files_replace_insert_delete_rename_and_clear(local_workspace_
     assert list((tmp_path / "files").iterdir()) == []
 
 
+def test_workspace_files_glob_and_grep(local_workspace_files):
+    local_workspace_files.write("notes/today.md", "Alpha\nTODO one", mode="create")
+    local_workspace_files.write("notes/archive.txt", "todo two", mode="create")
+    local_workspace_files.write("logs/app.log", "INFO ok", mode="create")
+
+    glob_result = local_workspace_files.glob("**/*.md")
+    assert "notes/today.md" in glob_result
+    assert "archive.txt" not in glob_result
+
+    grep_result = local_workspace_files.grep("todo", include="*.md")
+    assert "notes/today.md:2:TODO one" in grep_result
+    assert "archive.txt" not in grep_result
+    assert "notes/today.md" in local_workspace_files.glob("/files/**/*.md")
+    assert "notes/today.md:2:TODO one" in local_workspace_files.grep(
+        "todo",
+        include="/workspace/**/*.md",
+    )
+
+    assert "No matches found" in local_workspace_files.grep("missing")
+
+
 def test_workspace_files_rejects_path_traversal(local_workspace_files):
     result = local_workspace_files.write("../outside.txt", "bad", mode="create")
 
     assert "outside workspace namespace" in result
+    assert "outside workspace namespace" in local_workspace_files.glob("../*.md")
+    assert "outside workspace namespace" in local_workspace_files.grep(
+        "secret",
+        include="../*.md",
+    )
 
 
 def test_workspace_files_uses_s3_compatible_workspace_storage():
@@ -151,15 +194,62 @@ def test_workspace_files_uses_s3_compatible_workspace_storage():
     assert "created" in memory.write("notes.txt", "hello", mode="create").lower()
     assert ("bucket", "workspace/files/notes.txt") in client.objects
     assert "hello" in memory.view("notes.txt")
+    assert "hello" in memory.read("notes.txt")
 
     memory.write("nested/item.txt", "child", mode="create")
     assert "nested/" in memory.view("")
+    assert "is a directory" in memory.read("nested")
+    assert "nested/item.txt" in memory.glob("**/*.txt")
+    assert "nested/item.txt:1:child" in memory.grep("child")
+
+    assert "renamed" in memory.rename("nested", "archive").lower()
+    assert ("bucket", "workspace/files/archive/item.txt") in client.objects
+    assert ("bucket", "workspace/files/nested/item.txt") not in client.objects
 
     assert "renamed" in memory.rename("notes.txt", "renamed.txt").lower()
     assert ("bucket", "workspace/files/renamed.txt") in client.objects
 
     assert "deleted" in memory.delete("renamed.txt").lower()
     assert ("bucket", "workspace/files/renamed.txt") not in client.objects
+
+
+def test_workspace_files_s3_glob_and_grep_follow_pagination():
+    client = FakeS3Client(page_size=1)
+    storage = S3WorkspaceStorage(
+        bucket_name="bucket",
+        prefix="workspace/files",
+        client=client,
+    )
+    memory = WorkspaceFilesBackend(storage)
+
+    memory.write("a.txt", "alpha", mode="create")
+    memory.write("b.txt", "beta", mode="create")
+
+    glob_result = memory.glob("*.txt")
+    assert "a.txt" in glob_result
+    assert "b.txt" in glob_result
+
+    grep_result = memory.grep("a")
+    assert "a.txt:1:alpha" in grep_result
+    assert "b.txt:1:beta" in grep_result
+
+
+def test_workspace_files_s3_directory_rename_deletes_in_batches():
+    client = FakeS3Client()
+    storage = S3WorkspaceStorage(
+        bucket_name="bucket",
+        prefix="workspace/files",
+        client=client,
+    )
+    memory = WorkspaceFilesBackend(storage)
+
+    for index in range(1001):
+        memory.write(f"big/file_{index}.txt", "data", mode="create")
+
+    assert "renamed" in memory.rename("big", "moved").lower()
+    assert client.delete_batch_sizes == [1000, 1]
+    assert ("bucket", "workspace/files/moved/file_1000.txt") in client.objects
+    assert ("bucket", "workspace/files/big/file_1000.txt") not in client.objects
 
 
 def test_create_workspace_files_backend_local_uses_workspace_files(monkeypatch, tmp_path):

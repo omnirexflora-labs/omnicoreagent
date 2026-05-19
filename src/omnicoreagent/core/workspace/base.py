@@ -11,6 +11,16 @@ class AbstractWorkspaceFilesBackend(ABC):
     """
 
     @abstractmethod
+    def ls(self, path: Optional[str] = None) -> str:
+        """List directory contents."""
+        pass
+
+    @abstractmethod
+    def read(self, path: str) -> str:
+        """Read file contents."""
+        pass
+
+    @abstractmethod
     def view(self, path: Optional[str] = None) -> str:
         """Show directory listing or file contents."""
         pass
@@ -43,4 +53,21 @@ class AbstractWorkspaceFilesBackend(ABC):
     @abstractmethod
     def clear(self) -> str:
         """Clear all workspace files."""
+        pass
+
+    @abstractmethod
+    def glob(self, pattern: str, path: Optional[str] = None) -> str:
+        """Find files by pattern."""
+        pass
+
+    @abstractmethod
+    def grep(
+        self,
+        pattern: str,
+        path: Optional[str] = None,
+        include: Optional[str] = None,
+        case_sensitive: bool = False,
+        max_matches: int = 100,
+    ) -> str:
+        """Search file contents."""
         pass

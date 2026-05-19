@@ -100,13 +100,13 @@ TASK: {task}
 
 OUTPUT REQUIREMENTS:
 - Write your output to: {output_path}
-- Use workspace_file_write tool to save your output
+- Use write_file tool to save your output
 - Be thorough but focused on YOUR specific task only
 - Do not duplicate work assigned to other subagents
 - Structure your output clearly with headers
 
 When you have completed the task:
-1. Save output to the output_path using workspace_file_write
+1. Save output to the output_path using write_file
 2. Confirm you saved the output
 3. Return a brief summary of the completed output
 """
@@ -348,7 +348,7 @@ def build_subagent_tools(
     Always pass a JSON array of subagent specs. If you only need one subagent,
     pass an array with one item. Multiple specs run in parallel.
     Each subagent writes output to workspace files. After completion, read
-    all output paths with workspace_file_view before synthesizing.
+    all output paths with read_file before synthesizing.
 
     When to use:
     - Task has multiple independent components

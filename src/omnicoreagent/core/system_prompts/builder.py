@@ -89,8 +89,9 @@ class AgentPromptContextBuilder:
             sections.append(subagents_prompt)
 
         has_workspace_tools = {
-            "workspace_file_view",
-            "workspace_file_write",
+            "ls",
+            "read_file",
+            "write_file",
         }.issubset(available_tools)
         if self.enable_workspace_files and has_workspace_tools:
             sections.append(workspace_files_additional_prompt)

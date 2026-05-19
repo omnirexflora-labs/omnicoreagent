@@ -18,14 +18,18 @@ class ToolObservationFormatter:
         self,
         result: dict[str, Any],
         session_id: str | None,
+        tool_call_result: ToolCallResult | None = None,
     ) -> dict[str, Any]:
         tool_name = result.get("tool_name", "unknown_tool")
+        tool_provider = getattr(tool_call_result, "tool_provider", None) or result.get(
+            "tool_provider"
+        )
         data = result.get("data")
 
         if (
             data is None
             or not self.tool_offloader.config.enabled
-            or should_keep_tool_output_inline(tool_name)
+            or should_keep_tool_output_inline(tool_provider)
         ):
             return result
 
@@ -54,10 +58,11 @@ class ToolObservationFormatter:
         tool_counter = defaultdict(int)
         seen_tools: set[str] = set()
 
-        for result in tools_results[: len(tool_call_results)]:
+        for index, result in enumerate(tools_results[: len(tool_call_results)]):
             result = self.maybe_offload_result(
                 result=result,
                 session_id=session_id,
+                tool_call_result=tool_call_results[index],
             )
             tool_name = result.get("tool_name", "unknown_tool")
             args = result.get("args", {})

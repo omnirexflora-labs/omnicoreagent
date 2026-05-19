@@ -13,6 +13,8 @@ Based on patterns from:
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.workspace.artifacts import ToolResponseOffloader
 
+ARTIFACT_TOOL_MARKER = "_omnicoreagent_builtin_artifact_tool"
+
 
 def build_tool_registry_artifact_tool(
     offloader: ToolResponseOffloader, registry: ToolRegistry
@@ -57,6 +59,7 @@ def build_tool_registry_artifact_tool(
                 "message": f"Artifact '{artifact_id}' not found. Check the artifact ID and try again.",
             }
         return content
+    setattr(read_artifact, ARTIFACT_TOOL_MARKER, True)
 
     @registry.register_tool(
         name="tail_artifact",
@@ -92,6 +95,7 @@ def build_tool_registry_artifact_tool(
                 "message": f"Artifact '{artifact_id}' not found.",
             }
         return content
+    setattr(tail_artifact, ARTIFACT_TOOL_MARKER, True)
 
     @registry.register_tool(
         name="search_artifact",
@@ -127,6 +131,7 @@ def build_tool_registry_artifact_tool(
                 "message": f"Artifact '{artifact_id}' not found.",
             }
         return content
+    setattr(search_artifact, ARTIFACT_TOOL_MARKER, True)
 
     @registry.register_tool(
         name="list_artifacts",
@@ -158,5 +163,6 @@ def build_tool_registry_artifact_tool(
         lines.append(f"\nTotal tokens saved: {stats['tokens_saved']}")
 
         return "\n".join(lines)
+    setattr(list_artifacts, ARTIFACT_TOOL_MARKER, True)
 
     return registry

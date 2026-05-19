@@ -340,9 +340,10 @@ async def test_execute_records_mcp_workspace_and_observation_telemetry(
         ),
         ToolCallResult(
             tool_executor=FakeExecutor(),
-            tool_name="workspace_file_view",
+            tool_name="read_file",
             tool_args={"path": "notes.md"},
             tool_call_id="tool-call-workspace",
+            tool_provider="workspace",
         ),
     ]
 
@@ -369,7 +370,7 @@ async def test_execute_records_mcp_workspace_and_observation_telemetry(
         session_state=session_state,
         add_message_to_history=add_message_to_history,
         session_id="chat800",
-        tool_batch_name="search_docs, workspace_file_view",
+        tool_batch_name="search_docs, read_file",
         tool_batch_args=[{"query": "telemetry"}, {"path": "notes.md"}],
         parse_tool_observation=parse_tool_observation,
         build_tool_results_observation=build_tool_results_observation,
@@ -381,7 +382,7 @@ async def test_execute_records_mcp_workspace_and_observation_telemetry(
     assert obs_text == "[TOOL RESPONSE OFFLOADED] workspace://tool-output"
     assert [result["tool_name"] for result in tools_results] == [
         "search_docs",
-        "workspace_file_view",
+        "read_file",
     ]
     assert {span.kind for span in trace.spans} >= {
         "tool.batch",
@@ -452,6 +453,7 @@ async def test_artifact_tools_are_recorded_as_workspace_reads(runner, session_st
                 tool_name="read_artifact",
                 tool_args={"artifact_id": "search_123"},
                 tool_call_id="tool-call-artifact",
+                tool_provider="artifact",
             )
         ],
         session_state=session_state,
@@ -534,15 +536,16 @@ async def test_workspace_tool_telemetry_respects_tool_result_suppression(
         tool_call_results=[
             ToolCallResult(
                 tool_executor=FakeExecutor(),
-                tool_name="workspace_file_view",
+                tool_name="read_file",
                 tool_args={"path": "notes.md"},
                 tool_call_id="tool-call-workspace-redacted",
+                tool_provider="workspace",
             )
         ],
         session_state=session_state,
         add_message_to_history=add_message_to_history,
         session_id="chat801",
-        tool_batch_name="workspace_file_view",
+        tool_batch_name="read_file",
         tool_batch_args=[{"path": "notes.md"}],
         parse_tool_observation=parse_tool_observation,
         build_tool_results_observation=build_tool_results_observation,
@@ -620,6 +623,7 @@ async def test_artifact_error_result_is_recorded_as_workspace_read_error(
                 tool_name="read_artifact",
                 tool_args={"artifact_id": "missing"},
                 tool_call_id="tool-call-artifact-error",
+                tool_provider="artifact",
             )
         ],
         session_state=session_state,
@@ -688,6 +692,7 @@ async def test_artifact_error_result_is_normalized_without_telemetry(
                 tool_name="read_artifact",
                 tool_args={"artifact_id": "missing"},
                 tool_call_id="tool-call-artifact-error",
+                tool_provider="artifact",
             )
         ],
         session_state=session_state,
@@ -745,6 +750,7 @@ async def test_artifact_content_starting_with_error_stays_success(
                 tool_name="read_artifact",
                 tool_args={"artifact_id": "compiler-log"},
                 tool_call_id="tool-call-artifact-error-content",
+                tool_provider="artifact",
             )
         ],
         session_state=session_state,
