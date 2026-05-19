@@ -328,7 +328,7 @@ uses.
 | **Agent Skills** | Loads packaged capabilities implemented with Python, Bash, or Node.js. |
 | **BM25 Tool Retrieval** | Selects relevant tools from large tool sets so the prompt stays focused. |
 | **Guardrails** | Adds prompt-injection screening inside the observation path with configurable behavior. |
-| **Telemetry Events** | Emits typed telemetry events for agent runs, tool calls, background work, and streaming integrations. |
+| **Telemetry and Traces** | Emits typed telemetry events and retrieves traces by exact `trace_id`, latest session, or `run_id` correlation for debugging and streaming integrations. |
 | **Workflow Orchestration** | Provides sequential, parallel, and router agents for multi-step application workflows. |
 | **Durable Background Tasks** | Runs manual or scheduled agent work with task state, run history, retries, cancellation, and workspace output. |
 | **Universal Models** | Supports OpenAI, Anthropic, Gemini, Groq, Ollama, DeepSeek, Mistral, OpenRouter, Azure, and Cencori through the runtime model layer. |

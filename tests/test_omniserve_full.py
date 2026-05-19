@@ -618,6 +618,16 @@ class TestEndpoints:
                 "spans": [{"kind": "agent.run"}],
             }
         )
+        agent.get_trace = AsyncMock(
+            return_value={
+                "trace_id": "trace_endpoint_by_run",
+                "run_id": "run_endpoint",
+                "session_id": "test-endpoint-session",
+                "status": "completed",
+                "events": [{"event_type": "final_answer"}],
+                "spans": [{"kind": "agent.run"}],
+            }
+        )
         store = InMemoryTelemetryStore()
         agent.telemetry_store = store
         agent.get_telemetry_events_after = AsyncMock(
@@ -841,6 +851,62 @@ class TestEndpoints:
         agent = server_client.app.state.agent
         agent.get_latest_trace.assert_awaited_with("trace_like_session")
 
+    def test_trace_endpoint_can_filter_by_run_id(self, server_client):
+        resp = server_client.get(
+            "/events/test-endpoint-session/trace?run_id=run_endpoint"
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["summary"]["trace_id"] == "trace_endpoint_by_run"
+        assert data["summary"]["run_id"] == "run_endpoint"
+        assert data["steps"][0]["event_type"] == "final_answer"
+        agent = server_client.app.state.agent
+        agent.get_trace.assert_awaited_with(run_id="run_endpoint")
+
+    def test_trace_endpoint_rejects_run_id_from_another_session(self, server_client):
+        agent = server_client.app.state.agent
+        agent.get_trace.return_value = {
+            "trace_id": "trace_other",
+            "run_id": "run_other",
+            "session_id": "other-session",
+            "status": "completed",
+            "events": [{"event_type": "user_message"}],
+            "spans": [{"kind": "agent.run"}],
+        }
+
+        resp = server_client.get("/events/test-endpoint-session/trace?run_id=run_other")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["session_id"] == "test-endpoint-session"
+        assert data["summary"] == {
+            "trace_id": None,
+            "run_id": None,
+            "status": None,
+            "event_count": 0,
+            "span_count": 0,
+        }
+        assert data["steps"] == []
+
+    def test_trace_endpoint_returns_empty_summary_for_missing_run_id(
+        self, server_client
+    ):
+        agent = server_client.app.state.agent
+        agent.get_trace.return_value = None
+
+        resp = server_client.get(
+            "/events/test-endpoint-session/trace?run_id=run_missing"
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["summary"]["trace_id"] is None
+        assert data["summary"]["run_id"] is None
+        assert data["summary"]["event_count"] == 0
+        assert data["summary"]["span_count"] == 0
+        assert data["steps"] == []
+
     def test_events_list_endpoint_uses_telemetry_events_accessor(self, server_client):
         resp = server_client.get("/events/test-endpoint-session/list")
 
@@ -853,6 +919,20 @@ class TestEndpoints:
         agent.get_telemetry_events_after.assert_awaited_with(
             cursor=None,
             session_id="test-endpoint-session",
+            run_id=None,
+        )
+
+    def test_events_list_endpoint_can_filter_by_run_id(self, server_client):
+        resp = server_client.get(
+            "/events/test-endpoint-session/list?run_id=run_endpoint"
+        )
+
+        assert resp.status_code == 200
+        agent = server_client.app.state.agent
+        agent.get_telemetry_events_after.assert_awaited_with(
+            cursor=None,
+            session_id="test-endpoint-session",
+            run_id="run_endpoint",
         )
 
     def test_run_normalizes_string_agent_result(self):

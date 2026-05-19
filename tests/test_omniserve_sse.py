@@ -311,3 +311,60 @@ async def test_stream_session_events_replays_existing_telemetry():
         "final_answer",
     ]
     assert _event_data(chunks[1])["run_id"] == "run_existing"
+
+
+@pytest.mark.asyncio
+async def test_stream_session_events_filters_existing_telemetry_by_run_id():
+    agent = _TelemetryAgent()
+    await agent.run("first", session_id="session-shared", run_id="run_first")
+    await agent.run("second", session_id="session-shared", run_id="run_second")
+
+    stream = stream_session_events(agent, "session-shared", run_id="run_second")
+    chunks = []
+    async for chunk in stream:
+        chunks.append(chunk)
+        if _event_name(chunk) == "final_answer":
+            break
+    await stream.aclose()
+
+    event_chunks = [
+        chunk for chunk in chunks if _event_name(chunk) not in {"session", "complete"}
+    ]
+    assert [_event_name(chunk) for chunk in event_chunks] == [
+        "user_message",
+        "final_answer",
+    ]
+    assert {_event_data(chunk)["run_id"] for chunk in event_chunks} == {"run_second"}
+    assert _event_data(chunks[0])["run_id"] == "run_second"
+
+
+@pytest.mark.asyncio
+async def test_stream_session_events_defensively_filters_when_agent_ignores_run_id():
+    agent = _UnfilteredTelemetryAgent(TelemetryConfig(max_payload_bytes=1))
+    await agent.run("first", session_id="session-shared-unfiltered", run_id="run_first")
+    await agent.run(
+        "second",
+        session_id="session-shared-unfiltered",
+        run_id="run_second",
+    )
+
+    stream = stream_session_events(
+        agent,
+        "session-shared-unfiltered",
+        run_id="run_second",
+    )
+    chunks = []
+    async for chunk in stream:
+        chunks.append(chunk)
+        if _event_name(chunk) == "final_answer":
+            break
+    await stream.aclose()
+
+    event_chunks = [
+        chunk for chunk in chunks if _event_name(chunk) not in {"session", "complete"}
+    ]
+    assert [_event_name(chunk) for chunk in event_chunks] == [
+        "user_message",
+        "final_answer",
+    ]
+    assert {_event_data(chunk)["run_id"] for chunk in event_chunks} == {"run_second"}

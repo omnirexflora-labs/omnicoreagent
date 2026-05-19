@@ -61,7 +61,10 @@ for event in events:
 
 When serving through OmniServe, `POST /run` streams the live run over SSE and
 `GET /events/{session_id}` replays stored telemetry events for that session
-before following new live telemetry events.
+before following new live telemetry events. Add `?run_id=...` to
+`/events/{session_id}`, `/events/{session_id}/list`, or
+`/events/{session_id}/trace` when a UI needs to isolate one run inside a shared
+session.
 
 ```bash
 curl -N -X POST http://localhost:8000/run \
@@ -69,6 +72,8 @@ curl -N -X POST http://localhost:8000/run \
   -d '{"query": "Research this topic", "session_id": "research_1"}'
 
 curl -N http://localhost:8000/events/research_1
+curl http://localhost:8000/events/research_1/list?run_id=RUN_ID
+curl http://localhost:8000/events/research_1/trace?run_id=RUN_ID
 ```
 
 ---
@@ -89,13 +94,18 @@ for event in trace["events"]:
     print(event["event_type"], event.get("input"), event.get("output"))
 ```
 
-You can also retrieve the latest trace for a session or the trace for a run:
+You can also retrieve the latest trace for a session or a trace correlated to a
+run:
 
 ```python
-latest = await agent.get_latest_trace("research_1")
-same_run = await agent.get_trace(run_id=result["run_id"])
+latest_session_trace = await agent.get_latest_trace("research_1")
+run_correlated_trace = await agent.get_trace(run_id=result["run_id"])
 normalized = await agent.get_trace(result["trace_id"], normalize=True)
 ```
+
+`trace_id` is the exact trace handle. `run_id` is a correlation and filtering
+handle; when more than one trace is correlated to the same run, `get_trace(
+run_id=...)` returns the latest matching trace.
 
 The trace is intentionally internal and dependency-free. It is a compact
 debugging view built from telemetry events and spans, not a full tracing or

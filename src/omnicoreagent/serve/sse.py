@@ -406,6 +406,7 @@ async def run_agent_stream(
 async def stream_session_events(
     agent: AgentType,
     session_id: str,
+    run_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Replay stored telemetry events, then stream live session telemetry via SSE.
@@ -416,25 +417,28 @@ async def stream_session_events(
     Args:
         agent: The agent
         session_id: Session ID to stream events for
+        run_id: Optional run ID to isolate one run inside a shared session
 
     Yields:
         SSE-formatted event strings
     """
-    yield format_sse_event("session", {"session_id": session_id, "status": "streaming"})
+    yield format_sse_event(
+        "session", {"session_id": session_id, "run_id": run_id, "status": "streaming"}
+    )
 
     event_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=_SSE_EVENT_QUEUE_SIZE)
     pump_task: asyncio.Task[Any] | None = None
     seen_event_ids: set[str] = set()
 
     try:
-        cursor = await _get_telemetry_stream_cursor(agent, session_id)
+        cursor = await _get_telemetry_stream_cursor(agent, session_id, run_id)
         pump_task = asyncio.create_task(
-            _pump_session_events(agent, session_id, event_queue, cursor)
+            _pump_session_events(agent, session_id, event_queue, cursor, run_id)
         )
 
         try:
             replay_events = await asyncio.wait_for(
-                _get_telemetry_events_after_cursor(agent, session_id, None),
+                _get_telemetry_events_after_cursor(agent, session_id, None, run_id),
                 timeout=_EVENT_REPLAY_TIMEOUT_SECONDS,
             )
         except Exception as exc:
@@ -442,11 +446,13 @@ async def stream_session_events(
             replay_events = []
             yield format_sse_event(
                 "error",
-                {"error": str(exc), "session_id": session_id},
+                {"error": str(exc), "session_id": session_id, "run_id": run_id},
             )
 
         for event in replay_events:
             event_type, event_data = _normalize_event_for_sse(event, session_id)
+            if not _event_matches_run(event_data, run_id):
+                continue
             event_id = event_data.get("event_id")
             if event_id is not None:
                 seen_event_ids.add(str(event_id))
@@ -458,6 +464,8 @@ async def stream_session_events(
                 raise event.error
 
             event_type, event_data = _normalize_event_for_sse(event, session_id)
+            if not _event_matches_run(event_data, run_id):
+                continue
             event_id = event_data.get("event_id")
             if event_id is not None and str(event_id) in seen_event_ids:
                 continue
@@ -467,8 +475,12 @@ async def stream_session_events(
             yield format_sse_event(event_type, event_data)
     except Exception as e:
         logger.error(f"OmniServe SSE: Event replay error: {e}")
-        yield format_sse_event("error", {"error": str(e), "session_id": session_id})
+        yield format_sse_event(
+            "error", {"error": str(e), "session_id": session_id, "run_id": run_id}
+        )
     finally:
         await _cancel_task(pump_task)
 
-    yield format_sse_event("session", {"session_id": session_id, "status": "ended"})
+    yield format_sse_event(
+        "session", {"session_id": session_id, "run_id": run_id, "status": "ended"}
+    )

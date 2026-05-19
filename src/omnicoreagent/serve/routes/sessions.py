@@ -1,6 +1,6 @@
 """Session and event routes for OmniServe."""
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
 from ..models import EventsResponse, SessionHistoryResponse, TraceResponse
@@ -18,10 +18,17 @@ def create_sessions_router() -> APIRouter:
         summary="Stream telemetry events (SSE)",
         description="Replay stored telemetry events for a session, then follow live telemetry events over SSE.",
     )
-    async def stream_telemetry_events(request: Request, session_id: str):
+    async def stream_telemetry_events(
+        request: Request,
+        session_id: str,
+        run_id: str | None = Query(
+            default=None,
+            description="Optional run id to isolate one run inside the session.",
+        ),
+    ):
         agent = get_agent(request)
         return StreamingResponse(
-            stream_session_events(agent, session_id),
+            stream_session_events(agent, session_id, run_id=run_id),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -36,10 +43,21 @@ def create_sessions_router() -> APIRouter:
         summary="Get telemetry events",
         description="Get stored telemetry events for a specific session as JSON.",
     )
-    async def list_telemetry_events(request: Request, session_id: str) -> EventsResponse:
+    async def list_telemetry_events(
+        request: Request,
+        session_id: str,
+        run_id: str | None = Query(
+            default=None,
+            description="Optional run id to isolate one run inside the session.",
+        ),
+    ) -> EventsResponse:
         agent = get_agent(request)
         events = normalize_events(
-            await agent.get_telemetry_events_after(cursor=None, session_id=session_id)
+            await agent.get_telemetry_events_after(
+                cursor=None,
+                session_id=session_id,
+                run_id=run_id,
+            )
         )
 
         return EventsResponse(
@@ -54,10 +72,25 @@ def create_sessions_router() -> APIRouter:
         summary="Get telemetry trace summary",
         description="Build a compact summary from the latest stored telemetry trace for the session.",
     )
-    async def get_trace(request: Request, session_id: str) -> TraceResponse:
+    async def get_trace(
+        request: Request,
+        session_id: str,
+        run_id: str | None = Query(
+            default=None,
+            description="Optional run id. When omitted, the latest session trace is returned.",
+        ),
+    ) -> TraceResponse:
         agent = get_agent(request)
-        trace = await agent.get_latest_trace(session_id)
+        trace = (
+            await agent.get_trace(run_id=run_id)
+            if run_id is not None
+            else await agent.get_latest_trace(session_id)
+        )
         trace = trace or {}
+        if run_id is not None and trace.get("session_id") != session_id:
+            trace = {}
+        elif run_id is None and trace.get("session_id") not in {None, session_id}:
+            trace = {}
         events = trace.get("events", [])
         spans = trace.get("spans", [])
 
