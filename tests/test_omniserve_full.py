@@ -609,16 +609,14 @@ class TestEndpoints:
         agent.run = AsyncMock(return_value={"response": "Agent response"})
         # Mock get_metrics
         agent.get_metrics = AsyncMock(return_value={"total_tokens": 100})
-        agent.list_telemetry_traces = AsyncMock(
-            return_value=[
-                {
-                    "trace_id": "trace_endpoint",
-                    "run_id": "run_endpoint",
-                    "status": "completed",
-                    "events": [{"event_type": "user_message"}],
-                    "spans": [{"kind": "agent.run"}],
-                }
-            ]
+        agent.get_latest_trace = AsyncMock(
+            return_value={
+                "trace_id": "trace_endpoint",
+                "run_id": "run_endpoint",
+                "status": "completed",
+                "events": [{"event_type": "user_message"}],
+                "spans": [{"kind": "agent.run"}],
+            }
         )
         store = InMemoryTelemetryStore()
         agent.telemetry_store = store
@@ -841,7 +839,7 @@ class TestEndpoints:
     def test_trace_endpoint_uses_telemetry_trace_accessor(self, server_client):
         server_client.get("/events/trace_like_session/trace")
         agent = server_client.app.state.agent
-        agent.list_telemetry_traces.assert_awaited_with(session_id="trace_like_session")
+        agent.get_latest_trace.assert_awaited_with("trace_like_session")
 
     def test_events_list_endpoint_uses_telemetry_events_accessor(self, server_client):
         resp = server_client.get("/events/test-endpoint-session/list")

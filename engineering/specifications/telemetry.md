@@ -424,12 +424,19 @@ end_span(trace_id: str, span_id: str, patch: dict) -> None
 upsert_trace(trace: TelemetryTrace) -> None
 get_trace(trace_id: str) -> TelemetryTrace | None
 list_traces(filter: TraceFilter) -> list[TelemetryTrace]
+get_stream_cursor(scope: TelemetryStreamScope) -> str | None
+stream_after(scope: TelemetryStreamScope, cursor: str | None) -> AsyncIterator[TelemetryEvent]
+get_events_after(scope: TelemetryStreamScope, cursor: str | None) -> list[TelemetryEvent]
 ```
 
 Rules:
 
 - stores must preserve trace-local sequence order.
+- trace listing must use a deterministic order. The current contract sorts by
+  `started_at`, then `trace_id`, so latest-session lookup is stable.
 - JSONL records must be append-friendly.
+- JSONL reload must preserve trace lookup, scoped event replay, and run/session
+  filtering behavior.
 - in-memory store is for tests and local development.
 - Redis stream is not the canonical trace store.
 - storage failure behavior depends on recorder strict/best-effort mode.
@@ -515,14 +522,16 @@ Output requirements:
 - validated event/span references
 - canonical event type names
 - canonical span kind names
-- explicit incomplete/missing evidence markers
+- explicit incomplete/missing evidence markers with deterministic event ids
 - behavior summary inputs preserved for future extraction
 
 Rules:
 
 - evaluators consume normalized traces only.
 - normalizer must not discard errors.
+- normalizer must preserve statuses.
 - normalizer must not hide incomplete traces.
+- normalizer must produce the same output for the same raw trace.
 - unsupported experimental events must be preserved with metadata explaining the
   source type.
 
@@ -605,9 +614,15 @@ Current runtime facade coverage:
   replay/follow helpers.
 - successful and guardrail-blocked public run responses include `trace_id` and
   `run_id`.
-- `get_trace(trace_id)` returns a telemetry trace when passed a returned
-  telemetry `trace_id`; `get_trace(session_id=...)` returns the latest telemetry
-  trace for that session.
+- `get_trace(trace_id=...)` returns an exact telemetry trace for any trace id
+  string.
+- `get_trace(run_id=...)` returns the trace for that run id.
+- `get_trace(session_id=...)` and `get_latest_trace(session_id)` return the
+  latest telemetry trace for that session using deterministic store ordering.
+- `get_trace(identifier)` first tries exact trace-id lookup, then treats the
+  identifier as a session id for latest-session lookup.
+- partial, failed, cancelled, timeout, safety-halted, and resource-halted traces
+  must be returned with their status intact.
 - if callers inject telemetry components directly, `telemetry_store`,
   `telemetry_recorder.store`, and `telemetry_stream.store` must refer to the
   same store instance. The runtime rejects mismatches instead of silently

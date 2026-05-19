@@ -33,9 +33,11 @@ class _TelemetryAgent:
         self.telemetry_config = telemetry_config
         self.run_started = asyncio.Event()
 
-    async def get_telemetry_stream_cursor(self, *, session_id: str):
+    async def get_telemetry_stream_cursor(
+        self, *, session_id: str, run_id: str | None = None
+    ):
         return await self.telemetry_stream.get_stream_cursor(
-            self._scope(session_id=session_id)
+            self._scope(session_id=session_id, run_id=run_id)
         )
 
     async def stream_telemetry_after(
