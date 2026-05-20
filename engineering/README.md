@@ -29,10 +29,14 @@ Specifications define what that subsystem must do exactly.
 Target architecture and specification records:
 
 - `architecture/background-agents.md`
+- `architecture/docs-experience.md`
+- `architecture/governed-execution.md`
 - `architecture/omniserve.md`
 - `architecture/telemetry.md`
 - `architecture/workspace.md`
 - `specifications/background-agents.md`
+- `specifications/docs-experience.md`
+- `specifications/governed-execution.md`
 - `specifications/omniserve.md`
 - `specifications/telemetry.md`
 - `specifications/workspace.md`
