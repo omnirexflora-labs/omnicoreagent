@@ -722,13 +722,16 @@ async def redis_memory_store_from_env_or_skip():
     client = redis.from_url(
         url,
         decode_responses=True,
-        socket_connect_timeout=0.2,
-        socket_timeout=0.2,
+        socket_connect_timeout=5,
+        socket_timeout=5,
     )
     try:
         await client.ping()
     except Exception as exc:
-        pytest.skip(f"Redis memory backend unavailable: {exc}")
+        message = f"Redis memory backend unavailable: {_summarize_backend_exception(exc)}"
+        if os.getenv("OMNICOREAGENT_TEST_REDIS_URL") or os.getenv("REDIS_URL"):
+            raise AssertionError(message) from exc
+        pytest.skip(message)
     finally:
         await client.aclose()
 
@@ -757,19 +760,28 @@ async def mongodb_memory_store_from_env_or_skip():
 
     client = AsyncIOMotorClient(
         uri,
-        serverSelectionTimeoutMS=200,
-        connectTimeoutMS=200,
-        socketTimeoutMS=200,
+        serverSelectionTimeoutMS=5000,
+        connectTimeoutMS=5000,
+        socketTimeoutMS=5000,
     )
     try:
         await client.admin.command("ping")
     except Exception as exc:
-        pytest.skip(f"MongoDB memory backend unavailable: {exc}")
+        message = f"MongoDB memory backend unavailable: {_summarize_backend_exception(exc)}"
+        if os.getenv("OMNICOREAGENT_TEST_MONGODB_URI") or os.getenv("MONGODB_URI"):
+            raise AssertionError(message) from exc
+        pytest.skip(message)
     finally:
         client.close()
 
     collection = f"messages_{uuid.uuid4().hex}"
     return MongoDb(uri=uri, db_name=database, collection=collection)
+
+
+def _summarize_backend_exception(exc: Exception) -> str:
+    message = str(exc).splitlines()[0]
+    message = message.split(", Topology Description:", 1)[0]
+    return f"{type(exc).__name__}: {message[:160]}"
 
 
 @pytest.mark.asyncio
