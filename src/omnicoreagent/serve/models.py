@@ -190,6 +190,30 @@ class TraceResponse(BaseModel):
     steps: list[dict[str, Any]] = Field(..., description="Ordered telemetry events")
 
 
+class TelemetryEventsResponse(BaseModel):
+    """Response model for filtered telemetry events."""
+
+    filters: dict[str, Any] = Field(default_factory=dict)
+    events: list[dict[str, Any]] = Field(..., description="Telemetry events list")
+    count: int = Field(..., description="Number of telemetry events")
+
+
+class TelemetryTraceDetailResponse(BaseModel):
+    """Response model for one telemetry trace."""
+
+    filters: dict[str, Any] = Field(default_factory=dict)
+    summary: dict[str, Any] = Field(..., description="Telemetry trace summary")
+    trace: dict[str, Any] = Field(..., description="Full telemetry trace")
+
+
+class TelemetryTraceListResponse(BaseModel):
+    """Response model for filtered telemetry traces."""
+
+    filters: dict[str, Any] = Field(default_factory=dict)
+    traces: list[dict[str, Any]] = Field(..., description="Telemetry traces")
+    count: int = Field(..., description="Number of telemetry traces")
+
+
 class BackgroundStatusResponse(BaseModel):
     """Simple status response for background control endpoints."""
 
