@@ -257,6 +257,45 @@ def test_omniserve_real_application_sync_run_writes_workspace_and_trace(tmp_path
         assert trace_payload["summary"]["event_count"] >= 20
         assert [step["event_type"] for step in trace_payload["steps"]][-1] == "final_answer"
 
+        telemetry_events_response = client.get(
+            "/telemetry/events",
+            params={
+                "session_id": "served-support-session",
+                "run_id": payload["run_id"],
+                "event_type": "tool_result",
+            },
+        )
+        assert telemetry_events_response.status_code == 200
+        telemetry_events = telemetry_events_response.json()
+        assert telemetry_events["count"] >= 4
+        assert {
+            event["output"]["tool_name"]
+            for event in telemetry_events["events"]
+        }.issuperset(
+            {
+                "lookup_customer",
+                "recent_orders",
+                "support_policy_search",
+                "create_escalation",
+            }
+        )
+
+        exact_trace_response = client.get(f"/telemetry/traces/{payload['trace_id']}")
+        assert exact_trace_response.status_code == 200
+        exact_trace = exact_trace_response.json()
+        assert exact_trace["summary"]["trace_id"] == payload["trace_id"]
+        assert exact_trace["trace"]["run_id"] == payload["run_id"]
+
+        run_trace_response = client.get(f"/telemetry/runs/{payload['run_id']}/trace")
+        assert run_trace_response.status_code == 200
+        assert run_trace_response.json()["summary"]["trace_id"] == payload["trace_id"]
+
+        session_trace_response = client.get(
+            "/telemetry/sessions/served-support-session/trace"
+        )
+        assert session_trace_response.status_code == 200
+        assert session_trace_response.json()["summary"]["run_id"] == payload["run_id"]
+
     ticket = workspace_dir / "files" / "tickets" / "tck-1042.md"
     assert ticket.read_text(encoding="utf-8").startswith("# tck-1042")
 

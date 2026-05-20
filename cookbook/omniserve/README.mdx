@@ -128,6 +128,12 @@ limiting until you opt in.
 | GET | `/events/{session_id}` | Yes* | Replay and follow telemetry events over SSE |
 | GET | `/events/{session_id}/list` | Yes* | Return stored telemetry events as JSON |
 | GET | `/events/{session_id}/trace` | Yes* | Return the latest telemetry trace summary |
+| GET | `/telemetry/events` | Yes* | Return stored telemetry events by trace, run, session, task, or event type; default `limit=200` |
+| GET | `/telemetry/events/stream` | Yes* | Replay and follow telemetry over SSE for a session |
+| GET | `/telemetry/traces` | Yes* | List traces by trace, run, session, task, agent, workflow, model, or status; default `limit=100` |
+| GET | `/telemetry/traces/{trace_id}` | Yes* | Return one exact trace |
+| GET | `/telemetry/runs/{run_id}/trace` | Yes* | Return the latest trace for one run |
+| GET | `/telemetry/sessions/{session_id}/trace` | Yes* | Return the latest trace for one session |
 | GET | `/sessions/{session_id}/history` | Yes* | Return conversation history |
 | GET | `/docs` | No | Swagger UI |
 | GET | `/redoc` | No | ReDoc UI |

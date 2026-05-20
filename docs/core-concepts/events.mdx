@@ -88,12 +88,23 @@ OmniServe uses the same telemetry stream:
 
 - `POST /run` streams telemetry for the run it starts and finishes with
   `complete`.
-- `GET /events/{session_id}` replays stored telemetry for a session and follows
-  new telemetry. Add `?run_id=...` to isolate one run inside that session.
-- `GET /events/{session_id}/list` returns stored telemetry events as JSON. Add
-  `?run_id=...` for the same run-scoped filtering.
-- `GET /events/{session_id}/trace` returns a compact telemetry summary for the
-  latest session trace. Add `?run_id=...` to retrieve the trace for that run.
+- `GET /telemetry/events` returns stored telemetry events as JSON. Filter by
+  `trace_id`, `run_id`, `session_id`, `task_id`, or `event_type`. The default
+  event limit is `200`.
+- `GET /telemetry/events/stream?session_id=...` replays stored telemetry for a
+  session and follows new telemetry. Add `run_id` to isolate one run.
+- `GET /telemetry/traces/{trace_id}` returns one exact trace.
+- `GET /telemetry/runs/{run_id}/trace` returns the latest trace correlated to
+  one run.
+- `GET /telemetry/sessions/{session_id}/trace` returns the latest trace for a
+  session.
+
+The older `/events/{session_id}`, `/events/{session_id}/list`, and
+`/events/{session_id}/trace` routes remain as compact session-oriented aliases.
+Use `?run_id=...` on those aliases to isolate one run inside a shared session.
+
+Trace detail routes return `404` when the requested exact trace, run trace, or
+session trace does not exist. The trace list route defaults to `limit=100`.
 
 Every telemetry event includes its `trace_id`. Runtime-created events also carry
 correlation metadata such as `run_id`, `session_id`, and `agent_id` when that

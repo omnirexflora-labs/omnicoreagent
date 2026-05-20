@@ -616,20 +616,33 @@ class TestEndpoints:
             return_value={
                 "trace_id": "trace_endpoint",
                 "run_id": "run_endpoint",
+                "session_id": "test-endpoint-session",
                 "status": "completed",
                 "events": [{"event_type": "user_message"}],
                 "spans": [{"kind": "agent.run"}],
             }
         )
         agent.get_trace = AsyncMock(
-            return_value={
-                "trace_id": "trace_endpoint_by_run",
-                "run_id": "run_endpoint",
+            side_effect=lambda **kwargs: {
+                "trace_id": kwargs.get("trace_id") or "trace_endpoint_by_run",
+                "run_id": kwargs.get("run_id") or "run_endpoint",
                 "session_id": "test-endpoint-session",
                 "status": "completed",
                 "events": [{"event_type": "final_answer"}],
                 "spans": [{"kind": "agent.run"}],
             }
+        )
+        agent.list_telemetry_traces = AsyncMock(
+            return_value=[
+                {
+                    "trace_id": "trace_endpoint",
+                    "run_id": "run_endpoint",
+                    "session_id": "test-endpoint-session",
+                    "status": "completed",
+                    "events": [{"event_type": "user_message"}],
+                    "spans": [{"kind": "agent.run"}],
+                }
+            ]
         )
         store = InMemoryTelemetryStore()
         agent.telemetry_store = store
@@ -869,6 +882,7 @@ class TestEndpoints:
 
     def test_trace_endpoint_rejects_run_id_from_another_session(self, server_client):
         agent = server_client.app.state.agent
+        agent.get_trace.side_effect = None
         agent.get_trace.return_value = {
             "trace_id": "trace_other",
             "run_id": "run_other",
@@ -896,6 +910,7 @@ class TestEndpoints:
         self, server_client
     ):
         agent = server_client.app.state.agent
+        agent.get_trace.side_effect = None
         agent.get_trace.return_value = None
 
         resp = server_client.get(
@@ -938,6 +953,215 @@ class TestEndpoints:
             run_id="run_endpoint",
         )
 
+    def test_telemetry_events_endpoint_filters_by_session_and_run(self, server_client):
+        resp = server_client.get(
+            "/telemetry/events?session_id=test-endpoint-session&run_id=run_endpoint"
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["filters"] == {
+            "limit": 200,
+            "run_id": "run_endpoint",
+            "session_id": "test-endpoint-session",
+        }
+        assert data["count"] == 1
+        assert data["events"][0]["event_type"] == "user_message"
+        agent = server_client.app.state.agent
+        agent.get_telemetry_events_after.assert_awaited_with(
+            cursor=None,
+            trace_id=None,
+            run_id="run_endpoint",
+            session_id="test-endpoint-session",
+            task_id=None,
+            event_types=None,
+        )
+
+    def test_telemetry_traces_endpoint_lists_filtered_traces(self, server_client):
+        resp = server_client.get(
+            "/telemetry/traces?session_id=test-endpoint-session&run_id=run_endpoint"
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["filters"]["session_id"] == "test-endpoint-session"
+        assert data["filters"]["run_id"] == "run_endpoint"
+        assert data["filters"]["limit"] == 100
+        assert data["count"] == 1
+        assert data["traces"][0]["trace_id"] == "trace_endpoint"
+        agent = server_client.app.state.agent
+        agent.list_telemetry_traces.assert_awaited_with(
+            trace_id=None,
+            run_id="run_endpoint",
+            session_id="test-endpoint-session",
+            task_id=None,
+            agent_id=None,
+            workflow_id=None,
+            model=None,
+            status=None,
+            normalize=False,
+        )
+
+    def test_telemetry_trace_endpoint_uses_exact_trace_id(self, server_client):
+        resp = server_client.get("/telemetry/traces/trace_endpoint")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["filters"] == {"trace_id": "trace_endpoint", "normalize": False}
+        assert data["summary"]["trace_id"] == "trace_endpoint"
+        assert data["trace"]["events"][0]["event_type"] == "final_answer"
+        agent = server_client.app.state.agent
+        agent.get_trace.assert_awaited_with(trace_id="trace_endpoint", normalize=False)
+
+    def test_telemetry_run_trace_endpoint_uses_run_id(self, server_client):
+        resp = server_client.get("/telemetry/runs/run_endpoint/trace")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["filters"] == {"run_id": "run_endpoint", "normalize": False}
+        assert data["summary"]["run_id"] == "run_endpoint"
+        agent = server_client.app.state.agent
+        agent.get_trace.assert_awaited_with(run_id="run_endpoint", normalize=False)
+
+    def test_telemetry_session_trace_endpoint_uses_latest_session_trace(
+        self, server_client
+    ):
+        resp = server_client.get("/telemetry/sessions/test-endpoint-session/trace")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["filters"] == {
+            "session_id": "test-endpoint-session",
+            "normalize": False,
+        }
+        assert data["summary"]["trace_id"] == "trace_endpoint"
+        agent = server_client.app.state.agent
+        agent.get_latest_trace.assert_awaited_with(
+            session_id="test-endpoint-session",
+            normalize=False,
+        )
+
+    def test_telemetry_trace_detail_endpoints_return_404_when_missing(self):
+        class MissingTraceAgent:
+            name = "MissingTraceAgent"
+
+            def generate_session_id(self):
+                return "missing-trace-session"
+
+            async def get_trace(self, **kwargs):
+                return None
+
+            async def get_latest_trace(self, **kwargs):
+                return None
+
+        server = OmniServe(
+            agent=MissingTraceAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+        client = TestClient(server.app, raise_server_exceptions=False)
+
+        assert client.get("/telemetry/traces/missing").status_code == 404
+        assert client.get("/telemetry/runs/missing/trace").status_code == 404
+        assert client.get("/telemetry/sessions/missing/trace").status_code == 404
+
+    def test_telemetry_trace_detail_endpoints_reject_mismatched_accessor_result(self):
+        class MismatchedTraceAgent:
+            name = "MismatchedTraceAgent"
+
+            def generate_session_id(self):
+                return "requested-session"
+
+            async def get_trace(self, **kwargs):
+                return {
+                    "trace_id": "wrong-trace",
+                    "run_id": "wrong-run",
+                    "session_id": "wrong-session",
+                    "status": "completed",
+                    "events": [],
+                    "spans": [],
+                }
+
+            async def get_latest_trace(self, **kwargs):
+                return {
+                    "trace_id": "wrong-trace",
+                    "run_id": "wrong-run",
+                    "session_id": "wrong-session",
+                    "status": "completed",
+                    "events": [],
+                    "spans": [],
+                }
+
+        server = OmniServe(
+            agent=MismatchedTraceAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+        client = TestClient(server.app, raise_server_exceptions=False)
+
+        assert client.get("/telemetry/traces/requested-trace").status_code == 404
+        assert client.get("/telemetry/runs/requested-run/trace").status_code == 404
+        assert client.get("/telemetry/sessions/requested-session/trace").status_code == 404
+
+    def test_telemetry_traces_endpoint_rejects_invalid_status(self, server_client):
+        resp = server_client.get("/telemetry/traces?status=bogus")
+
+        assert resp.status_code == 422
+        assert "Invalid trace status" in resp.json()["detail"]
+
+    def test_telemetry_events_endpoint_honors_limit(self, server_client):
+        resp = server_client.get(
+            "/telemetry/events?session_id=test-endpoint-session&limit=1"
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["filters"]["limit"] == 1
+        assert data["count"] == 1
+
+    def test_telemetry_events_stream_endpoint_is_registered_and_run_filtered(self):
+        class StreamTelemetryAgent:
+            name = "StreamTelemetryAgent"
+
+            def generate_session_id(self):
+                return "stream-session"
+
+            def get_telemetry_stream_cursor(self, *, session_id, run_id):
+                assert session_id == "stream-session"
+                assert run_id == "run-stream"
+                return None
+
+            def get_telemetry_events_after(self, *, cursor, session_id, run_id):
+                assert cursor is None
+                assert session_id == "stream-session"
+                assert run_id == "run-stream"
+                return [
+                    {
+                        "event_type": "final_answer",
+                        "metadata": {"session_id": session_id, "run_id": "run-stream"},
+                    },
+                    {
+                        "event_type": "final_answer",
+                        "metadata": {"session_id": session_id, "run_id": "run-drop"},
+                    },
+                ]
+
+            async def stream_telemetry_after(self, *, cursor, session_id, run_id):
+                if False:
+                    yield {}
+
+        server = OmniServe(
+            agent=StreamTelemetryAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+        client = TestClient(server.app, raise_server_exceptions=False)
+
+        resp = client.get(
+            "/telemetry/events/stream?session_id=stream-session&run_id=run-stream"
+        )
+
+        assert resp.status_code == 200
+        assert "run-stream" in resp.text
+        assert "run-drop" not in resp.text
+
     def test_events_list_endpoint_defensively_filters_run_id(self):
         class UnfilteredTelemetryAgent:
             name = "UnfilteredTelemetryAgent"
@@ -967,6 +1191,49 @@ class TestEndpoints:
         client = TestClient(server.app, raise_server_exceptions=False)
 
         resp = client.get("/events/unfiltered-session/list?run_id=run-keep")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["count"] == 1
+        assert data["events"][0]["metadata"]["run_id"] == "run-keep"
+
+    def test_telemetry_events_endpoint_defensively_filters_run_id(self):
+        class UnfilteredTelemetryAgent:
+            name = "TelemetryUnfilteredAgent"
+
+            def generate_session_id(self):
+                return "telemetry-unfiltered-session"
+
+            def get_telemetry_events_after(self, *, cursor, session_id, run_id):
+                assert cursor is None
+                assert session_id == "telemetry-unfiltered-session"
+                assert run_id == "run-keep"
+                return [
+                    {
+                        "event_type": "tool_result",
+                        "metadata": {
+                            "session_id": session_id,
+                            "run_id": "run-keep",
+                        },
+                    },
+                    {
+                        "event_type": "tool_result",
+                        "metadata": {
+                            "session_id": session_id,
+                            "run_id": "run-drop",
+                        },
+                    },
+                ]
+
+        server = OmniServe(
+            agent=UnfilteredTelemetryAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+        client = TestClient(server.app, raise_server_exceptions=False)
+
+        resp = client.get(
+            "/telemetry/events?session_id=telemetry-unfiltered-session&run_id=run-keep"
+        )
 
         assert resp.status_code == 200
         data = resp.json()

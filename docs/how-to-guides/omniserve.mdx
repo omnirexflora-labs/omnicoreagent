@@ -208,6 +208,12 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 | `GET` | `/events/{session_id}` | Yes* | Replay stored telemetry events, then follow live telemetry events over SSE; add `?run_id=...` to isolate one run |
 | `GET` | `/events/{session_id}/list` | Yes* | Return stored telemetry events as JSON; add `?run_id=...` to isolate one run |
 | `GET` | `/events/{session_id}/trace` | Yes* | Compact telemetry trace summary for the latest session trace, or `?run_id=...` for one run |
+| `GET` | `/telemetry/events` | Yes* | Return stored telemetry events filtered by `trace_id`, `run_id`, `session_id`, `task_id`, or `event_type` |
+| `GET` | `/telemetry/events/stream` | Yes* | Replay and follow telemetry events over SSE for `session_id`; add `run_id` to isolate one run |
+| `GET` | `/telemetry/traces` | Yes* | List traces filtered by trace, run, session, task, agent, workflow, model, or status |
+| `GET` | `/telemetry/traces/{trace_id}` | Yes* | Return one exact trace |
+| `GET` | `/telemetry/runs/{run_id}/trace` | Yes* | Return the latest trace correlated to one run |
+| `GET` | `/telemetry/sessions/{session_id}/trace` | Yes* | Return the latest trace for one session |
 | `GET` | `/docs` | No | Swagger UI |
 | `GET` | `/redoc` | No | ReDoc UI |
 
@@ -268,14 +274,30 @@ curl -N "http://localhost:8000/events/user123?run_id=RUN_ID"
 curl "http://localhost:8000/events/user123/list?run_id=RUN_ID"
 curl "http://localhost:8000/events/user123/trace?run_id=RUN_ID"
 
+# Production telemetry API
+curl "http://localhost:8000/telemetry/events?session_id=user123&run_id=RUN_ID"
+curl "http://localhost:8000/telemetry/events?run_id=RUN_ID&event_type=tool_result&limit=100"
+curl "http://localhost:8000/telemetry/traces?session_id=user123&limit=20"
+curl "http://localhost:8000/telemetry/traces/TRACE_ID"
+curl "http://localhost:8000/telemetry/runs/RUN_ID/trace"
+curl "http://localhost:8000/telemetry/sessions/user123/trace"
+curl -N "http://localhost:8000/telemetry/events/stream?session_id=user123&run_id=RUN_ID"
+
 # List tools
 curl http://localhost:8000/tools \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
 For telemetry traces, `trace_id` is the exact lookup handle returned by the
-agent runtime. OmniServe's `run_id` query parameter is a session-scoped
-correlation filter for event replay and trace summaries.
+agent runtime. `run_id` is the serving/runtime correlation handle returned from
+`/run/sync` and SSE completion payloads. Use `trace_id` when you need one exact
+trace. Use `run_id` when your UI or application needs all telemetry for one
+execution inside a shared session.
+
+`/telemetry/events` defaults to `limit=200`; `/telemetry/traces` defaults to
+`limit=100`. Both accept lower limits per request. Exact trace, run trace, and
+session trace detail endpoints return `404` when no matching trace exists or an
+accessor returns a trace that does not match the requested selector.
 
 ### Background Task Example
 

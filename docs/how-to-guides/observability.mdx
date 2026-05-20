@@ -59,21 +59,25 @@ for event in events:
     print(event.event_type, event.model_dump())
 ```
 
-When serving through OmniServe, `POST /run` streams the live run over SSE and
-`GET /events/{session_id}` replays stored telemetry events for that session
-before following new live telemetry events. Add `?run_id=...` to
-`/events/{session_id}`, `/events/{session_id}/list`, or
-`/events/{session_id}/trace` when a UI needs to isolate one run inside a shared
-session.
+When serving through OmniServe, `POST /run` streams the live run over SSE.
+For application UIs and APIs, use the `/telemetry` routes to replay, inspect,
+and stream stored telemetry. Filter by `run_id` when a UI needs to isolate one
+execution inside a shared session.
+The compact `/events/{session_id}` aliases are still available and accept
+`?run_id=...` for the same run-scoped isolation.
 
 ```bash
 curl -N -X POST http://localhost:8000/run \
   -H "Content-Type: application/json" \
   -d '{"query": "Research this topic", "session_id": "research_1"}'
 
-curl -N http://localhost:8000/events/research_1
-curl http://localhost:8000/events/research_1/list?run_id=RUN_ID
-curl http://localhost:8000/events/research_1/trace?run_id=RUN_ID
+curl "http://localhost:8000/telemetry/events?session_id=research_1&run_id=RUN_ID"
+curl "http://localhost:8000/telemetry/events?run_id=RUN_ID&event_type=tool_result&limit=100"
+curl "http://localhost:8000/telemetry/traces?session_id=research_1&limit=20"
+curl "http://localhost:8000/telemetry/traces/TRACE_ID"
+curl "http://localhost:8000/telemetry/runs/RUN_ID/trace"
+curl "http://localhost:8000/telemetry/sessions/research_1/trace"
+curl -N "http://localhost:8000/telemetry/events/stream?session_id=research_1&run_id=RUN_ID"
 ```
 
 ---
