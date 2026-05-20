@@ -32,6 +32,45 @@ There is no separate workspace-files backend: choose the workspace backend once,
 Workspace files default to local disk. Choose S3 or R2 only when the whole workspace should live in cloud storage.
 
 ```bash
+export OMNICOREAGENT_WORKSPACE_BACKEND=local
+export OMNICOREAGENT_WORKSPACE_DIR=./workspace
+```
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent
+
+async def main():
+    agent = OmniCoreAgent(
+        name="workspace_agent",
+        system_instruction=(
+            "Use workspace files for notes, progress, and final artifacts."
+        ),
+        model_config={"provider": "openai", "model": "gpt-4o"},
+        agent_config={"enable_workspace_files": True},
+    )
+
+    result = await agent.run(
+        "Create a project note at notes/plan.md with three checklist items, "
+        "then read it back."
+    )
+    print(result["response"])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+With the local backend, workspace command tools write under:
+
+```text
+./workspace/files/
+```
+
+For example, the prompt above creates `./workspace/files/notes/plan.md`.
+
+Cloud workspace storage uses the S3/R2 extra:
+
+```bash
 pip install "omnicoreagent[s3]"
 ```
 
