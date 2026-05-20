@@ -138,6 +138,10 @@ limiting until you opt in.
 | GET | `/docs` | No | Swagger UI |
 | GET | `/redoc` | No | ReDoc UI |
 
+`/ready` becomes true after server startup finishes, the agent is initialized,
+and configured MCP servers are connected. Local-only agents with no MCP servers
+do not need an MCP client for readiness.
+
 ### Background Task Endpoints
 
 These routes are mounted when background execution is enabled. It is enabled by

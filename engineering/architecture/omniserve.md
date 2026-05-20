@@ -118,8 +118,10 @@ Lifespan errors should fail startup or shutdown clearly. They should not leave a
 half-started server that reports readiness while core dependencies failed.
 
 Readiness is intentionally cheap. `/ready` combines the startup-complete flag,
-agent initialization state, and MCP client presence. It never performs model
-calls, tool calls, background work, or network probes.
+agent initialization state, and configured MCP connection state. Agents without
+configured MCP servers do not require an MCP client to be ready. Agents with
+configured MCP servers must have connected MCP sessions. Readiness never
+performs model calls, tool calls, background work, or network probes.
 
 ## HTTP API Boundary
 
@@ -189,7 +191,8 @@ Middleware must be predictable and testable:
 
 - public auth bypass paths are explicit.
 - protected routes require bearer auth when auth is enabled.
-- rate limiting applies to protected routes when enabled.
+- rate limiting applies to protected routes when enabled, including protected
+  requests rejected by auth.
 - request timeout is configured by `request_timeout`.
 - CORS behavior follows `OmniServeConfig`.
 - request logging adds process-time headers when enabled.

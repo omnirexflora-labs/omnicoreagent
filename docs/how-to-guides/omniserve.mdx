@@ -217,6 +217,11 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 | `GET` | `/docs` | No | Swagger UI |
 | `GET` | `/redoc` | No | ReDoc UI |
 
+`/ready` returns `ready: true` only after the FastAPI lifespan has completed
+startup, the served agent is initialized, and any configured MCP servers are
+connected. Agents without MCP servers do not need an MCP client to pass
+readiness.
+
 ### Background Task Endpoints
 
 These routes are mounted when background execution is enabled. It is enabled by

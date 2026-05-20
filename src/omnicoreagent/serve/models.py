@@ -132,7 +132,13 @@ class ReadinessResponse(BaseModel):
     ready: bool = Field(..., description="Whether the agent is ready")
     agent_name: str = Field(..., description="Name of the agent")
     initialized: bool = Field(..., description="Whether the agent is initialized")
-    mcp_connected: bool = Field(..., description="Whether MCP servers are connected")
+    mcp_connected: bool = Field(
+        ...,
+        description=(
+            "Whether MCP readiness is satisfied. True when no MCP servers are "
+            "configured, or when every configured MCP server has a connected session."
+        ),
+    )
 
 
 class ToolInfo(BaseModel):

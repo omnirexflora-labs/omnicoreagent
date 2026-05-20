@@ -240,7 +240,8 @@ Rate limiting is in-process per FastAPI app instance.
 When enabled:
 
 - public auth-bypass paths are exempt.
-- protected routes are keyed by client IP.
+- protected routes are keyed by client IP, including requests that fail bearer
+  auth.
 - `X-Forwarded-For` is used when present.
 - `X-Real-IP` is used when present and `X-Forwarded-For` is absent.
 - otherwise the ASGI client host is used.
@@ -369,9 +370,10 @@ Startup failures must not report readiness as healthy.
 - `mcp_connected`
 
 `ready` is true only when lifespan startup completed, the agent is initialized,
-and an exposed MCP client is present. If startup has not completed, startup
-failed, the agent reports `_initialized=False`, or an exposed `mcp_client` is
-`None`, readiness is false.
+and configured MCP servers are connected. Agents without configured MCP servers
+do not require an MCP client to become ready. If startup has not completed,
+startup failed, the agent reports `_initialized=False`, or any configured MCP
+server is missing a connected session, readiness is false.
 
 Readiness must remain cheap. It should not execute model calls, tool calls, or
 background work.
