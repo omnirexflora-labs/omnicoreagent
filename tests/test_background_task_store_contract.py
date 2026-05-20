@@ -100,8 +100,8 @@ async def create_store(kind: str, tmp_path):
             uri=mongodb_contract_uri(),
             database=mongodb_contract_database(),
             collection_prefix=f"test_omnicoreagent_background_{uuid4().hex}",
-            connect_timeout=0.2,
-            lock_timeout=0.5,
+            connect_timeout=20,
+            lock_timeout=5,
         )
     else:  # pragma: no cover
         raise AssertionError(f"unknown store kind: {kind}")
@@ -139,6 +139,10 @@ def skip_if_backend_unavailable(kind: str) -> None:
 
 
 def skip_backend(kind: str, message: str) -> None:
+    if kind == "redis" and os.getenv(REDIS_CONTRACT_URL_ENV):
+        raise AssertionError(message)
+    if kind == "mongodb" and os.getenv(MONGODB_CONTRACT_URI_ENV):
+        raise AssertionError(message)
     _UNAVAILABLE_BACKENDS[kind] = message
     pytest.skip(message)
 
@@ -624,7 +628,8 @@ def redis_unavailable_message(exc: Exception) -> str:
     return (
         "Redis task store unavailable. To run live Redis contract tests, "
         f"set {REDIS_CONTRACT_URL_ENV}, or start a local Redis server at "
-        f"{DEFAULT_REDIS_CONTRACT_URL}. Configured URL: {redis_contract_url()}. "
+        f"{DEFAULT_REDIS_CONTRACT_URL}. Configured URL: "
+        f"{_configured_value_label(redis_contract_url())}. "
         f"Error: {_summarize_exception(exc)}"
     )
 
@@ -642,9 +647,13 @@ def mongodb_unavailable_message(exc: Exception) -> str:
         "MongoDB task store unavailable. To run live MongoDB contract tests, "
         f"set {MONGODB_CONTRACT_URI_ENV} and {MONGODB_CONTRACT_DATABASE_ENV}, "
         f"or start a local MongoDB server at {DEFAULT_MONGODB_CONTRACT_URI}. "
-        f"Configured URI: {mongodb_contract_uri()}; database: "
+        f"Configured URI: {_configured_value_label(mongodb_contract_uri())}; database: "
         f"{mongodb_contract_database()}. Error: {_summarize_exception(exc)}"
     )
+
+
+def _configured_value_label(value: str) -> str:
+    return "default" if value.startswith(("redis://localhost", "mongodb://localhost")) else "provided"
 
 
 def _summarize_exception(exc: Exception) -> str:
@@ -770,7 +779,7 @@ async def test_mongodb_task_store_contract_persists_across_reconnect():
         uri=mongodb_contract_uri(),
         database=mongodb_contract_database(),
         collection_prefix=collection_prefix,
-        connect_timeout=0.2,
+        connect_timeout=5,
         lock_timeout=0.5,
     )
     try:
@@ -828,7 +837,7 @@ async def test_mongodb_task_store_contract_persists_across_reconnect():
             uri=mongodb_contract_uri(),
             database=mongodb_contract_database(),
             collection_prefix=collection_prefix,
-            connect_timeout=0.2,
+            connect_timeout=5,
             lock_timeout=0.5,
         )
         await restored.initialize()

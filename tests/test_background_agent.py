@@ -223,10 +223,15 @@ class FakeMongoCollection:
             async def to_list(self, length=None):
                 return self.docs
 
-        generation = filter["_generation"]
+        generation = filter.get("_generation")
         return Cursor(
             [doc for doc in self.docs.values() if doc.get("_generation") == generation]
         )
+
+    async def insert_one(self, document):
+        if document["_id"] in self.docs:
+            raise ValueError(f"duplicate document id: {document['_id']}")
+        self.docs[document["_id"]] = document
 
     async def insert_many(self, documents):
         for document in documents:
@@ -234,13 +239,24 @@ class FakeMongoCollection:
                 raise ValueError(f"duplicate document id: {document['_id']}")
             self.docs[document["_id"]] = document
 
+    async def delete_one(self, filter):
+        deleted = self.docs.pop(filter["_id"], None)
+        return FakeMongoUpdateResult(matched_count=1 if deleted else 0)
+
     async def delete_many(self, filter):
-        generation = filter["_generation"]
-        to_delete = [
-            doc_id
-            for doc_id, doc in self.docs.items()
-            if doc.get("_generation") == generation
-        ]
+        if "_generation" in filter:
+            generation = filter["_generation"]
+            to_delete = [
+                doc_id
+                for doc_id, doc in self.docs.items()
+                if doc.get("_generation") == generation
+            ]
+        else:
+            to_delete = [
+                doc_id
+                for doc_id, doc in self.docs.items()
+                if all(doc.get(key) == value for key, value in filter.items())
+            ]
         for doc_id in to_delete:
             self.docs.pop(doc_id, None)
         return FakeMongoUpdateResult(matched_count=len(to_delete))

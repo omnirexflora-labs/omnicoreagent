@@ -43,6 +43,7 @@ async def run_restart_integration(
         task_store=task_store_config,
         workspace=workspace,
         worker_id="before_restart",
+        lease_seconds=120,
     )
     await first.register_agent("agent", RestartAgent())
     task = await first.register_task(
@@ -59,11 +60,12 @@ async def run_restart_integration(
         task_store=task_store_config,
         workspace=workspace,
         worker_id="after_restart",
+        lease_seconds=120,
     )
     try:
         await restored.initialize()
         await restored.register_agent("agent", RestartAgent(), replace=True)
-        completed = await restored.run_until_terminal(queued.run_id, timeout_seconds=15)
+        completed = await restored.run_until_terminal(queued.run_id, timeout_seconds=60)
 
         assert completed.status == RunStatus.COMPLETED
         assert completed.query_snapshot == "Run after the manager restarts."
@@ -125,7 +127,7 @@ async def test_mongodb_manager_executes_queued_run_after_restart(tmp_path):
             DEFAULT_MONGODB_DATABASE,
         ),
         "collection_prefix": collection_prefix,
-        "connect_timeout": 0.2,
+        "connect_timeout": 20,
     }
     await require_mongodb_available(config)
     try:
@@ -138,7 +140,7 @@ async def require_redis_available(config: dict) -> None:
     try:
         from redis.asyncio import Redis
     except Exception as exc:
-        skip_or_fail_unavailable(redis_unavailable_message(config, exc))
+        skip_or_fail_unavailable("redis", redis_unavailable_message(config, exc))
 
     client = Redis.from_url(
         config["url"],
@@ -148,7 +150,7 @@ async def require_redis_available(config: dict) -> None:
     try:
         await client.ping()
     except Exception as exc:
-        skip_or_fail_unavailable(redis_unavailable_message(config, exc))
+        skip_or_fail_unavailable("redis", redis_unavailable_message(config, exc))
     finally:
         await client.aclose()
 
@@ -157,7 +159,7 @@ async def require_mongodb_available(config: dict) -> None:
     try:
         from motor.motor_asyncio import AsyncIOMotorClient
     except Exception as exc:
-        skip_or_fail_unavailable(mongodb_unavailable_message(config, exc))
+        skip_or_fail_unavailable("mongodb", mongodb_unavailable_message(config, exc))
 
     client = AsyncIOMotorClient(
         config["uri"],
@@ -166,7 +168,7 @@ async def require_mongodb_available(config: dict) -> None:
     try:
         await client[config["database"]].command("ping")
     except Exception as exc:
-        skip_or_fail_unavailable(mongodb_unavailable_message(config, exc))
+        skip_or_fail_unavailable("mongodb", mongodb_unavailable_message(config, exc))
     finally:
         client.close()
 
@@ -213,8 +215,12 @@ def _summarize_exception(exc: Exception) -> str:
     return f"{type(exc).__name__}: {message[:240]}"
 
 
-def skip_or_fail_unavailable(message: str) -> None:
-    if os.getenv("CI", "").lower() == "true":
+def skip_or_fail_unavailable(kind: str, message: str) -> None:
+    backend_env_configured = {
+        "redis": os.getenv("OMNICOREAGENT_TEST_REDIS_URL"),
+        "mongodb": os.getenv("OMNICOREAGENT_TEST_MONGODB_URI"),
+    }.get(kind)
+    if os.getenv("CI", "").lower() == "true" or backend_env_configured:
         raise AssertionError(message)
     pytest.skip(message)
 
@@ -223,7 +229,8 @@ def redis_unavailable_message(config: dict, exc: Exception) -> str:
     return (
         "Redis task store unavailable. To run live Redis manager integration "
         f"tests, set OMNICOREAGENT_TEST_REDIS_URL or start Redis at "
-        f"{DEFAULT_REDIS_URL}. Configured URL: {config['url']}. "
+        f"{DEFAULT_REDIS_URL}. Configured URL: "
+        f"{_configured_value_label(config['url'])}. "
         f"Error: {_summarize_exception(exc)}"
     )
 
@@ -233,6 +240,11 @@ def mongodb_unavailable_message(config: dict, exc: Exception) -> str:
         "MongoDB task store unavailable. To run live MongoDB manager integration "
         "tests, set OMNICOREAGENT_TEST_MONGODB_URI and "
         "OMNICOREAGENT_TEST_MONGODB_DATABASE, or start MongoDB at "
-        f"{DEFAULT_MONGODB_URI}. Configured URI: {config['uri']}; "
+        f"{DEFAULT_MONGODB_URI}. Configured URI: "
+        f"{_configured_value_label(config['uri'])}; "
         f"database: {config['database']}. Error: {_summarize_exception(exc)}"
     )
+
+
+def _configured_value_label(value: str) -> str:
+    return "default" if "localhost" in value else "provided"

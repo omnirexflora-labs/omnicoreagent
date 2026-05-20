@@ -87,20 +87,7 @@ class MongoDbTaskStore(SerializedTaskStore):
         if not generation:
             await self._load_snapshot(None)
             return
-        await self._load_snapshot(
-            {
-                "agents": await self._load_records(generation, "agents"),
-                "tasks": await self._load_records(generation, "tasks"),
-                "schedule_states": await self._load_records(
-                    generation, "schedule_states"
-                ),
-                "runs": await self._load_records(generation, "runs"),
-                "attempts": await self._load_records(generation, "attempts"),
-                "cancel_requested": sorted(
-                    await self._load_record_ids(generation, "cancelled")
-                ),
-            }
-        )
+        await self._load_snapshot(await self._load_snapshot_records(generation))
 
     async def _mutate(self, operation: Callable[[], Awaitable[T]]) -> T:
         await self._ensure_initialized()
@@ -133,28 +120,38 @@ class MongoDbTaskStore(SerializedTaskStore):
 
         await self._refresh_lock(token)
         try:
-            for name in ("agents", "tasks", "schedule_states", "runs", "attempts"):
-                records = [
+            created_at = utc_now()
+            records = []
+            for category in (
+                "agents",
+                "tasks",
+                "schedule_states",
+                "runs",
+                "attempts",
+            ):
+                records.extend(
                     {
-                        "_id": f"{generation}:{record_id}",
+                        "_id": f"{generation}:{category}:{record_id}",
                         "_generation": generation,
+                        "category": category,
                         "record_id": record_id,
                         "value": value,
+                        "created_at": created_at,
                     }
-                    for record_id, value in snapshot[name].items()
-                ]
-                if records:
-                    await self._collection(name).insert_many(records)
-            cancelled = [
+                    for record_id, value in snapshot[category].items()
+                )
+            records.extend(
                 {
-                    "_id": f"{generation}:{run_id}",
+                    "_id": f"{generation}:cancel_requested:{run_id}",
                     "_generation": generation,
+                    "category": "cancel_requested",
                     "record_id": run_id,
+                    "created_at": created_at,
                 }
                 for run_id in snapshot["cancel_requested"]
-            ]
-            if cancelled:
-                await self._collection("cancelled").insert_many(cancelled)
+            )
+            if records:
+                await self._snapshot_collection.insert_many(records)
             await self._commit_generation(token, generation, previous_generation)
         except Exception:
             await self._delete_generation(generation)
@@ -232,6 +229,10 @@ class MongoDbTaskStore(SerializedTaskStore):
     def _lock_collection(self):
         return self._collection("locks")
 
+    @property
+    def _snapshot_collection(self):
+        return self._collection("snapshots")
+
     def _collection(self, name: str):
         if self._db is None:
             raise TaskStoreError("MongoDB task store is not initialized")
@@ -244,18 +245,26 @@ class MongoDbTaskStore(SerializedTaskStore):
             if self._db is None:
                 await self.initialize()
 
-    async def _load_records(self, generation: str, name: str) -> dict:
-        docs = await self._collection(name).find({"_generation": generation}).to_list(
-            length=None
-        )
-        return {doc["record_id"]: doc["value"] for doc in docs}
-
-    async def _load_record_ids(self, generation: str, name: str) -> list[str]:
-        docs = await self._collection(name).find({"_generation": generation}).to_list(
-            length=None
-        )
-        return [doc["record_id"] for doc in docs]
+    async def _load_snapshot_records(self, generation: str) -> dict:
+        docs = await self._snapshot_collection.find(
+            {"_generation": generation}
+        ).to_list(length=None)
+        snapshot = {
+            "agents": {},
+            "tasks": {},
+            "schedule_states": {},
+            "runs": {},
+            "attempts": {},
+            "cancel_requested": [],
+        }
+        for doc in docs:
+            category = doc["category"]
+            if category == "cancel_requested":
+                snapshot["cancel_requested"].append(doc["record_id"])
+                continue
+            snapshot[category][doc["record_id"]] = doc["value"]
+        snapshot["cancel_requested"].sort()
+        return snapshot
 
     async def _delete_generation(self, generation: str) -> None:
-        for name in ("agents", "tasks", "schedule_states", "runs", "attempts", "cancelled"):
-            await self._collection(name).delete_many({"_generation": generation})
+        await self._snapshot_collection.delete_many({"_generation": generation})
