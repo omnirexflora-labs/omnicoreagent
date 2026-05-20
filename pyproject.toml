@@ -13,12 +13,26 @@ bump = true
 [project]
 name = "omnicoreagent"
 dynamic = ["version"]
-description = "Open Python agent harness and runtime for production AI agents: parallel tool execution, structured observations, loop detection, memory, workspace files, MCP tools, subagents, background tasks, and OmniServe APIs."
+description = "Open Python agent harness for production AI apps: tools, MCP, memory, workspace, telemetry, subagents, background tasks, and OmniServe APIs."
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [{ name = "Abiola Adeshina", email = "abiolaadedayo1993@gmail.com" }]
 requires-python = ">=3.10"
 
-keywords = ["git", "mcp", "llm", "automation", "agent", "ai", "runtime", "agent-harness"]
+keywords = [
+    "agent",
+    "agent-harness",
+    "ai",
+    "ai-agents",
+    "automation",
+    "background-tasks",
+    "llm",
+    "mcp",
+    "mcp-client",
+    "python",
+    "runtime",
+    "subagents",
+    "telemetry",
+]
 license = { text = "MIT" }
 classifiers = [
     "Development Status :: 4 - Beta",
