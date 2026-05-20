@@ -103,15 +103,19 @@ agent = OmniCoreAgent(
 )
 
 async def main():
-    result = await agent.run("Research the top 3 open-source agent runtimes and summarize them.")
+    result = await agent.run(
+        "Research the top 3 open-source agent runtimes and summarize them.",
+        session_id="quickstart",
+    )
     print(result["response"])
     await agent.cleanup()
 
 asyncio.run(main())
 ```
 
-That is the smallest path: one agent, one model, the harness loop, session memory,
-guardrails, workspace files, error handling, and metrics around each run.
+That is the smallest path: one agent, one model, one stable session, the harness
+loop, session memory, guardrails, workspace files, error handling, and metrics
+around each run.
 
 Context management, tool output offloading, BM25 tool retrieval, subagents, skills,
 cloud workspace storage, and production backends are opt-in so a small agent stays
@@ -313,6 +317,7 @@ pip install "omnicoreagent[postgres]"        # PostgreSQL / SQL memory
 pip install "omnicoreagent[mongodb]"         # MongoDB memory
 pip install "omnicoreagent[s3]"              # S3 / R2 workspace storage
 pip install "omnicoreagent[serve]"           # OmniServe REST/SSE API
+pip install "omnicoreagent[tokenizer]"       # Token-aware context budgeting
 pip install "omnicoreagent[otel]"            # OTLP trace export
 pip install "omnicoreagent[langsmith]"       # LangSmith trace export
 pip install "omnicoreagent[opik]"            # Comet Opik trace export
@@ -326,27 +331,39 @@ uses.
 
 ## Features
 
+### Core Runtime
+
 | Feature | What It Does |
 |---------|--------------|
 | **Parallel Batch Tool Execution** | Executes independent tool calls concurrently and returns one combined observation to the model. |
 | **Structured Observation Pipeline** | Parses, formats, guardrail-checks, and offloads tool results when configured before the model sees them. |
 | **Signature-Based Loop Detection** | Detects repeated SHA256-backed tool-call signatures and repeated tool interaction patterns beyond step-count exhaustion. |
-| **MCP Native Tools** | Connects MCP servers over stdio, SSE, and Streamable HTTP, including OAuth-capable remote servers. |
 | **Local Tool Registry** | Registers Python functions as tools with inferred schemas and async/sync execution support. |
 | **Multi-Tier Memory** | Uses in-memory, Redis, MongoDB, or SQL-backed session history through the memory router. |
-| **Runtime Backend Switching** | Switches memory backends at runtime when configured. |
-| **Workspace Files** | Gives agents a local, S3, or R2-backed file workspace for notes, scratchpads, artifacts, and tool offloads. |
 | **Context Engineering** | Checks context before each model call and automatically truncates or summarizes when the configured budget threshold is crossed. |
+| **Workspace Files** | Gives agents a local, S3, or R2-backed file workspace for notes, scratchpads, artifacts, and tool offloads. |
 | **Tool Output Offloading** | Writes large tool results to workspace files and gives the model a preview plus a file reference. |
+| **Guardrails** | Adds prompt-injection screening inside the observation path with configurable behavior. |
+
+### Production Harness
+
+| Feature | What It Does |
+|---------|--------------|
 | **Dynamic Subagents** | Lets the main agent spawn focused workers with isolated context and shared workspace output. |
+| **Durable Background Tasks** | Runs manual or scheduled agent work with task state, run history, retries, cancellation, and workspace output. |
+| **Workflow Orchestration** | Provides sequential, parallel, and router agents for multi-step application workflows. |
+| **Telemetry and Traces** | Emits typed telemetry events, retrieves traces by exact `trace_id`, latest session, or `run_id` correlation, and exports traces to OTLP, LangSmith, Opik, or JSONL. |
+| **OmniServe** | Turns an agent into a REST/SSE service with lifecycle management, auth, rate limits, telemetry APIs, background APIs, and metrics. |
+
+### Integrations
+
+| Feature | What It Does |
+|---------|--------------|
+| **MCP Native Tools** | Connects MCP servers over stdio, SSE, and Streamable HTTP, including OAuth-capable remote servers. |
 | **Agent Skills** | Loads packaged capabilities implemented with Python, Bash, or Node.js. |
 | **BM25 Tool Retrieval** | Selects relevant tools from large tool sets so the prompt stays focused. |
-| **Guardrails** | Adds prompt-injection screening inside the observation path with configurable behavior. |
-| **Telemetry and Traces** | Emits typed telemetry events, retrieves traces by exact `trace_id`, latest session, or `run_id` correlation, and exports traces to OTLP, LangSmith, Opik, or JSONL. |
-| **Workflow Orchestration** | Provides sequential, parallel, and router agents for multi-step application workflows. |
-| **Durable Background Tasks** | Runs manual or scheduled agent work with task state, run history, retries, cancellation, and workspace output. |
+| **Runtime Backend Switching** | Switches memory backends at runtime when configured. |
 | **Universal Models** | Supports OpenAI, Anthropic, Gemini, Groq, Ollama, DeepSeek, Mistral, OpenRouter, Azure, and Cencori through the runtime model layer. |
-| **OmniServe** | Turns an agent into a REST/SSE service with lifecycle management and metrics. |
 
 ---
 
@@ -378,7 +395,7 @@ All examples live in the **[Cookbook](./cookbook)** and are organized by use cas
 
 | Category | What You'll Build |
 |----------|-------------------|
-| [Getting Started](./cookbook/getting_started) | First agent, tools, memory, events |
+| [Getting Started](./cookbook/getting_started) | First agent, tools, memory, telemetry events, and traces |
 | [Real Applications](./cookbook/real_applications) | Due diligence, support operations, and workspace code review harnesses |
 | [Workflows](./cookbook/workflows) | Sequential, Parallel, Router agents |
 | [Background Agents](./cookbook/background_agents) | Scheduled autonomous tasks |
