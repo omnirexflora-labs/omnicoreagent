@@ -5,6 +5,9 @@ from typing import Any
 
 from omnicoreagent.core.tools.base_tool_handler import BaseToolHandler
 
+RESULT_ENVELOPE_STATUSES = {"success", "error"}
+RESULT_ENVELOPE_KEYS = {"status", "data", "message", "error"}
+
 
 class ToolExecutor:
     """Execute one validated tool call and normalize its result."""
@@ -55,9 +58,7 @@ class ToolExecutor:
         self, tool_name: str, tool_args: dict[str, Any], result: Any
     ) -> dict[str, Any]:
         if isinstance(result, dict):
-            is_result_envelope = any(
-                key in result for key in ("status", "data", "message")
-            )
+            is_result_envelope = self._is_result_envelope(result)
             if not is_result_envelope:
                 status = "success"
                 data = result
@@ -66,6 +67,10 @@ class ToolExecutor:
                 status = result.get("status", "success")
                 data = result.get("data")
                 message = result.get("message")
+
+                if "error" in result and "status" not in result:
+                    status = "error"
+                    message = message or result.get("error")
 
                 if status == "error" and not message:
                     message = (
@@ -97,3 +102,25 @@ class ToolExecutor:
             "data": data,
             "message": message,
         }
+
+    @staticmethod
+    def _is_result_envelope(result: dict[str, Any]) -> bool:
+        status = result.get("status")
+        keys = set(result)
+
+        if status in RESULT_ENVELOPE_STATUSES:
+            return keys.issubset(RESULT_ENVELOPE_KEYS)
+
+        if "status" in result:
+            return False
+
+        if "data" in result:
+            return True
+
+        if "error" in result:
+            return keys.issubset({"error", "message"})
+
+        if "message" in result and "status" not in result:
+            return keys.issubset(RESULT_ENVELOPE_KEYS)
+
+        return False

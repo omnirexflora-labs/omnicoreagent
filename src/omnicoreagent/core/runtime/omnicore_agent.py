@@ -566,7 +566,13 @@ class OmniCoreAgent:
         if not self._initialized:
             await self.initialize()
 
-        return harness_tools.available_tools(self.mcp_client, self.local_tools)
+        runtime_local_tools = self.local_tools
+        if self.agent and hasattr(self.agent, "tool_runtime_registry"):
+            runtime_local_tools = await self.agent.tool_runtime_registry.prepare_tools(
+                local_tools=self.local_tools
+            )
+
+        return harness_tools.available_tools(self.mcp_client, runtime_local_tools)
 
     async def get_session_history(self, session_id: str) -> List[Dict[str, Any]]:
         """Get session history for a specific session ID"""
