@@ -32,8 +32,9 @@ research, while keeping OmniCoreAgent's own architecture and product boundary.
   arbitrary subprocesses, which is why OS-level sandboxing is still needed. See
   https://code.claude.com/docs/en/permissions.
 - Claude Managed Agents added self-hosted sandboxes and MCP tunnels, showing the
-  market direction: managed agent loops with execution inside a customer-owned
-  boundary. See https://claude.com/blog/claude-managed-agents-updates.
+  market direction: managed orchestration with execution routed into
+  customer-owned or self-hosted sandbox boundaries. See
+  https://claude.com/blog/claude-managed-agents-updates.
 - OpenAI's Agents SDK added sandbox-aware orchestration and native sandbox
   execution while allowing developers to bring providers such as E2B, Modal,
   Vercel, Daytona, Runloop, Cloudflare, and others. See
@@ -164,6 +165,8 @@ Examples:
 - `process.exec`
 - `package.install`
 - `secret.read`
+- `observation.filter`
+- `observation.inject`
 - `subagent.spawn`
 - `background.task.create`
 - `background.task.cancel`
@@ -180,6 +183,8 @@ agent, session, background task, or subagent.
 
 It contains:
 
+- provenance: source, source reference, creator, loaded time, policy hash, and
+  parent policy id
 - identity scope
 - allowed capabilities
 - denied capabilities
@@ -195,6 +200,12 @@ It contains:
 - lifecycle and expiry
 - data classification rules
 - telemetry redaction rules
+
+Policy snapshots are durable runtime contracts. Each snapshot carries a schema
+version and policy hash. A runtime may load older policy versions only through
+an explicit migration path, and migrations must never broaden authority
+silently. If a policy snapshot cannot be migrated safely, execution fails
+closed.
 
 Policy rules are deterministic and ordered by precedence:
 
@@ -245,14 +256,25 @@ Governed execution must eventually intercept these surfaces:
 12. secret access
 13. OmniServe request/session boundaries
 14. telemetry export
+15. model-bound observation filtering and redaction
 
 The first implementation phases should start with the surfaces that can cause
 external side effects: tools, MCP, workspace, process, network, secrets,
-subagents, and background tasks.
+subagents, and background tasks. Observation filtering must also be governed
+because sandbox stdout/stderr, MCP responses, web output, and workspace file
+content are untrusted until filtered before model injection.
 
 ## Sandbox Runtime
 
 The sandbox runtime is an adapter boundary, not the policy engine.
+
+The agent harness and orchestration loop do not run inside the sandbox by
+default.
+
+The sandbox is a disposable execution worker used for commands, code,
+filesystem operations, network-restricted execution, and other contained side
+effects. The harness remains outside the sandbox so policy evaluation, retries,
+checkpointing, approvals, telemetry, and recovery survive sandbox failure.
 
 OmniCoreAgent should define a provider-neutral `SandboxRuntime` interface with
 adapters for:
@@ -347,6 +369,54 @@ Initial classes:
 GAAP shows that data disclosure cannot be solved only by sandboxing. OmniCoreAgent
 needs data classification in telemetry, memory, workspace, and policy decisions
 so future information-flow controls can be added without replacing the model.
+
+## Policy Composition
+
+Multiple policy layers may apply at once:
+
+- system default policy
+- application policy
+- agent policy
+- session policy
+- task policy
+- subagent policy
+- approval-derived temporary scope
+
+The effective policy is computed by narrowing authority, not by loosely merging
+permissions.
+
+Rules:
+
+- deny always survives composition
+- child, session, task, and subagent policies cannot remove parent denies
+- approval-derived scopes are temporary and cannot exceed the effective parent
+  policy
+- ambiguous composition fails closed
+- policy provenance and policy hashes must be retained through composition
+
+## Audit Log
+
+Telemetry records operational evidence. Governed execution also needs durable
+authority evidence.
+
+Audit records are the durable record of policy-relevant authority decisions.
+They include:
+
+- authority request id
+- policy id, version, and hash
+- actor
+- capability
+- target
+- decision
+- reason code
+- matched rules
+- approval id when present
+- execution result summary
+- timestamp
+
+Denied and approved high-risk actions must produce audit records. Audit records
+must not contain raw secrets. Audit write failure for high-risk actions fails
+closed unless policy explicitly allows best-effort audit.
 
 ## Approval Layer
 

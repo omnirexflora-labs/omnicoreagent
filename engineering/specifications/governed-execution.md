@@ -77,6 +77,13 @@ policy_id: string
 version: string
 name: string
 description: string | null
+provenance:
+  source: default | file | code | remote | inherited
+  source_ref: string | null
+  created_by: string | null
+  loaded_at: datetime
+  policy_hash: string
+  parent_policy_id: string | null
 scope:
   application_id: string | null
   agent_name: string | null
@@ -154,6 +161,53 @@ Rules:
 - A child policy can only narrow the parent policy.
 - Durable background tasks store a policy snapshot id.
 - If policy cannot be loaded, the runtime fails closed.
+- Every policy envelope must record provenance.
+- Policy hash is included in telemetry decisions and audit records.
+- Child policies reference the parent policy they narrowed from.
+- Policy source is never trusted if loaded from model-generated content unless
+  explicitly approved by application code.
+
+---
+
+## Policy Versioning and Migration
+
+Policy snapshots are durable runtime contracts. Background tasks, subagents, and
+resumed sessions may outlive the current policy schema.
+
+Rules:
+
+- Every policy envelope includes `version`.
+- Policy snapshots must include schema version and policy hash.
+- A runtime may load older policy versions only through an explicit migration
+  path.
+- If a stored policy snapshot cannot be migrated safely, execution fails
+  closed.
+- Policy migrations must never broaden authority silently.
+- Migration may only preserve or narrow authority unless an application-owned
+  migration explicitly allows expansion.
+
+---
+
+## Policy Composition
+
+Multiple policy layers may apply at once:
+
+- system default policy
+- application policy
+- agent policy
+- session policy
+- task policy
+- subagent policy
+- approval-derived temporary scope
+
+Rules:
+
+- Effective policy is computed by narrowing, not merging loosely.
+- Deny always survives composition.
+- Child, session, task, and subagent policies cannot remove parent denies.
+- Temporary approval scopes expire and cannot exceed the effective parent
+  policy.
+- If composition is ambiguous, fail closed.
 
 ---
 
@@ -201,6 +255,8 @@ capability_id: string
 provider: local | mcp | workspace | artifact | memory | skill | sandbox | background | subagent | serve
 name: string
 description: string
+descriptor_source: builtin | app_code | mcp_schema | generated | user_config
+descriptor_trust: trusted | untrusted | inferred
 risk_level: low | medium | high | critical
 side_effects:
   reads: [ResourceRef]
@@ -224,6 +280,8 @@ Examples:
   `filesystem.write`
 - a sandbox command declares `process.exec`, `filesystem.read`,
   `filesystem.write`, and `network.*` if network is requested
+- an observation filter declares `observation.filter` before untrusted output is
+  injected into the model context
 
 Rules:
 
@@ -231,6 +289,9 @@ Rules:
 - Unknown capability follows `defaults.unknown_capability`.
 - MCP tool descriptors may be generated from schemas and overridden by policy.
 - Application code can provide explicit descriptors for local tools.
+- Built-in and app-code descriptors may be trusted by default.
+- MCP schema and generated descriptors are advisory unless overridden by policy.
+- User-supplied or model-supplied descriptors must not grant authority directly.
 
 ---
 
@@ -281,6 +342,7 @@ decision_id: string
 request_id: string
 timestamp: datetime
 effect: allow | deny | ask
+reason_code: matched_allow | matched_deny | matched_ask | unknown_capability | unknown_target | policy_error | approval_required | sandbox_required | budget_exceeded | expired_policy
 reason: string
 matched_rules: [string]
 constraints:
@@ -304,6 +366,8 @@ Rules:
 - `ask` creates an approval request and pauses execution.
 - `allow` may still require sandbox enforcement.
 - A decision must include enough reason text to debug policy behavior.
+- `reason_code` is required so tests, telemetry, dashboards, and future evals do
+  not depend on parsing free-text reason strings.
 - Decisions are recorded in telemetry when configured.
 
 ---
@@ -375,9 +439,13 @@ Required enforcement points:
 | Network | `network.*` |
 | Secrets | `secret.read` or brokered secret use |
 | Telemetry export | `telemetry.export` |
+| Observation pipeline | `observation.filter` before tool/sandbox/MCP output reaches the model |
 
 No side-effecting path may bypass this once the governed execution phase owns
 that surface.
+
+Sandbox stdout/stderr, MCP responses, web output, and workspace file content are
+untrusted until filtered before model injection.
 
 ---
 
@@ -580,6 +648,31 @@ Required tests:
 
 ---
 
+## Budget Enforcement
+
+Budgets are authority constraints, not metrics only.
+
+Rules:
+
+- Budget checks happen before execution.
+- Budget counters are updated after allowed execution attempts.
+- Failed attempts may count against budget unless policy says otherwise.
+- Retries do not reset budget by default.
+- Subagents inherit narrowed budget from parent.
+- Background tasks resume with stored budget state.
+- Budget exceeded returns a deny decision with `reason_code:
+  budget_exceeded`.
+
+Required tests:
+
+- deny when tool-call budget is exhausted
+- retry does not reset budget
+- child subagent cannot exceed parent budget
+- background task resumes with stored budget counters
+- policy can explicitly decide whether failed attempts count
+
+---
+
 ## Telemetry Requirements
 
 Governed execution emits these event types:
@@ -605,10 +698,43 @@ Governed execution emits these event types:
 Rules:
 
 - Events include `trace_id` and `run_id` when available.
-- Events include policy id and matched rule ids.
+- Events include policy id, policy version, policy hash, reason code, and
+  matched rule ids.
 - Events do not include secret values.
 - Denied actions still produce telemetry.
 - Approval events link to authority request and decision ids.
+
+---
+
+## Audit Log
+
+Governed execution distinguishes telemetry from audit records.
+
+Telemetry is operational observability. Audit records are durable authority
+evidence.
+
+Audit records include:
+
+- authority request id
+- policy id, version, and hash
+- actor
+- capability
+- target
+- decision
+- reason code
+- matched rules
+- approval id when present
+- execution result summary
+- timestamp
+
+Rules:
+
+- Denied and approved high-risk actions produce audit records.
+- Audit records must not contain raw secrets.
+- Audit write failure for high-risk actions fails closed unless policy
+  explicitly allows best-effort audit.
+- Audit records are append-only once written.
+- Telemetry may reference audit ids, but telemetry is not the audit log.
 
 ---
 
@@ -652,11 +778,27 @@ Rules:
 
 ## Implementation Phases
 
+The first implementation PR must not attempt sandbox provider integration.
+
+Minimum first implementation target:
+
+- `PolicyEnvelope` model
+- `PolicyRule` model
+- `CapabilityDescriptor` model
+- `AuthorityRequest` model
+- `PolicyDecision` model
+- deterministic evaluator
+- default policy builder
+- deny/ask/allow precedence tests
+- unknown capability tests
+- fail-closed policy error tests
+
 ### Phase 1: Policy Core
 
 - Add policy models.
 - Add policy evaluator.
 - Add authority request and decision models.
+- Add policy provenance, policy hash, reason codes, and budget counters.
 - Add default policy builder.
 - Unit test deny/ask/allow precedence.
 
@@ -710,11 +852,16 @@ The governed execution track is complete when:
 - every governed side effect creates an authority request
 - policy decisions are deterministic and tested
 - deny/ask/allow precedence is tested
+- policy provenance, version, hash, and migration behavior are tested
+- policy reason codes are stable enough for tests and future evals
+- budget exceeded decisions are deterministic
 - approvals are first-class runtime objects
 - sandbox runtime is an adapter, not the policy engine
 - secrets are brokered/redacted
 - network and filesystem scopes are policy-addressable
+- observation filtering gates untrusted output before model injection
 - subagents and background tasks cannot broaden authority
 - telemetry records policy decisions and violations
+- audit records exist for denied and approved high-risk actions
 - docs and examples explain how app builders configure policy without making
   the first agent hard to run
