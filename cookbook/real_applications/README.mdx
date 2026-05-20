@@ -1,16 +1,21 @@
+---
+title: Real Application Harness Examples
+description: 'Production-shaped OmniCoreAgent examples for research, support operations, personal operations, workspace code review, and background tasks'
+---
+
 # Real Application Harness Examples
 
 These examples show OmniCoreAgent as an application-facing agent harness, not a toy loop. Each app combines domain behavior with the built-in runtime pieces it needs: local tools, workspace files, tool offloading, guardrails, telemetry identifiers, and file commands.
 
 ## Examples
 
-| Example | What it demonstrates |
-|---------|----------------------|
-| [Research due diligence](./research_due_diligence_agent.py) | Parallel research tools, context management, large evidence offload, artifact readback, workspace report output, telemetry identifiers |
-| [Support operations](./support_operations_agent.py) | Customer/order tools, support knowledge retrieval, guardrails, workspace ticket notes, telemetry |
-| [Personal operations assistant](./personal_operations_assistant.py) | Calendar/task/preferences tools, selectable memory backend, private workspace brief, guardrails, telemetry identifiers |
-| [Workspace code review](./workspace_code_review_agent.py) | Built-in workspace command tools for file discovery, grep-style search, reading, editing, and writing review output |
-| [Support background task](../background_agents/real_application_background_task.py) | The support operations app shape running through durable task state, attempts, lifecycle events, and workspace output |
+| Example | Run command | What it demonstrates |
+|---------|-------------|----------------------|
+| [Research due diligence](./research_due_diligence_agent.py) | `uv run python cookbook/real_applications/research_due_diligence_agent.py` | Parallel research tools, context management, large evidence offload, artifact readback, workspace report output, telemetry identifiers |
+| [Support operations](./support_operations_agent.py) | `uv run python cookbook/real_applications/support_operations_agent.py` | Customer/order tools, support knowledge retrieval, guardrails, workspace ticket notes, telemetry |
+| [Personal operations assistant](./personal_operations_assistant.py) | `uv run python cookbook/real_applications/personal_operations_assistant.py` | Calendar/task/preferences tools, selectable memory backend, private workspace brief, guardrails, telemetry identifiers |
+| [Workspace code review](./workspace_code_review_agent.py) | `uv run python cookbook/real_applications/workspace_code_review_agent.py` | Built-in workspace command tools for file discovery, grep-style search, reading, editing, and writing review output |
+| [Support background task](../background_agents/real_application_background_task.py) | `uv run python cookbook/background_agents/real_application_background_task.py` | The support operations app shape running through durable task state, attempts, lifecycle events, and workspace output |
 
 ## Run an Example
 
@@ -18,6 +23,10 @@ These examples show OmniCoreAgent as an application-facing agent harness, not a 
 export LLM_API_KEY=your_key
 uv run python cookbook/real_applications/research_due_diligence_agent.py
 ```
+
+Expected output includes the agent response plus runtime identifiers such as
+`trace_id` and `run_id`. Workspace examples also print or create files under the
+configured workspace.
 
 The examples default to the provider/model from `cookbook/shared.py`. Override them with:
 

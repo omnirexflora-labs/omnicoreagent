@@ -25,7 +25,8 @@
   <a href="#install-only-what-you-need">Install</a> -
   <a href="./cookbook">Cookbook</a> -
   <a href="#features">Features</a> -
-  <a href="https://docs-omnicoreagent.omnirexfloralabs.com/docs">Docs</a>
+  <a href="https://docs-omnicoreagent.omnirexfloralabs.com/docs">Docs</a> -
+  <a href="https://docs-omnicoreagent.omnirexfloralabs.com/docs/getting-started/use-docs-with-ai-tools">Ask AI</a>
 </p>
 
 ---
@@ -71,6 +72,13 @@ OmniCoreAgent keeps that boundary explicit:
 
 Start with the core harness. Turn on heavier production pieces only when the
 workload needs them.
+
+If you prefer guided docs, start with the
+[Quick Start](https://docs-omnicoreagent.omnirexfloralabs.com/docs/getting-started/quickstart).
+If you use AI coding tools, use the
+[AI tools guide](https://docs-omnicoreagent.omnirexfloralabs.com/docs/getting-started/use-docs-with-ai-tools)
+for Ask AI, `/llms.txt`, hosted docs MCP, Cursor, VS Code, ChatGPT, Claude, and
+Perplexity.
 
 ---
 
@@ -126,6 +134,8 @@ small.
 | Build a production-shaped app harness | [Real applications cookbook](./cookbook/real_applications) |
 | Build multi-step workflows | [Workflows cookbook](./cookbook/workflows) |
 | Serve an agent over HTTP/SSE | [OmniServe cookbook](./cookbook/omniserve) |
+| Use the docs inside AI tools | [AI tools guide](https://docs-omnicoreagent.omnirexfloralabs.com/docs/getting-started/use-docs-with-ai-tools) |
+| Debug setup or configuration | [Configuration guide](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/configuration) |
 | Understand the runtime internals | [Implementation Map](#implementation-map) |
 
 ---

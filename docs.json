@@ -35,7 +35,8 @@
                         "pages": [
                             "docs/index",
                             "docs/getting-started/installation",
-                            "docs/getting-started/quickstart"
+                            "docs/getting-started/quickstart",
+                            "docs/getting-started/use-docs-with-ai-tools"
                         ]
                     },
                     {
@@ -72,6 +73,26 @@
                         "group": "Changelog",
                         "pages": [
                             "docs/changelog"
+                        ]
+                    }
+                ]
+            },
+            {
+                "dropdown": "Cookbook",
+                "icon": "book-open",
+                "description": "Runnable OmniCoreAgent examples by use case",
+                "groups": [
+                    {
+                        "group": "Examples",
+                        "pages": [
+                            "cookbook/README",
+                            "cookbook/getting_started/README",
+                            "cookbook/real_applications/README",
+                            "cookbook/omniserve/README",
+                            "cookbook/background_agents/README",
+                            "cookbook/workflows/README",
+                            "cookbook/production/README",
+                            "cookbook/advanced_agent/README"
                         ]
                     }
                 ]
@@ -137,5 +158,19 @@
         "telemetry": {
             "enabled": true
         }
+    },
+    "contextual": {
+        "options": [
+            "assistant",
+            "copy",
+            "view",
+            "chatgpt",
+            "claude",
+            "perplexity",
+            "mcp",
+            "cursor",
+            "vscode"
+        ],
+        "display": "header"
     }
 }

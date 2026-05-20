@@ -7,7 +7,7 @@ icon: 'bolt'
 # Quick Start
 
 This guide creates the smallest useful OmniCoreAgent: one model, one harness
-runtime, and one task.
+runtime, one task, one local tool, and one stable session.
 
 The core install stays light. Redis, PostgreSQL, MongoDB, S3/R2, OmniServe, and
 background scheduling install as extras when the agent needs them.
@@ -74,6 +74,7 @@ background scheduling install as extras when the agent needs them.
 Local tools are normal Python functions registered through `ToolRegistry`.
 
 ```python
+import asyncio
 from omnicoreagent import OmniCoreAgent, ToolRegistry
 
 tools = ToolRegistry()
@@ -83,40 +84,111 @@ def get_weather(city: str) -> dict:
     """Get current weather for a city."""
     return {"city": city, "temp": "22C", "condition": "Sunny"}
 
-agent = OmniCoreAgent(
-    name="weather_agent",
-    system_instruction="Use tools when they help answer the user.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    local_tools=tools,
-)
+async def main():
+    agent = OmniCoreAgent(
+        name="weather_agent",
+        system_instruction="Use tools when they help answer the user.",
+        model_config={"provider": "openai", "model": "gpt-4o"},
+        local_tools=tools,
+    )
 
-result = await agent.run("What's the weather in Tokyo?")
+    result = await agent.run("What's the weather in Tokyo?")
+    print(result["response"])
+    await agent.cleanup()
+
+asyncio.run(main())
 ```
 
 ---
 
-## Add MCP Tools
+## Keep Continuity With Session IDs
+
+Agents keep continuity when you provide a stable `session_id`:
+
+```python
+await agent.run("My name is Abiola.", session_id="user_123")
+result = await agent.run("What is my name?", session_id="user_123")
+print(result["response"])
+```
+
+The default memory backend is in-memory and works for local development. Use
+Redis, MongoDB, or SQL database storage when conversation history must survive
+process restarts.
+
+---
+
+## Common First-Run Errors
+
+<AccordionGroup>
+  <Accordion title="LLM_API_KEY not found">
+    Export the model key before running your script:
+
+    ```bash
+    export LLM_API_KEY=your_api_key_here
+    ```
+
+    OmniCoreAgent examples use `LLM_API_KEY` as the single public model API-key
+    variable.
+  </Accordion>
+
+  <Accordion title="model_config requires provider and model">
+    Set both fields:
+
+    ```python
+    model_config={"provider": "openai", "model": "gpt-4o"}
+    ```
+
+    See [Models](/docs/how-to-guides/models) for supported provider names.
+  </Accordion>
+
+  <Accordion title="Missing optional backend package">
+    Install the extra for the backend you are using:
+
+    ```bash
+    pip install "omnicoreagent[redis]"
+    pip install "omnicoreagent[mongodb]"
+    pip install "omnicoreagent[serve]"
+    ```
+
+    The base quickstart does not require these extras.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Next: Add MCP Tools
 
 MCP servers are external tool providers. OmniCoreAgent connects to them and loads
 their tools into the same runtime view as local tools.
 
-```python
-agent = OmniCoreAgent(
-    name="fs_agent",
-    system_instruction="Inspect files when the task needs filesystem context.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    mcp_tools=[
-        {
-            "name": "filesystem",
-            "transport_type": "stdio",
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-        }
-    ],
-)
+This optional example uses Node.js and `npx` because the filesystem MCP server is
+published as an npm package:
 
-await agent.connect_mcp_servers()
-result = await agent.run("List files in /tmp")
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent
+
+async def main():
+    agent = OmniCoreAgent(
+        name="fs_agent",
+        system_instruction="Inspect files when the task needs filesystem context.",
+        model_config={"provider": "openai", "model": "gpt-4o"},
+        mcp_tools=[
+            {
+                "name": "filesystem",
+                "transport_type": "stdio",
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+            }
+        ],
+    )
+
+    await agent.connect_mcp_servers()
+    result = await agent.run("List files in /tmp")
+    print(result["response"])
+    await agent.cleanup()
+
+asyncio.run(main())
 ```
 
 <Note>
@@ -127,7 +199,7 @@ harness tools.
 
 ---
 
-## Turn On Heavier Harness Features
+## Next: Turn On Heavier Harness Features
 
 For longer tasks, enable the heavier harness features explicitly: automatic
 context control before each model call, tool output offloading into the
@@ -158,31 +230,25 @@ workers write outputs that the lead agent reads back.
 
 ---
 
-## Persistence With Session IDs
-
-Agents keep continuity when you provide a stable `session_id`:
-
-```python
-await agent.run("My name is Abiola.", session_id="user_123")
-result = await agent.run("What is my name?", session_id="user_123")
-```
-
-The default memory backend is suitable for local development. Use Redis,
-MongoDB, or SQL database storage when the application needs persistence outside
-the current process.
-
----
-
 ## Next Steps
 
 <CardGroup cols={3}>
-  <Card title="Architecture" icon="sitemap" href="/docs/core-concepts/architecture">
-    Understand the runtime layers and request flow.
-  </Card>
   <Card title="Local Tools" icon="toolbox" href="/docs/core-concepts/local-tools">
     Register Python functions as tools.
   </Card>
+  <Card title="Workspace Files" icon="folder-tree" href="/docs/core-concepts/workspace-files">
+    Store notes, artifacts, scratchpads, and tool offloads.
+  </Card>
+  <Card title="OmniServe" icon="server" href="/docs/how-to-guides/omniserve">
+    Serve this agent through REST and SSE.
+  </Card>
   <Card title="Configuration" icon="gear" href="/docs/how-to-guides/configuration">
     Configure context, tool offload, memory, events, and workspace storage.
+  </Card>
+  <Card title="Use Docs With AI Tools" icon="sparkles" href="/docs/getting-started/use-docs-with-ai-tools">
+    Ask questions against the official docs from your editor or AI tool.
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/docs/core-concepts/architecture">
+    Understand the runtime layers and request flow.
   </Card>
 </CardGroup>

@@ -1,0 +1,161 @@
+---
+title: Use Docs With AI Tools
+description: 'Use OmniCoreAgent docs with Ask AI, llms.txt, hosted MCP, Cursor, VS Code, ChatGPT, Claude, and Perplexity'
+icon: 'sparkles'
+---
+
+# Use Docs With AI Tools
+
+OmniCoreAgent docs are written for people and AI coding tools. Use this page
+when you want the docs inside your editor, chat session, or agent workflow.
+
+<Info>
+AI tools are a faster way to navigate the docs. They do not replace source-code
+verification for production changes.
+</Info>
+
+---
+
+## Ask AI In The Docs
+
+Use the Ask AI action in the docs header to ask questions against the official
+OmniCoreAgent documentation.
+
+Good prompts:
+
+```text
+Show me the smallest OmniCoreAgent with one local tool.
+```
+
+```text
+Explain memory vs workspace vs task store.
+```
+
+```text
+Build an OmniServe API with auth and rate limiting.
+```
+
+```text
+Which config enables context management and tool offload?
+```
+
+Ask AI should answer with the docs as source context. If a feature is not
+documented, verify in the source code or open an issue.
+
+---
+
+## Copy Or View A Page As Markdown
+
+Use the contextual menu on any docs page to copy the page as Markdown or view
+the raw Markdown source. This is useful when you want to paste one exact docs
+page into ChatGPT, Claude, Perplexity, Cursor, or another coding agent.
+
+Best use cases:
+
+- explain one API surface
+- convert one example to your app
+- compare memory, workspace, and task-store behavior
+- ask for a migration checklist from a specific docs page
+
+---
+
+## Use `/llms.txt`
+
+Mintlify publishes an AI-readable docs index at:
+
+```text
+https://docs-omnicoreagent.omnirexfloralabs.com/llms.txt
+```
+
+Use this when an AI tool asks for a documentation index or when you want to
+give a coding agent the full docs map before it starts changing code.
+
+Example prompt:
+
+```text
+Read the OmniCoreAgent llms.txt index, then show me the pages I need to build
+an agent with local tools, workspace files, and OmniServe.
+```
+
+---
+
+## Use The Hosted Docs MCP
+
+Mintlify exposes the docs as an MCP server at:
+
+```text
+https://docs-omnicoreagent.omnirexfloralabs.com/mcp
+```
+
+Use this with an MCP-capable editor or agent when you want documentation search
+available as a tool instead of pasting pages manually.
+
+Ask your tool to search the docs MCP for exact topics:
+
+```text
+Search the OmniCoreAgent docs MCP for task store configuration and summarize
+the Redis, MongoDB, and SQL options.
+```
+
+---
+
+## Use Cursor Or VS Code
+
+Use the contextual menu actions for Cursor or VS Code when you want the current
+docs page opened inside your editor context.
+
+Useful workflow:
+
+1. Open the docs page that matches your task.
+2. Send it to Cursor or VS Code from the contextual menu.
+3. Ask the editor agent to update your app using only that docs page and your
+   local source files.
+
+Example prompt:
+
+```text
+Using this OmniCoreAgent page, add a local tool registry to my existing agent
+without changing memory or workspace configuration.
+```
+
+---
+
+## Use ChatGPT, Claude, Or Perplexity
+
+The contextual menu can open the current docs page in ChatGPT, Claude, or
+Perplexity. Use this when you want explanation, comparison, or planning around
+one specific docs page.
+
+Good prompts:
+
+```text
+Turn this OmniServe docs page into a deployment checklist for my FastAPI app.
+```
+
+```text
+Explain the difference between MemoryRouter, workspace storage, and background
+task store using only this OmniCoreAgent page.
+```
+
+```text
+Create a minimal support-agent example from this local tools guide.
+```
+
+---
+
+## Where To Start
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="bolt" href="/docs/getting-started/quickstart">
+    Run the smallest useful OmniCoreAgent.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/docs/how-to-guides/configuration">
+    Find environment variables and runtime config.
+  </Card>
+  <Card title="Agent Harness" icon="layer-group" href="/docs/core-concepts/agent-harness">
+    Understand what OmniCoreAgent adds around the model.
+  </Card>
+  <Card title="OmniServe" icon="server" href="/docs/how-to-guides/omniserve">
+    Serve an agent through REST and SSE.
+  </Card>
+</CardGroup>

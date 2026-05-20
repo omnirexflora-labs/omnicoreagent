@@ -13,7 +13,29 @@ MongoDB, or SQL database storage when the application needs persistence.
 
 ## Quick Start
 
-Install the backend extra before using a production store:
+The default `in_memory` backend is enough for local development and tests:
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent, MemoryRouter
+
+async def main():
+    agent = OmniCoreAgent(
+        name="memory_agent",
+        system_instruction="Remember useful details inside the active session.",
+        model_config={"provider": "openai", "model": "gpt-4o"},
+        memory_router=MemoryRouter("in_memory"),
+    )
+
+    await agent.run("My project is called Atlas.", session_id="user_123")
+    result = await agent.run("What is my project called?", session_id="user_123")
+    print(result["response"])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+Install the backend extra before using a durable store:
 
 ```bash
 pip install "omnicoreagent[redis]"
@@ -27,6 +49,7 @@ from omnicoreagent import OmniCoreAgent, MemoryRouter
 # Start with Redis
 agent = OmniCoreAgent(
     name="my_agent",
+    system_instruction="Remember useful details inside the active session.",
     memory_router=MemoryRouter("redis"),
     model_config={"provider": "openai", "model": "gpt-4o"}
 )
@@ -46,7 +69,7 @@ await agent.switch_memory_store("redis")       # Back to Redis
 |---------|----------|---------------------|
 | `in_memory` | Fast development | — |
 | `redis` | Production persistence | `REDIS_URL` |
-| `database` | SQLAlchemy database storage | `DATABASE_URL` |
+| `sql` | SQLAlchemy database storage | `DATABASE_URL` |
 | `mongodb` | Document storage | `MONGODB_URI` |
 
 ---

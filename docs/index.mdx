@@ -15,26 +15,72 @@ mode: 'wide'
   alt="OmniCoreAgent Dark"
 />
 
-## Open Python Agent Harness And Runtime For Production AI Agents
+## Open Python Agent Harness For Production AI Applications
 
 **OmniCoreAgent** is the harness around the model: the loop, tools, memory,
 context control, workspace files, MCP tools, subagents, background tasks, and
 REST/SSE serving boundary that make an agent usable beyond a demo.
 
-The goal is direct: give builders the production pieces they otherwise patch
-around an LLM after the first demo starts breaking.
+Start small with one agent and one model. Add tools, memory, workspace files,
+background tasks, telemetry, and OmniServe only when the application needs them.
 
 ```bash
 pip install omnicoreagent
 ```
 
-Add only the production extras you need:
+```bash
+export LLM_API_KEY=your_api_key_here
+```
+
+<CardGroup cols={2}>
+  <Card title="Run The Quickstart" icon="bolt" href="/docs/getting-started/quickstart">
+    Install OmniCoreAgent, create your first agent, add one tool, and learn the
+    next paths.
+  </Card>
+  <Card title="Use Docs With AI Tools" icon="sparkles" href="/docs/getting-started/use-docs-with-ai-tools">
+    Use Ask AI, Markdown export, `llms.txt`, hosted docs MCP, Cursor, VS Code,
+    ChatGPT, Claude, and Perplexity.
+  </Card>
+</CardGroup>
+
+Add only the production extras you need later:
 
 ```bash
 pip install "omnicoreagent[redis]"
 pip install "omnicoreagent[serve]"
 pip install "omnicoreagent[all]"
 ```
+
+---
+
+## Choose Your Path
+
+<CardGroup cols={2}>
+  <Card title="Build Your First Agent" icon="bolt" href="/docs/getting-started/quickstart">
+    One model, one agent, one task.
+  </Card>
+  <Card title="Add Python Tools" icon="toolbox" href="/docs/core-concepts/local-tools">
+    Register application-owned functions with `ToolRegistry`.
+  </Card>
+  <Card title="Connect MCP Tools" icon="plug" href="/docs/core-concepts/mcp">
+    Load tools from external MCP servers.
+  </Card>
+  <Card title="Keep Session Memory" icon="database" href="/docs/core-concepts/memory">
+    Store conversation history in memory, Redis, MongoDB, or SQL.
+  </Card>
+  <Card title="Use Workspace Files" icon="folder-tree" href="/docs/core-concepts/workspace-files">
+    Give agents a file surface for notes, artifacts, and offloads.
+  </Card>
+  <Card title="Serve An Agent API" icon="server" href="/docs/how-to-guides/omniserve">
+    Run the same agent behind REST and SSE endpoints.
+  </Card>
+  <Card title="Run Background Work" icon="clock" href="/docs/core-concepts/background-agents">
+    Schedule durable agent work with run history, retries, and workspace output.
+  </Card>
+  <Card title="Build A Real Application" icon="rocket" href="/cookbook/real_applications">
+    Start from production-shaped examples.
+  </Card>
+</CardGroup>
 
 ---
 
@@ -96,6 +142,13 @@ OmniCoreAgent is built around real agent runtime problems:
   </Card>
   <Card title="MCP Tools" icon="plug" href="/docs/core-concepts/mcp">
     Connect external MCP servers over stdio, SSE, or Streamable HTTP.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/docs/how-to-guides/configuration">
+    Environment variables, memory, workspace, task stores, telemetry, and
+    OmniServe settings.
+  </Card>
+  <Card title="OmniServe" icon="server" href="/docs/how-to-guides/omniserve">
+    Production REST/SSE serving, auth, rate limits, events, and background APIs.
   </Card>
 </CardGroup>
 

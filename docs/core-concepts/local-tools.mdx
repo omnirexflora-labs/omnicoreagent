@@ -6,28 +6,39 @@ icon: 'wrench'
 
 # Local Tools System
 
-Register any Python function as an AI tool using the `ToolRegistry`:
+Register any Python function as an AI tool using the `ToolRegistry`.
 
 ```python
-from omnicoreagent import ToolRegistry
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
 
 tools = ToolRegistry()
 
 @tools.register_tool("get_weather")
-def get_weather(city: str) -> str:
+def get_weather(city: str) -> dict:
     """Get weather for a city."""
-    return f"Weather in {city}: Sunny, 25°C"
+    return {"city": city, "temperature": "25C", "condition": "Sunny"}
 
 @tools.register_tool("calculate_area")
-def calculate_area(length: float, width: float) -> str:
+def calculate_area(length: float, width: float) -> dict:
     """Calculate rectangle area."""
-    return f"Area: {length * width} square units"
+    return {"area": length * width, "unit": "square units"}
 
-agent = OmniCoreAgent(
-    name="tool_agent",
-    local_tools=tools,  # Your custom tools!
-    ...
-)
+async def main():
+    agent = OmniCoreAgent(
+        name="tool_agent",
+        system_instruction="Use local tools when they help answer the user.",
+        model_config={"provider": "openai", "model": "gpt-4o"},
+        local_tools=tools,
+    )
+
+    result = await agent.run(
+        "What is the weather in Lagos, and what is the area of a 12 by 8 room?"
+    )
+    print(result["response"])
+    await agent.cleanup()
+
+asyncio.run(main())
 ```
 
 ---
@@ -119,8 +130,9 @@ def calculate_total(price: float, quantity: int) -> float:
 
 agent = OmniCoreAgent(
     name="local_tools_agent",
+    system_instruction="Use local tools when they help answer the user.",
+    model_config={"provider": "openai", "model": "gpt-4o"},
     local_tools=tools,
-    ...
 )
 ```
 
