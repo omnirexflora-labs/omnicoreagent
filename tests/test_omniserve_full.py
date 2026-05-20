@@ -2,6 +2,7 @@ import os
 import pytest
 import asyncio
 from importlib.metadata import version
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, AsyncMock
 from fastapi.testclient import TestClient
 from click.testing import CliRunner
@@ -556,6 +557,36 @@ class TestMiddleware:
         )
         assert resp.status_code == 200
 
+    def test_auth_protects_telemetry_and_background_routes_with_api_prefix(self):
+        class LightweightAgent:
+            name = "BoundaryAgent"
+
+            def generate_session_id(self):
+                return "boundary-session"
+
+            def get_telemetry_events_after(self, **kwargs):
+                return []
+
+        config = OmniServeConfig(
+            api_prefix="/api",
+            auth_enabled=True,
+            auth_token="secret123",
+            background_start_worker=False,
+        )
+        server = OmniServe(agent=LightweightAgent(), config=config)
+        client = TestClient(server.app)
+
+        assert client.get("/api/ready").status_code == 200
+        assert client.get("/api/telemetry/events").status_code == 401
+        assert client.get("/api/background/status").status_code == 401
+
+        telemetry = client.get(
+            "/api/telemetry/events",
+            headers={"Authorization": "Bearer secret123"},
+        )
+        assert telemetry.status_code == 200
+        assert telemetry.json()["events"] == []
+
     def test_cors_middleware(self, mock_agent):
         config = OmniServeConfig(
             cors_enabled=True, cors_origins=["https://example.com"]
@@ -596,6 +627,60 @@ class TestMiddleware:
         assert allowed.headers["X-RateLimit-Remaining"] == "0"
         assert denied.status_code == 429
         assert denied.headers["Retry-After"]
+        assert denied.json()["error"] == "TooManyRequests"
+
+    def test_rate_limit_counts_unauthenticated_protected_requests(self, mock_agent):
+        config = OmniServeConfig(
+            auth_enabled=True,
+            auth_token="secret123",
+            rate_limit_enabled=True,
+            rate_limit_requests=2,
+            rate_limit_window=60,
+        )
+        server = OmniServe(agent=mock_agent, config=config)
+        client = TestClient(server.app)
+
+        first = client.post("/run/sync", json={"query": "first"})
+        second = client.post("/run/sync", json={"query": "second"})
+        third = client.post("/run/sync", json={"query": "third"})
+
+        assert first.status_code == 401
+        assert first.headers["X-RateLimit-Limit"] == "2"
+        assert first.headers["X-RateLimit-Remaining"] == "1"
+        assert second.status_code == 401
+        assert second.headers["X-RateLimit-Remaining"] == "0"
+        assert third.status_code == 429
+        assert third.json()["error"] == "TooManyRequests"
+
+    def test_rate_limit_applies_to_telemetry_and_exempts_readiness(self):
+        class LightweightAgent:
+            name = "RateLimitedTelemetryAgent"
+
+            def generate_session_id(self):
+                return "rate-limit-session"
+
+            def get_telemetry_events_after(self, **kwargs):
+                return []
+
+        config = OmniServeConfig(
+            rate_limit_enabled=True,
+            rate_limit_requests=1,
+            rate_limit_window=60,
+            background_enabled=False,
+        )
+        server = OmniServe(agent=LightweightAgent(), config=config)
+        client = TestClient(server.app)
+
+        readiness = client.get("/ready")
+        assert readiness.status_code == 200
+        assert "X-RateLimit-Limit" not in readiness.headers
+
+        allowed = client.get("/telemetry/events")
+        denied = client.get("/telemetry/events")
+
+        assert allowed.status_code == 200
+        assert allowed.headers["X-RateLimit-Limit"] == "1"
+        assert denied.status_code == 429
         assert denied.json()["error"] == "TooManyRequests"
 
 
@@ -713,6 +798,35 @@ class TestEndpoints:
             "mcp_connected": True,
         }
 
+    def test_readiness_does_not_require_mcp_when_no_servers_are_configured(self):
+        class LocalOnlyAgent:
+            name = "LocalOnlyAgent"
+            mcp_tools = []
+            mcp_client = None
+            _initialized = True
+
+            def generate_session_id(self):
+                return "local-only-session"
+
+            async def connect_mcp_servers(self):
+                return None
+
+        server = OmniServe(
+            agent=LocalOnlyAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+
+        with TestClient(server.app) as client:
+            resp = client.get("/ready")
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "ready": True,
+            "agent_name": "LocalOnlyAgent",
+            "initialized": True,
+            "mcp_connected": True,
+        }
+
     def test_readiness_reflects_uninitialized_agent(self):
         agent = MagicMock(spec=OmniCoreAgent)
         agent.name = "UninitializedAgent"
@@ -735,10 +849,140 @@ class TestEndpoints:
         agent = MagicMock(spec=OmniCoreAgent)
         agent.name = "MCPReadinessAgent"
         agent.generate_session_id.return_value = "mcp-readiness-session"
+        agent.mcp_tools = [{"name": "remote_tools", "transport_type": "stdio"}]
         agent.mcp_client = None
 
         server = OmniServe(
             agent=agent,
+            config=OmniServeConfig(background_enabled=False),
+        )
+
+        with TestClient(server.app) as client:
+            resp = client.get("/ready")
+
+        assert resp.status_code == 200
+        assert resp.json()["ready"] is False
+        assert resp.json()["mcp_connected"] is False
+
+    @pytest.mark.parametrize(
+        ("sessions", "expected_ready"),
+        [
+            ({"server_one": {"connected": True}, "server_two": {"connected": True}}, True),
+            (
+                {
+                    "server_one": {"connected": True},
+                    "server_two": {"connected": False},
+                },
+                False,
+            ),
+            ({"server_one": {"connected": True}}, False),
+            (
+                {
+                    "server_one": {"connected": True},
+                    "unconfigured_server": {"connected": True},
+                },
+                False,
+            ),
+        ],
+    )
+    def test_readiness_checks_each_configured_mcp_server_session(
+        self, sessions, expected_ready
+    ):
+        class MCPAgent:
+            name = "MCPAgent"
+            _initialized = True
+            mcp_tools = [
+                {"name": "server_one", "transport_type": "stdio"},
+                {"name": "server_two", "transport_type": "stdio"},
+            ]
+            mcp_client = SimpleNamespace(sessions=sessions)
+
+            def generate_session_id(self):
+                return "mcp-session-state"
+
+            async def connect_mcp_servers(self):
+                return None
+
+        server = OmniServe(
+            agent=MCPAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+
+        with TestClient(server.app) as client:
+            resp = client.get("/ready")
+
+        assert resp.status_code == 200
+        assert resp.json()["ready"] is expected_ready
+        assert resp.json()["mcp_connected"] is expected_ready
+
+    def test_readiness_uses_mcp_requested_to_actual_server_mapping(self):
+        class MCPAgent:
+            name = "MappedMCPAgent"
+            _initialized = True
+            mcp_tools = [{"name": "filesystem", "transport_type": "stdio"}]
+            mcp_client = SimpleNamespace(
+                added_servers_names={"filesystem": "FileSystem MCP"},
+                sessions={"FileSystem MCP": {"connected": True}},
+            )
+
+            def generate_session_id(self):
+                return "mapped-mcp-session"
+
+            async def connect_mcp_servers(self):
+                return None
+
+        server = OmniServe(
+            agent=MCPAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+
+        with TestClient(server.app) as client:
+            resp = client.get("/ready")
+
+        assert resp.status_code == 200
+        assert resp.json()["ready"] is True
+        assert resp.json()["mcp_connected"] is True
+
+    def test_readiness_supports_single_dict_mcp_config(self):
+        class MCPAgent:
+            name = "DictMCPAgent"
+            _initialized = True
+            mcp_tools = {"name": "filesystem", "transport_type": "stdio"}
+            mcp_client = SimpleNamespace(sessions={"filesystem": {"connected": True}})
+
+            def generate_session_id(self):
+                return "dict-mcp-session"
+
+            async def connect_mcp_servers(self):
+                return None
+
+        server = OmniServe(
+            agent=MCPAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+
+        with TestClient(server.app) as client:
+            resp = client.get("/ready")
+
+        assert resp.status_code == 200
+        assert resp.json()["ready"] is True
+        assert resp.json()["mcp_connected"] is True
+
+    def test_readiness_requires_sessions_for_configured_mcp_servers(self):
+        class MCPAgent:
+            name = "NoSessionMCPAgent"
+            _initialized = True
+            mcp_tools = [{"name": "filesystem", "transport_type": "stdio"}]
+            mcp_client = SimpleNamespace()
+
+            def generate_session_id(self):
+                return "no-session-mcp"
+
+            async def connect_mcp_servers(self):
+                return None
+
+        server = OmniServe(
+            agent=MCPAgent(),
             config=OmniServeConfig(background_enabled=False),
         )
 
