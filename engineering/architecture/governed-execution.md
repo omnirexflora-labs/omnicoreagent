@@ -415,9 +415,10 @@ They include:
 - execution result summary
 - timestamp
 
-Denied and approved high-risk actions must produce audit records. Audit records
-must not contain raw secrets. Audit write failure for high-risk actions fails
-closed unless policy explicitly allows best-effort audit.
+Every high-risk authority decision and result must produce audit records:
+allow, deny, ask, approval resolution, and execution summary. Audit records must
+not contain raw secrets. Audit write failure for high-risk actions fails closed
+unless policy explicitly allows best-effort audit.
 
 ## Approval Layer
 
@@ -442,6 +443,10 @@ Approval results include:
 - effective scope
 - expiry
 - audit reason
+
+Approval resolvers must bind the approval to a trusted principal from CLI,
+OmniServe, or application-owned identity context. Production high-risk
+approvals cannot come from unauthenticated strings or model output.
 
 Approvals may come from:
 
@@ -500,6 +505,7 @@ systems.
 
 OmniCoreAgent should model:
 
+- MCP server start/connect authority
 - MCP server identity
 - MCP server transport
 - tool names and schemas
@@ -509,9 +515,16 @@ OmniCoreAgent should model:
 - network trust
 - secret access
 - approval requirements
+- schema and tool hash drift
 
 AgentBound's MCP-focused access-control model is important here: enforcement
 must be possible even when the MCP server itself is not modified.
+
+Local MCP servers must not run with ambient host authority by default. They need
+scrubbed environment, explicit mounts, and sandbox or egress controls when
+their declared capabilities require them. Remote MCP servers need pinned
+identity and schema/tool drift checks, usually through a gateway or proxy
+boundary.
 
 ## Telemetry Integration
 
