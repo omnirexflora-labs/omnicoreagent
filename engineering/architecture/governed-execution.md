@@ -258,11 +258,12 @@ Governed execution must eventually intercept these surfaces:
 14. telemetry export
 15. model-bound observation filtering and redaction
 
-The first implementation phases should start with the surfaces that can cause
-external side effects: tools, MCP, workspace, process, network, secrets,
-subagents, and background tasks. Observation filtering must also be governed
-because sandbox stdout/stderr, MCP responses, web output, and workspace file
-content are untrusted until filtered before model injection.
+After the policy core exists, the first enforcement phases should start with
+the surfaces that can cause external side effects: tools, MCP, workspace,
+process, network, secrets, subagents, and background tasks. Observation
+filtering must also be governed because sandbox stdout/stderr, MCP responses,
+web output, and workspace file content are untrusted until filtered before
+model injection.
 
 ## Sandbox Runtime
 

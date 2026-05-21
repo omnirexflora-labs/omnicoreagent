@@ -188,6 +188,49 @@ Rules:
 
 ---
 
+## Policy Hash Canonicalization
+
+Policy hashes must be stable across equivalent YAML and JSON representations.
+
+Rules:
+
+- Hashes are computed from a canonical JSON representation.
+- Object keys are sorted.
+- Null and default fields are normalized consistently.
+- Runtime-generated fields such as `loaded_at` are excluded from the hash unless
+  explicitly required by a future policy version.
+- The `policy_hash` field itself is excluded from the canonical hash input.
+- Comments and formatting do not affect the hash.
+- The hash algorithm is `sha256` unless changed by a future versioned policy
+  format.
+
+---
+
+## Policy Loading
+
+Default policy files may live at:
+
+- `omnicoreagent.policy.yaml`
+- `.omnicoreagent/policy.yaml`
+- application-provided in-code config
+
+Resolution order:
+
+1. explicit runtime config
+2. application-provided policy object
+3. project policy file
+4. default policy builder
+
+Rules:
+
+- Policy file discovery must be deterministic.
+- Model-generated policy content is never loaded by discovery.
+- A missing policy file is not an error when the default policy builder is
+  available.
+- Invalid policy files raise `PolicyLoadError` and fail closed in strict mode.
+
+---
+
 ## Policy Composition
 
 Multiple policy layers may apply at once:
@@ -212,6 +255,29 @@ Rules:
 ---
 
 ## Policy Rule Schema
+
+Capability names use dot-separated lowercase namespaces:
+
+```text
+domain[.resource].action
+```
+
+Examples:
+
+- `tool.local.call`
+- `tool.mcp.call`
+- `workspace.files.write`
+- `network.http.get`
+- `process.exec`
+
+Rules:
+
+- Capability names are stable API contracts.
+- Renaming a capability requires a migration path.
+- Wildcards may match namespaces, for example `network.http.*`.
+- Capability names should describe authority, not implementation class names.
+- Two-segment capabilities such as `process.exec` are valid when there is no
+  useful intermediate resource namespace.
 
 ```yaml
 rule_id: string
@@ -759,6 +825,62 @@ Default OmniCoreAgent behavior:
 The first-run user experience must stay simple. Production users get stronger
 controls by adding policy config.
 
+Default policy profiles:
+
+- `permissive-dev`
+- `interactive-dev`
+- `strict-production`
+
+The default first-run profile should preserve simple local development while
+production deployments can opt into strict behavior.
+
+Profile intent:
+
+- `permissive-dev` keeps local development moving while still denying raw
+  secrets and unrestricted process/network execution by default.
+- `interactive-dev` asks before risky or unknown capabilities and is the best
+  profile for humans building and debugging agents locally.
+- `strict-production` denies unknown capabilities and requires explicit policy
+  for side effects, secrets, process execution, network egress, MCP tools,
+  subagents, and background work.
+
+Minimal policy input example before runtime normalization:
+
+```yaml
+version: "1"
+name: "support-agent-policy"
+mode: interactive
+rules:
+  deny:
+    - rule_id: deny_raw_secret_read
+      effect: deny
+      capability: secret.read
+  ask:
+    - rule_id: ask_external_post
+      effect: ask
+      capability: network.http.post
+      conditions:
+        host: "*.external.example"
+  allow:
+    - rule_id: allow_workspace_files
+      effect: allow
+      capability: workspace.files.*
+    - rule_id: allow_local_tools
+      effect: allow
+      capability: tool.local.call
+network:
+  default: deny
+workspace:
+  files:
+    read:
+      - path: "support/**"
+    write:
+      - path: "support/**"
+```
+
+The runtime fills provenance, policy hash, defaults, and other normalized fields
+when loading this input into a `PolicyEnvelope`.
+
 ---
 
 ## Failure Behavior
@@ -773,6 +895,19 @@ Rules:
 - Sandbox constraint unsupported: deny.
 - Telemetry write failure must not grant authority. The action may continue
   only if policy explicitly allows telemetry best-effort mode.
+- Audit write failure for high-risk actions fails closed unless policy
+  explicitly allows best-effort audit.
+
+Stable errors:
+
+- `PolicyLoadError`
+- `PolicyEvaluationError`
+- `PolicyDeniedError`
+- `ApprovalRequiredError`
+- `ApprovalExpiredError`
+- `SandboxRequiredError`
+- `BudgetExceededError`
+- `UnknownCapabilityError`
 
 ---
 
@@ -792,6 +927,24 @@ Minimum first implementation target:
 - deny/ask/allow precedence tests
 - unknown capability tests
 - fail-closed policy error tests
+
+Initial package layout:
+
+```text
+src/omnicoreagent/governance/
+  __init__.py
+  approvals.py
+  defaults.py
+  errors.py
+  evaluator.py
+  hashing.py
+  models.py
+  policy.py
+  telemetry.py
+```
+
+This package owns governed execution. It must not be scattered across tools,
+runtime, background, workspace, MCP, and serve modules.
 
 ### Phase 1: Policy Core
 
@@ -865,3 +1018,38 @@ The governed execution track is complete when:
 - audit records exist for denied and approved high-risk actions
 - docs and examples explain how app builders configure policy without making
   the first agent hard to run
+
+---
+
+## Documentation Boundary
+
+Internal engineering docs define architecture and contracts.
+
+Public docs should explain:
+
+- how to enable governed execution
+- how to define a policy
+- how to register capability descriptors
+- how approvals work
+- how to choose sandbox providers later
+
+Public docs must not expose unfinished provider promises as completed features.
+
+---
+
+## Remaining Non-Goals
+
+This design prepares the runtime for stronger authority control, but it does
+not solve every security problem in the first implementation phase.
+
+Not solved in Phase 1:
+
+- full information-flow control across all model/tool/memory paths
+- production sandbox provider integration
+- sandbox UI
+- enterprise policy administration
+- vendor observability dashboards
+- automatic proof that a third-party MCP server is safe
+
+Sandbox providers are optional adapters. They are not required for the first
+policy implementation PR.
