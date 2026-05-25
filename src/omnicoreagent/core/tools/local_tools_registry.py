@@ -16,6 +16,8 @@ class Tool:
         self.description = description
         self.inputSchema = inputSchema
         self.function = function
+        self.provider = "local"
+        self.internal_provider = False
         self.is_async = asyncio.iscoroutinefunction(function)
 
     def to_dict(self) -> dict[str, Any]:
@@ -24,6 +26,8 @@ class Tool:
             "description": self.description,
             "inputSchema": self.inputSchema,
             "function": self.function,
+            "provider": self.provider,
+            "internal_provider": self.internal_provider,
         }
 
     async def execute(self, parameters: dict[str, Any]) -> Any:
@@ -53,6 +57,7 @@ class ToolRegistry:
 
     def __init__(self):
         self.tools: dict[str, Tool] = {}
+        self._internal_tool_providers: dict[str, str] = {}
 
     def __str__(self):
         """Return a readable string representation of the ToolRegistry."""
@@ -75,7 +80,10 @@ class ToolRegistry:
                 f"got {type(tool)}"
             )
 
+        tool.provider = "local"
+        tool.internal_provider = False
         self.tools[tool.name.lower()] = tool
+        self._internal_tool_providers.pop(tool.name.lower(), None)
 
     def merge(self, other_registry: "ToolRegistry"):
         """Merge tools from another registry into this one."""
@@ -104,12 +112,29 @@ class ToolRegistry:
                 function=func,
             )
             self.tools[tool_name.lower()] = tool
+            self._internal_tool_providers.pop(tool_name.lower(), None)
             return func
 
         return decorator
 
     def get_tool(self, name: str) -> Tool | None:
         return self.tools.get(name.lower())
+
+    def mark_internal_tool_provider(self, name: str, provider: str) -> None:
+        tool = self.get_tool(name)
+        if tool is None:
+            raise ValueError(f"Tool '{name}' not found")
+        normalized_provider = provider.strip().lower()
+        if normalized_provider not in {"workspace", "artifact"}:
+            raise ValueError(
+                "internal tool provider must be either 'workspace' or 'artifact'"
+            )
+        self._internal_tool_providers[name.lower()] = normalized_provider
+        tool.provider = normalized_provider
+        tool.internal_provider = True
+
+    def get_tool_provider(self, name: str) -> str:
+        return self._internal_tool_providers.get(name.lower(), "local")
 
     def list_tools(self) -> list[Tool]:
         return list(self.tools.values())

@@ -58,3 +58,9 @@ class UnknownCapabilityError(GovernanceError):
     """Raised when an unknown capability is denied by policy."""
 
     code = "unknown_capability"
+
+
+class UngovernedCapabilityError(GovernanceError):
+    """Raised when a runtime surface is not governed in the current phase."""
+
+    code = "ungoverned_capability"

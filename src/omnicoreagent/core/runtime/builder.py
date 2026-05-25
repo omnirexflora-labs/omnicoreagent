@@ -30,6 +30,7 @@ def build_agent_runtime(
     guardrail_mode: str,
     summarize_fn: Any,
     debug: bool,
+    telemetry_recorder: Any = None,
 ) -> AgentRuntimeComponents:
     """Build the executable agent runtime without mutating the facade."""
     mcp_client, llm_connection = construction.create_llm_runtime(
@@ -49,6 +50,10 @@ def build_agent_runtime(
         agent_settings=agent_settings,
         guardrail=guardrail,
         guardrail_mode=guardrail_mode,
+        governance_engine=construction.build_governance_engine(
+            agent_config=agent_config,
+            telemetry_recorder=telemetry_recorder,
+        ),
     )
 
     subagent_factory, local_tools = harness_tools.prepare_dynamic_subagents(

@@ -3,6 +3,12 @@ from omnicoreagent.governance.approvals import (
     DenyAllApprovalResolver,
     StaticApprovalResolver,
 )
+from omnicoreagent.governance.capabilities import (
+    tool_authority_request,
+    tool_authority_requests,
+    tool_capability_descriptor,
+    tool_capability_name,
+)
 from omnicoreagent.governance.defaults import build_default_policy
 from omnicoreagent.governance.enforcement import GovernanceEngine
 from omnicoreagent.governance.errors import (
@@ -14,6 +20,7 @@ from omnicoreagent.governance.errors import (
     PolicyEvaluationError,
     PolicyLoadError,
     SandboxRequiredError,
+    UngovernedCapabilityError,
     UnknownCapabilityError,
 )
 from omnicoreagent.governance.evaluator import PolicyEvaluator
@@ -89,6 +96,7 @@ __all__ = [
     "SandboxRequiredError",
     "StaticApprovalResolver",
     "TargetMatcher",
+    "UngovernedCapabilityError",
     "UnknownCapabilityError",
     "attach_policy_hash",
     "build_default_policy",
@@ -98,4 +106,8 @@ __all__ = [
     "load_policy_file",
     "policy_from_mapping",
     "policy_hash",
+    "tool_authority_request",
+    "tool_authority_requests",
+    "tool_capability_descriptor",
+    "tool_capability_name",
 ]

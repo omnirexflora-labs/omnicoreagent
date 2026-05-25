@@ -139,6 +139,7 @@ class OmniCoreAgent:
             guardrail=self.guardrail,
             guardrail_mode=self.guardrail_mode,
             summarize_fn=self._summarize_history,
+            telemetry_recorder=self.telemetry_recorder,
             debug=self.debug,
         )
 

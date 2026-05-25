@@ -5,6 +5,7 @@ from typing import Any
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.tools.tool_batch_events import (
     assign_tool_call_ids,
+    build_tool_call_history_content,
     build_tool_batch_args,
     build_tool_batch_name,
     build_tool_call_history_metadata,
@@ -15,6 +16,12 @@ from omnicoreagent.core.types import (
     ToolCallResult,
 )
 from omnicoreagent.core.logging import logger
+from omnicoreagent.governance.capabilities import tool_authority_requests
+from omnicoreagent.governance.errors import (
+    GovernanceError,
+    PolicyDeniedError,
+    UngovernedCapabilityError,
+)
 
 TOOL_CALL_TIMEOUT_MESSAGE = (
     "Tool call timed out. Please try again or use a different approach."
@@ -24,19 +31,31 @@ TOOL_CALL_TIMEOUT_MESSAGE = (
 class ToolBatchRunner:
     """Run resolved tool calls as a single parallel batch."""
 
-    def __init__(self, agent_name: str, tool_call_timeout: int):
+    def __init__(
+        self,
+        agent_name: str,
+        tool_call_timeout: int,
+        governance_engine: Any = None,
+    ):
         self.agent_name = agent_name
         self.tool_call_timeout = tool_call_timeout
+        self.governance_engine = governance_engine
 
     def build_error_results(
         self,
         tool_call_results: list[ToolCallResult],
         error_message: str,
+        *,
+        redact_args: bool = False,
     ) -> list[dict[str, Any]]:
         return [
             {
                 "tool_name": getattr(single_tool, "tool_name", "unknown"),
-                "args": getattr(single_tool, "tool_args", {}),
+                "args": (
+                    _redacted_args(getattr(single_tool, "tool_args", {}))
+                    if redact_args
+                    else getattr(single_tool, "tool_args", {})
+                ),
                 "status": "error",
                 "data": None,
                 "message": error_message,
@@ -56,22 +75,33 @@ class ToolBatchRunner:
         record_history: bool = True,
         emit_telemetry: bool = True,
     ) -> list[dict[str, Any]]:
+        governance_enabled = self.governance_engine is not None
         for single_tool in tool_call_results:
+            tool_args = (
+                _redacted_args(single_tool.tool_args)
+                if governance_enabled
+                else single_tool.tool_args
+            )
             session_state.loop_detector.record_tool_call(
                 str(single_tool.tool_name),
-                str(single_tool.tool_args),
+                str(tool_args),
                 error_message,
             )
 
         if record_history:
             for single_tool in tool_call_results:
+                tool_args = (
+                    _redacted_args(single_tool.tool_args)
+                    if governance_enabled
+                    else single_tool.tool_args
+                )
                 await add_message_to_history(
                     role="tool",
                     content=error_message,
                     metadata={
                         "tool_call_id": single_tool.tool_call_id,
                         "tool": single_tool.tool_name,
-                        "args": single_tool.tool_args,
+                        "args": tool_args,
                         "agent_name": self.agent_name,
                     },
                     session_id=session_id,
@@ -88,6 +118,7 @@ class ToolBatchRunner:
         return self.build_error_results(
             tool_call_results=tool_call_results,
             error_message=error_message,
+            redact_args=governance_enabled,
         )
 
     async def start(
@@ -100,20 +131,30 @@ class ToolBatchRunner:
         telemetry_recorder: Any = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         tool_batch_name = build_tool_batch_name(tool_call_results)
-        tool_batch_args = build_tool_batch_args(tool_call_results)
+        governance_enabled = self.governance_engine is not None
+        tool_batch_args = build_tool_batch_args(
+            tool_call_results,
+            redact=governance_enabled,
+        )
         assign_tool_call_ids(tool_call_results)
         tool_calls_metadata = build_tool_call_history_metadata(
             agent_name=self.agent_name,
             tool_call_results=tool_call_results,
+            redact_args=governance_enabled,
+        )
+        history_content = build_tool_call_history_content(
+            response,
+            tool_call_results,
+            redact=governance_enabled,
         )
 
         await add_message_to_history(
             role="assistant",
-            content=response,
+            content=history_content,
             metadata=tool_calls_metadata.model_dump(),
             session_id=session_id,
         )
-        session_state.messages.append(Message(role="assistant", content=response))
+        session_state.messages.append(Message(role="assistant", content=history_content))
 
         return tool_batch_name, tool_batch_args
 
@@ -394,23 +435,38 @@ class ToolBatchRunner:
         telemetry_recorder: Any = None,
     ) -> dict[str, Any]:
         if telemetry_recorder is None:
-            return await single_tool.tool_executor.execute(
+            governance_error = await self._authorize_single_tool(single_tool)
+            if governance_error is not None:
+                return await self._governance_error_result(
+                    single_tool=single_tool,
+                    governance_error=governance_error,
+                    add_message_to_history=add_message_to_history,
+                    session_id=session_id,
+                )
+            result = await single_tool.tool_executor.execute(
                 agent_name=self.agent_name,
                 tool_args=single_tool.tool_args,
                 tool_name=single_tool.tool_name,
                 tool_call_id=single_tool.tool_call_id,
-                add_message_to_history=add_message_to_history,
+                add_message_to_history=_governed_history_writer(
+                    add_message_to_history,
+                    redact_args=self.governance_engine is not None,
+                ),
                 session_id=session_id,
             )
+            if self.governance_engine is not None:
+                return _redact_tool_result_args(result)
+            return result
 
         telemetry_shape = _tool_telemetry_shape(single_tool)
         telemetry_input = {
             "tool_name": single_tool.tool_name,
-            "tool_args": single_tool.tool_args,
             "tool_call_id": single_tool.tool_call_id,
             "tool_provider": single_tool.tool_provider,
             "tool_server": single_tool.tool_server,
         }
+        if self.governance_engine is None:
+            telemetry_input["tool_args"] = single_tool.tool_args
         span = await telemetry_recorder.start_span(
             name=single_tool.tool_name,
             kind=telemetry_shape["span_kind"],
@@ -418,6 +474,36 @@ class ToolBatchRunner:
             input=telemetry_input,
         )
         try:
+            governance_error = await self._authorize_single_tool(single_tool)
+            if governance_error is not None:
+                result = await self._governance_error_result(
+                    single_tool=single_tool,
+                    governance_error=governance_error,
+                    add_message_to_history=add_message_to_history,
+                    session_id=session_id,
+                )
+                await telemetry_recorder.emit_event(
+                    telemetry_shape["error_event"],
+                    actor=telemetry_shape["actor"],
+                    input=telemetry_input
+                    if telemetry_shape["single_event"]
+                    else None,
+                    output=result,
+                    error={
+                        "type": governance_error.__class__.__name__,
+                        "message": str(governance_error),
+                    },
+                )
+                await telemetry_recorder.end_span(
+                    span.span_id,
+                    status=SpanStatus.ERROR,
+                    output=result,
+                    error={
+                        "type": governance_error.__class__.__name__,
+                        "message": str(governance_error),
+                    },
+                )
+                return result
             if not telemetry_shape["single_event"]:
                 await telemetry_recorder.emit_event(
                     telemetry_shape["call_event"],
@@ -429,13 +515,22 @@ class ToolBatchRunner:
                 tool_args=single_tool.tool_args,
                 tool_name=single_tool.tool_name,
                 tool_call_id=single_tool.tool_call_id,
-                add_message_to_history=add_message_to_history,
+                add_message_to_history=_governed_history_writer(
+                    add_message_to_history,
+                    redact_args=self.governance_engine is not None,
+                ),
                 session_id=session_id,
+            )
+            if self.governance_engine is not None:
+                result = _redact_tool_result_args(result)
+            telemetry_result = _telemetry_tool_result(
+                result,
+                redact_args=self.governance_engine is not None,
             )
             if result.get("status") == "error":
                 event_kwargs = {
                     "actor": telemetry_shape["actor"],
-                    "output": result,
+                    "output": telemetry_result,
                     "error": {
                         "type": "ToolError",
                         "message": result.get("message") or "Tool returned error",
@@ -450,14 +545,17 @@ class ToolBatchRunner:
                 await telemetry_recorder.end_span(
                     span.span_id,
                     status=SpanStatus.ERROR,
-                    output=result,
+                    output=telemetry_result,
                     error={
                         "type": "ToolError",
                         "message": result.get("message") or "Tool returned error",
                     },
                 )
             else:
-                event_kwargs = {"actor": telemetry_shape["actor"], "output": result}
+                event_kwargs = {
+                    "actor": telemetry_shape["actor"],
+                    "output": telemetry_result,
+                }
                 if telemetry_shape["single_event"]:
                     event_kwargs["input"] = telemetry_input
                 await telemetry_recorder.emit_event(
@@ -467,7 +565,7 @@ class ToolBatchRunner:
                 await telemetry_recorder.end_span(
                     span.span_id,
                     status=SpanStatus.OK,
-                    output=result,
+                    output=telemetry_result,
                 )
             return result
         except Exception as exc:
@@ -490,6 +588,73 @@ class ToolBatchRunner:
                 error={"type": exc.__class__.__name__, "message": str(exc)},
             )
             raise
+
+    async def _authorize_single_tool(
+        self,
+        single_tool: ToolCallResult,
+    ) -> GovernanceError | None:
+        if self.governance_engine is None:
+            return None
+        if single_tool.tool_provider == "mcp":
+            return UngovernedCapabilityError(
+                "MCP governance is not implemented until the MCP enforcement phase.",
+                metadata={
+                    "tool": single_tool.tool_name,
+                    "tool_provider": single_tool.tool_provider,
+                    "tool_server": single_tool.tool_server,
+                    "reason_code": "ungoverned_capability",
+                },
+            )
+        try:
+            requests = tool_authority_requests(
+                tool_name=single_tool.tool_name,
+                tool_args=single_tool.tool_args,
+                tool_provider=single_tool.tool_provider,
+                tool_server=single_tool.tool_server,
+                actor=self.agent_name,
+            )
+            await self.governance_engine.authorize_all(requests)
+        except (GovernanceError, ValueError) as exc:
+            if isinstance(exc, GovernanceError):
+                return exc
+            return PolicyDeniedError(str(exc))
+        return None
+
+    async def _governance_error_result(
+        self,
+        *,
+        single_tool: ToolCallResult,
+        governance_error: GovernanceError,
+        add_message_to_history: Callable[[str, str, dict | None], Any],
+        session_id: str | None,
+    ) -> dict[str, Any]:
+        message = f"Governance denied tool execution: {governance_error}"
+        metadata = {
+            "tool_call_id": single_tool.tool_call_id,
+            "tool": single_tool.tool_name,
+            "args": "[REDACTED]",
+            "agent_name": self.agent_name,
+            "governance_error_code": getattr(
+                governance_error,
+                "code",
+                governance_error.__class__.__name__,
+            ),
+            "governance": getattr(governance_error, "metadata", {}),
+        }
+        await add_message_to_history(
+            role="tool",
+            content=message,
+            metadata=metadata,
+            session_id=session_id,
+        )
+        return {
+            "tool_name": single_tool.tool_name,
+            "args": {},
+            "status": "error",
+            "data": None,
+            "message": message,
+            "governance": metadata["governance"],
+        }
 
 
 def _tool_telemetry_shape(single_tool: ToolCallResult) -> dict[str, Any]:
@@ -570,3 +735,56 @@ def _artifact_tool_telemetry_shape(tool_name: str) -> dict[str, Any] | None:
         "single_event": True,
         "actor": TelemetryActor(type=ActorType.WORKSPACE, name=tool_name),
     }
+
+
+def _telemetry_tool_result(
+    result: dict[str, Any],
+    *,
+    redact_args: bool,
+) -> dict[str, Any]:
+    if not redact_args or "args" not in result:
+        return result
+    sanitized = dict(result)
+    sanitized["args"] = "[REDACTED]"
+    return sanitized
+
+
+def _redact_tool_result_args(result: dict[str, Any]) -> dict[str, Any]:
+    if "args" not in result:
+        return result
+    sanitized = dict(result)
+    sanitized["args"] = "[REDACTED]"
+    return sanitized
+
+
+def _redacted_args(tool_args: dict[str, Any]) -> dict[str, str]:
+    if not tool_args:
+        return {}
+    return {key: "[REDACTED]" for key in tool_args}
+
+
+def _governed_history_writer(
+    add_message_to_history: Callable[[str, str, dict | None], Any],
+    *,
+    redact_args: bool,
+) -> Callable[[str, str, dict | None], Any]:
+    if not redact_args:
+        return add_message_to_history
+
+    async def add_redacted_message(
+        role: str,
+        content: str,
+        metadata: dict | None = None,
+        session_id: str | None = None,
+    ) -> Any:
+        if metadata and "args" in metadata:
+            metadata = dict(metadata)
+            metadata["args"] = "[REDACTED]"
+        return await add_message_to_history(
+            role=role,
+            content=content,
+            metadata=metadata,
+            session_id=session_id,
+        )
+
+    return add_redacted_message

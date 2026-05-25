@@ -1,9 +1,18 @@
+import asyncio
 import json
 from datetime import timedelta
 
 import pytest
 
-from omnicoreagent.core.telemetry import TelemetryActor, TelemetryEvent
+from omnicoreagent.core.telemetry import (
+    ActorType,
+    InMemoryTelemetryStore,
+    TelemetryActor,
+    TelemetryEvent,
+    TelemetryRecorder,
+)
+from omnicoreagent.core.runtime.config import AgentConfig
+from omnicoreagent import OmniCoreAgent
 from omnicoreagent.governance import (
     ApprovalExpiredError,
     ApprovalRequiredError,
@@ -32,6 +41,10 @@ from omnicoreagent.governance import (
     load_policy_file,
     policy_from_mapping,
     policy_hash,
+    tool_authority_request,
+    tool_authority_requests,
+    tool_capability_descriptor,
+    tool_capability_name,
 )
 from omnicoreagent.governance.models import utc_now
 
@@ -53,6 +66,16 @@ class ExpiredApprovalResolver:
             approval_id=request.approval_id,
             resolved_by="expired",
             resolved_at=utc_now() + timedelta(seconds=10),
+        )
+
+
+class AsyncApprovalResolver:
+    async def resolve(self, request):
+        await asyncio.sleep(0)
+        return ApprovalResult(
+            approved=True,
+            approval_id=request.approval_id,
+            resolved_by="async-test",
         )
 
 
@@ -485,6 +508,108 @@ async def test_governance_engine_uses_approval_resolver_for_ask_decision():
 
 
 @pytest.mark.asyncio
+async def test_governance_engine_rechecks_budget_after_parallel_approvals():
+    policy = _policy()
+    policy.budget = {"max_requests": 1}
+    policy.__post_init__()
+    engine = GovernanceEngine(policy, approval_resolver=AsyncApprovalResolver())
+
+    results = await asyncio.gather(
+        engine.authorize(AuthorityRequest(capability="process.exec")),
+        engine.authorize(AuthorityRequest(capability="process.exec")),
+        return_exceptions=True,
+    )
+
+    allowed = [result for result in results if not isinstance(result, Exception)]
+    denied = [result for result in results if isinstance(result, BudgetExceededError)]
+    assert len(allowed) == 1
+    assert len(denied) == 1
+    assert policy.budget is not None
+    assert policy.budget.used_requests == 1
+
+
+@pytest.mark.asyncio
+async def test_governance_engine_authorize_all_does_not_consume_on_partial_denial():
+    policy = _policy()
+    policy.budget = {"max_requests": 2}
+    policy.__post_init__()
+    engine = GovernanceEngine(policy)
+
+    with pytest.raises(PolicyDeniedError):
+        await engine.authorize_all(
+            [
+                AuthorityRequest(capability="workspace.files.write"),
+                AuthorityRequest(capability="secret.read"),
+            ]
+        )
+
+    assert policy.budget is not None
+    assert policy.budget.used_requests == 0
+
+
+@pytest.mark.asyncio
+async def test_governance_engine_authorize_all_budget_denial_does_not_emit_allows():
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    await recorder.start_trace(
+        trace_id="trace-budget-batch-deny",
+        actor=TelemetryActor(type=ActorType.SYSTEM, name="governance-test"),
+    )
+    policy = _policy()
+    policy.budget = {"max_requests": 1}
+    policy.__post_init__()
+    engine = GovernanceEngine(policy, telemetry_recorder=recorder)
+
+    with pytest.raises(BudgetExceededError):
+        await engine.authorize_all(
+            [
+                AuthorityRequest(capability="workspace.files.read"),
+                AuthorityRequest(capability="workspace.files.write"),
+            ]
+        )
+    await recorder.end_trace()
+
+    trace = await store.get_trace("trace-budget-batch-deny")
+    assert trace is not None
+    event_types = [event.event_type for event in trace.events]
+    assert "policy_decision_deny" in event_types
+    assert "policy_decision_allow" not in event_types
+
+
+@pytest.mark.asyncio
+async def test_governance_engine_approved_batch_budget_denial_does_not_emit_allows():
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    await recorder.start_trace(
+        trace_id="trace-approved-budget-batch-deny",
+        actor=TelemetryActor(type=ActorType.SYSTEM, name="governance-test"),
+    )
+    policy = _policy()
+    policy.budget = {"max_requests": 1}
+    policy.__post_init__()
+    engine = GovernanceEngine(
+        policy,
+        approval_resolver=AsyncApprovalResolver(),
+        telemetry_recorder=recorder,
+    )
+
+    with pytest.raises(BudgetExceededError):
+        await engine.authorize_all(
+            [
+                AuthorityRequest(capability="process.exec"),
+                AuthorityRequest(capability="process.exec"),
+            ]
+        )
+    await recorder.end_trace()
+
+    trace = await store.get_trace("trace-approved-budget-batch-deny")
+    assert trace is not None
+    event_types = [event.event_type for event in trace.events]
+    assert "policy_decision_deny" in event_types
+    assert "policy_decision_allow" not in event_types
+
+
+@pytest.mark.asyncio
 async def test_governance_engine_blocks_static_high_risk_approval_by_default():
     engine = GovernanceEngine(
         _policy(),
@@ -671,3 +796,174 @@ def test_rule_conditions_separate_provider_from_execution_surface():
 
     assert decision.effect == PolicyEffect.ALLOW
     assert decision.matched_rule_ids == ["allow_memory_surface"]
+
+
+def test_tool_capability_descriptors_map_workspace_artifact_and_local_tools():
+    workspace = tool_capability_descriptor(
+        tool_name="write_file",
+        tool_provider="workspace",
+    )
+    artifact = tool_capability_descriptor(
+        tool_name="read_artifact",
+        tool_provider="artifact",
+    )
+    local = tool_capability_descriptor(tool_name="lookup_customer")
+
+    assert workspace.capability == "workspace.files.write"
+    assert workspace.execution_surface == "workspace"
+    assert workspace.risk_level == "medium"
+    assert artifact.capability == "workspace.artifacts.read"
+    assert artifact.execution_surface == "artifact"
+    assert local.capability == "tool.local.call"
+    assert local.execution_surface == "tool"
+
+
+def test_mcp_tool_capability_descriptor_is_untrusted_mcp_schema():
+    descriptor = tool_capability_descriptor(
+        tool_name="remote_search",
+        tool_provider="mcp",
+        tool_server="search",
+    )
+
+    assert descriptor.capability == "tool.mcp.call"
+    assert descriptor.descriptor_source.value == "mcp_schema"
+    assert descriptor.descriptor_trust.value == "untrusted"
+
+
+def test_tool_authority_request_preserves_workspace_target_path():
+    request = tool_authority_request(
+        tool_name="move_file",
+        tool_args={"old_path": "notes/a.md", "new_path": "notes/b.md"},
+        tool_provider="workspace",
+    )
+
+    assert request.capability == "workspace.files.move"
+    assert request.provider == "workspace"
+    assert request.target.path == "notes/a.md"
+    assert request.risk_level == "medium"
+
+
+def test_tool_authority_requests_include_move_source_and_destination():
+    requests = tool_authority_requests(
+        tool_name="move_file",
+        tool_args={"old_path": "./notes/a.md", "new_path": "archive/b.md"},
+        tool_provider="workspace",
+    )
+
+    assert [request.target.path for request in requests] == [
+        "notes/a.md",
+        "archive/b.md",
+    ]
+    assert [request.metadata["target_role"] for request in requests] == [
+        "source",
+        "destination",
+    ]
+
+
+def test_workspace_authority_request_normalizes_and_rejects_traversal():
+    request = tool_authority_request(
+        tool_name="read_file",
+        tool_args={"path": "./workspace/notes/a.md"},
+        tool_provider="workspace",
+    )
+    assert request.target.path == "notes/a.md"
+
+    with pytest.raises(ValueError):
+        tool_authority_request(
+            tool_name="read_file",
+            tool_args={"path": "notes/%2e%2e/secret.txt"},
+            tool_provider="workspace",
+        )
+
+
+def test_clear_files_uses_critical_clear_capability():
+    request = tool_authority_request(
+        tool_name="clear_files",
+        tool_args={},
+        tool_provider="workspace",
+    )
+
+    assert request.capability == "workspace.files.clear"
+    assert request.risk_level == "critical"
+
+
+def test_tool_capability_name_maps_mcp_descriptor_for_phase_three():
+    assert (
+        tool_capability_name(tool_name="remote_search", tool_provider="mcp")
+        == "tool.mcp.call"
+    )
+
+
+@pytest.mark.asyncio
+async def test_omnicoreagent_initializes_governance_engine_from_agent_config():
+    agent = OmniCoreAgent(
+        name="governed",
+        system_instruction="You are governed.",
+        model_config={"provider": "openai", "model": "gpt-4o", "api_key": "test"},
+        agent_config={
+            "guardrail_mode": "off",
+            "governance_config": {
+                "enabled": True,
+                "policy": {
+                    "name": "runtime-policy",
+                    "mode": "strict",
+                    "rules": {
+                        "allow": [
+                            {
+                                "rule_id": "allow_workspace",
+                                "capability": "workspace.files.*",
+                            }
+                        ]
+                    },
+                },
+            },
+        },
+    )
+
+    await agent.initialize()
+
+    assert agent.agent.governance_engine is not None
+    assert agent.agent.governance_engine.policy.name == "runtime-policy"
+
+
+@pytest.mark.parametrize(
+    "governance_config,error_match",
+    [
+        ("enabled", "governance_config must be a dict"),
+        ({"enabled": "true"}, "governance_config.enabled must be a boolean"),
+        (
+            {"allow_static_high_risk_approvals": "false"},
+            "allow_static_high_risk_approvals must be a boolean",
+        ),
+        (
+            {"policy": {}, "policy_path": "policy.json"},
+            "cannot set both policy and policy_path",
+        ),
+        ({"policy": "bad"}, "policy must be a dict or PolicyEnvelope"),
+        ({"policy_path": 123}, "policy_path must be a string or path-like"),
+        ({"enabeld": True}, "unknown keys: enabeld"),
+    ],
+)
+def test_governance_config_validation(governance_config, error_match):
+    with pytest.raises(ValueError, match=error_match):
+        OmniCoreAgent(
+            name="bad-governance",
+            system_instruction="You are governed.",
+            model_config={"provider": "openai", "model": "gpt-4o", "api_key": "test"},
+            agent_config={
+                "guardrail_mode": "off",
+                "governance_config": governance_config,
+            },
+        )
+
+
+def test_governance_config_preserves_runtime_approval_resolver_identity():
+    resolver = StaticApprovalResolver(approved=True)
+    config = AgentConfig(
+        governance_config={
+            "enabled": True,
+            "approval_resolver": resolver,
+        }
+    )
+
+    assert config.model_dump()["governance_config"]["approval_resolver"] is resolver

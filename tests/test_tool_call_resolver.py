@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
+from omnicoreagent.core.tools.local_tools_registry import Tool, ToolRegistry
 from omnicoreagent.core.tools.tool_action import ToolAction
 from omnicoreagent.core.tools.tool_call_resolver import ToolCallResolver
 from omnicoreagent.core.workspace.config import WorkspaceConfig
@@ -71,6 +71,80 @@ async def test_resolve_single_action_marks_builtin_workspace_tools(resolver, tmp
     assert isinstance(resolved, ToolCallResult)
     assert resolved.tool_name == "read_file"
     assert resolved.tool_provider == "workspace"
+
+
+@pytest.mark.asyncio
+async def test_resolve_single_action_does_not_trust_forged_workspace_marker(resolver):
+    registry = ToolRegistry()
+
+    @registry.register_tool(
+        name="fake_workspace_read",
+        inputSchema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+        description="A normal app tool that forges the old internal marker.",
+    )
+    async def fake_workspace_read(path: str):
+        return {"path": path}
+
+    setattr(fake_workspace_read, "_omnicoreagent_builtin_workspace_tool", True)
+
+    resolved = await resolver.resolve_single_action(
+        action=ToolAction(
+            tool_name="fake_workspace_read",
+            parameters={"path": "notes.md"},
+            raw={"tool": "fake_workspace_read", "parameters": {"path": "notes.md"}},
+        ),
+        sessions={},
+        mcp_tools=None,
+        local_tools=registry,
+    )
+
+    assert isinstance(resolved, ToolCallResult)
+    assert resolved.tool_name == "fake_workspace_read"
+    assert resolved.tool_provider == "local"
+
+
+@pytest.mark.asyncio
+async def test_resolve_single_action_does_not_trust_prebuilt_tool_provider_metadata(
+    resolver,
+):
+    registry = ToolRegistry()
+
+    async def fake_workspace_read(path: str):
+        return {"path": path}
+
+    registry.register(
+        Tool(
+            name="fake_workspace_read",
+            description="A normal app tool that forges internal provider metadata.",
+            inputSchema={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+            function=fake_workspace_read,
+        )
+    )
+    registry.get_tool("fake_workspace_read").provider = "workspace"
+    registry.get_tool("fake_workspace_read").internal_provider = True
+
+    resolved = await resolver.resolve_single_action(
+        action=ToolAction(
+            tool_name="fake_workspace_read",
+            parameters={"path": "notes.md"},
+            raw={"tool": "fake_workspace_read", "parameters": {"path": "notes.md"}},
+        ),
+        sessions={},
+        mcp_tools=None,
+        local_tools=registry,
+    )
+
+    assert isinstance(resolved, ToolCallResult)
+    assert resolved.tool_name == "fake_workspace_read"
+    assert resolved.tool_provider == "local"
 
 
 @pytest.mark.asyncio

@@ -68,6 +68,7 @@ class BaseReactAgent:
         tool_offload_config: dict = None,
         workspace_config: WorkspaceConfig | dict | None = None,
         guardrail: PromptInjectionGuard | None = None,
+        governance_engine: Any = None,
     ):
         self.agent_name = agent_name
         self.max_steps = max(max_steps, 5)
@@ -110,13 +111,17 @@ class BaseReactAgent:
             workspace_config=workspace_config,
         )
         self.guardrail = guardrail
+        self.governance_engine = governance_engine
         self.tool_observation_handler = ToolObservationHandler(
             agent_name=self.agent_name,
             tool_offloader=self.tool_offloader,
             guardrail=self.guardrail,
         )
         self.tool_call_resolver = ToolCallResolver(guardrail=self.guardrail)
-        self.tool_failure_handler = ToolFailureHandler(agent_name=self.agent_name)
+        self.tool_failure_handler = ToolFailureHandler(
+            agent_name=self.agent_name,
+            governance_enabled=self.governance_engine is not None,
+        )
         self.message_history_loader = AgentMessageHistoryLoader(
             agent_name=self.agent_name
         )
@@ -124,6 +129,7 @@ class BaseReactAgent:
         self.tool_batch_runner = ToolBatchRunner(
             agent_name=self.agent_name,
             tool_call_timeout=self.tool_call_timeout,
+            governance_engine=self.governance_engine,
         )
         self.tool_action_runner = AgentToolActionRunner(
             agent_name=self.agent_name,
