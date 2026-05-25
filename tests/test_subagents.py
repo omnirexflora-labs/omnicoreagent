@@ -9,6 +9,11 @@ import pytest
 from omnicoreagent import OmniCoreAgent
 from omnicoreagent.core.subagents import SubagentFactory, build_subagent_tools
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
+from omnicoreagent.core.workspace.config import WorkspaceConfig
+from omnicoreagent.core.workspace.tools import (
+    build_tool_registry_workspace_files,
+    validate_workspace_tool_name_conflicts,
+)
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.runtime.config import normalize_agent_config
 
@@ -103,6 +108,24 @@ class TestSubagentFactory:
         )
 
         assert factory._build_subagent_local_tools() is local_tools
+
+    def test_subagent_local_tools_preserves_internal_workspace_provider(
+        self, model_config, tmp_path
+    ):
+        local_tools = ToolRegistry()
+        build_tool_registry_workspace_files(
+            registry=local_tools,
+            workspace_config=WorkspaceConfig(workspace_dir=tmp_path / "workspace"),
+        )
+        factory = SubagentFactory(
+            base_model_config=model_config,
+            local_tools=local_tools,
+        )
+
+        child_tools = factory._build_subagent_local_tools()
+
+        assert child_tools.get_tool_provider("read_file") == "workspace"
+        validate_workspace_tool_name_conflicts(child_tools)
 
     @pytest.mark.asyncio
     async def test_run_subagent(self, factory):

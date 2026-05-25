@@ -52,18 +52,24 @@ def handle_stuck_state(
 class ToolFailureHandler:
     """Handle failed tool resolution and repeated tool-call loops."""
 
-    def __init__(self, agent_name: str):
+    def __init__(self, agent_name: str, governance_enabled: bool = False):
         self.agent_name = agent_name
+        self.governance_enabled = governance_enabled
 
     def build_validation_error_results(
         self,
         tool_errors: list[ToolError],
         fallback_message: str,
+        redact_args: bool = False,
     ) -> list[dict[str, Any]]:
         return [
             {
                 "tool_name": getattr(single_tool, "tool_name", "unknown"),
-                "args": getattr(single_tool, "tool_args", {}),
+                "args": (
+                    _redacted_tool_args(getattr(single_tool, "tool_args", {}))
+                    if redact_args
+                    else getattr(single_tool, "tool_args", {})
+                ),
                 "status": "error",
                 "data": None,
                 "message": getattr(single_tool, "observation", fallback_message),
@@ -84,25 +90,33 @@ class ToolFailureHandler:
         for single_tool in tool_errors:
             tool_name = getattr(single_tool, "tool_name", "unknown")
             tool_args = getattr(single_tool, "tool_args", {})
+            persisted_tool_args = (
+                _redacted_tool_args(tool_args) if self.governance_enabled else tool_args
+            )
             error_message = getattr(single_tool, "observation", obs_text)
 
             if telemetry_recorder is not None:
                 await telemetry_recorder.emit_event(
                     "tool_error",
                     actor=TelemetryActor(type=ActorType.TOOL, name=str(tool_name)),
-                    input={"tool_name": tool_name, "tool_args": tool_args},
+                    input={"tool_name": tool_name, "tool_args": persisted_tool_args},
                     error={"type": "ToolValidationError", "message": error_message},
                 )
             session_state.loop_detector.record_tool_call(
                 str(tool_name),
-                str(tool_args),
+                str(persisted_tool_args),
                 str(error_message),
             )
 
         tool_batch_name = ", ".join(
             [getattr(tool, "tool_name", "unknown") for tool in tool_errors]
         )
-        tool_batch_args = [getattr(tool, "tool_args", {}) for tool in tool_errors]
+        tool_batch_args = [
+            _redacted_tool_args(getattr(tool, "tool_args", {}))
+            if self.governance_enabled
+            else getattr(tool, "tool_args", {})
+            for tool in tool_errors
+        ]
 
         logger.error(
             f"Tool call validation failed for: {tool_batch_name} "
@@ -116,6 +130,7 @@ class ToolFailureHandler:
             self.build_validation_error_results(
                 tool_errors=tool_errors,
                 fallback_message=obs_text,
+                redact_args=self.governance_enabled,
             ),
         )
 
@@ -182,3 +197,9 @@ class ToolFailureHandler:
 
             session_state.state = AgentState.STUCK
             session_state.loop_detector.reset(tool_name)
+
+
+def _redacted_tool_args(tool_args: dict[str, Any]) -> dict[str, str]:
+    if not tool_args:
+        return {}
+    return {key: "[REDACTED]" for key in tool_args}

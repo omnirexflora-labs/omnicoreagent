@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from enum import Enum
+from os import PathLike
 from typing import Any
 import uuid
 
@@ -96,6 +97,21 @@ def _default_tool_offload() -> dict[str, Any]:
     }
 
 
+def _default_governance_config() -> dict[str, Any]:
+    return {
+        "enabled": False,
+        "profile": "interactive-dev",
+        "policy": None,
+        "policy_path": None,
+        "project_root": None,
+        "approval_resolver": None,
+        "allow_static_high_risk_approvals": False,
+    }
+
+
+GOVERNANCE_CONFIG_KEYS = frozenset(_default_governance_config())
+
+
 @dataclass
 class AgentConfig:
     agent_name: str = "OmniCoreAgent"
@@ -115,6 +131,7 @@ class AgentConfig:
         default_factory=_default_context_management
     )
     tool_offload: dict[str, Any] = field(default_factory=_default_tool_offload)
+    governance_config: dict[str, Any] = field(default_factory=_default_governance_config)
     workspace_config: WorkspaceConfig | dict[str, Any] | None = None
 
     def __post_init__(self):
@@ -128,6 +145,16 @@ class AgentConfig:
             _default_context_management(), self.context_management
         )
         self.tool_offload = _merge_defaults(_default_tool_offload(), self.tool_offload)
+        if not isinstance(self.governance_config, dict):
+            raise ValueError("governance_config must be a dict")
+        _validate_unknown_keys(
+            "governance_config",
+            self.governance_config,
+            GOVERNANCE_CONFIG_KEYS,
+        )
+        self.governance_config = _merge_defaults(
+            _default_governance_config(), self.governance_config
+        )
         if self.workspace_config is not None:
             self.workspace_config = resolve_workspace_config(self.workspace_config)
 
@@ -137,12 +164,22 @@ class AgentConfig:
         )
         _validate_context_management(self.context_management)
         _validate_tool_offload(self.tool_offload)
+        _validate_governance_config(self.governance_config)
 
         if self.enable_subagents:
             self.enable_workspace_files = True
 
     def model_dump(self) -> dict[str, Any]:
-        return asdict(self)
+        data = {}
+        for item in fields(self):
+            value = getattr(self, item.name)
+            if item.name == "governance_config":
+                data[item.name] = dict(value)
+            elif is_dataclass(value):
+                data[item.name] = asdict(value)
+            else:
+                data[item.name] = value
+        return data
 
     def model_copy(self, *, update: dict[str, Any] | None = None) -> AgentConfig:
         return replace(self, **(update or {}))
@@ -219,6 +256,18 @@ def _merge_defaults(defaults: dict[str, Any], value: dict[str, Any] | None) -> d
     return {**defaults, **value}
 
 
+def _validate_unknown_keys(
+    name: str,
+    value: dict[str, Any],
+    allowed_keys: frozenset[str],
+) -> None:
+    unknown = set(value) - allowed_keys
+    if unknown:
+        allowed = ", ".join(sorted(allowed_keys))
+        found = ", ".join(sorted(unknown))
+        raise ValueError(f"{name} has unknown keys: {found}. Allowed keys: {allowed}")
+
+
 def _validate_range(name: str, value: int, *, minimum: int, maximum: int):
     if value < minimum or value > maximum:
         raise ValueError(f"{name} must be between {minimum} and {maximum}, got {value}")
@@ -288,3 +337,36 @@ def _validate_tool_offload(value: dict[str, Any]):
         raise ValueError(
             f"tool_offload.retention_days must be non-negative, got {retention_days}"
         )
+
+
+def _validate_governance_config(value: dict[str, Any]):
+    if not isinstance(value, dict):
+        raise ValueError("governance_config must be a dict")
+    if not isinstance(value.get("enabled", False), bool):
+        raise ValueError("governance_config.enabled must be a boolean")
+    if not isinstance(value.get("allow_static_high_risk_approvals", False), bool):
+        raise ValueError(
+            "governance_config.allow_static_high_risk_approvals must be a boolean"
+        )
+    profile = value.get("profile", "interactive-dev")
+    if profile not in {"permissive-dev", "interactive-dev", "strict-production"}:
+        raise ValueError(
+            "governance_config.profile must be one of "
+            "{'permissive-dev', 'interactive-dev', 'strict-production'}"
+        )
+    if value.get("policy") is not None and value.get("policy_path") is not None:
+        raise ValueError("governance_config cannot set both policy and policy_path")
+    policy = value.get("policy")
+    if policy is not None and not isinstance(policy, dict):
+        try:
+            from omnicoreagent.governance import PolicyEnvelope
+
+            valid_policy = isinstance(policy, PolicyEnvelope)
+        except Exception:
+            valid_policy = False
+        if not valid_policy:
+            raise ValueError("governance_config.policy must be a dict or PolicyEnvelope")
+    for key in ("policy_path", "project_root"):
+        path_value = value.get(key)
+        if path_value is not None and not isinstance(path_value, (str, PathLike)):
+            raise ValueError(f"governance_config.{key} must be a string or path-like")

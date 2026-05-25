@@ -20,6 +20,8 @@ def normalize_workspace_path(
         return ""
 
     decoded = urllib.parse.unquote(str(path)).strip().lstrip("/")
+    while decoded.startswith("./"):
+        decoded = decoded[2:]
     for prefix in strip_prefixes:
         clean_prefix = prefix.strip("/")
         if decoded == clean_prefix:

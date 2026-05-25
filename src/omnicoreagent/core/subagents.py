@@ -128,6 +128,9 @@ When you have completed the task:
             if tool.name == "spawn_subagents":
                 continue
             registry.register(tool)
+            provider = self.local_tools.get_tool_provider(tool.name)
+            if provider in {"workspace", "artifact"}:
+                registry.mark_internal_tool_provider(tool.name, provider)
         return registry
 
     def create_subagent(

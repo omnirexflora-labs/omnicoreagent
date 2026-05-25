@@ -83,6 +83,34 @@ def create_react_agent(
     agent_settings: Any,
     guardrail: Any,
     guardrail_mode: str,
+    governance_engine: Any = None,
 ) -> Any:
     tool_guardrail = guardrail if guardrail_mode == "full" else None
-    return runtime("ReactAgent")(config=agent_settings, guardrail=tool_guardrail)
+    return runtime("ReactAgent")(
+        config=agent_settings,
+        guardrail=tool_guardrail,
+        governance_engine=governance_engine,
+    )
+
+
+def build_governance_engine(agent_config: dict[str, Any], telemetry_recorder: Any = None) -> Any:
+    governance_config = agent_config.get("governance_config") or {}
+    if not governance_config.get("enabled", False):
+        return None
+
+    from omnicoreagent.governance import GovernanceEngine, load_policy
+
+    policy = load_policy(
+        policy=governance_config.get("policy"),
+        explicit_path=governance_config.get("policy_path"),
+        project_root=governance_config.get("project_root"),
+        profile=governance_config.get("profile", "interactive-dev"),
+    )
+    return GovernanceEngine(
+        policy,
+        approval_resolver=governance_config.get("approval_resolver"),
+        telemetry_recorder=telemetry_recorder,
+        allow_static_high_risk_approvals=governance_config.get(
+            "allow_static_high_risk_approvals", False
+        ),
+    )

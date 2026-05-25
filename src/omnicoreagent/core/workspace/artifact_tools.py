@@ -16,6 +16,10 @@ from omnicoreagent.core.workspace.artifacts import ToolResponseOffloader
 ARTIFACT_TOOL_MARKER = "_omnicoreagent_builtin_artifact_tool"
 
 
+def _mark_artifact_tool(registry: ToolRegistry, name: str) -> None:
+    registry.mark_internal_tool_provider(name, "artifact")
+
+
 def build_tool_registry_artifact_tool(
     offloader: ToolResponseOffloader, registry: ToolRegistry
 ) -> ToolRegistry:
@@ -60,6 +64,7 @@ def build_tool_registry_artifact_tool(
             }
         return content
     setattr(read_artifact, ARTIFACT_TOOL_MARKER, True)
+    _mark_artifact_tool(registry, "read_artifact")
 
     @registry.register_tool(
         name="tail_artifact",
@@ -96,6 +101,7 @@ def build_tool_registry_artifact_tool(
             }
         return content
     setattr(tail_artifact, ARTIFACT_TOOL_MARKER, True)
+    _mark_artifact_tool(registry, "tail_artifact")
 
     @registry.register_tool(
         name="search_artifact",
@@ -132,6 +138,7 @@ def build_tool_registry_artifact_tool(
             }
         return content
     setattr(search_artifact, ARTIFACT_TOOL_MARKER, True)
+    _mark_artifact_tool(registry, "search_artifact")
 
     @registry.register_tool(
         name="list_artifacts",
@@ -164,5 +171,6 @@ def build_tool_registry_artifact_tool(
 
         return "\n".join(lines)
     setattr(list_artifacts, ARTIFACT_TOOL_MARKER, True)
+    _mark_artifact_tool(registry, "list_artifacts")
 
     return registry

@@ -120,11 +120,7 @@ def _register_workspace_tool(
     function: Callable[..., Any],
 ) -> None:
     existing = registry.get_tool(name)
-    if existing and not getattr(
-        existing.function,
-        WORKSPACE_TOOL_MARKER,
-        False,
-    ):
+    if existing and registry.get_tool_provider(name) != "workspace":
         raise ValueError(
             f"Tool name conflict: '{name}' is reserved for built-in workspace tools "
             "when enable_workspace_files=True. Rename the app tool or disable "
@@ -137,6 +133,9 @@ def _register_workspace_tool(
         description=description,
         inputSchema=inputSchema,
     )(function)
+    registered = registry.get_tool(name)
+    if registered is not None:
+        registry.mark_internal_tool_provider(name, "workspace")
 
 
 def build_tool_registry_workspace_files(
@@ -450,7 +449,7 @@ def validate_workspace_tool_name_conflicts(registry: ToolRegistry) -> None:
     conflicts = []
     for name in sorted(WORKSPACE_COMMAND_TOOL_NAMES):
         existing = registry.get_tool(name)
-        if existing and not getattr(existing.function, WORKSPACE_TOOL_MARKER, False):
+        if existing and registry.get_tool_provider(name) != "workspace":
             conflicts.append(name)
 
     if conflicts:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 
 from omnicoreagent.core.telemetry import TelemetryRecorder
@@ -47,6 +48,7 @@ class GovernanceEngine:
         self.approval_resolver = approval_resolver
         self.telemetry_recorder = telemetry_recorder
         self.allow_static_high_risk_approvals = allow_static_high_risk_approvals
+        self._budget_lock = asyncio.Lock()
 
     async def evaluate(self, request: AuthorityRequest) -> PolicyDecision:
         await emit_policy_request(self.telemetry_recorder, request)
@@ -76,8 +78,75 @@ class GovernanceEngine:
         return decision
 
     async def authorize(self, request: AuthorityRequest) -> PolicyDecision:
-        decision = await self.evaluate(request)
-        if decision.effect == PolicyEffect.DENY:
+        decisions = await self.authorize_all([request])
+        return decisions[0]
+
+    async def authorize_all(
+        self,
+        requests: list[AuthorityRequest],
+    ) -> list[PolicyDecision]:
+        if not requests:
+            return []
+
+        async with self._budget_lock:
+            budget_decision = self._budget_exceeded_decision(requests)
+            if budget_decision is not None:
+                await emit_policy_decision(self.telemetry_recorder, budget_decision)
+                raise BudgetExceededError(
+                    budget_decision.reason,
+                    metadata=_decision_metadata(budget_decision),
+                )
+            decisions = [await self.evaluate(request) for request in requests]
+            self._raise_first_denied(decisions)
+            for decision in decisions:
+                if decision.constraints.sandbox_required:
+                    raise SandboxRequiredError(
+                        "Policy requires routing through the sandbox execution boundary.",
+                        metadata=_decision_metadata(
+                            decision,
+                            reason_code=ReasonCode.SANDBOX_REQUIRED,
+                        ),
+                    )
+
+            ask_indexes = [
+                index
+                for index, decision in enumerate(decisions)
+                if decision.effect == PolicyEffect.ASK
+            ]
+            if not ask_indexes:
+                await self._consume_budget_or_raise_many(requests)
+                return decisions
+
+        for index in ask_indexes:
+            decisions[index] = await self._resolve_approval(
+                requests[index],
+                decisions[index],
+                emit_decision=False,
+            )
+
+        async with self._budget_lock:
+            for decision in decisions:
+                if decision.constraints.sandbox_required:
+                    raise SandboxRequiredError(
+                        "Policy requires routing through the sandbox execution boundary.",
+                        metadata=_decision_metadata(
+                            decision,
+                            reason_code=ReasonCode.SANDBOX_REQUIRED,
+                        ),
+                    )
+            await self._consume_budget_or_raise_many(requests)
+            for index in ask_indexes:
+                await emit_policy_decision(
+                    self.telemetry_recorder,
+                    decisions[index],
+                    strict=decisions[index].constraints.strict_telemetry,
+                )
+        return decisions
+
+    def _raise_first_denied(self, decisions: list[PolicyDecision]) -> None:
+        for decision in decisions:
+            if decision.effect != PolicyEffect.DENY:
+                continue
             if decision.reason_code == ReasonCode.BUDGET_EXCEEDED:
                 raise BudgetExceededError(
                     decision.reason,
@@ -89,23 +158,13 @@ class GovernanceEngine:
                     metadata=_decision_metadata(decision),
                 )
             raise PolicyDeniedError(decision.reason, metadata=_decision_metadata(decision))
-        if decision.effect == PolicyEffect.ASK:
-            decision = await self._resolve_approval(request, decision)
-        if decision.constraints.sandbox_required:
-            raise SandboxRequiredError(
-                "Policy requires routing through the sandbox execution boundary.",
-                metadata=_decision_metadata(
-                    decision,
-                    reason_code=ReasonCode.SANDBOX_REQUIRED,
-                ),
-            )
-        self._consume_budget(request)
-        return decision
 
     async def _resolve_approval(
         self,
         request: AuthorityRequest,
         decision: PolicyDecision,
+        *,
+        emit_decision: bool = True,
     ) -> PolicyDecision:
         approval = ApprovalRequest(
             request_id=request.request_id,
@@ -164,11 +223,12 @@ class GovernanceEngine:
         decision.approval_id = result.approval_id
         decision.reason_code = ReasonCode.MATCHED_ALLOW
         decision.reason = result.reason or "Approved by resolver."
-        await emit_policy_decision(
-            self.telemetry_recorder,
-            decision,
-            strict=decision.constraints.strict_telemetry,
-        )
+        if emit_decision:
+            await emit_policy_decision(
+                self.telemetry_recorder,
+                decision,
+                strict=decision.constraints.strict_telemetry,
+            )
         return decision
 
     def _consume_budget(self, request: AuthorityRequest) -> None:
@@ -177,6 +237,59 @@ class GovernanceEngine:
             return
         budget.used_requests += 1
         budget.used_cost += request.budget_cost
+
+    async def _consume_budget_or_raise(self, request: AuthorityRequest) -> None:
+        await self._consume_budget_or_raise_many([request])
+
+    async def _consume_budget_or_raise_many(
+        self,
+        requests: list[AuthorityRequest],
+    ) -> None:
+        decision = self._budget_exceeded_decision(requests)
+        if decision is not None:
+            await emit_policy_decision(self.telemetry_recorder, decision)
+            raise BudgetExceededError(
+                decision.reason,
+                metadata=_decision_metadata(decision),
+            )
+        for request in requests:
+            self._consume_budget(request)
+
+    def _budget_exceeded_decision(
+        self,
+        requests: list[AuthorityRequest],
+    ) -> PolicyDecision | None:
+        request = requests[0]
+        budget = self.policy.budget
+        if budget is None:
+            return None
+        request_count = len(requests)
+        budget_cost = sum(item.budget_cost for item in requests)
+        if (
+            budget.max_requests is not None
+            and budget.used_requests + request_count > budget.max_requests
+        ):
+            return PolicyDecision(
+                effect=PolicyEffect.DENY,
+                request_id=request.request_id,
+                policy_id=self.policy.policy_id,
+                policy_hash=self.policy.provenance.policy_hash,
+                reason_code=ReasonCode.BUDGET_EXCEEDED,
+                reason="Policy request budget exceeded.",
+            )
+        if (
+            budget.max_cost is not None
+            and budget.used_cost + budget_cost > budget.max_cost
+        ):
+            return PolicyDecision(
+                effect=PolicyEffect.DENY,
+                request_id=request.request_id,
+                policy_id=self.policy.policy_id,
+                policy_hash=self.policy.provenance.policy_hash,
+                reason_code=ReasonCode.BUDGET_EXCEEDED,
+                reason="Policy cost budget exceeded.",
+            )
+        return None
 
 
 def _decision_metadata(

@@ -61,6 +61,30 @@ async def test_handle_validation_error_records_loop(handler, session_state):
         }
     ]
 
+
+@pytest.mark.asyncio
+async def test_handle_validation_error_redacts_args_when_governed(session_state):
+    handler = ToolFailureHandler(agent_name="test_agent", governance_enabled=True)
+
+    (
+        _tool_batch_name,
+        tool_batch_args,
+        _obs_text,
+        results,
+    ) = await handler.handle_validation_error(
+        tool_error=ToolError(
+            observation="The tool named 'missing_tool' does not exist.",
+            tool_name="missing_tool",
+            tool_args={"api_key": "secret", "query": "customer"},
+        ),
+        session_state=session_state,
+        session_id="governed-validation-error",
+    )
+
+    assert tool_batch_args == [{"api_key": "[REDACTED]", "query": "[REDACTED]"}]
+    assert results[0]["args"] == {"api_key": "[REDACTED]", "query": "[REDACTED]"}
+
+
 @pytest.mark.asyncio
 async def test_handle_loop_state_marks_session_stuck(handler, session_state):
     session_state.messages = [Message(role="system", content="system")]

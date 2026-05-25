@@ -113,6 +113,7 @@ __all__ = [
     "SandboxRequiredError",
     "BudgetExceededError",
     "UnknownCapabilityError",
+    "UngovernedCapabilityError",
     "build_default_policy",
     "attach_policy_hash",
     "canonical_policy_payload",
@@ -121,6 +122,10 @@ __all__ = [
     "load_policy_file",
     "policy_from_mapping",
     "policy_hash",
+    "tool_authority_request",
+    "tool_authority_requests",
+    "tool_capability_descriptor",
+    "tool_capability_name",
 ]
 
 _EXPORTS = {
@@ -239,6 +244,10 @@ _EXPORTS = {
     "SandboxRequiredError": ("omnicoreagent.governance", "SandboxRequiredError"),
     "BudgetExceededError": ("omnicoreagent.governance", "BudgetExceededError"),
     "UnknownCapabilityError": ("omnicoreagent.governance", "UnknownCapabilityError"),
+    "UngovernedCapabilityError": (
+        "omnicoreagent.governance",
+        "UngovernedCapabilityError",
+    ),
     "build_default_policy": ("omnicoreagent.governance", "build_default_policy"),
     "attach_policy_hash": ("omnicoreagent.governance", "attach_policy_hash"),
     "canonical_policy_payload": ("omnicoreagent.governance", "canonical_policy_payload"),
@@ -247,6 +256,13 @@ _EXPORTS = {
     "load_policy_file": ("omnicoreagent.governance", "load_policy_file"),
     "policy_from_mapping": ("omnicoreagent.governance", "policy_from_mapping"),
     "policy_hash": ("omnicoreagent.governance", "policy_hash"),
+    "tool_authority_request": ("omnicoreagent.governance", "tool_authority_request"),
+    "tool_authority_requests": ("omnicoreagent.governance", "tool_authority_requests"),
+    "tool_capability_descriptor": (
+        "omnicoreagent.governance",
+        "tool_capability_descriptor",
+    ),
+    "tool_capability_name": ("omnicoreagent.governance", "tool_capability_name"),
 }
 
 _OPTIONAL_EXPORTS = {

@@ -11,7 +11,10 @@ if TYPE_CHECKING:
 
 class ReactAgent(BaseReactAgent):
     def __init__(
-        self, config: AgentConfig, guardrail: PromptInjectionGuard | None = None
+        self,
+        config: AgentConfig,
+        guardrail: PromptInjectionGuard | None = None,
+        governance_engine=None,
     ):
         super().__init__(
             agent_name=config.agent_name,
@@ -27,4 +30,5 @@ class ReactAgent(BaseReactAgent):
             tool_offload_config=getattr(config, "tool_offload", None),
             workspace_config=config.workspace_config,
             guardrail=guardrail,
+            governance_engine=governance_engine,
         )
