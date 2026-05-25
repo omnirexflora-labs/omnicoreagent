@@ -150,6 +150,23 @@ FOUNDATION_EVENT_TYPES = frozenset(
         "runtime_error",
         "uncaught_exception",
         "telemetry_error",
+        "policy_request_created",
+        "policy_decision_allow",
+        "policy_decision_ask",
+        "policy_decision_deny",
+        "approval_request_created",
+        "approval_resolved",
+        "sandbox_session_created",
+        "sandbox_exec_started",
+        "sandbox_exec_completed",
+        "sandbox_exec_failed",
+        "policy_violation",
+        "secret_access_denied",
+        "secret_access_brokered",
+        "network_access_denied",
+        "network_access_allowed",
+        "filesystem_access_denied",
+        "filesystem_access_allowed",
     }
 )
 
