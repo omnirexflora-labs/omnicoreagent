@@ -79,6 +79,19 @@ class AsyncApprovalResolver:
         )
 
 
+class RecordingApprovalResolver:
+    def __init__(self):
+        self.requests = []
+
+    async def resolve(self, request):
+        self.requests.append(request)
+        return ApprovalResult(
+            approved=True,
+            approval_id=request.approval_id,
+            resolved_by="recording-test",
+        )
+
+
 def _policy(*, mode=PolicyMode.STRICT):
     return policy_from_mapping(
         {
@@ -505,6 +518,39 @@ async def test_governance_engine_uses_approval_resolver_for_ask_decision():
     assert decision.effect == PolicyEffect.ALLOW
     assert decision.approval_id is not None
     assert decision.reason == "approved in test"
+
+
+@pytest.mark.asyncio
+async def test_governance_approval_request_preserves_authority_context():
+    resolver = RecordingApprovalResolver()
+    engine = GovernanceEngine(
+        build_default_policy("interactive-dev"),
+        approval_resolver=resolver,
+    )
+
+    decision = await engine.authorize(
+        AuthorityRequest(
+            capability="tool.mcp.call",
+            actor="agent",
+            provider="mcp",
+            execution_surface="mcp",
+            target={"tool_name": "search_docs", "mcp_server": "docs-server"},
+            risk_level="low",
+            method="call_tool",
+            mcp_server="docs-server",
+            metadata={"tool_name": "search_docs"},
+        )
+    )
+
+    assert decision.effect == PolicyEffect.ALLOW
+    approval_request = resolver.requests[0]
+    assert approval_request.capability == "tool.mcp.call"
+    assert approval_request.provider == "mcp"
+    assert approval_request.execution_surface == "mcp"
+    assert approval_request.mcp_server == "docs-server"
+    assert approval_request.target.tool_name == "search_docs"
+    assert approval_request.target.mcp_server == "docs-server"
+    assert approval_request.metadata["tool_name"] == "search_docs"
 
 
 @pytest.mark.asyncio

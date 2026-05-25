@@ -12,6 +12,26 @@ from mcp.client.streamable_http import streamable_http_client
 
 from omnicoreagent.core.logging import logger
 
+STDIO_ENV_ALLOWLIST = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "NODE_PATH",
+    }
+)
+SUPPORTED_TRANSPORTS = frozenset({"stdio", "sse", "streamable_http"})
+
 
 async def open_server_transport(
     *,
@@ -20,8 +40,7 @@ async def open_server_transport(
     oauth_auth: Any = None,
     debug: bool = False,
 ) -> tuple[Any, Any, str]:
-    transport_type = server.get("transport_type", "stdio")
-    normalized_transport = transport_type.lower()
+    normalized_transport = normalize_transport_type(server)
 
     if normalized_transport == "sse":
         return await _open_sse_transport(
@@ -39,7 +58,20 @@ async def open_server_transport(
             debug=debug,
         )
 
-    return await _open_stdio_transport(stack=stack, server=server)
+    if normalized_transport == "stdio":
+        return await _open_stdio_transport(stack=stack, server=server)
+
+    raise ValueError(f"Unsupported MCP transport_type: {normalized_transport}")
+
+
+def normalize_transport_type(server: dict[str, Any]) -> str:
+    transport = str(server.get("transport_type", "stdio")).lower()
+    if transport not in SUPPORTED_TRANSPORTS:
+        supported = ", ".join(sorted(SUPPORTED_TRANSPORTS))
+        raise ValueError(
+            f"Unsupported MCP transport_type: {transport}. Supported: {supported}"
+        )
+    return transport
 
 
 async def _open_sse_transport(
@@ -103,13 +135,24 @@ async def _open_stdio_transport(
     stack: AsyncExitStack,
     server: dict[str, Any],
 ) -> tuple[Any, Any, str]:
-    env = {**os.environ, **server["env"]} if server.get("env") else None
     server_params = StdioServerParameters(
         command=server["command"],
         args=server["args"],
-        env=env,
+        env=build_stdio_env(server),
     )
     read_stream, write_stream = await stack.enter_async_context(
         stdio_client(server_params)
     )
     return read_stream, write_stream, "stdio"
+
+
+def build_stdio_env(server: dict[str, Any]) -> dict[str, str] | None:
+    """Return a scrubbed stdio env plus explicit app-owned overrides."""
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key in STDIO_ENV_ALLOWLIST or key.startswith("LC_")
+    }
+    explicit_env = server.get("env") or {}
+    env.update({str(key): str(value) for key, value in explicit_env.items()})
+    return env

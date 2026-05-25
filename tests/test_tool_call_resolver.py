@@ -177,6 +177,29 @@ async def test_resolve_single_action_uses_mcp_tools_before_local(resolver):
 
 
 @pytest.mark.asyncio
+async def test_resolve_single_action_rejects_ambiguous_mcp_tool_names(resolver):
+    resolved = await resolver.resolve_single_action(
+        action=ToolAction(
+            tool_name="search",
+            parameters={"query": "runtime"},
+            raw={"tool": "search", "parameters": {"query": "runtime"}},
+        ),
+        sessions={
+            "docs": {"session": object()},
+            "tickets": {"session": object()},
+        },
+        mcp_tools={
+            "docs": [SimpleNamespace(name="search")],
+            "tickets": [SimpleNamespace(name="search")],
+        },
+        local_tools=None,
+    )
+
+    assert isinstance(resolved, ToolError)
+    assert "available on multiple servers" in resolved.observation
+
+
+@pytest.mark.asyncio
 async def test_resolve_single_action_rejects_tool_call_to_sub_agent(resolver):
     sub_agent = SimpleNamespace(name="research_agent")
 

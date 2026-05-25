@@ -35,6 +35,7 @@ def create_llm_runtime(
     mcp_tools: list[dict[str, Any]],
     model_config: dict[str, Any],
     debug: bool,
+    governance_engine: Any = None,
 ) -> tuple[Any, Any]:
     if not mcp_tools:
         llm_connection = runtime("LLMConnection")(
@@ -49,6 +50,7 @@ def create_llm_runtime(
         servers=mcp_tools,
         model_config=model_config,
         api_key=model_config.get("api_key"),
+        governance_engine=governance_engine,
         debug=debug,
     )
     return mcp_client, mcp_client.llm_connection

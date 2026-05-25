@@ -171,12 +171,21 @@ class GovernanceEngine:
             decision_id=decision.decision_id,
             capability=request.capability,
             actor=request.actor,
+            target=request.target,
+            provider=request.provider,
+            execution_surface=request.execution_surface,
+            risk_level=request.risk_level,
+            data_classes=list(request.data_classes),
+            method=request.method,
+            host=request.host,
+            mcp_server=request.mcp_server,
             reason=decision.reason,
             expires_at=(
                 utc_now() + timedelta(seconds=decision.constraints.approval_expires_seconds)
                 if decision.constraints.approval_expires_seconds is not None
                 else None
             ),
+            metadata=dict(request.metadata),
         )
         if self.approval_resolver is None:
             decision.approval_id = approval.approval_id

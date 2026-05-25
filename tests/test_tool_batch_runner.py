@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+from types import SimpleNamespace
 
 from omnicoreagent.core.telemetry import (
     ActorType,
@@ -21,7 +22,11 @@ from omnicoreagent.core.workspace.config import WorkspaceConfig
 from omnicoreagent.core.workspace.tools import build_tool_registry_workspace_files
 from omnicoreagent.core.types import AgentState, SessionState, ToolCallResult
 from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
-from omnicoreagent.governance import GovernanceEngine, policy_from_mapping
+from omnicoreagent.governance import (
+    GovernanceEngine,
+    build_default_policy,
+    policy_from_mapping,
+)
 from omnicoreagent.governance.models import PolicyBudget
 
 
@@ -134,6 +139,37 @@ def _allow_workspace_policy():
                         "capability": "workspace.artifacts.*",
                     },
                 ]
+            },
+        }
+    )
+
+
+def _mcp_policy():
+    return policy_from_mapping(
+        {
+            "name": "mcp-policy",
+            "mode": "strict",
+            "rules": {
+                "deny": [
+                    {
+                        "rule_id": "deny_destructive_docs",
+                        "capability": "tool.mcp.call",
+                        "target": {
+                            "mcp_server": "docs-server",
+                            "tool_name": "delete_docs",
+                        },
+                    }
+                ],
+                "allow": [
+                    {
+                        "rule_id": "allow_docs_search",
+                        "capability": "tool.mcp.call",
+                        "target": {
+                            "mcp_server": "docs-server",
+                            "tool_name": "search_docs",
+                        },
+                    }
+                ],
             },
         }
     )
@@ -471,7 +507,7 @@ async def test_governance_allows_workspace_read(session_state):
 
 
 @pytest.mark.asyncio
-async def test_governance_fails_closed_for_mcp_until_phase_three(session_state):
+async def test_governance_requires_policy_for_mcp_tool(session_state):
     executor = CountingExecutor()
     runner = ToolBatchRunner(
         agent_name="test_agent",
@@ -515,9 +551,217 @@ async def test_governance_fails_closed_for_mcp_until_phase_three(session_state):
 
     assert executor.calls == 0
     assert tools_results[0]["status"] == "error"
-    assert "MCP governance is not implemented" in obs_text
+    assert "Unknown capability denied" in obs_text
     assert history[0]["metadata"]["args"] == "[REDACTED]"
-    assert history[0]["metadata"]["governance_error_code"] == "ungoverned_capability"
+    assert history[0]["metadata"]["governance_error_code"] == "unknown_capability"
+
+
+@pytest.mark.asyncio
+async def test_governance_interactive_default_requires_mcp_approval(session_state):
+    executor = CountingExecutor()
+    runner = ToolBatchRunner(
+        agent_name="test_agent",
+        tool_call_timeout=10,
+        governance_engine=GovernanceEngine(build_default_policy("interactive-dev")),
+    )
+    history = []
+    tool_calls = [
+        ToolCallResult(
+            tool_executor=executor,
+            tool_name="remote_search",
+            tool_args={"query": "docs"},
+            tool_call_id="tool-call-mcp-approval",
+            tool_provider="mcp",
+            tool_server="search",
+        )
+    ]
+
+    async def add_message_to_history(role, content, metadata=None, session_id=None):
+        history.append({"role": role, "content": content, "metadata": metadata or {}})
+
+    async def parse_tool_observation(raw_output):
+        return raw_output
+
+    def build_tool_results_observation(
+        tool_call_results, tools_results, session_state, session_id
+    ):
+        return tools_results[0]["message"]
+
+    obs_text, tools_results = await runner.execute(
+        tool_call_results=tool_calls,
+        session_state=session_state,
+        add_message_to_history=add_message_to_history,
+        session_id="governed-mcp-approval",
+        telemetry_recorder=None,
+        tool_batch_name="remote_search",
+        tool_batch_args=[{"query": "docs"}],
+        parse_tool_observation=parse_tool_observation,
+        build_tool_results_observation=build_tool_results_observation,
+    )
+
+    assert executor.calls == 0
+    assert tools_results[0]["status"] == "error"
+    assert "Matched ask policy rule" in obs_text
+    assert history[0]["metadata"]["governance_error_code"] == "approval_required"
+
+
+@pytest.mark.asyncio
+async def test_governance_allows_specific_mcp_tool(session_state):
+    executor = CountingExecutor()
+    runner = ToolBatchRunner(
+        agent_name="test_agent",
+        tool_call_timeout=10,
+        governance_engine=GovernanceEngine(_mcp_policy()),
+    )
+    history = []
+    tool_calls = [
+        ToolCallResult(
+            tool_executor=executor,
+            tool_name="search_docs",
+            tool_args={"query": "governance"},
+            tool_call_id="tool-call-mcp-allow",
+            tool_provider="mcp",
+            tool_server="docs-server",
+        )
+    ]
+
+    async def add_message_to_history(role, content, metadata=None, session_id=None):
+        history.append({"role": role, "content": content, "metadata": metadata or {}})
+
+    async def parse_tool_observation(raw_output):
+        return raw_output
+
+    def build_tool_results_observation(
+        tool_call_results, tools_results, session_state, session_id
+    ):
+        return tools_results[0]["data"]
+
+    obs_text, tools_results = await runner.execute(
+        tool_call_results=tool_calls,
+        session_state=session_state,
+        add_message_to_history=add_message_to_history,
+        session_id="governed-mcp-allow",
+        telemetry_recorder=None,
+        tool_batch_name="search_docs",
+        tool_batch_args=[{"query": "governance"}],
+        parse_tool_observation=parse_tool_observation,
+        build_tool_results_observation=build_tool_results_observation,
+    )
+
+    assert executor.calls == 1
+    assert tools_results[0]["status"] == "success"
+    assert tools_results[0]["args"] == "[REDACTED]"
+    assert history[0]["metadata"]["args"] == "[REDACTED]"
+    assert obs_text == "search_docs:ok"
+
+
+@pytest.mark.asyncio
+async def test_governance_wraps_resolved_mcp_call_without_server_changes(
+    session_state,
+):
+    class FakeMcpSession:
+        def __init__(self):
+            self.calls = []
+
+        async def call_tool(self, tool_name, tool_args):
+            self.calls.append((tool_name, tool_args))
+            return {"status": "success", "data": "docs result"}
+
+    session = FakeMcpSession()
+    resolved = await ToolCallResolver().resolve_single_action(
+        action=ToolAction(
+            tool_name="search_docs",
+            parameters={"query": "policy"},
+            raw={"tool": "search_docs", "parameters": {"query": "policy"}},
+        ),
+        sessions={"docs-server": {"session": session}},
+        mcp_tools={"docs-server": [SimpleNamespace(name="search_docs")]},
+        local_tools=None,
+    )
+    runner = ToolBatchRunner(
+        agent_name="test_agent",
+        tool_call_timeout=10,
+        governance_engine=GovernanceEngine(_mcp_policy()),
+    )
+    history = []
+
+    async def add_message_to_history(role, content, metadata=None, session_id=None):
+        history.append({"role": role, "content": content, "metadata": metadata or {}})
+
+    async def parse_tool_observation(raw_output):
+        return raw_output
+
+    def build_tool_results_observation(
+        tool_call_results, tools_results, session_state, session_id
+    ):
+        return tools_results[0]["data"]
+
+    obs_text, tools_results = await runner.execute(
+        tool_call_results=[resolved],
+        session_state=session_state,
+        add_message_to_history=add_message_to_history,
+        session_id="governed-resolved-mcp",
+        telemetry_recorder=None,
+        tool_batch_name="search_docs",
+        tool_batch_args=[{"query": "policy"}],
+        parse_tool_observation=parse_tool_observation,
+        build_tool_results_observation=build_tool_results_observation,
+    )
+
+    assert session.calls == [("search_docs", {"query": "policy"})]
+    assert tools_results[0]["status"] == "success"
+    assert tools_results[0]["args"] == "[REDACTED]"
+    assert history[0]["metadata"]["args"] == "[REDACTED]"
+    assert obs_text == "docs result"
+
+
+@pytest.mark.asyncio
+async def test_governance_denies_specific_mcp_tool_on_allowed_server(session_state):
+    executor = CountingExecutor()
+    runner = ToolBatchRunner(
+        agent_name="test_agent",
+        tool_call_timeout=10,
+        governance_engine=GovernanceEngine(_mcp_policy()),
+    )
+    history = []
+    tool_calls = [
+        ToolCallResult(
+            tool_executor=executor,
+            tool_name="delete_docs",
+            tool_args={"path": "prod"},
+            tool_call_id="tool-call-mcp-deny",
+            tool_provider="mcp",
+            tool_server="docs-server",
+        )
+    ]
+
+    async def add_message_to_history(role, content, metadata=None, session_id=None):
+        history.append({"role": role, "content": content, "metadata": metadata or {}})
+
+    async def parse_tool_observation(raw_output):
+        return raw_output
+
+    def build_tool_results_observation(
+        tool_call_results, tools_results, session_state, session_id
+    ):
+        return tools_results[0]["message"]
+
+    obs_text, tools_results = await runner.execute(
+        tool_call_results=tool_calls,
+        session_state=session_state,
+        add_message_to_history=add_message_to_history,
+        session_id="governed-mcp-deny",
+        telemetry_recorder=None,
+        tool_batch_name="delete_docs",
+        tool_batch_args=[{"path": "prod"}],
+        parse_tool_observation=parse_tool_observation,
+        build_tool_results_observation=build_tool_results_observation,
+    )
+
+    assert executor.calls == 0
+    assert tools_results[0]["status"] == "error"
+    assert "Governance denied tool execution" in obs_text
+    assert history[0]["metadata"]["governance_error_code"] == "policy_denied"
 
 
 @pytest.mark.asyncio
