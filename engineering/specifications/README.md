@@ -19,6 +19,8 @@ must obey.
 Target specifications:
 
 - `background-agents.md`
+- `docs-experience.md`
+- `governed-execution.md`
 - `omniserve.md`
 - `telemetry.md`
 - `workspace.md`
