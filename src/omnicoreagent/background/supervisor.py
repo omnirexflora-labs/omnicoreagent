@@ -390,7 +390,7 @@ class BackgroundSupervisor:
                 timeout_seconds=running.task.timeout_seconds,
             )
         )
-        self.active_agent_tasks[running.run.run_id] = agent_task
+        self.track_active_agent_task(running.run.run_id, agent_task)
         return await agent_task
 
     async def complete_successful_attempt(
@@ -471,6 +471,15 @@ class BackgroundSupervisor:
         self.active_agent_tasks.pop(running.run.run_id, None)
         running.heartbeat_task.cancel()
         await self.drain_cancelled_task(running.heartbeat_task)
+
+    def track_active_agent_task(self, run_id: str, task: asyncio.Task) -> None:
+        self.active_agent_tasks[run_id] = task
+
+        def _forget(completed: asyncio.Task) -> None:
+            if self.active_agent_tasks.get(run_id) is completed:
+                self.active_agent_tasks.pop(run_id, None)
+
+        task.add_done_callback(_forget)
 
     async def run_agent_with_run_context(
         self,

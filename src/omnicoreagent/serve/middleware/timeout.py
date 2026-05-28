@@ -20,6 +20,8 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
         self.timeout_seconds = timeout_seconds
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if _route_manages_timeout(request.url.path):
+            return await call_next(request)
         try:
             return await asyncio.wait_for(
                 call_next(request), timeout=self.timeout_seconds
@@ -48,3 +50,17 @@ def add_timeout_middleware(app: FastAPI, config: OmniServeConfig) -> None:
 
     app.add_middleware(TimeoutMiddleware, timeout_seconds=config.request_timeout)
     logger.info(f"OmniServe: Request timeout set to {config.request_timeout}s")
+
+
+def _route_manages_timeout(path: str) -> bool:
+    """Return true for routes that produce their own structured timeout response."""
+    parts = [part for part in path.strip("/").split("/") if part]
+    for index, part in enumerate(parts):
+        if part != "background":
+            continue
+        return (
+            len(parts) == index + 4
+            and parts[index + 1] == "tasks"
+            and parts[index + 3] == "run"
+        )
+    return False

@@ -9,6 +9,7 @@ import pytest
 from omnicoreagent import OmniServe, OmniServeConfig
 from omnicoreagent.background import BackgroundAgentManager
 from omnicoreagent.core.workspace.manager import Workspace
+from omnicoreagent.serve.middleware.timeout import _route_manages_timeout
 
 
 @pytest.fixture(autouse=True)
@@ -462,6 +463,13 @@ def test_background_api_wait_true_times_out_before_slow_inline_run_finishes(tmp_
         assert timeout_detail["request_timeout_seconds"] == 1
 
     assert len(agent.calls) == 1
+
+
+def test_background_manual_run_route_owns_structured_timeout_with_api_prefix():
+    assert _route_manages_timeout("/background/tasks/task-1/run") is True
+    assert _route_manages_timeout("/api/v1/background/tasks/task-1/run") is True
+    assert _route_manages_timeout("/background/tasks/task-1") is False
+    assert _route_manages_timeout("/background/runs/run-1") is False
 
 
 def test_background_api_rejects_invalid_schedule_payload(tmp_path):
