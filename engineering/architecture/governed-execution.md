@@ -169,7 +169,12 @@ Examples:
 - `observation.inject`
 - `subagent.spawn`
 - `background.task.create`
-- `background.task.cancel`
+- `background.task.update`
+- `background.task.delete`
+- `background.task.pause`
+- `background.task.resume`
+- `background.run.start`
+- `background.run.cancel`
 - `serve.response.stream`
 
 Capability requests include actor, target, scope, inputs, declared risk, data
@@ -488,7 +493,8 @@ Background tasks must carry policy across time.
 
 Every durable task stores:
 
-- policy snapshot id
+- policy snapshot id, schema version, and hash
+- budget counters from the latest governed decision on that task/run
 - task capability scope
 - sandbox profile
 - workspace scope
@@ -497,8 +503,11 @@ Every durable task stores:
 - budget and expiry
 - approval state
 
-If a task resumes after restart, it resumes under the stored policy snapshot
-or fails closed if that policy can no longer be resolved.
+If a task resumes after restart, the stored task and run policy snapshots must
+match the active policy version and hash. If the snapshot is missing,
+unavailable, or different, execution fails closed before the agent runs.
+Stored budget counters restore the active policy budget floor before execution
+continues, so restart cannot reset already-consumed background authority.
 
 ## MCP Tools
 

@@ -22,6 +22,8 @@ ARTIFACT_READ_TOOLS = frozenset(
     {"read_artifact", "tail_artifact", "search_artifact", "list_artifacts"}
 )
 MCP_SERVER_TRANSPORTS = frozenset({"stdio", "sse", "streamable_http"})
+BACKGROUND_TASK_ACTIONS = frozenset({"create", "update", "delete", "pause", "resume"})
+BACKGROUND_RUN_ACTIONS = frozenset({"start", "cancel"})
 
 
 def tool_capability_descriptor(
@@ -95,7 +97,9 @@ def tool_authority_requests(
             provider=descriptor.provider,
             execution_surface=descriptor.execution_surface,
             target=target,
-            risk_level=tool_risk_level(tool_name=tool_name, tool_provider=tool_provider),
+            risk_level=tool_risk_level(
+                tool_name=tool_name, tool_provider=tool_provider
+            ),
             mcp_server=tool_server if tool_provider == "mcp" else None,
             metadata={
                 "tool_name": tool_name,
@@ -212,11 +216,7 @@ def mcp_server_authority_request(
         )
     server_name = str(server.get("name") or "")
     host = _server_host(server)
-    capability = (
-        "mcp.server.start"
-        if transport == "stdio"
-        else "mcp.server.connect"
-    )
+    capability = "mcp.server.start" if transport == "stdio" else "mcp.server.connect"
     return AuthorityRequest(
         capability=capability,
         actor=actor,
@@ -238,6 +238,104 @@ def mcp_server_authority_request(
             "has_explicit_env": bool(server.get("env")),
             "url": _redacted_url(server.get("url")),
             "command": server.get("command") if transport == "stdio" else None,
+        },
+    )
+
+
+def subagent_spawn_authority_requests(
+    *,
+    subagent_specs: list[dict[str, Any]],
+    tool_names: list[str] | None = None,
+    mcp_servers: list[str] | None = None,
+    memory_scope: str | None = None,
+    budget: dict[str, Any] | None = None,
+    deadline: str | None = None,
+    actor: str = "agent",
+) -> list[AuthorityRequest]:
+    return [
+        AuthorityRequest(
+            capability="subagent.spawn",
+            actor=actor,
+            provider="subagent",
+            execution_surface="subagent",
+            target=AuthorityTarget(
+                resource=str(spec.get("name") or f"subagent_{index}"),
+                path=spec.get("output_path"),
+            ),
+            risk_level="medium",
+            metadata={
+                "subagent_name": spec.get("name") or f"subagent_{index}",
+                "role": spec.get("role"),
+                "task": spec.get("task"),
+                "output_path": spec.get("output_path"),
+                "task_length": len(str(spec.get("task") or "")),
+                "tool_names": list(tool_names or []),
+                "mcp_servers": list(mcp_servers or []),
+                "workspace_scope": spec.get("output_path"),
+                "memory_scope": memory_scope,
+                "budget": dict(budget or {}),
+                "deadline": deadline,
+            },
+        )
+        for index, spec in enumerate(subagent_specs)
+    ]
+
+
+def background_task_authority_request(
+    *,
+    task: Any,
+    action: str = "create",
+    actor: str = "background_manager",
+) -> AuthorityRequest:
+    if action not in BACKGROUND_TASK_ACTIONS:
+        supported = ", ".join(sorted(BACKGROUND_TASK_ACTIONS))
+        raise ValueError(
+            f"Unsupported background task action: {action}. Supported: {supported}"
+        )
+    return AuthorityRequest(
+        capability=f"background.task.{action}",
+        actor=actor,
+        provider="background",
+        execution_surface="background",
+        target=AuthorityTarget(resource=task.task_id),
+        risk_level="medium" if action in {"create", "update"} else "low",
+        metadata={
+            "action": action,
+            "task_id": task.task_id,
+            "agent_id": task.agent_id,
+            "schedule_type": getattr(task.schedule.type, "value", task.schedule.type),
+            "enabled": task.enabled,
+        },
+    )
+
+
+def background_run_authority_request(
+    *,
+    action: str,
+    run: Any = None,
+    task: Any = None,
+    actor: str = "background_manager",
+) -> AuthorityRequest:
+    if action not in BACKGROUND_RUN_ACTIONS:
+        supported = ", ".join(sorted(BACKGROUND_RUN_ACTIONS))
+        raise ValueError(
+            f"Unsupported background run action: {action}. Supported: {supported}"
+        )
+    task_id = getattr(run, "task_id", None) or getattr(task, "task_id", None)
+    agent_id = getattr(run, "agent_id", None) or getattr(task, "agent_id", None)
+    return AuthorityRequest(
+        capability=f"background.run.{action}",
+        actor=actor,
+        provider="background",
+        execution_surface="background",
+        target=AuthorityTarget(resource=task_id),
+        risk_level="medium" if action == "start" else "low",
+        metadata={
+            "action": action,
+            "run_id": getattr(run, "run_id", None),
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "trigger_type": getattr(getattr(run, "trigger_type", None), "value", None),
         },
     )
 

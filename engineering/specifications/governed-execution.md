@@ -529,7 +529,7 @@ Required enforcement points:
 | Artifacts | `workspace.artifacts.read/write` |
 | Memory | `memory.read/write` |
 | Subagent spawn | `subagent.spawn` plus derived child policy |
-| Background task | `background.task.create/schedule/cancel` |
+| Background task/run | `background.task.create/update/delete/pause/resume`, `background.run.start/cancel` |
 | Skills | `skill.load` and `skill.execute` |
 | Sandbox command | `process.exec` plus filesystem/network/secrets |
 | Network | `network.*` |
@@ -757,9 +757,13 @@ Required tests:
 
 Rules:
 
-- Task creation and scheduling require policy decisions.
-- Durable task stores a policy snapshot id.
-- Restarted tasks load the same snapshot or fail closed.
+- Task creation, update, deletion, pause, resume, scheduling, run start, and run
+  cancellation require policy decisions.
+- Durable task and run records store a policy snapshot id, schema version, and hash.
+- Restarted tasks load the same snapshot or fail closed before the agent runs.
+- Missing snapshots fail closed for governed background execution.
+- Stored snapshots carry budget counters and restore the active policy budget
+  floor before background execution decisions.
 - Task retry does not reset policy budgets unless configured.
 - Long-running tasks may need approval renewal.
 
@@ -769,7 +773,7 @@ Required tests:
 - restart loads snapshot
 - missing snapshot fails closed
 - retry preserves policy
-- cancel requires policy
+- cancel run requires policy
 
 ---
 
@@ -1096,9 +1100,20 @@ code call this boundary instead of each implementing policy semantics.
 
 ### Phase 5: Subagent and Background Policy
 
-- Derive child policy for subagents.
-- Store policy snapshot for background tasks.
-- Enforce restart fail-closed behavior.
+- Gate dynamic subagent spawn behind `subagent.spawn`.
+- Prevent recursive spawn by deriving subagent runtime config with
+  `enable_subagents=False`.
+- Derive an inherited child policy for subagents that denies recursive spawn
+  and cannot multiply parent budget authority by default.
+- Include subagent task, tool, MCP, workspace, memory, budget, and deadline
+  metadata in spawn authority requests so later policy composition can narrow
+  those scopes deterministically.
+- Store policy snapshots on governed background task and run records.
+- Enforce restart fail-closed behavior for missing, unavailable, or changed
+  policy snapshots.
+- Restore stored background budget counters as the active policy budget floor on
+  restart.
+- Gate background run execution and cancellation behind policy.
 
 ### Phase 6: Sandbox Runtime Interface
 

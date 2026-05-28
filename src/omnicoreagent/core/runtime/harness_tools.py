@@ -15,6 +15,7 @@ def prepare_dynamic_subagents(
     agent_config: dict[str, Any],
     prompt_builder: Any,
     memory_router: Any,
+    governance_engine: Any = None,
     debug: bool,
 ) -> tuple[Any, Any]:
     if not enabled:
@@ -34,6 +35,7 @@ def prepare_dynamic_subagents(
         agent_config=agent_config,
         prompt_builder=prompt_builder,
         memory_router=memory_router,
+        governance_engine=governance_engine,
         debug=debug,
     )
     runtime("build_subagent_tools")(factory, local_tools)

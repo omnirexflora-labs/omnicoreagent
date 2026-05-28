@@ -14,6 +14,8 @@ import json
 from typing import Any, Dict, List, Optional
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.logging import logger
+from omnicoreagent.governance.capabilities import subagent_spawn_authority_requests
+from omnicoreagent.governance.snapshots import derive_subagent_policy
 
 
 class SubagentFactory:
@@ -34,6 +36,7 @@ class SubagentFactory:
         agent_config: Optional[Dict[str, Any]] = None,
         prompt_builder: Optional[Any] = None,
         memory_router: Optional[Any] = None,
+        governance_engine: Optional[Any] = None,
         debug: Optional[bool] = False,
     ):
         """
@@ -46,6 +49,7 @@ class SubagentFactory:
             agent_config: Full agent config (context_management, tool_offload, etc.)
             prompt_builder: Optional prompt builder with build_subagent_prompt support
             memory_router: MemoryRouter instance
+            governance_engine: Optional governed execution policy engine
             debug: Debug mode
         """
         self.base_model_config = base_model_config
@@ -55,9 +59,10 @@ class SubagentFactory:
         self.debug = debug
         self.agent_config = agent_config or {}
         self.prompt_builder = prompt_builder
+        self.governance_engine = governance_engine
         self._active_subagents: Dict[str, Any] = {}
 
-    def _build_subagent_config(self) -> Dict[str, Any]:
+    def _build_subagent_config(self, *, subagent_name: str = "subagent") -> Dict[str, Any]:
         """
         Build agent_config for subagents inheriting parent's config.
 
@@ -71,6 +76,18 @@ class SubagentFactory:
         config["max_steps"] = min(config.get("max_steps", 15), 15)
         config["enable_subagents"] = False
         config["enable_workspace_files"] = True
+        if self.governance_engine is not None:
+            governance_config = dict(config.get("governance_config") or {})
+            governance_config.update(
+                {
+                    "enabled": True,
+                    "policy": derive_subagent_policy(
+                        self.governance_engine.policy,
+                        subagent_name=subagent_name,
+                    ),
+                }
+            )
+            config["governance_config"] = governance_config
 
         return config
 
@@ -158,7 +175,7 @@ When you have completed the task:
             output_path=output_path,
         )
 
-        subagent_config = self._build_subagent_config()
+        subagent_config = self._build_subagent_config(subagent_name=name)
 
         from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
 
@@ -228,6 +245,7 @@ When you have completed the task:
                         "subagent_name": name,
                         "output_path": output_path,
                         "error": response[:500] if len(response) > 500 else response,
+                        "governance": self._governance_reference(),
                     },
                     "message": f"Subagent '{name}' encountered an error: {response[:100]}",
                 }
@@ -240,6 +258,7 @@ When you have completed the task:
                     "subagent_name": name,
                     "output_path": output_path,
                     "summary": response[:500] if len(response) > 500 else response,
+                    "governance": self._governance_reference(),
                 },
                 "message": f"Subagent '{name}' completed. Output saved to {output_path}",
             }
@@ -250,7 +269,11 @@ When you have completed the task:
 
             return {
                 "status": "error",
-                "data": {"subagent_name": name, "error": error_msg},
+                "data": {
+                    "subagent_name": name,
+                    "error": error_msg,
+                    "governance": self._governance_reference(),
+                },
                 "message": f"Subagent '{name}' failed: {error_msg}",
             }
 
@@ -273,6 +296,7 @@ When you have completed the task:
                 "message": "No subagents to spawn",
             }
 
+        await self._authorize_subagent_spawns(subagent_specs)
         logger.info(f"Spawning {len(subagent_specs)} subagents in parallel")
 
         tasks = [
@@ -323,6 +347,47 @@ When you have completed the task:
                 "results": processed_results,
             },
             "message": f"Completed {successful}/{len(subagent_specs)} subagents successfully",
+        }
+
+    async def _authorize_subagent_spawns(
+        self, subagent_specs: list[dict[str, Any]]
+    ) -> None:
+        if self.governance_engine is None:
+            return
+        requests = subagent_spawn_authority_requests(
+            subagent_specs=subagent_specs,
+            tool_names=self._local_tool_names(),
+            mcp_servers=self._mcp_server_names(),
+            memory_scope=str(self.agent_config.get("memory_config") or ""),
+            budget=self._governance_budget_snapshot(),
+        )
+        await self.governance_engine.authorize_all(requests)
+
+    def _local_tool_names(self) -> list[str]:
+        if self.local_tools is None or not hasattr(self.local_tools, "list_tools"):
+            return []
+        return [tool.name for tool in self.local_tools.list_tools()]
+
+    def _mcp_server_names(self) -> list[str]:
+        return [str(server.get("name") or "") for server in self.mcp_tools or []]
+
+    def _governance_budget_snapshot(self) -> dict[str, Any]:
+        if self.governance_engine is None or self.governance_engine.policy.budget is None:
+            return {}
+        budget = self.governance_engine.policy.budget
+        return {
+            "max_requests": budget.max_requests,
+            "max_cost": budget.max_cost,
+            "used_requests": budget.used_requests,
+            "used_cost": budget.used_cost,
+        }
+
+    def _governance_reference(self) -> dict[str, Any] | None:
+        if self.governance_engine is None:
+            return None
+        return {
+            "parent_policy_id": self.governance_engine.policy.policy_id,
+            "parent_policy_hash": self.governance_engine.policy.provenance.policy_hash,
         }
 
     async def cleanup(self):

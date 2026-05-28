@@ -4,7 +4,10 @@ from omnicoreagent.governance.approvals import (
     StaticApprovalResolver,
 )
 from omnicoreagent.governance.capabilities import (
+    background_run_authority_request,
+    background_task_authority_request,
     mcp_server_authority_request,
+    subagent_spawn_authority_requests,
     tool_authority_request,
     tool_authority_requests,
     tool_capability_descriptor,
@@ -59,6 +62,14 @@ from omnicoreagent.governance.policy import (
     load_policy_file,
     policy_from_mapping,
 )
+from omnicoreagent.governance.snapshots import (
+    POLICY_SNAPSHOT_METADATA_KEY,
+    attach_policy_snapshot,
+    derive_subagent_policy,
+    policy_snapshot_from_engine,
+    policy_snapshot_from_policy,
+    require_current_policy_snapshot,
+)
 from omnicoreagent.governance.telemetry import GOVERNANCE_EVENT_TYPES
 
 __all__ = [
@@ -100,14 +111,23 @@ __all__ = [
     "UngovernedCapabilityError",
     "UnknownCapabilityError",
     "attach_policy_hash",
+    "attach_policy_snapshot",
+    "background_run_authority_request",
+    "background_task_authority_request",
     "build_default_policy",
     "canonical_policy_payload",
     "discover_policy_file",
+    "derive_subagent_policy",
     "load_policy",
     "load_policy_file",
     "mcp_server_authority_request",
     "policy_from_mapping",
     "policy_hash",
+    "policy_snapshot_from_engine",
+    "policy_snapshot_from_policy",
+    "POLICY_SNAPSHOT_METADATA_KEY",
+    "require_current_policy_snapshot",
+    "subagent_spawn_authority_requests",
     "tool_authority_request",
     "tool_authority_requests",
     "tool_capability_descriptor",

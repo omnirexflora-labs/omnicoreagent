@@ -34,6 +34,12 @@ from omnicoreagent.background.run_helpers import (
 )
 from omnicoreagent.background.store.base import AbstractTaskStore
 from omnicoreagent.background.transitions import BackgroundRunTransitions
+from omnicoreagent.governance.capabilities import background_run_authority_request
+from omnicoreagent.governance.errors import GovernanceError
+from omnicoreagent.governance.snapshots import (
+    attach_policy_snapshot,
+    require_current_policy_snapshot,
+)
 
 
 @dataclass(slots=True)
@@ -59,6 +65,7 @@ class BackgroundSupervisor:
         worker_id: str,
         lease_seconds: int,
         memory_router: Any = None,
+        governance_engine: Any = None,
         event_log: BackgroundEventLog,
         emit_run: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
@@ -67,6 +74,7 @@ class BackgroundSupervisor:
         self.worker_id = worker_id
         self.lease_seconds = lease_seconds
         self.memory_router = memory_router
+        self.governance_engine = governance_engine
         self.event_log = event_log
         self._emit_run = emit_run
         self.transitions = BackgroundRunTransitions(
@@ -133,10 +141,10 @@ class BackgroundSupervisor:
                 except asyncio.TimeoutError:
                     return await self.task_store.get_run(run_id) or latest
 
-            if deadline is None:
+            if deadline is None and latest.status == RunStatus.QUEUED:
                 return latest
 
-            if asyncio.get_running_loop().time() >= deadline:
+            if deadline is not None and asyncio.get_running_loop().time() >= deadline:
                 return latest
 
             await asyncio.sleep(
@@ -221,11 +229,12 @@ class BackgroundSupervisor:
         if latest.status == RunStatus.QUEUED:
             await self.mark_terminal(latest, RunStatus.CANCELLED, "cancelled")
         elif (
-            latest.status == RunStatus.CLAIMED
-            and latest.lease_owner == self.worker_id
+            latest.status == RunStatus.CLAIMED and latest.lease_owner == self.worker_id
         ):
             await self.mark_terminal(latest, RunStatus.CANCELLED, "cancelled")
-        elif latest.status == RunStatus.RUNNING and latest.lease_owner == self.worker_id:
+        elif (
+            latest.status == RunStatus.RUNNING and latest.lease_owner == self.worker_id
+        ):
             active_task = self.active_agent_tasks.get(run_id)
             if active_task is not None and not active_task.done():
                 active_task.cancel()
@@ -328,6 +337,63 @@ class BackgroundSupervisor:
         if await self.task_store.is_cancel_requested(claimed.run_id):
             await self.mark_terminal(claimed, RunStatus.CANCELLED, "cancelled")
             return
+        try:
+            require_current_policy_snapshot(
+                claimed.metadata,
+                self.governance_engine,
+                surface=f"background run {claimed.run_id}",
+                required=self.governance_engine is not None,
+            )
+            require_current_policy_snapshot(
+                task.metadata,
+                self.governance_engine,
+                surface=f"background task {task.task_id}",
+                required=self.governance_engine is not None,
+            )
+            if (
+                self.governance_engine is not None
+                and not claimed.metadata.get("governance_run_start_authorized")
+            ):
+                await self.governance_engine.authorize(
+                    background_run_authority_request(
+                        action="start",
+                        run=claimed,
+                        task=task,
+                        actor="background_worker",
+                    )
+                )
+                task = task.model_copy(
+                    update={
+                        "metadata": attach_policy_snapshot(
+                            task.metadata,
+                            self.governance_engine,
+                        ),
+                        "updated_at": utc_now(),
+                    }
+                )
+                await self.task_store.save_task(task)
+                claimed = await self.task_store.update_run_metadata(
+                    claimed.run_id,
+                    {
+                        **attach_policy_snapshot(
+                            claimed.metadata,
+                            self.governance_engine,
+                        ),
+                        "governance_run_start_authorized": True,
+                    },
+                    self.worker_id,
+                    claimed.lease_token,
+                )
+        except Exception as exc:
+            if isinstance(exc, GovernanceError):
+                await self.task_store.update_run_metadata(
+                    claimed.run_id,
+                    {"governance_failure": dict(exc.metadata)},
+                    self.worker_id,
+                    claimed.lease_token,
+                )
+            await self.mark_terminal(claimed, RunStatus.FAILED, str(exc))
+            return
         return task, agent
 
     async def start_claimed_attempt(
@@ -354,7 +420,9 @@ class BackgroundSupervisor:
         attempt = BackgroundAttempt(
             run_id=run.run_id,
             attempt_number=attempt_number,
-            reason=AttemptReason.INITIAL if attempt_number == 1 else AttemptReason.RETRY,
+            reason=AttemptReason.INITIAL
+            if attempt_number == 1
+            else AttemptReason.RETRY,
             worker_id=self.worker_id,
             lease_token=run.lease_token,
         )

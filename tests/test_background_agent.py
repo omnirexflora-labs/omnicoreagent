@@ -46,6 +46,42 @@ from omnicoreagent.background.event_log import BackgroundEventLog
 from omnicoreagent.background.recovery import BackgroundRunRecovery
 from omnicoreagent.background.transitions import BackgroundRunTransitions
 from omnicoreagent.core.telemetry import TelemetryStreamScope
+from omnicoreagent.governance import (
+    BudgetExceededError,
+    GovernanceEngine,
+    POLICY_SNAPSHOT_METADATA_KEY,
+    PolicyDeniedError,
+    UnknownCapabilityError,
+    policy_from_mapping,
+)
+from omnicoreagent.governance.models import PolicyBudget
+
+
+def _background_governance_policy(*, name="background-policy", allow_start=True):
+    allow_rules = [
+        {
+            "rule_id": "allow_background_tasks",
+            "capability": "background.task.*",
+        },
+        {
+            "rule_id": "allow_background_run_cancel",
+            "capability": "background.run.cancel",
+        },
+    ]
+    if allow_start:
+        allow_rules.append(
+            {
+                "rule_id": "allow_background_run_start",
+                "capability": "background.run.start",
+            }
+        )
+    return policy_from_mapping(
+        {
+            "name": name,
+            "mode": "strict",
+            "rules": {"allow": allow_rules},
+        }
+    )
 
 
 class FakeAgent:
@@ -98,7 +134,10 @@ class ConfiguredFakeAgent(FakeAgent):
         self.mcp_tools = [{"name": "filesystem", "transport": "stdio"}]
         self.agent_config = {
             "enable_workspace_files": True,
-            "workspace_config": {"workspace_backend": "local", "workspace_dir": "custom"},
+            "workspace_config": {
+                "workspace_backend": "local",
+                "workspace_dir": "custom",
+            },
         }
 
 
@@ -636,7 +675,9 @@ async def test_due_schedule_and_atomic_dispatch_advances_state():
 async def test_cron_schedule_gets_initial_due_time():
     store = InMemoryTaskStore()
     await store.save_agent(agent_spec())
-    await store.save_task(task_spec(schedule={"type": "cron", "expression": "* * * * *"}))
+    await store.save_task(
+        task_spec(schedule={"type": "cron", "expression": "* * * * *"})
+    )
 
     state = await store.get_schedule_state("task")
 
@@ -932,6 +973,291 @@ async def test_manager_run_now_executes_agent_and_records_events():
     assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
     assert events[-1]["event"] == "background_run_completed"
     assert "background_run_claimed" in {event["event"] for event in events}
+
+
+@pytest.mark.asyncio
+async def test_manager_stores_policy_snapshot_on_governed_background_tasks():
+    engine = GovernanceEngine(_background_governance_policy())
+    manager = BackgroundAgentManager(task_store="in_memory", governance_engine=engine)
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+
+    task = await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    run = await manager.run_now("task", wait=True)
+
+    task_snapshot = task.metadata[POLICY_SNAPSHOT_METADATA_KEY]
+    run_snapshot = run.metadata[POLICY_SNAPSHOT_METADATA_KEY]
+    assert task_snapshot["policy_hash"] == engine.policy.provenance.policy_hash
+    assert run_snapshot == task_snapshot
+    assert run.status == RunStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_manager_governs_background_task_lifecycle_mutations():
+    engine = GovernanceEngine(_background_governance_policy())
+    manager = BackgroundAgentManager(task_store="in_memory", governance_engine=engine)
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "interval", "seconds": 60},
+    )
+
+    updated = await manager.update_task("task", {"query": "updated work"})
+    await manager.pause_task("task")
+    await manager.resume_task("task")
+    await manager.delete_task("task")
+
+    assert updated.query == "updated work"
+    assert updated.metadata[POLICY_SNAPSHOT_METADATA_KEY]["policy_hash"] == (
+        engine.policy.provenance.policy_hash
+    )
+    assert await manager.get_task("task") is None
+
+
+@pytest.mark.asyncio
+async def test_manager_denies_background_task_registration_without_policy_allow():
+    engine = GovernanceEngine(
+        policy_from_mapping(
+            {"name": "deny-background", "mode": "strict", "rules": {"allow": []}}
+        )
+    )
+    manager = BackgroundAgentManager(task_store="in_memory", governance_engine=engine)
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+
+    with pytest.raises(UnknownCapabilityError):
+        await manager.register_task(
+            task_id="task",
+            agent_id="agent",
+            query="do work",
+            schedule={"type": "manual"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_manager_denies_manual_run_start_before_queuing():
+    engine = GovernanceEngine(_background_governance_policy(allow_start=False))
+    manager = BackgroundAgentManager(task_store="in_memory", governance_engine=engine)
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    with pytest.raises(UnknownCapabilityError):
+        await manager.run_now("task")
+
+    assert await manager.list_runs(task_id="task") == []
+
+
+@pytest.mark.asyncio
+async def test_manager_denies_scheduled_run_start_before_dispatching():
+    store = InMemoryTaskStore()
+    engine = GovernanceEngine(_background_governance_policy(allow_start=False))
+    manager = BackgroundAgentManager(task_store=store, governance_engine=engine)
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    due_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="scheduled work",
+        schedule={"type": "once", "run_at": due_at},
+        overlap_policy=OverlapPolicy.ALLOW_PARALLEL,
+    )
+    state_before = await store.get_schedule_state("task")
+
+    with pytest.raises(UnknownCapabilityError):
+        await manager._dispatch_due_schedules()
+
+    assert await manager.list_runs(task_id="task") == []
+    state_after = await store.get_schedule_state("task")
+    assert state_after.next_due_at == state_before.next_due_at
+    assert state_after.paused is True
+
+
+@pytest.mark.asyncio
+async def test_manager_fails_closed_when_governed_schedule_loses_engine():
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(
+        task_store=store,
+        governance_engine=GovernanceEngine(_background_governance_policy()),
+    )
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    due_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="scheduled work",
+        schedule={"type": "once", "run_at": due_at},
+    )
+    manager.governance_engine = None
+
+    with pytest.raises(PolicyDeniedError, match="no governance engine"):
+        await manager._dispatch_due_schedules()
+
+    assert await manager.list_runs(task_id="task") == []
+    assert (await store.get_schedule_state("task")).paused is True
+
+
+@pytest.mark.asyncio
+async def test_manager_replace_governed_task_validates_existing_snapshot():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    manager.governance_engine = GovernanceEngine(_background_governance_policy())
+
+    with pytest.raises(PolicyDeniedError, match="missing a required policy snapshot"):
+        await manager.register_task(
+            task_id="task",
+            agent_id="agent",
+            query="replacement",
+            schedule={"type": "manual"},
+            replace=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_manager_fails_closed_when_background_policy_snapshot_changes():
+    first = GovernanceEngine(_background_governance_policy(name="first-policy"))
+    manager = BackgroundAgentManager(task_store="in_memory", governance_engine=first)
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    manager.governance_engine = GovernanceEngine(
+        _background_governance_policy(name="changed-policy")
+    )
+
+    with pytest.raises(PolicyDeniedError, match="different policy snapshot"):
+        await manager.run_now("task")
+
+
+@pytest.mark.asyncio
+async def test_manager_fails_closed_when_governed_background_task_has_no_snapshot():
+    manager = BackgroundAgentManager(task_store="in_memory")
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    manager.governance_engine = GovernanceEngine(_background_governance_policy())
+
+    with pytest.raises(PolicyDeniedError, match="missing a required policy snapshot"):
+        await manager.run_now("task")
+
+
+@pytest.mark.asyncio
+async def test_manager_restores_background_policy_budget_floor_from_snapshot():
+    policy = _background_governance_policy()
+    policy.budget = PolicyBudget(max_requests=1)
+    first = GovernanceEngine(policy)
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store, governance_engine=first)
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    restarted_policy = _background_governance_policy()
+    restarted_policy.budget = PolicyBudget(max_requests=1)
+    restarted = BackgroundAgentManager(
+        task_store=store,
+        governance_engine=GovernanceEngine(restarted_policy),
+    )
+
+    with pytest.raises(BudgetExceededError):
+        await restarted.run_now("task")
+
+
+@pytest.mark.asyncio
+async def test_manager_persists_run_start_budget_floor_back_to_task_snapshot():
+    policy = _background_governance_policy()
+    policy.budget = PolicyBudget(max_requests=2)
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(
+        task_store=store,
+        governance_engine=GovernanceEngine(policy),
+    )
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    await manager.run_now("task", wait=True)
+
+    restarted_policy = _background_governance_policy()
+    restarted_policy.budget = PolicyBudget(max_requests=2)
+    restarted = BackgroundAgentManager(
+        task_store=store,
+        governance_engine=GovernanceEngine(restarted_policy),
+    )
+
+    with pytest.raises(BudgetExceededError):
+        await restarted.run_now("task")
+
+
+@pytest.mark.asyncio
+async def test_supervisor_fails_closed_for_durable_run_without_governance_engine():
+    first = GovernanceEngine(_background_governance_policy())
+    manager = BackgroundAgentManager(task_store="in_memory", governance_engine=first)
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    run = await manager.run_now("task")
+
+    manager.governance_engine = None
+    terminal = await manager.run_until_terminal(run.run_id, timeout_seconds=2)
+
+    assert terminal.status == RunStatus.FAILED
+    assert "stored policy snapshot" in terminal.error
+    assert terminal.metadata["governance_failure"]["reason_code"] == "expired_policy"
+
+
+@pytest.mark.asyncio
+async def test_manager_fails_closed_when_governed_cancel_loses_engine():
+    manager = BackgroundAgentManager(
+        task_store="in_memory",
+        governance_engine=GovernanceEngine(_background_governance_policy()),
+    )
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    run = await manager.run_now("task")
+    manager.governance_engine = None
+
+    with pytest.raises(PolicyDeniedError, match="no governance engine"):
+        await manager.cancel_run(run.run_id)
 
 
 @pytest.mark.asyncio
@@ -1502,7 +1828,9 @@ async def test_update_task_validates_nested_schedule_patch():
         schedule={"type": "manual"},
     )
 
-    updated = await manager.update_task("task", {"schedule": {"type": "interval", "seconds": 60}})
+    updated = await manager.update_task(
+        "task", {"schedule": {"type": "interval", "seconds": 60}}
+    )
     state = await manager.task_store.get_schedule_state("task")
 
     assert updated.schedule.type == ScheduleType.INTERVAL
@@ -1552,7 +1880,10 @@ async def test_manager_dispatches_due_schedule_from_worker_loop():
         task_id="task",
         agent_id="agent",
         query="scheduled work",
-        schedule={"type": "once", "run_at": datetime.now(timezone.utc) - timedelta(seconds=1)},
+        schedule={
+            "type": "once",
+            "run_at": datetime.now(timezone.utc) - timedelta(seconds=1),
+        },
         overlap_policy=OverlapPolicy.ALLOW_PARALLEL,
     )
 
@@ -2077,6 +2408,7 @@ async def test_running_cancel_finishes_cancelled_not_completed():
     run = await manager.run_now("task")
     await wait_for(lambda: agent.calls, timeout=0.5)
     await manager.cancel_run(run.run_id)
+
     async def terminal_run():
         latest = await manager.get_run(run.run_id)
         if latest and latest.status in {
@@ -2182,7 +2514,9 @@ async def test_recover_expired_running_run_requeues_when_retry_available():
     )
     async with store._lock:
         store._runs[run.run_id] = running.model_copy(
-            update={"lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)}
+            update={
+                "lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)
+            }
         )
 
     await manager.recover_expired_runs()
@@ -2207,7 +2541,9 @@ async def test_recovery_service_requeues_expired_running_run_directly():
         session_id="s1",
         workspace_path="w1",
     )
-    created = await store.create_run_with_overlap_guard(run, OverlapPolicy.ALLOW_PARALLEL)
+    created = await store.create_run_with_overlap_guard(
+        run, OverlapPolicy.ALLOW_PARALLEL
+    )
     claimed = await store.claim_run(created.run_id, "lost_worker", lease_seconds=30)
     running = await store.transition_run(
         claimed.run_id,
@@ -2227,7 +2563,9 @@ async def test_recovery_service_requeues_expired_running_run_directly():
     )
     async with store._lock:
         store._runs[run.run_id] = running.model_copy(
-            update={"lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)}
+            update={
+                "lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)
+            }
         )
 
     emitted = []
@@ -2298,7 +2636,9 @@ async def test_recover_expired_running_run_honors_cancelled_transition_race(
     )
     async with store._lock:
         store._runs[run.run_id] = running.model_copy(
-            update={"lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)}
+            update={
+                "lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)
+            }
         )
 
     await manager.recover_expired_runs()
@@ -2391,7 +2731,9 @@ async def test_recover_expired_retrying_run_requeues_without_self_transition():
     )
     async with store._lock:
         store._runs[run.run_id] = retrying.model_copy(
-            update={"lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)}
+            update={
+                "lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)
+            }
         )
 
     await manager.recover_expired_runs()
