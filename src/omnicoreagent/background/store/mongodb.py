@@ -43,6 +43,21 @@ class MongoDbTaskStore(SerializedTaskStore):
 
     async def initialize(self) -> None:
         await super().initialize()
+        last_error: Exception | None = None
+        for attempt in range(self._initialize_attempts()):
+            try:
+                await self._initialize_backend_client()
+                return
+            except Exception as exc:
+                last_error = exc
+                self._close_client()
+                if attempt + 1 >= self._initialize_attempts():
+                    break
+                await asyncio.sleep(0.25)
+        if last_error is not None:
+            raise last_error
+
+    async def _initialize_backend_client(self) -> None:
         try:
             from motor.motor_asyncio import AsyncIOMotorClient
             from pymongo.write_concern import WriteConcern
@@ -74,11 +89,17 @@ class MongoDbTaskStore(SerializedTaskStore):
         await self._load_backend_state()
 
     async def close(self) -> None:
+        self._close_client()
+        await super().close()
+
+    def _initialize_attempts(self) -> int:
+        return 2 if self.connect_timeout and self.connect_timeout > 0 else 1
+
+    def _close_client(self) -> None:
         if self._client is not None:
             self._client.close()
             self._client = None
             self._db = None
-        await super().close()
 
     async def _load_backend_state(self) -> None:
         await self._ensure_initialized()

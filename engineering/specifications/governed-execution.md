@@ -584,7 +584,7 @@ class SandboxRuntime:
 
 ```yaml
 sandbox_id: string | null
-provider: none | local | docker | opensandbox | openshell | e2b | vercel | modal | daytona | runloop | cloudflare
+provider: none | local_test
 image: string | null
 working_dir: string
 workspace_mount:
@@ -611,6 +611,15 @@ Rules:
 - Sandbox runtime is selected by policy/config, not by the model.
 - Sandbox adapters must report unsupported constraints before execution.
 - If policy requires a sandbox and no compatible runtime exists, deny.
+- `local_test` is a development/test adapter only.
+- `environment`, `resources`, `lifecycle`, and `network_policy` are part of the
+  provider-neutral contract. The `local_test` adapter carries them for handler
+  context and tests but does not enforce CPU, memory, timeout, network, or
+  process isolation.
+- Sandbox execution requests must include authority metadata from the policy
+  decision that allowed the sandbox route.
+- Sandbox telemetry records command summaries and bounded output summaries, not
+  raw command arguments or raw stdout/stderr.
 - Sandbox stdout/stderr is untrusted tool output.
 - Sandbox outputs go through observation, guardrails, offload, and telemetry.
 
@@ -1118,9 +1127,28 @@ code call this boundary instead of each implementing policy semantics.
 ### Phase 6: Sandbox Runtime Interface
 
 - Add provider-neutral sandbox protocol.
-- Add `none` and local test adapter.
-- Enforce sandbox-required decisions.
-- Route sandbox outputs through telemetry and observations.
+- Add `none` adapter for policy-only mode. It never satisfies
+  `sandbox_required`.
+- Add a safe local test adapter that executes registered handlers only. It must
+  not expose arbitrary shell execution.
+- Public sandbox providers in this phase are only `none` and `local_test`.
+  Production providers are future adapters, not completed runtime surfaces.
+- Enforce `sandbox_required` decisions by allowing them only through an explicit
+  sandbox authorization route. Normal `authorize()` and `authorize_all()` fail
+  closed when a decision carries `sandbox_required`, even if a sandbox runtime is
+  configured.
+- Provide `authorize_sandboxed()` and `authorize_all_sandboxed()` for callers
+  that will immediately route execution through a compatible sandbox runtime.
+- A compatible runtime must implement the `SandboxRuntime` contract. The local
+  test adapter can satisfy `sandbox_required` only when the application
+  explicitly enables the development/test flag.
+- Phase 6 does not auto-route existing agent tool calls into a sandbox. The
+  normal tool path remains fail-closed for `sandbox_required` decisions until a
+  sandbox execution route is explicitly wired by the caller or runtime surface.
+- Route sandbox execution results through stable telemetry events and structured
+  observation-shaped output.
+- Treat the local test adapter network policy as advisory test context. Real network
+  enforcement belongs to future production sandbox providers.
 
 ### Phase 7: Provider Adapters
 
@@ -1175,7 +1203,7 @@ Public docs must not expose unfinished provider promises as completed features.
 This design prepares the runtime for stronger authority control, but it does
 not solve every security problem in the first implementation phase.
 
-Not solved in Phase 1:
+Not solved in this governance/sandbox phase:
 
 - full information-flow control across all model/tool/memory paths
 - production sandbox provider integration
