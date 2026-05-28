@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from omnicoreagent.background.event_log import BackgroundEventLog
 from omnicoreagent.background.models import (
@@ -15,6 +16,13 @@ from omnicoreagent.background.models import (
 )
 from omnicoreagent.background.run_helpers import build_run
 from omnicoreagent.background.store.base import AbstractTaskStore
+from omnicoreagent.governance.capabilities import background_run_authority_request
+from omnicoreagent.governance.errors import GovernanceError
+from omnicoreagent.governance.snapshots import (
+    POLICY_SNAPSHOT_METADATA_KEY,
+    attach_policy_snapshot,
+    require_current_policy_snapshot,
+)
 
 
 class BackgroundScheduleDispatcher:
@@ -25,10 +33,12 @@ class BackgroundScheduleDispatcher:
         *,
         task_store: AbstractTaskStore,
         event_log: BackgroundEventLog,
+        governance_engine=None,
         emit_run: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
         self.task_store = task_store
         self.event_log = event_log
+        self.governance_engine = governance_engine
         self._emit_run = emit_run
 
     async def emit_run(self, event_name: str, run: BackgroundRun) -> None:
@@ -69,6 +79,11 @@ class BackgroundScheduleDispatcher:
                     due_at=due_at,
                     occurrence_id=occurrence_for_due,
                 )
+                try:
+                    task, run = await self._authorize_scheduled_run(task=task, run=run)
+                except GovernanceError:
+                    await self.task_store.set_schedule_paused(task.task_id, True)
+                    raise
                 existing_run_ids = {
                     item.run_id for item in await self.task_store.list_runs(task.task_id)
                 }
@@ -95,3 +110,47 @@ class BackgroundScheduleDispatcher:
                     created,
                 )
         return dispatched_any
+
+    async def _authorize_scheduled_run(
+        self, *, task, run: BackgroundRun
+    ) -> tuple[Any, BackgroundRun]:
+        if self.governance_engine is None:
+            if POLICY_SNAPSHOT_METADATA_KEY in task.metadata:
+                require_current_policy_snapshot(
+                    task.metadata,
+                    None,
+                    surface=f"background task {task.task_id}",
+                )
+            return task, run
+        require_current_policy_snapshot(
+            task.metadata,
+            self.governance_engine,
+            surface=f"background task {task.task_id}",
+            required=True,
+        )
+        await self.governance_engine.authorize(
+            background_run_authority_request(
+                action="start",
+                run=run,
+                task=task,
+                actor="background_scheduler",
+            )
+        )
+        task = task.model_copy(
+            update={
+                "metadata": attach_policy_snapshot(
+                    task.metadata,
+                    self.governance_engine,
+                ),
+                "updated_at": utc_now(),
+            }
+        )
+        await self.task_store.save_task(task)
+        return task, run.model_copy(
+            update={
+                "metadata": {
+                    **attach_policy_snapshot(run.metadata, self.governance_engine),
+                    "governance_run_start_authorized": True,
+                }
+            }
+        )

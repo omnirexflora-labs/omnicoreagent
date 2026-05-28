@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import FastAPI
 
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.runtime import construction
 
 from .config import OmniServeConfig
 from .lifespan import agent_lifespan
@@ -82,6 +83,7 @@ def _build_background_manager(
     return BackgroundAgentManager(
         task_store=config.background_task_store_config(),
         telemetry_store=getattr(agent, "telemetry_store", None),
+        governance_engine=_resolve_agent_governance_engine(agent),
     )
 
 
@@ -89,3 +91,19 @@ def _ensure_agent_telemetry(agent: AgentType) -> None:
     ensure_telemetry = getattr(agent, "_ensure_telemetry", None)
     if callable(ensure_telemetry):
         ensure_telemetry()
+
+
+def _resolve_agent_governance_engine(agent: AgentType) -> Any | None:
+    runtime_agent = getattr(agent, "agent", None)
+    runtime_engine = getattr(runtime_agent, "governance_engine", None)
+    if runtime_engine is not None:
+        return runtime_engine
+
+    agent_config = getattr(agent, "agent_config", {}) or {}
+    governance_config = agent_config.get("governance_config") or {}
+    if not governance_config.get("enabled", False):
+        return None
+    return construction.build_governance_engine(
+        agent_config=agent_config,
+        telemetry_recorder=getattr(agent, "telemetry_recorder", None),
+    )

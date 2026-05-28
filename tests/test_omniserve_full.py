@@ -18,6 +18,8 @@ from omnicoreagent.core.telemetry import (
     TelemetryStreamScope,
 )
 from omnicoreagent.serve.cli import cli
+from omnicoreagent.serve.app_factory import _build_background_manager
+from omnicoreagent.governance import policy_from_mapping
 
 
 @pytest.fixture(autouse=True)
@@ -113,6 +115,38 @@ class TestConfiguration:
         with patch.dict(os.environ, {"OMNICOREAGENT_SERVE_AUTH_ENABLED": "true"}):
             with pytest.raises(ValidationError, match="AUTH_TOKEN is required"):
                 OmniServeConfig()
+
+    def test_background_manager_inherits_agent_governance_config(self):
+        policy = policy_from_mapping(
+            {
+                "name": "serve-background-policy",
+                "mode": "strict",
+                "rules": {
+                    "allow": [
+                        {
+                            "rule_id": "allow_background",
+                            "capability": "background.*",
+                        }
+                    ]
+                },
+            }
+        )
+        agent = SimpleNamespace(
+            agent=None,
+            agent_config={"governance_config": {"enabled": True, "policy": policy}},
+            telemetry_store=None,
+            telemetry_recorder=None,
+            _ensure_telemetry=lambda: None,
+        )
+
+        manager = _build_background_manager(
+            agent=agent,
+            config=OmniServeConfig(background_enabled=True),
+            background_manager=None,
+        )
+
+        assert manager.governance_engine is not None
+        assert manager.governance_engine.policy.name == "serve-background-policy"
 
     @pytest.mark.parametrize(
         ("kwargs", "message"),

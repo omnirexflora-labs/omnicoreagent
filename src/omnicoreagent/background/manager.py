@@ -37,6 +37,15 @@ from omnicoreagent.background.store.router import TaskStoreRouter
 from omnicoreagent.background.supervisor import BackgroundSupervisor
 from omnicoreagent.background.workspace_io import BackgroundWorkspaceIO
 from omnicoreagent.core.telemetry import InMemoryTelemetryStore, TelemetryStream
+from omnicoreagent.governance.capabilities import (
+    background_run_authority_request,
+    background_task_authority_request,
+)
+from omnicoreagent.governance.snapshots import (
+    POLICY_SNAPSHOT_METADATA_KEY,
+    attach_policy_snapshot,
+    require_current_policy_snapshot,
+)
 
 
 _EVENT_REPLAY_TIMEOUT_SECONDS = 2.0
@@ -53,21 +62,27 @@ class BackgroundAgentManager:
         workspace: Any = None,
         telemetry_store: Any = None,
         telemetry_stream: Any = None,
+        governance_engine: Any = None,
         worker_id: str | None = None,
         lease_seconds: int = 30,
     ) -> None:
         self.task_store = TaskStoreRouter.create(task_store)
         self.memory_router = memory_router
         self.telemetry_store = telemetry_store or (
-            telemetry_stream.store if telemetry_stream is not None else InMemoryTelemetryStore()
+            telemetry_stream.store
+            if telemetry_stream is not None
+            else InMemoryTelemetryStore()
         )
-        self.telemetry_stream = telemetry_stream or TelemetryStream(self.telemetry_store)
+        self.telemetry_stream = telemetry_stream or TelemetryStream(
+            self.telemetry_store
+        )
         if self.telemetry_stream.store is not self.telemetry_store:
             raise ValueError(
                 "telemetry_stream.store must be the same object as telemetry_store"
             )
         self.worker_id = worker_id or f"worker_{uuid4().hex}"
         self.lease_seconds = lease_seconds
+        self.governance_engine = governance_engine
 
         self._agents: dict[str, Any] = {}
         self._running = False
@@ -86,6 +101,7 @@ class BackgroundAgentManager:
         self._scheduler = BackgroundScheduleDispatcher(
             task_store=self.task_store,
             event_log=self._event_log,
+            governance_engine=self.governance_engine,
             emit_run=self._emit_run,
         )
         self._supervisor = BackgroundSupervisor(
@@ -94,6 +110,7 @@ class BackgroundAgentManager:
             worker_id=self.worker_id,
             lease_seconds=self.lease_seconds,
             memory_router=self.memory_router,
+            governance_engine=self.governance_engine,
             event_log=self._event_log,
             emit_run=self._emit_run,
         )
@@ -124,7 +141,7 @@ class BackgroundAgentManager:
         if existing and not replace:
             raise AgentAlreadyRegisteredError(
                 f"Agent already registered: {agent_spec.agent_id}"
-        )
+            )
         self._agents.pop(agent_spec.agent_id, None)
         await self.task_store.save_agent(agent_spec)
         return agent_spec
@@ -181,23 +198,78 @@ class BackgroundAgentManager:
         )
         if not await self.task_store.get_agent(task.agent_id):
             raise AgentNotFoundError(f"Agent not found: {task.agent_id}")
-        if await self.task_store.get_task(task.task_id) and not replace:
+        existing = await self.task_store.get_task(task.task_id)
+        if existing and not replace:
             raise TaskAlreadyRegisteredError(f"Task already registered: {task.task_id}")
+        if self.governance_engine is not None:
+            action = "update" if existing is not None else "create"
+            if existing is not None:
+                require_current_policy_snapshot(
+                    existing.metadata,
+                    self.governance_engine,
+                    surface=f"background task {existing.task_id}",
+                    required=True,
+                )
+            await self.governance_engine.authorize(
+                background_task_authority_request(task=task, action=action)
+            )
+            task = task.model_copy(
+                update={
+                    "metadata": attach_policy_snapshot(
+                        task.metadata,
+                        self.governance_engine,
+                    ),
+                    "updated_at": utc_now(),
+                }
+            )
         await self.task_store.save_task(task)
         return task
 
-    async def update_task(self, task_id: str, patch: dict[str, Any]) -> BackgroundTaskSpec:
+    async def update_task(
+        self, task_id: str, patch: dict[str, Any]
+    ) -> BackgroundTaskSpec:
         existing = await self.task_store.get_task(task_id)
         if not existing:
             raise TaskNotFoundError(f"Task not found: {task_id}")
+        if self.governance_engine is not None:
+            require_current_policy_snapshot(
+                existing.metadata,
+                self.governance_engine,
+                surface=f"background task {existing.task_id}",
+                required=True,
+            )
         data = existing.model_dump(mode="python")
         data.update(patch)
         data["updated_at"] = utc_now()
         updated = BackgroundTaskSpec(**data)
+        if self.governance_engine is not None:
+            await self.governance_engine.authorize(
+                background_task_authority_request(task=updated, action="update")
+            )
+            updated = updated.model_copy(
+                update={
+                    "metadata": attach_policy_snapshot(
+                        updated.metadata,
+                        self.governance_engine,
+                    ),
+                    "updated_at": utc_now(),
+                }
+            )
         await self.task_store.save_task(updated)
         return updated
 
     async def delete_task(self, task_id: str, delete_runs: bool = False) -> None:
+        existing = await self.task_store.get_task(task_id)
+        if self.governance_engine is not None and existing is not None:
+            require_current_policy_snapshot(
+                existing.metadata,
+                self.governance_engine,
+                surface=f"background task {existing.task_id}",
+                required=True,
+            )
+            await self.governance_engine.authorize(
+                background_task_authority_request(task=existing, action="delete")
+            )
         await self.task_store.delete_task(task_id)
         if delete_runs:
             await self.task_store.delete_runs_for_task(task_id)
@@ -240,9 +312,31 @@ class BackgroundAgentManager:
         self._initialized = False
 
     async def pause_task(self, task_id: str) -> None:
+        task = await self.task_store.get_task(task_id)
+        if self.governance_engine is not None and task is not None:
+            require_current_policy_snapshot(
+                task.metadata,
+                self.governance_engine,
+                surface=f"background task {task.task_id}",
+                required=True,
+            )
+            await self.governance_engine.authorize(
+                background_task_authority_request(task=task, action="pause")
+            )
         await self.task_store.set_schedule_paused(task_id, True)
 
     async def resume_task(self, task_id: str) -> None:
+        task = await self.task_store.get_task(task_id)
+        if self.governance_engine is not None and task is not None:
+            require_current_policy_snapshot(
+                task.metadata,
+                self.governance_engine,
+                surface=f"background task {task.task_id}",
+                required=True,
+            )
+            await self.governance_engine.authorize(
+                background_task_authority_request(task=task, action="resume")
+            )
         await self.task_store.set_schedule_paused(task_id, False)
 
     async def run_now(
@@ -255,7 +349,36 @@ class BackgroundAgentManager:
         task = await self.task_store.get_task(task_id)
         if not task or not task.enabled:
             raise TaskNotFoundError(f"Task not found: {task_id}")
+        if self.governance_engine is not None:
+            require_current_policy_snapshot(
+                task.metadata,
+                self.governance_engine,
+                surface=f"background task {task.task_id}",
+                required=True,
+            )
         run = build_run(task, TriggerType.MANUAL, query or task.query)
+        if self.governance_engine is not None:
+            await self.governance_engine.authorize(
+                background_run_authority_request(action="start", run=run, task=task)
+            )
+            task = task.model_copy(
+                update={
+                    "metadata": attach_policy_snapshot(
+                        task.metadata,
+                        self.governance_engine,
+                    ),
+                    "updated_at": utc_now(),
+                }
+            )
+            await self.task_store.save_task(task)
+            run = run.model_copy(
+                update={
+                    "metadata": {
+                        **attach_policy_snapshot(run.metadata, self.governance_engine),
+                        "governance_run_start_authorized": True,
+                    }
+                }
+            )
         created = await self.task_store.create_run_with_overlap_guard(
             run, task.overlap_policy
         )
@@ -330,6 +453,25 @@ class BackgroundAgentManager:
 
     async def cancel_run(self, run_id: str) -> None:
         self._sync_services_config()
+        run = await self.task_store.get_run(run_id)
+        if run is not None:
+            if self.governance_engine is None:
+                if POLICY_SNAPSHOT_METADATA_KEY in run.metadata:
+                    require_current_policy_snapshot(
+                        run.metadata,
+                        None,
+                        surface=f"background run {run.run_id}",
+                    )
+            else:
+                require_current_policy_snapshot(
+                    run.metadata,
+                    self.governance_engine,
+                    surface=f"background run {run.run_id}",
+                    required=True,
+                )
+                await self.governance_engine.authorize(
+                    background_run_authority_request(action="cancel", run=run)
+                )
         await self._supervisor.cancel_run(run_id)
 
     async def recover_expired_runs(self) -> None:
@@ -538,6 +680,8 @@ class BackgroundAgentManager:
         self._supervisor.worker_id = self.worker_id
         self._supervisor.memory_router = self.memory_router
         self._supervisor.lease_seconds = self.lease_seconds
+        self._supervisor.governance_engine = self.governance_engine
+        self._scheduler.governance_engine = self.governance_engine
 
     def _sync_event_log_config(self) -> None:
         self._event_log.replay_timeout_seconds = self._event_replay_timeout_seconds

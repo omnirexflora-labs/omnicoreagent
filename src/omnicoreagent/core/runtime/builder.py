@@ -67,6 +67,7 @@ def build_agent_runtime(
         agent_config=agent_config,
         prompt_builder=prompt_builder,
         memory_router=memory_router,
+        governance_engine=governance_engine,
         debug=debug,
     )
 

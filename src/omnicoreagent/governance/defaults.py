@@ -85,6 +85,16 @@ def _permissive_dev_policy() -> PolicyEnvelope:
                     effect=PolicyEffect.ALLOW,
                     capability="telemetry.*",
                 ),
+                PolicyRule(
+                    rule_id="allow_subagent_spawn",
+                    effect=PolicyEffect.ALLOW,
+                    capability="subagent.*",
+                ),
+                PolicyRule(
+                    rule_id="allow_background_execution",
+                    effect=PolicyEffect.ALLOW,
+                    capability="background.*",
+                ),
             ],
         ),
     )
@@ -133,6 +143,16 @@ def _interactive_dev_policy() -> PolicyEnvelope:
                     rule_id="ask_mcp_server_start",
                     effect=PolicyEffect.ASK,
                     capability="mcp.server.*",
+                ),
+                PolicyRule(
+                    rule_id="ask_subagent_spawn",
+                    effect=PolicyEffect.ASK,
+                    capability="subagent.*",
+                ),
+                PolicyRule(
+                    rule_id="ask_background_execution",
+                    effect=PolicyEffect.ASK,
+                    capability="background.*",
                 ),
                 PolicyRule(
                     rule_id="ask_high_risk",

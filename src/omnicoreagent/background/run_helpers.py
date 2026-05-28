@@ -37,6 +37,7 @@ def build_run(
         occurrence_id=occurrence_id,
         session_id=build_session_id(task, run_id),
         workspace_path=build_workspace_path(task, run_id),
+        metadata=dict(task.metadata),
     )
 
 
