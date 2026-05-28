@@ -7,6 +7,8 @@ from mcp import ClientSession
 
 from omnicoreagent.core.llm import LLMConnection
 from omnicoreagent.core.logging import logger
+from omnicoreagent.governance.capabilities import mcp_server_authority_request
+from omnicoreagent.governance.errors import GovernanceError
 from omnicoreagent.mcp_clients_connection.oauth import (
     build_oauth_provider,
     is_oauth_enabled,
@@ -24,11 +26,13 @@ class MCPClient:
         servers: list[dict[str, Any]] | None = None,
         model_config: dict[str, Any] | None = None,
         api_key: str | None = None,
+        governance_engine: Any = None,
         debug: bool = False,
     ):
         self.servers = self._normalize_servers(servers or [])
         self.state = MCPClientState()
         self.debug = debug
+        self.governance_engine = governance_engine
         self.llm_connection = (
             LLMConnection(model_config=model_config, api_key=api_key)
             if model_config
@@ -90,12 +94,17 @@ class MCPClient:
             for result in results:
                 if isinstance(result, Exception):
                     logger.error(f"Server connection failed: {result}")
+                    if isinstance(result, GovernanceError):
+                        raise result
                 logger.info(f"Server connection result: {result}")
+        except (GovernanceError, ValueError):
+            raise
         except Exception as e:
             logger.info(f"start servers task error: {e}")
 
     async def _connect_to_single_server(self, server, server_added_name):
         try:
+            await self._authorize_server_connection(server)
             stack = AsyncExitStack()
             url = server.get("url", "")
 
@@ -124,6 +133,11 @@ class MCPClient:
             )
             init_result = await session.initialize()
             server_name = init_result.serverInfo.name
+            if server_name != server_added_name:
+                await self._authorize_server_connection(
+                    server,
+                    resolved_server_name=server_name,
+                )
             if self.state.has_server(server_name):
                 error_message = (
                     f"{server_name} is already connected. Disconnect it and try again."
@@ -150,10 +164,42 @@ class MCPClient:
             await self._load_server_tools(server_name)
 
             return f"{server_name} connected successfully"
+        except (GovernanceError, ValueError):
+            stack = locals().get("stack")
+            if stack is not None:
+                try:
+                    await stack.aclose()
+                except Exception as cleanup_error:
+                    logger.error(f"Error cleaning failed MCP connection: {cleanup_error}")
+            raise
         except Exception as e:
+            stack = locals().get("stack")
+            if stack is not None:
+                try:
+                    await stack.aclose()
+                except Exception as cleanup_error:
+                    logger.error(f"Error cleaning failed MCP connection: {cleanup_error}")
             error_message = f"Failed to connect to server: {str(e)}"
             logger.error(error_message)
             return error_message
+
+    async def _authorize_server_connection(
+        self,
+        server: dict[str, Any],
+        *,
+        resolved_server_name: str | None = None,
+    ) -> None:
+        if self.governance_engine is None:
+            return
+        server_identity = dict(server)
+        if resolved_server_name is not None:
+            server_identity["name"] = resolved_server_name
+            server_identity["requested_name"] = server.get("name")
+        request = mcp_server_authority_request(
+            server=server_identity,
+            actor="mcp_client",
+        )
+        await self.governance_engine.authorize(request)
 
     async def _load_server_tools(self, server_name: str) -> list[Any]:
         """Load MCP tools for one connected server."""
@@ -193,6 +239,8 @@ class MCPClient:
         for server, result in zip(servers, results, strict=True):
             if isinstance(result, Exception):
                 logger.error(f"Failed to add server '{server['name']}': {result}")
+                if isinstance(result, GovernanceError):
+                    raise result
                 responses.append((server["name"], str(result)))
             else:
                 responses.append(result)

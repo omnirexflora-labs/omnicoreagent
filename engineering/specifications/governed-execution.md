@@ -449,7 +449,9 @@ telemetry:
 Rules:
 
 - `deny` stops execution.
-- `ask` creates an approval request and pauses execution.
+- `ask` creates an approval request. If the application did not provide an
+  approval resolver for that run, execution fails closed with
+  `ApprovalRequiredError`.
 - `allow` may still require sandbox enforcement.
 - A decision must include enough reason text to debug policy behavior.
 - `reason_code` is required so tests, telemetry, dashboards, and future evals do
@@ -491,9 +493,10 @@ Rules:
 - Approvals cannot broaden beyond the policy envelope.
 - Expired approvals deny by default.
 - Approval state is recorded in telemetry.
-- Background tasks that need approval must enter a paused state.
-- The approver principal must come from trusted CLI, OmniServe, or
-  application-owned identity context.
+- Background task approval behavior is application-owned. The core harness does
+  not provide a babysitting loop or approval UI by default.
+- The approver principal must come from trusted application-owned identity
+  context.
 - The approver principal must be authorized for the policy scope, tenant,
   session, data class, and requested capability.
 - Approval records must include tenant/session/request binding where available.
@@ -548,8 +551,9 @@ Tool provider resolution:
   generic `tool.local.call`.
 - Application local tools emit `tool.local.call` plus any declared capabilities
   from their descriptor.
-- MCP tools emit `tool.mcp.call` plus any declared or policy-overridden
-  capabilities.
+- MCP tools currently emit `tool.mcp.call`. A later descriptor phase will add
+  declared or policy-overridden secondary capabilities such as network,
+  filesystem, memory, and secret use.
 - Composite actions produce one deterministic governance decision path, either
   by evaluating all required capabilities together or by producing a single
   approval request that lists every required capability.
@@ -696,14 +700,20 @@ Rules:
 - MCP servers default to untrusted external capability providers.
 - MCP server startup or connection requires `mcp.server.start` or
   `mcp.server.connect`.
+- Unsupported MCP transport types fail closed before authorization and before
+  opening any local process or remote connection.
 - Tool calls require `tool.mcp.call`.
 - Server-level allow does not imply all tool-level capabilities.
 - Tool descriptors can be generated but policy overrides are authoritative.
 - MCP tool outputs are untrusted observations.
 - MCP servers cannot gain workspace, memory, network, or secret authority unless
   declared and allowed.
-- Local MCP servers must run with scrubbed environment, explicit mounts,
-  sandbox/egress policy when required, and no ambient credentials by default.
+- Local MCP servers must run with a scrubbed operational environment, explicit
+  mounts, sandbox/egress policy when required, and no ambient credentials by
+  default.
+- If the configured MCP server name differs from the server identity returned by
+  MCP initialization, the runtime must authorize the reported identity before
+  registering tools from that server.
 - Remote MCP servers require an explicit remote identity boundary such as a
   gateway/proxy, pinned server identity or URL, and schema/tool hash.
 - MCP schema or tool drift is denied until reapproved or explicitly allowed by
@@ -717,6 +727,7 @@ Required tests:
 - deny MCP tool network capability not granted
 - policy wraps MCP calls without modifying server code
 - deny local MCP startup with ambient secrets
+- deny reported MCP server identity drift unless policy allows it
 - deny remote MCP schema/tool drift until approved
 
 ---
@@ -1065,16 +1076,23 @@ code call this boundary instead of each implementing policy semantics.
 ### Phase 3: MCP Enforcement
 
 - Add MCP server/tool capability descriptors.
-- Enforce policy around MCP tool calls.
+- Enforce policy before MCP server start/connect and MCP tool calls.
 - Add per-server/per-tool rules.
-- Add tests with fake MCP tools.
+- Add tests with fake MCP servers and tools.
+- Do not treat remote schema/tool hash pinning or MCP secondary capability
+  enforcement as complete in this phase; those require the later descriptor and
+  sandbox/policy phases.
 
 ### Phase 4: Approval Interface
 
-- Add approval resolver protocol.
-- Add static resolver and callback resolver.
-- Add paused/denied behavior.
-- Add OmniServe approval API design later if needed.
+- Keep approval resolution app-owned.
+- Keep the core resolver protocol small and deterministic.
+- `ask` without an app-provided resolver fails closed with `ApprovalRequiredError`.
+- Static resolvers remain test/development helpers and must not silently approve
+  high-risk production actions.
+- Do not add a built-in babysitting loop, approval UI, callback server, or
+  OmniServe approval API in the core harness unless a later application-facing
+  design explicitly needs it.
 
 ### Phase 5: Subagent and Background Policy
 

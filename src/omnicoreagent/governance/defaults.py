@@ -130,6 +130,11 @@ def _interactive_dev_policy() -> PolicyEnvelope:
                     capability="tool.mcp.call",
                 ),
                 PolicyRule(
+                    rule_id="ask_mcp_server_start",
+                    effect=PolicyEffect.ASK,
+                    capability="mcp.server.*",
+                ),
+                PolicyRule(
                     rule_id="ask_high_risk",
                     effect=PolicyEffect.ASK,
                     capability="*",

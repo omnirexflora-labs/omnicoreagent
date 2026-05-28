@@ -4,6 +4,7 @@ from omnicoreagent.governance.approvals import (
     StaticApprovalResolver,
 )
 from omnicoreagent.governance.capabilities import (
+    mcp_server_authority_request,
     tool_authority_request,
     tool_authority_requests,
     tool_capability_descriptor,
@@ -104,6 +105,7 @@ __all__ = [
     "discover_policy_file",
     "load_policy",
     "load_policy_file",
+    "mcp_server_authority_request",
     "policy_from_mapping",
     "policy_hash",
     "tool_authority_request",

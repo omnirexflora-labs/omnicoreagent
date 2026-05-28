@@ -2,7 +2,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from omnicoreagent.governance import (
+    GovernanceEngine,
+    UnknownCapabilityError,
+    policy_from_mapping,
+)
 from omnicoreagent.mcp_clients_connection.client import MCPClient
+from omnicoreagent.mcp_clients_connection.transports import (
+    build_stdio_env,
+    normalize_transport_type,
+)
 
 # Mock data for testing
 MOCK_MODEL_CONFIG = {
@@ -43,6 +52,29 @@ MOCK_TOOLS = [
     MockTool("tool1", "Test tool 1"),
     MockTool("tool2", "Test tool 2"),
 ]
+
+
+def _strict_mcp_connection_policy():
+    return policy_from_mapping(
+        {
+            "name": "mcp-connect-policy",
+            "mode": "strict",
+            "rules": {
+                "allow": [
+                    {
+                        "rule_id": "allow_docs_stdio_server",
+                        "capability": "mcp.server.start",
+                        "target": {"mcp_server": "server1"},
+                    },
+                    {
+                        "rule_id": "allow_docs_remote_server",
+                        "capability": "mcp.server.connect",
+                        "target": {"host": "test.com", "mcp_server": "server2"},
+                    },
+                ]
+            },
+        }
+    )
 
 
 class TestMCPClient:
@@ -209,6 +241,188 @@ class TestMCPClient:
             "server2 connected successfully",
         ]
         assert mock_client._connect_to_single_server.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_governance_denies_mcp_server_connect_before_transport(
+        self,
+        mock_client,
+    ):
+        mock_client.governance_engine = GovernanceEngine(
+            policy_from_mapping(
+                {
+                    "name": "deny-mcp-connect",
+                    "mode": "strict",
+                    "rules": {},
+                }
+            )
+        )
+
+        with patch(
+            "omnicoreagent.mcp_clients_connection.client.open_server_transport"
+        ) as open_transport:
+            with pytest.raises(UnknownCapabilityError):
+                await mock_client._connect_to_single_server(
+                    MOCK_MCP_SERVERS[0],
+                    "server1",
+                )
+
+        open_transport.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_governance_allows_mcp_server_connect_before_transport(
+        self,
+        mock_client,
+    ):
+        mock_client.governance_engine = GovernanceEngine(_strict_mcp_connection_policy())
+        server_info = MagicMock()
+        server_info.name = "server1"
+        matching_session = AsyncMock()
+        matching_session.initialize = AsyncMock(
+            return_value=MagicMock(
+                serverInfo=server_info,
+            )
+        )
+        matching_session.list_tools = AsyncMock(return_value=MagicMock(tools=MOCK_TOOLS))
+        mock_transport = (AsyncMock(), AsyncMock())
+        mock_stack = AsyncMock()
+        mock_stack.enter_async_context.return_value = matching_session
+
+        with patch(
+            "omnicoreagent.mcp_clients_connection.client.AsyncExitStack",
+            return_value=mock_stack,
+        ), patch(
+            "omnicoreagent.mcp_clients_connection.client.open_server_transport",
+            AsyncMock(return_value=(*mock_transport, "stdio")),
+        ) as open_transport:
+            result = await mock_client._connect_to_single_server(
+                MOCK_MCP_SERVERS[0],
+                "server1",
+            )
+
+        assert result == "server1 connected successfully"
+        open_transport.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_governance_reauthorizes_reported_mcp_server_identity(
+        self,
+        mock_client,
+    ):
+        mock_client.governance_engine = GovernanceEngine(_strict_mcp_connection_policy())
+        server_info = MagicMock()
+        server_info.name = "unexpected-server"
+        reported_session = AsyncMock()
+        reported_session.initialize = AsyncMock(
+            return_value=MagicMock(
+                serverInfo=server_info,
+            )
+        )
+        reported_session.list_tools = AsyncMock(return_value=MagicMock(tools=[]))
+        mock_transport = (AsyncMock(), AsyncMock())
+        mock_stack = AsyncMock()
+        mock_stack.enter_async_context.return_value = reported_session
+
+        with patch(
+            "omnicoreagent.mcp_clients_connection.client.AsyncExitStack",
+            return_value=mock_stack,
+        ), patch(
+            "omnicoreagent.mcp_clients_connection.client.open_server_transport",
+            AsyncMock(return_value=(*mock_transport, "stdio")),
+        ) as open_transport:
+            with pytest.raises(UnknownCapabilityError):
+                await mock_client._connect_to_single_server(
+                    MOCK_MCP_SERVERS[0],
+                    "server1",
+                )
+
+        open_transport.assert_awaited_once()
+        mock_stack.aclose.assert_awaited_once()
+        assert "unexpected-server" not in mock_client.sessions
+
+    @pytest.mark.asyncio
+    async def test_unsupported_mcp_transport_fails_before_transport(self, mock_client):
+        mock_client.governance_engine = GovernanceEngine(_strict_mcp_connection_policy())
+        server = {
+            "name": "server1",
+            "transport_type": "http",
+            "command": "mock_command",
+            "args": [],
+        }
+
+        with patch(
+            "omnicoreagent.mcp_clients_connection.client.open_server_transport"
+        ) as open_transport:
+            with pytest.raises(ValueError, match="Unsupported MCP transport_type: http"):
+                await mock_client._connect_to_single_server(server, "server1")
+
+        open_transport.assert_not_called()
+
+    def test_transport_normalization_rejects_unsupported_type(self):
+        with pytest.raises(ValueError, match="Unsupported MCP transport_type: http"):
+            normalize_transport_type({"transport_type": "http"})
+
+    @pytest.mark.asyncio
+    async def test_governance_checks_dynamic_add_servers(self, mock_client):
+        mock_client.governance_engine = GovernanceEngine(
+            policy_from_mapping(
+                {
+                    "name": "deny-dynamic-mcp-connect",
+                    "mode": "strict",
+                    "rules": {},
+                }
+            )
+        )
+
+        with patch(
+            "omnicoreagent.mcp_clients_connection.client.open_server_transport"
+        ) as open_transport:
+            with pytest.raises(UnknownCapabilityError):
+                await mock_client.add_servers([MOCK_MCP_SERVERS[1]])
+
+        open_transport.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_connect_to_servers_surfaces_governance_error(self, mock_client):
+        mock_client.governance_engine = GovernanceEngine(
+            policy_from_mapping(
+                {
+                    "name": "deny-mcp-connect",
+                    "mode": "strict",
+                    "rules": {},
+                }
+            )
+        )
+
+        with patch(
+            "omnicoreagent.mcp_clients_connection.client.open_server_transport"
+        ) as open_transport:
+            with pytest.raises(UnknownCapabilityError):
+                await mock_client.connect_to_servers()
+
+        open_transport.assert_not_called()
+
+    def test_stdio_env_uses_only_explicit_server_env(self, monkeypatch):
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "ambient-secret")
+        monkeypatch.setenv("PATH", "/usr/bin")
+        monkeypatch.setenv("LANG", "C.UTF-8")
+        monkeypatch.setenv("HTTPS_PROXY", "http://secret@example.test")
+
+        env = build_stdio_env({"env": {"SAFE_TOKEN": "explicit", "COUNT": 3}})
+
+        assert env["PATH"] == "/usr/bin"
+        assert env["LANG"] == "C.UTF-8"
+        assert env["SAFE_TOKEN"] == "explicit"
+        assert env["COUNT"] == "3"
+        assert "AWS_SECRET_ACCESS_KEY" not in env
+        assert "HTTPS_PROXY" not in env
+
+    def test_stdio_env_uses_scrubbed_baseline_without_explicit_env(self, monkeypatch):
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "ambient-secret")
+        monkeypatch.setenv("PATH", "/usr/bin")
+
+        env = build_stdio_env({})
+
+        assert env["PATH"] == "/usr/bin"
+        assert "AWS_SECRET_ACCESS_KEY" not in env
 
     @pytest.mark.asyncio
     async def test_remove_server(self, mock_client):

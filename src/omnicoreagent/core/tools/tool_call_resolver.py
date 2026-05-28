@@ -44,8 +44,15 @@ class ToolCallResolver:
         action: ToolAction,
         sessions: dict,
         mcp_tools: dict | None,
-    ) -> ToolCallResult | None:
-        match = find_mcp_tool(tool_name=action.tool_name, mcp_tools=mcp_tools)
+    ) -> ToolCallResult | ToolError | None:
+        try:
+            match = find_mcp_tool(tool_name=action.tool_name, mcp_tools=mcp_tools)
+        except ValueError as exc:
+            return ToolError(
+                observation=str(exc),
+                tool_name=action.tool_name,
+                tool_args=action.parameters,
+            )
         if not match:
             return None
 
@@ -111,6 +118,8 @@ class ToolCallResolver:
                 sessions=sessions,
                 mcp_tools=mcp_tools,
             )
+            if isinstance(resolved, ToolError):
+                return resolved
 
         if not resolved:
             resolved = self.resolve_local_tool_action(

@@ -20,7 +20,6 @@ from omnicoreagent.governance.capabilities import tool_authority_requests
 from omnicoreagent.governance.errors import (
     GovernanceError,
     PolicyDeniedError,
-    UngovernedCapabilityError,
 )
 
 TOOL_CALL_TIMEOUT_MESSAGE = (
@@ -595,14 +594,13 @@ class ToolBatchRunner:
     ) -> GovernanceError | None:
         if self.governance_engine is None:
             return None
-        if single_tool.tool_provider == "mcp":
-            return UngovernedCapabilityError(
-                "MCP governance is not implemented until the MCP enforcement phase.",
+        if single_tool.tool_provider == "mcp" and not single_tool.tool_server:
+            return PolicyDeniedError(
+                "MCP tool execution requires a concrete server identity.",
                 metadata={
                     "tool": single_tool.tool_name,
                     "tool_provider": single_tool.tool_provider,
-                    "tool_server": single_tool.tool_server,
-                    "reason_code": "ungoverned_capability",
+                    "reason_code": "unknown_target",
                 },
             )
         try:

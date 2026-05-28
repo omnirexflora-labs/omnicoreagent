@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 from omnicoreagent.core.workspace.paths import (
     WORKSPACE_FILE_PATH_PREFIXES,
@@ -20,6 +21,7 @@ WORKSPACE_MOVE_TOOLS = frozenset({"move_file"})
 ARTIFACT_READ_TOOLS = frozenset(
     {"read_artifact", "tail_artifact", "search_artifact", "list_artifacts"}
 )
+MCP_SERVER_TRANSPORTS = frozenset({"stdio", "sse", "streamable_http"})
 
 
 def tool_capability_descriptor(
@@ -197,6 +199,49 @@ def tool_capability_name(*, tool_name: str, tool_provider: str) -> str:
     return "tool.local.call"
 
 
+def mcp_server_authority_request(
+    *,
+    server: dict[str, Any],
+    actor: str = "agent",
+) -> AuthorityRequest:
+    transport = str(server.get("transport_type", "stdio")).lower()
+    if transport not in MCP_SERVER_TRANSPORTS:
+        supported = ", ".join(sorted(MCP_SERVER_TRANSPORTS))
+        raise ValueError(
+            f"Unsupported MCP transport_type: {transport}. Supported: {supported}"
+        )
+    server_name = str(server.get("name") or "")
+    host = _server_host(server)
+    capability = (
+        "mcp.server.start"
+        if transport == "stdio"
+        else "mcp.server.connect"
+    )
+    return AuthorityRequest(
+        capability=capability,
+        actor=actor,
+        provider="mcp",
+        execution_surface="mcp",
+        target=AuthorityTarget(
+            resource=server_name,
+            host=host,
+            mcp_server=server_name,
+        ),
+        risk_level="medium" if transport == "stdio" else "low",
+        method=transport,
+        host=host,
+        mcp_server=server_name,
+        metadata={
+            "server_name": server_name,
+            "requested_name": server.get("requested_name"),
+            "transport_type": transport,
+            "has_explicit_env": bool(server.get("env")),
+            "url": _redacted_url(server.get("url")),
+            "command": server.get("command") if transport == "stdio" else None,
+        },
+    )
+
+
 def tool_risk_level(*, tool_name: str, tool_provider: str) -> str:
     if tool_provider == "workspace":
         if tool_name == "clear_files":
@@ -231,3 +276,22 @@ def _execution_surface(tool_provider: str) -> str:
     if tool_provider == "mcp":
         return "mcp"
     return "tool"
+
+
+def _server_host(server: dict[str, Any]) -> str | None:
+    url = server.get("url")
+    if not url:
+        return None
+    parsed = urlparse(str(url))
+    return parsed.hostname
+
+
+def _redacted_url(url: Any) -> str | None:
+    if not url:
+        return None
+    parsed = urlparse(str(url))
+    if not parsed.scheme or not parsed.netloc:
+        return str(url)
+    host = parsed.hostname or ""
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{parsed.scheme}://{host}{port}{parsed.path}"

@@ -249,10 +249,22 @@ class ApprovalRequest:
     capability: str
     actor: str
     approval_id: str = field(default_factory=lambda: governance_id("approval"))
+    target: AuthorityTarget | dict[str, Any] | None = None
+    provider: str | None = None
+    execution_surface: str | None = None
+    risk_level: str = "low"
+    data_classes: list[str] = field(default_factory=list)
+    method: str | None = None
+    host: str | None = None
+    mcp_server: str | None = None
     reason: str = ""
     created_at: datetime = field(default_factory=utc_now)
     expires_at: datetime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if isinstance(self.target, dict):
+            self.target = AuthorityTarget(**self.target)
 
 
 @dataclass

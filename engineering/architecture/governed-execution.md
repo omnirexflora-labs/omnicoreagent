@@ -213,9 +213,10 @@ Policy rules are deterministic and ordered by precedence:
 deny -> ask -> allow
 ```
 
-Deny wins. Ask pauses the action until an approval resolver returns a decision.
-Allow may still attach constraints such as sandbox profile, timeout, output
-limit, redaction, or workspace destination.
+Deny wins. Ask requires app-owned external authority. Without a resolver, the
+runtime fails closed with a stable approval-required error. Allow may still
+attach constraints such as sandbox profile, timeout, output limit, redaction, or
+workspace destination.
 
 ## Trust Zones
 
@@ -444,15 +445,17 @@ Approval results include:
 - expiry
 - audit reason
 
-Approval resolvers must bind the approval to a trusted principal from CLI,
-OmniServe, or application-owned identity context. Production high-risk
-approvals cannot come from unauthenticated strings or model output.
+Approval resolvers are app-owned extensions. The core harness only exposes the
+small resolver contract and fails closed when no resolver exists. Production
+high-risk approvals cannot come from unauthenticated strings or model output.
+The core runtime must not add a built-in babysitting loop, approval UI, callback
+server, or OmniServe approval workflow by default.
 
 Approvals may come from:
 
-- application callback
-- CLI prompt
-- OmniServe API
+- application-owned resolver
+- CLI prompt implemented by the app
+- application-owned API/dashboard
 - static policy default
 - future human review UI
 
@@ -521,10 +524,15 @@ AgentBound's MCP-focused access-control model is important here: enforcement
 must be possible even when the MCP server itself is not modified.
 
 Local MCP servers must not run with ambient host authority by default. They need
-scrubbed environment, explicit mounts, and sandbox or egress controls when
-their declared capabilities require them. Remote MCP servers need pinned
-identity and schema/tool drift checks, usually through a gateway or proxy
-boundary.
+a scrubbed operational environment, explicit mounts, and sandbox or egress
+controls when their declared capabilities require them. If a server reports a
+different identity during initialization than the configured identity used to
+start it, the reported identity must be authorized before its tools are
+registered. Remote MCP servers need pinned identity and schema/tool drift
+checks, usually through a gateway or proxy boundary.
+
+Unsupported MCP transports fail closed. The runtime must never interpret an
+unknown transport as stdio or any other side-effecting transport.
 
 ## Telemetry Integration
 
