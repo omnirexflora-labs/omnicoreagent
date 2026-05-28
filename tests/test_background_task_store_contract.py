@@ -32,6 +32,7 @@ from omnicoreagent.background.models import (
 
 REDIS_CONTRACT_URL_ENV = "OMNICOREAGENT_TEST_REDIS_URL"
 DEFAULT_REDIS_CONTRACT_URL = "redis://localhost:6379/0"
+REDIS_CONTRACT_CONNECT_TIMEOUT = 2.0
 MONGODB_CONTRACT_URI_ENV = "OMNICOREAGENT_TEST_MONGODB_URI"
 MONGODB_CONTRACT_DATABASE_ENV = "OMNICOREAGENT_TEST_MONGODB_DATABASE"
 DEFAULT_MONGODB_CONTRACT_URI = "mongodb://localhost:27017"
@@ -92,7 +93,7 @@ async def create_store(kind: str, tmp_path):
         store = RedisTaskStore(
             url=redis_contract_url(),
             prefix=f"test:omnicoreagent:background:{uuid4().hex}",
-            connect_timeout=0.2,
+            connect_timeout=REDIS_CONTRACT_CONNECT_TIMEOUT,
             lock_timeout=0.5,
         )
     elif kind == "mongodb":
@@ -670,7 +671,7 @@ async def test_redis_task_store_contract_persists_across_reconnect():
     first = RedisTaskStore(
         url=url,
         prefix=prefix,
-        connect_timeout=0.2,
+        connect_timeout=REDIS_CONTRACT_CONNECT_TIMEOUT,
         lock_timeout=0.5,
     )
     try:
@@ -727,7 +728,7 @@ async def test_redis_task_store_contract_persists_across_reconnect():
         restored = RedisTaskStore(
             url=url,
             prefix=prefix,
-            connect_timeout=0.2,
+            connect_timeout=REDIS_CONTRACT_CONNECT_TIMEOUT,
             lock_timeout=0.5,
         )
         await restored.initialize()

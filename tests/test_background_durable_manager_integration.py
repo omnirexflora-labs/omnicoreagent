@@ -16,6 +16,7 @@ from omnicoreagent.core.workspace.manager import Workspace
 
 
 DEFAULT_REDIS_URL = "redis://localhost:6379/0"
+REDIS_MANAGER_CONNECT_TIMEOUT = 2.0
 DEFAULT_MONGODB_URI = "mongodb://localhost:27017"
 DEFAULT_MONGODB_DATABASE = "omnicoreagent_test"
 
@@ -107,7 +108,7 @@ async def test_redis_manager_executes_queued_run_after_restart(tmp_path):
         "backend": "redis",
         "url": os.getenv("OMNICOREAGENT_TEST_REDIS_URL", DEFAULT_REDIS_URL),
         "prefix": prefix,
-        "connect_timeout": 0.2,
+        "connect_timeout": REDIS_MANAGER_CONNECT_TIMEOUT,
     }
     await require_redis_available(config)
     try:
