@@ -37,10 +37,18 @@ from omnicoreagent.governance import (
     UnknownCapabilityError,
     build_default_policy,
     canonical_policy_payload,
+    filesystem_authority_request,
+    filesystem_capability_descriptor,
     load_policy,
     load_policy_file,
+    network_authority_request,
+    network_capability_descriptor,
+    package_install_authority_request,
+    package_install_capability_descriptor,
     policy_from_mapping,
     policy_hash,
+    secret_authority_request,
+    secret_capability_descriptor,
     tool_authority_request,
     tool_authority_requests,
     tool_capability_descriptor,
@@ -1106,6 +1114,156 @@ def test_clear_files_uses_critical_clear_capability():
 
     assert request.capability == "workspace.files.clear"
     assert request.risk_level == "critical"
+
+
+def test_network_authority_request_addresses_method_host_and_credentials():
+    request = network_authority_request(
+        method="POST",
+        url="https://api.example.com/v1/orders?token=secret",
+        credentialed=True,
+    )
+    descriptor = network_capability_descriptor(
+        method="post",
+        host="api.example.com",
+        credentialed=True,
+    )
+
+    assert request.capability == "network.http.post"
+    assert request.provider == "network"
+    assert request.execution_surface == "network"
+    assert request.method == "post"
+    assert request.host == "api.example.com"
+    assert request.target.host == "api.example.com"
+    assert request.risk_level == "high"
+    assert request.data_classes == ["credential"]
+    assert request.metadata["url"] == "https://api.example.com/v1/orders"
+    assert "secret" not in str(request.metadata)
+    assert descriptor.capability == request.capability
+    assert descriptor.metadata["credentialed"] is True
+
+
+def test_network_authority_request_normalizes_explicit_host_and_redacts_relative_url():
+    request = network_authority_request(
+        method="get",
+        host="API.EXAMPLE.COM:443",
+        url="/v1/orders?token=secret#frag",
+    )
+
+    assert request.host == "api.example.com"
+    assert request.target.host == "api.example.com"
+    assert request.metadata["url"] == "/v1/orders"
+    assert "secret" not in str(request.metadata)
+
+
+def test_package_install_uses_separate_capability_from_network_get():
+    request = package_install_authority_request(
+        package="requests",
+        manager="pip",
+        host="pypi.org",
+    )
+    descriptor = package_install_capability_descriptor(
+        package="requests",
+        manager="pip",
+        host="pypi.org",
+    )
+
+    assert request.capability == "package.install"
+    assert request.execution_surface == "network"
+    assert request.target.resource == "requests"
+    assert request.host == "pypi.org"
+    assert request.risk_level == "high"
+    assert descriptor.capability == "package.install"
+    assert descriptor.provider == "package"
+    assert descriptor.execution_surface == "network"
+
+
+def test_filesystem_authority_request_normalizes_scope_and_rejects_escape():
+    request = filesystem_authority_request(
+        action="write",
+        path="/workspace/./notes/report.md",
+        sandbox_id="sandbox_1",
+    )
+    descriptor = filesystem_capability_descriptor(action="write")
+
+    assert request.capability == "filesystem.write"
+    assert request.target.path == "/workspace/notes/report.md"
+    assert request.target.resource == "sandbox_1"
+    assert request.risk_level == "medium"
+    assert descriptor.execution_surface == "filesystem"
+
+    with pytest.raises(ValueError):
+        filesystem_authority_request(action="read", path="../host-secret.txt")
+    with pytest.raises(ValueError):
+        filesystem_authority_request(action="read", path="/workspace/../host-secret.txt")
+
+
+def test_secret_authority_request_separates_brokered_use_from_raw_read():
+    brokered = secret_authority_request(
+        secret_ref="stripe/live",
+        purpose="charge customer",
+        brokered=True,
+    )
+    raw = secret_authority_request(
+        secret_ref="stripe/live",
+        purpose="debug credential",
+        brokered=False,
+    )
+    descriptor = secret_capability_descriptor(secret_ref="stripe/live", brokered=True)
+
+    assert brokered.capability == "secret.use"
+    assert brokered.execution_surface == "secret_broker"
+    assert brokered.data_classes == []
+    assert brokered.metadata == {
+        "secret_ref": "stripe/live",
+        "purpose": "charge customer",
+        "brokered": True,
+    }
+    assert raw.capability == "secret.read"
+    assert raw.risk_level == "critical"
+    assert raw.data_classes == ["credential"]
+    assert descriptor.capability == "secret.use"
+
+
+def test_default_policies_gate_secret_network_and_package_surfaces():
+    permissive = build_default_policy("permissive-dev")
+    interactive = build_default_policy("interactive-dev")
+    evaluator = PolicyEvaluator()
+
+    assert (
+        evaluator.evaluate(
+            permissive,
+            secret_authority_request(secret_ref="api/key", purpose="call api"),
+        ).effect
+        == PolicyEffect.DENY
+    )
+    assert (
+        evaluator.evaluate(
+            permissive,
+            package_install_authority_request(package="httpx"),
+        ).effect
+        == PolicyEffect.DENY
+    )
+    assert (
+        evaluator.evaluate(
+            permissive,
+            filesystem_authority_request(action="delete", path="/etc/passwd"),
+        ).effect
+        == PolicyEffect.DENY
+    )
+    assert (
+        evaluator.evaluate(
+            interactive,
+            secret_authority_request(secret_ref="api/key", purpose="call api"),
+        ).effect
+        == PolicyEffect.ASK
+    )
+    assert (
+        evaluator.evaluate(
+            interactive,
+            network_authority_request(method="get", host="api.example.com"),
+        ).effect
+        == PolicyEffect.ASK
+    )
 
 
 def test_tool_capability_name_maps_mcp_descriptor_for_phase_three():

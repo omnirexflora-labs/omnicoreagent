@@ -98,9 +98,9 @@ rules:
   allow: [PolicyRule]
 defaults:
   unknown_capability: deny | ask | allow
-  unknown_mcp_server: deny | ask | allow
-  unknown_network_host: deny | ask | allow
-  unknown_secret: deny | ask | allow
+  # Future default knobs may add per-surface unknown handling.
+  # Current implementation uses normal rule/mode evaluation for unknown MCP
+  # servers, network hosts, and secrets.
 sandbox:
   required_for: [capability-pattern]
   default_profile: string | null
@@ -303,12 +303,11 @@ target: TargetMatcher | null
 conditions:
   risk_level: [low | medium | high | critical] | null
   data_classes: [string] | null
-  provider: local | mcp | workspace | artifact | skill | sandbox | null
-  execution_surface: tool | workspace | artifact | memory | mcp | skill | sandbox | background | subagent | serve | telemetry | null
+  provider: local | mcp | workspace | artifact | memory | skill | sandbox | background | subagent | serve | telemetry | network | package | filesystem | secret | null
+  execution_surface: tool | workspace | artifact | memory | mcp | skill | sandbox | background | subagent | serve | telemetry | network | filesystem | secret | secret_broker | null
   mcp_server: string | null
   method: string | null
   host: string | null
-  path: string | null
 constraints:
   timeout_seconds: int | null
   output_bytes: int | null
@@ -338,7 +337,7 @@ Every side-effecting surface must expose capability metadata.
 
 ```yaml
 capability_id: string
-provider: local | mcp | workspace | artifact | memory | skill | sandbox | background | subagent | serve
+provider: local | mcp | workspace | artifact | memory | skill | sandbox | background | subagent | serve | telemetry | network | package | filesystem | secret
 name: string
 description: string
 descriptor_source: builtin | app_code | mcp_schema | generated | user_config
@@ -631,15 +630,18 @@ Rules:
 
 - Workspace files are the default writable file surface.
 - Host filesystem access is denied unless explicitly allowed.
+- Host filesystem authority requests use `filesystem.read`,
+  `filesystem.write`, and `filesystem.delete`.
+- Filesystem targets are normalized before policy matching.
 - Absolute host paths are never exposed to the model unless policy allows.
 - `delete` requires explicit allow or approval.
 - Subagents get a narrowed workspace prefix by default.
 - Sandbox mount rules are derived from workspace and filesystem policy.
 - Filesystem and workspace decisions evaluate canonicalized paths inside a
   stable root.
-- Relative segments such as `../`, absolute paths, symlink escapes, hardlink
-  escapes, and sandbox mount escapes are rejected unless policy explicitly
-  grants the resolved target.
+- Relative segments such as `../` are rejected during authority-request
+  construction. Deeper symlink, hardlink, mount, and stable-root escape checks
+  must run at the concrete filesystem/sandbox execution boundary.
 - Object-storage keys are normalized before policy matching.
 - The final resolved path/key is enforced again at execution time to reduce
   time-of-check/time-of-use races.
@@ -666,9 +668,12 @@ Rules:
 
 - Process/sandbox network defaults to deny.
 - Tool-level network access requires explicit capability or policy.
+- HTTP authority requests use `network.http.{method}` with lowercase method and
+  normalized host.
 - HTTP method and host must be policy-addressable.
 - Package install requires `package.install`, not only `network.http.get`.
-- Unknown hosts follow `defaults.unknown_network_host`.
+- Unknown hosts follow normal policy mode behavior until a first-class
+  `unknown_network_host` default model is implemented.
 - Credentialed network calls should use brokered secret access.
 
 Required tests:
@@ -688,6 +693,9 @@ Rules:
 - Secrets are never provided to the model by default.
 - Secrets are never passed into sandbox environment by default.
 - Policy may allow brokered secret use without raw secret read.
+- Brokered secret use is `secret.use` and references a secret name plus purpose;
+  it does not expose the credential value to the model.
+- Raw secret value access is `secret.read` and remains credential-class data.
 - Telemetry records secret reference names only.
 - Secret values must be redacted before telemetry, memory, workspace, and model
   observations.
@@ -1150,7 +1158,17 @@ code call this boundary instead of each implementing policy semantics.
 - Treat the local test adapter network policy as advisory test context. Real network
   enforcement belongs to future production sandbox providers.
 
-### Phase 7: Provider Adapters
+### Phase 7: Network, Filesystem, And Secret Contracts
+
+- Add capability descriptors and authority-request builders for network,
+  package installation, host filesystem, and secrets.
+- Keep `package.install` separate from generic network GET.
+- Keep `secret.use` separate from raw `secret.read`.
+- Normalize HTTP method/host and filesystem paths before policy matching.
+- Ensure default profiles deny or ask for secret/network/package capabilities
+  unless explicitly configured.
+
+### Phase 8: Provider Adapters
 
 - Evaluate and add adapters only after the interface is stable.
 - Candidate adapters: OpenSandbox, OpenShell, E2B, Vercel, Modal, Daytona,

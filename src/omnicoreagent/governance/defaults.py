@@ -52,16 +52,34 @@ def _permissive_dev_policy() -> PolicyEnvelope:
                     capability="secret.read",
                 ),
                 PolicyRule(
+                    rule_id="deny_unconfigured_secret_broker_use",
+                    effect=PolicyEffect.DENY,
+                    capability="secret.use",
+                    reason="Brokered secret use needs explicit policy.",
+                ),
+                PolicyRule(
                     rule_id="deny_unrestricted_process_exec",
                     effect=PolicyEffect.DENY,
                     capability="process.exec",
                     reason="Process execution needs explicit policy.",
                 ),
                 PolicyRule(
+                    rule_id="deny_unrestricted_host_filesystem_access",
+                    effect=PolicyEffect.DENY,
+                    capability="filesystem.*",
+                    reason="Host filesystem access needs explicit policy.",
+                ),
+                PolicyRule(
                     rule_id="deny_unrestricted_network_egress",
                     effect=PolicyEffect.DENY,
                     capability="network.*",
                     reason="Network egress needs explicit policy.",
+                ),
+                PolicyRule(
+                    rule_id="deny_unrestricted_package_install",
+                    effect=PolicyEffect.DENY,
+                    capability="package.install",
+                    reason="Package installation needs explicit policy.",
                 ),
             ],
             allow=[
@@ -133,6 +151,16 @@ def _interactive_dev_policy() -> PolicyEnvelope:
                     rule_id="ask_network_egress",
                     effect=PolicyEffect.ASK,
                     capability="network.*",
+                ),
+                PolicyRule(
+                    rule_id="ask_package_install",
+                    effect=PolicyEffect.ASK,
+                    capability="package.install",
+                ),
+                PolicyRule(
+                    rule_id="ask_secret_broker_use",
+                    effect=PolicyEffect.ASK,
+                    capability="secret.use",
                 ),
                 PolicyRule(
                     rule_id="ask_mcp_tool_call",
