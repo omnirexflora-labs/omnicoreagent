@@ -18,7 +18,10 @@ from omnicoreagent.sandbox import (
     SandboxCommandContext,
     SandboxExecRequest,
     SandboxExecResult,
+    SandboxFilesystemDefault,
+    SandboxFilesystemPolicy,
     SandboxManifest,
+    SandboxNetworkDefault,
     SandboxProvider,
     SandboxResources,
     SandboxRuntimeConfig,
@@ -162,6 +165,72 @@ def test_sandbox_nested_models_are_top_level_exports():
     assert SandboxEnvironment().plain == {}
     assert SandboxResources().gpu is False
     assert SandboxLifecycle(cleanup="always").cleanup == SandboxLifecycleCleanup.ALWAYS
+
+
+def test_sandbox_manifest_normalizes_policy_contracts():
+    manifest = SandboxManifest(
+        working_dir="/workspace/./app",
+        workspace_mount={
+            "source": "s3://bucket/workspaces/agent-a",
+            "target": "/workspace",
+            "mode": "read_write",
+        },
+        filesystem_policy={
+            "default": "deny",
+            "readable_paths": ["/workspace/./input"],
+            "writable_paths": ["/workspace/out"],
+        },
+        network_policy={
+            "default": "deny",
+            "allowed_hosts": ["API.EXAMPLE.COM", "*.Internal.EXAMPLE"],
+            "denied_hosts": ["blocked.example.com"],
+        },
+        environment={
+            "plain": {"APP_ENV": "test"},
+            "secret_refs": ["stripe/live"],
+        },
+    )
+
+    assert manifest.working_dir == "/workspace/app"
+    assert manifest.workspace_mount.source == "s3://bucket/workspaces/agent-a"
+    assert manifest.filesystem_policy.default == SandboxFilesystemDefault.DENY
+    assert manifest.filesystem_policy.readable_paths == ["/workspace/input"]
+    assert manifest.network_policy.default == SandboxNetworkDefault.DENY
+    assert manifest.network_policy.allowed_hosts == [
+        "api.example.com",
+        "*.internal.example",
+    ]
+    assert manifest.environment.plain == {"APP_ENV": "test"}
+    assert manifest.environment.secret_refs == ["stripe/live"]
+
+
+def test_sandbox_policy_contracts_reject_unsafe_values():
+    with pytest.raises(ValueError, match="escapes"):
+        SandboxFilesystemPolicy(readable_paths=["/workspace/../host"])
+    with pytest.raises(ValueError, match="escapes"):
+        SandboxFilesystemPolicy(readable_paths=["/workspace/%2e%2e/host"])
+    with pytest.raises(ValueError, match="escapes"):
+        SandboxFilesystemPolicy(writable_paths=["/workspace/%2e%2e/host"])
+    with pytest.raises(ValueError, match="escapes"):
+        SandboxFilesystemPolicy(denied_paths=["/workspace/%2e%2e/host"])
+    with pytest.raises(ValueError, match="escapes"):
+        SandboxManifest(working_dir="/workspace/%2e%2e/host")
+    with pytest.raises(ValueError, match="mount source"):
+        WorkspaceMount(source="../host", target="/workspace")
+    with pytest.raises(ValueError, match="escapes"):
+        WorkspaceMount(source="/workspace/%2e%2e/host", target="/workspace")
+    with pytest.raises(ValueError, match="escapes"):
+        WorkspaceMount(source="/workspace", target="/workspace/%2e%2e/host")
+    with pytest.raises(ValueError, match="credentials"):
+        WorkspaceMount(source="s3://user:secret@bucket/workspace", target="/workspace")
+    with pytest.raises(ValueError, match="host pattern"):
+        NetworkPolicy(allowed_hosts=["https://api.example.com/path"])
+    with pytest.raises(ValueError, match="port"):
+        NetworkPolicy(allowed_hosts=["api.example.com:443"])
+    with pytest.raises(ValueError, match="environment variable"):
+        SandboxEnvironment(plain={"1INVALID": "value"})
+    with pytest.raises(ValueError, match="secret ref"):
+        SandboxEnvironment(secret_refs=["../root"])
 
 
 @pytest.mark.asyncio

@@ -590,8 +590,15 @@ workspace_mount:
   source: string
   target: string
   mode: read_only | read_write
-filesystem_policy: object
-network_policy: object
+filesystem_policy:
+  default: deny | allow
+  readable_paths: [string]
+  writable_paths: [string]
+  denied_paths: [string]
+network_policy:
+  default: deny | allow
+  allowed_hosts: [string]
+  denied_hosts: [string]
 environment:
   plain: object
   secret_refs: [string]
@@ -615,6 +622,17 @@ Rules:
   provider-neutral contract. The `local_test` adapter carries them for handler
   context and tests but does not enforce CPU, memory, timeout, network, or
   process isolation.
+- `working_dir`, `workspace_mount.target`, and sandbox filesystem policy paths
+  must be absolute sandbox paths. Encoded traversal such as `%2e%2e` is decoded
+  and rejected before provider adapters see the manifest.
+- `workspace_mount.source` must be an absolute source path or a URI such as
+  `s3://bucket/prefix`. Relative escapes and embedded credentials are rejected.
+- Sandbox host patterns are host-only values with optional leading wildcard
+  namespace such as `*.example.com`. Ports, schemes, paths, userinfo, and query
+  strings are rejected instead of silently widened.
+- Sandbox environment keys must be valid environment variable names. Secret
+  refs are symbolic references only and must not contain whitespace, null bytes,
+  or traversal segments.
 - Sandbox execution requests must include authority metadata from the policy
   decision that allowed the sandbox route.
 - Sandbox telemetry records command summaries and bounded output summaries, not
@@ -671,7 +689,12 @@ Rules:
 - HTTP authority requests use `network.http.{method}` with lowercase method and
   normalized host.
 - HTTP method and host must be policy-addressable.
+- Authority hosts are host-only. Embedded credentials and explicit ports are
+  rejected in this phase rather than broadened or silently normalized.
 - Package install requires `package.install`, not only `network.http.get`.
+- Package names in authority requests are package identities, not installer
+  command text. Flags, shell separators, whitespace injection, and control
+  characters are rejected before authorization.
 - Unknown hosts follow normal policy mode behavior until a first-class
   `unknown_network_host` default model is implemented.
 - Credentialed network calls should use brokered secret access.
@@ -1165,6 +1188,10 @@ code call this boundary instead of each implementing policy semantics.
 - Keep `package.install` separate from generic network GET.
 - Keep `secret.use` separate from raw `secret.read`.
 - Normalize HTTP method/host and filesystem paths before policy matching.
+- Reject embedded credentials in network URLs/hosts before authorization.
+- Decode and reject encoded filesystem traversal before policy matching.
+- Normalize sandbox manifest network, filesystem, environment, and secret
+  reference policy fields before any provider adapter sees them.
 - Ensure default profiles deny or ask for secret/network/package capabilities
   unless explicitly configured.
 

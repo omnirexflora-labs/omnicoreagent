@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import posixpath
+import re
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from omnicoreagent.core.workspace.paths import (
     WORKSPACE_FILE_PATH_PREFIXES,
@@ -308,9 +309,8 @@ def package_install_authority_request(
     host: str | None = None,
     actor: str = "agent",
 ) -> AuthorityRequest:
-    package = str(package or "").strip()
-    if not package:
-        raise ValueError("package is required")
+    package = _normalize_package_name(package)
+    manager = _normalize_package_manager(manager)
     resolved_host = _normalize_host(host) if host else None
     return AuthorityRequest(
         capability="package.install",
@@ -335,6 +335,8 @@ def package_install_capability_descriptor(
     manager: str = "pip",
     host: str | None = None,
 ) -> CapabilityDescriptor:
+    normalized_package = _normalize_package_name(package) if package else None
+    manager = _normalize_package_manager(manager)
     return CapabilityDescriptor(
         capability="package.install",
         provider="package",
@@ -343,7 +345,7 @@ def package_install_capability_descriptor(
         descriptor_trust="trusted",
         risk_level="high",
         metadata={
-            "package": str(package).strip() if package else None,
+            "package": normalized_package,
             "manager": manager,
             "host": _normalize_host(host) if host else None,
         },
@@ -578,6 +580,10 @@ def _normalize_host(host: str | None) -> str:
     if "/" in normalized or "\\" in normalized:
         raise ValueError(f"Invalid network host: {host}")
     parsed = urlparse(f"//{normalized}")
+    if parsed.username or parsed.password:
+        raise ValueError(f"Invalid network host: {host}")
+    if parsed.port is not None:
+        raise ValueError(f"Network host must not include a port: {host}")
     hostname = parsed.hostname
     if not hostname:
         raise ValueError(f"Invalid network host: {host}")
@@ -588,6 +594,10 @@ def _host_from_url(url: str | None) -> str | None:
     if not url:
         return None
     parsed = urlparse(str(url))
+    if parsed.username or parsed.password:
+        raise ValueError("network URL must not contain embedded credentials")
+    if parsed.port is not None:
+        raise ValueError("network URL must not include an explicit port")
     return parsed.hostname
 
 
@@ -610,7 +620,7 @@ def _normalize_filesystem_action(action: str) -> str:
 
 
 def _normalize_filesystem_path(path: str | None) -> str:
-    raw = str(path or "").strip()
+    raw = unquote(str(path or "").strip())
     if not raw:
         raise ValueError("filesystem path is required")
     if "\x00" in raw:
@@ -621,6 +631,28 @@ def _normalize_filesystem_path(path: str | None) -> str:
     normalized = posixpath.normpath(raw.replace("\\", "/"))
     if normalized == ".":
         raise ValueError("filesystem path is required")
+    return normalized
+
+
+def _normalize_package_name(package: str | None) -> str:
+    normalized = str(package or "").strip()
+    if not normalized:
+        raise ValueError("package is required")
+    if re.search(r"[;&|`$<>]", normalized):
+        raise ValueError("package must be an identity, not command text")
+    if "\x00" in normalized or any(char.isspace() for char in normalized):
+        raise ValueError("package contains invalid control characters")
+    return normalized
+
+
+def _normalize_package_manager(manager: str) -> str:
+    normalized = str(manager or "").strip().lower()
+    if not normalized:
+        raise ValueError("package manager is required")
+    if any(char.isspace() for char in normalized) or any(
+        char in normalized for char in "/\\\x00"
+    ):
+        raise ValueError(f"Invalid package manager: {manager}")
     return normalized
 
 
@@ -638,6 +670,11 @@ def _normalize_secret_ref(secret_ref: str) -> str:
         raise ValueError("secret_ref is required")
     if any(char.isspace() for char in normalized):
         raise ValueError("secret_ref must not contain whitespace")
+    if "\x00" in normalized:
+        raise ValueError("secret_ref must not contain null bytes")
+    parts = [part for part in normalized.replace("\\", "/").split("/") if part]
+    if ".." in parts:
+        raise ValueError(f"secret_ref escapes allowed scope: {secret_ref}")
     return normalized
 
 
