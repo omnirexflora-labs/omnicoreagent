@@ -122,6 +122,14 @@ __all__ = [
     "load_policy_file",
     "policy_from_mapping",
     "policy_hash",
+    "network_authority_request",
+    "network_capability_descriptor",
+    "package_install_authority_request",
+    "package_install_capability_descriptor",
+    "filesystem_authority_request",
+    "filesystem_capability_descriptor",
+    "secret_authority_request",
+    "secret_capability_descriptor",
     "tool_authority_request",
     "tool_authority_requests",
     "tool_capability_descriptor",
@@ -279,6 +287,38 @@ _EXPORTS = {
     "load_policy_file": ("omnicoreagent.governance", "load_policy_file"),
     "policy_from_mapping": ("omnicoreagent.governance", "policy_from_mapping"),
     "policy_hash": ("omnicoreagent.governance", "policy_hash"),
+    "network_authority_request": (
+        "omnicoreagent.governance",
+        "network_authority_request",
+    ),
+    "network_capability_descriptor": (
+        "omnicoreagent.governance",
+        "network_capability_descriptor",
+    ),
+    "package_install_authority_request": (
+        "omnicoreagent.governance",
+        "package_install_authority_request",
+    ),
+    "package_install_capability_descriptor": (
+        "omnicoreagent.governance",
+        "package_install_capability_descriptor",
+    ),
+    "filesystem_authority_request": (
+        "omnicoreagent.governance",
+        "filesystem_authority_request",
+    ),
+    "filesystem_capability_descriptor": (
+        "omnicoreagent.governance",
+        "filesystem_capability_descriptor",
+    ),
+    "secret_authority_request": (
+        "omnicoreagent.governance",
+        "secret_authority_request",
+    ),
+    "secret_capability_descriptor": (
+        "omnicoreagent.governance",
+        "secret_capability_descriptor",
+    ),
     "tool_authority_request": ("omnicoreagent.governance", "tool_authority_request"),
     "tool_authority_requests": ("omnicoreagent.governance", "tool_authority_requests"),
     "tool_capability_descriptor": (

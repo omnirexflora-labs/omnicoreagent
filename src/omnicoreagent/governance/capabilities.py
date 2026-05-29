@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import posixpath
 from typing import Any
 from urllib.parse import urlparse
 
@@ -24,6 +25,8 @@ ARTIFACT_READ_TOOLS = frozenset(
 MCP_SERVER_TRANSPORTS = frozenset({"stdio", "sse", "streamable_http"})
 BACKGROUND_TASK_ACTIONS = frozenset({"create", "update", "delete", "pause", "resume"})
 BACKGROUND_RUN_ACTIONS = frozenset({"start", "cancel"})
+FILESYSTEM_ACTIONS = frozenset({"read", "write", "delete"})
+HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete", "head"})
 
 
 def tool_capability_descriptor(
@@ -242,6 +245,200 @@ def mcp_server_authority_request(
     )
 
 
+def network_capability_descriptor(
+    *,
+    method: str,
+    host: str | None = None,
+    credentialed: bool = False,
+) -> CapabilityDescriptor:
+    method = _normalize_http_method(method)
+    return CapabilityDescriptor(
+        capability=f"network.http.{method}",
+        provider="network",
+        execution_surface="network",
+        descriptor_source="app_code",
+        descriptor_trust="trusted",
+        risk_level=_network_risk_level(method=method, credentialed=credentialed),
+        data_classes=["credential"] if credentialed else [],
+        metadata={
+            "method": method,
+            "host": _normalize_host(host) if host else None,
+            "credentialed": credentialed,
+        },
+    )
+
+
+def network_authority_request(
+    *,
+    method: str,
+    host: str | None = None,
+    url: str | None = None,
+    actor: str = "agent",
+    credentialed: bool = False,
+    data_classes: list[str] | None = None,
+) -> AuthorityRequest:
+    method = _normalize_http_method(method)
+    resolved_host = _normalize_host(host or _host_from_url(url))
+    classes = list(data_classes or [])
+    if credentialed and "credential" not in classes:
+        classes.append("credential")
+    return AuthorityRequest(
+        capability=f"network.http.{method}",
+        actor=actor,
+        provider="network",
+        execution_surface="network",
+        target=AuthorityTarget(host=resolved_host),
+        risk_level=_network_risk_level(method=method, credentialed=credentialed),
+        data_classes=classes,
+        method=method,
+        host=resolved_host,
+        metadata={
+            "method": method,
+            "host": resolved_host,
+            "url": _redacted_url(url),
+            "credentialed": credentialed,
+        },
+    )
+
+
+def package_install_authority_request(
+    *,
+    package: str,
+    manager: str = "pip",
+    host: str | None = None,
+    actor: str = "agent",
+) -> AuthorityRequest:
+    package = str(package or "").strip()
+    if not package:
+        raise ValueError("package is required")
+    resolved_host = _normalize_host(host) if host else None
+    return AuthorityRequest(
+        capability="package.install",
+        actor=actor,
+        provider="package",
+        execution_surface="network",
+        target=AuthorityTarget(resource=package, host=resolved_host),
+        risk_level="high",
+        method=manager,
+        host=resolved_host,
+        metadata={
+            "package": package,
+            "manager": manager,
+            "host": resolved_host,
+        },
+    )
+
+
+def package_install_capability_descriptor(
+    *,
+    package: str | None = None,
+    manager: str = "pip",
+    host: str | None = None,
+) -> CapabilityDescriptor:
+    return CapabilityDescriptor(
+        capability="package.install",
+        provider="package",
+        execution_surface="network",
+        descriptor_source="app_code",
+        descriptor_trust="trusted",
+        risk_level="high",
+        metadata={
+            "package": str(package).strip() if package else None,
+            "manager": manager,
+            "host": _normalize_host(host) if host else None,
+        },
+    )
+
+
+def filesystem_capability_descriptor(
+    *,
+    action: str,
+    path: str | None = None,
+) -> CapabilityDescriptor:
+    action = _normalize_filesystem_action(action)
+    return CapabilityDescriptor(
+        capability=f"filesystem.{action}",
+        provider="filesystem",
+        execution_surface="filesystem",
+        descriptor_source="app_code",
+        descriptor_trust="trusted",
+        risk_level=_filesystem_risk_level(action),
+        metadata={
+            "action": action,
+            "path": _normalize_filesystem_path(path) if path else None,
+        },
+    )
+
+
+def filesystem_authority_request(
+    *,
+    action: str,
+    path: str,
+    actor: str = "agent",
+    sandbox_id: str | None = None,
+) -> AuthorityRequest:
+    action = _normalize_filesystem_action(action)
+    safe_path = _normalize_filesystem_path(path)
+    return AuthorityRequest(
+        capability=f"filesystem.{action}",
+        actor=actor,
+        provider="filesystem",
+        execution_surface="filesystem",
+        target=AuthorityTarget(path=safe_path, resource=sandbox_id),
+        risk_level=_filesystem_risk_level(action),
+        metadata={
+            "action": action,
+            "path": safe_path,
+            "sandbox_id": sandbox_id,
+        },
+    )
+
+
+def secret_capability_descriptor(
+    *,
+    secret_ref: str,
+    brokered: bool = True,
+) -> CapabilityDescriptor:
+    secret_ref = _normalize_secret_ref(secret_ref)
+    return CapabilityDescriptor(
+        capability="secret.use" if brokered else "secret.read",
+        provider="secret",
+        execution_surface="secret_broker" if brokered else "secret",
+        descriptor_source="app_code",
+        descriptor_trust="trusted",
+        risk_level="medium" if brokered else "critical",
+        data_classes=[] if brokered else ["credential"],
+        metadata={"secret_ref": secret_ref, "brokered": brokered},
+    )
+
+
+def secret_authority_request(
+    *,
+    secret_ref: str,
+    purpose: str,
+    actor: str = "agent",
+    brokered: bool = True,
+) -> AuthorityRequest:
+    secret_ref = _normalize_secret_ref(secret_ref)
+    purpose = str(purpose or "").strip()
+    if not purpose:
+        raise ValueError("secret purpose is required")
+    return AuthorityRequest(
+        capability="secret.use" if brokered else "secret.read",
+        actor=actor,
+        provider="secret",
+        execution_surface="secret_broker" if brokered else "secret",
+        target=AuthorityTarget(resource=secret_ref),
+        risk_level="medium" if brokered else "critical",
+        data_classes=[] if brokered else ["credential"],
+        metadata={
+            "secret_ref": secret_ref,
+            "purpose": purpose,
+            "brokered": brokered,
+        },
+    )
+
+
 def subagent_spawn_authority_requests(
     *,
     subagent_specs: list[dict[str, Any]],
@@ -366,6 +563,84 @@ def _normalize_workspace_target(path: Any) -> str | None:
     )
 
 
+def _normalize_http_method(method: str) -> str:
+    normalized = str(method or "").lower().strip()
+    if normalized not in HTTP_METHODS:
+        supported = ", ".join(sorted(HTTP_METHODS))
+        raise ValueError(f"Unsupported HTTP method: {method}. Supported: {supported}")
+    return normalized
+
+
+def _normalize_host(host: str | None) -> str:
+    normalized = str(host or "").strip().lower()
+    if not normalized:
+        raise ValueError("network host is required")
+    if "/" in normalized or "\\" in normalized:
+        raise ValueError(f"Invalid network host: {host}")
+    parsed = urlparse(f"//{normalized}")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError(f"Invalid network host: {host}")
+    return hostname.lower()
+
+
+def _host_from_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    parsed = urlparse(str(url))
+    return parsed.hostname
+
+
+def _network_risk_level(*, method: str, credentialed: bool) -> str:
+    if credentialed:
+        return "high"
+    if method in {"post", "put", "patch", "delete"}:
+        return "medium"
+    return "low"
+
+
+def _normalize_filesystem_action(action: str) -> str:
+    normalized = str(action or "").lower().strip()
+    if normalized not in FILESYSTEM_ACTIONS:
+        supported = ", ".join(sorted(FILESYSTEM_ACTIONS))
+        raise ValueError(
+            f"Unsupported filesystem action: {action}. Supported: {supported}"
+        )
+    return normalized
+
+
+def _normalize_filesystem_path(path: str | None) -> str:
+    raw = str(path or "").strip()
+    if not raw:
+        raise ValueError("filesystem path is required")
+    if "\x00" in raw:
+        raise ValueError("filesystem path contains a null byte")
+    parts = [part for part in raw.replace("\\", "/").split("/") if part]
+    if ".." in parts:
+        raise ValueError(f"filesystem path escapes allowed scope: {path}")
+    normalized = posixpath.normpath(raw.replace("\\", "/"))
+    if normalized == ".":
+        raise ValueError("filesystem path is required")
+    return normalized
+
+
+def _filesystem_risk_level(action: str) -> str:
+    if action == "delete":
+        return "high"
+    if action == "write":
+        return "medium"
+    return "low"
+
+
+def _normalize_secret_ref(secret_ref: str) -> str:
+    normalized = str(secret_ref or "").strip()
+    if not normalized:
+        raise ValueError("secret_ref is required")
+    if any(char.isspace() for char in normalized):
+        raise ValueError("secret_ref must not contain whitespace")
+    return normalized
+
+
 def _execution_surface(tool_provider: str) -> str:
     if tool_provider == "workspace":
         return "workspace"
@@ -389,7 +664,7 @@ def _redacted_url(url: Any) -> str | None:
         return None
     parsed = urlparse(str(url))
     if not parsed.scheme or not parsed.netloc:
-        return str(url)
+        return parsed.path
     host = parsed.hostname or ""
     port = f":{parsed.port}" if parsed.port else ""
     return f"{parsed.scheme}://{host}{port}{parsed.path}"
