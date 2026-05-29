@@ -1145,7 +1145,7 @@ def test_network_authority_request_addresses_method_host_and_credentials():
 def test_network_authority_request_normalizes_explicit_host_and_redacts_relative_url():
     request = network_authority_request(
         method="get",
-        host="API.EXAMPLE.COM:443",
+        host="API.EXAMPLE.COM",
         url="/v1/orders?token=secret#frag",
     )
 
@@ -1153,6 +1153,30 @@ def test_network_authority_request_normalizes_explicit_host_and_redacts_relative
     assert request.target.host == "api.example.com"
     assert request.metadata["url"] == "/v1/orders"
     assert "secret" not in str(request.metadata)
+
+
+def test_network_authority_request_rejects_embedded_credentials():
+    with pytest.raises(ValueError, match="embedded credentials"):
+        network_authority_request(
+            method="get",
+            url="https://user:secret@api.example.com/v1/orders",
+        )
+
+    with pytest.raises(ValueError, match="Invalid network host"):
+        network_authority_request(
+            method="get",
+            host="user:secret@api.example.com",
+        )
+    with pytest.raises(ValueError, match="port"):
+        network_authority_request(
+            method="get",
+            host="api.example.com:443",
+        )
+    with pytest.raises(ValueError, match="port"):
+        network_authority_request(
+            method="get",
+            url="https://api.example.com:443/v1/orders",
+        )
 
 
 def test_package_install_uses_separate_capability_from_network_get():
@@ -1177,6 +1201,17 @@ def test_package_install_uses_separate_capability_from_network_get():
     assert descriptor.execution_surface == "network"
 
 
+def test_package_install_rejects_ambiguous_package_inputs():
+    with pytest.raises(ValueError, match="package contains invalid"):
+        package_install_authority_request(package="requests\n--extra-index-url=secret")
+    with pytest.raises(ValueError, match="package contains invalid"):
+        package_install_authority_request(package="requests --index-url secret")
+    with pytest.raises(ValueError, match="command text"):
+        package_install_authority_request(package="requests; rm -rf /")
+    with pytest.raises(ValueError, match="Invalid package manager"):
+        package_install_authority_request(package="requests", manager="pip install")
+
+
 def test_filesystem_authority_request_normalizes_scope_and_rejects_escape():
     request = filesystem_authority_request(
         action="write",
@@ -1195,6 +1230,8 @@ def test_filesystem_authority_request_normalizes_scope_and_rejects_escape():
         filesystem_authority_request(action="read", path="../host-secret.txt")
     with pytest.raises(ValueError):
         filesystem_authority_request(action="read", path="/workspace/../host-secret.txt")
+    with pytest.raises(ValueError):
+        filesystem_authority_request(action="read", path="/workspace/%2e%2e/secret.txt")
 
 
 def test_secret_authority_request_separates_brokered_use_from_raw_read():
@@ -1222,6 +1259,13 @@ def test_secret_authority_request_separates_brokered_use_from_raw_read():
     assert raw.risk_level == "critical"
     assert raw.data_classes == ["credential"]
     assert descriptor.capability == "secret.use"
+
+
+def test_secret_authority_request_rejects_scope_escape_and_nulls():
+    with pytest.raises(ValueError, match="escapes"):
+        secret_authority_request(secret_ref="../api/key", purpose="call api")
+    with pytest.raises(ValueError, match="null"):
+        secret_authority_request(secret_ref="api/key\x00value", purpose="call api")
 
 
 def test_default_policies_gate_secret_network_and_package_surfaces():
