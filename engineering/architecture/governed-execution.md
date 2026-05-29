@@ -284,14 +284,15 @@ effects. The harness remains outside the sandbox so policy evaluation, retries,
 checkpointing, approvals, telemetry, and recovery survive sandbox failure.
 
 OmniCoreAgent should define a provider-neutral `SandboxRuntime` interface with
-adapters for:
+initial adapters for:
 
 - `none`: no external sandbox, only policy checks
-- `local`: local restricted execution for development
-- future Docker or process sandbox
-- future OpenSandbox adapter
-- future OpenShell adapter
-- future E2B, Vercel, Modal, Daytona, Runloop, Cloudflare adapters
+- `local_test`: local test execution through explicitly registered handlers, not
+  arbitrary shell access
+
+Future provider candidates include Docker or process sandboxing, OpenSandbox,
+OpenShell, E2B, Vercel, Modal, Daytona, Runloop, and Cloudflare. They are not
+public runtime providers until their adapters exist and pass this contract.
 
 The runtime interface should support:
 
@@ -303,12 +304,35 @@ The runtime interface should support:
 - set network policy
 - set environment variables
 - inject approved secrets through a broker
-- stream stdout/stderr/events
 - snapshot or checkpoint when supported
 - terminate and cleanup
 
+Provider adapters may add stdout/stderr/event streaming later. Phase 6 defines
+the request/result/session boundary first; streaming is not part of the initial
+runtime protocol.
+
 Sandbox adapters must not decide whether an action is allowed. They only
 enforce the decision and report evidence.
+
+In the first implementation phase, `none` never satisfies a `sandbox_required`
+policy decision. The `local_test` adapter exists to validate lifecycle,
+telemetry, and result contracts without shipping a host shell executor as a
+hidden production surface.
+
+Sandbox-required work must use the explicit sandbox authorization route. Normal
+governance authorization fails closed when `sandbox_required` is present, even
+when a sandbox runtime exists. This prevents a caller from interpreting "allowed
+under sandbox constraints" as permission to execute on the ordinary tool path.
+
+The `local_test` adapter's network policy, environment, resource limits, and
+lifecycle settings are advisory test context only. It helps handlers receive
+the same contract a production provider will enforce, but it is not a network,
+process, CPU, memory, or timeout isolation boundary.
+
+Sandbox execution telemetry must link to the policy decision that authorized the
+route. It records command summaries and bounded output summaries instead of raw
+arguments or raw stdout/stderr. Raw sandbox output remains untrusted until the
+observation pipeline filters it before model injection.
 
 ## Filesystem and Workspace Boundary
 
@@ -588,7 +612,7 @@ surface they need.
    background task surfaces
 4. Approval resolver interface
 5. Telemetry events for decisions and violations
-6. Sandbox runtime interface with a no-op/local adapter
+6. Sandbox runtime interface with a no-op/local test adapter
 7. Network/filesystem/secret policy contracts
 8. Provider adapters after the interface is stable
 9. Public docs and examples

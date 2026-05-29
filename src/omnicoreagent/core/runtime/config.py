@@ -105,6 +105,8 @@ def _default_governance_config() -> dict[str, Any]:
         "policy_path": None,
         "project_root": None,
         "approval_resolver": None,
+        "sandbox_runtime": None,
+        "allow_test_sandbox_runtime": False,
         "allow_static_high_risk_approvals": False,
     }
 
@@ -348,6 +350,8 @@ def _validate_governance_config(value: dict[str, Any]):
         raise ValueError(
             "governance_config.allow_static_high_risk_approvals must be a boolean"
         )
+    if not isinstance(value.get("allow_test_sandbox_runtime", False), bool):
+        raise ValueError("governance_config.allow_test_sandbox_runtime must be a boolean")
     profile = value.get("profile", "interactive-dev")
     if profile not in {"permissive-dev", "interactive-dev", "strict-production"}:
         raise ValueError(

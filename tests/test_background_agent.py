@@ -1725,8 +1725,17 @@ async def test_queue_next_equal_queued_at_uses_stable_ordering():
 @pytest.mark.asyncio
 async def test_manager_run_now_wait_timeout_does_not_block_on_running_agent():
     manager = BackgroundAgentManager(task_store="in_memory")
-    agent_delay = 1.0
-    agent = FakeAgent(response="complete", delay=agent_delay)
+    release_agent = asyncio.Event()
+
+    class WaitingAgent(FakeAgent):
+        async def run(self, query: str, session_id: str, run_id: str | None = None):
+            self.calls.append(
+                {"query": query, "session_id": session_id, "run_id": run_id}
+            )
+            await release_agent.wait()
+            return {"response": self.response, "session_id": session_id}
+
+    agent = WaitingAgent(response="complete")
     await manager.register_agent("agent", agent)
     await manager.register_task(
         task_id="task",
@@ -1735,12 +1744,13 @@ async def test_manager_run_now_wait_timeout_does_not_block_on_running_agent():
         schedule={"type": "manual"},
     )
 
-    started = asyncio.get_running_loop().time()
-    run = await manager.run_now("task", wait=True, timeout_seconds=0.01)
-    elapsed = asyncio.get_running_loop().time() - started
+    run = await asyncio.wait_for(
+        manager.run_now("task", wait=True, timeout_seconds=0.01),
+        timeout=2.0,
+    )
 
-    assert elapsed < agent_delay
     assert run.status in {RunStatus.QUEUED, RunStatus.CLAIMED, RunStatus.RUNNING}
+    release_agent.set()
     completed = await wait_for(
         lambda: manager.list_runs(status=RunStatus.COMPLETED),
         timeout=1.5,

@@ -28,7 +28,9 @@ from omnicoreagent.governance.models import (
 from omnicoreagent.governance.telemetry import (
     emit_policy_decision,
     emit_policy_request,
+    emit_policy_violation,
 )
+from omnicoreagent.sandbox.base import SandboxRuntime
 
 
 class GovernanceEngine:
@@ -39,6 +41,8 @@ class GovernanceEngine:
         evaluator: PolicyEvaluator | None = None,
         approval_resolver: ApprovalResolver | None = None,
         telemetry_recorder: TelemetryRecorder | None = None,
+        sandbox_runtime=None,
+        allow_test_sandbox_runtime: bool = False,
         allow_static_high_risk_approvals: bool = False,
     ) -> None:
         self.policy = policy
@@ -47,6 +51,8 @@ class GovernanceEngine:
         self.evaluator = evaluator or PolicyEvaluator()
         self.approval_resolver = approval_resolver
         self.telemetry_recorder = telemetry_recorder
+        self.sandbox_runtime = sandbox_runtime
+        self.allow_test_sandbox_runtime = allow_test_sandbox_runtime
         self.allow_static_high_risk_approvals = allow_static_high_risk_approvals
         self._budget_lock = asyncio.Lock()
 
@@ -85,6 +91,24 @@ class GovernanceEngine:
         self,
         requests: list[AuthorityRequest],
     ) -> list[PolicyDecision]:
+        return await self._authorize_all(requests, sandbox_route=False)
+
+    async def authorize_sandboxed(self, request: AuthorityRequest) -> PolicyDecision:
+        decisions = await self.authorize_all_sandboxed([request])
+        return decisions[0]
+
+    async def authorize_all_sandboxed(
+        self,
+        requests: list[AuthorityRequest],
+    ) -> list[PolicyDecision]:
+        return await self._authorize_all(requests, sandbox_route=True)
+
+    async def _authorize_all(
+        self,
+        requests: list[AuthorityRequest],
+        *,
+        sandbox_route: bool,
+    ) -> list[PolicyDecision]:
         if not requests:
             return []
 
@@ -99,14 +123,9 @@ class GovernanceEngine:
             decisions = [await self.evaluate(request) for request in requests]
             self._raise_first_denied(decisions)
             for decision in decisions:
-                if decision.constraints.sandbox_required:
-                    raise SandboxRequiredError(
-                        "Policy requires routing through the sandbox execution boundary.",
-                        metadata=_decision_metadata(
-                            decision,
-                            reason_code=ReasonCode.SANDBOX_REQUIRED,
-                        ),
-                    )
+                await self._raise_if_sandbox_required_without_route(
+                    decision, sandbox_route
+                )
 
             ask_indexes = [
                 index
@@ -126,14 +145,9 @@ class GovernanceEngine:
 
         async with self._budget_lock:
             for decision in decisions:
-                if decision.constraints.sandbox_required:
-                    raise SandboxRequiredError(
-                        "Policy requires routing through the sandbox execution boundary.",
-                        metadata=_decision_metadata(
-                            decision,
-                            reason_code=ReasonCode.SANDBOX_REQUIRED,
-                        ),
-                    )
+                await self._raise_if_sandbox_required_without_route(
+                    decision, sandbox_route
+                )
             await self._consume_budget_or_raise_many(requests)
             for index in ask_indexes:
                 await emit_policy_decision(
@@ -142,6 +156,42 @@ class GovernanceEngine:
                     strict=decisions[index].constraints.strict_telemetry,
                 )
         return decisions
+
+    async def _raise_if_sandbox_required_without_route(
+        self,
+        decision: PolicyDecision,
+        sandbox_route: bool,
+    ) -> None:
+        if not decision.constraints.sandbox_required:
+            return
+        if sandbox_route and self._sandbox_runtime_satisfies_required_boundary():
+            return
+        metadata = _decision_metadata(
+            decision,
+            reason_code=ReasonCode.SANDBOX_REQUIRED,
+        )
+        metadata["sandbox_provider"] = getattr(self.sandbox_runtime, "provider", None)
+        metadata["sandbox_route"] = sandbox_route
+        await emit_policy_violation(
+            self.telemetry_recorder,
+            decision,
+            reason_code=ReasonCode.SANDBOX_REQUIRED.value,
+            metadata=metadata,
+            strict=decision.constraints.strict_telemetry,
+        )
+        raise SandboxRequiredError(
+            "Policy requires routing through the sandbox execution boundary.",
+            metadata=metadata,
+        )
+
+    def _sandbox_runtime_satisfies_required_boundary(self) -> bool:
+        if not isinstance(self.sandbox_runtime, SandboxRuntime):
+            return False
+        if not getattr(self.sandbox_runtime, "supports_required_sandbox", False):
+            return False
+        if getattr(self.sandbox_runtime, "is_test_adapter", False):
+            return self.allow_test_sandbox_runtime
+        return True
 
     def _raise_first_denied(self, decisions: list[PolicyDecision]) -> None:
         for decision in decisions:

@@ -47,6 +47,7 @@ from omnicoreagent.governance import (
     tool_capability_name,
 )
 from omnicoreagent.governance.models import utc_now
+from omnicoreagent.sandbox import LocalTestSandboxRuntime, NoneSandboxRuntime
 
 
 class BrokenEvaluator:
@@ -77,6 +78,11 @@ class AsyncApprovalResolver:
             approval_id=request.approval_id,
             resolved_by="async-test",
         )
+
+
+class FakeSandboxBoundary:
+    provider = "fake"
+    supports_required_sandbox = True
 
 
 class RecordingApprovalResolver:
@@ -724,6 +730,175 @@ async def test_governance_engine_enforces_sandbox_constraint():
     assert exc.value.metadata["reason_code"] == "sandbox_required"
 
 
+@pytest.mark.asyncio
+async def test_governance_engine_allows_sandbox_constraint_with_runtime():
+    policy = PolicyEnvelope(
+        name="sandbox",
+        mode=PolicyMode.STRICT,
+        rules=PolicyRuleSet(
+            allow=[
+                PolicyRule(
+                    rule_id="allow_sandboxed_process",
+                    effect=PolicyEffect.ALLOW,
+                    capability="process.exec",
+                    constraints=PolicyConstraints(sandbox_required=True),
+                )
+            ]
+        ),
+    )
+    engine = GovernanceEngine(
+        policy,
+        sandbox_runtime=LocalTestSandboxRuntime(),
+        allow_test_sandbox_runtime=True,
+    )
+
+    decision = await engine.authorize_sandboxed(
+        AuthorityRequest(capability="process.exec")
+    )
+
+    assert decision.effect == PolicyEffect.ALLOW
+    assert decision.constraints.sandbox_required is True
+
+
+@pytest.mark.asyncio
+async def test_governance_engine_normal_authorize_does_not_route_to_sandbox():
+    policy = PolicyEnvelope(
+        name="sandbox",
+        mode=PolicyMode.STRICT,
+        rules=PolicyRuleSet(
+            allow=[
+                PolicyRule(
+                    rule_id="allow_sandboxed_process",
+                    effect=PolicyEffect.ALLOW,
+                    capability="process.exec",
+                    constraints=PolicyConstraints(sandbox_required=True),
+                )
+            ]
+        ),
+    )
+    engine = GovernanceEngine(
+        policy,
+        sandbox_runtime=LocalTestSandboxRuntime(),
+        allow_test_sandbox_runtime=True,
+    )
+
+    with pytest.raises(SandboxRequiredError) as exc:
+        await engine.authorize(AuthorityRequest(capability="process.exec"))
+
+    assert exc.value.metadata["sandbox_route"] is False
+
+
+@pytest.mark.asyncio
+async def test_governance_engine_rejects_test_sandbox_without_explicit_dev_flag():
+    policy = PolicyEnvelope(
+        name="sandbox",
+        mode=PolicyMode.STRICT,
+        rules=PolicyRuleSet(
+            allow=[
+                PolicyRule(
+                    rule_id="allow_sandboxed_process",
+                    effect=PolicyEffect.ALLOW,
+                    capability="process.exec",
+                    constraints=PolicyConstraints(sandbox_required=True),
+                )
+            ]
+        ),
+    )
+    engine = GovernanceEngine(policy, sandbox_runtime=LocalTestSandboxRuntime())
+
+    with pytest.raises(SandboxRequiredError):
+        await engine.authorize_sandboxed(AuthorityRequest(capability="process.exec"))
+
+
+@pytest.mark.asyncio
+async def test_governance_engine_rejects_none_runtime_for_sandbox_constraint():
+    policy = PolicyEnvelope(
+        name="sandbox",
+        mode=PolicyMode.STRICT,
+        rules=PolicyRuleSet(
+            allow=[
+                PolicyRule(
+                    rule_id="allow_sandboxed_process",
+                    effect=PolicyEffect.ALLOW,
+                    capability="process.exec",
+                    constraints=PolicyConstraints(sandbox_required=True),
+                )
+            ]
+        ),
+    )
+    engine = GovernanceEngine(policy, sandbox_runtime=NoneSandboxRuntime())
+
+    with pytest.raises(SandboxRequiredError) as exc:
+        await engine.authorize_sandboxed(AuthorityRequest(capability="process.exec"))
+
+    assert exc.value.metadata["sandbox_provider"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_governance_engine_rejects_non_runtime_sandbox_boundary():
+    policy = PolicyEnvelope(
+        name="sandbox",
+        mode=PolicyMode.STRICT,
+        rules=PolicyRuleSet(
+            allow=[
+                PolicyRule(
+                    rule_id="allow_sandboxed_process",
+                    effect=PolicyEffect.ALLOW,
+                    capability="process.exec",
+                    constraints=PolicyConstraints(sandbox_required=True),
+                )
+            ]
+        ),
+    )
+    engine = GovernanceEngine(policy, sandbox_runtime=FakeSandboxBoundary())
+
+    with pytest.raises(SandboxRequiredError) as exc:
+        await engine.authorize_sandboxed(AuthorityRequest(capability="process.exec"))
+
+    assert exc.value.metadata["sandbox_provider"] == "fake"
+
+
+@pytest.mark.asyncio
+async def test_governance_engine_emits_policy_violation_when_sandbox_route_fails():
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    context = await recorder.start_trace(
+        trace_id="trace-sandbox-violation",
+        run_id="run-sandbox-violation",
+        session_id="session-sandbox-violation",
+        actor=TelemetryActor(type=ActorType.SYSTEM, name="governance-test"),
+    )
+    policy = PolicyEnvelope(
+        name="sandbox",
+        mode=PolicyMode.STRICT,
+        rules=PolicyRuleSet(
+            allow=[
+                PolicyRule(
+                    rule_id="allow_sandboxed_process",
+                    effect=PolicyEffect.ALLOW,
+                    capability="process.exec",
+                    constraints=PolicyConstraints(sandbox_required=True),
+                )
+            ]
+        ),
+    )
+    engine = GovernanceEngine(policy, telemetry_recorder=recorder)
+
+    with pytest.raises(SandboxRequiredError):
+        await engine.authorize_sandboxed(AuthorityRequest(capability="process.exec"))
+    await recorder.end_trace()
+
+    trace = await store.get_trace(context.trace_id)
+    event_types = [event.event_type for event in trace.events]
+    assert event_types == [
+        "policy_request_created",
+        "policy_decision_allow",
+        "policy_violation",
+    ]
+    assert trace.events[-1].output["reason_code"] == "sandbox_required"
+    assert trace.events[-1].output["metadata"]["sandbox_route"] is True
+
+
 def test_governance_telemetry_event_types_are_registered():
     for event_type in (
         "policy_request_created",
@@ -1005,11 +1180,14 @@ def test_governance_config_validation(governance_config, error_match):
 
 def test_governance_config_preserves_runtime_approval_resolver_identity():
     resolver = StaticApprovalResolver(approved=True)
+    sandbox_runtime = LocalTestSandboxRuntime()
     config = AgentConfig(
         governance_config={
             "enabled": True,
             "approval_resolver": resolver,
+            "sandbox_runtime": sandbox_runtime,
         }
     )
 
     assert config.model_dump()["governance_config"]["approval_resolver"] is resolver
+    assert config.model_dump()["governance_config"]["sandbox_runtime"] is sandbox_runtime

@@ -61,6 +61,28 @@ async def emit_policy_decision(
     )
 
 
+async def emit_policy_violation(
+    recorder: TelemetryRecorder | None,
+    decision: PolicyDecision,
+    *,
+    reason_code: str,
+    metadata: dict[str, Any] | None = None,
+    strict: bool = False,
+) -> None:
+    if recorder is None:
+        return
+    await _emit(
+        recorder,
+        "policy_violation",
+        output={
+            "decision": to_plain(decision),
+            "reason_code": reason_code,
+            "metadata": metadata or {},
+        },
+        strict=strict,
+    )
+
+
 async def _emit(
     recorder: TelemetryRecorder,
     event_type: str,

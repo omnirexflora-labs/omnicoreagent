@@ -112,6 +112,10 @@ def build_governance_engine(agent_config: dict[str, Any], telemetry_recorder: An
         policy,
         approval_resolver=governance_config.get("approval_resolver"),
         telemetry_recorder=telemetry_recorder,
+        sandbox_runtime=governance_config.get("sandbox_runtime"),
+        allow_test_sandbox_runtime=governance_config.get(
+            "allow_test_sandbox_runtime", False
+        ),
         allow_static_high_risk_approvals=governance_config.get(
             "allow_static_high_risk_approvals", False
         ),
