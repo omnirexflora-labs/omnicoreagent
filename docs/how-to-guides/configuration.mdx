@@ -239,6 +239,39 @@ agent_config = {
 }
 ```
 
+Governed sandbox command execution uses the explicit sandbox route. The normal
+tool path does not automatically become sandboxed just because a sandbox runtime
+is configured.
+
+```python
+from omnicoreagent import (
+    LocalTestSandboxRuntime,
+    SandboxCommandSpec,
+    SandboxExecResult,
+    SandboxExecutionService,
+)
+
+runtime = LocalTestSandboxRuntime()
+runtime.register_command(
+    "inspect",
+    lambda request: SandboxExecResult(exit_code=0, stdout="ok"),
+)
+
+engine = agent.agent.governance_engine
+engine.sandbox_runtime = runtime
+engine.allow_test_sandbox_runtime = True
+
+result = await SandboxExecutionService(engine).execute(
+    SandboxCommandSpec(command=["inspect"], cwd="/workspace")
+)
+```
+
+`SandboxExecutionService` authorizes `process.exec`, authorizes requested
+sandbox scope such as workspace mounts, network rules, environment keys, and
+secret references, then creates the sandbox session and executes the command.
+Model-bound sandbox output must still go through the normal observation and
+guardrail pipeline before it is injected back into an agent loop.
+
 ---
 
 ## 3. Model Configuration

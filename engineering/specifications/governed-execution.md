@@ -635,10 +635,19 @@ Rules:
   or traversal segments.
 - Sandbox execution requests must include authority metadata from the policy
   decision that allowed the sandbox route.
+- The provider-neutral `SandboxExecutionService` is the explicit route for
+  sandboxed command execution. It evaluates policy in the harness, creates the
+  sandbox session, executes through the configured runtime, attaches authority
+  metadata to the result, and applies lifecycle cleanup.
+- The sandbox execution service is not called implicitly by the ordinary tool
+  path. A caller must intentionally choose the sandbox route.
 - Sandbox telemetry records command summaries and bounded output summaries, not
   raw command arguments or raw stdout/stderr.
 - Sandbox stdout/stderr is untrusted tool output.
-- Sandbox outputs go through observation, guardrails, offload, and telemetry.
+- `SandboxExecutionService` returns a `SandboxExecResult` with authority
+  metadata and observation-shaping helpers. Any sandbox output that is injected
+  into the model must still pass through the model-bound observation, guardrail,
+  offload, and telemetry pipeline.
 
 ---
 
@@ -1170,6 +1179,9 @@ code call this boundary instead of each implementing policy semantics.
   configured.
 - Provide `authorize_sandboxed()` and `authorize_all_sandboxed()` for callers
   that will immediately route execution through a compatible sandbox runtime.
+- Provide a provider-neutral sandbox execution service that combines
+  sandbox-route authorization, session creation, command execution, authority
+  metadata attachment, and lifecycle cleanup.
 - A compatible runtime must implement the `SandboxRuntime` contract. The local
   test adapter can satisfy `sandbox_required` only when the application
   explicitly enables the development/test flag.
