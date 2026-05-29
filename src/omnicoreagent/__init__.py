@@ -146,6 +146,7 @@ __all__ = [
     "SandboxAuthorityContext",
     "SandboxCommand",
     "SandboxCommandContext",
+    "SandboxRuntimeConfig",
     "SandboxProvider",
     "NetworkPolicy",
     "SandboxEnvironment",
@@ -157,6 +158,7 @@ __all__ = [
     "SandboxRuntimeError",
     "SandboxUnsupportedError",
     "SandboxSessionNotFoundError",
+    "build_sandbox_runtime",
 ]
 
 _EXPORTS = {
@@ -337,6 +339,7 @@ _EXPORTS = {
     "SandboxAuthorityContext": ("omnicoreagent.sandbox", "SandboxAuthorityContext"),
     "SandboxCommand": ("omnicoreagent.sandbox", "SandboxCommand"),
     "SandboxCommandContext": ("omnicoreagent.sandbox", "SandboxCommandContext"),
+    "SandboxRuntimeConfig": ("omnicoreagent.sandbox", "SandboxRuntimeConfig"),
     "SandboxProvider": ("omnicoreagent.sandbox", "SandboxProvider"),
     "NetworkPolicy": ("omnicoreagent.sandbox", "NetworkPolicy"),
     "SandboxEnvironment": ("omnicoreagent.sandbox", "SandboxEnvironment"),
@@ -351,6 +354,7 @@ _EXPORTS = {
         "omnicoreagent.sandbox",
         "SandboxSessionNotFoundError",
     ),
+    "build_sandbox_runtime": ("omnicoreagent.sandbox", "build_sandbox_runtime"),
 }
 
 _OPTIONAL_EXPORTS = {

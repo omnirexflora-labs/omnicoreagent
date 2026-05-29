@@ -108,11 +108,19 @@ def build_governance_engine(agent_config: dict[str, Any], telemetry_recorder: An
         project_root=governance_config.get("project_root"),
         profile=governance_config.get("profile", "interactive-dev"),
     )
+    sandbox_runtime = governance_config.get("sandbox_runtime")
+    if sandbox_runtime is None and governance_config.get("sandbox_config") is not None:
+        from omnicoreagent.sandbox import build_sandbox_runtime
+
+        sandbox_runtime = build_sandbox_runtime(
+            governance_config.get("sandbox_config"),
+            telemetry_recorder=telemetry_recorder,
+        )
     return GovernanceEngine(
         policy,
         approval_resolver=governance_config.get("approval_resolver"),
         telemetry_recorder=telemetry_recorder,
-        sandbox_runtime=governance_config.get("sandbox_runtime"),
+        sandbox_runtime=sandbox_runtime,
         allow_test_sandbox_runtime=governance_config.get(
             "allow_test_sandbox_runtime", False
         ),

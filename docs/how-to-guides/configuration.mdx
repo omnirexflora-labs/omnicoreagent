@@ -198,7 +198,12 @@ agent_config = {
     "enable_agent_skills": True,     # Enable local skill discovery
     "enable_advanced_tool_use": True, # Enable BM25 tool retrieval
     "context_management": {"enabled": True},
-    "tool_offload": {"enabled": True}
+    "tool_offload": {"enabled": True},
+    "governance_config": {
+        "enabled": True,
+        "profile": "interactive-dev",
+        "sandbox_config": {"provider": "none"}
+    }
 }
 
 agent = OmniCoreAgent(
@@ -213,6 +218,26 @@ the active workspace. For full harness-style workloads, pair dynamic subagents
 with context management and tool offloading. Context management checks the prompt
 before each model call; tool offloading keeps large tool payloads in workspace
 artifacts instead of feeding the full payload back into the loop.
+
+`governance_config.sandbox_config` selects the sandbox runtime boundary used by
+governed execution. Supported built-in providers are:
+
+| Provider | Use |
+| --- | --- |
+| `none` | Policy-only mode. Does not satisfy `sandbox_required`. |
+| `local_test` | Development/test adapter that runs registered handlers only. No shell or production isolation. |
+
+Use `local_test` only for tests and local harness wiring:
+
+```python
+agent_config = {
+    "governance_config": {
+        "enabled": True,
+        "sandbox_config": {"provider": "local_test"},
+        "allow_test_sandbox_runtime": True,
+    }
+}
+```
 
 ---
 

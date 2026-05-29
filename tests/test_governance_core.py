@@ -1320,6 +1320,21 @@ async def test_omnicoreagent_initializes_governance_engine_from_agent_config():
         ),
         ({"policy": "bad"}, "policy must be a dict or PolicyEnvelope"),
         ({"policy_path": 123}, "policy_path must be a string or path-like"),
+        (
+            {"sandbox_config": {"provider": "docker"}},
+            "sandbox_config.provider must be one of",
+        ),
+        (
+            {"sandbox_config": {"provider": "local_test", "extra": True}},
+            "governance_config.sandbox_config has unknown keys: extra",
+        ),
+        (
+            {
+                "sandbox_runtime": LocalTestSandboxRuntime(),
+                "sandbox_config": {"provider": "local_test"},
+            },
+            "cannot set both sandbox_runtime and sandbox_config",
+        ),
         ({"enabeld": True}, "unknown keys: enabeld"),
     ],
 )
@@ -1349,3 +1364,43 @@ def test_governance_config_preserves_runtime_approval_resolver_identity():
 
     assert config.model_dump()["governance_config"]["approval_resolver"] is resolver
     assert config.model_dump()["governance_config"]["sandbox_runtime"] is sandbox_runtime
+
+
+@pytest.mark.asyncio
+async def test_omnicoreagent_builds_sandbox_runtime_from_governance_config():
+    agent = OmniCoreAgent(
+        name="governed-sandbox",
+        system_instruction="You are governed.",
+        model_config={"provider": "openai", "model": "gpt-4o", "api_key": "test"},
+        agent_config={
+            "guardrail_mode": "off",
+            "governance_config": {
+                "enabled": True,
+                "profile": "strict-production",
+                "sandbox_config": {"provider": "local_test"},
+                "allow_test_sandbox_runtime": True,
+                "policy": {
+                    "name": "sandbox-runtime-policy",
+                    "mode": "strict",
+                    "rules": {
+                        "allow": [
+                            {
+                                "rule_id": "allow_sandboxed_process",
+                                "capability": "process.exec",
+                                "constraints": {"sandbox_required": True},
+                            }
+                        ]
+                    },
+                },
+            },
+        },
+    )
+
+    await agent.initialize()
+    engine = agent.agent.governance_engine
+
+    assert isinstance(engine.sandbox_runtime, LocalTestSandboxRuntime)
+    decision = await engine.authorize_sandboxed(
+        AuthorityRequest(capability="process.exec")
+    )
+    assert decision.constraints.sandbox_required is True

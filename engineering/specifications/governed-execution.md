@@ -1170,7 +1170,10 @@ code call this boundary instead of each implementing policy semantics.
 
 ### Phase 8: Provider Adapters
 
-- Evaluate and add adapters only after the interface is stable.
+- Add runtime selection/factory support for built-in `none` and `local_test`
+  adapters before external providers.
+- External provider adapters must plug into the same factory/config path.
+- Evaluate and add external adapters only after the interface is stable.
 - Candidate adapters: OpenSandbox, OpenShell, E2B, Vercel, Modal, Daytona,
   Runloop, Cloudflare.
 
