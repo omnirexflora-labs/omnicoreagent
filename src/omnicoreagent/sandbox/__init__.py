@@ -4,6 +4,7 @@ from omnicoreagent.sandbox.errors import (
     SandboxSessionNotFoundError,
     SandboxUnsupportedError,
 )
+from omnicoreagent.sandbox.factory import SandboxRuntimeConfig, build_sandbox_runtime
 from omnicoreagent.sandbox.local import (
     LocalTestSandboxRuntime,
     SandboxCommand,
@@ -43,6 +44,7 @@ __all__ = [
     "SandboxProvider",
     "SandboxResources",
     "SandboxRuntime",
+    "SandboxRuntimeConfig",
     "SandboxRuntimeError",
     "SandboxSession",
     "SandboxSessionNotFoundError",
@@ -50,4 +52,5 @@ __all__ = [
     "SandboxUnsupportedError",
     "WorkspaceMount",
     "WorkspaceMountMode",
+    "build_sandbox_runtime",
 ]

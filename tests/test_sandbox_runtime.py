@@ -21,9 +21,11 @@ from omnicoreagent.sandbox import (
     SandboxManifest,
     SandboxProvider,
     SandboxResources,
+    SandboxRuntimeConfig,
     SandboxSessionNotFoundError,
     SandboxUnsupportedError,
     WorkspaceMount,
+    build_sandbox_runtime,
 )
 from omnicoreagent.sandbox.telemetry import emit_sandbox_event
 
@@ -98,6 +100,18 @@ def test_sandbox_observation_truncates_untrusted_output():
         "timed_out": False,
         "metadata": {"stdout_truncated": True, "stderr_truncated": True},
     }
+
+
+def test_build_sandbox_runtime_from_config():
+    none_runtime = build_sandbox_runtime({"provider": "none"})
+    local_runtime = build_sandbox_runtime(SandboxRuntimeConfig(provider="local_test"))
+
+    assert isinstance(none_runtime, NoneSandboxRuntime)
+    assert isinstance(local_runtime, LocalTestSandboxRuntime)
+    assert build_sandbox_runtime(local_runtime) is local_runtime
+
+    with pytest.raises(ValueError, match="Unsupported sandbox provider"):
+        build_sandbox_runtime({"provider": "docker"})
 
 
 @pytest.mark.asyncio

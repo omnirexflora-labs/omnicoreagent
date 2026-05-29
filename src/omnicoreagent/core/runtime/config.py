@@ -106,6 +106,7 @@ def _default_governance_config() -> dict[str, Any]:
         "project_root": None,
         "approval_resolver": None,
         "sandbox_runtime": None,
+        "sandbox_config": None,
         "allow_test_sandbox_runtime": False,
         "allow_static_high_risk_approvals": False,
     }
@@ -352,6 +353,37 @@ def _validate_governance_config(value: dict[str, Any]):
         )
     if not isinstance(value.get("allow_test_sandbox_runtime", False), bool):
         raise ValueError("governance_config.allow_test_sandbox_runtime must be a boolean")
+    sandbox_config = value.get("sandbox_config")
+    if sandbox_config is not None:
+        if value.get("sandbox_runtime") is not None:
+            raise ValueError(
+                "governance_config cannot set both sandbox_runtime and sandbox_config"
+            )
+        if isinstance(sandbox_config, str):
+            provider = sandbox_config
+        elif isinstance(sandbox_config, dict):
+            _validate_unknown_keys(
+                "governance_config.sandbox_config",
+                sandbox_config,
+                frozenset({"provider"}),
+            )
+            provider = sandbox_config.get("provider", "none")
+        else:
+            try:
+                from omnicoreagent.sandbox import SandboxRuntimeConfig
+
+                valid_config = isinstance(sandbox_config, SandboxRuntimeConfig)
+                provider = sandbox_config.provider.value if valid_config else None
+            except Exception:
+                valid_config = False
+                provider = None
+            if not valid_config:
+                raise ValueError("governance_config.sandbox_config must be a dict or string")
+        if provider not in {"none", "local_test"}:
+            raise ValueError(
+                "governance_config.sandbox_config.provider must be one of "
+                "{'none', 'local_test'}"
+            )
     profile = value.get("profile", "interactive-dev")
     if profile not in {"permissive-dev", "interactive-dev", "strict-production"}:
         raise ValueError(
