@@ -1,11 +1,24 @@
 import pytest
 
+import omnicoreagent
 from omnicoreagent.core.telemetry import (
     ActorType,
     InMemoryTelemetryStore,
     TelemetryConfig,
     TelemetryActor,
     TelemetryRecorder,
+)
+from omnicoreagent.governance import (
+    AuthorityRequest,
+    GovernanceEngine,
+    PolicyConstraints,
+    PolicyEffect,
+    PolicyEnvelope,
+    PolicyMode,
+    PolicyRule,
+    PolicyRuleSet,
+    SandboxRequiredError,
+    UnknownCapabilityError,
 )
 from omnicoreagent.sandbox import (
     LocalTestSandboxRuntime,
@@ -15,9 +28,11 @@ from omnicoreagent.sandbox import (
     SandboxLifecycle,
     SandboxLifecycleCleanup,
     SandboxAuthorityContext,
+    SandboxCommandSpec,
     SandboxCommandContext,
     SandboxExecRequest,
     SandboxExecResult,
+    SandboxExecutionService,
     SandboxFilesystemDefault,
     SandboxFilesystemPolicy,
     SandboxManifest,
@@ -165,6 +180,8 @@ def test_sandbox_nested_models_are_top_level_exports():
     assert SandboxEnvironment().plain == {}
     assert SandboxResources().gpu is False
     assert SandboxLifecycle(cleanup="always").cleanup == SandboxLifecycleCleanup.ALWAYS
+    assert omnicoreagent.SandboxExecutionService is SandboxExecutionService
+    assert omnicoreagent.SandboxCommandSpec is SandboxCommandSpec
 
 
 def test_sandbox_manifest_normalizes_policy_contracts():
@@ -295,6 +312,407 @@ async def test_local_test_sandbox_emits_telemetry_events():
 
 
 @pytest.mark.asyncio
+async def test_sandbox_execution_service_authorizes_executes_and_cleans_up():
+    runtime = LocalTestSandboxRuntime(
+        commands={
+            "ok": lambda request: SandboxExecResult(
+                exit_code=0,
+                stdout="done",
+                metadata={"handled": True},
+            )
+        }
+    )
+    engine = GovernanceEngine(
+        _sandbox_policy(),
+        sandbox_runtime=runtime,
+        allow_test_sandbox_runtime=True,
+    )
+
+    result = await SandboxExecutionService(engine).execute(
+        SandboxCommandSpec(command=["ok", "--fast"])
+    )
+
+    assert result.ok is True
+    assert result.stdout == "done"
+    assert runtime.sessions == {}
+    assert result.metadata["handled"] is True
+    assert result.metadata["sandbox_provider"] == "local_test"
+    assert result.metadata["authority"]["matched_rule_ids"] == [
+        "allow_sandboxed_process"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_service_preserves_failed_on_success_sessions():
+    runtime = LocalTestSandboxRuntime(
+        commands={"fail": lambda request: SandboxExecResult(exit_code=2, stderr="no")}
+    )
+    engine = GovernanceEngine(
+        _sandbox_policy(),
+        sandbox_runtime=runtime,
+        allow_test_sandbox_runtime=True,
+    )
+
+    result = await SandboxExecutionService(engine).execute(
+        {
+            "command": ["fail"],
+            "manifest": {"lifecycle": {"cleanup": "on_success"}},
+        }
+    )
+
+    assert result.ok is False
+    assert list(runtime.sessions) == [result.metadata["sandbox_session_id"]]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_service_fails_closed_without_sandbox_route():
+    engine = GovernanceEngine(_sandbox_policy(), sandbox_runtime=NoneSandboxRuntime())
+
+    with pytest.raises(SandboxRequiredError):
+        await SandboxExecutionService(engine).execute({"command": ["ok"]})
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_service_rejects_mismatched_authority_request():
+    runtime = LocalTestSandboxRuntime(
+        commands={"ok": lambda request: SandboxExecResult(exit_code=0)}
+    )
+    engine = GovernanceEngine(
+        _sandbox_policy(),
+        sandbox_runtime=runtime,
+        allow_test_sandbox_runtime=True,
+    )
+
+    with pytest.raises(ValueError, match="process.exec"):
+        await SandboxExecutionService(engine).execute(
+            SandboxCommandSpec(
+                command=["ok"],
+                authority_request=AuthorityRequest(
+                    capability="workspace.files.read",
+                    provider="workspace",
+                    execution_surface="workspace",
+                ),
+            )
+        )
+
+
+def test_sandbox_execution_service_rejects_string_command():
+    with pytest.raises(ValueError, match="list of argv"):
+        SandboxCommandSpec(command="python script.py")
+    with pytest.raises(ValueError, match="non-empty"):
+        SandboxCommandSpec(command=["ok", ""])
+    with pytest.raises(ValueError, match="strings"):
+        SandboxCommandSpec(command=["ok", None])
+    with pytest.raises(ValueError, match="strings"):
+        SandboxCommandSpec(command=[123])
+    with pytest.raises(ValueError, match="control"):
+        SandboxCommandSpec(command=["ok\x00bad"])
+    with pytest.raises(ValueError, match="control"):
+        SandboxCommandSpec(command=["ok\nnext"])
+    with pytest.raises(ValueError, match="absolute"):
+        SandboxCommandSpec(command=["ok"], cwd="workspace")
+    with pytest.raises(ValueError, match="escapes"):
+        SandboxCommandSpec(command=["ok"], cwd="/workspace/%2e%2e/secret")
+    with pytest.raises(ValueError, match="environment variable"):
+        SandboxCommandSpec(command=["ok"], environment={"1BAD": "value"})
+    with pytest.raises(ValueError, match="environment variable"):
+        SandboxCommandSpec(command=["ok"], environment={"BAD=KEY": "value"})
+    with pytest.raises(ValueError, match="environment variable"):
+        SandboxCommandSpec(command=["ok"], environment={"NULL\x00KEY": "value"})
+    with pytest.raises(ValueError, match="positive integer"):
+        SandboxCommandSpec(command=["ok"], timeout_seconds=0)
+    with pytest.raises(ValueError, match="positive integer"):
+        SandboxCommandSpec(command=["ok"], timeout_seconds="30")
+
+
+def test_sandbox_execution_service_preserves_argv_whitespace():
+    spec = SandboxCommandSpec(command=["printf", " value "])
+
+    assert spec.command == ["printf", " value "]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_service_filters_policy_metadata():
+    class RecordingEngine(GovernanceEngine):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.requests = []
+
+        async def authorize_sandboxed(self, request):
+            self.requests.append(request)
+            return await super().authorize_sandboxed(request)
+
+    runtime = LocalTestSandboxRuntime(
+        commands={"ok": lambda request: SandboxExecResult(exit_code=0)}
+    )
+    engine = RecordingEngine(
+        _sandbox_policy(),
+        sandbox_runtime=runtime,
+        allow_test_sandbox_runtime=True,
+    )
+
+    await SandboxExecutionService(engine).execute(
+        SandboxCommandSpec(
+            command=["ok", "--secret", "value"],
+            metadata={"purpose": "test", "secret": "raw", "nested": {"x": "y"}},
+        )
+    )
+
+    assert engine.requests[0].metadata == {
+        "command": {"name": "ok", "argc": 3},
+        "purpose": "test",
+    }
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_service_does_not_mutate_caller_authority_request():
+    runtime = LocalTestSandboxRuntime(
+        commands={"ok": lambda request: SandboxExecResult(exit_code=0)}
+    )
+    engine = GovernanceEngine(
+        _sandbox_policy(),
+        sandbox_runtime=runtime,
+        allow_test_sandbox_runtime=True,
+    )
+    request = AuthorityRequest(
+        capability="process.exec",
+        target=None,
+        metadata={"purpose": "test", "secret": "raw"},
+    )
+
+    await SandboxExecutionService(engine).execute(
+        SandboxCommandSpec(command=["ok"], authority_request=request)
+    )
+
+    assert request.provider is None
+    assert request.execution_surface is None
+    assert request.target is None
+    assert request.metadata == {"purpose": "test", "secret": "raw"}
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_service_forces_command_risk_high():
+    class RecordingEngine(GovernanceEngine):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.requests = []
+
+        async def authorize_sandboxed(self, request):
+            self.requests.append(request)
+            return await super().authorize_sandboxed(request)
+
+    runtime = LocalTestSandboxRuntime(
+        commands={"ok": lambda request: SandboxExecResult(exit_code=0)}
+    )
+    engine = RecordingEngine(
+        _sandbox_policy(),
+        sandbox_runtime=runtime,
+        allow_test_sandbox_runtime=True,
+    )
+
+    await SandboxExecutionService(engine).execute(
+        SandboxCommandSpec(
+            command=["ok"],
+            authority_request=AuthorityRequest(
+                capability="process.exec",
+                risk_level="low",
+            ),
+        )
+    )
+
+    assert engine.requests[-1].risk_level == "high"
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_service_authorizes_manifest_scope_before_create():
+    runtime = LocalTestSandboxRuntime(
+        commands={"ok": lambda request: SandboxExecResult(exit_code=0)}
+    )
+    engine = GovernanceEngine(
+        _sandbox_policy(),
+        sandbox_runtime=runtime,
+        allow_test_sandbox_runtime=True,
+    )
+
+    with pytest.raises(UnknownCapabilityError, match="Unknown capability"):
+        await SandboxExecutionService(engine).execute(
+            {
+                "command": ["ok"],
+                "manifest": {
+                    "network_policy": {
+                        "default": "deny",
+                        "allowed_hosts": ["api.example.com"],
+                    }
+                },
+            }
+        )
+
+    assert runtime.sessions == {}
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_service_runs_with_allowed_manifest_scope():
+    runtime = LocalTestSandboxRuntime(
+        commands={"ok": lambda request: SandboxExecResult(exit_code=0, stdout="ok")}
+    )
+    engine = GovernanceEngine(
+        _sandbox_policy(
+            extra_allow=[
+                PolicyRule(
+                    rule_id="allow_sandbox_network",
+                    effect=PolicyEffect.ALLOW,
+                    capability="sandbox.network.configure",
+                )
+            ]
+        ),
+        sandbox_runtime=runtime,
+        allow_test_sandbox_runtime=True,
+    )
+
+    result = await SandboxExecutionService(engine).execute(
+        {
+            "command": ["ok"],
+            "manifest": {
+                "network_policy": {
+                    "default": "deny",
+                    "allowed_hosts": ["api.example.com"],
+                }
+            },
+        }
+    )
+
+    assert result.ok is True
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_service_manifest_scope_is_policy_matchable():
+    class RecordingEngine(GovernanceEngine):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.batch_requests = []
+
+        async def authorize_all(self, requests):
+            self.batch_requests.append(requests)
+            return await super().authorize_all(requests)
+
+    runtime = LocalTestSandboxRuntime(
+        commands={"ok": lambda request: SandboxExecResult(exit_code=0)}
+    )
+    engine = RecordingEngine(
+        _sandbox_policy(
+            extra_allow=[
+                PolicyRule(
+                    rule_id="allow_api_network",
+                    effect=PolicyEffect.ALLOW,
+                    capability="sandbox.network.configure",
+                    target={"host": "api.example.com"},
+                ),
+                PolicyRule(
+                    rule_id="allow_workspace_cwd",
+                    effect=PolicyEffect.ALLOW,
+                    capability="sandbox.filesystem.cwd",
+                    target={"path": "/workspace/app"},
+                ),
+                PolicyRule(
+                    rule_id="allow_workspace_write",
+                    effect=PolicyEffect.ALLOW,
+                    capability="sandbox.filesystem.configure",
+                    target={"path": "/workspace/out"},
+                ),
+            ]
+        ),
+        sandbox_runtime=runtime,
+        allow_test_sandbox_runtime=True,
+    )
+
+    result = await SandboxExecutionService(engine).execute(
+        {
+            "command": ["ok"],
+            "cwd": "/workspace/./app",
+            "manifest": {
+                "filesystem_policy": {"writable_paths": ["/workspace/out"]},
+                "network_policy": {"allowed_hosts": ["api.example.com"]},
+            },
+        }
+    )
+
+    scope_requests = engine.batch_requests[0]
+    assert result.ok is True
+    assert [request.target.host for request in scope_requests if request.host] == [
+        "api.example.com"
+    ]
+    assert [request.target.path for request in scope_requests if request.target.path] == [
+        "/workspace/app",
+        "/workspace/out",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_service_cleanup_never_preserves_session():
+    runtime = LocalTestSandboxRuntime(
+        commands={"ok": lambda request: SandboxExecResult(exit_code=0)}
+    )
+    engine = GovernanceEngine(
+        _sandbox_policy(),
+        sandbox_runtime=runtime,
+        allow_test_sandbox_runtime=True,
+    )
+
+    result = await SandboxExecutionService(engine).execute(
+        {"command": ["ok"], "manifest": {"lifecycle": {"cleanup": "never"}}}
+    )
+
+    assert result.ok is True
+    assert list(runtime.sessions) == [result.metadata["sandbox_session_id"]]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_service_cleanup_failure_preserves_execute_error():
+    class CleanupFailureRuntime(LocalTestSandboxRuntime):
+        async def terminate(self, session_id: str) -> None:
+            raise RuntimeError("terminate exploded")
+
+    def boom(request):
+        raise RuntimeError("execute exploded")
+
+    runtime = CleanupFailureRuntime(commands={"boom": boom})
+    engine = GovernanceEngine(
+        _sandbox_policy(),
+        sandbox_runtime=runtime,
+        allow_test_sandbox_runtime=True,
+    )
+
+    with pytest.raises(RuntimeError, match="execute exploded") as exc:
+        await SandboxExecutionService(engine).execute({"command": ["boom"]})
+
+    assert any("terminate exploded" in note for note in exc.value.__notes__)
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_service_success_cleanup_failure_runs_once():
+    class CleanupFailureRuntime(LocalTestSandboxRuntime):
+        def __init__(self):
+            super().__init__(commands={"ok": lambda request: SandboxExecResult(exit_code=0)})
+            self.terminate_calls = 0
+
+        async def terminate(self, session_id: str) -> None:
+            self.terminate_calls += 1
+            raise RuntimeError("terminate exploded")
+
+    runtime = CleanupFailureRuntime()
+    engine = GovernanceEngine(
+        _sandbox_policy(),
+        sandbox_runtime=runtime,
+        allow_test_sandbox_runtime=True,
+    )
+
+    with pytest.raises(RuntimeError, match="terminate exploded"):
+        await SandboxExecutionService(engine).execute({"command": ["ok"]})
+
+    assert runtime.terminate_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_sandbox_telemetry_strict_mode_reraises_missing_trace_errors():
     class MissingTraceRecorder:
         config = TelemetryConfig(strict=True)
@@ -314,4 +732,22 @@ def _authority() -> SandboxAuthorityContext:
         policy_hash="hash_1",
         matched_rule_ids=["allow_sandbox"],
         reason_code="matched_allow",
+    )
+
+
+def _sandbox_policy(extra_allow: list[PolicyRule] | None = None) -> PolicyEnvelope:
+    return PolicyEnvelope(
+        name="sandbox",
+        mode=PolicyMode.STRICT,
+        rules=PolicyRuleSet(
+            allow=[
+                PolicyRule(
+                    rule_id="allow_sandboxed_process",
+                    effect=PolicyEffect.ALLOW,
+                    capability="process.exec",
+                    constraints=PolicyConstraints(sandbox_required=True),
+                )
+            ]
+            + list(extra_allow or [])
+        ),
     )

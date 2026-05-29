@@ -4,6 +4,7 @@ from omnicoreagent.sandbox.errors import (
     SandboxSessionNotFoundError,
     SandboxUnsupportedError,
 )
+from omnicoreagent.sandbox.execution import SandboxCommandSpec, SandboxExecutionService
 from omnicoreagent.sandbox.factory import SandboxRuntimeConfig, build_sandbox_runtime
 from omnicoreagent.sandbox.local import (
     LocalTestSandboxRuntime,
@@ -38,7 +39,9 @@ __all__ = [
     "SandboxEnvironment",
     "SandboxAuthorityContext",
     "SandboxCommand",
+    "SandboxCommandSpec",
     "SandboxCommandContext",
+    "SandboxExecutionService",
     "SandboxExecRequest",
     "SandboxExecResult",
     "SandboxFilesystemDefault",
