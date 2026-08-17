@@ -54,6 +54,17 @@ Process communication with local CLI tools:
 }
 ```
 
+Parallel Search MCP is an optional public endpoint for live web search and URL
+fetching. It does not require an account, API key, or OAuth:
+
+```python
+{
+    "name": "parallel_search",
+    "transport_type": "streamable_http",
+    "url": "https://search.parallel.ai/mcp"
+}
+```
+
 ### 3. sse — Server-Sent Events
 
 ```python
