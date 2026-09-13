@@ -52,7 +52,9 @@ async def test_load_skips_observation_user_messages(loader, session_state):
         return [
             Message(role="user", content="start"),
             Message(
-                role="user", content="<observations><tool>old</tool></observations>"
+                role="user",
+                content="<observations><tool>old</tool></observations>",
+                metadata={"transient_observation": True},
             ),
             Message(role="assistant", content="answer"),
         ]
@@ -81,6 +83,7 @@ async def test_load_skips_subagent_observation_user_messages(loader, session_sta
                     "<observations><observation>old</observation></observations>\n"
                     "END OF OBSERVATIONS"
                 ),
+                metadata={"transient_observation": True},
             ),
             Message(role="assistant", content="answer"),
         ]

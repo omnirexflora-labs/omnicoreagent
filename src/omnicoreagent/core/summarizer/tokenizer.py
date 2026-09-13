@@ -7,6 +7,7 @@ installations.
 
 from functools import lru_cache
 from typing import Any
+from omnicoreagent.core.interaction_history import render_message
 
 
 DEFAULT_ENCODING = "cl100k_base"
@@ -69,7 +70,7 @@ def count_message_tokens(messages: list[dict[str, Any]], model: str = "gpt-4") -
     """
     total = 0
     for msg in messages:
-        content = msg.get("content", "")
+        content = render_message(msg)
         if content:
             total += count_tokens(str(content), model)
     return total
@@ -91,3 +92,15 @@ def estimate_tokens_simple(text: str) -> int:
         return 0
     words = len(str(text).split())
     return int(words * 1.3)
+
+
+def truncate_text_to_tokens(text: str, budget: int, model: str = "gpt-4") -> str:
+    if budget <= 0:
+        return ""
+    encoding = get_encoding(model)
+    if encoding is not None:
+        return encoding.decode(encoding.encode(text)[:budget])
+    words = text.split()
+    while words and count_tokens(" ".join(words), model) > budget:
+        words.pop()
+    return " ".join(words)

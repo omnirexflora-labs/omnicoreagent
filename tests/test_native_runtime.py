@@ -82,8 +82,26 @@ async def test_plain_xml_answer_is_content_and_never_executes():
     ]
 
 
+@pytest.fixture(params=["in_memory", "sql"])
+def native_memory(request, monkeypatch, tmp_path):
+    if request.param == "sql":
+        from omnicoreagent.core.memory_store.sql_db_memory import get_sql_manager
+
+        get_sql_manager().close_all()
+        monkeypatch.setenv(
+            "DATABASE_URL", f"sqlite:///{tmp_path / 'native-history.db'}"
+        )
+    try:
+        yield MemoryRouter(request.param)
+    finally:
+        if request.param == "sql":
+            get_sql_manager().close_all()
+
+
 @pytest.mark.asyncio
-async def test_native_batch_preserves_ids_arguments_and_continues_with_tool_results():
+async def test_native_batch_preserves_ids_arguments_and_continues_with_tool_results(
+    native_memory,
+):
     registry = ToolRegistry()
     received = []
 
@@ -104,7 +122,7 @@ async def test_native_batch_preserves_ids_arguments_and_continues_with_tool_resu
             turn("Done"),
         ]
     )
-    result, memory = await run(model, registry=registry)
+    result, memory = await run(model, registry=registry, memory=native_memory)
     assert result["answer"] == "Done"
     assert received == ["001", "hello, world"]
     messages, definitions = model.requests[1]

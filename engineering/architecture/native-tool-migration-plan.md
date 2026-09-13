@@ -126,7 +126,7 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 | 04 | Complete catalog boundary | 50 passed (native catalog/protocol, resolver, registry/runtime registry); schema validation, exact execution arguments, collision mapping and per-catalog BM25 discovery covered. `uv lock` resolved 151 packages; offline attempt lacked cached build dependencies. |
 | 05 | Complete initial cutover | 93 passed (native runtime, base, LLM step, prompts, subagents, history, telemetry, imports). XML parser and dispatcher seams deleted. One import subprocess SIGSEGV occurred during overlapping test invocations; the sequential rerun passed all 93. Result/cancellation hardening follows in 06; broad fixture/docs cleanup remains in 11–12. |
 | 06 | Complete result boundary | 153 passed (executor, registry, native runs, telemetry, output guardrails, subagent governance/factory, offloader). Falsy/MCP/partial results, timeout siblings, cancellation records and approved history covered. |
-| 07 | Pending | |
+| 07 | Complete representation adaptation | 135 passed, 2 live-store skips. Real native batch round trips on in-memory and SQLite; context/group selection, summary/token accounting and generic storage tests. SQLite agent-name filtering fixed after the new round trip exposed TEXT/JSON containment behavior. |
 | 08 | Pending | |
 | 09 | Pending | |
 | 10 | Pending | |
@@ -143,3 +143,5 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 - Step 04 sequencing clarification: configured-child schemas are represented as native catalog bindings now; executor wiring and the dynamic-spawn typed-array change stay in step 05 with the prompt cutover. No second execution path is enabled in this step. Colliding names use deterministic aliases with concrete provider/server bindings rather than ambiguous bare-name routing.
 
 - Step 06 limitation: synchronous in-process Python tools run in worker threads to avoid blocking the event loop. Cancellation stops awaiting and records cancellation but cannot forcibly terminate arbitrary Python thread side effects; process isolation is outside this protocol migration.
+
+- Step 07 policy: active `preserve_recent` expands to retain a complete recent interaction; stored sliding windows and token budgets drop whole groups that do not fit. Very small summary budgets use existing truncation behavior without marking source rows summarized. Unmarked XML-era observations remain historical data; only explicit transient metadata is omitted. PostgreSQL JSON filter expression is implemented but not live-verified.

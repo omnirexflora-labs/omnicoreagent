@@ -225,12 +225,14 @@ class AgentLlmStepRunner:
 
     def _build_context_summarizer(self, llm_connection: Any):
         async def summarize_for_context(messages):
+            from omnicoreagent.core.interaction_history import (
+                render_message,
+                message_record,
+            )
+
             history_text = "\n".join(
-                [
-                    f"{message.role if hasattr(message, 'role') else message.get('role', 'unknown')}: "
-                    f"{message.content if hasattr(message, 'content') else message.get('content', '')}"
-                    for message in messages
-                ]
+                f"{message_record(message).get('role', 'unknown')}: {render_message(message)}"
+                for message in messages
             )
             summary_messages = [
                 {

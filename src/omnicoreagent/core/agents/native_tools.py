@@ -52,6 +52,7 @@ async def execute_native_turn(
         "interaction_version": 2,
         "has_tool_calls": True,
         "tool_calls": stored_calls,
+        "model_message": {**assistant, "tool_calls": stored_calls},
     }
     await add_message_to_history(
         role="assistant", content=turn.text, metadata=metadata, session_id=session_id

@@ -5,7 +5,18 @@ import uuid
 import threading
 import asyncio
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
-from sqlalchemy import String, Text, DateTime, create_engine, func, inspect, text
+from sqlalchemy import (
+    String,
+    Text,
+    DateTime,
+    create_engine,
+    func,
+    inspect,
+    text,
+    JSON,
+    cast,
+    type_coerce,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.ext.mutable import MutableDict
@@ -15,6 +26,19 @@ from omnicoreagent.core.summarizer.summarizer_engine import (
     apply_summarization_logic,
 )
 from omnicoreagent.core.summarizer.summarizer_types import SummaryConfig
+
+
+def _agent_name_expression(session):
+    # DynamicJSON is stored as TEXT. SQLite JSON_EXTRACT reads that text directly;
+    # PostgreSQL requires a JSON cast before applying JSON operators.
+    column = StorageMessage.msg_metadata
+    json_column = (
+        type_coerce(column, JSON)
+        if session.bind.dialect.name == "sqlite"
+        else cast(column, JSON)
+    )
+    return json_column["agent_name"].as_string()
+
 
 DEFAULT_MAX_KEY_LENGTH = 128
 DEFAULT_MAX_VARCHAR_LENGTH = 256
@@ -332,9 +356,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
                     query = query.filter(StorageMessage.session_id == session_id)
 
                 if agent_name:
-                    query = query.filter(
-                        StorageMessage.msg_metadata.contains({"agent_name": agent_name})
-                    )
+                    query = query.filter(_agent_name_expression(session) == agent_name)
 
                 messages = query.order_by(StorageMessage.timestamp.asc()).all()
 
@@ -435,7 +457,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             if session_id and agent_name:
                 query = session.query(StorageMessage).filter(
                     StorageMessage.session_id == session_id,
-                    StorageMessage.msg_metadata.contains({"agent_name": agent_name}),
+                    _agent_name_expression(session) == agent_name,
                 )
                 query.delete()
             elif session_id:
@@ -445,7 +467,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
                 query.delete()
             elif agent_name:
                 query = session.query(StorageMessage).filter(
-                    StorageMessage.msg_metadata.contains({"agent_name": agent_name})
+                    _agent_name_expression(session) == agent_name
                 )
                 query.delete()
             else:

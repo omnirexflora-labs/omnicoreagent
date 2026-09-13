@@ -67,28 +67,32 @@ class AgentMessageHistoryLoader:
     def _apply_user_message(
         self, message: Message, session_state: SessionState
     ) -> None:
-        if self._is_transient_observation(message.content):
+        if (message.metadata or {}).get("transient_observation"):
             return
 
         self._clear_or_flush_pending(session_state=session_state)
         session_state.messages.append(Message(role="user", content=message.content))
 
-    def _is_transient_observation(self, content: str) -> bool:
-        stripped = content.strip()
-        return stripped.startswith("<observations>") or stripped.startswith(
-            "OBSERVATION RESULT FROM SUB-AGENTS"
-        )
-
     def _apply_assistant_message(
         self, message: Message, session_state: SessionState
     ) -> None:
         metadata = message.metadata or {}
-        calls = message.tool_calls or metadata.get("tool_calls", [])
+        native_message = metadata.get("model_message") or {}
+        calls = (
+            message.tool_calls
+            or native_message.get("tool_calls")
+            or metadata.get("tool_calls", [])
+        )
         if calls or metadata.get("has_tool_calls"):
             self._clear_or_flush_pending(session_state=session_state)
             session_state.assistant_with_tool_calls = {
                 "role": "assistant",
-                "content": message.content,
+                "content": native_message.get("content", message.content),
+                **{
+                    key: native_message[key]
+                    for key in ("reasoning_content",)
+                    if key in native_message
+                },
                 "tool_calls": (
                     [ToolCall.model_validate(call).model_dump() for call in calls]
                 ),
