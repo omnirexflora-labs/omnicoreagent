@@ -288,6 +288,8 @@ async def test_blocked_guardrail_response_formats_unsafe_input():
         "session_id": "session",
         "agent_name": "agent",
         "guardrail_result": {"is_safe": False, "message": "unsafe"},
+        "status": "error",
+        "termination_reason": "safety_guard",
     }
 
 
@@ -357,3 +359,25 @@ def test_format_run_response_increments_usage_for_metric_response():
         "metric": usage,
     }
     assert getattr(usage, "seen") is True
+
+
+def test_runtime_outcome_survives_public_and_serving_serialization():
+    from omnicoreagent.core.token_usage import Usage
+    from omnicoreagent.serve.serialization import normalize_run_result
+
+    usage = Usage()
+    response = execution.format_run_response(
+        response={
+            "answer": "budget exhausted",
+            "usage": usage,
+            "status": "error",
+            "termination_reason": "max_steps",
+        },
+        session_id="session",
+        agent_name="agent",
+        usage_getter=lambda: Usage(),
+    )
+    served = normalize_run_result(response, agent_name="agent")
+    assert served["status"] == "error"
+    assert served["termination_reason"] == "max_steps"
+    assert served["response"] == "budget exhausted"

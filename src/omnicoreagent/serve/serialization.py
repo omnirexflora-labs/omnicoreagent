@@ -41,6 +41,11 @@ def normalize_run_result(result: Any, *, agent_name: str) -> dict[str, Any]:
             "metric": normalize_metric(result.get("metric")),
             "trace_id": result.get("trace_id"),
             "run_id": result.get("run_id"),
+            **{
+                key: result[key]
+                for key in ("status", "termination_reason", "guardrail_result")
+                if key in result
+            },
         }
 
     return {

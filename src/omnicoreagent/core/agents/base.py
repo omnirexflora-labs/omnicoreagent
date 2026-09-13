@@ -64,11 +64,9 @@ class BaseReactAgent:
         governance_engine: Any = None,
     ):
         self.agent_name = agent_name
-        self.max_steps = max(max_steps, 5)
-        if max_steps < 5:
-            logger.warning(
-                f"Agent {agent_name}: max_steps increased from {max_steps} to 5 (minimum required for tool usage)"
-            )
+        if max_steps < 1:
+            raise ValueError("max_steps must be positive")
+        self.max_steps = max_steps
         self.tool_call_timeout = tool_call_timeout
 
         self.request_limit = request_limit
@@ -305,6 +303,11 @@ class BaseReactAgent:
                         "length",
                         "content_filter",
                     }:
+                        if telemetry_recorder is not None and step_span is not None:
+                            await telemetry_recorder.end_span(
+                                step_span.span_id, status=SpanStatus.ERROR
+                            )
+                        run_usage.total_time = time.perf_counter() - start_time
                         return {
                             "answer": turn.refusal or turn.text,
                             "usage": run_usage,
@@ -313,6 +316,11 @@ class BaseReactAgent:
                         }
                     if turn.tool_calls:
                         if session_state.state == AgentState.STUCK:
+                            if telemetry_recorder is not None and step_span is not None:
+                                await telemetry_recorder.end_span(
+                                    step_span.span_id, status=SpanStatus.ERROR
+                                )
+                            run_usage.total_time = time.perf_counter() - start_time
                             return {
                                 "answer": "Repeated tool calls halted.",
                                 "usage": run_usage,

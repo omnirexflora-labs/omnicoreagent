@@ -276,6 +276,14 @@ class BackgroundSupervisor:
 
         try:
             result = await self.execute_agent_attempt(running)
+            if (
+                isinstance(result, dict)
+                and result.get("status", "success") != "success"
+            ):
+                raise RuntimeError(
+                    f"Agent execution failed ({result.get('termination_reason', result['status'])}): "
+                    f"{result.get('response', '')}"
+                )
         except asyncio.CancelledError:
             try:
                 if await self.task_store.is_cancel_requested(running.run.run_id):
@@ -350,9 +358,8 @@ class BackgroundSupervisor:
                 surface=f"background task {task.task_id}",
                 required=self.governance_engine is not None,
             )
-            if (
-                self.governance_engine is not None
-                and not claimed.metadata.get("governance_run_start_authorized")
+            if self.governance_engine is not None and not claimed.metadata.get(
+                "governance_run_start_authorized"
             ):
                 await self.governance_engine.authorize(
                     background_run_authority_request(
@@ -564,7 +571,13 @@ class BackgroundSupervisor:
                 kwargs["run_id"] = run.run_id
         except (TypeError, ValueError):
             kwargs["run_id"] = run.run_id
-        coro = agent.run(**kwargs)
+
+        async def invoke():
+            if getattr(agent, "mcp_tools", None):
+                await agent.connect_mcp_servers()
+            return await agent.run(**kwargs)
+
+        coro = invoke()
         return (
             await asyncio.wait_for(coro, timeout=timeout_seconds)
             if timeout_seconds

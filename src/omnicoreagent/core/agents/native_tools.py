@@ -11,7 +11,7 @@ from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
 from omnicoreagent.core.tools.mcp_tool_handler import MCPToolHandler
 from omnicoreagent.core.tools.tool_executor import ToolExecutor
 from omnicoreagent.core.types import AgentState, ToolCallResult
-from omnicoreagent.core.token_usage import Usage, usage
+from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 
 
@@ -109,7 +109,6 @@ async def execute_native_turn(
                         result.get("metric"), Usage
                     ):
                         run_usage.incr(result["metric"])
-                        usage.incr(result["metric"])
                     return {
                         "status": result.get("status", "success")
                         if isinstance(result, dict)

@@ -491,7 +491,10 @@ class TestConfiguration:
         assert "omnicoreagent-serve" in result.output
         assert "omniserver" not in result.output
         assert "Agent path inside image: /app/agents/agent file.py" in result.output
-        assert "docker build -f docker/Dockerfile -t omnicoreagent-serve ." in result.output
+        assert (
+            "docker build -f docker/Dockerfile -t omnicoreagent-serve ."
+            in result.output
+        )
         assert (output_dir / "Dockerfile").exists()
         assert not marker_file.exists()
 
@@ -528,7 +531,10 @@ class TestConfiguration:
         )
 
         assert result.exit_code != 0
-        assert "Agent file must be inside the current Docker build context" in result.output
+        assert (
+            "Agent file must be inside the current Docker build context"
+            in result.output
+        )
         assert not (project_root / "docker" / "Dockerfile").exists()
 
 
@@ -639,7 +645,9 @@ class TestMiddleware:
         assert resp.status_code == 200
         assert resp.headers["access-control-allow-origin"] == "https://example.com"
 
-    def test_rate_limit_middleware_allows_then_denies_protected_routes(self, mock_agent):
+    def test_rate_limit_middleware_allows_then_denies_protected_routes(
+        self, mock_agent
+    ):
         config = OmniServeConfig(
             rate_limit_enabled=True,
             rate_limit_requests=1,
@@ -901,7 +909,10 @@ class TestEndpoints:
     @pytest.mark.parametrize(
         ("sessions", "expected_ready"),
         [
-            ({"server_one": {"connected": True}, "server_two": {"connected": True}}, True),
+            (
+                {"server_one": {"connected": True}, "server_two": {"connected": True}},
+                True,
+            ),
             (
                 {
                     "server_one": {"connected": True},
@@ -1107,7 +1118,9 @@ class TestEndpoints:
         resp = server_client.post("/run/sync", json={"query": "Hello"})
 
         assert resp.status_code == 200
-        traces = asyncio.run(server_client.app.state.agent.telemetry_store.list_traces())
+        traces = asyncio.run(
+            server_client.app.state.agent.telemetry_store.list_traces()
+        )
         serve_trace = next(
             trace
             for trace in traces
@@ -1377,7 +1390,9 @@ class TestEndpoints:
 
         assert client.get("/telemetry/traces/requested-trace").status_code == 404
         assert client.get("/telemetry/runs/requested-run/trace").status_code == 404
-        assert client.get("/telemetry/sessions/requested-session/trace").status_code == 404
+        assert (
+            client.get("/telemetry/sessions/requested-session/trace").status_code == 404
+        )
 
     def test_telemetry_traces_endpoint_rejects_invalid_status(self, server_client):
         resp = server_client.get("/telemetry/traces?status=bogus")
@@ -1756,6 +1771,9 @@ class TestEndpoints:
         assert data["run_id"].startswith("run_")
         assert data == {
             "response": "plain response",
+            "status": "success",
+            "termination_reason": None,
+            "guardrail_result": None,
             "session_id": "string-session",
             "agent_name": "StringAgent",
             "metric": None,

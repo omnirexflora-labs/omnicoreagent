@@ -103,18 +103,21 @@ class BackgroundTaskRunRequest(BaseModel):
 class RunResponse(BaseModel):
     """Response model for synchronous agent run."""
 
+    status: str = Field(
+        "success", description="Runtime outcome: success, error, or cancelled"
+    )
+    termination_reason: Optional[str] = Field(
+        None, description="Why execution terminated"
+    )
+    guardrail_result: Optional[dict[str, Any]] = None
     response: str = Field(..., description="Agent's response")
     session_id: str = Field(..., description="Session ID for this conversation")
     agent_name: str = Field(..., description="Name of the agent")
     metric: Optional[dict[str, Any]] = Field(
         None, description="Optional metrics for this run"
     )
-    trace_id: Optional[str] = Field(
-        None, description="Telemetry trace ID for this run"
-    )
-    run_id: Optional[str] = Field(
-        None, description="Runtime run ID for this run"
-    )
+    trace_id: Optional[str] = Field(None, description="Telemetry trace ID for this run")
+    run_id: Optional[str] = Field(None, description="Runtime run ID for this run")
 
 
 class HealthResponse(BaseModel):

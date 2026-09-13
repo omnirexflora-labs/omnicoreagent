@@ -163,9 +163,7 @@ class OmniCoreAgent:
             String summary of the messages
         """
         if not self.llm_connection:
-            runtime_logger().warning(
-                "No LLM connection available for summarization"
-            )
+            runtime_logger().warning("No LLM connection available for summarization")
             return ""
 
         instruction = summaries.summary_instruction(max_tokens)
@@ -375,16 +373,29 @@ class OmniCoreAgent:
                 usage_getter=self._usage,
             )
             trace_status = TraceStatus(
-                formatted_response.pop("_trace_status", TraceStatus.COMPLETED.value)
+                formatted_response.pop(
+                    "_trace_status",
+                    TraceStatus.COMPLETED.value
+                    if formatted_response.get("status", "success") == "success"
+                    else TraceStatus.FAILED.value,
+                )
             )
             await self.telemetry_recorder.emit_event(
                 "final_answer",
                 actor=self._telemetry_actor(),
-                output={"response": formatted_response.get("response")},
+                output={
+                    "response": formatted_response.get("response"),
+                    "status": formatted_response.get("status", "success"),
+                    "termination_reason": formatted_response.get("termination_reason"),
+                },
             )
             await self.telemetry_recorder.end_trace(
                 status=trace_status,
-                output={"response": formatted_response.get("response")},
+                output={
+                    "response": formatted_response.get("response"),
+                    "status": formatted_response.get("status", "success"),
+                    "termination_reason": formatted_response.get("termination_reason"),
+                },
             )
             formatted_response["trace_id"] = trace_context.trace_id
             formatted_response["run_id"] = run_id
@@ -616,7 +627,9 @@ class OmniCoreAgent:
         if trace_id is not None:
             return await self.get_telemetry_trace(trace_id, normalize=normalize)
         if run_id is not None:
-            traces = await self.list_telemetry_traces(run_id=run_id, normalize=normalize)
+            traces = await self.list_telemetry_traces(
+                run_id=run_id, normalize=normalize
+            )
             return traces[-1] if traces else None
         if session_id is not None:
             return await self.get_latest_trace(session_id, normalize=normalize)

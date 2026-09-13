@@ -133,7 +133,9 @@ class AgentLlmStepRunner:
                 tools=tools,
                 telemetry_recorder=telemetry_recorder,
             )
-            if response:
+            if response is None:
+                raise ValueError("Provider returned no response")
+            if response is not None:
                 await self._record_response(
                     response=response,
                     run_usage=run_usage,
@@ -158,6 +160,8 @@ class AgentLlmStepRunner:
                     "answer": error_message,
                     "usage": run_usage,
                     "_trace_status": TraceStatus.ABORTED_RESOURCE_GUARD.value,
+                    "status": "error",
+                    "termination_reason": "resource_limit",
                 }
             )
 
@@ -165,7 +169,12 @@ class AgentLlmStepRunner:
             error_message = "Model encountered an error, please do retry again"
             logger.error(f"{error_message}: {e}")
             return AgentLlmStepResult(
-                error_result={"answer": error_message, "usage": run_usage}
+                error_result={
+                    "answer": error_message,
+                    "usage": run_usage,
+                    "status": "error",
+                    "termination_reason": "provider_error",
+                }
             )
 
     async def _call_model(
@@ -289,9 +298,7 @@ class AgentLlmStepRunner:
         telemetry_recorder: Any = None,
         debug: bool,
     ):
-        request_usage = extract_response_usage(response)
-        if not request_usage:
-            return
+        request_usage = extract_response_usage(response) or Usage(requests=1)
 
         usage.incr(request_usage)
         run_usage.incr(request_usage)

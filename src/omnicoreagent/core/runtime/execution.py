@@ -25,7 +25,9 @@ async def blocked_guardrail_response(
             "guardrail_check",
             actor=TelemetryActor(type=ActorType.GUARDRAIL),
             input={"target": "user_input", "agent_name": agent_name},
-            output=result.to_dict() if hasattr(result, "to_dict") else {"safe": result.is_safe},
+            output=result.to_dict()
+            if hasattr(result, "to_dict")
+            else {"safe": result.is_safe},
         )
     if result.is_safe:
         return None
@@ -39,6 +41,8 @@ async def blocked_guardrail_response(
         "session_id": session_id,
         "agent_name": agent_name,
         "guardrail_result": result.to_dict(),
+        "status": "error",
+        "termination_reason": "safety_guard",
     }
 
 
@@ -76,6 +80,9 @@ def format_run_response(
             "agent_name": agent_name,
             "metric": usage,
         }
+        for key in ("status", "termination_reason"):
+            if key in response:
+                normalized[key] = response[key]
         if response.get("_trace_status"):
             normalized["_trace_status"] = response["_trace_status"]
         return normalized

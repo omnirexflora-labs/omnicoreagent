@@ -32,7 +32,12 @@ class AgentRunOutcomeHandler:
 
         session_state.state = AgentState.FINISHED
         run_usage.total_time = time.perf_counter() - start_time
-        return {"answer": answer, "usage": run_usage}
+        return {
+            "answer": answer,
+            "usage": run_usage,
+            "status": "success",
+            "termination_reason": "stop",
+        }
 
     def max_steps_result(
         self,

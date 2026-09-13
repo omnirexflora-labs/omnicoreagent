@@ -127,7 +127,7 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 | 05 | Complete initial cutover | 93 passed (native runtime, base, LLM step, prompts, subagents, history, telemetry, imports). XML parser and dispatcher seams deleted. One import subprocess SIGSEGV occurred during overlapping test invocations; the sequential rerun passed all 93. Result/cancellation hardening follows in 06; broad fixture/docs cleanup remains in 11–12. |
 | 06 | Complete result boundary | 153 passed (executor, registry, native runs, telemetry, output guardrails, subagent governance/factory, offloader). Falsy/MCP/partial results, timeout siblings, cancellation records and approved history covered. |
 | 07 | Complete representation adaptation | 135 passed, 2 live-store skips. Real native batch round trips on in-memory and SQLite; context/group selection, summary/token accounting and generic storage tests. SQLite agent-name filtering fixed after the new round trip exposed TEXT/JSON containment behavior. |
-| 08 | Pending | |
+| 08 | Complete outcome propagation | 271 passed (runtime/outcomes, background, serve, LLM step and native runs). Returned errors fail background attempts; serving retains status/reason; missing provider usage still counts a request. |
 | 09 | Pending | |
 | 10 | Pending | |
 | 11 | Pending | |
@@ -145,3 +145,5 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 - Step 06 limitation: synchronous in-process Python tools run in worker threads to avoid blocking the event loop. Cancellation stops awaiting and records cancellation but cannot forcibly terminate arbitrary Python thread side effects; process isolation is outside this protocol migration.
 
 - Step 07 policy: active `preserve_recent` expands to retain a complete recent interaction; stored sliding windows and token budgets drop whole groups that do not fit. Very small summary budgets use existing truncation behavior without marking source rows summarized. Unmarked XML-era observations remain historical data; only explicit transient metadata is omitted. PostgreSQL JSON filter expression is implemented but not live-verified.
+
+- Step 09 source check: installed OpenAI chunk models expose indexed tool deltas and `AsyncStream.close()` closes the response. Checked [official function-calling streaming documentation](https://developers.openai.com/api/docs/guides/function-calling#streaming) and [Chat Completions reference](https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create). Adapter tests remain offline; no model calls were made.

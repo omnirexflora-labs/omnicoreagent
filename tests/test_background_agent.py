@@ -3427,3 +3427,27 @@ def test_occurrence_id_scope_includes_task_revision_and_due_time():
     due_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
     occurrence = build_occurrence_id(ScheduleType.ONCE, 3, due_at)
     assert occurrence == "once:3:2026-01-01T00:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_returned_runtime_error_is_a_failed_background_run():
+    class FailedAgent(FakeAgent):
+        async def run(self, query, session_id=None, run_id=None):
+            return {
+                "response": "step budget exhausted",
+                "status": "error",
+                "termination_reason": "max_steps",
+            }
+
+    manager = BackgroundAgentManager(task_store="in_memory")
+    await manager.register_agent("agent", FailedAgent())
+    await manager.register_task(
+        task_id="failed-native",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    result = await manager.run_now("failed-native", wait=True)
+    assert result.status == RunStatus.FAILED
+    events = await manager.get_run_events(result.run_id)
+    assert "background_run_completed" not in {event["event"] for event in events}
