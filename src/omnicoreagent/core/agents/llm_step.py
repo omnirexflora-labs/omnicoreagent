@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any
 
@@ -59,6 +61,7 @@ class AgentLlmStepRunner:
         telemetry_recorder: Any = None,
         debug: bool = False,
         tools: list[dict[str, Any]] | None = None,
+        on_event: Any = None,
     ) -> AgentLlmStepResult:
         if debug:
             logger.info(f"Sending {len(session_state.messages)} messages to LLM")
@@ -131,6 +134,7 @@ class AgentLlmStepRunner:
                 llm_connection=llm_connection,
                 messages=session_state.messages,
                 tools=tools,
+                on_event=on_event,
                 telemetry_recorder=telemetry_recorder,
             )
             if response is None:
@@ -183,10 +187,33 @@ class AgentLlmStepRunner:
         llm_connection: Any,
         messages: list[Any],
         tools: list[dict[str, Any]] | None = None,
+        on_event: Any = None,
         telemetry_recorder: Any = None,
     ) -> Any:
+        async def request():
+            if on_event is None:
+                return await llm_connection.llm_call(messages, tools=tools)
+            response = None
+            async with aclosing(
+                llm_connection.llm_stream(messages, tools=tools)
+            ) as stream:
+                async for event in stream:
+                    if event["type"] == "turn_complete":
+                        if response is not None:
+                            raise ValueError("Provider stream returned multiple turns")
+                        response = event["turn"]
+                    else:
+                        if response is not None:
+                            raise ValueError(
+                                "Provider stream emitted text after completion"
+                            )
+                        await on_event(event)
+            if response is None:
+                raise ValueError("Provider stream ended without a complete turn")
+            return response
+
         if telemetry_recorder is None:
-            return await llm_connection.llm_call(messages, tools=tools)
+            return await request()
 
         span_context = await telemetry_recorder.start_span(
             name="model.call",
@@ -200,7 +227,7 @@ class AgentLlmStepRunner:
                 actor=TelemetryActor(type=ActorType.MODEL),
                 input={"message_count": len(messages)},
             )
-            response = await llm_connection.llm_call(messages, tools=tools)
+            response = await request()
             await telemetry_recorder.emit_event(
                 "model_response",
                 actor=TelemetryActor(type=ActorType.MODEL),
@@ -219,6 +246,12 @@ class AgentLlmStepRunner:
                 output={"usage": self._usage_payload(extract_response_usage(response))},
             )
             return response
+        except asyncio.CancelledError:
+            await telemetry_recorder.end_span(
+                span_context.span_id,
+                status=SpanStatus.CANCELLED,
+            )
+            raise
         except Exception as exc:
             await telemetry_recorder.record_exception(
                 exc,

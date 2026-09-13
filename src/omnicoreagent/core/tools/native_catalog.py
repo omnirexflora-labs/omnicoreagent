@@ -63,9 +63,11 @@ class NativeToolCatalog:
                 candidates.append((data, "mcp", server, None))
         for agent in sub_agents or []:
             schema = ToolRegistry()._infer_schema(agent.run)
-            schema["properties"].pop("session_id", None)
+            runtime_parameters = {"session_id", "run_id", "on_event"}
+            for parameter in runtime_parameters:
+                schema["properties"].pop(parameter, None)
             schema["required"] = [
-                name for name in schema["required"] if name != "session_id"
+                name for name in schema["required"] if name not in runtime_parameters
             ]
             candidates.append(
                 (

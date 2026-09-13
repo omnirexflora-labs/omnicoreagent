@@ -11,6 +11,7 @@ from omnicoreagent.core.runtime import (
     harness_tools,
     normalization,
     summaries,
+    streaming,
 )
 from omnicoreagent.core.runtime.imports import (
     LazyDefaultPromptBuilder,
@@ -280,6 +281,7 @@ class OmniCoreAgent:
         query: str,
         session_id: Optional[str] = None,
         run_id: Optional[str] = None,
+        on_event: Any = None,
     ) -> Dict[str, Any]:
         """
         Run the agent with a query and optional session ID.
@@ -299,6 +301,12 @@ class OmniCoreAgent:
 
         run_id = run_id or self.generate_run_id()
         trace_context = None
+        delivery = (
+            streaming.StreamDelivery(on_event, run_id)
+            if on_event is not None
+            else streaming.current_delivery.get()
+        )
+        delivery_token = streaming.current_delivery.set(delivery)
         try:
             trace_context = await self.telemetry_recorder.start_trace(
                 name="agent.run",
@@ -350,7 +358,17 @@ class OmniCoreAgent:
                 system_instruction=self.system_instruction
             )
 
+            async def emit_delta(event):
+                await delivery.emit(
+                    event,
+                    agent_name=self.name,
+                    run_id=run_id,
+                    session_id=session_id,
+                    trace_id=trace_context.trace_id,
+                )
+
             response = await self.agent.run(
+                **({"on_event": emit_delta} if delivery is not None else {}),
                 system_prompt=runtime_prompt,
                 query=query,
                 llm_connection=self.llm_connection,
@@ -429,6 +447,19 @@ class OmniCoreAgent:
                     error={"type": exc.__class__.__name__, "message": str(exc)},
                 )
             raise
+
+        finally:
+            streaming.current_delivery.reset(delivery_token)
+
+    def stream(
+        self, query: str, session_id: str | None = None, run_id: str | None = None
+    ):
+        """Stream live intermediate text and one terminal result from the same run loop.
+
+        Use ``contextlib.aclosing`` when stopping iteration early. Deltas are not
+        replayed from telemetry; the completed answer is persisted normally.
+        """
+        return streaming.stream_run(self, query, session_id=session_id, run_id=run_id)
 
     async def _store_message_with_telemetry(
         self,

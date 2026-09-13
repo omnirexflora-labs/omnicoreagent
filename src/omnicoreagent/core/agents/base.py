@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 
 from collections.abc import Callable
@@ -181,6 +182,7 @@ class BaseReactAgent:
         local_tools: Any = None,
         debug: bool = False,
         sub_agents: list = None,
+        on_event: Any = None,
     ) -> None:
         await self.initial_message_preparer.prepare(
             session_state=session_state,
@@ -206,6 +208,7 @@ class BaseReactAgent:
         session_id: str = None,
         telemetry_recorder: Any = None,
         sub_agents: list = None,
+        on_event: Any = None,
     ) -> Any:
         """Run native model turns, correlated tool results and final text."""
         session_state = self.session_state_store.reset_for_run(
@@ -280,6 +283,7 @@ class BaseReactAgent:
                     llm_step = await self.llm_step_runner.run(
                         session_state=session_state,
                         llm_connection=llm_connection,
+                        on_event=on_event,
                         tools=[]
                         if session_state.state == AgentState.STUCK
                         else catalog.definitions(),
@@ -378,11 +382,13 @@ class BaseReactAgent:
                             status=SpanStatus.OK,
                             output={"returned": False},
                         )
-                except Exception as exc:
+                except BaseException as exc:
                     if telemetry_recorder is not None and step_span is not None:
                         await telemetry_recorder.end_span(
                             step_span.span_id,
-                            status=SpanStatus.ERROR,
+                            status=SpanStatus.CANCELLED
+                            if isinstance(exc, asyncio.CancelledError)
+                            else SpanStatus.ERROR,
                             error={
                                 "type": exc.__class__.__name__,
                                 "message": str(exc),

@@ -8,7 +8,7 @@ import asyncio
 import contextlib
 import json
 from dataclasses import dataclass
-from inspect import isawaitable
+from inspect import isawaitable, signature
 from typing import TYPE_CHECKING, Any, AsyncGenerator
 from uuid import uuid4
 
@@ -16,7 +16,12 @@ from omnicoreagent.core.logging import logger
 
 from .serialization import normalize_event, normalize_run_result
 from .state import get_agent_name
-from .telemetry import build_run_kwargs, finish_serve_trace, start_serve_trace
+from .telemetry import (
+    accepts_keyword,
+    build_run_kwargs,
+    finish_serve_trace,
+    start_serve_trace,
+)
 
 if TYPE_CHECKING:
     from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent as AgentType
@@ -147,7 +152,9 @@ async def _get_telemetry_events_after_cursor(
 ) -> list[Any]:
     events_after_method = getattr(agent, "get_telemetry_events_after", None)
     if callable(events_after_method):
-        result = events_after_method(cursor=cursor, session_id=session_id, run_id=run_id)
+        result = events_after_method(
+            cursor=cursor, session_id=session_id, run_id=run_id
+        )
         if isawaitable(result):
             return await result
         return result
@@ -173,8 +180,12 @@ async def _run_agent_with_timeout(
     session_id: str,
     timeout_seconds: int | None,
     run_id: str,
+    on_event: Any = None,
 ) -> Any:
-    run_coro = agent.run(query, **build_run_kwargs(agent, session_id=session_id, run_id=run_id))
+    kwargs = build_run_kwargs(agent, session_id=session_id, run_id=run_id)
+    if on_event is not None and accepts_keyword(signature(agent.run), "on_event"):
+        kwargs["on_event"] = on_event
+    run_coro = agent.run(query, **kwargs)
     if timeout_seconds and timeout_seconds > 0:
         return await asyncio.wait_for(run_coro, timeout=timeout_seconds)
     return await run_coro
@@ -248,7 +259,9 @@ async def run_agent_stream(
             _pump_session_events(agent, session_id, event_queue, cursor, run_id)
         )
         run_task = asyncio.create_task(
-            _run_agent_with_timeout(agent, query, session_id, timeout_seconds, run_id)
+            _run_agent_with_timeout(
+                agent, query, session_id, timeout_seconds, run_id, event_queue.put
+            )
         )
 
         while True:
@@ -330,8 +343,11 @@ async def run_agent_stream(
 
                 await finish_serve_trace(
                     serve_trace,
+                    status="completed"
+                    if normalized.get("status", "success") == "success"
+                    else "failed",
                     output={
-                        "status": "completed",
+                        "status": normalized.get("status"),
                         "agent_trace_id": complete_payload.get("trace_id"),
                     },
                 )

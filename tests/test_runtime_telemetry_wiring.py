@@ -73,7 +73,11 @@ async def test_run_records_completed_telemetry_trace() -> None:
         "final_answer",
     ]
     assert trace.spans[0].kind == "agent.run"
-    assert trace.spans[0].output == {"response": "done"}
+    assert trace.spans[0].output == {
+        "response": "done",
+        "status": "success",
+        "termination_reason": None,
+    }
     agent.agent.run.assert_awaited_once()
 
 
@@ -569,7 +573,11 @@ async def test_parallel_runs_share_session_without_mixing_trace_context() -> Non
             trace.trace_id,
             trace.trace_id,
         ]
-        assert trace.spans[0].output == {"response": trace.events[-1].output["response"]}
+        assert trace.spans[0].output == {
+            "response": trace.events[-1].output["response"],
+            "status": "success",
+            "termination_reason": None,
+        }
 
     output_by_run_id = {
         trace.run_id: trace.spans[0].output["response"] for trace in traces
