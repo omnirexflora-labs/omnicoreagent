@@ -32,6 +32,8 @@ def extract_response_usage(response: Any) -> Usage | None:
         raw_usage = response.get("usage")
     if raw_usage is None:
         return None
+    if isinstance(raw_usage, Usage):
+        return raw_usage
 
     def get_value(name: str, default: int = 0) -> int:
         if isinstance(raw_usage, dict):

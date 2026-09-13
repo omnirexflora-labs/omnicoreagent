@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import inspect
 import os
@@ -61,8 +62,15 @@ def retry_with_backoff(max_retries=3, base_delay=1, max_delay=60, backoff_factor
                             f"Max retries ({max_retries}) exceeded. Last error: {e}"
                         )
                         break
-                    _sleep_before_retry(
-                        e, attempt, max_retries, base_delay, max_delay, backoff_factor
+                    await asyncio.sleep(
+                        _retry_delay(
+                            e,
+                            attempt,
+                            max_retries,
+                            base_delay,
+                            max_delay,
+                            backoff_factor,
+                        )
                     )
             raise last_exception
 
@@ -111,20 +119,24 @@ def _is_retryable(exc: Exception) -> bool:
     )
 
 
-def _sleep_before_retry(
+def _retry_delay(
     exc: Exception,
     attempt: int,
     max_retries: int,
     base_delay: int,
     max_delay: int,
     backoff_factor: int,
-) -> None:
+) -> float:
     delay = min(base_delay * (backoff_factor**attempt), max_delay)
     jitter = random.uniform(0, 0.1 * delay)
     total_delay = delay + jitter
     logger.warning(f"Retryable error on attempt {attempt + 1}/{max_retries + 1}: {exc}")
     logger.info(f"Retrying in {total_delay:.2f} seconds...")
-    time.sleep(total_delay)
+    return total_delay
+
+
+def _sleep_before_retry(*args):
+    time.sleep(_retry_delay(*args))
 
 
 class LLMConnection:
@@ -249,16 +261,19 @@ class LLMConnection:
                     base_url="https://api.cencori.com/v1",
                     api_key=self.llm_api_key,
                 )
-                return await client.chat.completions.create(**params)
+                try:
+                    return await client.chat.completions.create(**params)
+                finally:
+                    await client.close()
             litellm = _get_litellm()
-            litellm.drop_params = True
+            litellm.drop_params = False
             return await litellm.acompletion(**params)
         except Exception as e:
             error_message = (
                 f"Error calling LLM with model {self.llm_config.get('model')}: {e}"
             )
             logger.error(error_message)
-            return None
+            raise
 
     @retry_with_backoff(max_retries=3, base_delay=1, max_delay=30)
     def llm_call_sync(
@@ -274,16 +289,61 @@ class LLMConnection:
                     base_url="https://api.cencori.com/v1",
                     api_key=self.llm_api_key,
                 )
-                return client.chat.completions.create(**params)
+                try:
+                    return client.chat.completions.create(**params)
+                finally:
+                    client.close()
             litellm = _get_litellm()
-            litellm.drop_params = True
+            litellm.drop_params = False
             return litellm.completion(**params)
         except Exception as e:
             error_message = (
                 f"Error calling LLM with model {self.llm_config.get('model')}: {e}"
             )
             logger.error(error_message)
-            return None
+            raise
+
+    async def llm_stream(self, messages, tools=None):
+        """Yield text deltas followed by one complete normalized turn.
+
+        No automatic retry: replaying a partially observed stream would duplicate
+        output. The caller receives errors and cancellation directly.
+        """
+        from omnicoreagent.core.model_stream import ModelStreamAssembler
+
+        params = self._completion_params(messages, tools)
+        params.update(stream=True, stream_options={"include_usage": True})
+        assembler = ModelStreamAssembler()
+        client = None
+        stream = None
+        try:
+            if self.llm_config["provider"].lower() == "cencori":
+                client = _get_openai().AsyncOpenAI(
+                    base_url="https://api.cencori.com/v1",
+                    api_key=self.llm_api_key,
+                )
+                stream = await client.chat.completions.create(**params)
+            else:
+                litellm = _get_litellm()
+                litellm.drop_params = False
+                stream = await litellm.acompletion(**params)
+            async for chunk in stream:
+                for event in assembler.feed(chunk):
+                    yield event
+            yield {"type": "turn_complete", "turn": assembler.finish()}
+        finally:
+            try:
+                if stream is not None:
+                    close = getattr(stream, "aclose", None) or getattr(
+                        stream, "close", None
+                    )
+                    if close is not None:
+                        result = close()
+                        if inspect.isawaitable(result):
+                            await result
+            finally:
+                if client is not None:
+                    await client.close()
 
     def _completion_params(
         self, messages: list[Any], tools: list[dict[str, Any]] | None = None

@@ -80,8 +80,8 @@ class TestLLMConnection:
                 make_model_config("gemini", "gemini-pro"),
                 api_key="test-api-key",
             )
-            response = await conn.llm_call(messages)
-            assert response is None
+            with pytest.raises(Exception, match="Boom"):
+                await conn.llm_call(messages)
 
     def test_removed_method_is_not_present(self, mock_llm_connection):
         assert not hasattr(mock_llm_connection, "truncate_messages_for_groq")

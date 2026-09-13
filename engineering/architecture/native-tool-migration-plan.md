@@ -128,7 +128,7 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 | 06 | Complete result boundary | 153 passed (executor, registry, native runs, telemetry, output guardrails, subagent governance/factory, offloader). Falsy/MCP/partial results, timeout siblings, cancellation records and approved history covered. |
 | 07 | Complete representation adaptation | 135 passed, 2 live-store skips. Real native batch round trips on in-memory and SQLite; context/group selection, summary/token accounting and generic storage tests. SQLite agent-name filtering fixed after the new round trip exposed TEXT/JSON containment behavior. |
 | 08 | Complete outcome propagation | 271 passed (runtime/outcomes, background, serve, LLM step and native runs). Returned errors fail background attempts; serving retains status/reason; missing provider usage still counts a request. |
-| 09 | Pending | |
+| 09 | Complete provider stream | 45 passed (stream assembly, both adapters, complete turns and LLM step); Ruff/diff passed. Indexed fragments, usage-only tail, early text, upstream close and async retry covered. |
 | 10 | Pending | |
 | 11 | Pending | |
 | 12 | Pending | |
@@ -147,3 +147,5 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 - Step 07 policy: active `preserve_recent` expands to retain a complete recent interaction; stored sliding windows and token budgets drop whole groups that do not fit. Very small summary budgets use existing truncation behavior without marking source rows summarized. Unmarked XML-era observations remain historical data; only explicit transient metadata is omitted. PostgreSQL JSON filter expression is implemented but not live-verified.
 
 - Step 09 source check: installed OpenAI chunk models expose indexed tool deltas and `AsyncStream.close()` closes the response. Checked [official function-calling streaming documentation](https://developers.openai.com/api/docs/guides/function-calling#streaming) and [Chat Completions reference](https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create). Adapter tests remain offline; no model calls were made.
+
+- Step 09 limitation: the stream contract accepts text deltas and function calls; multimodal content-block deltas fail explicitly. Streaming requests never retry automatically after partial output. Provider capability failures are surfaced instead of silently dropping tool parameters.
