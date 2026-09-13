@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Conversation history now accepts tool, summary, delegation, and custom metadata
+  without dropping prior turns. Reconstructed tool batches exclude orphan and
+  duplicate results and retain their call identifiers.
+
 ### Removed
 - **Breaking change:** Deleted `RouterAgent`, `ParallelAgent`, and `SequentialAgent`,
   including their package exports, examples, and documentation. These APIs have no

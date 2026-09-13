@@ -102,7 +102,7 @@ class Message(SerializableRecord):
     role: str
     content: str
     tool_call_id: str | None = None
-    tool_calls: str | None = None
+    tool_calls: list[ToolCall | dict[str, Any]] | None = None
     metadata: ToolCallMetadata | dict[str, Any] | None = None
     timestamp: str | None = None
 
@@ -112,8 +112,10 @@ class Message(SerializableRecord):
                 self.content = json.dumps(self.content, ensure_ascii=False)
             except Exception:
                 self.content = str(self.content)
-        if isinstance(self.metadata, dict):
-            self.metadata = ToolCallMetadata(**self.metadata)
+        # History metadata also carries tool diagnostics, summaries and delegation.
+        # It is not exclusively a tool-call schema.
+        if isinstance(self.metadata, ToolCallMetadata):
+            self.metadata = self.metadata.model_dump()
 
 
 @dataclass

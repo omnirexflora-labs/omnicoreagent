@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from typing import Any
 
-from omnicoreagent.core.types import Message, SessionState
+from omnicoreagent.core.types import Message, SessionState, ToolCall
 from omnicoreagent.core.logging import logger
 
 
@@ -82,16 +82,15 @@ class AgentMessageHistoryLoader:
     def _apply_assistant_message(
         self, message: Message, session_state: SessionState
     ) -> None:
-        metadata = message.metadata
-        if metadata and metadata.has_tool_calls:
+        metadata = message.metadata or {}
+        calls = message.tool_calls or metadata.get("tool_calls", [])
+        if calls or metadata.get("has_tool_calls"):
             self._clear_or_flush_pending(session_state=session_state)
             session_state.assistant_with_tool_calls = {
                 "role": "assistant",
                 "content": message.content,
                 "tool_calls": (
-                    [tool_call.model_dump() for tool_call in metadata.tool_calls]
-                    if metadata.tool_calls
-                    else []
+                    [ToolCall.model_validate(call).model_dump() for call in calls]
                 ),
             }
             session_state.pending_tool_responses = []
@@ -105,10 +104,24 @@ class AgentMessageHistoryLoader:
     def _apply_tool_message(
         self, message: Message, session_state: SessionState
     ) -> None:
-        metadata = message.metadata
-        tool_call_id = metadata.tool_call_id if metadata else message.tool_call_id
+        metadata = message.metadata or {}
+        tool_call_id = message.tool_call_id or metadata.get("tool_call_id")
         if not tool_call_id:
             logger.warning("Skipping tool message without tool_call_id.")
+            return
+
+        pending = session_state.assistant_with_tool_calls
+        expected = (
+            {str(call["id"]) for call in pending["tool_calls"]} if pending else set()
+        )
+        if str(tool_call_id) not in expected:
+            logger.warning("Skipping tool message without a matching pending call.")
+            return
+        if any(
+            response["tool_call_id"] == str(tool_call_id)
+            for response in session_state.pending_tool_responses
+        ):
+            logger.warning("Skipping duplicate tool response in conversation history.")
             return
 
         session_state.pending_tool_responses.append(
