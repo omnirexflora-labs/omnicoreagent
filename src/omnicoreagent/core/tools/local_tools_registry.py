@@ -33,21 +33,14 @@ class Tool:
 
     async def execute(self, parameters: dict[str, Any]) -> Any:
         """Execute the tool with extracted parameters"""
-        sig = inspect.signature(self.function)
-        func_params = {}
-
-        for param_name, param in sig.parameters.items():
-            if param_name in parameters:
-                func_params[param_name] = parameters[param_name]
-            elif param.default is not inspect.Parameter.empty:
-                func_params[param_name] = param.default
-            else:
-                raise ValueError(f"Missing required parameter: {param_name}")
-
+        try:
+            bound = inspect.signature(self.function).bind(**parameters)
+        except TypeError as exc:
+            raise ValueError(f"Invalid tool arguments: {exc}") from exc
+        bound.apply_defaults()
         if self.is_async:
-            return await self.function(**func_params)
-        else:
-            return self.function(**func_params)
+            return await self.function(*bound.args, **bound.kwargs)
+        return await asyncio.to_thread(self.function, *bound.args, **bound.kwargs)
 
     def __repr__(self):
         return f"<Tool name={self.name} async={self.is_async}>"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import json
 from typing import Any
 
 from omnicoreagent.core.workspace.artifacts import ToolResponseOffloader
@@ -33,7 +34,11 @@ class ToolObservationFormatter:
         ):
             return result
 
-        data_str = data if isinstance(data, str) else str(data)
+        data_str = (
+            data
+            if isinstance(data, str)
+            else json.dumps(data, ensure_ascii=False, default=str)
+        )
         if not self.tool_offloader.should_offload(data_str):
             return result
 

@@ -125,7 +125,7 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 | 03 | Complete | 47 passed (model protocol, response extraction, LLM adapter/step, import startup); Ruff/diff passed. Complete-turn decoder and provider-field serializer committed with this update. |
 | 04 | Complete catalog boundary | 50 passed (native catalog/protocol, resolver, registry/runtime registry); schema validation, exact execution arguments, collision mapping and per-catalog BM25 discovery covered. `uv lock` resolved 151 packages; offline attempt lacked cached build dependencies. |
 | 05 | Complete initial cutover | 93 passed (native runtime, base, LLM step, prompts, subagents, history, telemetry, imports). XML parser and dispatcher seams deleted. One import subprocess SIGSEGV occurred during overlapping test invocations; the sequential rerun passed all 93. Result/cancellation hardening follows in 06; broad fixture/docs cleanup remains in 11–12. |
-| 06 | Pending | |
+| 06 | Complete result boundary | 153 passed (executor, registry, native runs, telemetry, output guardrails, subagent governance/factory, offloader). Falsy/MCP/partial results, timeout siblings, cancellation records and approved history covered. |
 | 07 | Pending | |
 | 08 | Pending | |
 | 09 | Pending | |
@@ -141,3 +141,5 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 - Step 03: malformed argument JSON remains attached to its identified call until execution validation; missing/duplicate provider IDs fail at response decoding. Text-only helpers reject native calls rather than discarding them. Terminal and streaming semantics are specified above and wired in steps 08–10.
 
 - Step 04 sequencing clarification: configured-child schemas are represented as native catalog bindings now; executor wiring and the dynamic-spawn typed-array change stay in step 05 with the prompt cutover. No second execution path is enabled in this step. Colliding names use deterministic aliases with concrete provider/server bindings rather than ambiguous bare-name routing.
+
+- Step 06 limitation: synchronous in-process Python tools run in worker threads to avoid blocking the event loop. Cancellation stops awaiting and records cancellation but cannot forcibly terminate arbitrary Python thread side effects; process isolation is outside this protocol migration.

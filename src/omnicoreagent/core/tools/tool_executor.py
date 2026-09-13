@@ -5,7 +5,7 @@ from typing import Any
 
 from omnicoreagent.core.tools.base_tool_handler import BaseToolHandler
 
-RESULT_ENVELOPE_STATUSES = {"success", "error"}
+RESULT_ENVELOPE_STATUSES = {"success", "partial", "error"}
 RESULT_ENVELOPE_KEYS = {"status", "data", "message", "error"}
 
 
@@ -85,15 +85,41 @@ class ToolExecutor:
                     )
 
         elif hasattr(result, "content"):
-            content = result.content
-            data = content[0].text if isinstance(content, list) else content
-            status = "success"
-            message = None
+            blocks = []
+            for block in result.content or []:
+                if hasattr(block, "model_dump"):
+                    blocks.append(block.model_dump(exclude_none=True))
+                elif isinstance(block, dict):
+                    blocks.append(block)
+                else:
+                    blocks.append(
+                        {"type": "text", "text": str(getattr(block, "text", block))}
+                    )
+            structured = getattr(result, "structuredContent", None)
+            if (
+                len(blocks) == 1
+                and blocks[0].get("type") == "text"
+                and structured is None
+            ):
+                data = blocks[0].get("text", "")
+            else:
+                data = {"content": blocks}
+                if structured is not None:
+                    data["structuredContent"] = structured
+            status = "error" if getattr(result, "isError", False) else "success"
+            message = (
+                (
+                    "\n".join(block.get("text", "") for block in blocks)
+                    or "MCP tool failed"
+                )
+                if status == "error"
+                else None
+            )
 
         else:
             data = result
-            status = "success" if result else "error"
-            message = None if result else f"Tool '{tool_name}' returned empty output."
+            status = "success"
+            message = None
 
         return {
             "tool_name": tool_name,

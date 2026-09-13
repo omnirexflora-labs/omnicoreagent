@@ -222,21 +222,7 @@ When you have completed the task:
             if not isinstance(response, str):
                 response = str(response)
 
-            # Check for error indicators in the response
-            error_indicators = [
-                "model encountered an error",
-                "error occurred",
-                "failed to",
-                "unable to complete",
-                "retry again",
-            ]
-            response_lower = response.lower()
-            is_error = any(
-                indicator in response_lower for indicator in error_indicators
-            )
-
-            # Also check if response is empty or too short
-            is_error = is_error or len(response.strip()) < 10
+            is_error = result.get("status", "success") != "success"
 
             if is_error:
                 logger.warning(f"Subagent '{name}' returned an error response")
@@ -261,7 +247,7 @@ When you have completed the task:
                     "summary": response[:500] if len(response) > 500 else response,
                     "governance": self._governance_reference(),
                 },
-                "message": f"Subagent '{name}' completed. Output saved to {output_path}",
+                "message": f"Subagent '{name}' completed. Requested output path: {output_path}",
             }
 
         except Exception as e:

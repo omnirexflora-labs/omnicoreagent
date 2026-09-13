@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from copy import deepcopy
 
 from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
@@ -36,11 +37,21 @@ async def execute_native_turn(
     telemetry_recorder=None,
 ):
     assistant = turn.assistant_message()
+    stored_calls = deepcopy(assistant["tool_calls"])
+    if agent.governance_engine is not None:
+        for stored in stored_calls:
+            try:
+                args = json.loads(stored["function"]["arguments"])
+                stored["function"]["arguments"] = json.dumps(
+                    {key: "[REDACTED]" for key in args}
+                )
+            except (ValueError, TypeError):
+                stored["function"]["arguments"] = "{}"
     metadata = {
         "agent_name": agent.agent_name,
         "interaction_version": 2,
         "has_tool_calls": True,
-        "tool_calls": assistant["tool_calls"],
+        "tool_calls": stored_calls,
     }
     await add_message_to_history(
         role="assistant", content=turn.text, metadata=metadata, session_id=session_id
@@ -59,6 +70,32 @@ async def execute_native_turn(
             if binding.provider == "subagent":
 
                 async def delegate(params):
+                    if agent.governance_engine is not None:
+                        from omnicoreagent.governance.capabilities import (
+                            subagent_spawn_authority_requests,
+                        )
+
+                        child_tools = getattr(binding.agent, "local_tools", None)
+                        await agent.governance_engine.authorize_all(
+                            subagent_spawn_authority_requests(
+                                subagent_specs=[
+                                    {
+                                        "name": binding.agent.name,
+                                        "task": params.get("query", ""),
+                                    }
+                                ],
+                                tool_names=[
+                                    tool["name"]
+                                    for tool in child_tools.get_available_tools()
+                                ]
+                                if child_tools
+                                else [],
+                                mcp_servers=list(
+                                    getattr(binding.agent, "mcp_tools", {}) or {}
+                                ),
+                                memory_scope=session_id,
+                            )
+                        )
                     name, result = await agent.subagent_runner._execute_single_agent(
                         {"agent": binding.agent.name, "parameters": params},
                         [binding.agent],
@@ -72,7 +109,12 @@ async def execute_native_turn(
                     ):
                         run_usage.incr(result["metric"])
                         usage.incr(result["metric"])
-                    return {"status": "success", "data": result}
+                    return {
+                        "status": result.get("status", "success")
+                        if isinstance(result, dict)
+                        else "success",
+                        "data": result,
+                    }
 
                 handler = CallbackHandler(delegate)
             elif binding.name == "tools_retriever" and binding.provider == "local":
@@ -105,6 +147,15 @@ async def execute_native_turn(
                     session_id=session_id,
                     telemetry_recorder=telemetry_recorder,
                 )
+        except asyncio.CancelledError:
+            result = {
+                "tool_name": request.name,
+                "args": {},
+                "status": "error",
+                "data": None,
+                "message": "Tool execution cancelled",
+                "error_type": "cancelled",
+            }
         except asyncio.TimeoutError:
             result = {
                 "tool_name": request.name,
@@ -156,8 +207,8 @@ async def execute_native_turn(
             input=payload,
         )
         await telemetry_recorder.emit_event("tool_batch_start", input=payload)
-    try:
-        results = await asyncio.gather(*(one(request) for request in turn.tool_calls))
+
+    async def persist_results(results):
         for result in results:
             normalized = json.loads(result["content"])
             await add_message_to_history(
@@ -173,6 +224,11 @@ async def execute_native_turn(
                 },
             )
             session_state.messages.append(result)
+
+    tasks = [asyncio.create_task(one(request)) for request in turn.tool_calls]
+    try:
+        results = await asyncio.gather(*tasks)
+        await persist_results(results)
         session_state.state = AgentState.OBSERVING
         if telemetry_recorder is not None:
             await telemetry_recorder.emit_event(
@@ -183,6 +239,14 @@ async def execute_native_turn(
             )
             await telemetry_recorder.end_span(batch_span.span_id, status=SpanStatus.OK)
     except BaseException as exc:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+        if isinstance(exc, asyncio.CancelledError):
+            await persist_results(
+                [result for result in outcomes if isinstance(result, dict)]
+            )
         if telemetry_recorder is not None and batch_span is not None:
             await telemetry_recorder.end_span(
                 batch_span.span_id,

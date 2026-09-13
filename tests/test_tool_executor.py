@@ -113,3 +113,44 @@ def test_normalize_pure_error_dict_is_error_envelope():
     assert result["status"] == "error"
     assert result["data"] is None
     assert result["message"] == "Inventory service unavailable"
+
+
+def test_falsy_results_are_successful_values():
+    executor = ToolExecutor(None)
+    for value in (False, 0, "", [], {}, None):
+        result = executor._normalize_result("tool", {}, value)
+        assert result["status"] == "success"
+        assert result["data"] == value
+
+
+def test_mcp_errors_preserve_all_content_and_structured_data():
+    from types import SimpleNamespace
+
+    result = ToolExecutor(None)._normalize_result(
+        "mcp",
+        {},
+        SimpleNamespace(
+            content=[SimpleNamespace(text="first"), SimpleNamespace(text="second")],
+            structuredContent={"code": 42},
+            isError=True,
+        ),
+    )
+    assert result["status"] == "error"
+    assert result["data"] == {
+        "content": [
+            {"type": "text", "text": "first"},
+            {"type": "text", "text": "second"},
+        ],
+        "structuredContent": {"code": 42},
+    }
+    assert result["message"] == "first\nsecond"
+
+
+def test_partial_subagent_envelope_retains_status_and_data():
+    result = ToolExecutor(None)._normalize_result(
+        "spawn_subagents",
+        {},
+        {"status": "partial", "data": {"failed": 1}, "message": "1/2 done"},
+    )
+    assert result["status"] == "partial"
+    assert result["data"] == {"failed": 1}

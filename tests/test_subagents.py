@@ -181,9 +181,12 @@ class TestSubagentFactory:
             "Failed to write the output.",
         ],
     )
-    async def test_run_subagent_detects_error_responses(self, factory, response):
+    @pytest.mark.parametrize("status", ["success", "error"])
+    async def test_run_subagent_uses_status_not_response_text(
+        self, factory, response, status
+    ):
         with patch.object(OmniCoreAgent, "run", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = {"response": response}
+            mock_run.return_value = {"response": response, "status": status}
 
             result = await factory.run_subagent(
                 name="researcher",
@@ -192,7 +195,7 @@ class TestSubagentFactory:
                 output_path="/workspace/tasks/test/output.md",
             )
 
-        assert result["status"] == "error"
+        assert result["status"] == status
         assert result["data"]["subagent_name"] == "researcher"
 
     @pytest.mark.asyncio
@@ -600,7 +603,7 @@ class TestOmniCoreAgentSubagents:
         assert "ad hoc workers" in prompt
         assert "unique output path" in prompt
         assert "subagents as an array" in prompt
-        assert 'Use workspace tools' in prompt
+        assert "Use workspace tools" in prompt
         assert "spawn_subagents:" in prompt
         assert "read_file:" in prompt
         assert "write_file:" in prompt

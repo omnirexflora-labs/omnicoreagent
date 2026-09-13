@@ -45,10 +45,12 @@ def call(name, args, id="call_1"):
     return {"type": "function", "id": id, "function": {"name": name, "arguments": args}}
 
 
-async def run(model, *, registry=None, memory=None, sub_agents=None, **config):
+async def run(
+    model, *, registry=None, memory=None, sub_agents=None, tool_call_timeout=2, **config
+):
     memory = memory or MemoryRouter("in_memory")
     agent = BaseReactAgent(
-        "test", 5, 2, tool_offload_config={"enabled": False}, **config
+        "test", 5, tool_call_timeout, tool_offload_config={"enabled": False}, **config
     )
     result = await agent.run(
         system_prompt="Test",
@@ -264,3 +266,115 @@ async def test_repeated_empty_turns_exhaust_steps_with_explicit_error():
     assert len(model.requests) == 5
     assert result["status"] == "error"
     assert result["termination_reason"] == "max_steps"
+
+
+@pytest.mark.asyncio
+async def test_timeout_keeps_completed_sibling_and_one_result_per_call():
+    import asyncio
+
+    registry = ToolRegistry()
+
+    @registry.register_tool(name="fast")
+    async def fast():
+        return False
+
+    @registry.register_tool(name="slow")
+    async def slow():
+        await asyncio.Event().wait()
+
+    model = Model(
+        [
+            turn(calls=[call("fast", "{}", "fast_id"), call("slow", "{}", "slow_id")]),
+            turn("Partial result"),
+        ]
+    )
+    _, memory = await run(model, registry=registry, tool_call_timeout=0.02)
+    records = [
+        record
+        for record in await memory.get_messages("session", "test")
+        if record["role"] == "tool"
+    ]
+    assert len(records) == 2
+    results = {
+        record["metadata"]["tool_call_id"]: json.loads(record["content"])
+        for record in records
+    }
+    assert results["fast_id"]["status"] == "success"
+    assert results["fast_id"]["data"] is False
+    assert results["slow_id"]["status"] == "error"
+    assert "timed out" in results["slow_id"]["message"]
+    assert [record["content"] for record in records] == [
+        m["content"] for m in model.requests[1][0] if m["role"] == "tool"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cancellation_persists_completed_and_cancelled_call_results():
+    import asyncio
+
+    started = asyncio.Event()
+    registry = ToolRegistry()
+
+    @registry.register_tool(name="fast")
+    async def fast():
+        return "done"
+
+    @registry.register_tool(name="slow")
+    async def slow():
+        started.set()
+        await asyncio.Event().wait()
+
+    memory = MemoryRouter("in_memory")
+    model = Model(
+        [turn(calls=[call("fast", "{}", "fast_id"), call("slow", "{}", "slow_id")])]
+    )
+    task = asyncio.create_task(run(model, registry=registry, memory=memory))
+    await asyncio.wait_for(started.wait(), timeout=2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    records = [
+        record
+        for record in await memory.get_messages("session", "test")
+        if record["role"] == "tool"
+    ]
+    results = {
+        record["metadata"]["tool_call_id"]: json.loads(record["content"])
+        for record in records
+    }
+    assert len(records) == 2
+    assert results["fast_id"]["data"] == "done"
+    assert results["slow_id"]["error_type"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_guarded_result_is_identical_in_storage_and_model_context():
+    from types import SimpleNamespace
+
+    registry = ToolRegistry()
+
+    @registry.register_tool(name="untrusted")
+    async def untrusted():
+        return "unsafe payload"
+
+    class Guard:
+        def check(self, text):
+            return SimpleNamespace(
+                threat_level=SimpleNamespace(value="dangerous"),
+                message="blocked",
+                threat_score=1,
+            )
+
+    model = Model([turn(calls=[call("untrusted", "{}")]), turn("Handled")])
+    _, memory = await run(model, registry=registry, guardrail=Guard())
+    record = next(
+        record
+        for record in await memory.get_messages("session", "test")
+        if record["role"] == "tool"
+    )
+    active = next(
+        message for message in model.requests[1][0] if message["role"] == "tool"
+    )
+    assert record["content"] == active["content"]
+    assert "unsafe payload" not in record["content"]
+    assert json.loads(record["content"])["status"] == "error"
