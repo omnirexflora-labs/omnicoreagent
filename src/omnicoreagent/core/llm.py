@@ -217,16 +217,23 @@ class LLMConnection:
         )
 
     def to_dict(self, msg):
+        """Serialize model-facing fields only; persistence metadata stays internal."""
         if hasattr(msg, "model_dump"):
-            msg_dict = msg.model_dump(exclude_none=True)
-            if "timestamp" in msg_dict and hasattr(msg_dict["timestamp"], "timestamp"):
-                msg_dict["timestamp"] = msg_dict["timestamp"].timestamp()
-            return msg_dict
-        if isinstance(msg, dict):
-            return msg
-        if hasattr(msg, "__dict__"):
-            return {k: v for k, v in msg.__dict__.items() if v is not None}
-        return msg
+            msg = msg.model_dump(exclude_none=True)
+        elif not isinstance(msg, dict) and hasattr(msg, "__dict__"):
+            msg = vars(msg)
+        if not isinstance(msg, dict):
+            raise TypeError("Model messages must be mappings or message records")
+        allowed = {
+            "role",
+            "content",
+            "name",
+            "tool_calls",
+            "tool_call_id",
+            "refusal",
+            "reasoning_content",
+        }
+        return {key: value for key, value in msg.items() if key in allowed}
 
     @retry_with_backoff(max_retries=3, base_delay=1, max_delay=30)
     async def llm_call(

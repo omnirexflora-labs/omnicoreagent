@@ -122,7 +122,7 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 | 01 | Complete | `e349d0b`; 254 passed |
 | 02 | Complete prerequisite | `18639e9`; 226 passed, 2 skipped |
 | Plan | Recorded | Markdown/diff validation; see commit history |
-| 03 | Pending | |
+| 03 | Complete | 47 passed (model protocol, response extraction, LLM adapter/step, import startup); Ruff/diff passed. Complete-turn decoder and provider-field serializer committed with this update. |
 | 04 | Pending | |
 | 05 | Pending | |
 | 06 | Pending | |
@@ -137,3 +137,5 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 
 - Initial workflow deletion and history repair predate this explicit sequence. History repair does not authorize skipping step 07.
 - Supported provider names do not prove each deployed model supports tools or streaming. Offline adapter fixtures establish our contract; model/provider capability verification must be reported separately.
+
+- Step 03: malformed argument JSON remains attached to its identified call until execution validation; missing/duplicate provider IDs fail at response decoding. Text-only helpers reject native calls rather than discarding them. Terminal and streaming semantics are specified above and wired in steps 08–10.
