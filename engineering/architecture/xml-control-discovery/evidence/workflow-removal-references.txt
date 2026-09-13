@@ -1,0 +1,59 @@
+README.md:139:| Build multi-step workflows | [Workflows cookbook](./cookbook/workflows) |
+README.md:400:| [Workflows](./cookbook/workflows) | Sequential, Parallel, Router agents |
+cookbook/README.mdx:46:→ **[workflows](./workflows)** — Sequential, Parallel, and Router agents.
+cookbook/advanced_agent/README.mdx:121:**Previous**: [Workflows](../workflows) — Multi-agent orchestration
+cookbook/getting_started/README.mdx:166:- **[Workflows](../workflows)**: Chain agents together (Sequential, Parallel, Router)
+cookbook/getting_started/agent_with_sub_agents.py:134:See cookbook/workflows/ for SequentialAgent, ParallelAgent, RouterAgent patterns!
+cookbook/workflows/README.mdx:29:from omnicoreagent import SequentialAgent
+cookbook/workflows/README.mdx:31:workflow = SequentialAgent(
+cookbook/workflows/parallel_agent.py:5:    ParallelAgent,
+cookbook/workflows/parallel_agent.py:83:researcher_parallel_agent = ParallelAgent(
+cookbook/workflows/router_agent.py:5:    RouterAgent,
+cookbook/workflows/router_agent.py:73:# --- RouterAgent (receives model_config, agent_config, and memory_router) ---
+cookbook/workflows/router_agent.py:74:router_agent = RouterAgent(
+cookbook/workflows/router_agent.py:90:#         logger.info(f"Running RouterAgent with session_id={session_id}, query={query}")
+cookbook/workflows/router_agent.py:93:#         print("RouterAgent result:")
+cookbook/workflows/router_agent.py:111:    print("Async RouterAgent result:", result)
+cookbook/workflows/sequential_workflow.py:12:    python cookbook/workflows/sequential_workflow.py
+cookbook/workflows/sequential_workflow.py:22:    SequentialAgent,
+cookbook/workflows/sequential_workflow.py:168:async def create_pipeline() -> SequentialAgent:
+cookbook/workflows/sequential_workflow.py:233:    return SequentialAgent(sub_agents=[researcher, writer, editor])
+cookbook/workflows/sequential_workflow.py:239:    workflow: Optional[SequentialAgent] = None
+docs.json:58:                            "docs/core-concepts/workflows"
+docs.json:93:                            "cookbook/workflows/README",
+docs/core-concepts/workflows.mdx:18:from omnicoreagent import OmniCoreAgent, SequentialAgent
+docs/core-concepts/workflows.mdx:40:pipeline = SequentialAgent(
+docs/core-concepts/workflows.mdx:54:from omnicoreagent import OmniCoreAgent, ParallelAgent
+docs/core-concepts/workflows.mdx:75:parallel = ParallelAgent(
+docs/core-concepts/workflows.mdx:89:from omnicoreagent import OmniCoreAgent, RouterAgent
+docs/core-concepts/workflows.mdx:110:router = RouterAgent(
+docs/core-concepts/workflows.mdx:123:| **SequentialAgent** | Tasks that depend on each other (output of one → input of next) | Research → Write → Review |
+docs/core-concepts/workflows.mdx:124:| **ParallelAgent** | Independent tasks that can run simultaneously for speed | Code + Security + Performance review |
+docs/core-concepts/workflows.mdx:125:| **RouterAgent** | Intelligent task routing to specialized agents | Route "analyze sales" to data agent |
+src/omnicoreagent/__init__.py:44:    "ParallelAgent",
+src/omnicoreagent/__init__.py:45:    "SequentialAgent",
+src/omnicoreagent/__init__.py:46:    "RouterAgent",
+src/omnicoreagent/__init__.py:179:    "ParallelAgent": ("omnicoreagent.workflows.parallel_agent", "ParallelAgent"),
+src/omnicoreagent/__init__.py:180:    "SequentialAgent": ("omnicoreagent.workflows.sequential_agent", "SequentialAgent"),
+src/omnicoreagent/__init__.py:181:    "RouterAgent": ("omnicoreagent.workflows.router_agent", "RouterAgent"),
+src/omnicoreagent/workflows/__init__.py:1:from .parallel_agent import ParallelAgent
+src/omnicoreagent/workflows/__init__.py:2:from .sequential_agent import SequentialAgent
+src/omnicoreagent/workflows/__init__.py:3:from .router_agent import RouterAgent
+src/omnicoreagent/workflows/__init__.py:6:__all__ = ["ParallelAgent", "SequentialAgent", "RouterAgent"]
+src/omnicoreagent/workflows/parallel_agent.py:8:class ParallelAgent:
+src/omnicoreagent/workflows/parallel_agent.py:15:            raise ValueError("ParallelAgent requires at least one sub-agent")
+src/omnicoreagent/workflows/parallel_agent.py:24:        logger.info("RouterAgent: Initializing MCP servers for router and sub-agents")
+src/omnicoreagent/workflows/router_agent.py:9:class RouterAgent:
+src/omnicoreagent/workflows/router_agent.py:13:    - Builds an internal RouterAgent OmniCoreAgent with those configs.
+src/omnicoreagent/workflows/router_agent.py:30:            raise ValueError("RouterAgent requires at least one sub-agent")
+src/omnicoreagent/workflows/router_agent.py:50:        logger.info("RouterAgent: Initializing MCP servers for router and sub-agents")
+src/omnicoreagent/workflows/router_agent.py:63:                name="RouterAgent",
+src/omnicoreagent/workflows/router_agent.py:151:                "This RouterAgent instance has not been initialized. "
+src/omnicoreagent/workflows/router_agent.py:155:        logger.info(f"RouterAgent: Routing task -> {task}")
+src/omnicoreagent/workflows/router_agent.py:177:                f"RouterAgent: Invalid routing decision, retry {retry_count}/{self.max_retries}"
+src/omnicoreagent/workflows/router_agent.py:192:                "error": f"RouterAgent could not resolve a valid agent after {self.max_retries} retries.",
+src/omnicoreagent/workflows/sequential_agent.py:7:class SequentialAgent:
+src/omnicoreagent/workflows/sequential_agent.py:14:            raise ValueError("SequentialAgent requires at least one sub-agent")
+src/omnicoreagent/workflows/sequential_agent.py:23:        logger.info("SequentialAgent: Initializing MCP servers for sub-agents")
+src/omnicoreagent/workflows/sequential_agent.py:36:                "SequentialAgent must be initialized Call `await <your_instance>.initialize()` before using it"
+src/omnicoreagent/workflows/sequential_agent.py:67:                            f"{agent_name}: Max retries reached, stopping SequentialAgent"

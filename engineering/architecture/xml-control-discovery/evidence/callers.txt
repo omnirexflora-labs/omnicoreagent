@@ -1,0 +1,111 @@
+.github/workflows/python-app.yml:129:    # test_base.py::test_extract_action_or_answer_fallback_error — broken_upstream
+src/omnicoreagent/core/agents/base.py:45:    parse_action_or_answer,
+src/omnicoreagent/core/agents/base.py:187:    async def extract_action_or_answer(
+src/omnicoreagent/core/agents/base.py:194:        return parse_action_or_answer(response, debug=debug)
+src/omnicoreagent/core/agents/base.py:406:                    parsed_response = await self.extract_action_or_answer(
+src/omnicoreagent/core/agents/llm_step.py:170:            return await llm_connection.llm_call(messages)
+src/omnicoreagent/core/agents/llm_step.py:184:            response = await llm_connection.llm_call(messages)
+src/omnicoreagent/core/agents/llm_step.py:231:            response = await llm_connection.llm_call(summary_messages)
+src/omnicoreagent/core/agents/subagent_helpers.py:32:def build_sub_agents_observation_xml(observations: list[dict]) -> str:
+src/omnicoreagent/core/agents/subagent_runner.py:14:    build_sub_agents_observation_xml,
+src/omnicoreagent/core/agents/subagent_runner.py:320:        xml_obs_block = build_sub_agents_observation_xml(observations)
+src/omnicoreagent/core/agents/tool_action.py:148:            parse_tool_observation=self.tool_observation_handler.parse,
+src/omnicoreagent/core/agents/xml_parser.py:8:def extract_thought(response: str) -> str | None:
+src/omnicoreagent/core/agents/xml_parser.py:13:def parse_action_or_answer(response: str, debug: bool = False) -> ParsedResponse:
+src/omnicoreagent/core/llm.py:232:    async def llm_call(
+src/omnicoreagent/core/llm.py:257:    def llm_call_sync(
+src/omnicoreagent/core/runtime/omnicore_agent.py:186:            response = await self.llm_connection.llm_call(messages=prompt_messages)
+src/omnicoreagent/core/tools/arguments.py:6:def normalize_tool_args(value: Any) -> Any:
+src/omnicoreagent/core/tools/observations.py:6:def build_xml_observations_block(tools_results):
+src/omnicoreagent/core/tools/tool_action.py:25:def parse_tool_actions(
+src/omnicoreagent/core/tools/tool_batch_runner.py:168:        parse_tool_observation: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
+src/omnicoreagent/core/tools/tool_batch_runner.py:279:                observation = await parse_tool_observation(
+src/omnicoreagent/core/tools/tool_call_resolver.py:7:from omnicoreagent.core.tools.tool_action import ToolAction, parse_tool_actions
+src/omnicoreagent/core/tools/tool_call_resolver.py:12:from omnicoreagent.core.tools.arguments import normalize_tool_args
+src/omnicoreagent/core/tools/tool_call_resolver.py:67:            tool_args=normalize_tool_args(action.parameters),
+src/omnicoreagent/core/tools/tool_call_resolver.py:94:            tool_args=normalize_tool_args(action.parameters),
+src/omnicoreagent/core/tools/tool_call_resolver.py:142:        return parse_tool_actions(parsed_response)
+src/omnicoreagent/core/tools/tool_observation.py:11:from omnicoreagent.core.tools.tool_observation_parser import parse_tool_observation
+src/omnicoreagent/core/tools/tool_observation.py:14:from omnicoreagent.core.tools.observations import build_xml_observations_block
+src/omnicoreagent/core/tools/tool_observation.py:35:        return parse_tool_observation(raw_output)
+src/omnicoreagent/core/tools/tool_observation.py:72:        xml_obs_block = build_xml_observations_block(scrubbed_results)
+src/omnicoreagent/core/tools/tool_observation_parser.py:9:def parse_tool_observation(raw_output: str | dict[str, Any]) -> dict[str, Any]:
+src/omnicoreagent/workflows/router_agent.py:120:            response = await agent.llm_connection.llm_call(
+tests/test_agent_tool_action.py:120:        assert kwargs["parse_tool_observation"] == observation_handler.parse
+tests/test_base.py:20:async def test_extract_action_or_answer_with_final_answer(agent):
+tests/test_base.py:22:    result = await agent.extract_action_or_answer(response, session_id="test")
+tests/test_base.py:27:async def test_extract_action_or_answer_with_action(agent):
+tests/test_base.py:29:    result = await agent.extract_action_or_answer(response, session_id="test")
+tests/test_base.py:39:async def test_extract_action_or_answer_error_mentions_parallel_tool_calls(agent):
+tests/test_base.py:40:    result = await agent.extract_action_or_answer("plain text", session_id="test")
+tests/test_base.py:223:        async def llm_call(self, messages):
+tests/test_llm.py:55:            resp1 = await conn.llm_call(messages, tools)
+tests/test_llm.py:66:            resp2 = await conn.llm_call(messages)
+tests/test_llm.py:83:            response = await conn.llm_call(messages)
+tests/test_llm_step.py:65:        async def llm_call(self, messages):
+tests/test_llm_step.py:97:        async def llm_call(self, messages):
+tests/test_llm_step.py:129:        async def llm_call(self, messages):
+tests/test_llm_step.py:209:        async def llm_call(self, messages):
+tests/test_loop_telemetry_instrumentation.py:56:        async def llm_call(self, messages):
+tests/test_omniserve_production_validation.py:88:    async def llm_call(self, messages: list[Any]):
+tests/test_omniserve_production_validation.py:133:    async def llm_call(self, messages: list[Any]):
+tests/test_real_application_examples.py:114:    async def llm_call(self, messages):
+tests/test_real_application_examples.py:247:    async def llm_call(self, messages):
+tests/test_real_application_examples.py:353:    async def llm_call(self, messages):
+tests/test_real_application_production_boundaries.py:65:    async def llm_call(self, messages: list[Any]):
+tests/test_real_application_smoke.py:25:    async def llm_call(self, messages):
+tests/test_subagent_runner.py:8:    build_sub_agents_observation_xml,
+tests/test_subagent_runner.py:199:    xml = build_sub_agents_observation_xml(
+tests/test_tool_arguments.py:1:from omnicoreagent.core.tools.arguments import normalize_tool_args
+tests/test_tool_arguments.py:4:def test_normalize_tool_args_unwraps_single_dict_list_from_stringified_json():
+tests/test_tool_arguments.py:7:    normalized = normalize_tool_args(raw)
+tests/test_tool_arguments.py:16:def test_normalize_tool_args_keeps_real_scalar_lists():
+tests/test_tool_arguments.py:17:    normalized = normalize_tool_args({"tags": "billing, urgent"})
+tests/test_tool_batch_runner.py:337:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:354:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:388:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:404:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:436:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:452:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:484:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:500:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:532:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:548:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:582:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:598:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:631:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:647:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:691:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:707:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:741:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:757:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:797:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:813:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:845:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:861:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:942:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:958:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:1007:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:1023:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:1115:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:1131:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:1176:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:1194:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:1233:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:1249:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:1299:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:1314:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:1394:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:1409:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:1475:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:1498:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:1561:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:1584:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:1645:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:1668:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:1714:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:1737:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:1772:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:1795:        parse_tool_observation=parse_tool_observation,
+tests/test_tool_batch_runner.py:1855:    async def parse_tool_observation(raw_output):
+tests/test_tool_batch_runner.py:1878:        parse_tool_observation=parse_tool_observation,

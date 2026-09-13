@@ -1,0 +1,25 @@
+{"probe": "plain", "result": {"error": "PARSE ERROR: Response does not use required XML format."}}
+{"probe": "thought_only", "result": {"error": "PARSE ERROR: Response contains XML but violates the required format."}}
+{"probe": "answer_then_tool", "result": {"action": true, "data": "[{\"tool\": \"ping\", \"parameters\": {\"x\": \"1\"}}]", "tool_calls": true}}
+{"probe": "tool_inside_answer", "result": {"action": true, "data": "[{\"tool\": \"ping\", \"parameters\": {\"x\": \"1\"}}]", "tool_calls": true}}
+{"probe": "all_three", "result": {"action": true, "data": "[{\"tool\": \"ping\", \"parameters\": {\"x\": \"1\"}}]", "tool_calls": true}}
+{"probe": "malformed_tool_and_answer", "result": {"error": "Invalid tool call format - missing name or parameters"}}
+{"probe": "two_unwrapped_calls", "result": {"action": true, "data": "[{\"tool\": \"ping\", \"parameters\": {\"x\": \"1\"}}]", "tool_calls": true}}
+{"probe": "empty_collection", "result": {"error": "PARSE ERROR: Response contains XML but violates the required format."}}
+{"probe": "fenced_call", "result": {"action": true, "data": "[{\"tool\": \"ping\", \"parameters\": {\"x\": \"1\"}}]", "tool_calls": true}}
+{"probe": "aliases", "result": {"action": true, "data": "[{\"tool\": \"ping\", \"parameters\": {\"x\": \"1\"}}]", "tool_calls": true}}
+{"probe": "parameter_text", "result": {"action": true, "data": "[{\"tool\": \"ping\", \"parameters\": {}}]", "tool_calls": true}}
+{"probe": "entities", "result": {"action": true, "data": "[{\"tool\": \"ping\", \"parameters\": {\"x\": \"&lt;tag&gt;\"}}]", "tool_calls": true}}
+{"probe": "normalization", "result": {"text": ["hello", "world"], "numeric_string": 1, "specs": {"name": "one"}, "false_string": false}}
+{"probe": "observation_false_and_error_status", "result": "<observations>\n  <observation tool_name=\"ping#1\">No output</observation>\n</observations>"}
+{"probe": "native_only_response", "result": "ValueError: No valid response content found in LLM response: <class 'types.SimpleNamespace'>"}
+{"probe": "mcp_multi_content", "result": {"tool_name": "mcp", "args": {}, "status": "success", "data": "first", "message": null}}
+{"probe": "load_tool_metadata", "result": "TypeError: ToolCallMetadata.__init__() got an unexpected keyword argument 'tool'"}
+{"probe": "load_subagent_metadata", "result": "TypeError: ToolCallMetadata.__init__() got an unexpected keyword argument 'sub_agent_results'"}
+{"probe": "load_summary_metadata", "result": "TypeError: ToolCallMetadata.__init__() got an unexpected keyword argument 'type'"}
+{"probe": "five_parse_errors", "result": {"answer": null, "calls": 5, "last_context_roles": ["system", "user", "user", "user", "user", "user"], "state_after_run": "idle"}}
+{"probe": "single_tool_active_context", "result": [{"role": "system", "content": "probe\n[AVAILABLE TOOLS REGISTRY]\nAvailable tools:\n\nping: No description provided.\n  - x: string (required) - No description"}, {"role": "user", "content": "[CURRENT_DATETIME: 2026-09-13 20:57:55 ]\n\nq"}, {"role": "assistant", "content": "<tool_call><tool_name>ping</tool_name><parameters><x>1</x></parameters></tool_call>"}, {"role": "user", "content": "<observations>\n  <observation tool_name=\"ping#1\">{\"x\":1}</observation>\n</observations>"}]}
+{"probe": "single_tool_stored_shapes", "result": [{"role": "user", "content": "q", "metadata_keys": ["agent_name"]}, {"role": "assistant", "content": "<tool_call><tool_name>ping</tool_name><parameters><x>1</x></parameters></tool_call>", "metadata_keys": ["has_tool_calls", "tool_calls", "tool_call_id", "agent_name"]}, {"role": "tool", "content": "{\"x\": 1}", "metadata_keys": ["tool_call_id", "tool", "args", "agent_name"]}, {"role": "user", "content": "<observations>\n  <observation tool_name=\"ping#1\">{\"x\":1}</observation>\n</observations>", "metadata_keys": ["agent_name"]}, {"role": "assistant", "content": "done", "metadata_keys": ["agent_name"]}]}
+{"probe": "continued_tool_session_context", "result": [{"role": "system", "content": "probe\n[AVAILABLE TOOLS REGISTRY]\nAvailable tools:\n\nping: No description provided.\n  - x: string (required) - No description"}, {"role": "user", "content": "[CURRENT_DATETIME: 2026-09-13 20:57:55 ]\n\nagain"}]}
+{"probe": "single_spawn_normalized", "result": "TypeError: the JSON object must be str, bytes or bytearray, not dict"}
+{"probe": "context_splits_native_batch", "result": ["system", "tool", "tool", "tool", "tool"]}
