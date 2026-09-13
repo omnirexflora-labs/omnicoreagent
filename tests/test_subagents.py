@@ -368,28 +368,27 @@ class TestSubagentFactory:
         factory.run_parallel_subagents = AsyncMock(return_value={"status": "success"})
 
         input_list = [{"name": "test", "role": "r", "task": "t", "output_path": "p"}]
-        await spawn_tool.execute({"subagents_json": input_list})
+        await spawn_tool.execute({"subagents": input_list})
 
         factory.run_parallel_subagents.assert_called_once_with(input_list)
 
     @pytest.mark.asyncio
-    async def test_tool_wrapper_handles_json_string_input(self, factory):
+    async def test_tool_wrapper_rejects_json_string_input(self, factory):
         registry = ToolRegistry()
         build_subagent_tools(factory, registry)
         spawn_tool = registry.get_tool("spawn_subagents")
         factory.run_parallel_subagents = AsyncMock(return_value={"status": "success"})
 
-        await spawn_tool.execute(
+        result = await spawn_tool.execute(
             {
-                "subagents_json": (
+                "subagents": (
                     '[{"name": "test", "role": "r", "task": "t", "output_path": "p"}]'
                 )
             }
         )
 
-        factory.run_parallel_subagents.assert_called_once_with(
-            [{"name": "test", "role": "r", "task": "t", "output_path": "p"}]
-        )
+        assert result["status"] == "error"
+        factory.run_parallel_subagents.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_tool_wrapper_rejects_invalid_json(self, factory):
@@ -397,10 +396,10 @@ class TestSubagentFactory:
         build_subagent_tools(factory, registry)
         spawn_tool = registry.get_tool("spawn_subagents")
 
-        result = await spawn_tool.execute({"subagents_json": "{not json"})
+        result = await spawn_tool.execute({"subagents": "{not json"})
 
         assert result["status"] == "error"
-        assert "Invalid JSON" in result["message"]
+        assert result["message"] == "subagents must be an array"
 
     @pytest.mark.asyncio
     async def test_tool_wrapper_rejects_non_array_json(self, factory):
@@ -408,10 +407,10 @@ class TestSubagentFactory:
         build_subagent_tools(factory, registry)
         spawn_tool = registry.get_tool("spawn_subagents")
 
-        result = await spawn_tool.execute({"subagents_json": '{"name": "single"}'})
+        result = await spawn_tool.execute({"subagents": '{"name": "single"}'})
 
         assert result["status"] == "error"
-        assert result["message"] == "subagents_json must be a JSON array"
+        assert result["message"] == "subagents must be an array"
 
     @pytest.mark.asyncio
     async def test_spawn_tool_schema_requires_array_parameter(self, factory):
@@ -419,7 +418,7 @@ class TestSubagentFactory:
         build_subagent_tools(factory, registry)
         spawn_tool = registry.get_tool("spawn_subagents")
 
-        assert spawn_tool.inputSchema["required"] == ["subagents_json"]
+        assert spawn_tool.inputSchema["required"] == ["subagents"]
         assert spawn_tool.inputSchema["additionalProperties"] is False
 
     def test_created_subagent_does_not_inherit_spawn_tool(self, model_config):
@@ -598,10 +597,10 @@ class TestOmniCoreAgentSubagents:
         )
 
         prompt = session_state.messages[0].content
-        assert '<extension name="subagents_harness">' in prompt
-        assert "<dynamic_spawn>" in prompt
-        assert "<subagents_json>" in prompt
-        assert '<extension name="workspace_files">' in prompt
+        assert "ad hoc workers" in prompt
+        assert "unique output path" in prompt
+        assert "subagents as an array" in prompt
+        assert 'Use workspace tools' in prompt
         assert "spawn_subagents:" in prompt
         assert "read_file:" in prompt
         assert "write_file:" in prompt

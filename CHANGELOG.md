@@ -9,6 +9,11 @@ All notable changes to this project will be documented in this file.
   without dropping prior turns. Reconstructed tool batches exclude orphan and
   duplicate results and retain their call identifiers.
 
+### Changed
+- Agent execution now uses native tool calls and plain final text. XML-looking text
+  is task content. Tool call IDs and typed JSON arguments survive execution/history.
+- Dynamic spawning accepts a `subagents` array, replacing `subagents_json`.
+
 ### Removed
 - **Breaking change:** Deleted `RouterAgent`, `ParallelAgent`, and `SequentialAgent`,
   including their package exports, examples, and documentation. These APIs have no

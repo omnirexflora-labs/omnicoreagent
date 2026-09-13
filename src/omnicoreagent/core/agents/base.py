@@ -12,15 +12,10 @@ from omnicoreagent.core.token_usage import (
 from omnicoreagent.core.types import (
     AgentState,
     Message,
-    ParsedResponse,
     SessionState,
-    ToolCallResult,
-    ToolError,
 )
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.tool_batch_runner import ToolBatchRunner
-from omnicoreagent.core.tools.tool_call_resolver import ToolCallResolver
-from omnicoreagent.core.tools.tool_failure_handler import ToolFailureHandler
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.logging import logger
@@ -34,16 +29,14 @@ from omnicoreagent.core.workspace.artifacts import (
 )
 from omnicoreagent.core.agents.initial_messages import AgentInitialMessagePreparer
 from omnicoreagent.core.agents.llm_step import AgentLlmStepRunner
-from omnicoreagent.core.agents.loop_step import AgentLoopStepHandler
+from omnicoreagent.core.agents.native_tools import execute_native_turn
+from omnicoreagent.core.tools.native_catalog import NativeToolCatalog
 from omnicoreagent.core.agents.message_history import AgentMessageHistoryLoader
 from omnicoreagent.core.agents.run_outcome import AgentRunOutcomeHandler
 from omnicoreagent.core.agents.session_state import AgentSessionStateStore
 from omnicoreagent.core.agents.subagent_runner import SubAgentCallRunner
-from omnicoreagent.core.agents.tool_action import AgentToolActionRunner
 from omnicoreagent.core.tools.tool_observation import ToolObservationHandler
-from omnicoreagent.core.agents.xml_parser import (
-    parse_action_or_answer,
-)
+
 
 if TYPE_CHECKING:
     from omnicoreagent.core.guardrails import PromptInjectionGuard
@@ -117,11 +110,6 @@ class BaseReactAgent:
             tool_offloader=self.tool_offloader,
             guardrail=self.guardrail,
         )
-        self.tool_call_resolver = ToolCallResolver(guardrail=self.guardrail)
-        self.tool_failure_handler = ToolFailureHandler(
-            agent_name=self.agent_name,
-            governance_enabled=self.governance_engine is not None,
-        )
         self.message_history_loader = AgentMessageHistoryLoader(
             agent_name=self.agent_name
         )
@@ -130,13 +118,6 @@ class BaseReactAgent:
             agent_name=self.agent_name,
             tool_call_timeout=self.tool_call_timeout,
             governance_engine=self.governance_engine,
-        )
-        self.tool_action_runner = AgentToolActionRunner(
-            agent_name=self.agent_name,
-            tool_call_resolver=self.tool_call_resolver,
-            tool_failure_handler=self.tool_failure_handler,
-            tool_batch_runner=self.tool_batch_runner,
-            tool_observation_handler=self.tool_observation_handler,
         )
         self.tool_runtime_registry = ToolRuntimeRegistry(
             register_internal_tool=self.register_internal_tool,
@@ -162,14 +143,6 @@ class BaseReactAgent:
             prompt_context_builder=self.prompt_context_builder,
         )
         self.run_outcome_handler = AgentRunOutcomeHandler(agent_name=self.agent_name)
-        self.loop_step_handler = AgentLoopStepHandler(
-            agent_name=self.agent_name,
-            max_steps=self.max_steps,
-            run_outcome_handler=self.run_outcome_handler,
-            tool_action_runner=self.tool_action_runner,
-            subagent_runner=self.subagent_runner,
-            reset_system_prompt=self.reset_system_prompt,
-        )
 
     def init_skills(self):
         if self.enable_agent_skills:
@@ -183,59 +156,6 @@ class BaseReactAgent:
 
     def _get_session_state(self, session_id: str, debug: bool) -> SessionState:
         return self.session_state_store.get(session_id=session_id, debug=debug)
-
-    async def extract_action_or_answer(
-        self,
-        response: str,
-        session_id: str,
-        debug: bool = False,
-    ) -> ParsedResponse:
-        """Parse LLM response to extract a final answer, tool call, or agent call using XML format only."""
-        return parse_action_or_answer(response, debug=debug)
-
-    async def resolve_tool_call_request(
-        self,
-        parsed_response: ParsedResponse,
-        sessions: dict,
-        mcp_tools: dict,
-        local_tools: Any = None,
-        sub_agents: list = None,
-    ) -> ToolError | list[ToolCallResult]:
-        return await self.tool_call_resolver.resolve(
-            parsed_response=parsed_response,
-            sessions=sessions,
-            mcp_tools=mcp_tools,
-            local_tools=local_tools,
-            sub_agents=sub_agents,
-        )
-
-    async def act(
-        self,
-        parsed_response: ParsedResponse,
-        response: str,
-        add_message_to_history: Callable[[str, str, dict | None], Any],
-        system_prompt: str,
-        debug: bool = False,
-        sessions: dict = None,
-        mcp_tools: dict = None,
-        local_tools: Any = None,
-        session_id: str = None,
-        sub_agents: list = None,
-    ):
-        await self.tool_action_runner.run(
-            parsed_response=parsed_response,
-            response=response,
-            session_state=self._get_session_state(session_id=session_id, debug=debug),
-            add_message_to_history=add_message_to_history,
-            system_prompt=system_prompt,
-            reset_system_prompt=self.reset_system_prompt,
-            debug=debug,
-            sessions=sessions,
-            mcp_tools=mcp_tools,
-            local_tools=local_tools,
-            session_id=session_id,
-            sub_agents=sub_agents,
-        )
 
     async def reset_system_prompt(self, messages: list, system_prompt: str):
         old_messages = messages[1:]
@@ -274,39 +194,6 @@ class BaseReactAgent:
             sub_agents=sub_agents,
         )
 
-    async def execute_sub_agent_calls(
-        self,
-        response: str,
-        agent_calls: list,
-        sub_agents: list,
-        session_id: str,
-        session_state: Any,
-        add_message_to_history: Callable[[str, str, dict | None], Any],
-        run_usage: Usage,
-        telemetry_recorder: Any = None,
-        debug: bool = False,
-    ):
-        """
-        Execute multiple sub-agent calls in parallel with proper observation formatting.
-
-        This function:
-        1. Connects all MCP servers concurrently (if needed)
-        2. Executes all sub-agent runs concurrently
-        3. Formats results into proper XML observations
-        4. Adds observations to message history
-        """
-        await self.subagent_runner.execute(
-            response=response,
-            agent_calls=agent_calls,
-            sub_agents=sub_agents,
-            session_id=session_id,
-            session_state=session_state,
-            add_message_to_history=add_message_to_history,
-            run_usage=run_usage,
-            telemetry_recorder=telemetry_recorder,
-            debug=debug,
-        )
-
     async def run(
         self,
         system_prompt: str,
@@ -322,9 +209,7 @@ class BaseReactAgent:
         telemetry_recorder: Any = None,
         sub_agents: list = None,
     ) -> Any:
-        """Execute ReAct loop with JSON communication
-        kwargs: if mcp is enbale then it will be sessions and availables_tools else it will be local_tools
-        """
+        """Run native model turns, correlated tool results and final text."""
         session_state = self.session_state_store.reset_for_run(
             session_id=session_id, debug=debug
         )
@@ -333,6 +218,12 @@ class BaseReactAgent:
 
         runtime_local_tools = await self.tool_runtime_registry.prepare_tools(
             local_tools=local_tools
+        )
+        catalog = NativeToolCatalog(
+            local_tools=runtime_local_tools,
+            mcp_tools=mcp_tools,
+            sub_agents=sub_agents,
+            advanced=self.enable_advanced_tool_use,
         )
         await self.prepare_initial_messages(
             system_prompt=system_prompt,
@@ -365,7 +256,6 @@ class BaseReactAgent:
             new_state=AgentState.RUNNING, session_id=session_id, debug=debug
         ):
             current_steps = 0
-            last_valid_response = None
             while (
                 session_state.state not in [AgentState.FINISHED]
                 and current_steps < self.max_steps
@@ -376,18 +266,25 @@ class BaseReactAgent:
                     step_span = await telemetry_recorder.start_span(
                         name="agent.step",
                         kind="agent.step",
-                        actor=TelemetryActor(type=ActorType.AGENT, name=self.agent_name),
+                        actor=TelemetryActor(
+                            type=ActorType.AGENT, name=self.agent_name
+                        ),
                         input={"step": current_steps},
                     )
                     await telemetry_recorder.emit_event(
                         "agent_step",
-                        actor=TelemetryActor(type=ActorType.AGENT, name=self.agent_name),
+                        actor=TelemetryActor(
+                            type=ActorType.AGENT, name=self.agent_name
+                        ),
                         input={"step": current_steps},
                     )
                 try:
                     llm_step = await self.llm_step_runner.run(
                         session_state=session_state,
                         llm_connection=llm_connection,
+                        tools=[]
+                        if session_state.state == AgentState.STUCK
+                        else catalog.definitions(),
                         run_usage=run_usage,
                         session_id=session_id,
                         telemetry_recorder=telemetry_recorder,
@@ -401,40 +298,72 @@ class BaseReactAgent:
                                 output={"error_result": llm_step.error_result},
                             )
                         return llm_step.error_result
-                    response = llm_step.response
-
-                    parsed_response = await self.extract_action_or_answer(
-                        response=response,
-                        debug=debug,
-                        session_id=session_id,
-                    )
-                    step_result = await self.loop_step_handler.handle(
-                        parsed_response=parsed_response,
-                        response=response,
-                        session_state=session_state,
-                        add_message_to_history=add_message_to_history,
-                        system_prompt=system_prompt,
-                        session_id=session_id,
-                        run_usage=run_usage,
-                        start_time=start_time,
-                        current_steps=current_steps,
-                        last_valid_response=last_valid_response,
-                        debug=debug,
-                        sessions=sessions,
-                        mcp_tools=mcp_tools,
-                        local_tools=runtime_local_tools,
-                        telemetry_recorder=telemetry_recorder,
-                        sub_agents=sub_agents,
-                    )
-                    last_valid_response = step_result.last_valid_response
-                    if step_result.should_return:
+                    turn = llm_step.response
+                    if turn is None:
+                        raise ValueError("Model returned no turn")
+                    if turn.refusal or turn.finish_reason in {
+                        "length",
+                        "content_filter",
+                    }:
+                        return {
+                            "answer": turn.refusal or turn.text,
+                            "usage": run_usage,
+                            "status": "error",
+                            "termination_reason": turn.finish_reason or "refusal",
+                        }
+                    if turn.tool_calls:
+                        if session_state.state == AgentState.STUCK:
+                            return {
+                                "answer": "Repeated tool calls halted.",
+                                "usage": run_usage,
+                                "status": "error",
+                                "termination_reason": "tool_loop",
+                            }
+                        await execute_native_turn(
+                            self,
+                            turn=turn,
+                            catalog=catalog,
+                            local_tools=runtime_local_tools,
+                            sessions=sessions,
+                            session_state=session_state,
+                            session_id=session_id,
+                            add_message_to_history=add_message_to_history,
+                            run_usage=run_usage,
+                            telemetry_recorder=telemetry_recorder,
+                        )
+                        if any(
+                            session_state.loop_detector.is_looping(binding.name)
+                            for binding in catalog.bindings.values()
+                        ):
+                            session_state.state = AgentState.STUCK
+                            session_state.messages.append(
+                                Message(
+                                    role="user",
+                                    content="Repeated tool calls are not making progress. Give your best answer with the available results and explain remaining limitations. Tools are disabled.",
+                                )
+                            )
+                    elif turn.text.strip():
                         if telemetry_recorder is not None and step_span is not None:
                             await telemetry_recorder.end_span(
                                 step_span.span_id,
                                 status=SpanStatus.OK,
                                 output={"returned": True},
                             )
-                        return step_result.run_result
+                        return await self.run_outcome_handler.handle_final_answer(
+                            answer=turn.text,
+                            session_state=session_state,
+                            add_message_to_history=add_message_to_history,
+                            session_id=session_id,
+                            run_usage=run_usage,
+                            start_time=start_time,
+                        )
+                    else:
+                        session_state.messages.append(
+                            Message(
+                                role="user",
+                                content="The previous response was empty. Provide an answer or use an available tool.",
+                            )
+                        )
                     if telemetry_recorder is not None and step_span is not None:
                         await telemetry_recorder.end_span(
                             step_span.span_id,
@@ -453,10 +382,10 @@ class BaseReactAgent:
                         )
                     raise
 
-        if session_state.state == AgentState.STUCK and last_valid_response:
-            return self.run_outcome_handler.loop_stuck_result(
-                last_valid_response=last_valid_response
-            )
-
         run_usage.total_time = time.perf_counter() - start_time
-        return {"answer": last_valid_response, "usage": run_usage}
+        return {
+            "answer": "Agent reached its step limit.",
+            "usage": run_usage,
+            "status": "error",
+            "termination_reason": "max_steps",
+        }

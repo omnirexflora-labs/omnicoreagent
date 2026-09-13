@@ -46,11 +46,11 @@ async def test_build_system_prompt_includes_enabled_harness_context():
     )
 
     assert prompt.startswith("base system\n")
-    assert 'extension name="subagents_harness"' in prompt
+    assert "workers" in prompt
     assert "spawn_subagents" in prompt
-    assert "<subagents_json>" in prompt
-    assert "<dynamic_spawn>" in prompt
-    assert "<configured_subagents>" in prompt
+    assert "subagents as an array" in prompt
+    assert "ad hoc workers" in prompt
+    assert "native delegate tools" in prompt
     assert 'extension name="sub_agents_extension"' not in prompt
     assert 'extension name="dynamic_subagents_extension"' not in prompt
     assert "OBSERVATION RESULT FROM TOOL CALLS" not in prompt
@@ -64,8 +64,8 @@ async def test_build_system_prompt_includes_enabled_harness_context():
     assert "query: str (REQUIRED)" in prompt
     assert "limit: int (optional, default=3)" in prompt
     assert "write_file" in prompt
-    assert 'area name="files"' in prompt
-    assert 'area name="artifacts"' in prompt
+    assert "workspace tools" in prompt
+    assert "offloaded to artifacts" in prompt
     assert "read_artifact" in prompt
     assert "[AVAILABLE TOOLS REGISTRY]\ntools_retriever: Discover tools" in prompt
 
@@ -88,13 +88,13 @@ async def test_subagent_prompt_dynamic_only_matches_spawn_tool_surface():
         sub_agents=None,
     )
 
-    assert 'extension name="subagents_harness"' in prompt
+    assert "workers" in prompt
     assert "spawn_subagents" in prompt
-    assert "<dynamic_spawn>" in prompt
-    assert "<configured_subagents>" not in prompt
-    assert "<agent_call>" not in prompt
+    assert "ad hoc workers" in prompt
+    assert "native delegate tools" not in prompt
+    assert "native delegate tools" not in prompt
     assert "read_file" in prompt
-    assert 'area name="files"' in prompt
+    assert "workspace tools" in prompt
     assert "[AVAILABLE SUB AGENTS REGISTRY]" not in prompt
 
 
@@ -115,11 +115,11 @@ async def test_extension_prompts_require_backing_tools_in_tools_section():
         sub_agents=None,
     )
 
-    assert 'extension name="tools_retriever_extension"' not in prompt
-    assert 'extension name="subagents_harness"' not in prompt
-    assert 'extension name="workspace_files"' not in prompt
-    assert 'extension name="artifact_tool"' not in prompt
-    assert 'extension name="agent_skills"' not in prompt
+    assert "Use tools_retriever" not in prompt
+    assert "workers" not in prompt
+    assert "Use workspace tools" not in prompt
+    assert "Large tool results" not in prompt
+    assert "Consult the available skill catalog" not in prompt
     assert "[AVAILABLE SKILLS]" not in prompt
 
 
@@ -136,12 +136,12 @@ async def test_subagent_prompt_configured_only_does_not_claim_spawn_tool():
         sub_agents=[FakeSubAgent()],
     )
 
-    assert 'extension name="subagents_harness"' in prompt
+    assert "workers" in prompt
     assert "spawn_subagents" not in prompt
-    assert "<dynamic_spawn>" not in prompt
-    assert "<configured_subagents>" in prompt
-    assert "<agent_call>" in prompt
-    assert "<agent_name>registered_worker_name</agent_name>" in prompt
+    assert "ad hoc workers" not in prompt
+    assert "native delegate tools" in prompt
+    assert "native delegate tools" in prompt
+    assert "matching worker" in prompt
     assert "[AVAILABLE SUB AGENTS REGISTRY]" in prompt
 
 

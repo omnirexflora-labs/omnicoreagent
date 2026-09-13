@@ -124,7 +124,7 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 | Plan | Recorded | Markdown/diff validation; see commit history |
 | 03 | Complete | 47 passed (model protocol, response extraction, LLM adapter/step, import startup); Ruff/diff passed. Complete-turn decoder and provider-field serializer committed with this update. |
 | 04 | Complete catalog boundary | 50 passed (native catalog/protocol, resolver, registry/runtime registry); schema validation, exact execution arguments, collision mapping and per-catalog BM25 discovery covered. `uv lock` resolved 151 packages; offline attempt lacked cached build dependencies. |
-| 05 | Pending | |
+| 05 | Complete initial cutover | 93 passed (native runtime, base, LLM step, prompts, subagents, history, telemetry, imports). XML parser and dispatcher seams deleted. One import subprocess SIGSEGV occurred during overlapping test invocations; the sequential rerun passed all 93. Result/cancellation hardening follows in 06; broad fixture/docs cleanup remains in 11–12. |
 | 06 | Pending | |
 | 07 | Pending | |
 | 08 | Pending | |

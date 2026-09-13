@@ -53,23 +53,37 @@ async def test_react_loop_records_model_step_and_parallel_tool_telemetry():
         def __init__(self):
             self.calls = 0
 
-        async def llm_call(self, messages):
+        async def llm_call(self, messages, tools=None):
             self.calls += 1
             if self.calls == 1:
-                return """
-<thought>Need both tools.</thought>
-<tool_calls>
-  <tool_call>
-    <tool_name>alpha</tool_name>
-    <parameters><value>one</value></parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>beta</tool_name>
-    <parameters><value>two</value></parameters>
-  </tool_call>
-</tool_calls>
-"""
-            return "<final_answer>done</final_answer>"
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "Need both tools.",
+                                "tool_calls": [
+                                    {
+                                        "id": "alpha_id",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "alpha",
+                                            "arguments": '{"value":"one"}',
+                                        },
+                                    },
+                                    {
+                                        "id": "beta_id",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "beta",
+                                            "arguments": '{"value":"two"}',
+                                        },
+                                    },
+                                ],
+                            }
+                        }
+                    ]
+                }
+            return "done"
 
     async def add_message_to_history(role, content, metadata=None, session_id=None):
         history.append(

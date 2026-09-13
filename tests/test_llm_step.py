@@ -62,7 +62,7 @@ async def test_llm_step_calls_model_and_records_usage(monkeypatch):
     monkeypatch.setattr(llm_step, "usage", Usage())
 
     class LlmConnection:
-        async def llm_call(self, messages):
+        async def llm_call(self, messages, tools=None):
             return {
                 "choices": [
                     {"message": {"content": "<final_answer>done</final_answer>"}}
@@ -82,7 +82,7 @@ async def test_llm_step_calls_model_and_records_usage(monkeypatch):
         session_id="chat1",
     )
 
-    assert result.response == "<final_answer>done</final_answer>"
+    assert result.response.text == "<final_answer>done</final_answer>"
     assert result.error_result is None
     assert run_usage.requests == 1
     assert run_usage.total_tokens == 7
@@ -94,7 +94,7 @@ async def test_llm_step_manages_context_before_model_call(monkeypatch):
     calls = []
 
     class LlmConnection:
-        async def llm_call(self, messages):
+        async def llm_call(self, messages, tools=None):
             calls.append(messages)
             if isinstance(messages[0], dict):
                 return "summary"
@@ -108,7 +108,7 @@ async def test_llm_step_manages_context_before_model_call(monkeypatch):
         session_id="chat1",
     )
 
-    assert result.response == "<final_answer>done</final_answer>"
+    assert result.response.text == "<final_answer>done</final_answer>"
     assert session_state.messages == [Message(role="system", content="summary")]
     assert len(calls) == 2
 
@@ -126,7 +126,7 @@ async def test_llm_step_records_context_compression_telemetry(monkeypatch):
     )
 
     class LlmConnection:
-        async def llm_call(self, messages):
+        async def llm_call(self, messages, tools=None):
             if isinstance(messages[0], dict):
                 return "summary"
             return "<final_answer>done</final_answer>"
@@ -142,7 +142,7 @@ async def test_llm_step_records_context_compression_telemetry(monkeypatch):
     await recorder.end_trace()
 
     trace = await store.get_trace(context.trace_id)
-    assert result.response == "<final_answer>done</final_answer>"
+    assert result.response.text == "<final_answer>done</final_answer>"
     assert session_state.messages == [Message(role="system", content="summary")]
     assert {span.kind for span in trace.spans} >= {
         "context.compression",
@@ -197,7 +197,9 @@ async def test_llm_step_records_usage_limit_as_resource_guard_halt(monkeypatch):
     assert result.response is None
     assert result.error_result["answer"].startswith("Usage limit error:")
     assert any(span.kind == "runtime.control" for span in trace.spans)
-    event = next(event for event in trace.events if event.event_type == "resource_guard_halt")
+    event = next(
+        event for event in trace.events if event.event_type == "resource_guard_halt"
+    )
     assert event.error.type == "UsageLimitExceeded"
 
 
@@ -206,7 +208,7 @@ async def test_llm_step_returns_model_error(monkeypatch):
     monkeypatch.setattr(llm_step, "usage", Usage())
 
     class LlmConnection:
-        async def llm_call(self, messages):
+        async def llm_call(self, messages, tools=None):
             raise RuntimeError("provider down")
 
     result = await make_runner().run(

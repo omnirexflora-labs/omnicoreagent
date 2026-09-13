@@ -10,7 +10,6 @@ Subagents inherit:
 """
 
 import asyncio
-import json
 from typing import Any, Dict, List, Optional
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.logging import logger
@@ -62,7 +61,9 @@ class SubagentFactory:
         self.governance_engine = governance_engine
         self._active_subagents: Dict[str, Any] = {}
 
-    def _build_subagent_config(self, *, subagent_name: str = "subagent") -> Dict[str, Any]:
+    def _build_subagent_config(
+        self, *, subagent_name: str = "subagent"
+    ) -> Dict[str, Any]:
         """
         Build agent_config for subagents inheriting parent's config.
 
@@ -372,7 +373,10 @@ When you have completed the task:
         return [str(server.get("name") or "") for server in self.mcp_tools or []]
 
     def _governance_budget_snapshot(self) -> dict[str, Any]:
-        if self.governance_engine is None or self.governance_engine.policy.budget is None:
+        if (
+            self.governance_engine is None
+            or self.governance_engine.policy.budget is None
+        ):
             return {}
         budget = self.governance_engine.policy.budget
         return {
@@ -433,65 +437,33 @@ def build_subagent_tools(
         inputSchema={
             "type": "object",
             "properties": {
-                "subagents_json": {
-                    "type": "string",
-                    "description": """
-    JSON array string of subagent specifications. Each spec needs:
-    - name: Unique identifier (e.g., "aws_analyst")
-    - role: Worker role or expertise description (e.g., "API reviewer")
-    - task: Specific task to complete
-    - output_path: Workspace file path for output
-
-    Example:
-    '[
-        {"name": "api", "role": "API reviewer", "task": "Review API error handling and write concrete risks", "output_path": "/workspace/audit/api.md"},
-        {"name": "tests", "role": "Test reviewer", "task": "Review test coverage gaps and write recommended cases", "output_path": "/workspace/audit/tests.md"}
-    ]'
-                    """,
+                "subagents": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 15,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "role": {"type": "string"},
+                            "task": {"type": "string"},
+                            "output_path": {"type": "string"},
+                        },
+                        "required": ["name", "role", "task", "output_path"],
+                        "additionalProperties": False,
+                    },
                 },
             },
-            "required": ["subagents_json"],
+            "required": ["subagents"],
             "additionalProperties": False,
         },
     )
-    async def spawn_subagents(
-        subagents_json: str,
-    ) -> Dict[str, Any]:
-        """
-        Spawn one or more subagents.
-
-        Parameters
-        ----------
-        subagents_json : str
-            JSON array of subagent specs with name, role, task, output_path
-
-        Returns
-        -------
-        dict
-            {
-                "status": "success" | "partial" | "error",
-                "data": {"total", "successful", "failed", "results"},
-                "message": Completion summary
-            }
-        """
-
-        try:
-            if isinstance(subagents_json, list):
-                subagent_specs = subagents_json
-            else:
-                subagent_specs = json.loads(subagents_json)
-
-            if not isinstance(subagent_specs, list):
-                return {
-                    "status": "error",
-                    "data": None,
-                    "message": "subagents_json must be a JSON array",
-                }
-        except json.JSONDecodeError as e:
+    async def spawn_subagents(subagents: list[dict[str, Any]]) -> Dict[str, Any]:
+        """Run a typed array of focused worker specifications."""
+        if not isinstance(subagents, list):
             return {
                 "status": "error",
                 "data": None,
-                "message": f"Invalid JSON: {str(e)}",
+                "message": "subagents must be an array",
             }
-
-        return await factory.run_parallel_subagents(subagent_specs)
+        return await factory.run_parallel_subagents(subagents)

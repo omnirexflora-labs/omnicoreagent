@@ -362,7 +362,7 @@ async def test_real_tool_batch_history_survives_a_new_agent_run():
             self.responses = iter(responses)
             self.requests = []
 
-        async def llm_call(self, messages):
+        async def llm_call(self, messages, tools=None):
             self.requests.append(
                 deepcopy(
                     [
@@ -404,11 +404,34 @@ async def test_real_tool_batch_history_survives_a_new_agent_run():
 
     model = Model(
         [
-            "<tool_calls>"
-            '<tool_call><tool_name>lookup</tool_name><parameters>{"key":"present"}</parameters></tool_call>'
-            '<tool_call><tool_name>lookup</tool_name><parameters>{"key":"missing"}</parameters></tool_call>'
-            "</tool_calls>",
-            "<final_answer>One found, one missing.</final_answer>",
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "lookup_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "lookup",
+                                        "arguments": '{"key":"present"}',
+                                    },
+                                },
+                                {
+                                    "id": "lookup_2",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "lookup",
+                                        "arguments": '{"key":"missing"}',
+                                    },
+                                },
+                            ],
+                        }
+                    }
+                ]
+            },
+            "One found, one missing.",
         ]
     )
     await run(agent(), model, "look up both records")
@@ -437,7 +460,7 @@ async def test_real_tool_batch_history_survives_a_new_agent_run():
         "continued",
     )
 
-    resumed = Model(["<final_answer>Remembered.</final_answer>"])
+    resumed = Model(["Remembered."])
     await run(agent(), resumed, "what happened?")
     messages = resumed.requests[0]
     assistant = next(m for m in messages if m.get("tool_calls"))
@@ -445,7 +468,12 @@ async def test_real_tool_batch_history_survives_a_new_agent_run():
     expected_ids = {m["metadata"]["tool_call_id"] for m in tool_records}
     assert {call["id"] for call in assistant["tool_calls"]} == expected_ids
     assert {m["tool_call_id"] for m in results} == expected_ids
-    assert {m["content"] for m in results} == {"record found", "record missing"}
+    import json
+
+    assert {
+        json.loads(m["content"])["data"] or json.loads(m["content"])["message"]
+        for m in results
+    } == {"record found", "record missing"}
     assert all("metadata" not in m for m in results)
     contents = [m["content"] for m in messages]
     assert "look up both records" in contents

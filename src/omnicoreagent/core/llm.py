@@ -301,7 +301,4 @@ class LLMConnection:
             params["tools"] = tools
             params["tool_choice"] = "auto"
 
-        if self.llm_config["provider"].lower() == "openrouter" and not tools:
-            params["stop"] = ["\n\nObservation:"]
-
         return params

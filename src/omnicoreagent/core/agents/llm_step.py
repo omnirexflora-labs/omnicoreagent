@@ -6,8 +6,14 @@ from typing import Any
 from omnicoreagent.core.agents.llm_response import (
     extract_response_content,
     extract_response_usage,
+    normalize_model_turn,
 )
-from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor, TraceStatus
+from omnicoreagent.core.telemetry import (
+    ActorType,
+    SpanStatus,
+    TelemetryActor,
+    TraceStatus,
+)
 from omnicoreagent.core.system_prompts import FAST_CONVERSATION_SUMMARY_PROMPT
 from omnicoreagent.core.token_usage import (
     Usage,
@@ -17,12 +23,13 @@ from omnicoreagent.core.token_usage import (
     usage,
 )
 from omnicoreagent.core.types import SessionState
+from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.logging import logger
 
 
 @dataclass
 class AgentLlmStepResult:
-    response: str | None = None
+    response: ModelTurn | None = None
     error_result: dict[str, Any] | None = None
 
 
@@ -51,6 +58,7 @@ class AgentLlmStepRunner:
         session_id: str,
         telemetry_recorder: Any = None,
         debug: bool = False,
+        tools: list[dict[str, Any]] | None = None,
     ) -> AgentLlmStepResult:
         if debug:
             logger.info(f"Sending {len(session_state.messages)} messages to LLM")
@@ -122,6 +130,7 @@ class AgentLlmStepRunner:
             response = await self._call_model(
                 llm_connection=llm_connection,
                 messages=session_state.messages,
+                tools=tools,
                 telemetry_recorder=telemetry_recorder,
             )
             if response:
@@ -132,7 +141,7 @@ class AgentLlmStepRunner:
                     telemetry_recorder=telemetry_recorder,
                     debug=debug,
                 )
-                response = extract_response_content(response)
+                response = normalize_model_turn(response)
             return AgentLlmStepResult(response=response)
 
         except UsageLimitExceeded as e:
@@ -164,10 +173,11 @@ class AgentLlmStepRunner:
         *,
         llm_connection: Any,
         messages: list[Any],
+        tools: list[dict[str, Any]] | None = None,
         telemetry_recorder: Any = None,
     ) -> Any:
         if telemetry_recorder is None:
-            return await llm_connection.llm_call(messages)
+            return await llm_connection.llm_call(messages, tools=tools)
 
         span_context = await telemetry_recorder.start_span(
             name="model.call",
@@ -181,12 +191,16 @@ class AgentLlmStepRunner:
                 actor=TelemetryActor(type=ActorType.MODEL),
                 input={"message_count": len(messages)},
             )
-            response = await llm_connection.llm_call(messages)
+            response = await llm_connection.llm_call(messages, tools=tools)
             await telemetry_recorder.emit_event(
                 "model_response",
                 actor=TelemetryActor(type=ActorType.MODEL),
                 output={
-                    "content": extract_response_content(response, strip=False),
+                    "content": normalize_model_turn(response).text,
+                    "tool_calls": [
+                        call.as_dict()
+                        for call in normalize_model_turn(response).tool_calls
+                    ],
                     "usage": self._usage_payload(extract_response_usage(response)),
                 },
             )
