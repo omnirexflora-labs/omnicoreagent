@@ -148,7 +148,7 @@ The decision to delete all three workflow classes and their examples with no fal
 [R14]: ../../../src/omnicoreagent/core/tools/tool_failure_handler.py#L52
 [R15]: ../../../src/omnicoreagent/core/system_prompts/summaries.py#L3
 [R16]: ../../../src/omnicoreagent/core/runtime/summaries.py#L8
-[R17]: ../../../src/omnicoreagent/workflows/router_agent.py#L9
+[R17]: https://github.com/omnirexflora-labs/omnicoreagent/blob/60da57a6dacd3f7796fffd9d198c0a7420aa6aad/src/omnicoreagent/workflows/router_agent.py#L9
 [R18]: ../../../src/omnicoreagent/core/agents/xml_parser.py#L13
 [R19]: ../../../src/omnicoreagent/core/tools/tool_batch_events.py#L15
 [R20]: ../../../src/omnicoreagent/core/llm.py#L130
@@ -177,8 +177,8 @@ The decision to delete all three workflow classes and their examples with no fal
 [R43]: ../../../src/omnicoreagent/core/agents/subagent_helpers.py#L32
 [R44]: ../../../src/omnicoreagent/core/subagents.py#L21
 [R45]: ../../../src/omnicoreagent/core/tools/advance_tools_use.py#L5
-[R46]: ../../../src/omnicoreagent/workflows/sequential_agent.py#L7
-[R47]: ../../../src/omnicoreagent/workflows/parallel_agent.py#L8
+[R46]: https://github.com/omnirexflora-labs/omnicoreagent/blob/60da57a6dacd3f7796fffd9d198c0a7420aa6aad/src/omnicoreagent/workflows/sequential_agent.py#L7
+[R47]: https://github.com/omnirexflora-labs/omnicoreagent/blob/60da57a6dacd3f7796fffd9d198c0a7420aa6aad/src/omnicoreagent/workflows/parallel_agent.py#L8
 [R48]: ../../../src/omnicoreagent/core/memory_store/memory_router.py#L12
 [R49]: ../../../src/omnicoreagent/core/context_manager.py#L60
 [R50]: ../../../src/omnicoreagent/core/memory_store/sql_db_memory.py#L175

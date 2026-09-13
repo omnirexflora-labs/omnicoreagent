@@ -136,7 +136,6 @@ small.
 | Manage memory and context | [Getting started cookbook](./cookbook/getting_started) |
 | Save files, artifacts, and large tool results | [Tool offload cookbook](./cookbook/getting_started/agent_with_tool_offload.py) |
 | Build a production-shaped app harness | [Real applications cookbook](./cookbook/real_applications) |
-| Build multi-step workflows | [Workflows cookbook](./cookbook/workflows) |
 | Serve an agent over HTTP/SSE | [OmniServe cookbook](./cookbook/omniserve) |
 | Use the docs inside AI tools | [AI tools guide](https://docs-omnicoreagent.omnirexfloralabs.com/docs/getting-started/use-docs-with-ai-tools) |
 | Debug setup or configuration | [Configuration guide](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/configuration) |
@@ -154,7 +153,7 @@ together after the prototype works.
 | **MCP-connected product agents** | MCP tools, local tools, structured observations, guardrails, session memory |
 | **Research and analysis agents** | Parallel tool batches, workspace files, tool offloading, context management, artifact readback |
 | **Long-running worker agents** | Background tasks, durable task stores, run history, workspace output, retries, cancellation |
-| **Multi-agent task systems** | Dynamic subagents, shared workspace output, workflow orchestration, telemetry events |
+| **Multi-agent task systems** | Dynamic subagents, shared workspace output, telemetry events |
 | **Agent APIs** | OmniServe REST/SSE, readiness, auth, request timeout, rate limits, metrics |
 | **Production app integrations** | Optional Redis, MongoDB, SQL, S3, and R2 backends without making the core install heavy |
 
@@ -351,7 +350,6 @@ uses.
 |---------|--------------|
 | **Dynamic Subagents** | Lets the main agent spawn focused workers with isolated context and shared workspace output. |
 | **Durable Background Tasks** | Runs manual or scheduled agent work with task state, run history, retries, cancellation, and workspace output. |
-| **Workflow Orchestration** | Provides sequential, parallel, and router agents for multi-step application workflows. |
 | **Telemetry and Traces** | Emits typed telemetry events, retrieves traces by exact `trace_id`, latest session, or `run_id` correlation, and exports traces to OTLP, LangSmith, Opik, or JSONL. |
 | **OmniServe** | Turns an agent into a REST/SSE service with lifecycle management, auth, rate limits, telemetry APIs, background APIs, and metrics. |
 
@@ -397,7 +395,6 @@ All examples live in the **[Cookbook](./cookbook)** and are organized by use cas
 |----------|-------------------|
 | [Getting Started](./cookbook/getting_started) | First agent, tools, memory, telemetry events, and traces |
 | [Real Applications](./cookbook/real_applications) | Due diligence, support operations, and workspace code review harnesses |
-| [Workflows](./cookbook/workflows) | Sequential, Parallel, Router agents |
 | [Background Agents](./cookbook/background_agents) | Scheduled autonomous tasks |
 | [Production](./cookbook/production) | Guardrails, serving, and production patterns |
 

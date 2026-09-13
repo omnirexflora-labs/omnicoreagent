@@ -41,9 +41,6 @@ __all__ = [
     "SqlTaskStore",
     "RedisTaskStore",
     "MongoDbTaskStore",
-    "ParallelAgent",
-    "SequentialAgent",
-    "RouterAgent",
     # MCP
     "MCPClient",
     # OmniServe
@@ -176,9 +173,6 @@ _EXPORTS = {
         "OmniCoreAgent",
     ),
     "MCPClient": ("omnicoreagent.mcp_clients_connection", "MCPClient"),
-    "ParallelAgent": ("omnicoreagent.workflows.parallel_agent", "ParallelAgent"),
-    "SequentialAgent": ("omnicoreagent.workflows.sequential_agent", "SequentialAgent"),
-    "RouterAgent": ("omnicoreagent.workflows.router_agent", "RouterAgent"),
     "BackgroundAgentManager": ("omnicoreagent.background", "BackgroundAgentManager"),
     "BackgroundAgentSpec": ("omnicoreagent.background", "BackgroundAgentSpec"),
     "BackgroundTaskSpec": ("omnicoreagent.background", "BackgroundTaskSpec"),

@@ -20,7 +20,7 @@ Snapshot: `60da57a6dacd3f7796fffd9d198c0a7420aa6aad`. Links point to unchanged w
 | R14 | [core/tools/tool_failure_handler.py:ToolFailureHandler](../../../../src/omnicoreagent/core/tools/tool_failure_handler.py#L52) |
 | R15 | [core/system_prompts/summaries.py:FAST_CONVERSATION_SUMMARY_PROMPT](../../../../src/omnicoreagent/core/system_prompts/summaries.py#L3) |
 | R16 | [core/runtime/summaries.py:summary_instruction](../../../../src/omnicoreagent/core/runtime/summaries.py#L8) |
-| R17 | [workflows/router_agent.py:RouterAgent](../../../../src/omnicoreagent/workflows/router_agent.py#L9) |
+| R17 | [workflows/router_agent.py:RouterAgent](https://github.com/omnirexflora-labs/omnicoreagent/blob/60da57a6dacd3f7796fffd9d198c0a7420aa6aad/src/omnicoreagent/workflows/router_agent.py#L9) |
 | R18 | [core/agents/xml_parser.py:parse_action_or_answer](../../../../src/omnicoreagent/core/agents/xml_parser.py#L13) |
 | R19 | [core/tools/tool_batch_events.py:assign_tool_call_ids](../../../../src/omnicoreagent/core/tools/tool_batch_events.py#L15) |
 | R20 | [core/llm.py:LLMConnection](../../../../src/omnicoreagent/core/llm.py#L130) |
@@ -49,8 +49,8 @@ Snapshot: `60da57a6dacd3f7796fffd9d198c0a7420aa6aad`. Links point to unchanged w
 | R43 | [core/agents/subagent_helpers.py:build_sub_agents_observation_xml](../../../../src/omnicoreagent/core/agents/subagent_helpers.py#L32) |
 | R44 | [core/subagents.py:SubagentFactory](../../../../src/omnicoreagent/core/subagents.py#L21) |
 | R45 | [core/tools/advance_tools_use.py:build_tool_registry_advance_tools_use](../../../../src/omnicoreagent/core/tools/advance_tools_use.py#L5) |
-| R46 | [workflows/sequential_agent.py:SequentialAgent](../../../../src/omnicoreagent/workflows/sequential_agent.py#L7) |
-| R47 | [workflows/parallel_agent.py:ParallelAgent](../../../../src/omnicoreagent/workflows/parallel_agent.py#L8) |
+| R46 | [workflows/sequential_agent.py:SequentialAgent](https://github.com/omnirexflora-labs/omnicoreagent/blob/60da57a6dacd3f7796fffd9d198c0a7420aa6aad/src/omnicoreagent/workflows/sequential_agent.py#L7) |
+| R47 | [workflows/parallel_agent.py:ParallelAgent](https://github.com/omnirexflora-labs/omnicoreagent/blob/60da57a6dacd3f7796fffd9d198c0a7420aa6aad/src/omnicoreagent/workflows/parallel_agent.py#L8) |
 | R48 | [core/memory_store/memory_router.py:MemoryRouter](../../../../src/omnicoreagent/core/memory_store/memory_router.py#L12) |
 | R49 | [core/context_manager.py:AgentLoopContextManager](../../../../src/omnicoreagent/core/context_manager.py#L60) |
 | R50 | [core/memory_store/sql_db_memory.py:DatabaseMessageStore](../../../../src/omnicoreagent/core/memory_store/sql_db_memory.py#L175) |

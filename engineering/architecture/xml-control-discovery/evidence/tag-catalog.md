@@ -14,7 +14,7 @@ All organizational base/extension tags below are consumed by the model as prompt
 | [core/agents/subagent_helpers.py](../../../../src/omnicoreagent/core/agents/subagent_helpers.py) | `agent_name`, `e`, `o`, `observation`, `observations`, `status` |
 | [core/tools/observations.py](../../../../src/omnicoreagent/core/tools/observations.py) | `observation`, `observations` |
 | [core/skills/manager.py](../../../../src/omnicoreagent/core/skills/manager.py) | `available_skills`, `description`, `location`, `name`, `skill` |
-| [workflows/router_agent.py](../../../../src/omnicoreagent/workflows/router_agent.py) | `agent`, `capabilities`, `final_answer`, `name`, `routing`, `task`, `thought`, `your_instance` |
+| [workflows/router_agent.py](https://github.com/omnirexflora-labs/omnicoreagent/blob/60da57a6dacd3f7796fffd9d198c0a7420aa6aad/src/omnicoreagent/workflows/router_agent.py) | `agent`, `capabilities`, `final_answer`, `name`, `routing`, `task`, `thought`, `your_instance` |
 | [core/tools/tool_call_resolver.py](../../../../src/omnicoreagent/core/tools/tool_call_resolver.py) | `agent_call`, `agent_name`, `parameters`, `tool_call`, `tool_name` |
 | [core/tools/tool_failure_handler.py](../../../../src/omnicoreagent/core/tools/tool_failure_handler.py) | `final_answer` |
 

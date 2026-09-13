@@ -54,8 +54,7 @@
                             "docs/core-concepts/workspace-files",
                             "docs/core-concepts/guardrails",
                             "docs/core-concepts/sub-agents",
-                            "docs/core-concepts/background-agents",
-                            "docs/core-concepts/workflows"
+                            "docs/core-concepts/background-agents"
                         ]
                     },
                     {
@@ -90,7 +89,6 @@
                             "cookbook/real_applications/README",
                             "cookbook/omniserve/README",
                             "cookbook/background_agents/README",
-                            "cookbook/workflows/README",
                             "cookbook/production/README",
                             "cookbook/advanced_agent/README"
                         ]

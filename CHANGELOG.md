@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Removed
+- **Breaking change:** Deleted `RouterAgent`, `ParallelAgent`, and `SequentialAgent`,
+  including their package exports, examples, and documentation. These APIs have no
+  compatibility aliases or fallback implementations.
+
 ## [0.1.18] - 2025-06-19
 
 ### Changed
