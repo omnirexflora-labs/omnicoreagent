@@ -1,7 +1,8 @@
 import asyncio
 import inspect
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
+from types import UnionType
 
 
 class Tool:
@@ -165,6 +166,10 @@ class ToolRegistry:
         sig = inspect.signature(func)
         props = {}
         required = []
+        try:
+            annotations = get_type_hints(func)
+        except (NameError, TypeError):
+            annotations = {}
 
         docstring = func.__doc__ or ""
         doc_lines = [line.strip() for line in docstring.split("\n") if ":" in line]
@@ -176,7 +181,10 @@ class ToolRegistry:
                 param_docs[parts[0].strip()] = parts[1].strip()
 
         for param_name, param in sig.parameters.items():
-            if param_name == "self":
+            if param_name == "self" or param.kind in {
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            }:
                 continue
 
             param_type = (
@@ -184,7 +192,7 @@ class ToolRegistry:
                 if param.annotation is not inspect.Parameter.empty
                 else str
             )
-            schema = {"type": self._map_type(param_type)}
+            schema = self._schema_for_type(annotations.get(param_name, param_type))
 
             if param_name in param_docs:
                 schema["description"] = param_docs[param_name]
@@ -200,6 +208,31 @@ class ToolRegistry:
             "required": required,
             "additionalProperties": False,
         }
+
+    def _schema_for_type(self, annotation: Any) -> dict[str, Any]:
+        origin = get_origin(annotation)
+        args = get_args(annotation)
+        if annotation is Any:
+            return {}
+        if annotation is type(None):
+            return {"type": "null"}
+        if origin in {Union, UnionType}:
+            return {"anyOf": [self._schema_for_type(item) for item in args]}
+        if origin is Literal:
+            return {"enum": list(args)}
+        if annotation is list or origin is list:
+            return {
+                "type": "array",
+                "items": self._schema_for_type(args[0]) if args else {},
+            }
+        if annotation is dict or origin is dict:
+            return {
+                "type": "object",
+                "additionalProperties": self._schema_for_type(args[1])
+                if len(args) > 1
+                else True,
+            }
+        return {"type": self._map_type(annotation)}
 
     def _map_type(self, typ: Any) -> str:
         type_map = {

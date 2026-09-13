@@ -123,7 +123,7 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 | 02 | Complete prerequisite | `18639e9`; 226 passed, 2 skipped |
 | Plan | Recorded | Markdown/diff validation; see commit history |
 | 03 | Complete | 47 passed (model protocol, response extraction, LLM adapter/step, import startup); Ruff/diff passed. Complete-turn decoder and provider-field serializer committed with this update. |
-| 04 | Pending | |
+| 04 | Complete catalog boundary | 50 passed (native catalog/protocol, resolver, registry/runtime registry); schema validation, exact execution arguments, collision mapping and per-catalog BM25 discovery covered. `uv lock` resolved 151 packages; offline attempt lacked cached build dependencies. |
 | 05 | Pending | |
 | 06 | Pending | |
 | 07 | Pending | |
@@ -139,3 +139,5 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 - Supported provider names do not prove each deployed model supports tools or streaming. Offline adapter fixtures establish our contract; model/provider capability verification must be reported separately.
 
 - Step 03: malformed argument JSON remains attached to its identified call until execution validation; missing/duplicate provider IDs fail at response decoding. Text-only helpers reject native calls rather than discarding them. Terminal and streaming semantics are specified above and wired in steps 08–10.
+
+- Step 04 sequencing clarification: configured-child schemas are represented as native catalog bindings now; executor wiring and the dynamic-spawn typed-array change stay in step 05 with the prompt cutover. No second execution path is enabled in this step. Colliding names use deterministic aliases with concrete provider/server bindings rather than ambiguous bare-name routing.
