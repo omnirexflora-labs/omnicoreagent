@@ -156,3 +156,18 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 
 - Step 12 corrections: public delivery observes producer cancellation instead of waiting forever; cancelled tool spans close; returned child errors mark delegation failure. LiteLLM parameter policy is now per request, not a global mutation. Final caller audit removed the unused summary-memory-constructor prompt/export. A cancellation arriving between result-history writes finishes the active write and skips completed IDs during reconciliation; storage remains nontransactional across process death.
 - Review package: [native-tool-migration-review.md](native-tool-migration-review.md) maps all X01–X44 entries, retained scenarios, breaking contracts and explicit external verification limits. The implementation checkpoints are complete; live provider/model and unavailable remote-storage verification remains a deployment gate, not a claimed offline result.
+
+### Live validation follow-up — 2026-09-14
+
+User supplied an OpenAI key and authorized Luna/Terra testing. Selected Luna and
+completed nine live scenarios. Provider checks exposed dropped tool-stream
+fragments in the installed LiteLLM path; OpenAI now uses its SDK for complete,
+synchronous and streaming requests. Added explicit reasoning effort, optional
+sampling defaults, SDK dependency, and fail-fast validation for missing streamed
+calls. The shared cookbook and live background example use Luna. Explicit caller
+model/reasoning choices remain intact.
+
+Verification: 1,036 offline tests passed (13 external-service skips, 2 deselected),
+then 17 focused tests passed after the final regression/example edits. The
+[live report](../validation/luna-live-validation.md) records actual provider
+results and the remaining Responses/reasoning, provider, and remote-service gates.

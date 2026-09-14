@@ -29,7 +29,8 @@ export LLM_API_KEY=your_provider_key
 ```
 
 Set `model_config["provider"]` to choose the provider. The runtime reads
-`LLM_API_KEY` and internally passes it to LiteLLM for the selected provider.
+`LLM_API_KEY` and passes it to the selected provider adapter (OpenAI SDK for
+OpenAI/Cencori, LiteLLM for other providers).
 Do not configure provider-specific key names in OmniCoreAgent examples.
 
 ### Optional Memory Backends

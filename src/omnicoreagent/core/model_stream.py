@@ -82,6 +82,8 @@ class ModelStreamAssembler:
     def finish(self):
         if self.finish_reason is None:
             raise ValueError("Provider stream ended without a terminal finish reason")
+        if self.finish_reason == "tool_calls" and not self.calls:
+            raise ValueError("Provider finished with tool_calls but supplied no calls")
         message = {
             "content": self.text or (None if self.calls else ""),
             "tool_calls": [self.calls[index] for index in sorted(self.calls)],

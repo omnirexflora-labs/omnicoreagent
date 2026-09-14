@@ -6,8 +6,8 @@ icon: 'microchip'
 
 # Universal Model Support
 
-Model-agnostic through LiteLLM with the provider values supported by the
-OmniCoreAgent runtime:
+OpenAI and Cencori use the OpenAI SDK; other supported providers use LiteLLM.
+All adapters return the same native turn and text-stream protocol:
 
 ---
 
@@ -43,6 +43,36 @@ model_config = {"provider": "ollama", "model": "llama3.1:8b", "ollama_host": "ht
 ```
 
 ---
+
+## GPT-5.6 Validation Model
+
+The shared cookbook default is `gpt-5.6-luna`. Select `gpt-5.6-terra` explicitly
+when you want that model instead:
+
+```python
+model_config = {"provider": "openai", "model": "gpt-5.6-luna", "max_tokens": 2500, "reasoning_effort": "none"}
+```
+
+For GPT-5.6 Luna, the provider requires `reasoning_effort="none"` when using
+function tools on Chat Completions. Reasoning-enabled function calls require the
+Responses API, which this runtime does not currently implement. The cookbook
+sets `none` for its GPT-5.6 Luna/Terra configurations; explicit overrides survive.
+
+`ModelConfig` and the shared cookbook leave sampling parameters unspecified by
+default. Set `temperature` or `top_p` only when the selected model supports them.
+Explicitly requested parameters are not silently dropped.
+
+To run the opt-in validation against your API key:
+
+```bash
+PYTHONPATH=src python engineering/validation/live_native_runtime.py --env-file .env
+```
+
+Use `--scenario http_sse_live_delivery` to rerun one check and `--report /tmp/live.json`
+to save its outcome.
+
+The validation makes paid model requests using synthetic tasks and tools. It does
+not print the API key. Override the model with `--model gpt-5.6-terra`.
 
 ## Model Configuration Options
 

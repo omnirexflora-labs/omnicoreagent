@@ -77,7 +77,7 @@ def test_stream_refusal_and_length_finish_are_retained():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("provider", ["openai", "cencori"])
+@pytest.mark.parametrize("provider", ["openai", "cencori", "groq"])
 async def test_provider_yields_before_completion_and_closes_stream(
     monkeypatch, provider
 ):
@@ -98,7 +98,7 @@ async def test_provider_yields_before_completion_and_closes_stream(
         ),
         close=AsyncMock(),
     )
-    if provider == "cencori":
+    if provider in {"openai", "cencori"}:
         monkeypatch.setattr(
             "omnicoreagent.core.llm._get_openai",
             lambda: SimpleNamespace(AsyncOpenAI=lambda **kwargs: client),
@@ -125,7 +125,7 @@ async def test_provider_yields_before_completion_and_closes_stream(
     assert create.call_args.kwargs["stream"] is True
     assert create.call_args.kwargs["stream_options"] == {"include_usage": True}
     assert closed == [True]
-    if provider == "cencori":
+    if provider in {"openai", "cencori"}:
         client.close.assert_awaited_once()
 
 
@@ -146,7 +146,7 @@ async def test_closing_public_provider_iterator_closes_upstream(monkeypatch):
         lambda: SimpleNamespace(acompletion=create),
     )
     stream = LLMConnection(
-        {"provider": "openai", "model": "test", "api_key": "test"}
+        {"provider": "groq", "model": "test", "api_key": "test"}
     ).llm_stream([])
     await anext(stream)
     await stream.aclose()
@@ -166,7 +166,7 @@ async def test_stream_failure_after_text_is_not_retried(monkeypatch):
         lambda: SimpleNamespace(acompletion=create),
     )
     stream = LLMConnection(
-        {"provider": "openai", "model": "test", "api_key": "test"}
+        {"provider": "groq", "model": "test", "api_key": "test"}
     ).llm_stream([])
     assert (await anext(stream))["text"] == "partial"
     with pytest.raises(RuntimeError, match="connection interrupted"):
@@ -184,7 +184,7 @@ async def test_complete_request_retry_waits_asynchronously(monkeypatch):
     )
     monkeypatch.setattr("omnicoreagent.core.llm.asyncio.sleep", sleep)
     result = await LLMConnection(
-        {"provider": "openai", "model": "test", "api_key": "test"}
+        {"provider": "groq", "model": "test", "api_key": "test"}
     ).llm_call([])
     assert result == {"choices": []}
     assert create.await_count == 2
@@ -198,3 +198,53 @@ def test_normalized_turn_retains_stream_usage():
 
     usage = Usage(requests=1, request_tokens=12, response_tokens=3, total_tokens=15)
     assert extract_response_usage(ModelTurn(content="done", usage=usage)) == usage
+
+
+def test_tool_finish_without_call_fragments_is_not_an_empty_answer():
+    assembler = ModelStreamAssembler()
+    assembler.feed(chunk(finish="tool_calls"))
+    with pytest.raises(ValueError, match="supplied no calls"):
+        assembler.finish()
+
+
+@pytest.mark.asyncio
+async def test_openai_sdk_tool_chunks_retain_identity_and_arguments(monkeypatch):
+    from openai.types.chat import ChatCompletionChunk
+
+    async def chunks():
+        for value in [
+            chunk(calls=[delta(0, '{"code":', "call_one", "receipt")]),
+            chunk(calls=[delta(0, '"001"}')]),
+            chunk(finish="tool_calls"),
+        ]:
+            yield ChatCompletionChunk(
+                id="completion",
+                created=0,
+                model="gpt-5.6-luna",
+                object="chat.completion.chunk",
+                **value,
+            )
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=AsyncMock(return_value=chunks()))
+        ),
+        close=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "omnicoreagent.core.llm._get_openai",
+        lambda: SimpleNamespace(AsyncOpenAI=lambda **kwargs: client),
+    )
+    connection = LLMConnection(
+        {"provider": "openai", "model": "gpt-5.6-luna", "reasoning_effort": "none"},
+        api_key="test",
+    )
+    events = [event async for event in connection.llm_stream([])]
+    assert len(events) == 1 and events[0]["type"] == "turn_complete"
+    call = events[0]["turn"].tool_calls[0]
+    assert (call.id, call.name, call.decode_arguments()) == (
+        "call_one",
+        "receipt",
+        {"code": "001"},
+    )
+    client.close.assert_awaited_once()

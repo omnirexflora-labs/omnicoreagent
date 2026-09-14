@@ -140,7 +140,7 @@ def _sleep_before_retry(*args):
 
 
 class LLMConnection:
-    """Direct LiteLLM connection configured from the agent runtime."""
+    """Provider connection using the OpenAI SDK or LiteLLM."""
 
     def __init__(self, model_config: dict[str, Any], api_key: str | None = None):
         self.model_config = dict(model_config or {})
@@ -167,7 +167,7 @@ class LLMConnection:
 
         provider_model_map = {
             "cencori": model,
-            "openai": f"openai/{model}",
+            "openai": model,
             "anthropic": f"anthropic/{model}",
             "groq": f"groq/{model}",
             "openrouter": f"openrouter/{model}",
@@ -202,6 +202,7 @@ class LLMConnection:
             "temperature": self.model_config.get("temperature"),
             "max_tokens": self.model_config.get("max_tokens"),
             "top_p": self.model_config.get("top_p"),
+            "reasoning_effort": self.model_config.get("reasoning_effort"),
         }
 
     def _set_llm_environment_variables(self):
@@ -255,11 +256,10 @@ class LLMConnection:
     ):
         try:
             params = self._completion_params(messages, tools)
-            if self.llm_config["provider"].lower() == "cencori":
+            if self.llm_config["provider"].lower() in {"openai", "cencori"}:
                 openai = _get_openai()
                 client = openai.AsyncOpenAI(
-                    base_url="https://api.cencori.com/v1",
-                    api_key=self.llm_api_key,
+                    **self._openai_client_options(),
                 )
                 try:
                     return await client.chat.completions.create(**params)
@@ -283,11 +283,10 @@ class LLMConnection:
     ):
         try:
             params = self._completion_params(messages, tools)
-            if self.llm_config["provider"].lower() == "cencori":
+            if self.llm_config["provider"].lower() in {"openai", "cencori"}:
                 openai = _get_openai()
                 client = openai.OpenAI(
-                    base_url="https://api.cencori.com/v1",
-                    api_key=self.llm_api_key,
+                    **self._openai_client_options(),
                 )
                 try:
                     return client.chat.completions.create(**params)
@@ -317,10 +316,9 @@ class LLMConnection:
         client = None
         stream = None
         try:
-            if self.llm_config["provider"].lower() == "cencori":
+            if self.llm_config["provider"].lower() in {"openai", "cencori"}:
                 client = _get_openai().AsyncOpenAI(
-                    base_url="https://api.cencori.com/v1",
-                    api_key=self.llm_api_key,
+                    **self._openai_client_options(),
                 )
                 stream = await client.chat.completions.create(**params)
             else:
@@ -353,12 +351,20 @@ class LLMConnection:
             "messages": [self.to_dict(m) for m in messages],
         }
 
-        for key in ("temperature", "max_tokens", "top_p"):
+        for key in ("temperature", "max_tokens", "top_p", "reasoning_effort"):
             if self.llm_config.get(key) is not None:
                 params[key] = self.llm_config[key]
 
         if tools:
             params["tools"] = tools
-            params["tool_choice"] = "auto"
 
+        if self.llm_config["provider"].lower() == "openai" and "max_tokens" in params:
+            params["max_completion_tokens"] = params.pop("max_tokens")
         return params
+
+    def _openai_client_options(self):
+        # Retries belong to our request boundary. Never replay a partial stream.
+        options = {"api_key": self.llm_api_key, "max_retries": 0}
+        if self.llm_config["provider"].lower() == "cencori":
+            options["base_url"] = "https://api.cencori.com/v1"
+        return options

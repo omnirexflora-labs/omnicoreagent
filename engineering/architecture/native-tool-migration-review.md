@@ -194,3 +194,15 @@ child failures correctly, and avoids hanging a public consumer when its producer
 is cancelled independently. Cancellation waits for an in-flight history write to
 finish before reconciling remaining rows. A stuck storage backend can therefore
 delay cleanup; store availability/timeouts remain operational requirements.
+
+## Live OpenAI follow-up — 2026-09-14
+
+The offline-only qualification above describes the original migration checkpoint.
+Subsequent authorized live testing found and corrected OpenAI adapter compatibility
+failures. OpenAI now uses its SDK directly. Nine live Luna scenarios pass,
+including native batches, history continuation, errors/timeouts, public and HTTP
+streaming, cancellation, configured/dynamic children, workspace output, and a
+background run. See the [live validation report](../validation/luna-live-validation.md)
+for failures found, exact configuration, measured results and remaining limits.
+Luna tools were tested with `reasoning_effort="none"` on Chat Completions;
+reasoning-enabled Responses integration is not implemented.

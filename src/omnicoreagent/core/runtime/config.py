@@ -36,10 +36,11 @@ class TransportType(str, Enum):
 class ModelConfig:
     provider: str
     model: str
-    temperature: float | None = 0.5
+    temperature: float | None = None
     max_tokens: int | None = 5000
     max_context_length: int | None = 100000
-    top_p: float | None = 0.7
+    top_p: float | None = None
+    reasoning_effort: str | None = None
     top_k: int | str | None = "N/A"
     api_key: str | None = None
     azure_endpoint: str | None = None
