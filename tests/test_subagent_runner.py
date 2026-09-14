@@ -8,7 +8,7 @@ from omnicoreagent.core.telemetry import (
     TelemetryRecorder,
 )
 from omnicoreagent.core.types import AgentState, SessionState
-from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
+from omnicoreagent.core.agents.loop_detection import NativeLoopDetector
 
 
 class FakeAgent:
@@ -38,7 +38,7 @@ def _session_state():
     return SessionState(
         messages=[],
         state=AgentState.IDLE,
-        loop_detector=RobustLoopDetector(debug=False),
+        loop_detector=NativeLoopDetector(),
         assistant_with_tool_calls=None,
         pending_tool_responses=[],
     )

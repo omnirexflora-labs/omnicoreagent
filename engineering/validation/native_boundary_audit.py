@@ -15,7 +15,7 @@ import sys
 from mcp import types
 
 from omnicoreagent.core.agents.llm_response import normalize_model_turn
-from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
+from omnicoreagent.core.agents.loop_detection import NativeLoopDetector, ToolInteraction
 from omnicoreagent.core.runtime.harness_tools import available_tools
 from omnicoreagent.core.tools.native_catalog import NativeToolCatalog
 from omnicoreagent.core.tools.tool_executor import ToolExecutor
@@ -106,16 +106,15 @@ async def main():
     findings["provider_specific_fields_retained"] = {
         "passed": "provider_specific_fields" in normalized.assistant_message()
     }
-    detector = RobustLoopDetector(debug=False)
-    for i in range(6):
-        # This is the signature passed by native_tools: original name, without server.
-        detector.record_tool_call("lookup", "{}", '{"data":"same"}')
+    detector = NativeLoopDetector()
+    interactions = [
+        ToolInteraction("mcp", str(i), "lookup", {}, "same") for i in range(5)
+    ]
+    for item in interactions:
+        detector.record_round([item])
     findings["same_name_servers_have_distinct_loop_identity"] = {
-        "passed": False,
-        "loop_detected_after_six_alternating_server_results": detector.is_looping(
-            "lookup"
-        ),
-        "note": "The recorder cannot accept provider/server identity; both bindings collapse to lookup.",
+        "passed": not detector.is_looping(),
+        "note": "Five distinct server identities; transport-independent detector probe.",
     }
     print(json.dumps(findings, indent=2))
 

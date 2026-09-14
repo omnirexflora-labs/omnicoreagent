@@ -6,6 +6,7 @@ import asyncio
 import json
 from copy import deepcopy
 
+from omnicoreagent.core.agents.loop_detection import ToolInteraction
 from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
 from omnicoreagent.core.tools.mcp_tool_handler import MCPToolHandler
@@ -73,6 +74,8 @@ async def execute_native_turn(
             resolutions[request.id] = catalog.resolve(request)
         except ValueError as exc:
             resolutions[request.id] = exc
+
+    interactions = {}
 
     async def one(request):
         resolved = None
@@ -192,10 +195,19 @@ async def execute_native_turn(
         signature_result = {
             key: value for key, value in result.items() if key != "args"
         }
-        session_state.loop_detector.record_tool_call(
-            result["tool_name"],
-            json.dumps(signature_args, sort_keys=True, default=str),
-            json.dumps(signature_result, sort_keys=True, default=str),
+        binding = catalog.bindings.get(request.name.lower())
+        if request.name.lower() not in catalog.visible:
+            binding = None
+        interactions[request.id] = ToolInteraction(
+            provider=binding.provider if binding else "unavailable",
+            server=binding.server if binding else None,
+            name=binding.name if binding else request.name.lower(),
+            arguments=signature_args,
+            result={
+                key: value
+                for key, value in signature_result.items()
+                if key != "tool_name"
+            },
         )
         original_data = result.get("data")
         result = agent.tool_result_offloader.maybe_offload_result(
@@ -273,6 +285,9 @@ async def execute_native_turn(
     tasks = [asyncio.create_task(one(request)) for request in turn.tool_calls]
     try:
         results = await asyncio.gather(*tasks)
+        session_state.loop_detector.record_round(
+            [interactions[request.id] for request in turn.tool_calls]
+        )
         await persist_results(results)
         session_state.state = AgentState.OBSERVING
         if telemetry_recorder is not None:

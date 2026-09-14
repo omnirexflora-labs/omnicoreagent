@@ -9,7 +9,7 @@ from omnicoreagent.core.types import (
     ToolCallMetadata,
     ToolFunction,
 )
-from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
+from omnicoreagent.core.agents.loop_detection import NativeLoopDetector
 
 
 TOOL_ALPHA_ID = "11111111-1111-1111-1111-111111111111"
@@ -21,7 +21,7 @@ def session_state():
     return SessionState(
         messages=[],
         state=AgentState.IDLE,
-        loop_detector=RobustLoopDetector(debug=False),
+        loop_detector=NativeLoopDetector(),
         assistant_with_tool_calls=None,
         pending_tool_responses=[],
     )

@@ -16,7 +16,7 @@ from omnicoreagent.core.workspace.artifacts import ToolResponseOffloader
 from omnicoreagent.core.workspace.config import WorkspaceConfig
 from omnicoreagent.core.workspace.tools import build_tool_registry_workspace_files
 from omnicoreagent.core.types import AgentState, SessionState, ToolCallResult
-from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
+from omnicoreagent.core.agents.loop_detection import NativeLoopDetector
 from omnicoreagent.governance import (
     GovernanceEngine,
     build_default_policy,
@@ -35,7 +35,7 @@ def session_state():
     return SessionState(
         messages=[],
         state=AgentState.IDLE,
-        loop_detector=RobustLoopDetector(debug=False),
+        loop_detector=NativeLoopDetector(),
         assistant_with_tool_calls=None,
         pending_tool_responses=[],
     )

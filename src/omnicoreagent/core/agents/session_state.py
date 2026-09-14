@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
+from omnicoreagent.core.agents.loop_detection import NativeLoopDetector
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.types import AgentState, SessionState
 
@@ -18,7 +18,7 @@ class AgentSessionStateStore:
             self.states[key] = SessionState(
                 messages=[],
                 state=AgentState.IDLE,
-                loop_detector=RobustLoopDetector(debug=debug),
+                loop_detector=NativeLoopDetector(),
                 assistant_with_tool_calls=None,
                 pending_tool_responses=[],
             )

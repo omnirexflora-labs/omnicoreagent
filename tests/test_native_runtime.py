@@ -46,11 +46,22 @@ def call(name, args, id="call_1"):
 
 
 async def run(
-    model, *, registry=None, memory=None, sub_agents=None, tool_call_timeout=2, **config
+    model,
+    *,
+    registry=None,
+    memory=None,
+    sub_agents=None,
+    tool_call_timeout=2,
+    max_steps=5,
+    **config,
 ):
     memory = memory or MemoryRouter("in_memory")
     agent = BaseReactAgent(
-        "test", 5, tool_call_timeout, tool_offload_config={"enabled": False}, **config
+        "test",
+        max_steps,
+        tool_call_timeout,
+        tool_offload_config={"enabled": False},
+        **config,
     )
     result = await agent.run(
         system_prompt="Test",
@@ -554,3 +565,47 @@ async def test_native_batch_starts_distinct_tools_before_either_completes():
     ]
     assert [o["status"] for o in outputs] == ["success", "success"]
     assert [o["data"] for o in outputs] == ["first", "second"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unavailable", [False, True])
+async def test_repeated_invalid_native_calls_halt_with_or_without_an_alias(unavailable):
+    registry = ToolRegistry()
+    effects = []
+
+    @registry.register_tool(name="very_long_name_" * 8)
+    async def long_tool(required: str):
+        effects.append(required)
+
+    class InvalidModel(Model):
+        async def llm_call(self, messages, tools=None):
+            self.requests.append((deepcopy(messages), tools))
+            if not tools:
+                return turn("Stopped after repeated invalid calls")
+            name = "unavailable" if unavailable else tools[0]["function"]["name"]
+            return turn(calls=[call(name, "{}", f"id{len(self.requests)}")])
+
+    model = InvalidModel([])
+    result, memory = await run(model, registry=registry, max_steps=10)
+    assert result["answer"] == "Stopped after repeated invalid calls"
+    assert len(model.requests) == 6
+    assert not effects
+    assert model.requests[-1][1] == []
+    records = await memory.get_messages("session", "test")
+    assert len([r for r in records if r["role"] == "tool"]) == 5
+
+
+@pytest.mark.asyncio
+async def test_large_single_batch_does_not_disable_tools():
+    registry = ToolRegistry()
+
+    @registry.register_tool(name="echo")
+    async def echo():
+        return "same"
+
+    model = Model(
+        [turn(calls=[call("echo", "{}", f"id{i}") for i in range(10)]), turn("Done")]
+    )
+    result, _ = await run(model, registry=registry)
+    assert result["answer"] == "Done"
+    assert model.requests[1][1]

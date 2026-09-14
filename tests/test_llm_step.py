@@ -14,14 +14,14 @@ from omnicoreagent.core.telemetry import (
 )
 from omnicoreagent.core.token_usage import Usage, UsageLimits
 from omnicoreagent.core.types import AgentState, Message, SessionState
-from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
+from omnicoreagent.core.agents.loop_detection import NativeLoopDetector
 
 
 def make_session_state(messages=None):
     return SessionState(
         messages=messages or [Message(role="user", content="hello")],
         state=AgentState.IDLE,
-        loop_detector=RobustLoopDetector(debug=False),
+        loop_detector=NativeLoopDetector(),
         assistant_with_tool_calls=None,
         pending_tool_responses=[],
     )

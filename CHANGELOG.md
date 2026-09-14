@@ -2,6 +2,10 @@
 
 ## Unreleased — native tool runtime
 
+- Detect native tool loops across complete rounds with concrete provider/server
+  identities. Ignore execution order and generated IDs, retain changing sibling
+  results as progress, and halt repeated invalid or unavailable calls consistently.
+
 - Remove the unused legacy tool resolver, obsolete control types and unused default
   config wrapper. Add a concurrency regression test and installed-MCP diagnostic;
   reopen integration gates for the SDK incompatibilities documented in the audit.

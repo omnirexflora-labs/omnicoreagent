@@ -312,10 +312,7 @@ class BaseReactAgent:
                             run_usage=run_usage,
                             telemetry_recorder=telemetry_recorder,
                         )
-                        if any(
-                            session_state.loop_detector.is_looping(binding.name)
-                            for binding in catalog.bindings.values()
-                        ):
+                        if session_state.loop_detector.is_looping():
                             session_state.state = AgentState.STUCK
                             session_state.messages.append(
                                 Message(
