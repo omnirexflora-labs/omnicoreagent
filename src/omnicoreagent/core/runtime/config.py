@@ -120,8 +120,8 @@ class AgentConfig:
     agent_name: str = "OmniCoreAgent"
     request_limit: int = 0
     total_tokens_limit: int = 0
-    max_steps: int = 15
-    tool_call_timeout: int = 30
+    max_steps: int = 50
+    tool_call_timeout: int = 180
     mcp_enabled: bool = False
     enable_advanced_tool_use: bool = False
     enable_subagents: bool = False

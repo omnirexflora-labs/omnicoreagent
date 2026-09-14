@@ -68,13 +68,13 @@ class SubagentFactory:
         Build agent_config for subagents inheriting parent's config.
 
         Subagents get full config but with some adjustments:
-        - Fewer max_steps (focused task)
+        - A bounded 50-step budget for focused tasks
         - Workspace files are always enabled for writing output
         - Dynamic delegation stays on the lead agent only
         """
         config = self.agent_config.copy()
 
-        config["max_steps"] = min(config.get("max_steps", 15), 15)
+        config["max_steps"] = min(config.get("max_steps", 50), 50)
         config["enable_subagents"] = False
         config["enable_workspace_files"] = True
         context_management = dict(config.get("context_management") or {})

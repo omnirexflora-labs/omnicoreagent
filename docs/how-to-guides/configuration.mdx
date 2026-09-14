@@ -189,8 +189,8 @@ The `AgentConfig` handles the runtime behavior of the agent, such as reasoning s
 
 ```python
 agent_config = {
-    "tool_call_timeout": 30,         # Max seconds per tool execution
-    "max_steps": 15,                 # Max reasoning loops per run()
+    "tool_call_timeout": 180,        # Max seconds per tool execution
+    "max_steps": 50,                 # Max reasoning loops per run()
     "request_limit": 0,              # 0 = unlimited
     "total_tokens_limit": 0,         # 0 = unlimited
     "enable_subagents": True,        # Dynamic focused workers

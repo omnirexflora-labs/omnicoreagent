@@ -118,8 +118,8 @@ agent = OmniCoreAgent(
     mcp_tools=[...],
     memory_router=MemoryRouter("redis"),
     agent_config={
-        "max_steps": 20,
-        "tool_call_timeout": 30,
+        "max_steps": 50,
+        "tool_call_timeout": 180,
         "enable_advanced_tool_use": True,
         "enable_subagents": True,
         "enable_agent_skills": True,

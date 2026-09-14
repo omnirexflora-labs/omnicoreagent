@@ -50,7 +50,7 @@ class TestSubagentFactory:
 
         config = factory._build_subagent_config()
 
-        assert config["max_steps"] == 15
+        assert config["max_steps"] == 50
         assert config["enable_subagents"] is False
         assert config["enable_workspace_files"] is True
         assert config["context_management"] == {"enabled": True}
@@ -513,9 +513,20 @@ class TestOmniCoreAgentSubagents:
     def test_harness_defaults_bound_context_and_tool_results(self):
         config = normalize_agent_config("Harness", None)
 
+        assert config["max_steps"] == 50
+        assert config["tool_call_timeout"] == 180
         assert config["enable_workspace_files"] is True
         assert config["context_management"]["enabled"] is True
         assert config["tool_offload"]["enabled"] is True
+
+    def test_harness_defaults_preserve_explicit_lower_limits(self):
+        config = normalize_agent_config(
+            "Harness",
+            {"max_steps": 7, "tool_call_timeout": 5},
+        )
+
+        assert config["max_steps"] == 7
+        assert config["tool_call_timeout"] == 5
 
     @pytest.mark.asyncio
     async def test_enable_subagents_registers_core_spawn_tool(self, model_config):

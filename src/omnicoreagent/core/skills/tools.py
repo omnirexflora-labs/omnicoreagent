@@ -113,7 +113,7 @@ def build_skill_tools(
         
         Scripts are:
         - Sandboxed to run from the skill directory
-        - Subject to a timeout (default 30 seconds)
+        - Subject to the agent's tool timeout (180 seconds by default)
         - Only accessible from the scripts/ subdirectory
         
         Use this when a skill's SKILL.md references a script to run.

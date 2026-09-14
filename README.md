@@ -418,14 +418,14 @@ database storage, S3, R2, or OmniServe deployment settings.
 
 ### Full Harness Config Example
 
-The defaults keep the first agent small: workspace files and guardrails are on,
-conversation memory is in-memory, and advanced harness pieces stay off until
-you enable them. This example shows the production-style switches together.
+The defaults provide a bounded harness: workspace files, context management,
+tool output offloading, and guardrails are on, while conversation memory uses
+an in-memory store. This example shows the production-style switches together.
 
 ```python
 agent_config = {
-    "max_steps": 15,
-    "tool_call_timeout": 30,
+    "max_steps": 50,
+    "tool_call_timeout": 180,
     "request_limit": 0,                  # 0 = unlimited
     "total_tokens_limit": 0,             # 0 = unlimited
     "memory_config": {
@@ -435,8 +435,8 @@ agent_config = {
     },
     "enable_workspace_files": True,      # Default on
     "guardrail_mode": "full",            # Default
-    "context_management": {"enabled": True},  # Default off
-    "tool_offload": {"enabled": True},        # Default off
+    "context_management": {"enabled": True},  # Default on
+    "tool_offload": {"enabled": True},        # Default on
     "enable_advanced_tool_use": True,         # Default off
     "enable_subagents": True,                 # Default off
     "enable_agent_skills": True,              # Default off
