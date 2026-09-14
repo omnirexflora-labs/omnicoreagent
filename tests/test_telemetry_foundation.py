@@ -5,11 +5,13 @@ import pytest
 
 from omnicoreagent.core.telemetry import (
     ActorType,
+    CaptureState,
     InMemoryTelemetryExporter,
     InMemoryTelemetryStore,
     JsonlTelemetryStore,
     SpanStatus,
     TelemetryActor,
+    TelemetryCapture,
     TelemetryConfig,
     TelemetryEvent,
     TelemetryNormalizer,
@@ -19,8 +21,10 @@ from omnicoreagent.core.telemetry import (
     TelemetryStreamScope,
     TelemetryTrace,
     TelemetryTraceMetadata,
+    TelemetryProvenance,
     OTelTraceMapper,
     TraceFilter,
+    TraceEvidenceStatus,
     TraceStatus,
     current_telemetry_context,
 )
@@ -59,6 +63,62 @@ def test_telemetry_trace_metadata_round_trips_telemetry_config_version():
     assert restored.telemetry_config_version == "abc123"
     assert restored.telemetry_storage == "jsonl"
     assert restored.privacy_config_version == "privacy123"
+
+
+def test_evidence_records_are_versioned_and_provenance_round_trips():
+    trace = TelemetryTrace(
+        trace_id="trace-v3",
+        root_span_id="span-v3",
+        execution_surface="controlled",
+        provenance=TelemetryProvenance(
+            adapter="harbor",
+            evaluation_id="eval-1",
+            case_id="case-1",
+            trial_id="trial-1",
+        ),
+    )
+
+    restored = TelemetryTrace.from_dict(trace.model_dump())
+
+    assert trace.schema_version == 3
+    assert trace.evidence_status == TraceEvidenceStatus.COMPLETE
+    assert restored.execution_surface == "controlled"
+    assert restored.provenance.adapter == "harbor"
+    assert restored.provenance.trial_id == "trial-1"
+
+
+def test_legacy_evidence_records_are_marked_unknown_by_normalizer():
+    legacy = {
+        "trace_id": "trace-legacy",
+        "root_span_id": "span-legacy",
+        "status": "completed",
+        "ended_at": utc_now().isoformat(),
+        "spans": [],
+        "events": [],
+    }
+
+    normalized = TelemetryNormalizer().normalize(TelemetryTrace.from_dict(legacy))
+
+    assert normalized.schema_version == 1
+    assert normalized.evidence_status == TraceEvidenceStatus.PARTIAL
+    assert "legacy_schema" in normalized.metadata.tags
+    assert "missing_evidence" in normalized.metadata.tags
+
+
+def test_capture_descriptor_requires_reasons_for_unavailable_payloads():
+    available = TelemetryCapture(
+        state=CaptureState.AVAILABLE,
+        source="runtime",
+        role="request",
+    )
+    assert available.state == CaptureState.AVAILABLE
+
+    with pytest.raises(ValueError, match="reason is required"):
+        TelemetryCapture(
+            state=CaptureState.NOT_RECORDED,
+            source="runtime",
+            role="request",
+        )
 
 
 def test_telemetry_records_serialize_and_validate():
@@ -145,6 +205,8 @@ async def test_recorder_captures_trace_span_event_and_redacts_payload():
     assert trace.session_id == "session-1"
     assert trace.spans[0].input == {"api_key": "[REDACTED]", "safe": "value"}
     assert trace.events[0].input == {"api_key": "[REDACTED]", "message": "hello"}
+    assert trace.spans[0].input_capture.state == CaptureState.REDACTED
+    assert trace.events[0].input_capture.state == CaptureState.REDACTED
     assert trace.spans[-1].status == SpanStatus.OK
     assert current_telemetry_context() is None
 
@@ -776,6 +838,8 @@ async def test_privacy_flags_block_model_and_tool_payloads():
     assert trace.events[1].output is None
     assert trace.events[2].output is None
     assert trace.events[3].output is None
+    assert trace.events[1].output_capture.state == CaptureState.NOT_RECORDED
+    assert trace.events[2].output_capture.state == CaptureState.NOT_RECORDED
 
 
 def test_redaction_covers_common_secret_key_variants():

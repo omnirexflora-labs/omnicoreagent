@@ -7,6 +7,7 @@ import pytest
 from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
 from omnicoreagent.core.telemetry import (
     ActorType,
+    CaptureState,
     InMemoryTelemetryExporter,
     InMemoryTelemetryStore,
     LangSmithTelemetryExporter,
@@ -15,6 +16,7 @@ from omnicoreagent.core.telemetry import (
     OpikTelemetryExporter,
     SpanStatus,
     TelemetryActor,
+    TelemetryCapture,
     TelemetryConfig,
     TelemetryExportError,
     TelemetryExporter,
@@ -37,6 +39,12 @@ def _trace() -> TelemetryTrace:
         kind="agent.run",
         actor=actor,
         status=SpanStatus.OK,
+        input_capture=TelemetryCapture(
+            state=CaptureState.NOT_RECORDED,
+            source="user",
+            role="request",
+            reason="policy",
+        ),
         attributes={"custom": {"nested": True}},
     )
     tool = TelemetrySpan(
@@ -83,6 +91,10 @@ def test_otel_mapper_preserves_trace_span_events_and_attributes():
     assert records[1].parent_span_id == "span-root"
     assert records[0].attributes["omnicoreagent.trace_id"] == "trace-export"
     assert records[0].attributes["omnicoreagent.run_id"] == "run-export"
+    assert records[0].attributes["omnicoreagent.schema_version"] == 3
+    assert records[0].attributes["omnicoreagent.span.input.capture_state"] == (
+        "not_recorded"
+    )
     assert records[0].events[0].attributes["omnicoreagent.input"] == (
         '{"message": "hello"}'
     )

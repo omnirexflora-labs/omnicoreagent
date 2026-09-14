@@ -74,6 +74,7 @@ async def start_serve_trace(
     context = await recorder.start_trace(
         name="serve.request",
         kind="serve.request",
+        execution_surface="serve",
         actor=TelemetryActor(type=ActorType.SERVE, name="OmniServe"),
         run_id=run_id,
         session_id=session_id,

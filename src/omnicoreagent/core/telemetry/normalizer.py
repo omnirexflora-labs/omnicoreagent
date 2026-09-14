@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from omnicoreagent.core.telemetry.models import (
     ActorType,
+    TraceEvidenceStatus,
     TraceStatus,
     TelemetryActor,
     TelemetryEvent,
@@ -17,6 +18,7 @@ class TelemetryNormalizer:
         normalized.events.sort(
             key=lambda event: (event.sequence_number, event.timestamp, event.event_id)
         )
+        self._mark_legacy_schema(normalized)
         self._mark_missing_references(normalized)
         self._mark_incomplete_trace(normalized)
         normalized.events.sort(
@@ -47,6 +49,7 @@ class TelemetryNormalizer:
                 missing.append({"type": "parent_event", "id": event.parent_event_id})
 
         if missing:
+            trace.evidence_status = TraceEvidenceStatus.PARTIAL
             trace.metadata.tags = sorted({*trace.metadata.tags, "missing_evidence"})
             if any(event.metadata.get("normalizer") == "missing_evidence" for event in trace.events):
                 return
@@ -66,6 +69,7 @@ class TelemetryNormalizer:
     def _mark_incomplete_trace(self, trace: TelemetryTrace) -> None:
         if trace.status not in {TraceStatus.RUNNING, TraceStatus.PARTIAL} and trace.ended_at:
             return
+        trace.evidence_status = TraceEvidenceStatus.PARTIAL
         trace.metadata.tags = sorted({*trace.metadata.tags, "incomplete_trace"})
         if any(event.metadata.get("normalizer") == "incomplete_trace" for event in trace.events):
             return
@@ -81,6 +85,15 @@ class TelemetryNormalizer:
                 metadata={"normalizer": "incomplete_trace"},
             )
         )
+
+    def _mark_legacy_schema(self, trace: TelemetryTrace) -> None:
+        legacy = trace.schema_version < 3 or any(
+            record.schema_version < 3 for record in (*trace.spans, *trace.events)
+        )
+        if not legacy:
+            return
+        trace.evidence_status = TraceEvidenceStatus.UNKNOWN
+        trace.metadata.tags = sorted({*trace.metadata.tags, "legacy_schema"})
 
 
 def _next_sequence(trace: TelemetryTrace) -> int:

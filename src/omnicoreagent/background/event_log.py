@@ -371,6 +371,7 @@ class BackgroundEventLog:
             TelemetryTrace(
                 trace_id=trace_id,
                 root_span_id=span_id,
+                execution_surface="background",
                 run_id=event.get("run_id"),
                 session_id=event.get("session_id"),
                 task_id=event.get("task_id"),

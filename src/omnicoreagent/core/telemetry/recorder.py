@@ -13,13 +13,17 @@ from omnicoreagent.core.telemetry.context import (
 )
 from omnicoreagent.core.telemetry.models import (
     ActorType,
+    CaptureState,
     SpanStatus,
     TelemetryActor,
+    TelemetryCapture,
     TelemetryError,
     TelemetryEvent,
     TelemetrySpan,
     TelemetryTrace,
     TelemetryTraceMetadata,
+    TelemetryProvenance,
+    TraceEvidenceStatus,
     TraceStatus,
     telemetry_id,
     utc_now,
@@ -42,6 +46,68 @@ def _span_status_for_trace_status(status: TraceStatus) -> SpanStatus:
     if status == TraceStatus.TIMEOUT:
         return SpanStatus.TIMEOUT
     return SpanStatus.ERROR
+
+
+def _capture_source(kind: str | None) -> str:
+    normalized = str(kind or "runtime").lower()
+    if normalized in {"model.call", "model_call", "model_response"}:
+        return "provider"
+    if normalized.startswith("mcp") or normalized.startswith("tool"):
+        return "tool"
+    if normalized.startswith("workspace"):
+        return "workspace"
+    if normalized.startswith("memory"):
+        return "memory"
+    if normalized in {"user_message", "request"}:
+        return "user"
+    if normalized.startswith("adapter"):
+        return "adapter"
+    return "runtime"
+
+
+def _capture_role(kind: str | None, direction: str) -> str:
+    normalized = str(kind or "runtime").lower()
+    if normalized in {"agent.run", "request", "user_message"}:
+        return "request" if direction == "input" else "final_output"
+    if normalized in {"model.call", "model_call"}:
+        return "model_request" if direction == "input" else "model_response"
+    if normalized == "model_response":
+        return "model_response"
+    if normalized in {"tool.call", "mcp.tool.call", "tool_call", "mcp_tool_call"}:
+        return "tool_request" if direction == "input" else "tool_result"
+    if normalized in {
+        "tool_result",
+        "mcp_tool_result",
+        "tool_error",
+        "mcp_tool_error",
+    }:
+        return "tool_result"
+    if normalized.startswith("observation"):
+        return "observation"
+    if normalized.startswith("context"):
+        return "context"
+    return f"{direction}:{normalized}"
+
+
+def _payload_size(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        import json
+
+        return len(json.dumps(value, sort_keys=True, default=str).encode("utf-8"))
+    except Exception:
+        return None
+
+
+def _contains_redaction_marker(value: Any) -> bool:
+    if value == "[REDACTED]":
+        return True
+    if isinstance(value, dict):
+        return any(_contains_redaction_marker(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_redaction_marker(item) for item in value)
+    return False
 
 
 class TelemetryRecorder:
@@ -83,6 +149,8 @@ class TelemetryRecorder:
         suite_id: str | None = None,
         agent_id: str | None = None,
         workflow_id: str | None = None,
+        execution_surface: str = "interactive",
+        provenance: TelemetryProvenance | dict[str, Any] | None = None,
         metadata: TelemetryTraceMetadata | dict[str, Any] | None = None,
         input: dict[str, Any] | None = None,
     ) -> TelemetryContext:
@@ -99,12 +167,14 @@ class TelemetryRecorder:
         previous_payload_trace_hint = self._payload_trace_hint
         self._payload_trace_hint = trace_id
         try:
+            recorded_input, input_capture = self._capture_input(input, source=kind)
             root_span = TelemetrySpan(
                 trace_id=trace_id,
                 name=name,
                 kind=kind,
                 actor=actor,
-                input=self._record_input(input, source=kind),
+                input=recorded_input,
+                input_capture=input_capture,
             )
         finally:
             self._payload_trace_hint = previous_payload_trace_hint
@@ -120,6 +190,12 @@ class TelemetryRecorder:
             suite_id=suite_id,
             agent_id=agent_id,
             workflow_id=workflow_id,
+            execution_surface=execution_surface,
+            provenance=(
+                TelemetryProvenance.from_dict(provenance)
+                if isinstance(provenance, dict)
+                else provenance or TelemetryProvenance()
+            ),
             metadata=(
                 TelemetryTraceMetadata.from_dict(metadata)
                 if isinstance(metadata, dict)
@@ -217,6 +293,11 @@ class TelemetryRecorder:
                         "status": TraceStatus(status).value,
                         "ended_at": ended_at,
                         "incomplete": context.trace_id in self._incomplete_trace_ids,
+                        "evidence_status": (
+                            TraceEvidenceStatus.PARTIAL.value
+                            if context.trace_id in self._incomplete_trace_ids
+                            else TraceEvidenceStatus.COMPLETE.value
+                        ),
                     },
                 ),
                 trace_id=context.trace_id,
@@ -258,13 +339,15 @@ class TelemetryRecorder:
         attributes: dict[str, Any] | None = None,
     ) -> TelemetryContext:
         parent = self._require_context()
+        recorded_input, input_capture = self._capture_input(input, source=kind)
         span = TelemetrySpan(
             trace_id=parent.trace_id,
             parent_span_id=parent.span_id,
             name=name,
             kind=kind,
             actor=actor or TelemetryActor(type=ActorType.SYSTEM),
-            input=self._record_input(input, source=kind),
+            input=recorded_input,
+            input_capture=input_capture,
             attributes=self._record_metadata(attributes or {}),
         )
         await self._write(
@@ -289,13 +372,15 @@ class TelemetryRecorder:
         target_span_id = span_id or context.span_id
         if target_span_id is None:
             raise RuntimeError("No active telemetry span")
+        recorded_output, output_capture = self._capture_output(
+            output,
+            source=self._span_sources.get(target_span_id),
+        )
         patch = {
             "status": SpanStatus(status).value,
             "ended_at": utc_now(),
-            "output": self._record_output(
-                output,
-                source=self._span_sources.get(target_span_id),
-            ),
+            "output": recorded_output,
+            "output_capture": output_capture,
             "error": self._record_error(error),
         }
         await self._write(
@@ -353,6 +438,8 @@ class TelemetryRecorder:
         parent_event_id: str | None = None,
     ) -> TelemetryEvent:
         context = self._require_context()
+        recorded_input, input_capture = self._capture_input(input, source=event_type)
+        recorded_output, output_capture = self._capture_output(output, source=event_type)
         event_metadata = dict(metadata or {})
         correlation_metadata: dict[str, Any] = {}
         for key in (
@@ -377,11 +464,13 @@ class TelemetryRecorder:
             parent_event_id=parent_event_id,
             event_type=event_type,
             actor=actor or TelemetryActor(type=ActorType.SYSTEM),
-            input=self._record_input(input, source=event_type),
-            output=self._record_output(output, source=event_type),
+            input=recorded_input,
+            output=recorded_output,
             error=self._record_error(error),
             duration_ms=duration_ms,
             metadata=recorded_metadata,
+            input_capture=input_capture,
+            output_capture=output_capture,
         )
         await self._write(
             self.store.append_event(context.trace_id, event),
@@ -423,11 +512,7 @@ class TelemetryRecorder:
         *,
         source: str | None = None,
     ) -> dict[str, Any] | None:
-        if value is None or not self.config.record_inputs:
-            return None
-        if source in {"model.call", "model_call"} and not self.config.record_model_prompts:
-            return None
-        return self._record_payload(value)
+        return self._capture_input(value, source=source)[0]
 
     def _record_output(
         self,
@@ -435,13 +520,65 @@ class TelemetryRecorder:
         *,
         source: str | None = None,
     ) -> dict[str, Any] | None:
-        if value is None or not self.config.record_outputs:
-            return None
+        return self._capture_output(value, source=source)[0]
+
+    def _capture_input(
+        self,
+        value: dict[str, Any] | None,
+        *,
+        source: str | None = None,
+    ) -> tuple[dict[str, Any] | None, TelemetryCapture | None]:
+        if value is None:
+            return None, None
+        role = _capture_role(source, "input")
+        descriptor_source = _capture_source(source)
+        if not self.config.record_inputs:
+            return None, TelemetryCapture(
+                state=CaptureState.NOT_RECORDED,
+                source=descriptor_source,
+                role=role,
+                policy_version=self.config.fingerprint(),
+                reason="capture disabled by telemetry policy",
+            )
+        if source in {"model.call", "model_call"} and not self.config.record_model_prompts:
+            return None, TelemetryCapture(
+                state=CaptureState.NOT_RECORDED,
+                source=descriptor_source,
+                role=role,
+                policy_version=self.config.fingerprint(),
+                reason="model prompt capture disabled by telemetry policy",
+            )
+        return self._capture_recorded_payload(value, source=source, role=role)
+
+    def _capture_output(
+        self,
+        value: dict[str, Any] | None,
+        *,
+        source: str | None = None,
+    ) -> tuple[dict[str, Any] | None, TelemetryCapture | None]:
+        if value is None:
+            return None, None
+        role = _capture_role(source, "output")
+        descriptor_source = _capture_source(source)
+        if not self.config.record_outputs:
+            return None, TelemetryCapture(
+                state=CaptureState.NOT_RECORDED,
+                source=descriptor_source,
+                role=role,
+                policy_version=self.config.fingerprint(),
+                reason="capture disabled by telemetry policy",
+            )
         if (
             source in {"model.call", "model_response"}
             and not self.config.record_model_responses
         ):
-            return None
+            return None, TelemetryCapture(
+                state=CaptureState.NOT_RECORDED,
+                source=descriptor_source,
+                role=role,
+                policy_version=self.config.fingerprint(),
+                reason="model response capture disabled by telemetry policy",
+            )
         if (
             source
             in {
@@ -461,8 +598,52 @@ class TelemetryRecorder:
             }
             and not self.config.record_tool_results
         ):
-            return None
-        return self._record_payload(value)
+            return None, TelemetryCapture(
+                state=CaptureState.NOT_RECORDED,
+                source=descriptor_source,
+                role=role,
+                policy_version=self.config.fingerprint(),
+                reason="tool result capture disabled by telemetry policy",
+            )
+        return self._capture_recorded_payload(value, source=source, role=role)
+
+    def _capture_recorded_payload(
+        self,
+        value: dict[str, Any],
+        *,
+        source: str | None,
+        role: str,
+    ) -> tuple[dict[str, Any], TelemetryCapture]:
+        recorded = self._record_payload(value)
+        original_bytes = _payload_size(value)
+        recorded_bytes = _payload_size(recorded)
+        state = CaptureState.AVAILABLE
+        reference = None
+        reason = None
+        if isinstance(recorded, dict) and recorded.get("offloaded"):
+            state = CaptureState.OFFLOADED
+            reference = recorded.get("reference")
+        elif isinstance(recorded, dict) and recorded.get("truncated"):
+            state = CaptureState.TRUNCATED
+            reason = str(recorded.get("reason") or "payload exceeded telemetry limit")
+        elif _contains_redaction_marker(recorded) or recorded != value:
+            state = CaptureState.REDACTED
+        return recorded, TelemetryCapture(
+            state=state,
+            source=_capture_source(source),
+            role=role,
+            reference=reference,
+            content_type="application/json",
+            checksum=(recorded.get("checksum") if isinstance(recorded, dict) else None),
+            original_bytes=(
+                recorded.get("original_bytes", original_bytes)
+                if isinstance(recorded, dict)
+                else original_bytes
+            ),
+            recorded_bytes=recorded_bytes,
+            policy_version=self.config.fingerprint(),
+            reason=reason,
+        )
 
     def _record_error(
         self,

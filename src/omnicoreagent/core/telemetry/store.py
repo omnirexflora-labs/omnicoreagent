@@ -11,6 +11,7 @@ import json
 from typing import Any
 
 from omnicoreagent.core.telemetry.models import (
+    TraceEvidenceStatus,
     SpanStatus,
     TelemetryError,
     TelemetryEvent,
@@ -561,6 +562,8 @@ def _patch_trace(trace: TelemetryTrace, patch: dict[str, Any]) -> None:
     for key, value in patch.items():
         if key == "status" and value is not None:
             value = TraceStatus(value)
+        elif key == "evidence_status" and value is not None:
+            value = TraceEvidenceStatus(value)
         elif key == "ended_at":
             value = parse_datetime(value)
         setattr(trace, key, value)
@@ -568,6 +571,15 @@ def _patch_trace(trace: TelemetryTrace, patch: dict[str, Any]) -> None:
 
 def _merge_trace(existing: TelemetryTrace, incoming: TelemetryTrace) -> None:
     existing.incomplete = existing.incomplete or incoming.incomplete
+    if (
+        existing.evidence_status == TraceEvidenceStatus.PARTIAL
+        or incoming.evidence_status == TraceEvidenceStatus.PARTIAL
+    ):
+        existing.evidence_status = TraceEvidenceStatus.PARTIAL
+    elif incoming.evidence_status != TraceEvidenceStatus.UNKNOWN:
+        existing.evidence_status = incoming.evidence_status
+    existing.schema_version = max(existing.schema_version, incoming.schema_version)
+    existing.execution_surface = incoming.execution_surface or existing.execution_surface
     if _should_replace_trace_status(existing, incoming):
         existing.status = incoming.status
     if incoming.ended_at and (
@@ -582,6 +594,7 @@ def _merge_trace(existing: TelemetryTrace, incoming: TelemetryTrace) -> None:
     existing.suite_id = incoming.suite_id or existing.suite_id
     existing.agent_id = incoming.agent_id or existing.agent_id
     existing.workflow_id = incoming.workflow_id or existing.workflow_id
+    existing.provenance = incoming.provenance or existing.provenance
     existing.metadata = incoming.metadata or existing.metadata
     if incoming.root_span_id:
         existing.root_span_id = existing.root_span_id or incoming.root_span_id

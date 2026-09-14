@@ -156,6 +156,9 @@ class OTelTraceMapper:
             "omnicoreagent.trace_id": trace.trace_id,
             "omnicoreagent.span.kind": "runtime.control",
             "omnicoreagent.trace.status": trace.status.value,
+            "omnicoreagent.schema_version": trace.schema_version,
+            "omnicoreagent.execution_surface": trace.execution_surface,
+            "omnicoreagent.evidence_status": trace.evidence_status.value,
             "omnicoreagent.synthetic_span": True,
         }
         if trace.run_id:
@@ -190,6 +193,9 @@ class OTelTraceMapper:
             "omnicoreagent.span_id": span.span_id,
             "omnicoreagent.span.kind": span.kind,
             "omnicoreagent.trace.status": trace.status.value,
+            "omnicoreagent.schema_version": trace.schema_version,
+            "omnicoreagent.execution_surface": trace.execution_surface,
+            "omnicoreagent.evidence_status": trace.evidence_status.value,
             "omnicoreagent.actor.type": span.actor.type.value,
         }
         if span.parent_span_id:
@@ -213,6 +219,8 @@ class OTelTraceMapper:
         if span.actor.name:
             attributes["omnicoreagent.actor.name"] = span.actor.name
         attributes.update(_prefix_mapping("omnicoreagent.span.attribute.", span.attributes))
+        attributes.update(_capture_attributes("span.input", span.input_capture))
+        attributes.update(_capture_attributes("span.output", span.output_capture))
         attributes.update(_payload_attributes("input", span.input))
         attributes.update(_payload_attributes("output", span.output))
         if span.error:
@@ -257,6 +265,9 @@ class OTelTraceMapper:
             attributes["error.type"] = event.error.type
             attributes["error.message"] = event.error.message
         attributes.update(_prefix_mapping("omnicoreagent.event.metadata.", event.metadata))
+        attributes["omnicoreagent.schema_version"] = event.schema_version
+        attributes.update(_capture_attributes("event.input", event.input_capture))
+        attributes.update(_capture_attributes("event.output", event.output_capture))
         attributes.update(_payload_attributes("input", event.input))
         attributes.update(_payload_attributes("output", event.output))
         return OTelEventRecord(
@@ -477,6 +488,29 @@ def _payload_attributes(name: str, payload: dict[str, Any] | None) -> dict[str, 
     if payload is None:
         return {}
     return {f"omnicoreagent.{name}": _json_dumps(payload)}
+
+
+def _capture_attributes(name: str, capture: Any) -> dict[str, Any]:
+    if capture is None:
+        return {}
+    attributes = {
+        f"omnicoreagent.{name}.capture_state": capture.state.value,
+        f"omnicoreagent.{name}.capture_source": capture.source,
+        f"omnicoreagent.{name}.capture_role": capture.role,
+    }
+    for field_name in (
+        "reference",
+        "content_type",
+        "checksum",
+        "original_bytes",
+        "recorded_bytes",
+        "policy_version",
+        "reason",
+    ):
+        value = getattr(capture, field_name, None)
+        if value is not None:
+            attributes[f"omnicoreagent.{name}.{field_name}"] = value
+    return attributes
 
 
 def _prefix_mapping(prefix: str, payload: dict[str, Any]) -> dict[str, Any]:

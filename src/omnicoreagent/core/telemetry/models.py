@@ -50,6 +50,26 @@ class TraceStatus(str, Enum):
     PARTIAL = "partial"
 
 
+class CaptureState(str, Enum):
+    """What a telemetry payload descriptor establishes about its value."""
+
+    AVAILABLE = "available"
+    REDACTED = "redacted"
+    TRUNCATED = "truncated"
+    OFFLOADED = "offloaded"
+    NOT_RECORDED = "not_recorded"
+    MISSING = "missing"
+    INFERRED = "inferred"
+
+
+class TraceEvidenceStatus(str, Enum):
+    """Completeness of the execution evidence, independent of run status."""
+
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    UNKNOWN = "unknown"
+
+
 FOUNDATION_SPAN_KINDS = frozenset(
     {
         "agent.run",
@@ -210,6 +230,90 @@ class SerializableTelemetryRecord:
 
 
 @dataclass
+class TelemetryCapture(SerializableTelemetryRecord):
+    """Descriptor for the payload stored on a span or event.
+
+    The descriptor lets evaluators distinguish an absent runtime value from a
+    value intentionally excluded by privacy or retention policy. Checksums and
+    references always describe the redacted representation.
+    """
+
+    state: CaptureState | str
+    source: str
+    role: str
+    reference: str | None = None
+    content_type: str | None = None
+    checksum: str | None = None
+    original_bytes: int | None = None
+    recorded_bytes: int | None = None
+    policy_version: str | None = None
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        self.state = CaptureState(self.state)
+        self.source = str(self.source).strip()
+        self.role = str(self.role).strip()
+        if not self.source:
+            raise ValueError("Telemetry capture source must not be empty")
+        if not self.role:
+            raise ValueError("Telemetry capture role must not be empty")
+        for field_name in ("original_bytes", "recorded_bytes"):
+            value = getattr(self, field_name)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+            ):
+                raise ValueError(f"Telemetry capture {field_name} must be non-negative")
+        if self.state in {
+            CaptureState.NOT_RECORDED,
+            CaptureState.MISSING,
+            CaptureState.TRUNCATED,
+            CaptureState.INFERRED,
+        } and not self.reason:
+            raise ValueError(
+                f"Telemetry capture reason is required for state {self.state.value}"
+            )
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> TelemetryCapture | None:
+        if data is None:
+            return None
+        return cls(**data)
+
+
+@dataclass
+class TelemetryProvenance(SerializableTelemetryRecord):
+    """External and runtime provenance attached to one execution trace."""
+
+    source: str = "omnicoreagent"
+    adapter: str | None = None
+    application_version: str | None = None
+    deployment_id: str | None = None
+    environment: str | None = None
+    evaluation_id: str | None = None
+    case_id: str | None = None
+    trial_id: str | None = None
+    environment_id: str | None = None
+    verifier_reference: str | None = None
+    external_ids: dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.source = str(self.source).strip()
+        if not self.source:
+            raise ValueError("Telemetry provenance source must not be empty")
+        self.external_ids = {
+            str(key): str(value)
+            for key, value in dict(self.external_ids or {}).items()
+            if str(value).strip()
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> TelemetryProvenance:
+        if data is None:
+            return cls()
+        return cls(**data)
+
+
+@dataclass
 class TelemetryActor(SerializableTelemetryRecord):
     type: ActorType | str
     id: str | None = None
@@ -284,6 +388,9 @@ class TelemetryEvent(SerializableTelemetryRecord):
     token_usage: TokenUsage = field(default_factory=TokenUsage)
     estimated_cost_usd: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    schema_version: int = 3
+    input_capture: TelemetryCapture | None = None
+    output_capture: TelemetryCapture | None = None
 
     def __post_init__(self) -> None:
         self.timestamp = parse_datetime(self.timestamp) or utc_now()
@@ -294,6 +401,10 @@ class TelemetryEvent(SerializableTelemetryRecord):
             if isinstance(self.token_usage, dict)
             else self.token_usage
         )
+        self.input_capture = TelemetryCapture.from_dict(self.input_capture) if isinstance(self.input_capture, dict) else self.input_capture
+        self.output_capture = TelemetryCapture.from_dict(self.output_capture) if isinstance(self.output_capture, dict) else self.output_capture
+        if isinstance(self.schema_version, bool) or not isinstance(self.schema_version, int) or self.schema_version < 1:
+            raise ValueError("Telemetry event schema_version must be a positive integer")
         if (
             self.event_type not in FOUNDATION_EVENT_TYPES
             and not self.metadata.get("experimental")
@@ -302,7 +413,9 @@ class TelemetryEvent(SerializableTelemetryRecord):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TelemetryEvent:
-        return cls(**data)
+        payload = dict(data)
+        payload.setdefault("schema_version", 1)
+        return cls(**payload)
 
 
 @dataclass
@@ -324,6 +437,9 @@ class TelemetrySpan(SerializableTelemetryRecord):
     estimated_cost_usd: float | None = None
     attributes: dict[str, Any] = field(default_factory=dict)
     event_ids: list[str] = field(default_factory=list)
+    schema_version: int = 3
+    input_capture: TelemetryCapture | None = None
+    output_capture: TelemetryCapture | None = None
 
     def __post_init__(self) -> None:
         self.actor = TelemetryActor.from_dict(self.actor) if isinstance(self.actor, dict) else self.actor
@@ -336,6 +452,10 @@ class TelemetrySpan(SerializableTelemetryRecord):
             if isinstance(self.token_usage, dict)
             else self.token_usage
         )
+        self.input_capture = TelemetryCapture.from_dict(self.input_capture) if isinstance(self.input_capture, dict) else self.input_capture
+        self.output_capture = TelemetryCapture.from_dict(self.output_capture) if isinstance(self.output_capture, dict) else self.output_capture
+        if isinstance(self.schema_version, bool) or not isinstance(self.schema_version, int) or self.schema_version < 1:
+            raise ValueError("Telemetry span schema_version must be a positive integer")
         if self.kind in RESERVED_SPAN_KINDS:
             raise ValueError(f"Reserved span kind cannot be emitted yet: {self.kind}")
         if self.kind not in FOUNDATION_SPAN_KINDS:
@@ -345,7 +465,9 @@ class TelemetrySpan(SerializableTelemetryRecord):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TelemetrySpan:
-        return cls(**data)
+        payload = dict(data)
+        payload.setdefault("schema_version", 1)
+        return cls(**payload)
 
 
 @dataclass
@@ -408,15 +530,30 @@ class TelemetryTrace(SerializableTelemetryRecord):
     metadata: TelemetryTraceMetadata = field(default_factory=TelemetryTraceMetadata)
     spans: list[TelemetrySpan] = field(default_factory=list)
     events: list[TelemetryEvent] = field(default_factory=list)
+    schema_version: int = 3
+    execution_surface: str = "interactive"
+    evidence_status: TraceEvidenceStatus | str = TraceEvidenceStatus.COMPLETE
+    provenance: TelemetryProvenance = field(default_factory=TelemetryProvenance)
 
     def __post_init__(self) -> None:
         self.status = TraceStatus(self.status)
+        self.evidence_status = TraceEvidenceStatus(self.evidence_status)
+        self.execution_surface = str(self.execution_surface).strip().lower()
+        if not self.execution_surface:
+            raise ValueError("Telemetry trace execution_surface must not be empty")
+        if isinstance(self.schema_version, bool) or not isinstance(self.schema_version, int) or self.schema_version < 1:
+            raise ValueError("Telemetry trace schema_version must be a positive integer")
         self.started_at = parse_datetime(self.started_at) or utc_now()
         self.ended_at = parse_datetime(self.ended_at)
         self.metadata = (
             TelemetryTraceMetadata.from_dict(self.metadata)
             if isinstance(self.metadata, dict)
             else self.metadata
+        )
+        self.provenance = (
+            TelemetryProvenance.from_dict(self.provenance)
+            if isinstance(self.provenance, dict)
+            else self.provenance
         )
         self.spans = [
             TelemetrySpan.from_dict(span) if isinstance(span, dict) else span
@@ -429,7 +566,10 @@ class TelemetryTrace(SerializableTelemetryRecord):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TelemetryTrace:
-        return cls(**data)
+        payload = dict(data)
+        payload.setdefault("schema_version", 1)
+        payload.setdefault("evidence_status", TraceEvidenceStatus.UNKNOWN.value)
+        return cls(**payload)
 
 
 @dataclass
