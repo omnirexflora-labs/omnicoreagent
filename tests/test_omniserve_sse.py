@@ -159,6 +159,14 @@ async def test_run_agent_stream_yields_telemetry_before_complete():
         serve_trace.events[-1].output["agent_trace_id"]
         == _event_data(chunks[3])["trace_id"]
     )
+    agent_trace = next(
+        trace
+        for trace in traces
+        if trace.run_id == serve_trace.run_id
+        and trace.trace_id != serve_trace.trace_id
+    )
+    assert agent_trace.parent_trace_id == serve_trace.trace_id
+    assert agent_trace.parent_span_id == serve_trace.root_span_id
 
 
 @pytest.mark.asyncio

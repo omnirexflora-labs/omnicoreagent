@@ -283,4 +283,5 @@ before the old open questions are treated as implementation-complete.
 | Linked child traces | `0461767`, `1720316`, `9395e03` | Dynamic/configured child propagation, family lookup/API, and parent span child IDs. |
 | Background lineage | `ff2f580` | Background lifecycle trace is installed as the parent context and reconstructed agents use the canonical store. Focused background suites: 125 passed. |
 | Built-in storage and retention | `94d3659`, `918a8a6` | Adaptive memory/JSONL selection, explicit overrides, effective-store metadata, and configurable local trace-age cleanup. Full suite: 1079 passed, 14 skipped. |
-| Incomplete best-effort traces | pending | Non-strict persistence loss is marked on the trace while strict mode still fails the operation. Focused suite: 73 passed. |
+| Incomplete best-effort traces | `6d38423` | Non-strict persistence loss is marked on the trace while strict mode still fails the operation. Focused suite: 73 passed. |
+| Serving lineage and run families | pending | Serving request traces become explicit parents of agent traces; run-ID family lookup is available alongside exact-trace lookup. |

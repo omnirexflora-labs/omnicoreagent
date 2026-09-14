@@ -10,6 +10,7 @@ from omnicoreagent.core.telemetry import (
     AbstractTelemetryStore,
     ActorType,
     TelemetryActor,
+    TelemetryConfig,
     TelemetryRecorder,
     TraceStatus,
 )
@@ -52,14 +53,23 @@ async def start_serve_trace(
     store = _telemetry_store(agent)
     if store is None:
         return None
-    recorder = TelemetryRecorder(store)
+    config = TelemetryConfig.from_value(getattr(agent, "telemetry_config", None))
+    recorder = TelemetryRecorder(store, config=config)
+    metadata: dict[str, Any] = {"tags": ["serve"]}
+    if config is not None:
+        metadata["telemetry_config_version"] = config.fingerprint()
+    storage_name = store.__class__.__name__
+    metadata["telemetry_storage"] = {
+        "InMemoryTelemetryStore": "memory",
+        "JsonlTelemetryStore": "jsonl",
+    }.get(storage_name, storage_name)
     context = await recorder.start_trace(
         name="serve.request",
         kind="serve.request",
         actor=TelemetryActor(type=ActorType.SERVE, name="OmniServe"),
         run_id=run_id,
         session_id=session_id,
-        metadata={"tags": ["serve"]},
+        metadata=metadata,
         input={
             "method": method,
             "path": path,

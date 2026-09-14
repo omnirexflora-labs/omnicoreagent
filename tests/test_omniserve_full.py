@@ -1349,6 +1349,32 @@ class TestEndpoints:
         agent = server_client.app.state.agent
         agent.get_trace.assert_awaited_with(run_id="run_endpoint", normalize=False)
 
+    def test_telemetry_run_family_endpoint_uses_run_id(self, server_client):
+        agent = server_client.app.state.agent
+        agent.get_trace_family = AsyncMock(
+            return_value=[
+                {
+                    "trace_id": "trace_endpoint",
+                    "run_id": "run_endpoint",
+                    "status": "completed",
+                    "events": [],
+                    "spans": [],
+                }
+            ]
+        )
+
+        resp = server_client.get("/telemetry/runs/run_endpoint/family")
+
+        assert resp.status_code == 200
+        assert resp.json()["filters"] == {
+            "run_id": "run_endpoint",
+            "normalize": False,
+        }
+        assert [item["trace_id"] for item in resp.json()["traces"]] == [
+            "trace_endpoint"
+        ]
+        agent.get_trace_family.assert_awaited_with(run_id="run_endpoint", normalize=False)
+
     def test_telemetry_session_trace_endpoint_uses_latest_session_trace(
         self, server_client
     ):

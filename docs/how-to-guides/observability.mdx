@@ -76,6 +76,7 @@ curl "http://localhost:8000/telemetry/events?run_id=RUN_ID&event_type=tool_resul
 curl "http://localhost:8000/telemetry/traces?session_id=research_1&limit=20"
 curl "http://localhost:8000/telemetry/traces/TRACE_ID"
 curl "http://localhost:8000/telemetry/runs/RUN_ID/trace"
+curl "http://localhost:8000/telemetry/runs/RUN_ID/family"
 curl "http://localhost:8000/telemetry/sessions/research_1/trace"
 curl -N "http://localhost:8000/telemetry/events/stream?session_id=research_1&run_id=RUN_ID"
 ```
