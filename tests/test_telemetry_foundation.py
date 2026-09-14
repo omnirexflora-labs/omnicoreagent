@@ -55,6 +55,7 @@ def test_telemetry_trace_metadata_round_trips_telemetry_config_version():
     metadata = TelemetryTraceMetadata(
         telemetry_config_version="abc123",
         telemetry_storage="jsonl",
+        telemetry_payload_storage="workspace",
         privacy_config_version="privacy123",
     )
 
@@ -62,6 +63,7 @@ def test_telemetry_trace_metadata_round_trips_telemetry_config_version():
 
     assert restored.telemetry_config_version == "abc123"
     assert restored.telemetry_storage == "jsonl"
+    assert restored.telemetry_payload_storage == "workspace"
     assert restored.privacy_config_version == "privacy123"
 
 

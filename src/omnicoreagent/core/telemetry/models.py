@@ -492,6 +492,7 @@ class TelemetryTraceMetadata(SerializableTelemetryRecord):
     privacy_config_version: str | None = None
     telemetry_config_version: str | None = None
     telemetry_storage: str | None = None
+    telemetry_payload_storage: str | None = None
     tags: list[str] = field(default_factory=list)
 
     @classmethod
@@ -514,6 +515,7 @@ class TelemetryTraceMetadata(SerializableTelemetryRecord):
             privacy_config_version=data.get("privacy_config_version"),
             telemetry_config_version=data.get("telemetry_config_version"),
             telemetry_storage=data.get("telemetry_storage"),
+            telemetry_payload_storage=data.get("telemetry_payload_storage"),
             tags=list(data.get("tags") or []),
         )
 

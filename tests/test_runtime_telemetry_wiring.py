@@ -17,10 +17,12 @@ from omnicoreagent.core.telemetry import (
     TelemetryActor,
     TelemetrySpan,
     TelemetryTrace,
+    TelemetryTraceMetadata,
     TraceFilter,
     TraceStatus,
     ActorType,
     TelemetryConfig,
+    InMemoryTelemetryExporter,
 )
 from omnicoreagent.core.workspace.config import WorkspaceConfig
 from omnicoreagent.core.guardrails import DetectionConfig
@@ -466,6 +468,40 @@ def test_ensure_telemetry_rejects_facade_recorder_config_mismatch() -> None:
 
     with pytest.raises(ValueError, match="telemetry_config must match"):
         agent._ensure_telemetry()
+
+
+def test_ensure_telemetry_merges_injected_exporters_once() -> None:
+    store = InMemoryTelemetryStore()
+    recorder_exporter = InMemoryTelemetryExporter()
+    facade_exporter = InMemoryTelemetryExporter()
+    recorder = TelemetryRecorder(store, exporters=[recorder_exporter])
+    agent = OmniCoreAgent(
+        name="telemetry-agent",
+        system_instruction="You are a test agent.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini", "api_key": "key"},
+        telemetry_store=store,
+        telemetry_recorder=recorder,
+        telemetry_exporters=[facade_exporter],
+    )
+
+    agent._ensure_telemetry()
+
+    assert recorder.exporters == [recorder_exporter, facade_exporter]
+
+
+def test_telemetry_metadata_preserves_payload_storage_identity() -> None:
+    agent = OmniCoreAgent(
+        name="telemetry-agent",
+        system_instruction="You are a test agent.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini", "api_key": "key"},
+        telemetry_payload_store=SimpleNamespace(),
+    )
+
+    agent._ensure_telemetry()
+
+    metadata = agent._telemetry_metadata()
+    restored = TelemetryTraceMetadata.from_dict(metadata)
+    assert restored.telemetry_payload_storage == "SimpleNamespace"
 
 
 def test_telemetry_config_accepts_dictionary_at_facade_boundary() -> None:
