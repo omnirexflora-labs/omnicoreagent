@@ -15,8 +15,7 @@ stream, background job, or deep-agent execution to work.
 The source snapshot for this plan is branch `refactor/native-tool-runtime`.
 The plan was started at commit `8841795abda60388117ff5a1b32b3a633ede3a3a`;
 implementation checkpoints are listed below as they land. The current
-checkpoint is `407b0d4`; the context and lineage checkpoint is being recorded
-with the next commit.
+checkpoint is `b67fb18`.
 
 ## Current boundary
 
@@ -75,7 +74,7 @@ unit starts.
 | --- | --- | --- |
 | 1. Versioned evidence metadata | Complete at `36d88f4` | 49 telemetry foundation/export tests passed; 202 runtime/telemetry tests passed; Ruff and diff checks passed. Traces, spans, and events preserve schema version, capture state, execution surface, provenance, and legacy evidence status. |
 | 2. Complete request trajectory | Complete at `407b0d4` | 83 focused model/runtime/telemetry tests passed; Ruff and diff checks passed. Model turns expose tool catalog/count and finish metadata; requested/resolved calls, execution events, batch IDs, and exact post-offload observations retain causal links. |
-| 3. Context and lineage evidence | Complete in working tree; checkpoint pending | Context assembly and compression preserve message/tool digests and opt-in prompt payloads; internal summary calls, memory reads/writes, workspace offloads, and subagent terminal links are correlated. Capture gaps mark traces partial and are surfaced by normalization. Focused telemetry/runtime tests passed; commit follows. |
+| 3. Context and lineage evidence | Complete at `b67fb18` | Context assembly and compression preserve message/tool digests and opt-in prompt payloads; internal summary calls, memory reads/writes, workspace offloads, and subagent terminal links are correlated. Capture gaps mark traces partial and are surfaced by normalization. Focused suite: 102 passed. Full suite: 1,155 passed, 14 skipped, with one unrelated `tiktoken` encoding-cache failure in `tests/test_base.py::test_run_prepares_internal_tools_once_for_prompt_and_execution`. |
 
 ## Rules for every phase
 
