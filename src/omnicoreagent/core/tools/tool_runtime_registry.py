@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 from omnicoreagent.core.workspace.artifacts import ToolResponseOffloader
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.workspace.config import WorkspaceConfig
+from omnicoreagent.core.privacy import PrivacyFilter
 
 if TYPE_CHECKING:
     from omnicoreagent.core.workspace.manager import Workspace
@@ -16,6 +17,7 @@ def build_tool_registry_workspace_files(
     workspace_files_backend: Any = None,
     workspace: Workspace | None = None,
     workspace_config: WorkspaceConfig | dict | None = None,
+    privacy_filter: PrivacyFilter | None = None,
 ):
     from omnicoreagent.core.workspace.tools import (
         build_tool_registry_workspace_files as build_workspace_files_tool,
@@ -26,6 +28,7 @@ def build_tool_registry_workspace_files(
         workspace_files_backend=workspace_files_backend,
         workspace=workspace,
         workspace_config=workspace_config,
+        privacy_filter=privacy_filter,
     )
 
 
@@ -67,6 +70,7 @@ class ToolRuntimeRegistry:
         skill_manager: Any = None,
         workspace: Workspace | None = None,
         workspace_config: WorkspaceConfig | dict | None = None,
+        privacy_filter: PrivacyFilter | None = None,
     ):
         self.register_internal_tool = register_internal_tool
         self.tool_offloader = tool_offloader
@@ -77,6 +81,7 @@ class ToolRuntimeRegistry:
         self.skill_manager = skill_manager
         self.workspace = workspace
         self.workspace_config = workspace_config
+        self.privacy_filter = privacy_filter
 
     def _workspace_for_runtime_tools(self) -> Workspace:
         if self.workspace is None:
@@ -109,6 +114,7 @@ class ToolRuntimeRegistry:
                 workspace_files_backend=None,
                 workspace=self._workspace_for_runtime_tools(),
                 workspace_config=self.workspace_config,
+                privacy_filter=self.privacy_filter,
             )
 
         if self.tool_offloader.config.enabled:

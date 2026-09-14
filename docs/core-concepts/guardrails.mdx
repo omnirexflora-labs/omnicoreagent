@@ -68,3 +68,33 @@ positive input length, booleans, logging level, and compilable regular expressio
 <Warning>
 Always enable guardrails in user-facing applications to prevent prompt injection attacks and ensure agent reliability.
 </Warning>
+
+## Privacy boundaries
+
+The runtime has a separate privacy policy for data that is persisted or exposed
+outside the model context. It redacts email addresses, phone numbers, Social
+Security numbers, and valid payment card numbers from telemetry, conversation
+memory, workspace writes and offloaded artifacts, stream events, and public
+results by default. The model keeps the original task content unless
+`redact_model_io` is enabled.
+
+Configure it through `agent_config["privacy_config"]`:
+
+```python
+agent_config = {
+    "privacy_config": {
+        "enabled": True,
+        "redact_memory": True,
+        "redact_workspace": True,
+        "redact_telemetry": True,
+        "redact_stream": True,
+        "redact_public": True,
+        "redact_model_io": False,
+        "categories": ["email", "phone", "ssn", "credit_card"],
+    }
+}
+```
+
+Each boundary can be disabled deliberately for an integration that has its
+own data controls. The effective privacy policy fingerprint is recorded in
+telemetry metadata so traces show which policy produced them.

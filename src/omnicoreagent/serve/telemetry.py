@@ -58,8 +58,12 @@ async def start_serve_trace(
         store,
         config=config,
         payload_store=getattr(agent, "telemetry_payload_store", None),
+        privacy_filter=getattr(agent, "privacy_filter", None),
     )
     metadata: dict[str, Any] = {"tags": ["serve"]}
+    privacy_filter = getattr(agent, "privacy_filter", None)
+    if privacy_filter is not None:
+        metadata["privacy_config_version"] = privacy_filter.config.fingerprint()
     if config is not None:
         metadata["telemetry_config_version"] = config.fingerprint()
     storage_name = store.__class__.__name__

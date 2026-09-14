@@ -7,6 +7,7 @@ from typing import Any
 import uuid
 
 from omnicoreagent.core.guardrails.models import DetectionConfig
+from omnicoreagent.core.privacy import PrivacyConfig
 from omnicoreagent.core.workspace.config import (
     WorkspaceConfig,
     resolve_workspace_config,
@@ -129,6 +130,19 @@ def _default_governance_config() -> dict[str, Any]:
     }
 
 
+def _default_privacy_config() -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "redact_telemetry": True,
+        "redact_memory": True,
+        "redact_workspace": True,
+        "redact_stream": True,
+        "redact_public": True,
+        "redact_model_io": False,
+        "categories": ["credit_card", "email", "phone", "ssn"],
+    }
+
+
 GOVERNANCE_CONFIG_KEYS = frozenset(_default_governance_config())
 
 
@@ -147,6 +161,7 @@ class AgentConfig:
     enable_workspace_files: bool = True
     guardrail_config: dict[str, Any] = field(default_factory=dict)
     guardrail_mode: str = "full"
+    privacy_config: dict[str, Any] = field(default_factory=_default_privacy_config)
     context_management: dict[str, Any] = field(
         default_factory=_default_context_management
     )
@@ -166,6 +181,12 @@ class AgentConfig:
         # Validate the nested security policy at the public configuration
         # boundary, before model/tool construction can begin.
         DetectionConfig(**self.guardrail_config)
+        if not isinstance(self.privacy_config, dict):
+            raise ValueError("privacy_config must be a dict")
+        self.privacy_config = _merge_defaults(
+            _default_privacy_config(), self.privacy_config
+        )
+        PrivacyConfig(**self.privacy_config)
         self.memory_config = self.memory_config or _default_memory_config()
         self.context_management = _merge_defaults(
             _default_context_management(), self.context_management

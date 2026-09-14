@@ -94,7 +94,11 @@ def create_runs_router() -> APIRouter:
                 )
             else:
                 result = await run_coro
-            normalized = normalize_run_result(result, agent_name=get_agent_name(agent))
+            normalized = normalize_run_result(
+                result,
+                agent_name=get_agent_name(agent),
+                privacy_filter=getattr(agent, "privacy_filter", None),
+            )
             normalized["run_id"] = normalized.get("run_id") or run_id
             await finish_serve_trace(
                 serve_trace,

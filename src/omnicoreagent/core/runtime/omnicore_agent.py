@@ -14,6 +14,7 @@ from omnicoreagent.core.runtime import (
     streaming,
 )
 from omnicoreagent.core.guardrails.models import DetectionConfig
+from omnicoreagent.core.privacy import PrivacyFilter
 from omnicoreagent.core.runtime.imports import (
     LazyDefaultPromptBuilder,
     runtime,
@@ -109,6 +110,9 @@ class OmniCoreAgent:
 
         self.sub_agents = sub_agents
         self.agent_config = normalization.build_agent_config(name, agent_config)
+        self.privacy_filter = PrivacyFilter.from_value(
+            self.agent_config.get("privacy_config")
+        )
 
         self.debug = debug
         self._cumulative_usage = None
@@ -255,8 +259,12 @@ class OmniCoreAgent:
                 config=self.telemetry_config,
                 exporters=self.telemetry_exporters,
                 payload_store=self.telemetry_payload_store,
+                privacy_filter=self.privacy_filter,
             )
         else:
+            # The facade policy is the privacy boundary for all traces emitted
+            # by this run, including an injected recorder or delegated child.
+            self.telemetry_recorder.privacy_filter = self.privacy_filter
             if self.telemetry_recorder.store is not self.telemetry_store:
                 raise ValueError(
                     "telemetry_recorder.store must be the same object as telemetry_store"
@@ -318,6 +326,7 @@ class OmniCoreAgent:
         self.telemetry_stream = TelemetryStream(store)
         self.telemetry_config = getattr(recorder, "config", None)
         self.telemetry_payload_store = getattr(recorder, "payload_store", None)
+        self.privacy_filter = getattr(recorder, "privacy_filter", self.privacy_filter)
 
     def _telemetry_actor(self) -> TelemetryActor:
         return TelemetryActor(type=ActorType.AGENT, name=self.name)
@@ -328,6 +337,7 @@ class OmniCoreAgent:
             "model_provider": self.model_config.get("provider"),
             "model": self.model_config.get("model"),
             "guardrail_mode": self.agent_config.get("guardrail_mode", "full"),
+            "privacy_config_version": self.privacy_filter.config.fingerprint(),
         }
         guardrail_mode = metadata["guardrail_mode"]
         if guardrail_mode != "off":
@@ -400,7 +410,11 @@ class OmniCoreAgent:
         run_id = run_id or self.generate_run_id()
         trace_context = None
         delivery = (
-            streaming.StreamDelivery(on_event, run_id)
+            streaming.StreamDelivery(
+                on_event,
+                run_id,
+                privacy_filter=self.privacy_filter,
+            )
             if on_event is not None
             else streaming.current_delivery.get()
         )
@@ -450,7 +464,9 @@ class OmniCoreAgent:
                 )
                 blocked_response["trace_id"] = trace_context.trace_id
                 blocked_response["run_id"] = run_id
-                return blocked_response
+                return self.privacy_filter.redact(
+                    blocked_response, boundary="public"
+                )
 
             runtime_prompt = self.prompt_builder.build(
                 system_instruction=self.system_instruction
@@ -515,7 +531,7 @@ class OmniCoreAgent:
             )
             formatted_response["trace_id"] = trace_context.trace_id
             formatted_response["run_id"] = run_id
-            return formatted_response
+            return self.privacy_filter.redact(formatted_response, boundary="public")
         except asyncio.CancelledError as exc:
             if trace_context is not None:
                 await self.telemetry_recorder.emit_event(
@@ -566,8 +582,12 @@ class OmniCoreAgent:
         metadata: dict | None = None,
         session_id: str | None = None,
     ) -> None:
+        stored_content = self.privacy_filter.redact(content, boundary="memory")
+        stored_metadata = self.privacy_filter.redact(metadata, boundary="memory")
         if self.telemetry_recorder is None:
-            await self.memory_router.store_message(role, content, metadata, session_id)
+            await self.memory_router.store_message(
+                role, stored_content, stored_metadata, session_id
+            )
             return
         span = await self.telemetry_recorder.start_span(
             name="memory.write",
@@ -580,7 +600,9 @@ class OmniCoreAgent:
             },
         )
         try:
-            await self.memory_router.store_message(role, content, metadata, session_id)
+            await self.memory_router.store_message(
+                role, stored_content, stored_metadata, session_id
+            )
             await self.telemetry_recorder.emit_event(
                 "memory_write",
                 actor=TelemetryActor(type=ActorType.MEMORY),

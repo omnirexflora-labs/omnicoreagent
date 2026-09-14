@@ -7,28 +7,34 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
+from omnicoreagent.core.privacy import PrivacyFilter
+
 
 @dataclass
 class StreamDelivery:
     callback: Any
     run_id: str
     sequence: int = 0
+    privacy_filter: PrivacyFilter | None = None
 
     async def emit(self, event, *, agent_name, run_id, session_id, trace_id):
         self.sequence += 1
-        await self.callback(
-            {
-                **event,
-                "phase": "intermediate",
-                "run_id": self.run_id,
-                "actor_run_id": run_id,
-                "session_id": session_id,
-                "trace_id": trace_id,
-                "agent_name": agent_name,
-                "sequence": self.sequence,
-                "event_id": f"{self.run_id}:text:{self.sequence}",
-            }
-        )
+        event_payload = {
+            **event,
+            "phase": "intermediate",
+            "run_id": self.run_id,
+            "actor_run_id": run_id,
+            "session_id": session_id,
+            "trace_id": trace_id,
+            "agent_name": agent_name,
+            "sequence": self.sequence,
+            "event_id": f"{self.run_id}:text:{self.sequence}",
+        }
+        if self.privacy_filter is not None:
+            event_payload = self.privacy_filter.redact(
+                event_payload, boundary="stream"
+            )
+        await self.callback(event_payload)
 
 
 current_delivery: ContextVar[StreamDelivery | None] = ContextVar(

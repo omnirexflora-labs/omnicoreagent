@@ -37,6 +37,7 @@ from omnicoreagent.core.agents.run_outcome import AgentRunOutcomeHandler
 from omnicoreagent.core.agents.session_state import AgentSessionStateStore
 from omnicoreagent.core.agents.subagent_runner import SubAgentCallRunner
 from omnicoreagent.core.tools.tool_result_offloader import ToolResultOffloader
+from omnicoreagent.core.privacy import PrivacyFilter
 
 
 if TYPE_CHECKING:
@@ -63,6 +64,7 @@ class BaseReactAgent:
         workspace_config: WorkspaceConfig | dict | None = None,
         guardrail: PromptInjectionGuard | None = None,
         governance_engine: Any = None,
+        privacy_filter: PrivacyFilter | None = None,
     ):
         self.agent_name = agent_name
         if max_steps < 1:
@@ -101,6 +103,7 @@ class BaseReactAgent:
         self.tool_offloader = ToolResponseOffloader(
             config=OffloadConfig.from_dict(tool_offload_config or {}),
             workspace_config=workspace_config,
+            privacy_filter=privacy_filter,
         )
         self.guardrail = guardrail
         self.governance_engine = governance_engine
@@ -122,6 +125,7 @@ class BaseReactAgent:
             enable_agent_skills=self.enable_agent_skills,
             skill_manager=self.skill_manager,
             workspace_config=workspace_config,
+            privacy_filter=privacy_filter,
         )
         self.prompt_context_builder = AgentPromptContextBuilder(
             enable_advanced_tool_use=self.enable_advanced_tool_use,

@@ -446,6 +446,10 @@ def test_ensure_telemetry_uses_facade_telemetry_config_without_exporters() -> No
     assert agent.telemetry_recorder.config is config
     assert agent.telemetry_recorder.exporters == []
     assert agent._telemetry_metadata()["telemetry_config_version"] == config.fingerprint()
+    assert (
+        agent._telemetry_metadata()["privacy_config_version"]
+        == agent.privacy_filter.config.fingerprint()
+    )
 
 
 def test_ensure_telemetry_rejects_facade_recorder_config_mismatch() -> None:

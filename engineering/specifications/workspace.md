@@ -572,6 +572,8 @@ It returns `False` when disabled or under both thresholds.
 - create an artifact id from sanitized tool name, timestamp, and content hash
 - detect file extension from content where supported
 - write the full response to `workspace.artifacts`
+- apply the configured workspace privacy filter to the response, preview, and
+  custom metadata before writing them
 - write metadata JSON when enabled
 - store artifact in the current offloader session index
 - update offload count and tokens saved

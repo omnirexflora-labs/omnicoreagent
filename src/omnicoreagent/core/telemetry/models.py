@@ -360,6 +360,7 @@ class TelemetryTraceMetadata(SerializableTelemetryRecord):
     constraint_config_version: str | None = None
     guardrail_mode: str | None = None
     guardrail_config_version: str | None = None
+    privacy_config_version: str | None = None
     telemetry_config_version: str | None = None
     telemetry_storage: str | None = None
     tags: list[str] = field(default_factory=list)
@@ -381,6 +382,7 @@ class TelemetryTraceMetadata(SerializableTelemetryRecord):
             constraint_config_version=data.get("constraint_config_version"),
             guardrail_mode=data.get("guardrail_mode"),
             guardrail_config_version=data.get("guardrail_config_version"),
+            privacy_config_version=data.get("privacy_config_version"),
             telemetry_config_version=data.get("telemetry_config_version"),
             telemetry_storage=data.get("telemetry_storage"),
             tags=list(data.get("tags") or []),

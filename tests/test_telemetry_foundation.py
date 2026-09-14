@@ -51,12 +51,14 @@ def test_telemetry_trace_metadata_round_trips_telemetry_config_version():
     metadata = TelemetryTraceMetadata(
         telemetry_config_version="abc123",
         telemetry_storage="jsonl",
+        privacy_config_version="privacy123",
     )
 
     restored = TelemetryTraceMetadata.from_dict(metadata.model_dump())
 
     assert restored.telemetry_config_version == "abc123"
     assert restored.telemetry_storage == "jsonl"
+    assert restored.privacy_config_version == "privacy123"
 
 
 def test_telemetry_records_serialize_and_validate():

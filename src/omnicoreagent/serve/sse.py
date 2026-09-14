@@ -334,6 +334,7 @@ async def run_agent_stream(
                 normalized = normalize_run_result(
                     response,
                     agent_name=get_agent_name(agent),
+                    privacy_filter=getattr(agent, "privacy_filter", None),
                 )
                 complete_payload = {
                     "session_id": session_id,

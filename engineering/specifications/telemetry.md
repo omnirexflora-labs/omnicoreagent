@@ -238,6 +238,7 @@ metadata:
   constraint_config_version: string | null
   guardrail_mode: string | null
   guardrail_config_version: string | null
+  privacy_config_version: string | null
   tags: list[string]
 spans: list[TelemetrySpan]
 events: list[TelemetryEvent]
@@ -624,6 +625,8 @@ Rules:
 - payload stores expose read and retention cleanup operations. Cleanup retains
   references found in currently stored traces so active evidence is not broken.
 - secrets must not be stored by default.
+- common PII is redacted before telemetry persistence at the privacy boundary;
+  the effective privacy policy is identified by `privacy_config_version`.
 - `storage: auto` selects JSONL only for an explicitly configured local
   workspace; otherwise it selects in-memory storage. An injected store takes
   precedence over this policy.

@@ -26,6 +26,7 @@ from omnicoreagent.core.telemetry.models import (
 )
 from omnicoreagent.core.telemetry.payloads import TelemetryPayloadStore
 from omnicoreagent.core.telemetry.redaction import TelemetryConfig, redact_payload
+from omnicoreagent.core.privacy import PrivacyFilter
 from omnicoreagent.core.telemetry.store import AbstractTelemetryStore
 from omnicoreagent.core.telemetry.exporters import (
     TelemetryExporter,
@@ -50,11 +51,13 @@ class TelemetryRecorder:
         config: TelemetryConfig | None = None,
         exporters: list[TelemetryExporter] | None = None,
         payload_store: TelemetryPayloadStore | None = None,
+        privacy_filter: PrivacyFilter | None = None,
     ) -> None:
         self.store = store
         self.config = config or TelemetryConfig()
         self.exporters = list(exporters or [])
         self.payload_store = payload_store
+        self.privacy_filter = privacy_filter or PrivacyFilter()
         self._span_parent_contexts: dict[str, TelemetryContext | None] = {}
         self._span_sources: dict[str, str] = {}
         self._incomplete_trace_ids: set[str] = set()
@@ -482,6 +485,7 @@ class TelemetryRecorder:
 
     def _record_payload(self, value: Any) -> Any:
         try:
+            value = self.privacy_filter.redact(value, boundary="telemetry")
             return redact_payload(
                 value,
                 self.config,

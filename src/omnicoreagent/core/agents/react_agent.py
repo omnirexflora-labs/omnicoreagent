@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from omnicoreagent.core.agents.base import BaseReactAgent
+from omnicoreagent.core.privacy import PrivacyFilter
 from omnicoreagent.core.runtime.config import AgentConfig
 
 if TYPE_CHECKING:
@@ -31,4 +32,5 @@ class ReactAgent(BaseReactAgent):
             workspace_config=config.workspace_config,
             guardrail=guardrail,
             governance_engine=governance_engine,
+            privacy_filter=PrivacyFilter.from_value(config.privacy_config),
         )
