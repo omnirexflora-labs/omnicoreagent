@@ -672,3 +672,90 @@ async def test_governed_native_history_is_written_once_after_redaction(allowed):
         assert normalized["governance_error_code"] == "policy_denied"
     incoming = next(m for m in model.requests[1][0] if m["role"] == "tool")
     assert incoming["content"] == results[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_repeated_governance_denials_ignore_new_decision_ids():
+    from omnicoreagent.governance import GovernanceEngine, policy_from_mapping
+
+    registry = ToolRegistry()
+
+    @registry.register_tool(name="blocked")
+    async def blocked():
+        raise AssertionError("Denied tool executed")
+
+    class DeniedModel(Model):
+        async def llm_call(self, messages, tools=None):
+            self.requests.append((deepcopy(messages), tools))
+            return (
+                turn("Stopped")
+                if not tools
+                else turn(calls=[call("blocked", "{}", f"id{len(self.requests)}")])
+            )
+
+    policy = policy_from_mapping(
+        {
+            "name": "deny",
+            "mode": "strict",
+            "rules": {"deny": [{"rule_id": "deny", "capability": "tool.local.call"}]},
+        }
+    )
+    model = DeniedModel([])
+    result, memory = await run(
+        model,
+        registry=registry,
+        max_steps=10,
+        governance_engine=GovernanceEngine(policy),
+    )
+    assert result["answer"] == "Stopped"
+    assert len(model.requests) == 6
+    records = await memory.get_messages("session", "test")
+    decisions = [
+        json.loads(r["content"])["governance"]["decision_id"]
+        for r in records
+        if r["role"] == "tool"
+    ]
+    assert len(set(decisions)) == 5  # Real audit IDs remain intact in history.
+
+
+@pytest.mark.asyncio
+async def test_repeated_child_answers_ignore_run_accounting():
+    class Child:
+        name = "worker"
+        system_instruction = "Test worker"
+        count = 0
+
+        async def run(self, query: str, session_id=None):
+            self.count += 1
+            return {
+                "response": "same answer",
+                "status": "success",
+                "metric": self.count,
+                "run_id": f"run-{self.count}",
+            }
+
+        async def cleanup(self):
+            pass
+
+    class RepeatingModel(Model):
+        async def llm_call(self, messages, tools=None):
+            self.requests.append((deepcopy(messages), tools))
+            return (
+                turn("Stopped")
+                if not tools
+                else turn(
+                    calls=[
+                        call(
+                            "delegate_worker",
+                            '{"query":"same task"}',
+                            f"id{len(self.requests)}",
+                        )
+                    ]
+                )
+            )
+
+    child = Child()
+    model = RepeatingModel([])
+    result, _ = await run(model, sub_agents=[child], max_steps=10)
+    assert result["answer"] == "Stopped"
+    assert child.count == 5

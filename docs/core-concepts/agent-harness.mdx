@@ -68,7 +68,7 @@ Every capability below maps to code in the repository.
 | **Tool output offloading** | Large tool responses are written to workspace artifacts and replaced with a compact preview/reference. | `src/omnicoreagent/core/workspace/artifacts.py` |
 | **Artifact readback tools** | Agents read, tail, search, and list offloaded tool responses when full content is needed. | `src/omnicoreagent/core/workspace/artifact_tools.py` |
 | **Automatic context control** | Before each model call, active messages are checked and reduced when the configured context threshold is crossed. | `src/omnicoreagent/core/agents/llm_step.py`, `src/omnicoreagent/core/context_manager.py` |
-| **Loop detection** | Repeated SHA256-backed tool-call signatures and repeated interaction patterns are detected. | `src/omnicoreagent/core/agents/loop_detection.py` |
+| **Loop detection** | Complete native tool rounds are compared using provider/server identity, arguments and results; repeated rounds/cycles disable tools. | `src/omnicoreagent/core/agents/loop_detection.py` |
 | **Workspace files** | Agents get file tools for notes, scratchpads, todos, task progress, generated work, and subagent output. | `src/omnicoreagent/core/workspace/tools.py` |
 | **Local/S3/R2 workspace storage** | The same workspace interface runs on local disk, S3, or R2. | `src/omnicoreagent/core/workspace/config.py`, `src/omnicoreagent/core/workspace/storage.py` |
 | **Dynamic subagents** | The lead agent spawns one or many focused workers; workers inherit model/tools/config and write output to workspace files. | `src/omnicoreagent/core/subagents.py` |
@@ -153,3 +153,18 @@ the core runtime clean:
 
 The result is a complete, open agent harness whose production pieces are already
 integrated and testable.
+
+## Normal, deep and background execution
+
+`OmniCoreAgent` is the public agent for both normal and deep runs. Enable
+`agent_config={"enable_subagents": True}` to register the native `spawn_subagents`
+tool and let the parent create focused workers with a shared workspace. Both
+`run()` and `stream()` support this mode. There is no separate `DeepAgent` class.
+Configured children can also be supplied through `sub_agents`.
+
+The facade builds this capability through `core/runtime/builder.py` and
+`core/runtime/harness_tools.py`; worker creation lives in `core/subagents.py`.
+Background execution is a separate scheduling and persistence layer around the
+same agent runtime, exposed through `BackgroundAgentManager`. It provides durable
+job lifecycle and retry handling. Retired router/sequential/parallel workflow
+classes are not required for native parallel tool calls or child batches.

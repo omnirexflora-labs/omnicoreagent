@@ -15,8 +15,7 @@ from omnicoreagent.core.workspace.artifact_tools import (
 from omnicoreagent.core.workspace.artifacts import ToolResponseOffloader
 from omnicoreagent.core.workspace.config import WorkspaceConfig
 from omnicoreagent.core.workspace.tools import build_tool_registry_workspace_files
-from omnicoreagent.core.types import AgentState, SessionState, ToolCallResult
-from omnicoreagent.core.agents.loop_detection import NativeLoopDetector
+from omnicoreagent.core.types import ToolCallResult
 from omnicoreagent.governance import (
     GovernanceEngine,
     build_default_policy,
@@ -28,17 +27,6 @@ from omnicoreagent.governance.models import PolicyBudget
 @pytest.fixture
 def runner():
     return GovernedToolRunner(agent_name="test_agent")
-
-
-@pytest.fixture
-def session_state():
-    return SessionState(
-        messages=[],
-        state=AgentState.IDLE,
-        loop_detector=NativeLoopDetector(),
-        assistant_with_tool_calls=None,
-        pending_tool_responses=[],
-    )
 
 
 class CountingExecutor:
@@ -153,7 +141,7 @@ def _mcp_policy():
 
 
 @pytest.mark.asyncio
-async def test_governance_denies_local_tool_without_executing(session_state):
+async def test_governance_denies_local_tool_without_executing():
     executor = CountingExecutor()
     runner = GovernedToolRunner(
         agent_name="test_agent",
@@ -181,7 +169,7 @@ async def test_governance_denies_local_tool_without_executing(session_state):
 
 
 @pytest.mark.asyncio
-async def test_governance_denies_workspace_write_without_executing(session_state):
+async def test_governance_denies_workspace_write_without_executing():
     executor = CountingExecutor()
     runner = GovernedToolRunner(
         agent_name="test_agent",
@@ -209,7 +197,7 @@ async def test_governance_denies_workspace_write_without_executing(session_state
 
 
 @pytest.mark.asyncio
-async def test_governance_allows_workspace_read(session_state):
+async def test_governance_allows_workspace_read():
     executor = CountingExecutor()
     runner = GovernedToolRunner(
         agent_name="test_agent",
@@ -236,7 +224,7 @@ async def test_governance_allows_workspace_read(session_state):
 
 
 @pytest.mark.asyncio
-async def test_governance_requires_policy_for_mcp_tool(session_state):
+async def test_governance_requires_policy_for_mcp_tool():
     executor = CountingExecutor()
     runner = GovernedToolRunner(
         agent_name="test_agent",
@@ -265,7 +253,7 @@ async def test_governance_requires_policy_for_mcp_tool(session_state):
 
 
 @pytest.mark.asyncio
-async def test_governance_interactive_default_requires_mcp_approval(session_state):
+async def test_governance_interactive_default_requires_mcp_approval():
     executor = CountingExecutor()
     runner = GovernedToolRunner(
         agent_name="test_agent",
@@ -294,7 +282,7 @@ async def test_governance_interactive_default_requires_mcp_approval(session_stat
 
 
 @pytest.mark.asyncio
-async def test_governance_allows_specific_mcp_tool(session_state):
+async def test_governance_allows_specific_mcp_tool():
     executor = CountingExecutor()
     runner = GovernedToolRunner(
         agent_name="test_agent", governance_engine=GovernanceEngine(_mcp_policy())
@@ -322,7 +310,7 @@ async def test_governance_allows_specific_mcp_tool(session_state):
 
 
 @pytest.mark.asyncio
-async def test_governance_denies_specific_mcp_tool_on_allowed_server(session_state):
+async def test_governance_denies_specific_mcp_tool_on_allowed_server():
     executor = CountingExecutor()
     runner = GovernedToolRunner(
         agent_name="test_agent", governance_engine=GovernanceEngine(_mcp_policy())
@@ -350,7 +338,7 @@ async def test_governance_denies_specific_mcp_tool_on_allowed_server(session_sta
 
 
 @pytest.mark.asyncio
-async def test_governance_budget_is_atomic_for_parallel_tool_batch(session_state):
+async def test_governance_budget_is_atomic_for_parallel_tool_batch():
     first = CountingExecutor()
     second = CountingExecutor()
     runner = GovernedToolRunner(
@@ -386,7 +374,7 @@ async def test_governance_budget_is_atomic_for_parallel_tool_batch(session_state
 
 
 @pytest.mark.asyncio
-async def test_governance_denial_redacts_args_in_history_and_result(session_state):
+async def test_governance_denial_redacts_result_args():
     executor = CountingExecutor()
     runner = GovernedToolRunner(
         agent_name="test_agent",
@@ -412,9 +400,7 @@ async def test_governance_denial_redacts_args_in_history_and_result(session_stat
 
 
 @pytest.mark.asyncio
-async def test_governance_denial_emits_policy_telemetry_without_tool_args(
-    session_state,
-):
+async def test_governance_denial_emits_policy_telemetry_without_tool_args():
     store = InMemoryTelemetryStore()
     recorder = TelemetryRecorder(store)
     await recorder.start_trace(
@@ -463,7 +449,7 @@ async def test_governance_denial_emits_policy_telemetry_without_tool_args(
 
 
 @pytest.mark.asyncio
-async def test_governed_successful_tool_telemetry_redacts_result_args(session_state):
+async def test_governed_successful_tool_telemetry_redacts_result_args():
     store = InMemoryTelemetryStore()
     recorder = TelemetryRecorder(store)
     await recorder.start_trace(
@@ -504,9 +490,7 @@ async def test_governed_successful_tool_telemetry_redacts_result_args(session_st
 
 
 @pytest.mark.asyncio
-async def test_governance_denied_workspace_write_does_not_touch_real_storage(
-    session_state, tmp_path
-):
+async def test_governance_denied_workspace_write_does_not_touch_real_storage(tmp_path):
     registry = ToolRegistry()
     workspace_dir = tmp_path / "workspace"
     build_tool_registry_workspace_files(
@@ -530,7 +514,7 @@ async def test_governance_denied_workspace_write_does_not_touch_real_storage(
 
 
 @pytest.mark.asyncio
-async def test_governance_allows_real_workspace_write_and_read(session_state, tmp_path):
+async def test_governance_allows_real_workspace_write_and_read(tmp_path):
     registry = ToolRegistry()
     workspace_dir = tmp_path / "workspace"
     build_tool_registry_workspace_files(
@@ -556,9 +540,7 @@ async def test_governance_allows_real_workspace_write_and_read(session_state, tm
 
 
 @pytest.mark.asyncio
-async def test_governance_controls_real_artifact_tool_execution(
-    session_state, tmp_path
-):
+async def test_governance_controls_real_artifact_tool_execution(tmp_path):
     offloader = ToolResponseOffloader(
         config={"enabled": True}, base_dir=str(tmp_path / "artifacts")
     )
@@ -583,7 +565,7 @@ async def test_governance_controls_real_artifact_tool_execution(
 
 
 @pytest.mark.asyncio
-async def test_artifact_tools_are_recorded_as_workspace_reads(runner, session_state):
+async def test_artifact_tools_are_recorded_as_workspace_reads(runner):
     store = InMemoryTelemetryStore()
     recorder = TelemetryRecorder(store)
     context = await recorder.start_trace(
@@ -636,9 +618,7 @@ async def test_artifact_tools_are_recorded_as_workspace_reads(runner, session_st
 
 
 @pytest.mark.asyncio
-async def test_workspace_tool_telemetry_respects_tool_result_suppression(
-    runner, session_state
-):
+async def test_workspace_tool_telemetry_respects_tool_result_suppression(runner):
     store = InMemoryTelemetryStore()
     recorder = TelemetryRecorder(store, TelemetryConfig(record_tool_results=False))
     context = await recorder.start_trace(
@@ -688,9 +668,7 @@ async def test_workspace_tool_telemetry_respects_tool_result_suppression(
 
 
 @pytest.mark.asyncio
-async def test_artifact_error_result_is_recorded_as_workspace_read_error(
-    runner, session_state
-):
+async def test_artifact_error_result_is_recorded_as_workspace_read_error(runner):
     store = InMemoryTelemetryStore()
     recorder = TelemetryRecorder(store)
     context = await recorder.start_trace(
@@ -746,9 +724,7 @@ async def test_artifact_error_result_is_recorded_as_workspace_read_error(
 
 
 @pytest.mark.asyncio
-async def test_artifact_error_result_is_normalized_without_telemetry(
-    runner, session_state
-):
+async def test_artifact_error_result_is_normalized_without_telemetry(runner):
 
     class FakeExecutor:
         async def execute(
@@ -783,9 +759,7 @@ async def test_artifact_error_result_is_normalized_without_telemetry(
 
 
 @pytest.mark.asyncio
-async def test_artifact_content_starting_with_error_stays_success(
-    runner, session_state
-):
+async def test_artifact_content_starting_with_error_stays_success(runner):
 
     class FakeExecutor:
         async def execute(

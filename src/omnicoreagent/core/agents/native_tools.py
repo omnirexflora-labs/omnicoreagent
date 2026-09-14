@@ -198,6 +198,24 @@ async def execute_native_turn(
         binding = catalog.bindings.get(request.name.lower())
         if request.name.lower() not in catalog.visible:
             binding = None
+        if isinstance(signature_result.get("governance"), dict):
+            signature_result["governance"] = {
+                key: value
+                for key, value in signature_result["governance"].items()
+                if key not in {"request_id", "decision_id"}
+            }
+        if (
+            binding
+            and binding.provider == "subagent"
+            and isinstance(signature_result.get("data"), dict)
+        ):
+            # Child-run accounting/trace IDs change even when its answer does not.
+            # Do not strip similarly named fields from ordinary business payloads.
+            signature_result["data"] = {
+                key: value
+                for key, value in signature_result["data"].items()
+                if key not in {"metric", "run_id", "trace_id", "session_id"}
+            }
         interaction = ToolInteraction(
             provider=binding.provider if binding else "unavailable",
             server=binding.server if binding else None,

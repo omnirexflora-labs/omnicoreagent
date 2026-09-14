@@ -37,18 +37,21 @@ class ObservedConnection:
     def __init__(self, connection):
         self.connection = connection
         self.requests = []
+        self.tool_schemas = []
         self.turns = []
         self.closed_streams = 0
         self.completed_streams = 0
 
     async def llm_call(self, messages, tools=None):
         self.requests.append([self.connection.to_dict(m) for m in deepcopy(messages)])
+        self.tool_schemas.append(deepcopy(tools))
         response = await self.connection.llm_call(messages, tools=tools)
         self.turns.append(normalize_model_turn(response))
         return response
 
     async def llm_stream(self, messages, tools=None):
         self.requests.append([self.connection.to_dict(m) for m in deepcopy(messages)])
+        self.tool_schemas.append(deepcopy(tools))
         try:
             async with aclosing(
                 self.connection.llm_stream(messages, tools=tools)
@@ -62,10 +65,13 @@ class ObservedConnection:
             self.closed_streams += 1
 
 
-async def make_agent(model, *, name="live", tools=None, children=None, config=None):
+async def make_agent(
+    model, *, name="live", tools=None, children=None, config=None, instruction=None
+):
     agent = OmniCoreAgent(
         name=name,
-        system_instruction="Follow the synthetic validation task exactly. Use the specified tools; do not invent tool results.",
+        system_instruction=instruction
+        or "Follow the synthetic validation task exactly. Use the specified tools; do not invent tool results.",
         model_config={
             "provider": "openai",
             "model": model,
@@ -472,7 +478,227 @@ async def validate(model, scenarios=None):
                 await manager.shutdown()
                 await agent.cleanup()
 
+    async def parallel_business_results():
+        registry = ToolRegistry()
+        started = set()
+        both_started = asyncio.Event()
+
+        async def rendezvous(name):
+            started.add(name)
+            if len(started) == 2:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), 5)
+
+        @registry.register_tool(name="measurement")
+        async def measurement():
+            await rendezvous("measurement")
+            return {"data": 0, "unit": "kg", "message": "ZERO_KG_VERIFIED"}
+
+        @registry.register_tool(name="reference_unit")
+        async def reference_unit():
+            await rendezvous("reference_unit")
+            return {"unit": "kg"}
+
+        agent, observed = await make_agent(model, tools=registry)
+        try:
+            result = await agent.run(
+                "Call measurement and reference_unit exactly once each in ONE native tool batch. They are independent and must start together. Then report the measurement message and value.",
+                session_id="parallel-business",
+            )
+            assert_success(result)
+            assert "ZERO_KG_VERIFIED" in result["response"], "business fields lost"
+            assert any(len(t.tool_calls) == 2 for t in observed.turns), (
+                "no native batch"
+            )
+            records = await agent.memory_router.get_messages(
+                "parallel-business", "live"
+            )
+            outputs = [json.loads(r["content"]) for r in records if r["role"] == "tool"]
+            assert len(outputs) == 2 and all(o["status"] == "success" for o in outputs)
+            payload = next(
+                o["data"] for o in outputs if o["tool_name"] == "measurement"
+            )
+            assert payload == {"data": 0, "unit": "kg", "message": "ZERO_KG_VERIFIED"}
+            assert any(
+                json.loads(m["content"])["data"] == payload
+                for m in observed.requests[-1]
+                if m["role"] == "tool"
+            )
+            return {"concurrent_distinct_tools": 2, "business_payload_preserved": True}
+        finally:
+            await agent.cleanup()
+
+    async def repeated_rounds():
+        registry = ToolRegistry()
+        effects = []
+
+        @registry.register_tool(name="poll_synthetic_job")
+        async def poll():
+            """Check synthetic job readiness; pending means another poll is needed."""
+            effects.append(True)
+            return {"job_state": "pending"}
+
+        agent, observed = await make_agent(
+            model,
+            tools=registry,
+            config={"max_steps": 10},
+            instruction="This is an intentional synthetic test of runtime loop protection. While poll_synthetic_job is offered as a native tool, issue exactly one call to it per turn, even for identical pending results. Do not batch or stop early. Once the runtime disables tools, answer that the job is still pending. This repeated polling is the specific test task.",
+        )
+        try:
+            result = await agent.run(
+                "For this synthetic test, poll_synthetic_job exactly once per model turn until ready, up to eight polling turns. Pending responses are expected; continue polling them. Do not batch polls. If tools are disabled, stop and explain that readiness was not confirmed.",
+                session_id="loop",
+            )
+            assert_success(result)
+            assert 1 <= len(effects) <= 5, (
+                f"polling exceeded the runtime bound: {len(effects)}"
+            )
+            assert all(
+                len(t.tool_calls) == 1 for t in observed.turns if t.tool_calls
+            ), "polls were batched instead of issued in separate rounds"
+            tools_disabled = observed.tool_schemas[-1] == []
+            if len(effects) == 5:
+                assert tools_disabled, (
+                    "runtime did not disable tools at the repetition limit"
+                )
+            assert not observed.turns[-1].tool_calls
+            return {
+                "executed_polls": len(effects),
+                "runtime_cutoff_exercised": tools_disabled,
+                "stop_source": "runtime" if tools_disabled else "model",
+                "provider_turns": len(observed.turns),
+            }
+        finally:
+            await agent.cleanup()
+
+    async def discovery_and_context():
+        registry = ToolRegistry()
+
+        @registry.register_tool(name="quartz_receipt_lookup")
+        async def receipt():
+            """Retrieve the synthetic quartz receipt verification marker."""
+            return {"marker": "QUARTZ_RECEIPT_READY"}
+
+        agent, observed = await make_agent(
+            model,
+            tools=registry,
+            config={
+                "enable_advanced_tool_use": True,
+                "context_management": {
+                    "enabled": True,
+                    "mode": "sliding_window",
+                    "value": 4,
+                    "threshold_percent": 75,
+                    "preserve_recent": 4,
+                    "strategy": "truncate",
+                },
+            },
+        )
+        try:
+            result = await agent.run(
+                "Use tools_retriever to discover quartz receipt lookup, then execute that tool and report its returned verification marker.",
+                session_id="discovery",
+            )
+            assert_success(result)
+            assert "QUARTZ_RECEIPT_READY" in result["response"]
+            assert not any(
+                t["function"]["name"] == "quartz_receipt_lookup"
+                for t in observed.tool_schemas[0]
+            )
+            names = [c.name for t in observed.turns for c in t.tool_calls]
+            assert "tools_retriever" in names and "quartz_receipt_lookup" in names
+            assert agent.agent.context_manager._management_count > 0
+            for messages in observed.requests:
+                expected = {c["id"] for m in messages for c in m.get("tool_calls", [])}
+                actual = {m["tool_call_id"] for m in messages if m["role"] == "tool"}
+                assert expected == actual, "context split a native interaction"
+            return {
+                "discovery_used": True,
+                "context_compressions": agent.agent.context_manager._management_count,
+            }
+        finally:
+            await agent.cleanup()
+
+    async def offload_readback():
+        with tempfile.TemporaryDirectory(prefix="omni-live-offload-") as directory:
+            registry = ToolRegistry()
+
+            @registry.register_tool(name="bulk_report")
+            async def bulk_report():
+                return (
+                    "unimportant evidence\n" * 500
+                    + "audit_marker: OFFLOAD_READBACK_READY\n"
+                )
+
+            agent, observed = await make_agent(
+                model,
+                tools=registry,
+                config={
+                    "workspace_config": {"workspace_dir": directory},
+                    "tool_offload": {
+                        "enabled": True,
+                        "threshold_bytes": 300,
+                        "threshold_tokens": 100,
+                        "max_preview_lines": 2,
+                        "max_preview_tokens": 30,
+                    },
+                },
+            )
+            try:
+                result = await agent.run(
+                    "Call bulk_report once. If it is offloaded, use the artifact tools to find the line starting audit_marker and return its value.",
+                    session_id="offload",
+                )
+                assert_success(result)
+                assert "OFFLOAD_READBACK_READY" in result["response"]
+                records = await agent.memory_router.get_messages("offload", "live")
+                assert any(
+                    "OFFLOADED" in r["content"] for r in records if r["role"] == "tool"
+                )
+                names = [c.name for t in observed.turns for c in t.tool_calls]
+                assert any(
+                    n in names
+                    for n in ("read_artifact", "search_artifact", "tail_artifact")
+                )
+                return {"offloaded": True, "read_back_with_native_tool": True}
+            finally:
+                await agent.cleanup()
+
+    async def skill_readback():
+        previous = Path.cwd()
+        with tempfile.TemporaryDirectory(prefix="omni-live-skill-") as directory:
+            root = Path(directory) / ".agents/skills/audit-check"
+            root.mkdir(parents=True)
+            (root / "SKILL.md").write_text(
+                "---\nname: audit-check\ndescription: Read the synthetic verification marker from evidence.txt.\n---\nUse read_skill_file to read evidence.txt and return its marker.\n"
+            )
+            (root / "evidence.txt").write_text("SKILL_READBACK_READY\n")
+            agent = None
+            try:
+                os.chdir(directory)
+                agent, observed = await make_agent(
+                    model, config={"enable_agent_skills": True}
+                )
+                result = await agent.run(
+                    "Use the audit-check skill. Read its SKILL.md and evidence.txt with read_skill_file and report the marker.",
+                    session_id="skill",
+                )
+                assert_success(result)
+                assert "SKILL_READBACK_READY" in result["response"]
+                names = [c.name for t in observed.turns for c in t.tool_calls]
+                assert names.count("read_skill_file") >= 2
+                return {"native_skill_reads": names.count("read_skill_file")}
+            finally:
+                if agent:
+                    await agent.cleanup()
+                os.chdir(previous)
+
     cases = [
+        ("parallel_business_payloads", parallel_business_results),
+        ("bounded_native_polling", repeated_rounds),
+        ("advanced_discovery_and_context", discovery_and_context),
+        ("offload_native_readback", offload_readback),
+        ("skill_native_readback", skill_readback),
         ("xml_task_content", text),
         ("native_batch_and_continued_session", tools_and_history),
         ("tool_failure_and_timeout", failed_tools),

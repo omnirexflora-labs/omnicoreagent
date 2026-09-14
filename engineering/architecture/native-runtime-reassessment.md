@@ -1,5 +1,10 @@
 # Native runtime reassessment — 2026-09-14
 
+Follow-up: [native loop and execution cleanup](../validation/native-loop-cleanup.md)
+repairs N06 and the lossy data/message heuristics in N07, and removes redundant
+history callbacks/JSON round-trips. MCP repairs are explicitly deferred outside
+this PR at the user’s request. The findings below record the audited snapshot.
+
 Audited branch: `refactor/native-tool-runtime`, snapshot `ab7552c` (after Cencori removal).
 This report supersedes blanket completion claims in the earlier migration review.
 The XML **control** protocol has been replaced. That does **not** establish that

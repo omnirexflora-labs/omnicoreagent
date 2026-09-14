@@ -209,3 +209,15 @@ MCP connection, catalog, result normalization and HTTP transport boundaries.
 Steps 04, 06, 11 and 12 require the follow-up gates and ordered repair checkpoints
 in that report; loop identity and result-envelope ambiguity are also open.
 Native local batches and streaming remain implemented and tested.
+
+### Native loop and execution cleanup — 2026-09-14
+
+User scope: defer all MCP repairs to another PR. This checkpoint replaces the
+per-call detector with complete-round comparisons (`b7d06e0`), centralizes feedback
+and removes executor/history callbacks and data/message guessing (`9d06a73`), and
+excludes generated governance/child accounting from loop signatures.
+
+[Validation and scope](../validation/native-loop-cleanup.md) records final regression
+and live results. Deep-agent behavior is an `OmniCoreAgent` mode enabled through
+`enable_subagents`, not a separate retired workflow. MCP compatibility and the
+separate provider Responses/lossless-continuation work remain open.

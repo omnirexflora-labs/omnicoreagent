@@ -2,6 +2,10 @@
 
 ## Unreleased — native tool runtime
 
+- Exclude governance decision IDs and configured-child accounting from loop
+  comparisons while retaining those fields in history. Expand live validation
+  across non-MCP native execution, memory/context, skills and artifact readback.
+
 - Remove executor/governance history callbacks and redundant redaction/JSON
   round-trips. The native runtime writes each guarded/offloaded result once.
   Decode native arguments once; preserve ordinary dictionaries with data/message

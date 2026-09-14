@@ -215,15 +215,15 @@ plus a path it can use later.
 `max_steps` is still useful, but it is a blunt instrument. It stops an agent that
 is making progress just as quickly as one that is stuck.
 
-OmniCoreAgent tracks SHA256-backed tool-call signatures across the loop. Each
-signature is based on the tool name, input, and output for the call. The runtime
-detects:
+OmniCoreAgent compares complete native tool rounds. Each call signature includes
+provider/server identity, tool name, arguments, and guarded results before offload.
+A batch counts as one round; call order and generated request/trace IDs do not
+count as progress. Changing results from a sibling tool do count as progress.
 
-- **Consecutive loops**: the same tool call returns the same result repeatedly.
-- **Pattern loops**: the same tool repeats a small interaction pattern.
-
-When the harness stops a loop, the agent gets a reason. That makes debugging the
-agent behavior much easier than "max iterations reached."
+Five identical rounds, or five repetitions of a cycle of up to five rounds,
+disable tools for the next model request. The agent then answers from existing
+results and explains its limitations. Additional tool requests are rejected.
+This is exact repetition detection, not a semantic assessment of task progress.
 
 ### 4. The harness is already assembled
 
