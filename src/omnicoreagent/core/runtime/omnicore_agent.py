@@ -36,6 +36,20 @@ from omnicoreagent.core.telemetry import (
 )
 
 
+def _telemetry_payload_references(value: Any) -> set[str]:
+    references: set[str] = set()
+    if isinstance(value, dict):
+        reference = value.get("reference")
+        if isinstance(reference, str) and reference.startswith("telemetry://payload/"):
+            references.add(reference)
+        for item in value.values():
+            references.update(_telemetry_payload_references(item))
+    elif isinstance(value, list):
+        for item in value:
+            references.update(_telemetry_payload_references(item))
+    return references
+
+
 class OmniCoreAgent:
     """
     Public facade for the OmniCoreAgent runtime.
@@ -61,6 +75,7 @@ class OmniCoreAgent:
         prompt_builder: Optional[Any] = None,
         debug: bool = False,
         telemetry_config: Optional[Any] = None,
+        telemetry_payload_store: Optional[Any] = None,
     ):
         """
         Initialize the OmniCoreAgent with user-friendly configuration.
@@ -81,6 +96,8 @@ class OmniCoreAgent:
             telemetry_exporters: Optional telemetry exporters
             telemetry_config: Optional TelemetryConfig or dictionary controlling
                 built-in recording, redaction, and payload policy
+            telemetry_payload_store: Optional built-in store for oversized
+                redacted telemetry payloads
             debug: Enable debug logging
         """
         self.name = name
@@ -101,6 +118,7 @@ class OmniCoreAgent:
         self.telemetry_stream = telemetry_stream
         self.telemetry_exporters = self._build_telemetry_exporters(telemetry_exporters)
         self.telemetry_config = TelemetryConfig.from_value(telemetry_config)
+        self.telemetry_payload_store = telemetry_payload_store
         if prompt_builder:
             self.prompt_builder = prompt_builder
         else:
@@ -203,6 +221,16 @@ class OmniCoreAgent:
 
     def _ensure_telemetry(self) -> None:
         """Attach default telemetry components."""
+        if self.telemetry_recorder is not None and self.telemetry_config is None:
+            self.telemetry_config = getattr(self.telemetry_recorder, "config", None)
+
+        if self.telemetry_payload_store is None and self.telemetry_recorder is not None:
+            self.telemetry_payload_store = getattr(
+                self.telemetry_recorder,
+                "payload_store",
+                None,
+            )
+
         if self.telemetry_store is None:
             if self.telemetry_recorder is not None:
                 self.telemetry_store = self.telemetry_recorder.store
@@ -214,11 +242,18 @@ class OmniCoreAgent:
                     workspace_config=self.agent_config.get("workspace_config"),
                 )
 
+        if self.telemetry_payload_store is None:
+            self.telemetry_payload_store = construction.default_telemetry_payload_store(
+                telemetry_config=self.telemetry_config,
+                workspace_config=self.agent_config.get("workspace_config"),
+            )
+
         if self.telemetry_recorder is None:
             self.telemetry_recorder = TelemetryRecorder(
                 self.telemetry_store,
                 config=self.telemetry_config,
                 exporters=self.telemetry_exporters,
+                payload_store=self.telemetry_payload_store,
             )
         else:
             if self.telemetry_recorder.store is not self.telemetry_store:
@@ -244,6 +279,21 @@ class OmniCoreAgent:
             for exporter in self.telemetry_exporters:
                 if exporter not in existing_exporters:
                     existing_exporters.append(exporter)
+            recorder_payload_store = getattr(
+                self.telemetry_recorder,
+                "payload_store",
+                None,
+            )
+            if (
+                recorder_payload_store is not None
+                and self.telemetry_payload_store is not None
+                and recorder_payload_store is not self.telemetry_payload_store
+            ):
+                raise ValueError(
+                    "telemetry_payload_store must match telemetry_recorder.payload_store"
+                )
+            if recorder_payload_store is None and self.telemetry_payload_store is not None:
+                self.telemetry_recorder.payload_store = self.telemetry_payload_store
 
         if self.telemetry_config is None:
             self.telemetry_config = getattr(
@@ -266,6 +316,7 @@ class OmniCoreAgent:
         self.telemetry_recorder = recorder
         self.telemetry_stream = TelemetryStream(store)
         self.telemetry_config = getattr(recorder, "config", None)
+        self.telemetry_payload_store = getattr(recorder, "payload_store", None)
 
     def _telemetry_actor(self) -> TelemetryActor:
         return TelemetryActor(type=ActorType.AGENT, name=self.name)
@@ -285,6 +336,9 @@ class OmniCoreAgent:
                 "InMemoryTelemetryStore": "memory",
                 "JsonlTelemetryStore": "jsonl",
             }.get(storage_name, storage_name)
+        if self.telemetry_payload_store is not None:
+            payload_storage_name = self.telemetry_payload_store.__class__.__name__
+            metadata["telemetry_payload_storage"] = payload_storage_name
         return metadata
 
     def _telemetry_scope(
@@ -730,6 +784,32 @@ class OmniCoreAgent:
         if trace and normalize:
             trace = TelemetryNormalizer().normalize(trace)
         return trace.model_dump() if trace else None
+
+    async def read_telemetry_payload(self, reference: str) -> Any:
+        """Read a redacted oversized payload referenced by telemetry."""
+        self._ensure_telemetry()
+        payload_store = self.telemetry_payload_store
+        if payload_store is None:
+            raise ValueError("No telemetry payload store is configured")
+        return await asyncio.to_thread(payload_store.read, reference)
+
+    async def prune_telemetry_payloads(self, retention_days: int | None = None) -> int:
+        """Prune payloads while retaining references in currently stored traces."""
+        self._ensure_telemetry()
+        payload_store = self.telemetry_payload_store
+        if payload_store is None:
+            return 0
+        traces = await self.telemetry_store.list_traces()
+        references = {
+            reference
+            for trace in traces
+            for reference in _telemetry_payload_references(trace.model_dump())
+        }
+        return await asyncio.to_thread(
+            payload_store.prune,
+            retention_days,
+            references=references,
+        )
 
     async def export_trace(
         self,

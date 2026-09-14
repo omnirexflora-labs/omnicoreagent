@@ -54,7 +54,11 @@ async def start_serve_trace(
     if store is None:
         return None
     config = TelemetryConfig.from_value(getattr(agent, "telemetry_config", None))
-    recorder = TelemetryRecorder(store, config=config)
+    recorder = TelemetryRecorder(
+        store,
+        config=config,
+        payload_store=getattr(agent, "telemetry_payload_store", None),
+    )
     metadata: dict[str, Any] = {"tags": ["serve"]}
     if config is not None:
         metadata["telemetry_config_version"] = config.fingerprint()

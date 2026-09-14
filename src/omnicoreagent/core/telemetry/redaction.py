@@ -5,8 +5,14 @@ import hashlib
 import json
 from typing import Any
 
+from omnicoreagent.core.telemetry.payloads import TelemetryPayloadStore
+
 
 REDACTION_MARKER = "[REDACTED]"
+
+
+class TelemetryPayloadError(RuntimeError):
+    """Raised when configured oversized-payload storage is unavailable."""
 
 
 @dataclass
@@ -50,6 +56,11 @@ class TelemetryConfig:
             )
         if self.storage_path is not None and not str(self.storage_path).strip():
             raise ValueError("telemetry storage_path must not be empty")
+        self.offload_target = str(self.offload_target).lower().strip()
+        if self.offload_target not in {"workspace", "object_storage"}:
+            raise ValueError(
+                "telemetry offload_target must be workspace or object_storage"
+            )
         if self.retention_days is not None and self.retention_days < 0:
             raise ValueError("telemetry retention_days must be non-negative or None")
 
@@ -78,9 +89,14 @@ class TelemetryConfig:
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
 
 
-def redact_payload(value: Any, config: TelemetryConfig) -> Any:
+def redact_payload(
+    value: Any,
+    config: TelemetryConfig,
+    *,
+    payload_store: TelemetryPayloadStore | None = None,
+) -> Any:
     redacted = _redact(value, {key.lower() for key in config.redact_keys})
-    return _truncate_or_reference(redacted, config)
+    return _truncate_or_reference(redacted, config, payload_store=payload_store)
 
 
 def _redact(value: Any, redact_keys: set[str]) -> Any:
@@ -103,7 +119,12 @@ def _should_redact_key(key: str, redact_keys: set[str]) -> bool:
     return any(pattern in normalized for pattern in redact_keys)
 
 
-def _truncate_or_reference(value: Any, config: TelemetryConfig) -> Any:
+def _truncate_or_reference(
+    value: Any,
+    config: TelemetryConfig,
+    *,
+    payload_store: TelemetryPayloadStore | None = None,
+) -> Any:
     max_payload_bytes = config.max_payload_bytes
     if max_payload_bytes <= 0:
         return {"truncated": True, "reason": "max_payload_bytes<=0"}
@@ -115,10 +136,19 @@ def _truncate_or_reference(value: Any, config: TelemetryConfig) -> Any:
         return value
     checksum = hashlib.sha256(encoded).hexdigest()
     if config.offload_large_payloads:
+        if payload_store is None:
+            raise TelemetryPayloadError(
+                "telemetry payload offload is enabled but no payload store is configured"
+            )
+        reference = payload_store.write(
+            value,
+            checksum=checksum,
+            content_type="application/json",
+        )
         return {
             "offloaded": True,
             "target": config.offload_target,
-            "reference": f"telemetry://payload/{checksum}",
+            "reference": reference,
             "original_bytes": len(encoded),
             "content_type": "application/json",
             "checksum": checksum,

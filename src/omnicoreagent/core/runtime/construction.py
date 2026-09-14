@@ -50,6 +50,58 @@ def default_telemetry_store(
     )
 
 
+def default_telemetry_payload_store(
+    *,
+    telemetry_config: Any = None,
+    workspace_config: Any = None,
+) -> Any:
+    """Build the built-in store for oversized redacted telemetry payloads."""
+    from omnicoreagent.core.telemetry import TelemetryConfig
+    from omnicoreagent.core.telemetry.payloads import (
+        LocalTelemetryPayloadStore,
+        WorkspaceTelemetryPayloadStore,
+    )
+    from omnicoreagent.core.workspace.config import resolve_workspace_config
+
+    config = TelemetryConfig.from_value(telemetry_config) or TelemetryConfig()
+    if not config.offload_large_payloads:
+        return None
+
+    from omnicoreagent.core.workspace.storage import create_workspace_storage
+
+    resolved_workspace = resolve_workspace_config(workspace_config)
+    if config.offload_target == "object_storage":
+        if resolved_workspace.workspace_backend not in {"s3", "r2"}:
+            if config.strict:
+                raise ValueError(
+                    "telemetry offload_target='object_storage' requires an S3 or R2 workspace"
+                )
+            return None
+        storage = create_workspace_storage(
+            namespace="telemetry/payloads",
+            config=resolved_workspace,
+        )
+        return WorkspaceTelemetryPayloadStore(
+            storage,
+            retention_days=config.retention_days,
+        )
+
+    if config.storage_path is not None:
+        return LocalTelemetryPayloadStore(
+            f"{Path(config.storage_path).expanduser()}.payloads",
+            retention_days=config.retention_days,
+        )
+
+    storage = create_workspace_storage(
+        namespace="telemetry/payloads",
+        config=resolved_workspace,
+    )
+    return WorkspaceTelemetryPayloadStore(
+        storage,
+        retention_days=config.retention_days,
+    )
+
+
 def _telemetry_jsonl_path(config: Any, workspace_config: Any = None) -> Path:
     if config.storage_path is not None:
         return Path(config.storage_path).expanduser()

@@ -89,6 +89,8 @@ agent = OmniCoreAgent(
         "record_model_prompts": False,
         "record_model_responses": False,
         "retention_days": 7, # use None for unlimited local JSONL retention
+        "offload_large_payloads": False,
+        "offload_target": "workspace", # workspace or object_storage
         "max_payload_bytes": 64_000,
         "strict": False,
     },
@@ -102,6 +104,16 @@ keep the in-memory default. Set `storage: "memory"` or `storage: "jsonl"` to
 override that choice, and set `storage_path` for an explicit JSONL location.
 An exporter is an optional outbound copy of a completed built-in trace and is
 not part of the runtime execution path.
+
+When `offload_large_payloads` is enabled, oversized redacted telemetry values
+are written to the built-in content-addressed payload store before their trace
+reference is persisted. `offload_target: "workspace"` uses the configured
+workspace backend; `"object_storage"` requires an S3 or R2 workspace. With an
+explicit `storage_path`, local payloads are stored beside it in a
+`<storage_path>.payloads` directory. The returned `telemetry://payload/...`
+reference can be read with `await agent.read_telemetry_payload(reference)` and
+cleaned with `await agent.prune_telemetry_payloads()`. Redacted payloads are
+kept by default when they are still referenced by stored traces.
 
 | Exporter | Variables |
 |----------|-----------|

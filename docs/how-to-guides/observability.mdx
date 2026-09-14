@@ -210,6 +210,12 @@ The presets also read common environment variables:
 correlated export, but when a serving trace and an agent trace share the same
 `run_id`, the latest matching trace is exported.
 
+Large captured values may be represented by content-addressed
+`telemetry://payload/...` references. The built-in payload store writes the
+redacted value to the configured workspace or explicit local payload directory;
+use `agent.read_telemetry_payload(reference)` to retrieve it and
+`agent.prune_telemetry_payloads()` to apply the configured retention window.
+
 <Tip>
 Use metrics for cost and performance monitoring, events for live UI streaming,
 traces for debugging, and exporters when traces need to leave the process.

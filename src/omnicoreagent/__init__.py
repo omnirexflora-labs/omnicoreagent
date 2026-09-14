@@ -74,6 +74,11 @@ __all__ = [
     "InMemoryTelemetryStore",
     "JsonlTelemetryStore",
     "AbstractTelemetryStore",
+    "TelemetryPayloadStore",
+    "LocalTelemetryPayloadStore",
+    "WorkspaceTelemetryPayloadStore",
+    "TelemetryPayloadError",
+    "redact_payload",
     # Governance
     "GovernanceEngine",
     "PolicyEvaluator",
@@ -197,6 +202,23 @@ _EXPORTS = {
     "RedisTaskStore": ("omnicoreagent.background", "RedisTaskStore"),
     "MongoDbTaskStore": ("omnicoreagent.background", "MongoDbTaskStore"),
     "TelemetryConfig": ("omnicoreagent.core.telemetry", "TelemetryConfig"),
+    "TelemetryPayloadStore": (
+        "omnicoreagent.core.telemetry",
+        "TelemetryPayloadStore",
+    ),
+    "LocalTelemetryPayloadStore": (
+        "omnicoreagent.core.telemetry",
+        "LocalTelemetryPayloadStore",
+    ),
+    "WorkspaceTelemetryPayloadStore": (
+        "omnicoreagent.core.telemetry",
+        "WorkspaceTelemetryPayloadStore",
+    ),
+    "TelemetryPayloadError": (
+        "omnicoreagent.core.telemetry",
+        "TelemetryPayloadError",
+    ),
+    "redact_payload": ("omnicoreagent.core.telemetry", "redact_payload"),
     "TelemetryRecorder": ("omnicoreagent.core.telemetry", "TelemetryRecorder"),
     "TelemetryStream": ("omnicoreagent.core.telemetry", "TelemetryStream"),
     "TelemetryExporter": ("omnicoreagent.core.telemetry", "TelemetryExporter"),

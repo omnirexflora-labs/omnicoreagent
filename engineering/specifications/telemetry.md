@@ -611,9 +611,16 @@ Rules:
 - redaction runs before persistence.
 - keys matching `redact_keys` are replaced with a redaction marker.
 - payloads larger than `max_payload_bytes` are summarized and optionally
-  offloaded.
+  offloaded to the built-in content-addressed payload store.
 - offloaded payloads must store a reference, size, content type when known, and
   checksum when available.
+- payloads are redacted before being written; the reference is persisted only
+  after the payload store accepts the redacted record.
+- `offload_target: workspace` uses the configured workspace backend. The
+  `object_storage` target requires an S3 or R2 workspace. An explicit local
+  telemetry path uses a sibling `<path>.payloads` directory.
+- payload stores expose read and retention cleanup operations. Cleanup retains
+  references found in currently stored traces so active evidence is not broken.
 - secrets must not be stored by default.
 - `storage: auto` selects JSONL only for an explicitly configured local
   workspace; otherwise it selects in-memory storage. An injected store takes

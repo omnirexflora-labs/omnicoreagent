@@ -48,6 +48,11 @@ __all__ = [
     "InMemoryTelemetryStore",
     "JsonlTelemetryStore",
     "AbstractTelemetryStore",
+    "TelemetryPayloadStore",
+    "LocalTelemetryPayloadStore",
+    "WorkspaceTelemetryPayloadStore",
+    "TelemetryPayloadError",
+    "redact_payload",
 ]
 
 _EXPORTS = {
@@ -62,6 +67,23 @@ _EXPORTS = {
     "Usage": ("omnicoreagent.core.token_usage", "Usage"),
     "UsageLimitExceeded": ("omnicoreagent.core.token_usage", "UsageLimitExceeded"),
     "TelemetryConfig": ("omnicoreagent.core.telemetry", "TelemetryConfig"),
+    "TelemetryPayloadStore": (
+        "omnicoreagent.core.telemetry",
+        "TelemetryPayloadStore",
+    ),
+    "LocalTelemetryPayloadStore": (
+        "omnicoreagent.core.telemetry",
+        "LocalTelemetryPayloadStore",
+    ),
+    "WorkspaceTelemetryPayloadStore": (
+        "omnicoreagent.core.telemetry",
+        "WorkspaceTelemetryPayloadStore",
+    ),
+    "TelemetryPayloadError": (
+        "omnicoreagent.core.telemetry",
+        "TelemetryPayloadError",
+    ),
+    "redact_payload": ("omnicoreagent.core.telemetry", "redact_payload"),
     "TelemetryRecorder": ("omnicoreagent.core.telemetry", "TelemetryRecorder"),
     "TelemetryStream": ("omnicoreagent.core.telemetry", "TelemetryStream"),
     "TelemetryExporter": ("omnicoreagent.core.telemetry", "TelemetryExporter"),

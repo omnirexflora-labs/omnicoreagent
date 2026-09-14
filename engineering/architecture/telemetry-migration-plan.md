@@ -29,13 +29,14 @@ The completed checkpoint provides adaptive in-memory/JSONL storage, explicit
 retention and strictness policy, incomplete-trace marking for best-effort
 persistence failures, linked child/background/serving traces, and explicit
 trace-family lookup. Model prompts and responses remain excluded by default;
-when enabled they use the configured redaction, truncation, and offload policy.
+when enabled they use the configured redaction, truncation, and built-in
+workspace/object-storage offload policy.
 
-The remaining telemetry work is delivery hardening: verify queue overflow and
-reconnect behavior under production load, finish public streaming guarantees,
-and keep provider/model buffering separate from telemetry buffering. Those
-checks are prerequisites for changing PromptGuard behavior or the MCP adapter,
-but they do not require an external trace platform.
+The remaining telemetry work is delivery hardening: verify reconnect behavior
+under production load, finish public streaming guarantees, and keep
+provider/model buffering separate from telemetry buffering. Those checks are
+prerequisites for changing PromptGuard behavior or the MCP adapter, but they do
+not require an external trace platform.
 
 ## Rules for every phase
 
@@ -287,3 +288,4 @@ before the old open questions are treated as implementation-complete.
 | Guardrail evidence boundary | `4dbdf87` | Tool outputs are scrubbed before result telemetry and flagged/blocked decisions carry structured guardrail evidence. Focused security/runtime tests: 100 passed. |
 | Governance evidence assertion | `a8d27fd` | Policy request and deny events are asserted to share the active trace and session; full regression: 1082 passed, 14 skipped. |
 | Live stream overflow | `0cac745` | In-memory subscriber eviction now delivers an explicit overflow failure so SSE clients can reconnect from a cursor; full regression: 1083 passed, 14 skipped. |
+| Built-in payload offload | pending | Redacted oversized telemetry payloads are stored content-addressably in local/workspace storage, with read/prune APIs and strict/best-effort failure behavior. |

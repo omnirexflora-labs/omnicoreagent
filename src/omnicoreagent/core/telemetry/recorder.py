@@ -24,6 +24,7 @@ from omnicoreagent.core.telemetry.models import (
     telemetry_id,
     utc_now,
 )
+from omnicoreagent.core.telemetry.payloads import TelemetryPayloadStore
 from omnicoreagent.core.telemetry.redaction import TelemetryConfig, redact_payload
 from omnicoreagent.core.telemetry.store import AbstractTelemetryStore
 from omnicoreagent.core.telemetry.exporters import (
@@ -48,14 +49,17 @@ class TelemetryRecorder:
         store: AbstractTelemetryStore,
         config: TelemetryConfig | None = None,
         exporters: list[TelemetryExporter] | None = None,
+        payload_store: TelemetryPayloadStore | None = None,
     ) -> None:
         self.store = store
         self.config = config or TelemetryConfig()
         self.exporters = list(exporters or [])
+        self.payload_store = payload_store
         self._span_parent_contexts: dict[str, TelemetryContext | None] = {}
         self._span_sources: dict[str, str] = {}
         self._incomplete_trace_ids: set[str] = set()
         self._trace_templates: dict[str, TelemetryTrace] = {}
+        self._pending_payload_failure = False
 
     def current_context(self) -> TelemetryContext | None:
         return current_telemetry_context()
@@ -114,6 +118,10 @@ class TelemetryRecorder:
             ),
             spans=[root_span],
         )
+        if self._pending_payload_failure:
+            trace.incomplete = True
+            self._incomplete_trace_ids.add(trace_id)
+            self._pending_payload_failure = False
         self._trace_templates[trace_id] = trace
         await self._write(self.store.upsert_trace(trace), trace_id=trace_id)
         context = TelemetryContext(
@@ -410,7 +418,7 @@ class TelemetryRecorder:
             return None
         if source in {"model.call", "model_call"} and not self.config.record_model_prompts:
             return None
-        return redact_payload(value, self.config)
+        return self._record_payload(value)
 
     def _record_output(
         self,
@@ -445,7 +453,7 @@ class TelemetryRecorder:
             and not self.config.record_tool_results
         ):
             return None
-        return redact_payload(value, self.config)
+        return self._record_payload(value)
 
     def _record_error(
         self,
@@ -454,17 +462,35 @@ class TelemetryRecorder:
         if error is None:
             return None
         record = TelemetryError.from_dict(error) if isinstance(error, dict) else error
-        stack = redact_payload({"stack": record.stack}, self.config).get("stack")
+        stack = self._record_payload({"stack": record.stack}).get("stack")
         return TelemetryError(
             type=record.type,
             message=record.message,
             retryable=record.retryable,
-            metadata=redact_payload(record.metadata, self.config),
+            metadata=self._record_payload(record.metadata),
             stack=stack,
         )
 
     def _record_metadata(self, value: dict[str, Any]) -> dict[str, Any]:
-        return redact_payload(value, self.config)
+        return self._record_payload(value)
+
+    def _record_payload(self, value: Any) -> Any:
+        try:
+            return redact_payload(
+                value,
+                self.config,
+                payload_store=self.payload_store,
+            )
+        except Exception:
+            context = self.current_context()
+            if context is None:
+                self._pending_payload_failure = True
+            else:
+                self._incomplete_trace_ids.add(context.trace_id)
+            if self.config.strict:
+                raise
+            fallback = replace(self.config, offload_large_payloads=False)
+            return redact_payload(value, fallback)
 
     async def _write(self, operation, *, trace_id: str | None = None) -> None:
         try:

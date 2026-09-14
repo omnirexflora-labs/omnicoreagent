@@ -36,8 +36,17 @@ from omnicoreagent.core.telemetry.models import (
     TraceStatus,
 )
 from omnicoreagent.core.telemetry.normalizer import TelemetryNormalizer
+from omnicoreagent.core.telemetry.payloads import (
+    LocalTelemetryPayloadStore,
+    TelemetryPayloadStore,
+    WorkspaceTelemetryPayloadStore,
+)
 from omnicoreagent.core.telemetry.recorder import TelemetryRecorder
-from omnicoreagent.core.telemetry.redaction import TelemetryConfig
+from omnicoreagent.core.telemetry.redaction import (
+    TelemetryConfig,
+    TelemetryPayloadError,
+    redact_payload,
+)
 from omnicoreagent.core.telemetry.store import (
     AbstractTelemetryStore,
     InMemoryTelemetryStore,
@@ -53,6 +62,7 @@ __all__ = [
     "InMemoryTelemetryStore",
     "InMemoryTelemetryExporter",
     "JsonlTelemetryStore",
+    "LocalTelemetryPayloadStore",
     "JsonlTelemetryExporter",
     "LangSmithTelemetryExporter",
     "OTelEventRecord",
@@ -70,6 +80,8 @@ __all__ = [
     "TelemetryExporter",
     "TelemetryExportResult",
     "TelemetryNormalizer",
+    "TelemetryPayloadError",
+    "TelemetryPayloadStore",
     "TelemetryRecorder",
     "TelemetrySpan",
     "TelemetryStream",
@@ -79,9 +91,11 @@ __all__ = [
     "TokenUsage",
     "TraceFilter",
     "TraceStatus",
+    "WorkspaceTelemetryPayloadStore",
     "build_telemetry_exporter",
     "current_telemetry_context",
     "export_trace_to_many",
     "reset_telemetry_context",
+    "redact_payload",
     "set_telemetry_context",
 ]
