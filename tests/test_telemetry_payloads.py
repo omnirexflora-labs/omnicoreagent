@@ -111,6 +111,35 @@ async def test_recorder_strict_payload_write_failure_raises():
         await recorder.start_trace(input={"body": "x" * 200})
 
 
+@pytest.mark.asyncio
+async def test_nested_payload_failure_marks_child_trace_only():
+    class BrokenPayloadStore:
+        def write(self, payload, *, checksum, content_type="application/json"):
+            raise OSError("payload disk unavailable")
+
+    recorder = TelemetryRecorder(
+        InMemoryTelemetryStore(),
+        config=TelemetryConfig(
+            offload_large_payloads=True,
+            max_payload_bytes=32,
+        ),
+        payload_store=BrokenPayloadStore(),
+    )
+
+    await recorder.start_trace(trace_id="trace-parent")
+    await recorder.start_trace(
+        trace_id="trace-child",
+        input={"body": "x" * 200},
+    )
+    await recorder.end_trace()
+    await recorder.end_trace()
+
+    parent = await recorder.store.get_trace("trace-parent")
+    child = await recorder.store.get_trace("trace-child")
+    assert parent is not None and parent.incomplete is False
+    assert child is not None and child.incomplete is True
+
+
 def test_payload_store_prune_honors_retention_and_live_reference(tmp_path):
     store = LocalTelemetryPayloadStore(tmp_path / "payloads", retention_days=1)
     retained_payload = {"id": "retained"}

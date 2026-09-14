@@ -60,6 +60,7 @@ class TelemetryRecorder:
         self._incomplete_trace_ids: set[str] = set()
         self._trace_templates: dict[str, TelemetryTrace] = {}
         self._pending_payload_failure = False
+        self._payload_trace_hint: str | None = None
 
     def current_context(self) -> TelemetryContext | None:
         return current_telemetry_context()
@@ -92,13 +93,18 @@ class TelemetryRecorder:
             parent_trace_id = current_parent.trace_id
             parent_span_id = current_parent.span_id
         actor = actor or TelemetryActor(type=ActorType.AGENT)
-        root_span = TelemetrySpan(
-            trace_id=trace_id,
-            name=name,
-            kind=kind,
-            actor=actor,
-            input=self._record_input(input, source=kind),
-        )
+        previous_payload_trace_hint = self._payload_trace_hint
+        self._payload_trace_hint = trace_id
+        try:
+            root_span = TelemetrySpan(
+                trace_id=trace_id,
+                name=name,
+                kind=kind,
+                actor=actor,
+                input=self._record_input(input, source=kind),
+            )
+        finally:
+            self._payload_trace_hint = previous_payload_trace_hint
         trace = TelemetryTrace(
             trace_id=trace_id,
             root_span_id=root_span.span_id,
@@ -118,7 +124,7 @@ class TelemetryRecorder:
             ),
             spans=[root_span],
         )
-        if self._pending_payload_failure:
+        if self._pending_payload_failure or trace_id in self._incomplete_trace_ids:
             trace.incomplete = True
             self._incomplete_trace_ids.add(trace_id)
             self._pending_payload_failure = False
@@ -482,11 +488,14 @@ class TelemetryRecorder:
                 payload_store=self.payload_store,
             )
         except Exception:
-            context = self.current_context()
-            if context is None:
+            trace_id = self._payload_trace_hint
+            if trace_id is None:
+                context = self.current_context()
+                trace_id = context.trace_id if context is not None else None
+            if trace_id is None:
                 self._pending_payload_failure = True
             else:
-                self._incomplete_trace_ids.add(context.trace_id)
+                self._incomplete_trace_ids.add(trace_id)
             if self.config.strict:
                 raise
             fallback = replace(self.config, offload_large_payloads=False)

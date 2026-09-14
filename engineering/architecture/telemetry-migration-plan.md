@@ -289,3 +289,4 @@ before the old open questions are treated as implementation-complete.
 | Governance evidence assertion | `a8d27fd` | Policy request and deny events are asserted to share the active trace and session; full regression: 1082 passed, 14 skipped. |
 | Live stream overflow | `0cac745` | In-memory subscriber eviction now delivers an explicit overflow failure so SSE clients can reconnect from a cursor; full regression: 1083 passed, 14 skipped. |
 | Built-in payload offload | `2beea51` | Redacted oversized telemetry payloads are stored content-addressably in local/workspace storage, with read/prune APIs and strict/best-effort failure behavior; full regression: 1092 passed, 14 skipped. |
+| Payload failure lineage | pending | Payload persistence failures are attributed to the trace being created, including nested child traces; full regression: 1093 passed, 14 skipped. |
