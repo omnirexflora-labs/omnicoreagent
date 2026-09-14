@@ -129,7 +129,10 @@ class TestSubagentFactory:
 
     @pytest.mark.asyncio
     async def test_run_subagent(self, factory):
-        with patch.object(OmniCoreAgent, "run", new_callable=AsyncMock) as mock_run:
+        with (
+            patch.object(factory, "_workspace_output_error", return_value=None),
+            patch.object(OmniCoreAgent, "run", new_callable=AsyncMock) as mock_run,
+        ):
             mock_run.return_value = {"response": "Output saved"}
 
             result = await factory.run_subagent(
@@ -150,6 +153,7 @@ class TestSubagentFactory:
         )
 
         with (
+            patch.object(factory, "_workspace_output_error", return_value=None),
             patch.object(
                 OmniCoreAgent,
                 "connect_mcp_servers",
@@ -185,7 +189,10 @@ class TestSubagentFactory:
     async def test_run_subagent_uses_status_not_response_text(
         self, factory, response, status
     ):
-        with patch.object(OmniCoreAgent, "run", new_callable=AsyncMock) as mock_run:
+        with (
+            patch.object(factory, "_workspace_output_error", return_value=None),
+            patch.object(OmniCoreAgent, "run", new_callable=AsyncMock) as mock_run,
+        ):
             mock_run.return_value = {"response": response, "status": status}
 
             result = await factory.run_subagent(
@@ -200,7 +207,10 @@ class TestSubagentFactory:
 
     @pytest.mark.asyncio
     async def test_run_subagent_handles_non_string_response(self, factory):
-        with patch.object(OmniCoreAgent, "run", new_callable=AsyncMock) as mock_run:
+        with (
+            patch.object(factory, "_workspace_output_error", return_value=None),
+            patch.object(OmniCoreAgent, "run", new_callable=AsyncMock) as mock_run,
+        ):
             mock_run.return_value = {
                 "response": {"saved": True, "path": "/workspace/x"}
             }
@@ -325,6 +335,46 @@ class TestSubagentFactory:
         assert result["status"] == "error"
         assert result["data"]["results"][0]["status"] == "error"
         assert result["data"]["results"][0]["error"] == "worker crashed"
+
+    @pytest.mark.asyncio
+    async def test_run_subagent_requires_declared_workspace_output(self, factory):
+        child = MagicMock()
+        child.run = AsyncMock(return_value={"status": "success", "response": "done"})
+        child.cleanup = AsyncMock()
+        child.agent.tool_runtime_registry.workspace.files.exists.return_value = False
+        factory.create_subagent = MagicMock(return_value=child)
+
+        result = await factory.run_subagent(
+            name="missing-output",
+            role="Reviewer",
+            task="Review the project",
+            output_path="/workspace/reports/review.md",
+        )
+
+        assert result["status"] == "error"
+        assert result["data"]["output_path"] == "/workspace/reports/review.md"
+        assert result["data"]["termination_reason"] == "missing_output"
+        assert "without creating" in result["data"]["error"]
+        child.cleanup.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_run_subagent_accepts_verified_workspace_output(self, factory):
+        child = MagicMock()
+        child.run = AsyncMock(return_value={"status": "success", "response": "done"})
+        child.cleanup = AsyncMock()
+        child.agent.tool_runtime_registry.workspace.files.exists.return_value = True
+        factory.create_subagent = MagicMock(return_value=child)
+
+        result = await factory.run_subagent(
+            name="verified-output",
+            role="Reviewer",
+            task="Review the project",
+            output_path="/workspace/reports/review.md",
+        )
+
+        assert result["status"] == "success"
+        assert result["data"]["output_path"] == "/workspace/reports/review.md"
+        child.agent.tool_runtime_registry.workspace.files.exists.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_run_parallel_subagents_applies_defaults_for_sparse_specs(

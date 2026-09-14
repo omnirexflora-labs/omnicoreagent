@@ -15,6 +15,7 @@ from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.logging import logger
 from omnicoreagent.governance.capabilities import subagent_spawn_authority_requests
 from omnicoreagent.governance.snapshots import derive_subagent_policy
+from omnicoreagent.core.workspace.paths import WORKSPACE_FILE_PATH_PREFIXES
 
 
 class SubagentFactory:
@@ -243,6 +244,26 @@ When you have completed the task:
                     "message": f"Subagent '{name}' encountered an error: {response[:100]}",
                 }
 
+            output_error = self._workspace_output_error(agent, output_path)
+            if output_error is not None:
+                logger.warning(
+                    "Subagent '%s' completed without a usable workspace output: %s",
+                    name,
+                    output_error,
+                )
+                return {
+                    "status": "error",
+                    "data": {
+                        "subagent_name": name,
+                        "output_path": output_path,
+                        "error": output_error,
+                        "summary": response[:500] if len(response) > 500 else response,
+                        "termination_reason": "missing_output",
+                        "governance": self._governance_reference(),
+                    },
+                    "message": f"Subagent '{name}' did not create the requested output: {output_path}",
+                }
+
             logger.info(f"Subagent '{name}' completed task")
 
             return {
@@ -262,10 +283,11 @@ When you have completed the task:
 
             return {
                 "status": "error",
-                "data": {
-                    "subagent_name": name,
-                    "error": error_msg,
-                    "governance": self._governance_reference(),
+                    "data": {
+                        "subagent_name": name,
+                        "output_path": output_path,
+                        "error": error_msg,
+                        "governance": self._governance_reference(),
                 },
                 "message": f"Subagent '{name}' failed: {error_msg}",
             }
@@ -274,6 +296,34 @@ When you have completed the task:
             await agent.cleanup()
             if name in self._active_subagents:
                 del self._active_subagents[name]
+
+    @staticmethod
+    def _workspace_output_error(agent: Any, output_path: str) -> str | None:
+        """Return a diagnostic when a child did not create its declared output."""
+        if not isinstance(output_path, str) or not output_path.strip():
+            return "A non-empty workspace output path is required."
+
+        runtime_agent = getattr(agent, "agent", None)
+        tool_runtime_registry = getattr(runtime_agent, "tool_runtime_registry", None)
+        workspace = getattr(tool_runtime_registry, "workspace", None)
+        files = getattr(workspace, "files", None)
+        if files is None or not hasattr(files, "exists"):
+            return "The worker workspace was not initialized, so its output could not be verified."
+
+        try:
+            exists = files.exists(
+                output_path,
+                strip_prefixes=WORKSPACE_FILE_PATH_PREFIXES,
+            )
+        except Exception as exc:
+            return f"The worker output could not be verified: {exc}"
+
+        if not exists:
+            return (
+                "The worker completed without creating the requested workspace "
+                f"output at '{output_path}'."
+            )
+        return None
 
     async def run_parallel_subagents(
         self,
