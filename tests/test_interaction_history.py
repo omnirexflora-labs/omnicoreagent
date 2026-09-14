@@ -1,7 +1,18 @@
 import pytest
 
 from omnicoreagent.core.context_manager import AgentLoopContextManager
-from omnicoreagent.core.interaction_history import render_message, split_recent
+from omnicoreagent.core.interaction_history import (
+    context_evidence,
+    render_message,
+    split_recent,
+    stable_message_digest,
+)
+from omnicoreagent.core.privacy import PrivacyConfig, PrivacyFilter
+from omnicoreagent.core.telemetry import (
+    InMemoryTelemetryStore,
+    TelemetryConfig,
+    TelemetryRecorder,
+)
 from omnicoreagent.core.summarizer.summarizer_engine import (
     prepare_history_sliding_window,
     prepare_history_token_budget,
@@ -72,6 +83,31 @@ def test_summary_rendering_includes_calls_and_exact_arguments():
     assert "echo" in text
     assert "001" in text
     assert "first" in text
+
+
+def test_context_digest_uses_privacy_safe_representation():
+    recorder = TelemetryRecorder(
+        store=InMemoryTelemetryStore(),
+        config=TelemetryConfig(redact_keys=["secret"]),
+        privacy_filter=PrivacyFilter(PrivacyConfig()),
+    )
+    message = {
+        "role": "user",
+        "content": "Contact alice@example.com",
+        "metadata": {"secret": "do-not-hash"},
+    }
+    permitted = recorder.canonicalize_for_digest(message)
+
+    assert permitted["content"] == "Contact [REDACTED_EMAIL]"
+    assert permitted["metadata"]["secret"] == "[REDACTED]"
+    assert stable_message_digest(message, canonicalizer=recorder.canonicalize_for_digest) == stable_message_digest(
+        permitted
+    )
+    evidence = context_evidence(
+        [message],
+        canonicalizer=recorder.canonicalize_for_digest,
+    )
+    assert evidence["message_digests"][0] == stable_message_digest(permitted)
 
 
 @pytest.mark.asyncio

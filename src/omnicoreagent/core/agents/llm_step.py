@@ -70,13 +70,22 @@ class AgentLlmStepRunner:
         if debug:
             logger.info(f"Sending {len(session_state.messages)} messages to LLM")
 
+        digest_canonicalizer = (
+            telemetry_recorder.canonicalize_for_digest
+            if telemetry_recorder is not None
+            else None
+        )
         try:
             if self.limits_enabled:
                 self.usage_limits.check_before_request(usage=run_usage)
 
             if self.context_manager.should_trigger(session_state.messages):
                 context_span = None
-                before_evidence = context_evidence(session_state.messages, tools)
+                before_evidence = context_evidence(
+                    session_state.messages,
+                    tools,
+                    canonicalizer=digest_canonicalizer,
+                )
                 compression_input = dict(before_evidence)
                 if telemetry_recorder is not None and telemetry_recorder.config.record_model_prompts:
                     compression_input["messages"] = [
@@ -100,7 +109,11 @@ class AgentLlmStepRunner:
                             ),
                         ),
                     )
-                    after_evidence = context_evidence(session_state.messages, tools)
+                    after_evidence = context_evidence(
+                        session_state.messages,
+                        tools,
+                        canonicalizer=digest_canonicalizer,
+                    )
                     compression_output = {
                         "before": before_evidence,
                         "after": after_evidence,
@@ -150,7 +163,11 @@ class AgentLlmStepRunner:
                     )
 
             context_span = None
-            context_summary = context_evidence(session_state.messages, tools)
+            context_summary = context_evidence(
+                session_state.messages,
+                tools,
+                canonicalizer=digest_canonicalizer,
+            )
             context_input = dict(context_summary)
             if telemetry_recorder is not None:
                 if telemetry_recorder.config.record_model_prompts:
@@ -447,7 +464,10 @@ class AgentLlmStepRunner:
                     llm_connection=llm_connection,
                     messages=summary_messages,
                     telemetry_recorder=telemetry_recorder,
-                    context_evidence=context_evidence(summary_messages),
+                    context_evidence=context_evidence(
+                        summary_messages,
+                        canonicalizer=telemetry_recorder.canonicalize_for_digest,
+                    ),
                     context_span_id=parent_span_id,
                 )
             return extract_response_content(response, default="")

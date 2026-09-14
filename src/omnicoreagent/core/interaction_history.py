@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+from collections.abc import Callable
 from typing import Any
 
 
@@ -15,10 +16,17 @@ def message_record(message: Any) -> dict[str, Any]:
     return vars(message)
 
 
-def stable_message_digest(message: Any) -> str:
-    """Return a stable identifier without retaining message content."""
+def stable_message_digest(
+    message: Any,
+    *,
+    canonicalizer: Callable[[Any], Any] | None = None,
+) -> str:
+    """Return a stable identifier for the permitted message representation."""
+    record = message_record(message)
+    if canonicalizer is not None:
+        record = canonicalizer(record)
     encoded = json.dumps(
-        message_record(message),
+        record,
         sort_keys=True,
         ensure_ascii=False,
         separators=(",", ":"),
@@ -28,7 +36,10 @@ def stable_message_digest(message: Any) -> str:
 
 
 def context_evidence(
-    messages: list[Any], tools: list[dict[str, Any]] | None = None
+    messages: list[Any],
+    tools: list[dict[str, Any]] | None = None,
+    *,
+    canonicalizer: Callable[[Any], Any] | None = None,
 ) -> dict[str, Any]:
     """Describe the exact model context using counts, digests, and identities.
 
@@ -36,12 +47,19 @@ def context_evidence(
     when their telemetry policy explicitly permits prompt capture.
     """
     records = [message_record(message) for message in messages]
-    message_digests = [stable_message_digest(message) for message in messages]
+    if canonicalizer is not None:
+        records = [canonicalizer(record) for record in records]
+    message_digests = [
+        stable_message_digest(message, canonicalizer=canonicalizer)
+        for message in messages
+    ]
     role_counts: dict[str, int] = {}
     for record in records:
         role = str(record.get("role", "unknown"))
         role_counts[role] = role_counts.get(role, 0) + 1
     tool_definitions = list(tools or [])
+    if canonicalizer is not None:
+        tool_definitions = canonicalizer(tool_definitions)
     tool_names = sorted(
         str(tool.get("function", {}).get("name", tool.get("name", "")))
         for tool in tool_definitions

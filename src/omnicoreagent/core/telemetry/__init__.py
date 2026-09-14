@@ -45,7 +45,11 @@ from omnicoreagent.core.telemetry.evidence import (
     EvidenceValidationError,
     GenericTraceEvidenceAdapter,
     OmniCoreEvidenceAdapter,
+    PORTABLE_EVIDENCE_CONTRACT,
+    PORTABLE_EVIDENCE_SCHEMA,
+    PORTABLE_EVIDENCE_SCHEMA_VERSION,
     PortableExecutionEvidence,
+    validate_portable_evidence_document,
 )
 from omnicoreagent.core.telemetry.payloads import (
     LocalTelemetryPayloadStore,
@@ -98,6 +102,10 @@ __all__ = [
     "GenericTraceEvidenceAdapter",
     "OmniCoreEvidenceAdapter",
     "PortableExecutionEvidence",
+    "PORTABLE_EVIDENCE_CONTRACT",
+    "PORTABLE_EVIDENCE_SCHEMA",
+    "PORTABLE_EVIDENCE_SCHEMA_VERSION",
+    "validate_portable_evidence_document",
     "TelemetryPayloadError",
     "TelemetryPayloadStore",
     "TelemetryRecorder",

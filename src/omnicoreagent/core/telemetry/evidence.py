@@ -7,6 +7,7 @@ evaluator, score, or release-decision behavior.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from typing import Any, Mapping
 
 from omnicoreagent.core.telemetry.models import (
@@ -16,17 +17,27 @@ from omnicoreagent.core.telemetry.models import (
     FOUNDATION_SPAN_KINDS,
     SpanStatus,
     TelemetryActor,
+    TelemetryCapture,
     TelemetryEvent,
     TelemetryProvenance,
     TelemetrySpan,
     TelemetryTrace,
+    TokenUsage,
     TraceStatus,
+    to_plain,
 )
 from omnicoreagent.core.telemetry.normalizer import TelemetryNormalizer
 
 
 class EvidenceValidationError(ValueError):
     """Raised when an adapter cannot preserve a trace's causal identity."""
+
+
+PORTABLE_EVIDENCE_SCHEMA = "omnicoreagent.execution-evidence"
+PORTABLE_EVIDENCE_SCHEMA_VERSION = 1
+PORTABLE_EVIDENCE_CONTRACT = (
+    f"{PORTABLE_EVIDENCE_SCHEMA}/v{PORTABLE_EVIDENCE_SCHEMA_VERSION}"
+)
 
 
 @dataclass(frozen=True)
@@ -48,28 +59,182 @@ class PortableExecutionEvidence:
 
     execution_id: str
     source: str
-    trace: TelemetryTrace
+    # ``trace`` is the serialized contract, never an internal TelemetryTrace.
+    trace: dict[str, Any]
     task: dict[str, Any] | None = None
     final_output_references: tuple[EvidenceReference, ...] = ()
     missing_evidence: tuple[dict[str, Any], ...] = ()
     adapter: str = "omnicoreagent"
     schema_version: int = 1
     facts: tuple[EvidenceReference, ...] = field(default_factory=tuple)
+    _normalized_trace: TelemetryTrace | None = field(
+        default=None, repr=False, compare=False
+    )
+
+    @property
+    def internal_trace(self) -> TelemetryTrace | None:
+        """Return the runtime trace for adapter internals only.
+
+        Evaluators and integrations should use ``trace`` or ``model_dump``.
+        This accessor exists for the runtime while the independent serialized
+        contract is introduced.
+        """
+
+        return self._normalized_trace
 
     def model_dump(self) -> dict[str, Any]:
         return {
+            "contract": PORTABLE_EVIDENCE_CONTRACT,
             "schema_version": self.schema_version,
             "execution_id": self.execution_id,
             "source": self.source,
             "adapter": self.adapter,
-            "task": self.task,
-            "trace": self.trace.model_dump(),
+            "task": _json_value(self.task),
+            "trace": _json_value(self.trace),
             "final_output_references": [
                 reference.model_dump() for reference in self.final_output_references
             ],
-            "missing_evidence": list(self.missing_evidence),
+            "missing_evidence": _json_value(list(self.missing_evidence)),
             "facts": [reference.model_dump() for reference in self.facts],
         }
+
+    def json(self, *, indent: int | None = None) -> str:
+        """Serialize the evidence using only JSON-native values."""
+
+        return json.dumps(self.model_dump(), sort_keys=True, indent=indent)
+
+
+def _json_value(value: Any) -> Any:
+    """Return a value that can cross the standalone JSON boundary."""
+
+    plain = to_plain(value)
+    try:
+        return json.loads(json.dumps(plain, default=str))
+    except (TypeError, ValueError):
+        return str(plain)
+
+
+def _serialize_trace(trace: TelemetryTrace) -> dict[str, Any]:
+    """Serialize a trace while retaining unknown external fields as null."""
+
+    payload = trace.model_dump()
+    trace_missing = set(trace.metadata.extra.get("external_missing_fields", []))
+    for field_name in trace_missing:
+        payload[field_name.removeprefix("trace_")] = None
+    for span in payload.get("spans", []):
+        missing = set(span.get("attributes", {}).get("external_missing_fields", []))
+        for field_name in missing:
+            if field_name != "timestamp":
+                span[field_name] = None
+    for event in payload.get("events", []):
+        missing = set(event.get("metadata", {}).get("external_missing_fields", []))
+        if "timestamp" in missing:
+            event["timestamp"] = None
+    return payload
+
+
+def validate_portable_evidence_document(
+    value: Mapping[str, Any],
+) -> None:
+    """Validate the standalone evidence envelope without runtime models.
+
+    This deliberately checks mappings, identifiers, and relationships instead
+    of constructing OmniCoreAgent telemetry objects. It is suitable for
+    contract tests and documents the minimum an external evaluator must read.
+    """
+
+    if not isinstance(value, Mapping):
+        raise EvidenceValidationError("portable evidence must be an object")
+    if value.get("contract") != PORTABLE_EVIDENCE_CONTRACT:
+        raise EvidenceValidationError(
+            f"portable evidence contract must be {PORTABLE_EVIDENCE_CONTRACT}"
+        )
+    if value.get("schema_version") != PORTABLE_EVIDENCE_SCHEMA_VERSION:
+        raise EvidenceValidationError("unsupported portable evidence schema version")
+    for key in ("execution_id", "source", "adapter"):
+        if not isinstance(value.get(key), str) or not value[key].strip():
+            raise EvidenceValidationError(f"portable evidence requires {key}")
+    trace = value.get("trace")
+    if not isinstance(trace, Mapping):
+        raise EvidenceValidationError("portable evidence trace must be an object")
+    trace_id = trace.get("trace_id")
+    root_span_id = trace.get("root_span_id")
+    if not isinstance(trace_id, str) or not trace_id:
+        raise EvidenceValidationError("portable trace requires trace_id")
+    if not isinstance(root_span_id, str) or not root_span_id:
+        raise EvidenceValidationError("portable trace requires root_span_id")
+    spans = trace.get("spans")
+    events = trace.get("events")
+    if not isinstance(spans, list) or not isinstance(events, list):
+        raise EvidenceValidationError("portable trace requires spans and events arrays")
+    span_ids = [_required_identifier(span, "span_id") for span in spans]
+    event_ids = [_required_identifier(event, "event_id") for event in events]
+    if len(span_ids) != len(set(span_ids)):
+        raise EvidenceValidationError("portable trace contains duplicate span IDs")
+    if len(event_ids) != len(set(event_ids)):
+        raise EvidenceValidationError("portable trace contains duplicate event IDs")
+    if root_span_id not in set(span_ids):
+        raise EvidenceValidationError("portable trace root span is absent")
+    span_set = set(span_ids)
+    event_set = set(event_ids)
+    parent_trace_id = trace.get("parent_trace_id")
+    parent_span_id = trace.get("parent_span_id")
+    for span in spans:
+        if not isinstance(span, Mapping):
+            raise EvidenceValidationError("portable span must be an object")
+        if span.get("trace_id") != trace_id:
+            raise EvidenceValidationError("portable span trace_id mismatch")
+        parent = span.get("parent_span_id")
+        if parent is not None and not isinstance(parent, str):
+            raise EvidenceValidationError("portable span parent_span_id must be a string")
+        if parent and parent not in span_set:
+            external_root = (
+                span.get("span_id") == root_span_id
+                and parent_trace_id
+                and parent == parent_span_id
+            )
+            if not external_root:
+                raise EvidenceValidationError(
+                    f"portable span {span.get('span_id')} references unknown parent"
+                )
+        event_ids_for_span = span.get("event_ids") or []
+        if not isinstance(event_ids_for_span, list):
+            raise EvidenceValidationError("portable span event_ids must be an array")
+        for event_id in event_ids_for_span:
+            if not isinstance(event_id, str):
+                raise EvidenceValidationError("portable span event ID must be a string")
+            if event_id not in event_set:
+                raise EvidenceValidationError(
+                    f"portable span {span.get('span_id')} references unknown event"
+                )
+    for event in events:
+        if not isinstance(event, Mapping):
+            raise EvidenceValidationError("portable event must be an object")
+        if event.get("trace_id") != trace_id:
+            raise EvidenceValidationError("portable event trace_id mismatch")
+        span_id = event.get("span_id")
+        if span_id is not None and not isinstance(span_id, str):
+            raise EvidenceValidationError("portable event span_id must be a string")
+        if span_id and span_id not in span_set:
+            raise EvidenceValidationError("portable event references unknown span")
+        parent_event_id = event.get("parent_event_id")
+        if parent_event_id is not None and not isinstance(parent_event_id, str):
+            raise EvidenceValidationError(
+                "portable event parent_event_id must be a string"
+            )
+        if parent_event_id and parent_event_id not in event_set:
+            raise EvidenceValidationError(
+                "portable event references unknown parent event"
+            )
+
+
+def _required_identifier(value: Any, key: str) -> str:
+    if not isinstance(value, Mapping) or not isinstance(value.get(key), str):
+        raise EvidenceValidationError(f"portable record requires {key}")
+    identifier = value[key].strip()
+    if not identifier:
+        raise EvidenceValidationError(f"portable record requires {key}")
+    return identifier
 
 
 class OmniCoreEvidenceAdapter:
@@ -84,6 +249,8 @@ class OmniCoreEvidenceAdapter:
         task: dict[str, Any] | None = None,
         source: str | None = None,
     ) -> PortableExecutionEvidence:
+        if not isinstance(value, TelemetryTrace) and _is_portable_document(value):
+            return self.import_document(value, task=task)
         trace = value if isinstance(value, TelemetryTrace) else TelemetryTrace.from_dict(dict(value))
         normalized = TelemetryNormalizer().normalize(trace)
         _validate_trace(normalized)
@@ -106,12 +273,29 @@ class OmniCoreEvidenceAdapter:
         return PortableExecutionEvidence(
             execution_id=normalized.run_id or normalized.trace_id,
             source=selected_source,
-            trace=normalized,
+            trace=_serialize_trace(normalized),
             task=dict(task) if task is not None else None,
             final_output_references=final_outputs,
             missing_evidence=missing,
             adapter=self.name,
             facts=facts,
+            _normalized_trace=normalized,
+        )
+
+    def import_document(
+        self,
+        value: Mapping[str, Any],
+        *,
+        task: dict[str, Any] | None = None,
+    ) -> PortableExecutionEvidence:
+        """Re-import a previously serialized portable document."""
+
+        validate_portable_evidence_document(value)
+        document_task = task if task is not None else value.get("task")
+        return self.import_trace(
+            value["trace"],
+            task=dict(document_task) if isinstance(document_task, Mapping) else None,
+            source=str(value["source"]),
         )
 
 
@@ -133,11 +317,18 @@ class GenericTraceEvidenceAdapter(OmniCoreEvidenceAdapter):
         task: dict[str, Any] | None = None,
         source: str | None = None,
     ) -> PortableExecutionEvidence:
+        if not isinstance(value, TelemetryTrace) and _is_portable_document(value):
+            return self.import_document(value, task=task)
         if isinstance(value, TelemetryTrace):
             return super().import_trace(value, task=task, source=source)
         raw = dict(value)
         trace_id = str(raw.get("trace_id") or raw.get("id") or "").strip()
         raw_spans = list(raw.get("spans") or [])
+        raw_events = list(raw.get("events") or [])
+        if any(not isinstance(item, Mapping) for item in raw_spans):
+            raise EvidenceValidationError("external spans must be objects")
+        if any(not isinstance(item, Mapping) for item in raw_events):
+            raise EvidenceValidationError("external events must be objects")
         root_span_id = str(
             raw.get("root_span_id")
             or (raw_spans[0].get("id") if raw_spans else "")
@@ -150,7 +341,7 @@ class GenericTraceEvidenceAdapter(OmniCoreEvidenceAdapter):
         spans = [_map_external_span(item, trace_id) for item in raw_spans]
         events = [
             _map_external_event(item, trace_id, root_span_id)
-            for item in list(raw.get("events") or [])
+            for item in raw_events
         ]
         execution = raw.get("execution")
         execution = execution if isinstance(execution, Mapping) else {}
@@ -161,16 +352,47 @@ class GenericTraceEvidenceAdapter(OmniCoreEvidenceAdapter):
         provenance.setdefault("source", str(execution.get("source") or "external"))
         provenance.setdefault("adapter", self.name)
         provenance.setdefault("external_ids", {"trace_id": trace_id})
+        provenance = _preserve_extra(
+            provenance,
+            raw_provenance if isinstance(raw_provenance, Mapping) else {},
+            {
+                "source",
+                "adapter",
+                "application_version",
+                "deployment_id",
+                "environment",
+                "evaluation_id",
+                "case_id",
+                "trial_id",
+                "environment_id",
+                "verifier_reference",
+                "external_ids",
+                "extra",
+            },
+        )
+        metadata = _map_trace_metadata(raw.get("metadata"))
+        if raw.get("status") is not None and not _known_trace_status(
+            raw.get("status")
+        ):
+            metadata.setdefault("extra", {})["external_status"] = raw.get("status")
         trace = TelemetryTrace(
             trace_id=trace_id,
             root_span_id=root_span_id,
             parent_trace_id=raw.get("parent_trace_id"),
             parent_span_id=raw.get("parent_span_id"),
             status=_map_trace_status(raw.get("status")),
+            incomplete=bool(raw.get("incomplete", False)),
+            started_at=raw.get("started_at") or raw.get("start_time"),
+            ended_at=raw.get("ended_at") or raw.get("end_time"),
             run_id=raw.get("run_id") or execution.get("run_id"),
             session_id=raw.get("session_id") or execution.get("session_id"),
             task_id=raw.get("task_id") or execution.get("task_id"),
+            suite_id=raw.get("suite_id") or execution.get("suite_id"),
             agent_id=raw.get("agent_id") or execution.get("agent_id"),
+            workflow_id=raw.get("workflow_id") or execution.get("workflow_id"),
+            metadata=metadata,
+            schema_version=_positive_int(raw.get("schema_version"), default=1),
+            evidence_status=_map_evidence_status(raw.get("evidence_status")),
             execution_surface=str(
                 raw.get("execution_surface") or execution.get("surface") or "external"
             ),
@@ -178,7 +400,17 @@ class GenericTraceEvidenceAdapter(OmniCoreEvidenceAdapter):
             spans=spans,
             events=events,
         )
-        return super().import_trace(trace, task=task, source=source)
+        evidence = super().import_trace(trace, task=task, source=source)
+        missing = _external_missing_evidence(raw, raw_spans, raw_events)
+        if missing:
+            normalized = evidence.internal_trace or trace
+            _mark_external_missing(normalized, missing)
+            evidence.trace = _serialize_trace(normalized)
+            evidence._normalized_trace = normalized
+            evidence.missing_evidence = tuple(
+                _dedupe_dicts([*evidence.missing_evidence, *missing])
+            )
+        return evidence
 
 
 def _source_for_trace(trace: TelemetryTrace) -> str:
@@ -189,6 +421,267 @@ def _source_for_trace(trace: TelemetryTrace) -> str:
     ):
         return "controlled"
     return "production"
+
+
+def _is_portable_document(value: Mapping[str, Any]) -> bool:
+    return (
+        isinstance(value, Mapping)
+        and value.get("contract") == PORTABLE_EVIDENCE_CONTRACT
+        and isinstance(value.get("trace"), Mapping)
+    )
+
+
+def _map_trace_metadata(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    metadata = dict(value)
+    known = {
+        "agent_name",
+        "agent_version",
+        "model_provider",
+        "model",
+        "prompt_version",
+        "tool_schema_version",
+        "memory_config_version",
+        "constraint_config_version",
+        "guardrail_mode",
+        "guardrail_config_version",
+        "privacy_config_version",
+        "telemetry_config_version",
+        "telemetry_storage",
+        "telemetry_payload_storage",
+        "tags",
+        "extra",
+    }
+    return _preserve_extra(metadata, value, known)
+
+
+def _preserve_extra(
+    target: dict[str, Any],
+    raw: Mapping[str, Any],
+    known: set[str],
+) -> dict[str, Any]:
+    extra = dict(target.get("extra") or {})
+    extra.update({key: value for key, value in raw.items() if key not in known})
+    if extra:
+        target["extra"] = extra
+    return target
+
+
+def _positive_int(value: Any, *, default: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return default
+    return value
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _duration_ms(raw: Mapping[str, Any]) -> int | None:
+    value = raw.get("duration_ms")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        value = raw.get("duration")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        value = float(value) * 1000
+    return max(0, int(round(value)))
+
+
+def _map_error(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        error = dict(value)
+        error.setdefault("type", "external_error")
+        error.setdefault("message", "external execution error")
+        return error
+    return {"type": "external_error", "message": str(value)}
+
+
+def _map_usage(value: Any) -> TokenUsage | dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return TokenUsage()
+    usage = dict(value)
+    prompt = usage.get("prompt_tokens", usage.get("input_tokens"))
+    completion = usage.get("completion_tokens", usage.get("output_tokens"))
+    total = usage.get("total_tokens")
+    if total is None and isinstance(prompt, (int, float)) and isinstance(completion, (int, float)):
+        total = prompt + completion
+    return TokenUsage(
+        prompt_tokens=_int_or_none(prompt),
+        completion_tokens=_int_or_none(completion),
+        total_tokens=_int_or_none(total),
+    )
+
+
+def _int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return max(0, int(value))
+
+
+def _map_capture(value: Any) -> TelemetryCapture | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        return TelemetryCapture(
+            state=CaptureState.MISSING,
+            source="adapter",
+            role="external",
+            reason="external capture descriptor was not an object",
+        )
+    raw_state = str(value.get("state") or CaptureState.MISSING.value)
+    try:
+        state = CaptureState(raw_state)
+        reason = value.get("reason")
+    except ValueError:
+        state = CaptureState.MISSING
+        reason = f"unsupported external capture state: {raw_state}"
+    return TelemetryCapture(
+        state=state,
+        source=str(value.get("source") or "adapter"),
+        role=str(value.get("role") or "external"),
+        reference=value.get("reference"),
+        content_type=value.get("content_type"),
+        checksum=value.get("checksum"),
+        original_bytes=_int_or_none(value.get("original_bytes")),
+        recorded_bytes=_int_or_none(value.get("recorded_bytes")),
+        policy_version=value.get("policy_version"),
+        reason=reason
+        or (
+            "external capture descriptor has no reason"
+            if state
+            in {
+                CaptureState.NOT_RECORDED,
+                CaptureState.MISSING,
+                CaptureState.TRUNCATED,
+                CaptureState.INFERRED,
+            }
+            else None
+        ),
+    )
+
+
+def _map_evidence_status(value: Any) -> str:
+    value = str(value or "unknown").lower()
+    return value if value in {"complete", "partial", "unknown"} else "unknown"
+
+
+def _external_missing_evidence(
+    raw_trace: Mapping[str, Any],
+    raw_spans: list[Any],
+    raw_events: list[Any],
+) -> list[dict[str, Any]]:
+    missing: list[dict[str, Any]] = []
+    trace_fields = {
+        "status": ("status",),
+        "started_at": ("started_at", "start_time"),
+        "ended_at": ("ended_at", "end_time"),
+        "schema_version": ("schema_version",),
+    }
+    for field_name, aliases in trace_fields.items():
+        if not any(raw_trace.get(alias) is not None for alias in aliases):
+            missing.append({"type": f"trace_{field_name}", "state": "unknown"})
+    if raw_trace.get("schema_version") is not None and not _valid_schema_version(
+        raw_trace.get("schema_version")
+    ):
+        missing.append({"type": "trace_schema_version", "state": "unknown"})
+    if raw_trace.get("status") is not None and not _known_trace_status(
+        raw_trace.get("status")
+    ):
+        missing.append({"type": "trace_status", "state": "unknown"})
+    for record_type, records, identifier_keys in (
+        ("span", raw_spans, ("span_id", "id")),
+        ("event", raw_events, ("event_id", "id")),
+    ):
+        for index, raw in enumerate(records):
+            raw = raw if isinstance(raw, Mapping) else {}
+            identifier = next(
+                (str(raw.get(key)) for key in identifier_keys if raw.get(key)),
+                f"{record_type}_{index}",
+            )
+            fields = {
+                "status": ("status",),
+                "started_at": ("started_at", "start_time"),
+                "ended_at": ("ended_at", "end_time"),
+                "schema_version": ("schema_version",),
+            }
+            if record_type == "event":
+                fields = {
+                    "timestamp": ("timestamp", "started_at"),
+                    "schema_version": ("schema_version",),
+                }
+            for field_name, aliases in fields.items():
+                if not any(raw.get(alias) is not None for alias in aliases):
+                    missing.append(
+                        {"type": f"{record_type}_{field_name}", "id": identifier, "state": "unknown"}
+                    )
+            if raw.get("schema_version") is not None and not _valid_schema_version(
+                raw.get("schema_version")
+            ):
+                missing.append(
+                    {
+                        "type": f"{record_type}_schema_version",
+                        "id": identifier,
+                        "state": "unknown",
+                    }
+                )
+            if (
+                record_type == "span"
+                and raw.get("status") is not None
+                and not _known_span_status(raw.get("status"))
+            ):
+                missing.append(
+                    {"type": "span_status", "id": identifier, "state": "unknown"}
+                )
+    return missing
+
+
+def _mark_external_missing(
+    trace: TelemetryTrace,
+    missing: list[dict[str, Any]],
+) -> None:
+    """Retain unknown external fields so serialization does not invent values."""
+
+    trace_fields = {
+        item["type"]
+        for item in missing
+        if item["type"].startswith("trace_")
+    }
+    if trace_fields:
+        trace.metadata.extra.setdefault("external_missing_fields", [])
+        trace.metadata.extra["external_missing_fields"] = sorted(
+            set(trace.metadata.extra["external_missing_fields"]) | trace_fields
+        )
+    by_span: dict[str, set[str]] = {}
+    for item in missing:
+        if item["type"].startswith("span_") and item.get("id"):
+            by_span.setdefault(item["id"], set()).add(item["type"])
+    for span in trace.spans:
+        missing_fields = [
+            item_type.removeprefix("span_")
+            for item_type in by_span.get(span.span_id, set())
+        ]
+        if missing_fields:
+            span.attributes["external_missing_fields"] = sorted(missing_fields)
+    by_event: dict[str, set[str]] = {}
+    for item in missing:
+        if item["type"].startswith("event_") and item.get("id"):
+            by_event.setdefault(item["id"], set()).add(item["type"])
+    for event in trace.events:
+        missing_fields = [
+            item_type.removeprefix("event_")
+            for item_type in by_event.get(event.event_id, set())
+        ]
+        if missing_fields:
+            event.metadata["external_missing_fields"] = sorted(missing_fields)
+
+
+def _valid_schema_version(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
 def _validate_trace(trace: TelemetryTrace) -> None:
@@ -291,6 +784,41 @@ def _map_external_span(raw: Mapping[str, Any], trace_id: str) -> TelemetrySpan:
     attributes = dict(raw.get("attributes") or {})
     if kind == "runtime.control" and original_kind != kind:
         attributes.setdefault("external_span_kind", original_kind)
+    attributes = _preserve_extra(
+        attributes,
+        raw,
+        {
+            "span_id",
+            "id",
+            "parent_span_id",
+            "parent_id",
+            "name",
+            "kind",
+            "type",
+            "actor",
+            "status",
+            "started_at",
+            "start_time",
+            "ended_at",
+            "end_time",
+            "duration_ms",
+            "duration",
+            "input",
+            "output",
+            "error",
+            "token_usage",
+            "usage",
+            "estimated_cost_usd",
+            "cost_usd",
+            "attributes",
+            "event_ids",
+            "schema_version",
+            "input_capture",
+            "output_capture",
+        },
+    )
+    if raw.get("status") is not None and not _known_span_status(raw.get("status")):
+        attributes["external_status"] = raw.get("status")
     return TelemetrySpan(
         trace_id=trace_id,
         span_id=str(raw.get("span_id") or raw.get("id") or "").strip(),
@@ -299,10 +827,21 @@ def _map_external_span(raw: Mapping[str, Any], trace_id: str) -> TelemetrySpan:
         kind=kind,
         actor=_map_actor(raw.get("actor"), original_kind),
         status=_map_span_status(raw.get("status")),
+        started_at=raw.get("started_at") or raw.get("start_time"),
+        ended_at=raw.get("ended_at") or raw.get("end_time"),
+        duration_ms=_duration_ms(raw),
         input=_mapping(raw.get("input")),
         output=_mapping(raw.get("output")),
+        error=_map_error(raw.get("error")),
+        token_usage=_map_usage(raw.get("token_usage") or raw.get("usage")),
+        estimated_cost_usd=_number(
+            raw.get("estimated_cost_usd", raw.get("cost_usd"))
+        ),
         attributes=attributes,
         event_ids=list(raw.get("event_ids") or []),
+        schema_version=_positive_int(raw.get("schema_version"), default=1),
+        input_capture=_map_capture(raw.get("input_capture")),
+        output_capture=_map_capture(raw.get("output_capture")),
     )
 
 
@@ -314,6 +853,35 @@ def _map_external_event(
     if event_type not in FOUNDATION_EVENT_TYPES:
         metadata.setdefault("experimental", True)
         metadata.setdefault("external_event_type", event_type)
+    metadata = _preserve_extra(
+        metadata,
+        raw,
+        {
+            "event_id",
+            "id",
+            "event_type",
+            "type",
+            "span_id",
+            "parent_event_id",
+            "parent_id",
+            "actor",
+            "timestamp",
+            "started_at",
+            "input",
+            "output",
+            "error",
+            "duration_ms",
+            "duration",
+            "token_usage",
+            "usage",
+            "estimated_cost_usd",
+            "cost_usd",
+            "metadata",
+            "schema_version",
+            "input_capture",
+            "output_capture",
+        },
+    )
     return TelemetryEvent(
         trace_id=trace_id,
         event_id=str(raw.get("event_id") or raw.get("id") or "").strip(),
@@ -321,9 +889,19 @@ def _map_external_event(
         parent_event_id=raw.get("parent_event_id") or raw.get("parent_id"),
         event_type=event_type,
         actor=_map_actor(raw.get("actor"), "event"),
+        timestamp=raw.get("timestamp") or raw.get("started_at"),
         input=_mapping(raw.get("input")),
         output=_mapping(raw.get("output")),
+        error=_map_error(raw.get("error")),
+        duration_ms=_duration_ms(raw),
+        token_usage=_map_usage(raw.get("token_usage") or raw.get("usage")),
+        estimated_cost_usd=_number(
+            raw.get("estimated_cost_usd", raw.get("cost_usd"))
+        ),
         metadata=metadata,
+        schema_version=_positive_int(raw.get("schema_version"), default=1),
+        input_capture=_map_capture(raw.get("input_capture")),
+        output_capture=_map_capture(raw.get("output_capture")),
     )
 
 
@@ -357,6 +935,20 @@ def _map_span_status(value: Any) -> SpanStatus:
     }.get(value, SpanStatus.RUNNING)
 
 
+def _known_span_status(value: Any) -> bool:
+    return str(value or "running").lower() in {
+        "running",
+        "success",
+        "completed",
+        "ok",
+        "failed",
+        "error",
+        "cancelled",
+        "timeout",
+        "skipped",
+    }
+
+
 def _map_trace_status(value: Any) -> TraceStatus:
     value = str(value or "running").lower()
     return {
@@ -369,3 +961,17 @@ def _map_trace_status(value: Any) -> TraceStatus:
         "timeout": TraceStatus.TIMEOUT,
         "partial": TraceStatus.PARTIAL,
     }.get(value, TraceStatus.RUNNING)
+
+
+def _known_trace_status(value: Any) -> bool:
+    return str(value or "running").lower() in {
+        "running",
+        "success",
+        "completed",
+        "ok",
+        "failed",
+        "error",
+        "cancelled",
+        "timeout",
+        "partial",
+    }

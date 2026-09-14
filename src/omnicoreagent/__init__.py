@@ -88,6 +88,10 @@ __all__ = [
     "GenericTraceEvidenceAdapter",
     "OmniCoreEvidenceAdapter",
     "PortableExecutionEvidence",
+    "PORTABLE_EVIDENCE_CONTRACT",
+    "PORTABLE_EVIDENCE_SCHEMA",
+    "PORTABLE_EVIDENCE_SCHEMA_VERSION",
+    "validate_portable_evidence_document",
     # Governance
     "GovernanceEngine",
     "PolicyEvaluator",
@@ -246,6 +250,22 @@ _EXPORTS = {
     "PortableExecutionEvidence": (
         "omnicoreagent.core.telemetry",
         "PortableExecutionEvidence",
+    ),
+    "PORTABLE_EVIDENCE_CONTRACT": (
+        "omnicoreagent.core.telemetry",
+        "PORTABLE_EVIDENCE_CONTRACT",
+    ),
+    "PORTABLE_EVIDENCE_SCHEMA": (
+        "omnicoreagent.core.telemetry",
+        "PORTABLE_EVIDENCE_SCHEMA",
+    ),
+    "PORTABLE_EVIDENCE_SCHEMA_VERSION": (
+        "omnicoreagent.core.telemetry",
+        "PORTABLE_EVIDENCE_SCHEMA_VERSION",
+    ),
+    "validate_portable_evidence_document": (
+        "omnicoreagent.core.telemetry",
+        "validate_portable_evidence_document",
     ),
     "TelemetryRecorder": ("omnicoreagent.core.telemetry", "TelemetryRecorder"),
     "TelemetryStream": ("omnicoreagent.core.telemetry", "TelemetryStream"),

@@ -99,6 +99,17 @@ def redact_payload(
     return _truncate_or_reference(redacted, config, payload_store=payload_store)
 
 
+def redact_sensitive_payload(value: Any, config: TelemetryConfig) -> Any:
+    """Apply telemetry key redaction without truncating or offloading.
+
+    This is used for privacy-safe context fingerprints. The same redacted
+    representation is the input to normal payload capture; size limits are
+    applied only when the payload is persisted.
+    """
+
+    return _redact(value, {key.lower() for key in config.redact_keys})
+
+
 def _redact(value: Any, redact_keys: set[str]) -> Any:
     if isinstance(value, dict):
         return {

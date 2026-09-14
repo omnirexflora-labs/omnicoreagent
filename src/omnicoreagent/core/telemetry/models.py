@@ -299,6 +299,7 @@ class TelemetryProvenance(SerializableTelemetryRecord):
     environment_id: str | None = None
     verifier_reference: str | None = None
     external_ids: dict[str, str] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.source = str(self.source).strip()
@@ -309,12 +310,32 @@ class TelemetryProvenance(SerializableTelemetryRecord):
             for key, value in dict(self.external_ids or {}).items()
             if str(value).strip()
         }
+        self.extra = dict(self.extra or {})
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> TelemetryProvenance:
         if data is None:
             return cls()
-        return cls(**data)
+        known = {
+            "source",
+            "adapter",
+            "application_version",
+            "deployment_id",
+            "environment",
+            "evaluation_id",
+            "case_id",
+            "trial_id",
+            "environment_id",
+            "verifier_reference",
+            "external_ids",
+            "extra",
+        }
+        extra = dict(data.get("extra") or {})
+        extra.update({key: value for key, value in data.items() if key not in known})
+        return cls(
+            **{key: data[key] for key in known if key in data and key != "extra"},
+            extra=extra,
+        )
 
 
 @dataclass
@@ -494,6 +515,7 @@ class TelemetryTraceMetadata(SerializableTelemetryRecord):
     telemetry_storage: str | None = None
     telemetry_payload_storage: str | None = None
     tags: list[str] = field(default_factory=list)
+    extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(
@@ -501,6 +523,26 @@ class TelemetryTraceMetadata(SerializableTelemetryRecord):
     ) -> TelemetryTraceMetadata:
         if data is None:
             return cls()
+        known = {
+            "agent_name",
+            "agent_version",
+            "model_provider",
+            "model",
+            "prompt_version",
+            "tool_schema_version",
+            "memory_config_version",
+            "constraint_config_version",
+            "guardrail_mode",
+            "guardrail_config_version",
+            "privacy_config_version",
+            "telemetry_config_version",
+            "telemetry_storage",
+            "telemetry_payload_storage",
+            "tags",
+            "extra",
+        }
+        extra = dict(data.get("extra") or {})
+        extra.update({key: value for key, value in data.items() if key not in known})
         return cls(
             agent_name=data.get("agent_name"),
             agent_version=data.get("agent_version"),
@@ -517,6 +559,7 @@ class TelemetryTraceMetadata(SerializableTelemetryRecord):
             telemetry_storage=data.get("telemetry_storage"),
             telemetry_payload_storage=data.get("telemetry_payload_storage"),
             tags=list(data.get("tags") or []),
+            extra=extra,
         )
 
 

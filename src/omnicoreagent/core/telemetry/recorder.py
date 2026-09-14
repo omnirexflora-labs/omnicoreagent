@@ -29,7 +29,11 @@ from omnicoreagent.core.telemetry.models import (
     utc_now,
 )
 from omnicoreagent.core.telemetry.payloads import TelemetryPayloadStore
-from omnicoreagent.core.telemetry.redaction import TelemetryConfig, redact_payload
+from omnicoreagent.core.telemetry.redaction import (
+    TelemetryConfig,
+    redact_payload,
+    redact_sensitive_payload,
+)
 from omnicoreagent.core.privacy import PrivacyFilter
 from omnicoreagent.core.telemetry.store import AbstractTelemetryStore
 from omnicoreagent.core.telemetry.exporters import (
@@ -167,6 +171,12 @@ class TelemetryRecorder:
 
     def current_context(self) -> TelemetryContext | None:
         return current_telemetry_context()
+
+    def canonicalize_for_digest(self, value: Any) -> Any:
+        """Return the representation used for privacy-safe context hashes."""
+
+        privacy_safe = self.privacy_filter.redact(value, boundary="telemetry")
+        return redact_sensitive_payload(privacy_safe, self.config)
 
     async def start_trace(
         self,
