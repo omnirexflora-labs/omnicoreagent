@@ -6,7 +6,6 @@ from os import PathLike
 from typing import Any
 import uuid
 
-from omnicoreagent.core.guardrails.models import DetectionConfig
 from omnicoreagent.core.privacy import PrivacyConfig
 from omnicoreagent.core.workspace.config import (
     WorkspaceConfig,
@@ -178,9 +177,14 @@ class AgentConfig:
             0 if self.total_tokens_limit is None else self.total_tokens_limit
         )
         self.guardrail_config = self.guardrail_config or {}
-        # Validate the nested security policy at the public configuration
-        # boundary, before model/tool construction can begin.
-        DetectionConfig(**self.guardrail_config)
+        if self.guardrail_mode != "off":
+            # Keep the package import path lightweight; validation still
+            # happens before any guarded runtime component is built.
+            from omnicoreagent.core.guardrails.models import DetectionConfig
+
+            # Validate the nested security policy at the public configuration
+            # boundary, before model/tool construction can begin.
+            DetectionConfig(**self.guardrail_config)
         if not isinstance(self.privacy_config, dict):
             raise ValueError("privacy_config must be a dict")
         self.privacy_config = _merge_defaults(

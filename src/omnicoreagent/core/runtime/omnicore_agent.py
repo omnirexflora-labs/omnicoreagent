@@ -13,7 +13,6 @@ from omnicoreagent.core.runtime import (
     summaries,
     streaming,
 )
-from omnicoreagent.core.guardrails.models import DetectionConfig
 from omnicoreagent.core.privacy import PrivacyFilter
 from omnicoreagent.core.runtime.imports import (
     LazyDefaultPromptBuilder,
@@ -341,6 +340,8 @@ class OmniCoreAgent:
         }
         guardrail_mode = metadata["guardrail_mode"]
         if guardrail_mode != "off":
+            from omnicoreagent.core.guardrails.models import DetectionConfig
+
             guardrail_config = DetectionConfig(
                 **(self.agent_config.get("guardrail_config") or {})
             )
