@@ -53,6 +53,10 @@ class SubAgentCallRunner:
                     },
                 )
             agent = resolve_agent(agent_name, sub_agents)
+            if telemetry_recorder is not None:
+                inherit_telemetry = getattr(agent, "_inherit_telemetry", None)
+                if callable(inherit_telemetry):
+                    inherit_telemetry(telemetry_recorder)
             params = dict(call.get("parameters", {}))
             params["session_id"] = session_id
             kwargs = build_kwargs(agent, params)
@@ -77,12 +81,20 @@ class SubAgentCallRunner:
                     output={"result": result},
                 )
             if telemetry_recorder is not None and span is not None:
+                child_trace_id = (
+                    result.get("trace_id") if isinstance(result, dict) else None
+                )
+                child_run_id = (
+                    result.get("run_id") if isinstance(result, dict) else None
+                )
                 await telemetry_recorder.end_span(
                     span.span_id,
                     status=SpanStatus.OK if succeeded else SpanStatus.ERROR,
                     output={
                         "agent_name": agent_name,
                         "status": "success" if succeeded else "error",
+                        "child_trace_id": child_trace_id,
+                        "child_run_id": child_run_id,
                     },
                 )
             return agent_name, result

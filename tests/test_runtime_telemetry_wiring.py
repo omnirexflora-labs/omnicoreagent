@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
+from omnicoreagent.core.agents.subagent_runner import SubAgentCallRunner
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.telemetry import (
     InMemoryTelemetryStore,
@@ -130,6 +131,39 @@ async def test_get_trace_family_follows_parent_and_child_traces() -> None:
         "trace-family-parent",
         "trace-family-child",
     ]
+
+
+@pytest.mark.asyncio
+async def test_configured_child_inherits_parent_telemetry_and_is_linked() -> None:
+    store = InMemoryTelemetryStore()
+    parent = _initialized_agent(store=store)
+    await parent.telemetry_recorder.start_trace(
+        trace_id="trace-configured-parent",
+        run_id="run-configured-parent",
+        session_id="session-configured",
+    )
+    child = _initialized_agent(store=store)
+    child.name = "configured-child"
+    child.agent.run = AsyncMock(return_value="child done")
+
+    _, result = await SubAgentCallRunner("parent").run(
+        {
+            "agent": "configured-child",
+            "parameters": {"query": "child task"},
+        },
+        [child],
+        "session-configured",
+        telemetry_recorder=parent.telemetry_recorder,
+    )
+
+    child_trace = await store.get_trace(result["trace_id"])
+    assert child_trace.parent_trace_id == "trace-configured-parent"
+    parent_trace = await store.get_trace("trace-configured-parent")
+    delegation_span = next(span for span in parent_trace.spans if span.kind == "subagent.run")
+    assert child_trace.parent_span_id == delegation_span.span_id
+    assert delegation_span.output["child_trace_id"] == result["trace_id"]
+
+    await parent.telemetry_recorder.end_trace()
 
 
 @pytest.mark.asyncio

@@ -254,6 +254,16 @@ class OmniCoreAgent:
                 "telemetry_stream.store must be the same object as telemetry_store"
             )
 
+    def _inherit_telemetry(self, recorder: Any) -> None:
+        """Use a parent recorder for a delegated child execution."""
+        store = getattr(recorder, "store", None)
+        if store is None:
+            raise ValueError("A parent telemetry recorder must expose a store")
+        self.telemetry_store = store
+        self.telemetry_recorder = recorder
+        self.telemetry_stream = TelemetryStream(store)
+        self.telemetry_config = getattr(recorder, "config", None)
+
     def _telemetry_actor(self) -> TelemetryActor:
         return TelemetryActor(type=ActorType.AGENT, name=self.name)
 
