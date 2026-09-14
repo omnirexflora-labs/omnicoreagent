@@ -221,3 +221,40 @@ excludes generated governance/child accounting from loop signatures.
 and live results. Deep-agent behavior is an `OmniCoreAgent` mode enabled through
 `enable_subagents`, not a separate retired workflow. MCP compatibility and the
 separate provider Responses/lossless-continuation work remain open.
+
+## Post-migration hardening sequence — active after `53720a3`
+
+The native protocol migration and the telemetry, guardrail, and privacy
+checkpoints above are complete for the supported local, deep-agent, and
+background paths. Remaining work is ordered as small, independently tested
+reliability units:
+
+1. **Deep-agent handoff reliability — complete.** Worker budgets and
+   workspace/context defaults are enforced, and a child is only reported as
+   successful after its declared workspace output exists. Missing, invalid, or
+   unverifiable output returns a structured `missing_output` failure so the
+   parent can decide whether to retry or continue. Evidence: `8841795` and
+   `445275f`; focused subagent tests pass.
+2. **Governance authority integrity — complete at `cc26ec4`.** Policy models
+   reject invalid numeric/risk inputs, conflicting rule buckets, duplicate rule
+   identifiers, and malformed targets. Mutable budget counters no longer change
+   the semantic policy hash, approval results must match their request, approval
+   lifecycle evidence is emitted through built-in telemetry, and
+   `audit_required` fails closed without an active trace or when strict audit
+   persistence fails. Evidence: 276 focused governance/runtime tests, Ruff, and
+   diff checks pass.
+3. **MCP v2 compatibility — deferred to a separate PR.** The installed SDK
+   boundary defects remain documented in `native-runtime-reassessment.md`.
+   This branch will not add a compatibility fallback or silently preserve the
+   broken adapter while the known MCP work is out of scope.
+4. **Dead-path and documentation cleanup.** Re-audit remaining XML-era/manual
+   extraction and obsolete external exporter or workflow examples only after
+   active callers are proven absent. Delete obsolete files and examples; retain
+   XML as task data and historical discovery evidence.
+5. **Production integration gate.** Run the supported local/deep/background
+   matrix, privacy and governance failure paths, telemetry persistence and
+   streaming checks, then record provider-specific and remote-store limits.
+
+Each item ends with focused tests, a clean diff, an exact commit, and a push
+before the next item begins. No MCP repair or broad cleanup is mixed into the
+governance checkpoint.
