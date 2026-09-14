@@ -92,3 +92,11 @@ provider/client closure, and fail-fast handling of missing streamed call data.
 Reference: [OpenAI Luna model documentation](https://developers.openai.com/api/docs/models/gpt-5.6-luna)
 and [function-calling documentation](https://developers.openai.com/api/docs/guides/function-calling).
 Endpoint restrictions above were observed directly in this account's API response.
+
+## Subsequent LiteLLM review
+
+The [current LiteLLM review](litellm-current-review.md) supersedes any inference
+that separate provider SDKs are necessary. LiteLLM 1.100.1 passed isolated live
+streamed tool tests and high-effort Responses continuation, including with OpenAI
+SDK 2.24.0. This report's original SDK-path results remain historical evidence;
+the current LiteLLM path still needs application integration and full validation.
