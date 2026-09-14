@@ -254,11 +254,19 @@ reliability units:
    `OmniCoreAgent` run and remains covered by the cookbook tests. Historical
    discovery evidence still points at the investigated source snapshot; it is
    not an active import or documentation link. The remaining XML-era/manual
-   extraction and optional exporter audit is still required before the final
-   integration gate.
-5. **Production integration gate.** Run the supported local/deep/background
-   matrix, privacy and governance failure paths, telemetry persistence and
-   streaming checks, then record provider-specific and remote-store limits.
+   extraction audit found no executable XML tags, parsers, action extractors, or
+   XML prompt wrappers in active source. LangSmith, Opik, and OTLP exporters
+   remain deliberately optional adapters because their public export API and
+   tests have live callers; built-in telemetry does not depend on them. This
+   cleanup is complete at `d196576`.
+5. **Production integration gate — complete for the supported scope.** The
+   local, deep-agent, background, governance, privacy, telemetry, streaming,
+   serving, and context suites pass together. The final process run passed
+   1,151 tests with 14 expected external-service skips; `uv build` produced
+   the source distribution and wheel. The focused cleanup gate passed 38 tests,
+   and Ruff plus `git diff --check` passed. Credentialed provider results and
+   remote-store limits remain recorded in the validation reports; MCP v2
+   compatibility remains intentionally deferred to its separate PR.
 
 Each item ends with focused tests, a clean diff, an exact commit, and a push
 before the next item begins. No MCP repair or broad cleanup is mixed into the
