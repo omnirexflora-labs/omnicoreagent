@@ -395,6 +395,9 @@ class TelemetryEvent(SerializableTelemetryRecord):
     schema_version: int = 3
     input_capture: TelemetryCapture | None = None
     output_capture: TelemetryCapture | None = None
+    # Store-local transport cursor. It is assigned on stream copies and is not
+    # part of the evidence identity (event_id remains the stable reference).
+    stream_cursor: str | None = None
 
     def __post_init__(self) -> None:
         self.timestamp = parse_datetime(self.timestamp) or utc_now()

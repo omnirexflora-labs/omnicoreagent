@@ -12,7 +12,7 @@ from omnicoreagent.core.telemetry import (
     TelemetryStream,
     TraceStatus,
 )
-from omnicoreagent.serve.sse import run_agent_stream, stream_session_events
+from omnicoreagent.serve.sse import format_sse_event, run_agent_stream, stream_session_events
 
 
 def _event_name(chunk: str) -> str:
@@ -22,6 +22,16 @@ def _event_name(chunk: str) -> str:
 def _event_data(chunk: str) -> dict:
     data_line = next(line for line in chunk.splitlines() if line.startswith("data: "))
     return json.loads(data_line.removeprefix("data: "))
+
+
+def test_format_sse_event_emits_resume_id_after_event_type():
+    chunk = format_sse_event("agent_step", {"stream_cursor": "17", "value": 1})
+
+    assert chunk.splitlines()[:3] == [
+        "event: agent_step",
+        "id: 17",
+        'data: {"stream_cursor": "17", "value": 1}',
+    ]
 
 
 class _TelemetryAgent:
@@ -330,6 +340,23 @@ async def test_stream_session_events_replays_existing_telemetry():
         "final_answer",
     ]
     assert _event_data(chunks[1])["run_id"] == "run_existing"
+
+
+@pytest.mark.asyncio
+async def test_stream_session_events_resumes_after_supplied_cursor():
+    agent = _TelemetryAgent()
+    await agent.run("old", session_id="session-resume", run_id="run_resume")
+
+    stream = stream_session_events(agent, "session-resume", cursor="1")
+    chunks = []
+    async for chunk in stream:
+        chunks.append(chunk)
+        if _event_name(chunk) == "final_answer":
+            break
+    await stream.aclose()
+
+    assert [_event_name(chunk) for chunk in chunks] == ["session", "final_answer"]
+    assert "id: 2" in chunks[1]
 
 
 @pytest.mark.asyncio

@@ -105,7 +105,9 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
             trace = self._require_trace_unlocked(trace_id)
             self._trace_sequences[trace_id] += 1
             event.sequence_number = self._trace_sequences[trace_id]
-            trace.events.append(_copy_event(event))
+            trace_event = _copy_event(event)
+            trace_event.stream_cursor = None
+            trace.events.append(trace_event)
             if event.span_id:
                 span = _find_span(trace, event.span_id)
                 if span and event.event_id not in span.event_ids:
@@ -214,7 +216,7 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
         scope: TelemetryStreamScope,
         cursor: str | None,
     ) -> list[TelemetryEvent]:
-        after = int(cursor or 0)
+        after = _parse_stream_cursor(cursor)
         events: list[TelemetryEvent] = []
         for event_cursor, event in self._event_index:
             if event_cursor <= after:
@@ -282,6 +284,7 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
     ) -> None:
         self._event_cursor += 1
         stored_event = _copy_event(event)
+        stored_event.stream_cursor = str(self._event_cursor)
         self._event_index.append((self._event_cursor, stored_event))
         if not notify:
             return
@@ -323,7 +326,12 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         async with self._lock:
             await self._load_unlocked()
             await self._inner.append_event(trace_id, event)
-            await self._append_record_unlocked("event", event.model_dump())
+            cursor = await self._inner.get_stream_cursor(
+                TelemetryStreamScope(trace_id=trace_id)
+            )
+            payload = event.model_dump()
+            payload["stream_cursor"] = cursor
+            await self._append_record_unlocked("event", payload)
 
     async def start_span(self, trace_id: str, span: TelemetrySpan) -> None:
         async with self._lock:
@@ -508,6 +516,20 @@ def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         handle.write(text)
+
+
+def _parse_stream_cursor(cursor: str | None) -> int:
+    if cursor is None or cursor == "":
+        return 0
+    try:
+        parsed = int(cursor)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Telemetry stream cursor must be a non-negative integer"
+        ) from exc
+    if parsed < 0:
+        raise ValueError("Telemetry stream cursor must be a non-negative integer")
+    return parsed
 
 
 def _copy_event(event: TelemetryEvent) -> TelemetryEvent:

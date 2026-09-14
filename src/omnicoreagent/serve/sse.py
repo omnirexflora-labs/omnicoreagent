@@ -59,7 +59,9 @@ def format_sse_event(event_type: str, data: dict) -> str:
         SSE-formatted string
     """
     json_data = json.dumps(data, default=str)
-    return f"event: {event_type}\ndata: {json_data}\n\n"
+    stream_id = data.get("stream_cursor") or data.get("event_id")
+    id_line = f"id: {stream_id}\n" if stream_id is not None else ""
+    return f"event: {event_type}\n{id_line}data: {json_data}\n\n"
 
 
 def _normalize_event_for_sse(event: Any, session_id: str) -> tuple[str, dict[str, Any]]:
@@ -437,6 +439,7 @@ async def stream_session_events(
     agent: AgentType,
     session_id: str,
     run_id: str | None = None,
+    cursor: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Replay stored telemetry events, then stream live session telemetry via SSE.
@@ -461,14 +464,22 @@ async def stream_session_events(
     seen_event_ids: set[str] = set()
 
     try:
-        cursor = await _get_telemetry_stream_cursor(agent, session_id, run_id)
+        replay_cursor = cursor
+        if replay_cursor is None:
+            replay_cursor = await _get_telemetry_stream_cursor(
+                agent, session_id, run_id
+            )
         pump_task = asyncio.create_task(
-            _pump_session_events(agent, session_id, event_queue, cursor, run_id)
+            _pump_session_events(
+                agent, session_id, event_queue, replay_cursor, run_id
+            )
         )
 
         try:
             replay_events = await asyncio.wait_for(
-                _get_telemetry_events_after_cursor(agent, session_id, None, run_id),
+                _get_telemetry_events_after_cursor(
+                    agent, session_id, cursor, run_id
+                ),
                 timeout=_EVENT_REPLAY_TIMEOUT_SECONDS,
             )
         except Exception as exc:

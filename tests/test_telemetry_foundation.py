@@ -286,6 +286,36 @@ async def test_telemetry_stream_replays_and_follows_by_scope():
 
 
 @pytest.mark.asyncio
+async def test_stream_replay_exposes_transport_cursor_without_changing_trace_identity():
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    await recorder.start_trace(trace_id="trace-stream-cursor", session_id="session-cursor")
+    await recorder.emit_event("agent_start")
+    await recorder.emit_event("agent_step", input={"step": 1})
+
+    events = await store.get_events_after(
+        TelemetryStreamScope(session_id="session-cursor"), None
+    )
+    trace = await store.get_trace("trace-stream-cursor")
+
+    assert [event.stream_cursor for event in events] == ["1", "2"]
+    assert [event.event_id for event in events] == [event.event_id for event in trace.events]
+    assert all(event.stream_cursor is None for event in trace.events)
+
+
+@pytest.mark.asyncio
+async def test_stream_rejects_invalid_cursor():
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    await recorder.start_trace(trace_id="trace-invalid-cursor")
+
+    with pytest.raises(ValueError, match="non-negative integer"):
+        await store.get_events_after(
+            TelemetryStreamScope(trace_id="trace-invalid-cursor"), "event-id"
+        )
+
+
+@pytest.mark.asyncio
 async def test_telemetry_stream_isolates_sessions():
     store = InMemoryTelemetryStore()
     recorder = TelemetryRecorder(store)
@@ -346,6 +376,11 @@ async def test_jsonl_store_persists_trace_events_and_spans(tmp_path):
     assert trace.trace_id == "trace-jsonl"
     assert trace.status == TraceStatus.COMPLETED
     assert [event.event_type for event in trace.events] == ["agent_start"]
+
+    replayed = await reloaded.get_events_after(
+        TelemetryStreamScope(session_id="session-jsonl"), None
+    )
+    assert replayed[0].stream_cursor == "1"
 
 
 @pytest.mark.asyncio

@@ -287,10 +287,14 @@ def create_telemetry_router() -> APIRouter:
         request: Request,
         session_id: str = Query(...),
         run_id: str | None = Query(default=None),
+        cursor: str | None = Query(default=None),
     ):
         agent = get_agent(request)
+        resume_cursor = cursor or request.headers.get("last-event-id")
         return StreamingResponse(
-            stream_session_events(agent, session_id, run_id=run_id),
+            stream_session_events(
+                agent, session_id, run_id=run_id, cursor=resume_cursor
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",

@@ -68,6 +68,14 @@ extractors use these relationships:
 The event sequence is an ordering aid only. Parallel calls must remain
 independent unless an explicit causal reference says otherwise.
 
+Stream consumers may receive a store-local `stream_cursor` on replay/follow
+event copies. It is a transport position for reconnecting from the same store,
+not an evidence identity; evaluators must use `event_id` and `sequence_number`.
+OmniServe emits that cursor as the SSE `id` field when available.
+Clients may resume `/telemetry/events/stream` with either the `cursor` query
+parameter or the standard `Last-Event-ID` header. A supplied cursor is replayed
+before live follow; duplicate event IDs are suppressed at the SSE boundary.
+
 Context digests identify the exact ordered message/tool catalog supplied to a
 model without requiring content retention. Prompt payloads are added to the
 context/model records only when `record_model_prompts` is enabled. Compression
