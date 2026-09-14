@@ -83,6 +83,11 @@ __all__ = [
     "WorkspaceTelemetryPayloadStore",
     "TelemetryPayloadError",
     "redact_payload",
+    "EvidenceReference",
+    "EvidenceValidationError",
+    "GenericTraceEvidenceAdapter",
+    "OmniCoreEvidenceAdapter",
+    "PortableExecutionEvidence",
     # Governance
     "GovernanceEngine",
     "PolicyEvaluator",
@@ -225,6 +230,23 @@ _EXPORTS = {
         "TelemetryPayloadError",
     ),
     "redact_payload": ("omnicoreagent.core.telemetry", "redact_payload"),
+    "EvidenceReference": ("omnicoreagent.core.telemetry", "EvidenceReference"),
+    "EvidenceValidationError": (
+        "omnicoreagent.core.telemetry",
+        "EvidenceValidationError",
+    ),
+    "GenericTraceEvidenceAdapter": (
+        "omnicoreagent.core.telemetry",
+        "GenericTraceEvidenceAdapter",
+    ),
+    "OmniCoreEvidenceAdapter": (
+        "omnicoreagent.core.telemetry",
+        "OmniCoreEvidenceAdapter",
+    ),
+    "PortableExecutionEvidence": (
+        "omnicoreagent.core.telemetry",
+        "PortableExecutionEvidence",
+    ),
     "TelemetryRecorder": ("omnicoreagent.core.telemetry", "TelemetryRecorder"),
     "TelemetryStream": ("omnicoreagent.core.telemetry", "TelemetryStream"),
     "TelemetryExporter": ("omnicoreagent.core.telemetry", "TelemetryExporter"),

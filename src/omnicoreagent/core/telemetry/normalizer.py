@@ -39,6 +39,12 @@ class TelemetryNormalizer:
 
         for span in trace.spans:
             if span.parent_span_id and span.parent_span_id not in span_ids:
+                if (
+                    span.span_id == trace.root_span_id
+                    and trace.parent_trace_id is not None
+                    and span.parent_span_id == trace.parent_span_id
+                ):
+                    continue
                 missing.append({"type": "parent_span", "id": span.parent_span_id})
             for event_id in span.event_ids:
                 if event_id not in event_ids:

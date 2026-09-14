@@ -75,6 +75,21 @@ records before/after digests and the groups dropped or replaced. A context
 summary model request is a normal linked `model.call` span, so internal model
 work is not invisible to evaluation.
 
+## Adapter boundary
+
+`OmniCoreEvidenceAdapter` accepts a stored OmniCoreAgent trace or its serialized
+form, normalizes it, validates causal identity, and returns a
+`PortableExecutionEvidence` view. It reports final-output references and
+missing/capture-gap evidence while leaving the trace facts unchanged. A
+controlled adapter may attach task, case, trial, environment, and verifier
+metadata before handing the same view to a future evaluator.
+
+`GenericTraceEvidenceAdapter` is a small vendor-neutral import fixture. It maps
+common agent/model/tool span names to the foundation kinds and preserves unknown
+event types as experimental facts. This proves that production evidence does
+not require OmniCoreAgent's internal classes; Harbor integration can use the
+same boundary later without making the runtime depend on Harbor.
+
 ## Required normalized fields
 
 The normalized trace must expose:

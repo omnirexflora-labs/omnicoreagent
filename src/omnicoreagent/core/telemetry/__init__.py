@@ -40,6 +40,13 @@ from omnicoreagent.core.telemetry.models import (
     TraceStatus,
 )
 from omnicoreagent.core.telemetry.normalizer import TelemetryNormalizer
+from omnicoreagent.core.telemetry.evidence import (
+    EvidenceReference,
+    EvidenceValidationError,
+    GenericTraceEvidenceAdapter,
+    OmniCoreEvidenceAdapter,
+    PortableExecutionEvidence,
+)
 from omnicoreagent.core.telemetry.payloads import (
     LocalTelemetryPayloadStore,
     TelemetryPayloadStore,
@@ -86,6 +93,11 @@ __all__ = [
     "TelemetryExporter",
     "TelemetryExportResult",
     "TelemetryNormalizer",
+    "EvidenceReference",
+    "EvidenceValidationError",
+    "GenericTraceEvidenceAdapter",
+    "OmniCoreEvidenceAdapter",
+    "PortableExecutionEvidence",
     "TelemetryPayloadError",
     "TelemetryPayloadStore",
     "TelemetryRecorder",
