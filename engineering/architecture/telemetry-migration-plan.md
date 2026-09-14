@@ -15,7 +15,7 @@ stream, background job, or deep-agent execution to work.
 The source snapshot for this plan is branch `refactor/native-tool-runtime`.
 The plan was started at commit `8841795abda60388117ff5a1b32b3a633ede3a3a`;
 implementation checkpoints are listed below as they land. The current
-checkpoint is `d2a3246`.
+checkpoint is `6781201`.
 
 ## Current boundary
 
@@ -38,11 +38,12 @@ trace-family lookup. Model prompts and responses remain excluded by default;
 when enabled they use the configured redaction, truncation, and built-in
 workspace/object-storage offload policy.
 
-The remaining telemetry work is delivery hardening: verify reconnect behavior
-under production load, finish public streaming guarantees, and keep
-provider/model buffering separate from telemetry buffering. Those checks are
-prerequisites for changing PromptGuard behavior or the MCP adapter, but they do
-not require an external trace platform.
+The remaining telemetry work is evaluation integration. Delivery hardening now
+includes resumable replay/follow cursors, public SSE positions, and bounded
+provider stream statistics that make model buffering observable without
+retaining token deltas. These checks are prerequisites for changing PromptGuard
+behavior or the MCP adapter, but they do not require an external trace
+platform.
 
 ## Evaluation-evidence work sequence
 
@@ -80,7 +81,7 @@ unit starts.
 | 2. Complete request trajectory | Complete at `407b0d4` | 83 focused model/runtime/telemetry tests passed; Ruff and diff checks passed. Model turns expose tool catalog/count and finish metadata; requested/resolved calls, execution events, batch IDs, and exact post-offload observations retain causal links. |
 | 3. Context and lineage evidence | Complete at `b67fb18` | Context assembly and compression preserve message/tool digests and opt-in prompt payloads; internal summary calls, memory reads/writes, workspace offloads, and subagent terminal links are correlated. Capture gaps mark traces partial and are surfaced by normalization. Focused suite: 102 passed. Full suite: 1,155 passed, 14 skipped, with one unrelated `tiktoken` encoding-cache failure in `tests/test_base.py::test_run_prepares_internal_tools_once_for_prompt_and_execution`. |
 | 4. Portable evidence adapters | Complete at `adfa91d` | `OmniCoreEvidenceAdapter` normalizes and validates built-in traces, preserves cross-trace lineage, exposes final-output references and capture gaps, and returns a judgment-free portable view. `GenericTraceEvidenceAdapter` proves an external trace shape can be imported while preserving unknown events as experimental facts. Adapter/docs/runtime suite: 111 passed. |
-| 5. Telemetry delivery hardening | Complete at `d2a3246` | Stream event copies carry store-local cursors, JSONL replay rebuilds cursor positions, SSE emits resumable `id` fields, and `/telemetry/events/stream` accepts `cursor` or `Last-Event-ID`. Focused stream/API suite: 65 passed. |
+| 5. Telemetry delivery hardening | Complete at `6781201` | Stream event copies carry store-local cursors, JSONL replay rebuilds cursor positions, SSE emits resumable `id` fields, and `/telemetry/events/stream` accepts `cursor` or `Last-Event-ID`. `model.call` spans also record bounded provider stream statistics, including partial-stream failures, without token-by-token payloads. Focused stream/model/API suite: 96 passed (84 deselected). |
 
 ## Rules for every phase
 
@@ -254,11 +255,10 @@ evidence units below extend them without changing PromptGuard detection
 semantics, MCP behavior, context strategy, workspace storage, or model
 streaming. They keep runtime facts separate from future evaluator judgments.
 
-The next checkpoint is portable evidence adapters (migration unit 4): validate
-normalized traces and an independent adapter fixture before adding evaluators.
-Delivery hardening and production tests for replay/follow cursors, reconnects,
-bounded queues, cancellation, and provider buffering follow that boundary. MCP
-v2 remains a separate later unit because its installed
+The next checkpoint is the evaluation layer (migration unit 6): validate task
+specifications, deterministic checks, evaluator judgments, comparisons, and
+release decisions against the portable evidence contract. MCP v2 remains a
+separate later unit because its installed
 SDK compatibility issue is already known and intentionally deferred.
 
 ## Decisions recorded before the persistence/API phase

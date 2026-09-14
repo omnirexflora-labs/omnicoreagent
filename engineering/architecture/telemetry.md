@@ -187,6 +187,8 @@ The foundation phase provides:
 - deterministic trace normalization
 - versioned capture descriptors, context digests, causal tool/observation links,
   and portable evidence adapters
+- bounded provider stream statistics on `model.call` spans, including partial
+  stream terminal states without token-by-token payload capture
 - runtime evidence emission helpers
 
 The runtime facade wiring phase provides:
