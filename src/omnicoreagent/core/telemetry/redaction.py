@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
+import math
 from typing import Any
 
 from omnicoreagent.core.telemetry.payloads import TelemetryPayloadStore
@@ -47,6 +48,8 @@ class TelemetryConfig:
     offload_large_payloads: bool = False
     offload_target: str = "workspace"
     strict: bool = False
+    persistence_timeout_seconds: float | None = 5.0
+    export_timeout_seconds: float | None = 5.0
 
     def __post_init__(self) -> None:
         self.storage = str(self.storage).lower().strip()
@@ -63,6 +66,17 @@ class TelemetryConfig:
             )
         if self.retention_days is not None and self.retention_days < 0:
             raise ValueError("telemetry retention_days must be non-negative or None")
+        for field_name in ("persistence_timeout_seconds", "export_timeout_seconds"):
+            value = getattr(self, field_name)
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                raise ValueError(
+                    f"telemetry {field_name} must be non-negative, finite, or None"
+                )
 
     @classmethod
     def from_value(cls, value: "TelemetryConfig | dict[str, Any] | None") -> "TelemetryConfig | None":

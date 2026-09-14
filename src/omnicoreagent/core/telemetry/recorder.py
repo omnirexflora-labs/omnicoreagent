@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from dataclasses import replace
+import asyncio
 from typing import Any
 
 from omnicoreagent.core.telemetry.context import (
@@ -353,11 +354,34 @@ class TelemetryRecorder:
                     trace_id=context.trace_id,
                 )
                 if trace is not None:
-                    await export_trace_to_many(
-                        trace,
-                        self.exporters,
-                        strict=self.config.strict,
-                    )
+                    if root_context is not None:
+                        set_telemetry_context(root_context)
+                    try:
+                        results = await export_trace_to_many(
+                            trace,
+                            self.exporters,
+                            strict=self.config.strict,
+                            timeout=self.config.export_timeout_seconds,
+                        )
+                        failures = [
+                            result
+                            for result in results
+                            if "error" in result.metadata
+                        ]
+                        for failure in failures:
+                            await self._record_export_failure(failure)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        if self.config.strict:
+                            raise
+                        await self._record_export_failure(
+                            {
+                                "exporter": "telemetry",
+                                "error": str(exc),
+                                "error_type": exc.__class__.__name__,
+                            }
+                        )
         finally:
             set_telemetry_context(parent_context)
 
@@ -731,7 +755,7 @@ class TelemetryRecorder:
 
     async def _write(self, operation, *, trace_id: str | None = None) -> None:
         try:
-            await operation
+            await self._bounded(operation, self.config.persistence_timeout_seconds)
         except Exception:
             if trace_id is not None:
                 self._incomplete_trace_ids.add(trace_id)
@@ -740,10 +764,40 @@ class TelemetryRecorder:
 
     async def _read(self, operation, *, trace_id: str | None = None):
         try:
-            return await operation
+            return await self._bounded(operation, self.config.persistence_timeout_seconds)
         except Exception:
             if trace_id is not None:
                 self._incomplete_trace_ids.add(trace_id)
             if self.config.strict:
                 raise
             return None
+
+    async def _bounded(self, operation, timeout: float | None):
+        if timeout is None:
+            return await operation
+        return await asyncio.wait_for(operation, timeout=timeout)
+
+    async def _record_export_failure(self, failure: Any) -> None:
+        """Keep optional exporter failures visible without changing run status."""
+
+        exporter = (
+            failure.get("exporter", "telemetry")
+            if isinstance(failure, dict)
+            else getattr(failure, "exporter", "telemetry")
+        )
+        error = (
+            failure
+            if isinstance(failure, dict)
+            else failure.model_dump()
+            if hasattr(failure, "model_dump")
+            else {"error": str(failure)}
+        )
+        await self.emit_event(
+            "telemetry_error",
+            metadata={"component": "exporter", "exporter": str(exporter)},
+            error={
+                "type": str(error.get("error_type", "TelemetryExportError")),
+                "message": str(error.get("error", "telemetry export failed")),
+                "metadata": {"exporter": str(exporter)},
+            },
+        )

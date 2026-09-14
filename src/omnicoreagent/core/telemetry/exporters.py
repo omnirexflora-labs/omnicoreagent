@@ -455,11 +455,17 @@ async def export_trace_to_many(
     exporters: list[TelemetryExporter],
     *,
     strict: bool = False,
+    timeout: float | None = None,
 ) -> list[TelemetryExportResult]:
     results: list[TelemetryExportResult] = []
     for exporter in exporters:
         try:
-            results.append(await exporter.export_trace(trace))
+            operation = exporter.export_trace(trace)
+            results.append(
+                await operation
+                if timeout is None
+                else await asyncio.wait_for(operation, timeout=timeout)
+            )
         except Exception as exc:
             if strict:
                 raise
