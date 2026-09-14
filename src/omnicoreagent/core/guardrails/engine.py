@@ -59,15 +59,6 @@ class DetectionEngine:
                     start_time=start_time,
                 )
 
-            if self.config.allowlist_patterns:
-                if any(
-                    re.search(p, user_input, re.IGNORECASE)
-                    for p in self.config.allowlist_patterns
-                ):
-                    return self._create_safe_result(
-                        input_hash, len(user_input), start_time
-                    )
-
             if self.config.blocklist_patterns:
                 for pattern in self.config.blocklist_patterns:
                     if re.search(pattern, user_input, re.IGNORECASE):
@@ -82,6 +73,19 @@ class DetectionEngine:
                         )
 
             normalized = self._normalize_input(user_input)
+
+            if self.config.allowlist_patterns and any(
+                re.search(p, user_input, re.IGNORECASE)
+                for p in self.config.allowlist_patterns
+            ):
+                # A trusted pattern may bypass ordinary false positives, but
+                # it cannot authorize a known instruction override, extraction,
+                # jailbreak, or context-manipulation pattern.
+                _, allowlist_flags = self._pattern_matching(normalized)
+                if not self._has_high_risk_pattern(allowlist_flags):
+                    return self._create_safe_result(
+                        input_hash, len(user_input), start_time
+                    )
 
             flags = []
             total_score = 0

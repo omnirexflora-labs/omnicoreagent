@@ -61,8 +61,8 @@ positive input length, booleans, logging level, and compilable regular expressio
 | `enable_heuristic_analysis` | `bool` | `True` | Analyzes prompt structure for typical attack patterns. |
 | `enable_sequential_analysis` | `bool` | `True` | Checks for phased attacks across multiple tokens. |
 | `enable_entropy_analysis` | `bool` | `True` | Detects high-entropy payloads common in injections. |
-| `allowlist_patterns` | `list` | `[]` | List of regex patterns that bypass safety checks. |
-| `blocklist_patterns` | `list` | `[]` | Custom regex patterns to always block. |
+| `allowlist_patterns` | `list` | `[]` | List of regex patterns that bypass ordinary false positives; high-risk injection matches still go through detection. |
+| `blocklist_patterns` | `list` | `[]` | Custom regex patterns that always block; they take precedence over allowlists. |
 | `suspicious_output_action` | `"block"` or `"flag"` | `"block"` | Whether suspicious local tool output is blocked before it enters model context or only recorded and passed through. Dangerous and critical output is always blocked. |
 
 <Warning>
