@@ -1,5 +1,11 @@
 # Built-in Telemetry Migration Plan
 
+The next phase is defined by [the evaluation-ready telemetry foundation](evaluation-telemetry-foundation.md)
+and its [portable evidence contract](../specifications/telemetry-evidence.md).
+The operational telemetry foundation remains the runtime source of truth;
+this phase makes its evidence reconstructable and trustworthy for future
+controlled (Harbor) and production evaluation paths.
+
 This plan covers the telemetry work after the native tool runtime migration.
 The goal is a complete, useful telemetry system owned by OmniCoreAgent itself.
 External exporters such as LangSmith, Opik, and OTLP backends remain optional
@@ -37,6 +43,30 @@ under production load, finish public streaming guarantees, and keep
 provider/model buffering separate from telemetry buffering. Those checks are
 prerequisites for changing PromptGuard behavior or the MCP adapter, but they do
 not require an external trace platform.
+
+## Evaluation-evidence work sequence
+
+The following sequence is now the active telemetry design and implementation
+plan. Each unit is independently tested, committed, and pushed before the next
+unit starts.
+
+1. **Versioned evidence metadata.** Add schema version, execution surface,
+   provenance, and explicit payload capture states to traces, spans, and
+   events. Existing operational fields remain readable.
+2. **Complete request trajectory.** Instrument request, context assembly,
+   model turn, native tool request/resolution, executor result, post-guardrail
+   observation, and finalization with stable causal identifiers.
+3. **Context and lineage evidence.** Record context group/snapshot references,
+   child/background/serving links, workspace artifacts, and explicit missing
+   evidence without copying or erasing conversation history.
+4. **Portable evidence adapters.** Validate normalized OmniCoreAgent traces and
+   a minimal external adapter fixture. Harbor task/trial/verifier integration
+   and production selection follow the portable contract but remain separate
+   from the runtime recorder.
+5. **Evaluation layer.** Add task specifications, deterministic checks,
+   evaluator judgments, comparisons, sampling, and release decisions only
+   after the trace contract is proven. Evaluation records must reference facts
+   and must not mutate them.
 
 ## Rules for every phase
 
