@@ -242,3 +242,16 @@ async def test_closing_during_tool_records_cancelled_call():
     messages = await agent.memory_router.get_messages("s", "stream-agent")
     tool = next(m for m in messages if m["role"] == "tool")
     assert "cancelled" in tool["content"].lower()
+
+
+@pytest.mark.asyncio
+async def test_provider_cancellation_cannot_leave_public_consumer_hanging():
+    class CancelModel:
+        async def llm_stream(self, messages, tools=None):
+            yield {"type": "text_delta", "text": "Partial"}
+            raise asyncio.CancelledError()
+
+    async with aclosing(agent_with(CancelModel()).stream("task")) as stream:
+        await anext(stream)
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(anext(stream), 2)

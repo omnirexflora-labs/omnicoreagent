@@ -14,7 +14,6 @@ from omnicoreagent.core.system_prompts.extensions import (
 )
 from omnicoreagent.core.system_prompts.summaries import (
     FAST_CONVERSATION_SUMMARY_PROMPT,
-    SUMMARIZER_MEMORY_CONSTRUCTOR_PROMPT,
 )
 
 __all__ = [
@@ -22,7 +21,6 @@ __all__ = [
     "FAST_CONVERSATION_SUMMARY_PROMPT",
     "OmniCoreAgentPromptBuilder",
     "REACT_AGENT_PROMPT",
-    "SUMMARIZER_MEMORY_CONSTRUCTOR_PROMPT",
     "agent_skills_additional_prompt",
     "artifact_tool_additional_prompt",
     "build_subagents_additional_prompt",

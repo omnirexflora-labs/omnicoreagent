@@ -157,3 +157,21 @@ def test_build_kwargs_ignores_extra_params_without_mutating_input():
     kwargs = build_kwargs(agent, provided)
     assert kwargs == {"task": "work", "session_id": "s1"}
     assert provided == {"task": "work", "session_id": "s1", "unused": "ignore"}
+
+
+@pytest.mark.asyncio
+async def test_returned_child_error_marks_delegation_span_failed():
+    child = FakeAgent("worker", {"status": "error", "response": "step limit"})
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    context = await recorder.start_trace(
+        session_id="s", actor=TelemetryActor(type="agent", name="parent")
+    )
+    _, result = await SubAgentCallRunner("parent").run(
+        {"agent": "worker", "parameters": {}}, [child], "s", telemetry_recorder=recorder
+    )
+    await recorder.end_trace()
+    assert result["status"] == "error"
+    trace = await store.get_trace(context.trace_id)
+    assert next(s for s in trace.spans if s.kind == "subagent.run").status == "error"
+    assert trace.events[-1].event_type == "subagent_error"

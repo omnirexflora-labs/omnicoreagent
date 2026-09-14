@@ -426,3 +426,93 @@ async def test_discovery_cannot_unlock_sibling_from_same_turn():
     early = next(m for m in model.requests[1][0] if m.get("tool_call_id") == "early")
     assert json.loads(early["content"])["status"] == "error"
     assert "customer_profile" in [d["function"]["name"] for d in model.requests[1][1]]
+
+
+@pytest.mark.asyncio
+async def test_loop_detection_uses_results_before_offload_references(tmp_path):
+    registry = ToolRegistry()
+
+    @registry.register_tool(name="report")
+    async def report():
+        return "same evidence " * 100
+
+    class RepeatingModel(Model):
+        async def llm_call(self, messages, tools=None):
+            if tools == []:
+                self.requests.append((deepcopy(messages), tools))
+                return turn("Stopped repeating")
+            return await super().llm_call(messages, tools=tools)
+
+    model = RepeatingModel(
+        [turn(calls=[call("report", "{}", f"c{i}")]) for i in range(10)]
+    )
+    memory = MemoryRouter("in_memory")
+    agent = BaseReactAgent(
+        "loop",
+        10,
+        2,
+        tool_offload_config={"enabled": True, "threshold_bytes": 30},
+        workspace_config={"workspace_dir": str(tmp_path)},
+    )
+    result = await agent.run(
+        system_prompt="Test",
+        query="report",
+        llm_connection=model,
+        add_message_to_history=memory.store_message,
+        message_history=memory.get_messages,
+        local_tools=registry,
+        session_id="s",
+    )
+    assert result["answer"] == "Stopped repeating"
+    assert model.requests[-1][1] == []
+    stored = await memory.get_messages("s", "loop")
+    outputs = [m["content"] for m in stored if m["role"] == "tool"]
+    assert 4 <= len(outputs) <= 7
+    assert all("OFFLOADED" in content for content in outputs)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_between_history_rows_does_not_duplicate_results():
+    import asyncio
+
+    registry = ToolRegistry()
+
+    @registry.register_tool(name="echo")
+    async def echo():
+        return "done"
+
+    memory = MemoryRouter("in_memory")
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def store(role, content, metadata=None, session_id=None):
+        if role == "tool" and metadata["tool_call_id"] == "second":
+            started.set()
+            await release.wait()
+        await memory.store_message(role, content, metadata, session_id)
+
+    agent = BaseReactAgent("test", 3, 2, tool_offload_config={"enabled": False})
+    model = Model(
+        [turn(calls=[call("echo", "{}", "first"), call("echo", "{}", "second")])]
+    )
+    task = asyncio.create_task(
+        agent.run(
+            system_prompt="Test",
+            query="task",
+            llm_connection=model,
+            add_message_to_history=store,
+            message_history=memory.get_messages,
+            local_tools=registry,
+            session_id="s",
+        )
+    )
+    await asyncio.wait_for(started.wait(), 2)
+    task.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    messages = await memory.get_messages("s", "test")
+    assert [m["metadata"]["tool_call_id"] for m in messages if m["role"] == "tool"] == [
+        "first",
+        "second",
+    ]

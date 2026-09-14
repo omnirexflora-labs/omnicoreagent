@@ -62,13 +62,28 @@ async def stream_run(agent, query, *, session_id=None, run_id=None):
         await queue.put(terminal)
 
     task = asyncio.create_task(execute())
+    pending = None
     try:
         while True:
-            event = await queue.get()
+            pending = asyncio.create_task(queue.get())
+            done, _ = await asyncio.wait(
+                {task, pending}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if pending not in done:
+                # A provider or external owner may cancel the producer directly.
+                # Do not wait forever for a terminal item it cannot enqueue.
+                await task
+                event = await pending
+            else:
+                event = pending.result()
+            pending = None
             yield event
             if event["type"] in {"complete", "error"}:
                 break
     finally:
+        if pending is not None:
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
         if not task.done():
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)

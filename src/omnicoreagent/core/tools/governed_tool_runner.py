@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Callable
 from typing import Any
 
@@ -163,6 +164,9 @@ class GovernedToolRunner:
                     output=telemetry_result,
                 )
             return result
+        except asyncio.CancelledError:
+            await telemetry_recorder.end_span(span.span_id, status=SpanStatus.CANCELLED)
+            raise
         except Exception as exc:
             if telemetry_shape["single_event"]:
                 await telemetry_recorder.emit_event(

@@ -65,9 +65,13 @@ class SubAgentCallRunner:
             result = await agent.run(**kwargs)
             cleanup_attempted = True
             await self._cleanup_agent(agent_name, agent)
+            succeeded = (
+                not isinstance(result, dict)
+                or result.get("status", "success") == "success"
+            )
             if telemetry_recorder is not None:
                 await telemetry_recorder.emit_event(
-                    "subagent_result",
+                    "subagent_result" if succeeded else "subagent_error",
                     actor=TelemetryActor(type=ActorType.AGENT, name=agent_name),
                     input={"session_id": session_id, "agent_name": agent_name},
                     output={"result": result},
@@ -75,8 +79,11 @@ class SubAgentCallRunner:
             if telemetry_recorder is not None and span is not None:
                 await telemetry_recorder.end_span(
                     span.span_id,
-                    status=SpanStatus.OK,
-                    output={"agent_name": agent_name},
+                    status=SpanStatus.OK if succeeded else SpanStatus.ERROR,
+                    output={
+                        "agent_name": agent_name,
+                        "status": "success" if succeeded else "error",
+                    },
                 )
             return agent_name, result
 

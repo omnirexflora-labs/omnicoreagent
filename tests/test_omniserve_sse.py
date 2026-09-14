@@ -146,16 +146,19 @@ async def test_run_agent_stream_yields_telemetry_before_complete():
 
     traces = await agent.store.list_traces()
     serve_trace = next(
-        trace for trace in traces if any(span.kind == "serve.request" for span in trace.spans)
+        trace
+        for trace in traces
+        if any(span.kind == "serve.request" for span in trace.spans)
     )
     assert serve_trace.run_id == _event_data(chunks[3])["run_id"]
     assert [event.event_type for event in serve_trace.events] == [
         "serve_request_start",
         "serve_request_end",
     ]
-    assert serve_trace.events[-1].output["agent_trace_id"] == _event_data(chunks[3])[
-        "trace_id"
-    ]
+    assert (
+        serve_trace.events[-1].output["agent_trace_id"]
+        == _event_data(chunks[3])["trace_id"]
+    )
 
 
 @pytest.mark.asyncio
@@ -176,7 +179,9 @@ async def test_run_agent_stream_finishes_serve_trace_before_terminal_chunk_close
 
     traces = await agent.store.list_traces()
     serve_trace = next(
-        trace for trace in traces if any(span.kind == "serve.request" for span in trace.spans)
+        trace
+        for trace in traces
+        if any(span.kind == "serve.request" for span in trace.spans)
     )
     assert serve_trace.status == TraceStatus.COMPLETED
     assert [event.event_type for event in serve_trace.events] == [
@@ -242,7 +247,9 @@ async def test_concurrent_run_streams_same_session_only_emit_their_run_events():
 
     first, second = await asyncio.gather(collect("first"), collect("second"))
 
-    first_events = [_event_data(chunk) for chunk in first if _event_name(chunk) != "session"]
+    first_events = [
+        _event_data(chunk) for chunk in first if _event_name(chunk) != "session"
+    ]
     second_events = [
         _event_data(chunk) for chunk in second if _event_name(chunk) != "session"
     ]
@@ -290,9 +297,9 @@ async def test_concurrent_run_streams_do_not_leak_when_stream_ignores_run_id():
         ]
     }
     assert {event["run_id"] for event in second_events} == {
-        _event_data(next(chunk for chunk in second if _event_name(chunk) == "complete"))[
-            "run_id"
-        ]
+        _event_data(
+            next(chunk for chunk in second if _event_name(chunk) == "complete")
+        )["run_id"]
     }
 
 
@@ -344,7 +351,9 @@ async def test_stream_session_events_filters_existing_telemetry_by_run_id():
 @pytest.mark.asyncio
 async def test_stream_session_events_ends_for_agents_without_telemetry_methods():
     chunks = []
-    async for chunk in stream_session_events(_NoTelemetryAgent(), "session-no-telemetry"):
+    async for chunk in stream_session_events(
+        _NoTelemetryAgent(), "session-no-telemetry"
+    ):
         chunks.append(chunk)
 
     assert [_event_name(chunk) for chunk in chunks] == ["session", "session"]
@@ -382,3 +391,15 @@ async def test_stream_session_events_defensively_filters_when_agent_ignores_run_
         "final_answer",
     ]
     assert {_event_data(chunk)["run_id"] for chunk in event_chunks} == {"run_second"}
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_queue_overflow_is_explicit_failure():
+    from omnicoreagent.serve.sse import _put_stream_item, _EventStreamFailure
+
+    queue = asyncio.Queue(maxsize=1)
+    assert await _put_stream_item(queue, {"event_id": "first"})
+    assert not await _put_stream_item(queue, {"event_id": "second"})
+    failure = queue.get_nowait()
+    assert isinstance(failure, _EventStreamFailure)
+    assert "overflow" in str(failure.error)

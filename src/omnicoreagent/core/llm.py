@@ -266,7 +266,7 @@ class LLMConnection:
                 finally:
                     await client.close()
             litellm = _get_litellm()
-            litellm.drop_params = False
+            params["drop_params"] = False
             return await litellm.acompletion(**params)
         except Exception as e:
             error_message = (
@@ -294,7 +294,7 @@ class LLMConnection:
                 finally:
                     client.close()
             litellm = _get_litellm()
-            litellm.drop_params = False
+            params["drop_params"] = False
             return litellm.completion(**params)
         except Exception as e:
             error_message = (
@@ -325,7 +325,7 @@ class LLMConnection:
                 stream = await client.chat.completions.create(**params)
             else:
                 litellm = _get_litellm()
-                litellm.drop_params = False
+                params["drop_params"] = False
                 stream = await litellm.acompletion(**params)
             async for chunk in stream:
                 for event in assembler.feed(chunk):

@@ -238,22 +238,37 @@ async def execute_native_turn(
         )
         await telemetry_recorder.emit_event("tool_batch_start", input=payload)
 
+    persisted_ids = set()
+
+    async def persist_one(result):
+        normalized = json.loads(result["content"])
+        await add_message_to_history(
+            role="tool",
+            content=result["content"],
+            session_id=session_id,
+            metadata={
+                "agent_name": agent.agent_name,
+                "interaction_version": 2,
+                "tool_call_id": result["tool_call_id"],
+                "tool": normalized["tool_name"],
+                "args": normalized.get("args", {}),
+            },
+        )
+        session_state.messages.append(result)
+        persisted_ids.add(result["tool_call_id"])
+
     async def persist_results(results):
         for result in results:
-            normalized = json.loads(result["content"])
-            await add_message_to_history(
-                role="tool",
-                content=result["content"],
-                session_id=session_id,
-                metadata={
-                    "agent_name": agent.agent_name,
-                    "interaction_version": 2,
-                    "tool_call_id": result["tool_call_id"],
-                    "tool": normalized["tool_name"],
-                    "args": normalized.get("args", {}),
-                },
-            )
-            session_state.messages.append(result)
+            if result["tool_call_id"] in persisted_ids:
+                continue
+            write = asyncio.create_task(persist_one(result))
+            try:
+                await asyncio.shield(write)
+            except asyncio.CancelledError:
+                # Finish the in-flight write before reconciling this batch, so
+                # cancellation between rows cannot append a completed row twice.
+                await write
+                raise
 
     tasks = [asyncio.create_task(one(request)) for request in turn.tool_calls]
     try:
