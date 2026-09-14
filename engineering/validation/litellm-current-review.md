@@ -118,3 +118,12 @@ is made about every model, transport, multimodal feature, or external service.
 Source inspection used the installed distribution at 1.100.1:
 `litellm/responses/main.py`, `llms/anthropic/chat/transformation.py`,
 `llms/vertex_ai/gemini/transformation.py`, and the bundled model map.
+
+## Subsequent application retest
+
+The [application retest](litellm-agent-retest.md) now covers all nine live agent
+scenarios through a test-only LiteLLM adapter, including child/background paths
+and real HTTP SSE. All have passing results, with the initial streaming-assertion
+failure and its correction preserved in the report. A separate high-effort
+Responses round trip also passed again. Production routing is still unchanged;
+application Responses integration remains pending.

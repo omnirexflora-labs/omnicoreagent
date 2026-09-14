@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from contextlib import aclosing
+from contextlib import aclosing, nullcontext
 from copy import deepcopy
 import json
 import logging
@@ -246,9 +246,12 @@ async def validate(model, scenarios=None):
                         deltas.append(event["text"])
                         if first is None:
                             first = time.monotonic() - start
-                        assert observed.closed_streams < len(observed.requests), (
-                            "text only arrived after provider close"
-                        )
+                            assert observed.closed_streams < len(observed.requests), (
+                                "first text only arrived after provider close"
+                            )
+                        # The queue may still contain trailing text after the
+                        # provider closes. Early first delivery proves streaming;
+                        # requiring every delta before closure is a timing race.
                     elif event["type"] == "complete":
                         result = event
                     else:
@@ -496,6 +499,7 @@ async def validate(model, scenarios=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="gpt-5.6-luna")
+    parser.add_argument("--adapter", choices=["runtime", "litellm"], default="runtime")
     parser.add_argument("--env-file", type=Path)
     parser.add_argument("--report", type=Path)
     parser.add_argument("--scenario", action="append")
@@ -507,7 +511,20 @@ def main():
     if not os.getenv("LLM_API_KEY"):
         parser.error("LLM_API_KEY is required")
     logging.disable(logging.CRITICAL)
-    report = asyncio.run(validate(args.model, args.scenario))
+    adapter_context = nullcontext(None)
+    if args.adapter == "litellm":
+        from litellm_adapter import use_litellm
+
+        adapter_context = use_litellm()
+    with adapter_context as counters:
+        report = asyncio.run(validate(args.model, args.scenario))
+    report["adapter"] = args.adapter
+    if counters is not None:
+        report["adapter_counters"] = counters
+        if counters["stream_requests"] != counters["closed_streams"]:
+            report["failed"] += 1
+            report["adapter_error"] = "Not all requested streams closed successfully"
+
     if args.report:
         args.report.write_text(json.dumps(report, indent=2) + "\n")
     print(
