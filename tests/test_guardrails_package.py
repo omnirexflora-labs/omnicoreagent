@@ -20,7 +20,6 @@ from omnicoreagent.core.guardrails import (
         ("sensitivity", -1),
         ("sensitivity", float("nan")),
         ("sensitivity", float("inf")),
-        ("enable_ml_fallback", "false"),
         ("max_input_length", 0),
         ("max_input_length", True),
         ("enable_encoding_detection", 1),
@@ -44,6 +43,11 @@ def test_detection_config_normalizes_logging_level_and_copies_patterns():
     assert config.log_level == "DEBUG"
     assert config.allowlist_patterns == patterns
     assert config.allowlist_patterns is not patterns
+
+
+def test_detection_config_rejects_removed_ml_fallback_option():
+    with pytest.raises(TypeError, match="enable_ml_fallback"):
+        DetectionConfig(enable_ml_fallback=False)
 
 
 def test_suspicious_output_policy_defaults_to_block_and_accepts_flag():

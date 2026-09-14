@@ -29,7 +29,6 @@ class DetectionConfig:
 
     strict_mode: bool = False
     sensitivity: float = 1.0
-    enable_ml_fallback: bool = False
     max_input_length: int = 10000
     enable_encoding_detection: bool = True
     enable_heuristic_analysis: bool = True
@@ -56,7 +55,6 @@ class DetectionConfig:
         if not math.isfinite(self.sensitivity) or self.sensitivity <= 0:
             raise ValueError("sensitivity must be a finite number greater than 0")
 
-        self._validate_bool("enable_ml_fallback", self.enable_ml_fallback)
         self._validate_positive_int("max_input_length", self.max_input_length)
         for name in (
             "enable_encoding_detection",
