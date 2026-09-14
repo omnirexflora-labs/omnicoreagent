@@ -1,10 +1,8 @@
 from __future__ import annotations
-
+from omnicoreagent.core.model_protocol import ModelTurn, ToolRequest
 import re
 from types import SimpleNamespace
-
 import pytest
-
 from omnicoreagent.core.agents.base import BaseReactAgent
 from omnicoreagent.core.telemetry import (
     ActorType,
@@ -22,47 +20,71 @@ class ScriptedHarnessLlm:
         self.calls = 0
         self.artifact_id: str | None = None
 
-    async def llm_call(self, messages):
+    async def llm_call(self, messages, tools=None):
         self.calls += 1
-        transcript = "\n".join(getattr(message, "content", str(message)) for message in messages)
+        transcript = "\n".join(
+            (getattr(message, "content", str(message)) for message in messages)
+        )
         if self.calls == 1:
-            return """
-<tool_calls>
-  <tool_call>
-    <tool_name>tools_retriever</tool_name>
-    <parameters>{"query": "find customer profile external risk workspace write and large report tools"}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>customer_profile</tool_name>
-    <parameters>{"customer_id": "cust-001"}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>external_risk_lookup</tool_name>
-    <parameters>{"customer_id": "cust-001"}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>write_file</tool_name>
-    <parameters>{"path": "notes/customer.md", "content": "customer cust-001 reviewed", "mode": "create"}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>large_report</tool_name>
-    <parameters>{"customer_id": "cust-001"}</parameters>
-  </tool_call>
-</tool_calls>
-"""
+            return ModelTurn(
+                tool_calls=(
+                    ToolRequest(
+                        f"call_{self.calls}_0",
+                        "tools_retriever",
+                        '{"query": "find customer profile external risk workspace write and large report tools"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            )
         if self.calls == 2:
-            match = re.search(r"read_artifact\('([^']+)'\)", transcript)
+            return ModelTurn(
+                tool_calls=(
+                    ToolRequest(
+                        f"call_{self.calls}_1",
+                        "customer_profile",
+                        '{"customer_id": "cust-001"}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_2",
+                        "external_risk_lookup",
+                        '{"customer_id": "cust-001"}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_3",
+                        "write_file",
+                        '{"path": "notes/customer.md", "content": "customer cust-001 reviewed", "mode": "create"}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_4",
+                        "large_report",
+                        '{"customer_id": "cust-001"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            )
+        if self.calls == 3:
+            match = re.search("Artifact ID: (large_report_[\\w]+)", transcript)
             assert match, transcript
             self.artifact_id = match.group(1)
-            return f"""
-<tool_call>
-  <tool_name>read_artifact</tool_name>
-  <parameters>{{"artifact_id": "{self.artifact_id}"}}</parameters>
-</tool_call>
-"""
-        return """
-<final_answer>Customer profile, external risk, workspace note, and full artifact were processed.</final_answer>
-"""
+            return ModelTurn(
+                tool_calls=(
+                    ToolRequest(
+                        f"call_{self.calls}_0",
+                        "read_artifact",
+                        f'{{"artifact_id": "{self.artifact_id}"}}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            )
+        return "Customer profile, external risk, workspace note, and full artifact were processed."
+
+    async def llm_stream(self, messages, tools=None):
+        from omnicoreagent.core.agents.llm_response import normalize_model_turn
+
+        turn = normalize_model_turn(await self.llm_call(messages, tools=tools))
+        if turn.text:
+            yield {"type": "text_delta", "text": turn.text}
+        yield {"type": "turn_complete", "turn": turn}
 
 
 class FakeMcpSession:
@@ -79,24 +101,22 @@ class FakeMcpSession:
 
 
 @pytest.mark.asyncio
-async def test_full_stack_harness_run_uses_tools_workspace_offload_and_telemetry(tmp_path):
+async def test_full_stack_harness_run_uses_tools_workspace_offload_and_telemetry(
+    tmp_path,
+):
     workspace_dir = tmp_path / "workspace"
     local_tools = ToolRegistry()
 
     @local_tools.register_tool("customer_profile")
     def customer_profile(customer_id: str) -> dict:
-        return {
-            "customer_id": customer_id,
-            "tier": "enterprise",
-            "region": "EMEA",
-        }
+        return {"customer_id": customer_id, "tier": "enterprise", "region": "EMEA"}
 
     @local_tools.register_tool("large_report")
     def large_report(customer_id: str) -> dict:
         return {
             "customer_id": customer_id,
             "report": "\n".join(
-                f"{customer_id} revenue evidence line {index}" for index in range(120)
+                (f"{customer_id} revenue evidence line {index}" for index in range(120))
             ),
         }
 
@@ -152,20 +172,33 @@ async def test_full_stack_harness_run_uses_tools_workspace_offload_and_telemetry
         add_message_to_history=add_message_to_history,
         message_history=message_history,
         sessions={"crm": {"session": FakeMcpSession()}},
-        mcp_tools={"crm": [SimpleNamespace(name="external_risk_lookup")]},
+        mcp_tools={
+            "crm": [
+                SimpleNamespace(
+                    name="external_risk_lookup",
+                    description="Customer external risk",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {"customer_id": {"type": "string"}},
+                        "required": ["customer_id"],
+                    },
+                )
+            ]
+        },
         local_tools=local_tools,
         session_id="session-full-stack",
         telemetry_recorder=recorder,
     )
     await recorder.end_trace(output={"response": result["answer"]})
-
     assert "full artifact" in result["answer"]
     assert llm.artifact_id is not None
-    assert (workspace_dir / "files" / "notes" / "customer.md").read_text() == (
-        "customer cust-001 reviewed"
-    )
-    assert list((workspace_dir / "artifacts").glob("large_report_*.txt"))
-    assert {item["metadata"].get("tool") for item in history if item["role"] == "tool"} >= {
+    assert (
+        workspace_dir / "files" / "notes" / "customer.md"
+    ).read_text() == "customer cust-001 reviewed"
+    assert list((workspace_dir / "artifacts").glob("large_report_*.json"))
+    assert {
+        item["metadata"].get("tool") for item in history if item["role"] == "tool"
+    } >= {
         "tools_retriever",
         "customer_profile",
         "external_risk_lookup",
@@ -173,7 +206,6 @@ async def test_full_stack_harness_run_uses_tools_workspace_offload_and_telemetry
         "large_report",
         "read_artifact",
     }
-
     trace = await telemetry_store.get_trace(context.trace_id)
     assert trace is not None
     event_types = {event.event_type for event in trace.events}

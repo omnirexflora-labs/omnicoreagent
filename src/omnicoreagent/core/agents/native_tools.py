@@ -10,6 +10,7 @@ from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
 from omnicoreagent.core.tools.mcp_tool_handler import MCPToolHandler
 from omnicoreagent.core.tools.tool_executor import ToolExecutor
+from omnicoreagent.core.tools.tool_observation_guardrail import scrub_tool_results
 from omnicoreagent.core.types import AgentState, ToolCallResult
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
@@ -64,10 +65,22 @@ async def execute_native_turn(
         # Only approved/offloaded results are persisted below, exactly once.
         pass
 
+    # Resolve against the schemas supplied for this turn. Discovery may only
+    # unlock calls for the next request, never race siblings in this batch.
+    resolutions = {}
+    for request in turn.tool_calls:
+        try:
+            resolutions[request.id] = catalog.resolve(request)
+        except ValueError as exc:
+            resolutions[request.id] = exc
+
     async def one(request):
         resolved = None
         try:
-            binding, arguments = catalog.resolve(request)
+            resolution = resolutions[request.id]
+            if isinstance(resolution, ValueError):
+                raise resolution
+            binding, arguments = resolution
             if binding.provider == "subagent":
 
                 async def delegate(params):
@@ -97,7 +110,7 @@ async def execute_native_turn(
                                 memory_scope=session_id,
                             )
                         )
-                    name, result = await agent.subagent_runner._execute_single_agent(
+                    name, result = await agent.subagent_runner.run(
                         {"agent": binding.agent.name, "parameters": params},
                         [binding.agent],
                         session_id,
@@ -117,7 +130,7 @@ async def execute_native_turn(
                     }
 
                 handler = CallbackHandler(delegate)
-            elif binding.name == "tools_retriever" and binding.provider == "local":
+            elif binding.provider == "discovery":
 
                 async def discover(params):
                     return {
@@ -141,7 +154,7 @@ async def execute_native_turn(
                 binding.server,
             )
             async with asyncio.timeout(agent.tool_call_timeout):
-                result = await agent.tool_batch_runner._execute_single_tool(
+                result = await agent.governed_tool_runner.execute(
                     single_tool=resolved,
                     add_message_to_history=deferred_history,
                     session_id=session_id,
@@ -172,18 +185,35 @@ async def execute_native_turn(
                 "data": None,
                 "message": str(exc),
             }
-        result = agent.tool_observation_handler.scrub_results([result])[0]
-        result = agent.tool_observation_handler.formatter.maybe_offload_result(
+        result = scrub_tool_results([result], agent.guardrail)[0]
+        # Loop signatures use normalized, guarded contents before artifact IDs
+        # and governed-history redaction can change their representation.
+        signature_args = arguments if resolved is not None else request.arguments
+        signature_result = {
+            key: value for key, value in result.items() if key != "args"
+        }
+        session_state.loop_detector.record_tool_call(
+            result["tool_name"],
+            json.dumps(signature_args, sort_keys=True, default=str),
+            json.dumps(signature_result, sort_keys=True, default=str),
+        )
+        original_data = result.get("data")
+        result = agent.tool_result_offloader.maybe_offload_result(
             result,
             session_id,
             tool_call_result=resolved,
         )
+        if telemetry_recorder is not None and result.get("data") != original_data:
+            await telemetry_recorder.emit_event(
+                "workspace_offload",
+                actor=TelemetryActor(type=ActorType.WORKSPACE),
+                output={
+                    "tool_call_id": request.id,
+                    "tool_name": result["tool_name"],
+                    "reference": result.get("data"),
+                },
+            )
         content = json.dumps(result, ensure_ascii=False, default=str)
-        session_state.loop_detector.record_tool_call(
-            result["tool_name"],
-            json.dumps(result.get("args", {}), sort_keys=True, default=str),
-            content,
-        )
         return {"role": "tool", "content": content, "tool_call_id": request.id}
 
     batch_span = None

@@ -14,21 +14,10 @@ async def test_run_prepares_internal_tools_once_for_prompt_and_execution(monkeyp
     build_count = 0
     history = []
 
-    async def fake_build_internal_tools(registry):
+    async def fake_build_internal_tools(local_tools=None):
+        registry = agent.register_internal_tool
         nonlocal build_count
         build_count += 1
-
-        @registry.register_tool(
-            name="tools_retriever",
-            inputSchema={
-                "type": "object",
-                "properties": {"query": {"type": "string"}},
-                "required": ["query"],
-            },
-            description="Discover available tools.",
-        )
-        async def tools_retriever(query: str):
-            return {"status": "success", "data": f"found:{query}"}
 
         @registry.register_tool(
             name="internal_ping",
@@ -45,7 +34,8 @@ async def test_run_prepares_internal_tools_once_for_prompt_and_execution(monkeyp
         return registry
 
     monkeypatch.setattr(
-        "omnicoreagent.core.tools.tool_runtime_registry.build_tool_registry_advance_tools_use",
+        agent.tool_runtime_registry,
+        "prepare_tools",
         fake_build_internal_tools,
     )
 

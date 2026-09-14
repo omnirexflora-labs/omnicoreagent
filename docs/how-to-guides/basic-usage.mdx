@@ -146,6 +146,44 @@ specific to your application.
 
 ---
 
+## Live Text Streaming
+
+`stream()` uses the same execution loop as `run()`. Text arrives before the model
+turn finishes; tools execute only after a complete, validated call. Text alongside
+a call is intermediate content. Use the terminal result for the completed answer.
+
+```python
+from contextlib import aclosing
+
+async with aclosing(agent.stream("Analyze the available evidence", session_id="user_1")) as events:
+    async for event in events:
+        if event["type"] == "text_delta":
+            print(event["text"], end="", flush=True)
+        elif event["type"] == "complete":
+            result = event
+            print(result["status"], result["response"])
+        elif event["type"] == "error":
+            print(event["error"])
+```
+
+Deltas carry root `run_id`, `actor_run_id`, `trace_id`, `session_id`, `agent_name`,
+`event_id`, `sequence` and `phase="intermediate"`. Child text has the child's actor
+identity. A bounded queue applies backpressure; closing cancels the run and closes
+the provider stream. Async tools receive cancellation. Synchronous Python tools
+run in threads, whose side effects cannot be forcibly stopped by cancelling the await.
+
+Deltas are live-only, independent of debug output recording. Telemetry replay
+contains lifecycle events and the final answer according to telemetry recording
+settings; it does not replay token fragments. Background execution retains its
+durable lifecycle events and final outcome. Streaming provider requests do not
+retry after exposing partial output.
+
+`run()` and successful stream completion return `response`, `status`,
+`termination_reason`, session/run/trace IDs, agent name and metrics. Check `status`:
+provider errors, refusals, resource limits and step exhaustion return an error
+outcome rather than a successful answer. Setup/storage errors may raise; the stream
+reports them as a terminal `error` event. Partial text is not a successful final result.
+
 ## Event Streaming
 
 Read telemetry events for UIs, logging, and debugging. Use `run_id` when

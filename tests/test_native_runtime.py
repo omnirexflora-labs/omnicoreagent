@@ -396,3 +396,33 @@ async def test_guarded_result_is_identical_in_storage_and_model_context():
     assert record["content"] == active["content"]
     assert "unsafe payload" not in record["content"]
     assert json.loads(record["content"])["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_discovery_cannot_unlock_sibling_from_same_turn():
+    registry = ToolRegistry()
+    effects = []
+
+    @registry.register_tool(name="customer_profile")
+    async def profile():
+        effects.append("called")
+        return "profile"
+
+    model = Model(
+        [
+            turn(
+                calls=[
+                    call("tools_retriever", '{"query":"customer profile"}', "discover"),
+                    call("customer_profile", "{}", "early"),
+                ]
+            ),
+            turn(calls=[call("customer_profile", "{}", "later")]),
+            turn("Done"),
+        ]
+    )
+    result, _ = await run(model, registry=registry, enable_advanced_tool_use=True)
+    assert result["status"] == "success"
+    assert effects == ["called"]
+    early = next(m for m in model.requests[1][0] if m.get("tool_call_id") == "early")
+    assert json.loads(early["content"])["status"] == "error"
+    assert "customer_profile" in [d["function"]["name"] for d in model.requests[1][1]]

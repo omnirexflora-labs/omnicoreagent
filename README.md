@@ -183,16 +183,16 @@ LLM -> call tool A -> wait -> result -> LLM -> call tool B -> wait -> result
 OmniCoreAgent lets the model request independent tools together:
 
 ```text
-LLM -> [tool A + tool B + tool C in parallel] -> one structured observation -> LLM
+LLM -> [tool A + tool B + tool C in parallel] -> correlated tool results -> LLM
 ```
 
 The model gets one complete view of the batch before it reasons again. A failed
 tool is represented beside the successful tools instead of silently collapsing the
 whole step.
 
-Native function calling alone is not the runtime. OmniCoreAgent uses its own
-tool-call contract, parser, resolver, parallel runner, and result formatter so
-the harness controls the full execution path.
+OmniCoreAgent accepts provider-native function calls. Its per-run catalog validates
+JSON arguments and resolves concrete tool identities before governance checks and
+parallel execution. Each result retains the provider call ID.
 
 ### 2. Tool results become structured observations
 
@@ -202,7 +202,7 @@ errors, irrelevant fields, and prompt-injection content can all distort the loop
 OmniCoreAgent routes tool results through an observation pipeline:
 
 ```text
-tool output -> parse -> format -> guardrail check -> offload when configured -> observation -> model
+tool output -> normalize -> guardrail check -> offload when configured -> correlated JSON result -> model
 ```
 
 The model receives the signal it needs to continue the task, not an unbounded dump
@@ -334,7 +334,7 @@ uses.
 
 | Feature | What It Does |
 |---------|--------------|
-| **Parallel Batch Tool Execution** | Executes independent tool calls concurrently and returns one combined observation to the model. |
+| **Parallel Batch Tool Execution** | Executes independent tool calls concurrently and returns a result for each provider call ID to the model. |
 | **Structured Observation Pipeline** | Parses, formats, guardrail-checks, and offloads tool results when configured before the model sees them. |
 | **Signature-Based Loop Detection** | Detects repeated SHA256-backed tool-call signatures and repeated tool interaction patterns beyond step-count exhaustion. |
 | **Local Tool Registry** | Registers Python functions as tools with inferred schemas and async/sync execution support. |
@@ -371,9 +371,9 @@ OmniCoreAgent's capabilities are backed by concrete runtime modules:
 
 | Capability | Where It Lives |
 |-------|----------------|
-| Parallel tool batches | `core/tools/tool_batch_runner.py` |
-| XML tool-call contract | `core/agents/xml_parser.py` |
-| Structured observations | `core/tools/tool_observation.py` |
+| Parallel tool batches | `core/agents/native_tools.py` |
+| Native tool-call contract | `core/model_protocol.py` |
+| Structured observations | `core/tools/tool_result_offloader.py` |
 | Tool output offloading | `core/workspace/artifacts.py` |
 | Automatic context control | `core/agents/llm_step.py`, `core/context_manager.py` |
 | Workspace files | `core/workspace/tools.py`, `core/workspace/storage.py` |

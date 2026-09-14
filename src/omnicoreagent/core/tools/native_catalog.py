@@ -12,7 +12,29 @@ from typing import Any
 
 from omnicoreagent.core.model_protocol import ToolRequest
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.core.tools.tool_prompt_renderer import ALWAYS_VISIBLE_TOOL_NAMES
+
+ALWAYS_VISIBLE_TOOL_NAMES = frozenset(
+    {
+        "tools_retriever",
+        "spawn_subagents",
+        "ls",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "insert_file",
+        "delete_file",
+        "move_file",
+        "clear_files",
+        "glob",
+        "grep",
+        "read_artifact",
+        "tail_artifact",
+        "search_artifact",
+        "list_artifacts",
+        "read_skill_file",
+        "run_skill_script",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -41,6 +63,24 @@ class NativeToolCatalog:
         self, *, local_tools=None, mcp_tools=None, sub_agents=None, advanced=False
     ):
         candidates = []
+        if advanced:
+            candidates.append(
+                (
+                    {
+                        "name": "tools_retriever",
+                        "description": "Find tools by describing the capability needed. Matching tools become available on the next turn.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {"query": {"type": "string", "minLength": 1}},
+                            "required": ["query"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "discovery",
+                    None,
+                    None,
+                )
+            )
         if local_tools is not None:
             for tool in local_tools.get_available_tools():
                 provider = (
@@ -144,7 +184,7 @@ class NativeToolCatalog:
         return binding, arguments
 
     def discover(self, query: str) -> list[dict[str, Any]]:
-        from omnicoreagent.core.tools.advance_tools.advanced_tools_use import (
+        from omnicoreagent.core.tools.tool_search import (
             ToolDocument,
             ToolRetriever,
             tokenize,

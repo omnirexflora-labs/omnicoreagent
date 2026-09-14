@@ -61,10 +61,10 @@ Every capability below maps to code in the repository.
 
 | Capability | What The User Gets | Main Implementation |
 |------------|--------------------|---------------------|
-| **Custom tool-call contract** | XML tool calls, final answers, single tool calls, multi-tool calls, and agent calls are parsed consistently. | `src/omnicoreagent/core/agents/xml_parser.py` |
-| **Parallel batch tool execution** | Independent tools from one model step are resolved and executed together with timeout handling. | `src/omnicoreagent/core/tools/tool_batch_runner.py` |
+| **Native tool-call contract** | Provider-native function calls retain IDs and typed JSON arguments; text remains task content. Configured children use native delegate tools. | `src/omnicoreagent/core/model_protocol.py` |
+| **Parallel batch tool execution** | Independent tools from one model step are resolved and executed together with timeout handling. | `src/omnicoreagent/core/agents/native_tools.py` |
 | **Tool runtime registry** | Local tools, MCP tools, workspace tools, artifact tools, skills, subagent tools, and BM25 retrieval are prepared through one runtime surface. | `src/omnicoreagent/core/tools/tool_runtime_registry.py` |
-| **Structured observations** | Tool outputs are normalized, guarded, formatted, and returned to the model as structured observations. | `src/omnicoreagent/core/tools/tool_observation.py` |
+| **Structured observations** | Tool outputs are normalized, guarded, formatted, and returned to the model as structured observations. | `src/omnicoreagent/core/tools/tool_result_offloader.py` |
 | **Tool output offloading** | Large tool responses are written to workspace artifacts and replaced with a compact preview/reference. | `src/omnicoreagent/core/workspace/artifacts.py` |
 | **Artifact readback tools** | Agents read, tail, search, and list offloaded tool responses when full content is needed. | `src/omnicoreagent/core/workspace/artifact_tools.py` |
 | **Automatic context control** | Before each model call, active messages are checked and reduced when the configured context threshold is crossed. | `src/omnicoreagent/core/agents/llm_step.py`, `src/omnicoreagent/core/context_manager.py` |
@@ -88,7 +88,7 @@ The core loop is a controlled runtime cycle:
 2. Assemble prompt and tool registry
 3. Check context before model call
 4. Call model through LiteLLM
-5. Parse XML response
+5. Normalize the provider turn, retaining text, calls, finish reason and usage
 6. Resolve tool or agent calls
 7. Execute tool batch in parallel
 8. Normalize, guard, and offload observations

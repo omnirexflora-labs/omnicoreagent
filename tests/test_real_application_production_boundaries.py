@@ -1,22 +1,20 @@
 from __future__ import annotations
-
+from omnicoreagent.core.model_protocol import ModelTurn, ToolRequest
 import os
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
+from fastapi.testclient import TestClient
+import pytest
+from omnicoreagent import BackgroundAgentManager, OmniServe, OmniServeConfig
+from omnicoreagent.core.workspace.manager import Workspace
+from omnicoreagent.serve.cli import _load_agent_from_file
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
-
-from fastapi.testclient import TestClient  # noqa: E402
-import pytest  # noqa: E402
-
-from omnicoreagent import BackgroundAgentManager, OmniServe, OmniServeConfig  # noqa: E402
-from omnicoreagent.core.workspace.manager import Workspace  # noqa: E402
-from omnicoreagent.serve.cli import _load_agent_from_file  # noqa: E402
-
 
 LLM_ENV_KEYS = (
     "LLM_API_KEY",
@@ -62,48 +60,61 @@ class ScriptedSupportOperationsLlm:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def llm_call(self, messages: list[Any]):
+    async def llm_call(self, messages: list[Any], tools=None):
         self.calls += 1
         if self.calls == 1:
-            return """
-<tool_calls>
-  <tool_call>
-    <tool_name>lookup_customer</tool_name>
-    <parameters>{"customer_id": "cust-001"}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>recent_orders</tool_name>
-    <parameters>{"customer_id": "cust-001"}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>support_policy_search</tool_name>
-    <parameters>{"query": "enterprise delayed shipment escalation"}</parameters>
-  </tool_call>
-</tool_calls>
-"""
+            return ModelTurn(
+                tool_calls=(
+                    ToolRequest(
+                        f"call_{self.calls}_0",
+                        "lookup_customer",
+                        '{"customer_id": "cust-001"}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_1",
+                        "recent_orders",
+                        '{"customer_id": "cust-001"}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_2",
+                        "support_policy_search",
+                        '{"query": "enterprise delayed shipment escalation"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            )
         if self.calls == 2:
             conversation = _messages_text(messages)
             assert "Ada Ventures" in conversation
             assert "ord-1002" in conversation
             assert "Enterprise delayed shipments" in conversation
-            return """
-<tool_calls>
-  <tool_call>
-    <tool_name>create_escalation</tool_name>
-    <parameters>{"ticket_id": "tck-1042", "severity": "medium", "summary": "Delayed enterprise shipment needs timeline and goodwill review."}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>write_file</tool_name>
-    <parameters>{"path": "tickets/tck-1042.md", "content": "# tck-1042\\n\\nEscalated delayed shipment for Ada Ventures.", "mode": "create"}</parameters>
-  </tool_call>
-</tool_calls>
-"""
+            return ModelTurn(
+                tool_calls=(
+                    ToolRequest(
+                        f"call_{self.calls}_0",
+                        "create_escalation",
+                        '{"ticket_id": "tck-1042", "severity": "medium", "summary": "Delayed enterprise shipment needs timeline and goodwill review."}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_1",
+                        "write_file",
+                        '{"path": "tickets/tck-1042.md", "content": "# tck-1042\\n\\nEscalated delayed shipment for Ada Ventures.", "mode": "create"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            )
         conversation = _messages_text(messages)
         assert "queued_for_specialist" in conversation
         assert "tickets/tck-1042.md" in conversation
-        return """
-<final_answer>Support plan ready: explain the delay, share timeline, and route the medium escalation.</final_answer>
-"""
+        return "Support plan ready: explain the delay, share timeline, and route the medium escalation."
+
+    async def llm_stream(self, messages, tools=None):
+        from omnicoreagent.core.agents.llm_response import normalize_model_turn
+
+        turn = normalize_model_turn(await self.llm_call(messages, tools=tools))
+        if turn.text:
+            yield {"type": "text_delta", "text": turn.text}
+        yield {"type": "turn_complete", "turn": turn}
 
 
 def _messages_text(messages: list[Any]) -> str:
@@ -128,7 +139,6 @@ def test_real_application_examples_are_importable_agent_factories(tmp_path):
     research = research_due_diligence_agent.build_agent(tmp_path / "research")
     support = support_operations_agent.build_agent(tmp_path / "support")
     code_review = workspace_code_review_agent.build_agent(tmp_path / "code-review")
-
     assert personal.name == "personal_operations_assistant"
     assert research.name == "due_diligence_agent"
     assert support.name == "support_operations_agent"
@@ -141,12 +151,9 @@ def test_personal_assistant_can_use_sql_memory_by_default_path(monkeypatch, tmp_
     from cookbook.real_applications import personal_operations_assistant
 
     monkeypatch.delenv("DATABASE_URL", raising=False)
-
     agent = personal_operations_assistant.build_agent(
-        tmp_path / "personal-sql",
-        memory_backend="sql",
+        tmp_path / "personal-sql", memory_backend="sql"
     )
-
     assert agent.name == "personal_operations_assistant"
     assert agent.memory_router.get_memory_store_info()["type"] == "sql"
     assert (tmp_path / "personal-sql").is_dir()
@@ -154,7 +161,6 @@ def test_personal_assistant_can_use_sql_memory_by_default_path(monkeypatch, tmp_
 
 def test_omniserve_loads_real_application_agent_file():
     agent = _load_agent_from_file("cookbook/omniserve/real_application_agent.py")
-
     assert agent.name == "support_operations_agent"
     assert agent.agent_config["enable_workspace_files"] is True
     assert agent.agent_config["workspace_config"]["workspace_backend"] == "local"
@@ -167,10 +173,8 @@ def test_omniserve_real_application_exposes_domain_and_workspace_tools(tmp_path)
         create_agent(workspace_dir=tmp_path / "served-support-app")
     )
     server = OmniServe(agent, OmniServeConfig(background_enabled=False))
-
     with TestClient(server.app) as client:
         tools_response = client.get("/tools")
-
     assert tools_response.status_code == 200
     tool_names = {tool["name"] for tool in tools_response.json()["tools"]}
     assert {
@@ -191,27 +195,21 @@ def test_omniserve_real_application_sync_run_writes_workspace_and_trace(tmp_path
     workspace_dir = tmp_path / "served-support-app"
     agent = attach_test_model_credentials(create_agent(workspace_dir=workspace_dir))
     server = OmniServe(agent, OmniServeConfig(background_enabled=False))
-
     with TestClient(server.app) as client:
         agent.llm_connection = ScriptedSupportOperationsLlm()
         response = client.post(
             "/run/sync",
             json={
-                "query": (
-                    "Handle ticket tck-1042 for customer cust-001. Use the support "
-                    "tools and save notes at tickets/tck-1042.md."
-                ),
+                "query": "Handle ticket tck-1042 for customer cust-001. Use the support tools and save notes at tickets/tck-1042.md.",
                 "session_id": "served-support-session",
             },
         )
-
         assert response.status_code == 200
         payload = response.json()
         assert payload["response"].startswith("Support plan ready")
         assert payload["session_id"] == "served-support-session"
         assert payload["trace_id"]
         assert payload["run_id"]
-
         events_response = client.get(
             f"/events/served-support-session/list?run_id={payload['run_id']}"
         )
@@ -225,7 +223,6 @@ def test_omniserve_real_application_sync_run_writes_workspace_and_trace(tmp_path
         assert "observation_pipeline_end" in event_names
         assert "workspace_write" in event_names
         assert "final_answer" in event_names
-
         tool_results = [
             event["output"]
             for event in events_payload["events"]
@@ -238,14 +235,20 @@ def test_omniserve_real_application_sync_run_writes_workspace_and_trace(tmp_path
             "support_policy_search",
             "create_escalation",
         }.issubset(tool_names)
-        assert any(result.get("data", {}).get("name") == "Ada Ventures" for result in tool_results)
-        assert any("ord-1002" in str(result.get("data")) for result in tool_results)
         assert any(
-            result.get("data", {}).get("status") == "queued_for_specialist"
-            for result in tool_results
-            if result["tool_name"] == "create_escalation"
+            (
+                result.get("data", {}).get("name") == "Ada Ventures"
+                for result in tool_results
+            )
         )
-
+        assert any(("ord-1002" in str(result.get("data")) for result in tool_results))
+        assert any(
+            (
+                result.get("data", {}).get("status") == "queued_for_specialist"
+                for result in tool_results
+                if result["tool_name"] == "create_escalation"
+            )
+        )
         trace_response = client.get(
             f"/events/served-support-session/trace?run_id={payload['run_id']}"
         )
@@ -255,8 +258,9 @@ def test_omniserve_real_application_sync_run_writes_workspace_and_trace(tmp_path
         assert trace_payload["summary"]["run_id"] == payload["run_id"]
         assert trace_payload["summary"]["status"] == "completed"
         assert trace_payload["summary"]["event_count"] >= 20
-        assert [step["event_type"] for step in trace_payload["steps"]][-1] == "final_answer"
-
+        assert [step["event_type"] for step in trace_payload["steps"]][
+            -1
+        ] == "final_answer"
         telemetry_events_response = client.get(
             "/telemetry/events",
             params={
@@ -269,8 +273,7 @@ def test_omniserve_real_application_sync_run_writes_workspace_and_trace(tmp_path
         telemetry_events = telemetry_events_response.json()
         assert telemetry_events["count"] >= 4
         assert {
-            event["output"]["tool_name"]
-            for event in telemetry_events["events"]
+            event["output"]["tool_name"] for event in telemetry_events["events"]
         }.issuperset(
             {
                 "lookup_customer",
@@ -279,23 +282,19 @@ def test_omniserve_real_application_sync_run_writes_workspace_and_trace(tmp_path
                 "create_escalation",
             }
         )
-
         exact_trace_response = client.get(f"/telemetry/traces/{payload['trace_id']}")
         assert exact_trace_response.status_code == 200
         exact_trace = exact_trace_response.json()
         assert exact_trace["summary"]["trace_id"] == payload["trace_id"]
         assert exact_trace["trace"]["run_id"] == payload["run_id"]
-
         run_trace_response = client.get(f"/telemetry/runs/{payload['run_id']}/trace")
         assert run_trace_response.status_code == 200
         assert run_trace_response.json()["summary"]["trace_id"] == payload["trace_id"]
-
         session_trace_response = client.get(
             "/telemetry/sessions/served-support-session/trace"
         )
         assert session_trace_response.status_code == 200
         assert session_trace_response.json()["summary"]["run_id"] == payload["run_id"]
-
     ticket = workspace_dir / "files" / "tickets" / "tck-1042.md"
     assert ticket.read_text(encoding="utf-8").startswith("# tck-1042")
 
@@ -313,9 +312,7 @@ def test_omniserve_background_api_runs_real_application_background_agent(tmp_pat
     ).ensure()
     agent = SupportOperationsBackgroundAgent(workspace)
     manager = BackgroundAgentManager(
-        task_store="in_memory",
-        workspace=workspace,
-        worker_id="served_real_app_worker",
+        task_store="in_memory", workspace=workspace, worker_id="served_real_app_worker"
     )
     server = OmniServe(
         agent,
@@ -326,66 +323,48 @@ def test_omniserve_background_api_runs_real_application_background_agent(tmp_pat
         ),
         background_manager=manager,
     )
-
     with TestClient(server.app) as client:
         created = client.post(
             "/background/tasks",
             json={
                 "task_id": "support_ticket_tck_1042",
-                "query": (
-                    "Handle ticket tck-1042 for customer cust-001. Create a durable "
-                    "support note and escalation summary."
-                ),
+                "query": "Handle ticket tck-1042 for customer cust-001. Create a durable support note and escalation summary.",
                 "schedule": {"type": "manual"},
                 "timeout_seconds": 10,
                 "retry_policy": {"max_retries": 0},
             },
         )
         assert created.status_code == 200
-
         queued_response = client.post(
-            "/background/tasks/support_ticket_tck_1042/run",
-            json={"wait": False},
+            "/background/tasks/support_ticket_tck_1042/run", json={"wait": False}
         )
         assert queued_response.status_code == 200
         queued_run = queued_response.json()
         assert queued_run["status"] in {"queued", "running", "completed"}
-
-        run = _wait_for_background_run(
-            client,
-            queued_run["run_id"],
-            timeout_seconds=3,
-        )
+        run = _wait_for_background_run(client, queued_run["run_id"], timeout_seconds=3)
         assert run["status"] == "completed"
-
         events_response = client.get(f"/background/runs/{run['run_id']}/events")
         assert events_response.status_code == 200
         event_names = [event["event"] for event in events_response.json()["events"]]
         assert "background_run_completed" in event_names
-
         workspace_response = client.get(f"/background/runs/{run['run_id']}/workspace")
         assert workspace_response.status_code == 200
         workspace_files = {item["name"] for item in workspace_response.json()["files"]}
         assert {"events.jsonl", "output.md", "run.json", "tickets"}.issubset(
             workspace_files
         )
-
     output = workspace.files.read_text(f"{run['workspace_path']}/output.md")
     assert "Support background task: tck-1042" in output
     assert "Ada Ventures" in output
     assert "ord-1002" in output
     assert "Enterprise delayed shipments" in output
     assert "queued_for_specialist" in output
-
     ticket = workspace.files.read_text(f"{run['workspace_path']}/tickets/tck-1042.md")
     assert ticket == output
 
 
 def _wait_for_background_run(
-    client: TestClient,
-    run_id: str,
-    *,
-    timeout_seconds: float,
+    client: TestClient, run_id: str, *, timeout_seconds: float
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
     last_run: dict[str, Any] | None = None

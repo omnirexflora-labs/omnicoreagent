@@ -4,22 +4,10 @@ from typing import TYPE_CHECKING, Any
 
 from omnicoreagent.core.workspace.artifacts import ToolResponseOffloader
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.core.tools.tool_prompt_renderer import (
-    ALWAYS_VISIBLE_TOOL_NAMES,
-    ToolPromptRenderer,
-)
 from omnicoreagent.core.workspace.config import WorkspaceConfig
 
 if TYPE_CHECKING:
     from omnicoreagent.core.workspace.manager import Workspace
-
-
-async def build_tool_registry_advance_tools_use(registry: ToolRegistry):
-    from omnicoreagent.core.tools.advance_tools_use import (
-        build_tool_registry_advance_tools_use as build_advanced_tools,
-    )
-
-    return await build_advanced_tools(registry=registry)
 
 
 def build_tool_registry_workspace_files(
@@ -135,18 +123,4 @@ class ToolRuntimeRegistry:
                 registry=registry,
             )
 
-        if self.enable_advanced_tool_use:
-            await build_tool_registry_advance_tools_use(registry=registry)
-
         return registry
-
-    async def render_prompt_registry(
-        self, mcp_tools: dict | None = None, local_tools: Any = None
-    ) -> str:
-        renderer = ToolPromptRenderer(
-            include_mcp_tools=not self.enable_advanced_tool_use,
-            direct_tool_names=ALWAYS_VISIBLE_TOOL_NAMES
-            if self.enable_advanced_tool_use
-            else None,
-        )
-        return await renderer.render(mcp_tools=mcp_tools, local_tools=local_tools)

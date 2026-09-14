@@ -270,11 +270,6 @@ class OmniCoreAgent:
 
         if self.mcp_client and self.mcp_tools:
             await self.mcp_client.connect_to_servers()
-            harness_tools.index_tools_for_advanced_use(
-                enabled=self.agent.enable_advanced_tool_use,
-                mcp_tools=self.mcp_client.available_tools if self.mcp_client else {},
-                local_tools=self.local_tools,
-            )
 
     async def run(
         self,

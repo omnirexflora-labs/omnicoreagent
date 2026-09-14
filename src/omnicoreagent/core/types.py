@@ -119,16 +119,6 @@ class Message(SerializableRecord):
 
 
 @dataclass
-class ParsedResponse(SerializableRecord):
-    action: bool | None = None
-    data: str | None = None
-    error: str | None = None
-    answer: str | None = None
-    tool_calls: bool | None = None
-    agent_calls: bool | None = None
-
-
-@dataclass
 class ToolCallResult(SerializableRecord):
     tool_executor: Any
     tool_name: str
@@ -136,13 +126,6 @@ class ToolCallResult(SerializableRecord):
     tool_call_id: str | None = None
     tool_provider: str = "local"
     tool_server: str | None = None
-
-
-@dataclass
-class ToolError(SerializableRecord):
-    observation: str
-    tool_name: str
-    tool_args: dict | None = None
 
 
 @dataclass

@@ -42,21 +42,6 @@ def prepare_dynamic_subagents(
     return factory, local_tools
 
 
-def index_tools_for_advanced_use(
-    *,
-    enabled: bool,
-    mcp_tools: dict[str, Any] | None = None,
-    local_tools: Any = None,
-):
-    if not enabled:
-        return
-
-    runtime("AdvanceToolsUse")().load_and_process_tools(
-        mcp_tools=mcp_tools,
-        local_tools=local_tools,
-    )
-
-
 def available_tools(mcp_client: Any, local_tools: Any) -> list[dict[str, Any]]:
     tools: list[dict[str, Any]] = []
 

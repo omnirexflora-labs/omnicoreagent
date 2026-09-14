@@ -97,12 +97,12 @@ def test_advanced_discovery_is_scoped_to_each_catalog_and_unlocks_schemas():
 
     first = NativeToolCatalog(local_tools=registry, advanced=True)
     second = NativeToolCatalog(local_tools=registry, advanced=True)
-    assert first.definitions() == []
+    assert [d["function"]["name"] for d in first.definitions()] == ["tools_retriever"]
     with pytest.raises(ValueError):
         first.resolve(ToolRequest("id", "weather", '{"city":"Lagos"}'))
     found = first.discover("weather forecast temperature")
-    assert found == first.definitions()
-    assert second.definitions() == []
+    assert found == first.definitions()[1:]
+    assert [d["function"]["name"] for d in second.definitions()] == ["tools_retriever"]
     assert first.resolve(ToolRequest("id", "weather", '{"city":"Lagos"}'))[1] == {
         "city": "Lagos"
     }
@@ -118,7 +118,7 @@ def test_configured_delegation_schema_excludes_runtime_session_id():
 
     child = Child()
     catalog = NativeToolCatalog(sub_agents=[child], advanced=True)
-    definition = catalog.definitions()[0]["function"]
+    definition = catalog.definitions()[1]["function"]
     assert definition["name"] == "delegate_researcher"
     assert "session_id" not in definition["parameters"]["properties"]
     binding, args = catalog.resolve(
@@ -181,3 +181,23 @@ def test_native_catalog_rejects_wrong_types_before_execution():
     catalog = NativeToolCatalog(local_tools=registry)
     with pytest.raises(ValueError, match="Invalid arguments"):
         catalog.resolve(ToolRequest("id", "charge", '{"amount":"001"}'))
+
+
+def test_discovery_binding_cannot_hijack_an_application_tool_with_same_name():
+    registry = ToolRegistry()
+
+    @registry.register_tool(name="tools_retriever")
+    async def app_retriever(query: str):
+        return query
+
+    ordinary = NativeToolCatalog(local_tools=registry)
+    assert (
+        ordinary.resolve(ToolRequest("c", "tools_retriever", '{"query":"x"}'))[
+            0
+        ].provider
+        == "local"
+    )
+    advanced = NativeToolCatalog(local_tools=registry, advanced=True)
+    bindings = list(advanced.bindings.values())
+    assert {binding.provider for binding in bindings} == {"local", "discovery"}
+    assert len({binding.exposed_name for binding in bindings}) == 2

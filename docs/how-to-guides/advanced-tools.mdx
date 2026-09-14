@@ -22,11 +22,11 @@ agent_config = {
 
 ## How It Works
 
-1. Local tools, MCP tools, workspace/artifact tools, skills, and other registered runtime tools are indexed in memory.
+1. Local tools, MCP tools, workspace/artifact tools, skills, and other registered runtime tools form an isolated catalog for each run.
 2. Always-visible harness tools such as `tools_retriever`, workspace tools, artifact tools, and subagent tools stay directly visible.
 3. The model calls `tools_retriever` with a semantic query for the capability it needs.
 4. The retriever returns the top matching tools with names, descriptions, and parameters.
-5. The model calls the selected tool normally.
+5. Matching native tool schemas become available on the next model request. A discovery call cannot unlock another call in its own batch.
 
 ---
 
@@ -35,7 +35,7 @@ agent_config = {
 - **Scales to 1000+ tools** — searchable tools do not all need to be stuffed into the prompt
 - **Zero network I/O** — index lives in memory
 - **Deterministic** — same query always selects same tools
-- **Container-friendly** — no external dependencies
+- **Container-friendly** — no separate search service
 
 <Tip>
 Enable when you have many local or MCP tools and want the agent to discover the right capability through the runtime tool catalog.

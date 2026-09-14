@@ -589,14 +589,14 @@ class TestOmniCoreAgentSubagents:
         async def message_history(agent_name, session_id):
             return []
 
-        await agent.agent.prepare_initial_messages(
+        from omnicoreagent.core.tools.native_catalog import NativeToolCatalog
+
+        await agent.agent.initial_message_preparer.prepare(
             session_state=session_state,
             system_prompt="base system",
             session_id="prompt-session",
             message_history=message_history,
-            mcp_tools={},
-            local_tools=runtime_tools,
-            sub_agents=None,
+            catalog=NativeToolCatalog(local_tools=runtime_tools),
         )
 
         prompt = session_state.messages[0].content
@@ -604,9 +604,9 @@ class TestOmniCoreAgentSubagents:
         assert "unique output path" in prompt
         assert "subagents as an array" in prompt
         assert "Use workspace tools" in prompt
-        assert "spawn_subagents:" in prompt
-        assert "read_file:" in prompt
-        assert "write_file:" in prompt
+        assert "spawn_subagents" in prompt
+        assert "read_file" in prompt
+        assert "write_file" in prompt
 
         await agent.cleanup()
 

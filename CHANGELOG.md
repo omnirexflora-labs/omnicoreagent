@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — native tool runtime
+
+- Replace XML control with native function calls, strict JSON argument schemas,
+  stable provider call IDs and correlated JSON tool results. XML task content is
+  ordinary text and is never executable control syntax.
+- Add live provider, Python agent and SSE text streaming using the shared loop;
+  bounded queues, child actor identity and cancellation close upstream streams.
+- Remove the obsolete XML parsers/observation executors and global tool index.
+  Discovery now unlocks schemas for the next turn in an isolated per-run catalog.
+- Keep complete tool interactions together through context selection and history;
+  retain historical XML sessions as data. History loading failures now surface.
+- Return explicit success/error termination status through serving and background
+  outcomes. Dynamic spawn accepts a `subagents` array, replacing `subagents_json`.
+- Breaking: removed RouterAgent, ParallelAgent and SequentialAgent APIs, examples
+  and documentation, with no fallback. Normal, deep and background runs remain.
+
+
+
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]

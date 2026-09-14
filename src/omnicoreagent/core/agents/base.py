@@ -16,7 +16,7 @@ from omnicoreagent.core.types import (
     SessionState,
 )
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.core.tools.tool_batch_runner import ToolBatchRunner
+from omnicoreagent.core.tools.governed_tool_runner import GovernedToolRunner
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.logging import logger
@@ -36,7 +36,7 @@ from omnicoreagent.core.agents.message_history import AgentMessageHistoryLoader
 from omnicoreagent.core.agents.run_outcome import AgentRunOutcomeHandler
 from omnicoreagent.core.agents.session_state import AgentSessionStateStore
 from omnicoreagent.core.agents.subagent_runner import SubAgentCallRunner
-from omnicoreagent.core.tools.tool_observation import ToolObservationHandler
+from omnicoreagent.core.tools.tool_result_offloader import ToolResultOffloader
 
 
 if TYPE_CHECKING:
@@ -104,18 +104,13 @@ class BaseReactAgent:
         )
         self.guardrail = guardrail
         self.governance_engine = governance_engine
-        self.tool_observation_handler = ToolObservationHandler(
-            agent_name=self.agent_name,
-            tool_offloader=self.tool_offloader,
-            guardrail=self.guardrail,
-        )
+        self.tool_result_offloader = ToolResultOffloader(self.tool_offloader)
         self.message_history_loader = AgentMessageHistoryLoader(
             agent_name=self.agent_name
         )
         self.subagent_runner = SubAgentCallRunner(agent_name=self.agent_name)
-        self.tool_batch_runner = ToolBatchRunner(
+        self.governed_tool_runner = GovernedToolRunner(
             agent_name=self.agent_name,
-            tool_call_timeout=self.tool_call_timeout,
             governance_engine=self.governance_engine,
         )
         self.tool_runtime_registry = ToolRuntimeRegistry(
@@ -137,7 +132,6 @@ class BaseReactAgent:
             skill_manager=self.skill_manager,
         )
         self.initial_message_preparer = AgentInitialMessagePreparer(
-            tool_runtime_registry=self.tool_runtime_registry,
             message_history_loader=self.message_history_loader,
             prompt_context_builder=self.prompt_context_builder,
         )
@@ -172,28 +166,6 @@ class BaseReactAgent:
             debug=debug,
         )
 
-    async def prepare_initial_messages(
-        self,
-        session_state,
-        system_prompt: str,
-        session_id: str,
-        message_history: Callable[[], Any],
-        mcp_tools: dict = None,
-        local_tools: Any = None,
-        debug: bool = False,
-        sub_agents: list = None,
-        on_event: Any = None,
-    ) -> None:
-        await self.initial_message_preparer.prepare(
-            session_state=session_state,
-            system_prompt=system_prompt,
-            session_id=session_id,
-            message_history=message_history,
-            mcp_tools=mcp_tools,
-            local_tools=local_tools,
-            sub_agents=sub_agents,
-        )
-
     async def run(
         self,
         system_prompt: str,
@@ -226,15 +198,12 @@ class BaseReactAgent:
             sub_agents=sub_agents,
             advanced=self.enable_advanced_tool_use,
         )
-        await self.prepare_initial_messages(
+        await self.initial_message_preparer.prepare(
             system_prompt=system_prompt,
             session_state=session_state,
             message_history=message_history,
-            mcp_tools=mcp_tools,
-            local_tools=runtime_local_tools,
+            catalog=catalog,
             session_id=session_id,
-            debug=debug,
-            sub_agents=sub_agents,
         )
         session_state.messages.append(Message(role="user", content=query))
         self.prompt_context_builder.inject_current_datetime(session_state.messages)

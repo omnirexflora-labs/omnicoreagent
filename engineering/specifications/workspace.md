@@ -622,7 +622,7 @@ inline only because an app-local tool has a name such as `read_file` or `grep`.
 
 Required tests:
 
-- `tests/test_tool_observation.py`
+- `tests/test_tool_result_offloader.py`
 
 ---
 
@@ -704,7 +704,7 @@ expected operational errors into clear tool strings.
 Focused workspace verification:
 
 ```bash
-uv run pytest -q tests/test_workspace.py tests/test_workspace_files_backend.py tests/test_tool_response_offloader.py tests/test_tool_runtime_registry.py tests/test_tool_observation.py tests/test_prompt_context.py tests/test_subagents.py tests/test_import_startup.py
+uv run pytest -q tests/test_workspace.py tests/test_workspace_files_backend.py tests/test_tool_response_offloader.py tests/test_tool_runtime_registry.py tests/test_tool_result_offloader.py tests/test_prompt_context.py tests/test_subagents.py tests/test_import_startup.py
 ```
 
 Repository checks:

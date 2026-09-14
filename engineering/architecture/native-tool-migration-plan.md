@@ -130,7 +130,7 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 | 08 | Complete outcome propagation | 271 passed (runtime/outcomes, background, serve, LLM step and native runs). Returned errors fail background attempts; serving retains status/reason; missing provider usage still counts a request. |
 | 09 | Complete provider stream | 45 passed (stream assembly, both adapters, complete turns and LLM step); Ruff/diff passed. Indexed fragments, usage-only tail, early text, upstream close and async retry covered. |
 | 10 | Complete public delivery | 189 passed (public/provider streaming, native loop, SSE, facade telemetry, serve/background APIs), plus 15 passed after hiding runtime-only child parameters. Bounded producer, early deltas, child identity, cancellation during provider/tool, terminal parity and failure covered. |
-| 11 | Pending | |
+| 11 | Complete cleanup | 102 passed (native runs/catalog, prompts, governance, offloading, configured children, real applications, cookbook and import smoke). Changed-file Ruff and diff checks passed. Earlier broad run identified stale fixtures, subsequently migrated; full final rerun is step 12. |
 | 12 | Pending | |
 
 ## Plan changes and limitations
@@ -151,3 +151,5 @@ Acceptance: every retained scenario passes or has a specific external-verificati
 - Step 09 limitation: the stream contract accepts text deltas and function calls; multimodal content-block deltas fail explicitly. Streaming requests never retry automatically after partial output. Provider capability failures are surfaced instead of silently dropping tool parameters.
 
 - Step 10 delivery policy: text deltas are live-only, carry root run ID, actor run/trace/session IDs and monotonic sequence, and are labelled intermediate until the completed answer. Public queue is bounded at 256; SSE queue at 1000. Lifecycle event replay retains event-ID deduplication; replay returns persisted final answers, not historical token fragments. Background runs retain lifecycle event streams and durable terminal outcomes; they do not record token fragments. Explicitly close a public iterator with `aclosing` when stopping early.
+
+- Step 11 cleanup corrections: prompt capability activation uses native catalog identities, and history load failures surface instead of silently losing context. Discovery schemas belong to each run; calls are resolved against the turn-start catalog. BM25 splits snake_case/camelCase identifiers. Loop signatures use normalized guarded outputs before artifact references and argument redaction. Offload telemetry is emitted at the actual native boundary. Existing governance/authority, telemetry and offload tests were moved onto retained primitives; XML representation tests were deleted.

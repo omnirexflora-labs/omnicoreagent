@@ -25,7 +25,9 @@ def _make_agent(guardrail=None):
 
 
 def _scrub(agent, results):
-    return agent.tool_observation_handler.scrub_results(results)
+    from omnicoreagent.core.tools.tool_observation_guardrail import scrub_tool_results
+
+    return scrub_tool_results(results, agent.guardrail)
 
 
 def _make_result(tool_name="search", data="some data", message=None, status="success"):

@@ -552,7 +552,7 @@ tests/test_workspace.py
 tests/test_workspace_files_backend.py
 tests/test_tool_response_offloader.py
 tests/test_tool_runtime_registry.py
-tests/test_tool_observation.py
+tests/test_tool_result_offloader.py
 tests/test_prompt_context.py
 tests/test_subagents.py
 tests/test_import_startup.py
@@ -566,7 +566,7 @@ What each covers:
 | `test_workspace_files_backend.py` | Workspace file operations and local/S3 behavior |
 | `test_tool_response_offloader.py` | Artifact offloading, retrieval, metadata, shared workspace binding |
 | `test_tool_runtime_registry.py` | Runtime registration of workspace and artifact tools |
-| `test_tool_observation.py` | Offload decisions and inline retrieval outputs |
+| `test_tool_result_offloader.py` | Offload decisions and inline retrieval outputs |
 | `test_prompt_context.py` | Prompt sections for workspace/artifacts |
 | `test_subagents.py` | Subagent output contract through workspace files |
 | `test_import_startup.py` | Startup cost and lazy imports |
@@ -575,7 +575,7 @@ Run at least:
 
 ```bash
 uv run ruff check src tests
-uv run pytest -q tests/test_workspace.py tests/test_workspace_files_backend.py tests/test_tool_response_offloader.py tests/test_tool_runtime_registry.py tests/test_tool_observation.py tests/test_prompt_context.py tests/test_subagents.py tests/test_import_startup.py
+uv run pytest -q tests/test_workspace.py tests/test_workspace_files_backend.py tests/test_tool_response_offloader.py tests/test_tool_runtime_registry.py tests/test_tool_result_offloader.py tests/test_prompt_context.py tests/test_subagents.py tests/test_import_startup.py
 uv run pytest -q
 ```
 
