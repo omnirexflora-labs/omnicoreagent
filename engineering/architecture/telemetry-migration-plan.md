@@ -15,7 +15,7 @@ stream, background job, or deep-agent execution to work.
 The source snapshot for this plan is branch `refactor/native-tool-runtime`.
 The plan was started at commit `8841795abda60388117ff5a1b32b3a633ede3a3a`;
 implementation checkpoints are listed below as they land. The current
-checkpoint is `3f8e71c`.
+checkpoint is `8b0805f`.
 
 ## Current boundary
 
@@ -81,7 +81,7 @@ unit starts.
 | 2. Complete request trajectory | Complete at `407b0d4` | 83 focused model/runtime/telemetry tests passed; Ruff and diff checks passed. Model turns expose tool catalog/count and finish metadata; requested/resolved calls, execution events, batch IDs, and exact post-offload observations retain causal links. |
 | 3. Context and lineage evidence | Complete at `b67fb18` | Context assembly and compression preserve message/tool digests and opt-in prompt payloads; internal summary calls, memory reads/writes, workspace offloads, and subagent terminal links are correlated. Capture gaps mark traces partial and are surfaced by normalization. Focused suite: 102 passed. Full suite: 1,155 passed, 14 skipped, with one unrelated `tiktoken` encoding-cache failure in `tests/test_base.py::test_run_prepares_internal_tools_once_for_prompt_and_execution`. |
 | 4. Portable evidence adapters | Complete at `4af3239` | `OmniCoreEvidenceAdapter` emits the versioned JSON-only `omnicoreagent.execution-evidence/v1` envelope and validates/re-imports it without exposing internal trace objects. `GenericTraceEvidenceAdapter` preserves timing, usage, errors, capture states, provenance, relationships, and explicit unknown fields. Adapter/context/privacy suite: 20 passed; JSON Schema validation passed. |
-| 5. Telemetry delivery hardening | Complete at `3f8e71c` | Stream event copies carry store-local cursors, JSONL replay rebuilds cursor positions, SSE emits resumable `id` fields, and `/telemetry/events/stream` accepts `cursor` or `Last-Event-ID`. `model.call` spans record bounded provider stream statistics, including partial-stream failures, without token-by-token payloads. Persistence/export timeout behavior is configurable, visible, and strictness-aware. Focused delivery/adapter/model/API suite: 118 passed. |
+| 5. Telemetry delivery hardening | Complete at `3f8e71c` | Stream event copies carry store-local cursors, JSONL replay rebuilds cursor positions, SSE emits resumable `id` fields, and `/telemetry/events/stream` accepts `cursor` or `Last-Event-ID`. `model.call` spans record bounded provider stream statistics, including partial-stream failures, without token-by-token payloads. Persistence/export timeout behavior is configurable, visible, and strictness-aware. Focused delivery/adapter/model/API suite: 118 passed; final regression: 1,175 passed, 14 skipped. |
 
 ## Rules for every phase
 
