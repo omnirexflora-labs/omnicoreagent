@@ -603,10 +603,7 @@ class TelemetryRecorder:
                 policy_version=self.config.fingerprint(),
                 reason="capture disabled by telemetry policy",
             )
-        if (
-            source in {"model.call", "model_response"}
-            and not self.config.record_model_responses
-        ):
+        if source == "model_response" and not self.config.record_model_responses:
             return None, TelemetryCapture(
                 state=CaptureState.NOT_RECORDED,
                 source=descriptor_source,

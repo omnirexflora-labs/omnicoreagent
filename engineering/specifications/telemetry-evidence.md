@@ -83,6 +83,12 @@ records before/after digests and the groups dropped or replaced. A context
 summary model request is a normal linked `model.call` span, so internal model
 work is not invisible to evaluation.
 
+When a provider stream is used, the `model.call` span records bounded stream
+statistics (`streaming`, delta count, visible text byte count, and event-type
+counts). It does not retain each token by default. A cancelled or failed stream
+keeps those statistics with its terminal span status, while the complete
+`model_response` payload remains governed by `record_model_responses`.
+
 ## Adapter boundary
 
 `OmniCoreEvidenceAdapter` accepts a stored OmniCoreAgent trace or its serialized

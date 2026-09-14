@@ -206,6 +206,47 @@ async def test_llm_step_context_capture_respects_prompt_policy(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_llm_step_records_bounded_provider_stream_statistics(monkeypatch):
+    monkeypatch.setattr(llm_step, "usage", Usage())
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    context = await recorder.start_trace(trace_id="trace-stream-stats")
+    delivered = []
+
+    class LlmConnection:
+        async def llm_stream(self, messages, tools=None):
+            yield {"type": "text_delta", "text": "hello"}
+            yield {"type": "text_delta", "text": " world"}
+            yield {"type": "turn_complete", "turn": "hello world"}
+
+    async def on_event(event):
+        delivered.append(event)
+
+    result = await make_runner().run(
+        session_state=make_session_state(),
+        llm_connection=LlmConnection(),
+        run_usage=Usage(),
+        session_id="chat-stream",
+        telemetry_recorder=recorder,
+        on_event=on_event,
+    )
+    await recorder.end_trace()
+
+    trace = await store.get_trace(context.trace_id)
+    model_span = next(span for span in trace.spans if span.kind == "model.call")
+    model_call = next(event for event in trace.events if event.event_type == "model_call")
+    assert result.response.text == "hello world"
+    assert len(delivered) == 2
+    assert model_call.metadata["streaming"] is True
+    assert model_span.output["stream_stats"] == {
+        "streaming": True,
+        "delta_count": 2,
+        "visible_text_bytes": 11,
+        "event_types": {"text_delta": 2},
+    }
+
+
+@pytest.mark.asyncio
 async def test_llm_step_returns_usage_limit_error(monkeypatch):
     monkeypatch.setattr(llm_step, "usage", Usage())
     runner = make_runner(limits_enabled=True, request_limit=1)

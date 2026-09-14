@@ -268,6 +268,13 @@ class AgentLlmStepRunner:
         context_evidence: dict[str, Any] | None = None,
         context_span_id: str | None = None,
     ) -> tuple[Any, str | None, str | None, str | None]:
+        stream_stats: dict[str, Any] = {
+            "streaming": on_event is not None,
+            "delta_count": 0,
+            "visible_text_bytes": 0,
+            "event_types": {},
+        }
+
         async def request():
             if on_event is None:
                 return await llm_connection.llm_call(messages, tools=tools)
@@ -281,6 +288,15 @@ class AgentLlmStepRunner:
                             raise ValueError("Provider stream returned multiple turns")
                         response = event["turn"]
                     else:
+                        event_type = str(event.get("type", "unknown"))
+                        stream_stats["delta_count"] += 1
+                        event_types = stream_stats["event_types"]
+                        event_types[event_type] = event_types.get(event_type, 0) + 1
+                        text = event.get("text")
+                        if isinstance(text, str):
+                            stream_stats["visible_text_bytes"] += len(
+                                text.encode("utf-8")
+                            )
                         if response is not None:
                             raise ValueError(
                                 "Provider stream emitted text after completion"
@@ -300,6 +316,7 @@ class AgentLlmStepRunner:
         model_input = {
             "message_count": len(messages),
             "context_digest": (context_evidence or {}).get("context_digest"),
+            "streaming": stream_stats["streaming"],
         }
         if telemetry_recorder.config.record_model_prompts:
             model_input["messages"] = [message_record(message) for message in messages]
@@ -313,6 +330,7 @@ class AgentLlmStepRunner:
             attributes={
                 "context_digest": (context_evidence or {}).get("context_digest"),
                 "context_span_id": context_span_id,
+                "streaming": stream_stats["streaming"],
             },
         )
         try:
@@ -329,6 +347,7 @@ class AgentLlmStepRunner:
                     "model_span_id": span_context.span_id,
                     "context_span_id": context_span_id,
                     "context_digest": (context_evidence or {}).get("context_digest"),
+                    "streaming": stream_stats["streaming"],
                 },
             )
             response = await request()
@@ -340,6 +359,7 @@ class AgentLlmStepRunner:
                 "finish_reason": normalized.finish_reason,
                 "refusal": normalized.refusal,
                 "usage": self._usage_payload(extract_response_usage(response)),
+                "stream_stats": stream_stats,
             }
             response_event = await telemetry_recorder.emit_event(
                 "model_response",
@@ -362,6 +382,7 @@ class AgentLlmStepRunner:
                     "tool_call_ids": response_payload["tool_call_ids"],
                     "context_span_id": context_span_id,
                     "context_digest": (context_evidence or {}).get("context_digest"),
+                    "stream_stats": stream_stats,
                     "usage": response_payload["usage"],
                 },
             )
@@ -375,6 +396,7 @@ class AgentLlmStepRunner:
             await telemetry_recorder.end_span(
                 span_context.span_id,
                 status=SpanStatus.CANCELLED,
+                output={"stream_stats": stream_stats},
             )
             raise
         except Exception as exc:
@@ -386,6 +408,7 @@ class AgentLlmStepRunner:
             await telemetry_recorder.end_span(
                 span_context.span_id,
                 status=SpanStatus.ERROR,
+                output={"stream_stats": stream_stats},
                 error={"type": exc.__class__.__name__, "message": str(exc)},
             )
             raise
