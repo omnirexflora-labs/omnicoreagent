@@ -73,7 +73,8 @@ unit starts.
 | Unit | Status | Evidence |
 | --- | --- | --- |
 | 1. Versioned evidence metadata | Complete at `36d88f4` | 49 telemetry foundation/export tests passed; 202 runtime/telemetry tests passed; Ruff and diff checks passed. Traces, spans, and events preserve schema version, capture state, execution surface, provenance, and legacy evidence status. |
-| 2. Complete request trajectory | Next | Add stable causal identifiers and distinguish executor results from model observations. |
+| 2. Complete request trajectory | Complete at `407b0d4` | 83 focused model/runtime/telemetry tests passed; Ruff and diff checks passed. Model turns expose tool catalog/count and finish metadata; requested/resolved calls, execution events, batch IDs, and exact post-offload observations retain causal links. |
+| 3. Context and lineage evidence | Next | Record context snapshots/groups and explicit child/background/serving links without duplicating history. |
 
 ## Rules for every phase
 
