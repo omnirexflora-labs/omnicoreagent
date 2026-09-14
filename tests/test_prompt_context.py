@@ -5,8 +5,8 @@ from omnicoreagent.core.types import Message
 
 
 class FakeSkillManager:
-    def get_skills_context_xml(self):
-        return '<skills><skill name="write_tests" /></skills>'
+    def get_skills_context(self):
+        return "- name: write_tests\n  description: Write tests\n  instructions: SKILL.md"
 
 
 class FakeSubAgent:
@@ -54,7 +54,7 @@ async def test_build_system_prompt_includes_enabled_harness_context():
     assert "<tool_call_1>" not in prompt
     assert "args?: dict" not in prompt
     assert "[AVAILABLE SKILLS]" in prompt
-    assert '<skill name="write_tests"' in prompt
+    assert "- name: write_tests" in prompt
     assert "write_file" in prompt
     assert "workspace tools" in prompt
     assert "offloaded to artifacts" in prompt

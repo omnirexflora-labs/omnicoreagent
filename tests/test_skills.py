@@ -120,19 +120,20 @@ Test skill body.
         with pytest.raises(RuntimeError, match="not found"):
             manager.validate_skill("nonexistent")
 
-    def test_get_skills_context_xml(self):
-        """Test XML context generation."""
+    def test_get_skills_context(self):
+        """Test the plain-text native tool catalog."""
         self._create_skill("test-skill", "Test description")
 
         manager = SkillManager(self.skills_root)
         manager.discover_skills()
 
-        xml = manager.get_skills_context_xml()
+        context = manager.get_skills_context()
 
-        assert "<available_skills>" in xml
-        assert "<name>test-skill</name>" in xml
-        assert "<description>Test description</description>" in xml
-        assert "SKILL.md</location>" in xml
+        assert "- name: test-skill" in context
+        assert "description: Test description" in context
+        assert "instructions:" in context
+        assert "SKILL.md" in context
+        assert "<available_skills>" not in context
 
     def test_parse_yaml_complex(self):
         """Test parsing more complex frontmatter with metadata and allowed-tools."""

@@ -65,7 +65,7 @@ async def test_llm_step_calls_model_and_records_usage(monkeypatch):
         async def llm_call(self, messages, tools=None):
             return {
                 "choices": [
-                    {"message": {"content": "<final_answer>done</final_answer>"}}
+                    {"message": {"content": "done"}}
                 ],
                 "usage": {
                     "prompt_tokens": 3,
@@ -82,7 +82,7 @@ async def test_llm_step_calls_model_and_records_usage(monkeypatch):
         session_id="chat1",
     )
 
-    assert result.response.text == "<final_answer>done</final_answer>"
+    assert result.response.text == "done"
     assert result.error_result is None
     assert run_usage.requests == 1
     assert run_usage.total_tokens == 7
@@ -98,7 +98,7 @@ async def test_llm_step_manages_context_before_model_call(monkeypatch):
             calls.append(messages)
             if isinstance(messages[0], dict):
                 return "summary"
-            return "<final_answer>done</final_answer>"
+            return "done"
 
     session_state = make_session_state()
     result = await make_runner(TriggeringContextManager()).run(
@@ -108,7 +108,7 @@ async def test_llm_step_manages_context_before_model_call(monkeypatch):
         session_id="chat1",
     )
 
-    assert result.response.text == "<final_answer>done</final_answer>"
+    assert result.response.text == "done"
     assert session_state.messages == [Message(role="system", content="summary")]
     assert len(calls) == 2
 
@@ -129,7 +129,7 @@ async def test_llm_step_records_context_compression_telemetry(monkeypatch):
         async def llm_call(self, messages, tools=None):
             if isinstance(messages[0], dict):
                 return "summary"
-            return "<final_answer>done</final_answer>"
+            return "done"
 
     session_state = make_session_state()
     result = await make_runner(TriggeringContextManager()).run(
@@ -142,7 +142,7 @@ async def test_llm_step_records_context_compression_telemetry(monkeypatch):
     await recorder.end_trace()
 
     trace = await store.get_trace(context.trace_id)
-    assert result.response.text == "<final_answer>done</final_answer>"
+    assert result.response.text == "done"
     assert session_state.messages == [Message(role="system", content="summary")]
     assert {span.kind for span in trace.spans} >= {
         "context.compression",

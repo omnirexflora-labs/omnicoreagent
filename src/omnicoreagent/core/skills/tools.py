@@ -51,7 +51,7 @@ def build_skill_tools(
             "properties": {
                 "skill_name": {
                     "type": "string",
-                    "description": "Name of the skill to read from (from available_skills list)",
+                    "description": "Name of the skill to read from the available skills catalog",
                 },
                 "file_path": {
                     "type": "string",

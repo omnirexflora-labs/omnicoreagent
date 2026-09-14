@@ -23,12 +23,7 @@ class OmniCoreAgentPromptBuilder:
         if not system_instruction.strip():
             raise ValueError("System instruction is required.")
 
-        return f"""<system_instruction>
-{system_instruction.strip()}
-</system_instruction>
-
-{self.react_prompt}
-""".strip()
+        return f"{system_instruction.strip()}\n\n{self.react_prompt}".strip()
 
 
 class AgentPromptContextBuilder:
@@ -68,7 +63,7 @@ class AgentPromptContextBuilder:
 
         skills_context = ""
         if self.enable_agent_skills and self.skill_manager:
-            skills_context = self.skill_manager.get_skills_context_xml()
+            skills_context = self.skill_manager.get_skills_context()
 
         has_skill_tools = {
             "read_skill_file",
