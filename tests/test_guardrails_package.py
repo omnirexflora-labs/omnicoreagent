@@ -1,3 +1,7 @@
+import logging
+
+import pytest
+
 from omnicoreagent.core.guardrails import (
     DetectionConfig,
     PatternManager,
@@ -6,6 +10,60 @@ from omnicoreagent.core.guardrails import (
     create_guard,
     quick_check,
 )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("strict_mode", "true"),
+        ("sensitivity", 0),
+        ("sensitivity", -1),
+        ("sensitivity", float("nan")),
+        ("sensitivity", float("inf")),
+        ("enable_ml_fallback", "false"),
+        ("max_input_length", 0),
+        ("max_input_length", True),
+        ("enable_encoding_detection", 1),
+        ("enable_heuristic_analysis", None),
+        ("enable_sequential_analysis", 0),
+        ("enable_entropy_analysis", "yes"),
+        ("log_level", "LOUD"),
+        ("allowlist_patterns", "pattern"),
+        ("blocklist_patterns", ["["]),
+    ],
+)
+def test_detection_config_rejects_invalid_security_policy_fields(field, value):
+    with pytest.raises(ValueError):
+        DetectionConfig(**{field: value})
+
+
+def test_detection_config_normalizes_logging_level_and_copies_patterns():
+    patterns = [r"safe\s+value"]
+    config = DetectionConfig(log_level="debug", allowlist_patterns=patterns)
+
+    assert config.log_level == "DEBUG"
+    assert config.allowlist_patterns == patterns
+    assert config.allowlist_patterns is not patterns
+
+
+def test_update_config_rejects_unknown_fields_without_mutating_policy():
+    guard = PromptInjectionGuard(DetectionConfig(max_input_length=100))
+
+    with pytest.raises(ValueError, match="Unknown detection configuration"):
+        guard.update_config(max_input_length=3, typo=True)
+
+    assert guard.config.max_input_length == 100
+    assert guard.detection_engine.config.max_input_length == 100
+
+
+def test_update_config_validates_and_updates_engine_logger_atomically():
+    guard = PromptInjectionGuard(DetectionConfig())
+
+    guard.update_config(max_input_length=3, log_level="warning")
+
+    assert guard.config.max_input_length == 3
+    assert guard.detection_engine.config is guard.config
+    assert guard.detection_engine.logger.level == logging.WARNING
 
 
 def test_guardrails_package_exports_public_api():

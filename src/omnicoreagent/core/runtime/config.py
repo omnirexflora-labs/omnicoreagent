@@ -6,6 +6,7 @@ from os import PathLike
 from typing import Any
 import uuid
 
+from omnicoreagent.core.guardrails.models import DetectionConfig
 from omnicoreagent.core.workspace.config import (
     WorkspaceConfig,
     resolve_workspace_config,
@@ -162,6 +163,9 @@ class AgentConfig:
             0 if self.total_tokens_limit is None else self.total_tokens_limit
         )
         self.guardrail_config = self.guardrail_config or {}
+        # Validate the nested security policy at the public configuration
+        # boundary, before model/tool construction can begin.
+        DetectionConfig(**self.guardrail_config)
         self.memory_config = self.memory_config or _default_memory_config()
         self.context_management = _merge_defaults(
             _default_context_management(), self.context_management

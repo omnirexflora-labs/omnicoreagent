@@ -47,6 +47,11 @@ def test_guardrail_config_must_be_a_mapping() -> None:
         _make_agent(agent_config={"guardrail_config": ["strict_mode", True]})
 
 
+def test_invalid_nested_guardrail_policy_fails_at_public_boundary() -> None:
+    with pytest.raises(ValueError, match="sensitivity"):
+        _make_agent(agent_config={"guardrail_config": {"sensitivity": 0}})
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
