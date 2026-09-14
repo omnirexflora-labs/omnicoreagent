@@ -188,10 +188,6 @@ class AgentConfig:
         return replace(self, **(update or {}))
 
 
-def default_agent_config(name: str) -> dict[str, Any]:
-    return AgentConfig(agent_name=name).model_dump()
-
-
 def normalize_model_config(config: dict[str, Any] | ModelConfig) -> dict[str, Any]:
     if isinstance(config, ModelConfig):
         data = asdict(config)

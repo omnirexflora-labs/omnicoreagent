@@ -516,3 +516,41 @@ async def test_cancellation_between_history_rows_does_not_duplicate_results():
         "first",
         "second",
     ]
+
+
+@pytest.mark.asyncio
+async def test_native_batch_starts_distinct_tools_before_either_completes():
+    import asyncio
+
+    registry = ToolRegistry()
+    started = set()
+    both_started = asyncio.Event()
+
+    async def rendezvous(name):
+        started.add(name)
+        if len(started) == 2:
+            both_started.set()
+        await asyncio.wait_for(both_started.wait(), timeout=1)
+        return name
+
+    @registry.register_tool(name="first")
+    async def first():
+        return await rendezvous("first")
+
+    @registry.register_tool(name="second")
+    async def second():
+        return await rendezvous("second")
+
+    model = Model(
+        [
+            turn(calls=[call("first", "{}", "a"), call("second", "{}", "b")]),
+            turn("Done"),
+        ]
+    )
+    result, _ = await run(model, registry=registry)
+    assert result["answer"] == "Done"
+    outputs = [
+        json.loads(m["content"]) for m in model.requests[1][0] if m["role"] == "tool"
+    ]
+    assert [o["status"] for o in outputs] == ["success", "success"]
+    assert [o["data"] for o in outputs] == ["first", "second"]

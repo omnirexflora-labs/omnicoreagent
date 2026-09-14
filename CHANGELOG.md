@@ -2,6 +2,10 @@
 
 ## Unreleased — native tool runtime
 
+- Remove the unused legacy tool resolver, obsolete control types and unused default
+  config wrapper. Add a concurrency regression test and installed-MCP diagnostic;
+  reopen integration gates for the SDK incompatibilities documented in the audit.
+
 - Breaking: remove Cencori from supported providers and delete its dedicated SDK
   adapter. Existing Cencori configurations now fail validation; all supported
   providers use LiteLLM. Remove the unused direct OpenAI SDK dependency.

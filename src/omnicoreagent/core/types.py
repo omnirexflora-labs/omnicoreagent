@@ -17,12 +17,6 @@ class AgentState(str, Enum):
     STUCK = "stuck"
 
 
-class ContextInclusion(str, Enum):
-    NONE = "none"
-    THIS_SERVER = "thisServer"
-    ALL_SERVERS = "allServers"
-
-
 def _to_plain(value: Any, *, exclude_none: bool = False) -> Any:
     if isinstance(value, Enum):
         return value.value
@@ -126,19 +120,6 @@ class ToolCallResult(SerializableRecord):
     tool_call_id: str | None = None
     tool_provider: str = "local"
     tool_server: str | None = None
-
-
-@dataclass
-class ToolCallRecord(SerializableRecord):
-    tool_name: str
-    tool_args: str
-    observation: str
-
-
-@dataclass
-class LoopDetectorConfig(SerializableRecord):
-    max_repeats: int = 3
-    similarity_threshold: float = 0.9
 
 
 @dataclass

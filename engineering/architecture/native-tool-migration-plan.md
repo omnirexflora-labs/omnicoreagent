@@ -200,3 +200,12 @@ service skips, two deselected. Builds and lint passed. See the
 
 Only the lossless continuation/Responses integration portion of the provider
 follow-up remains; switching production routing is no longer pending.
+
+### Reopened integration gates — 2026-09-14
+
+The [current reassessment](native-runtime-reassessment.md) supersedes the statement
+that only Responses/continuation remains. Real installed-SDK diagnostics fail at
+MCP connection, catalog, result normalization and HTTP transport boundaries.
+Steps 04, 06, 11 and 12 require the follow-up gates and ordered repair checkpoints
+in that report; loop identity and result-envelope ambiguity are also open.
+Native local batches and streaming remain implemented and tested.

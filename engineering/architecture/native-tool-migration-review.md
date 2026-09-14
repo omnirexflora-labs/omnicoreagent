@@ -1,5 +1,10 @@
 # Native tool migration review
 
+Current reassessment: [native runtime audit](native-runtime-reassessment.md) found
+installed MCP 2.2 incompatibilities and remaining result/loop/provider issues.
+The original implementation record below is historical; its offline MCP coverage
+does not establish that the current SDK integration works.
+
 The migration is implemented on `refactor/native-tool-runtime` in the isolated
 `omnicoreagent-xml-discovery` worktree. The investigated source snapshot was main
 `60da57a6dacd3f7796fffd9d198c0a7420aa6aad`. The original working branch was not modified.
