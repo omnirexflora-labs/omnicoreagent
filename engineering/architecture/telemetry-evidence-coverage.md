@@ -1,7 +1,7 @@
 # Telemetry evidence coverage
 
 This map records the latest implementation checkpoint on branch
-`refactor/native-tool-runtime` at commit `8b0805f` (portable evidence and delivery policy work). It names runtime emitters
+`refactor/native-tool-runtime` at commit `0e1770f` (portable evidence and remote acceptance work). It names runtime emitters
 and executable tests; event names in the registry are not treated as coverage
 by themselves.
 
