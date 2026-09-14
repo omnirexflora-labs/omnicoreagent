@@ -8,7 +8,8 @@ stream, background job, or deep-agent execution to work.
 
 The source snapshot for this plan is branch `refactor/native-tool-runtime`.
 The plan was started at commit `8841795abda60388117ff5a1b32b3a633ede3a3a`;
-implementation checkpoints are listed below as they land.
+implementation checkpoints are listed below as they land. The current
+checkpoint is `a8d27fd9f44cb517095a71a4650476fdfca87a9c`.
 
 ## Current boundary
 
@@ -18,27 +19,23 @@ The current built-in path is:
 runtime -> TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE
 ```
 
-Normal agent runs already record model, tool, observation, memory, workspace,
+Normal agent runs record model, tool, observation, memory, workspace,
 guardrail, governance, and finalization evidence. `agent.stream()` delivers
 live runtime events, while telemetry replay/follow is exposed separately by
-the agent API and OmniServe telemetry SSE routes.
+the agent API and OmniServe telemetry SSE routes. The built-in path works with
+no exporter or hosted tracing service installed.
 
-The current system is not yet a complete execution graph:
+The completed checkpoint provides adaptive in-memory/JSONL storage, explicit
+retention and strictness policy, incomplete-trace marking for best-effort
+persistence failures, linked child/background/serving traces, and explicit
+trace-family lookup. Model prompts and responses remain excluded by default;
+when enabled they use the configured redaction, truncation, and offload policy.
 
-- the default store is process-local memory;
-- recorder writes are best effort unless a caller constructs a strict recorder;
-- model prompts and model responses are omitted by default;
-- dynamic and configured child agents create separate traces without a parent
-  trace link or returned child trace identifier;
-- background lifecycle traces and agent execution traces can share a `run_id`;
-- serving and agent boundaries are correlated by identifiers but are not one
-  parent/child graph;
-- telemetry redaction and payload policy are not available through
-  `AgentConfig` or a first-class `telemetry_config` argument.
-
-These are telemetry design issues. They should be resolved before changing
-PromptGuard, governance, or the MCP adapter so failures in those systems remain
-diagnosable with built-in evidence.
+The remaining telemetry work is delivery hardening: verify queue overflow and
+reconnect behavior under production load, finish public streaming guarantees,
+and keep provider/model buffering separate from telemetry buffering. Those
+checks are prerequisites for changing PromptGuard behavior or the MCP adapter,
+but they do not require an external trace platform.
 
 ## Rules for every phase
 
@@ -207,15 +204,17 @@ No MCP implementation work belongs in the earlier phases.
 
 ## First implementation checkpoint
 
-The first code checkpoint will implement only migration unit 1: expose the
-built-in telemetry configuration cleanly and prove that execution remains fully
-functional without external exporters. It will not change PromptGuard,
-governance policy semantics, MCP, context strategy, workspace storage, or model
-streaming behavior.
+Migration units 1 through 5 have landed in the checkpoints below. They expose
+the built-in telemetry configuration, complete lineage and local persistence,
+mark partial evidence, correlate serving requests, and record sanitized
+guardrail and governance outcomes. They do not change PromptGuard detection
+semantics, MCP behavior, context strategy, workspace storage, or model
+streaming.
 
-The next checkpoint will then implement lineage propagation and trace-family
-lookup. That is the first point at which dynamic child trace completeness can
-be corrected safely.
+The next checkpoint is delivery hardening (migration unit 4): production tests
+for replay/follow cursors, reconnects, bounded queues, cancellation, and
+provider buffering. MCP v2 remains a separate later unit because its installed
+SDK compatibility issue is already known and intentionally deferred.
 
 ## Decisions recorded before the persistence/API phase
 
@@ -286,3 +285,4 @@ before the old open questions are treated as implementation-complete.
 | Incomplete best-effort traces | `6d38423` | Non-strict persistence loss is marked on the trace while strict mode still fails the operation. Focused suite: 73 passed. |
 | Serving lineage and run families | `ae3a463` | Serving request traces become explicit parents of agent traces; run-ID family lookup is available alongside exact-trace lookup. Focused serving tests: 4 passed. |
 | Guardrail evidence boundary | `4dbdf87` | Tool outputs are scrubbed before result telemetry and flagged/blocked decisions carry structured guardrail evidence. Focused security/runtime tests: 100 passed. |
+| Governance evidence assertion | `a8d27fd` | Policy request and deny events are asserted to share the active trace and session; full regression: 1082 passed, 14 skipped. |
