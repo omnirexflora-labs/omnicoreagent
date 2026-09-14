@@ -80,6 +80,29 @@ class PrivacyConfig:
 class PrivacyFilter:
     """Redact configured PII recursively at a named data boundary."""
 
+    # Correlation and content-addressed identifiers are opaque protocol data,
+    # not user-facing free text. Redacting a digit sequence inside one would
+    # make traces, stream cursors, or artifact references impossible to follow.
+    _IDENTIFIER_KEYS = frozenset(
+        {
+            "trace_id",
+            "run_id",
+            "session_id",
+            "span_id",
+            "event_id",
+            "task_id",
+            "agent_id",
+            "parent_span_id",
+            "parent_trace_id",
+            "tool_call_id",
+            "artifact_id",
+            "input_hash",
+            "checksum",
+            "request_id",
+            "decision_id",
+        }
+    )
+
     _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
     _SSN = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
     _CARD = re.compile(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)")
@@ -109,7 +132,10 @@ class PrivacyFilter:
             return value
         if isinstance(value, dict):
             return {
-                key: self.redact(item, boundary=boundary) for key, item in value.items()
+                key: item
+                if str(key).lower() in self._IDENTIFIER_KEYS
+                else self.redact(item, boundary=boundary)
+                for key, item in value.items()
             }
         if isinstance(value, list):
             return [self.redact(item, boundary=boundary) for item in value]

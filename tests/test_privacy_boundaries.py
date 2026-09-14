@@ -65,6 +65,21 @@ def test_privacy_boundaries_can_be_disabled_explicitly():
     )
 
 
+def test_privacy_filter_preserves_protocol_identifiers():
+    privacy = PrivacyFilter()
+    payload = {
+        "trace_id": "trace_947643490111d",
+        "run_id": "run_4111111111111111",
+        "message": "alice@example.com",
+    }
+
+    redacted = privacy.redact(payload, boundary="public")
+
+    assert redacted["trace_id"] == payload["trace_id"]
+    assert redacted["run_id"] == payload["run_id"]
+    assert redacted["message"] == "[REDACTED_EMAIL]"
+
+
 @pytest.mark.asyncio
 async def test_telemetry_redacts_pii_before_trace_storage():
     store = InMemoryTelemetryStore()
