@@ -286,3 +286,4 @@ before the old open questions are treated as implementation-complete.
 | Serving lineage and run families | `ae3a463` | Serving request traces become explicit parents of agent traces; run-ID family lookup is available alongside exact-trace lookup. Focused serving tests: 4 passed. |
 | Guardrail evidence boundary | `4dbdf87` | Tool outputs are scrubbed before result telemetry and flagged/blocked decisions carry structured guardrail evidence. Focused security/runtime tests: 100 passed. |
 | Governance evidence assertion | `a8d27fd` | Policy request and deny events are asserted to share the active trace and session; full regression: 1082 passed, 14 skipped. |
+| Live stream overflow | `0cac745` | In-memory subscriber eviction now delivers an explicit overflow failure so SSE clients can reconnect from a cursor; full regression: 1083 passed, 14 skipped. |
