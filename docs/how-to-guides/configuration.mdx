@@ -29,8 +29,7 @@ export LLM_API_KEY=your_provider_key
 ```
 
 Set `model_config["provider"]` to choose the provider. The runtime reads
-`LLM_API_KEY` and passes it to the selected provider adapter (LiteLLM for OpenAI
-and other providers, OpenAI SDK for the dedicated Cencori endpoint).
+`LLM_API_KEY` and passes it to LiteLLM for the selected provider.
 Do not configure provider-specific key names in OmniCoreAgent examples.
 
 ### Optional Memory Backends
@@ -257,7 +256,7 @@ model_config = {
 ```
 
 Supported provider values are: `openai`, `anthropic`, `groq`, `ollama`,
-`azure`, `gemini`, `deepseek`, `mistral`, `openrouter`, and `cencori`.
+`azure`, `gemini`, `deepseek`, `mistral`, and `openrouter`.
 
 Provider-specific runtime options currently supported by OmniCoreAgent are:
 

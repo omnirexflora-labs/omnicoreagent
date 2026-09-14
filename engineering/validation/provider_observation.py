@@ -23,12 +23,8 @@ def observe_litellm():
         counters["complete_requests"] += 1
         return original_sync(*args, **kwargs)
 
-    def forbidden_sdk():
-        raise AssertionError("Production OpenAI routing bypassed LiteLLM")
-
     with (
         patch.object(litellm, "acompletion", observed_async),
         patch.object(litellm, "completion", observed_sync),
-        patch("omnicoreagent.core.llm._get_openai", forbidden_sdk),
     ):
         yield counters

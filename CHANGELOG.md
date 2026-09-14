@@ -2,6 +2,10 @@
 
 ## Unreleased — native tool runtime
 
+- Breaking: remove Cencori from supported providers and delete its dedicated SDK
+  adapter. Existing Cencori configurations now fail validation; all supported
+  providers use LiteLLM. Remove the unused direct OpenAI SDK dependency.
+
 - Route production OpenAI async, sync and streaming calls through current LiteLLM;
   remove the temporary direct-SDK workaround and test-only routing shim. Pass API
   keys per connection and keep retry ownership at the runtime boundary.

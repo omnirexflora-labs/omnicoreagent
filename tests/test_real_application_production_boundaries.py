@@ -29,7 +29,6 @@ LLM_ENV_KEYS = (
     "AZURE_API_BASE",
     "AZURE_API_VERSION",
     "OLLAMA_API_BASE",
-    "CENCORI_API_KEY",
 )
 
 

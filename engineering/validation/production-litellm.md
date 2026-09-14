@@ -2,6 +2,11 @@
 
 Baseline `8b86602`, branch `refactor/native-tool-runtime`.
 
+Current status: Cencori and the dedicated SDK factory have since been removed.
+All supported providers route through LiteLLM. The observer now counts LiteLLM
+requests without patching a separate SDK factory. Results below record the
+original routing checkpoint.
+
 OpenAI now uses LiteLLM 1.100.1 in the actual `LLMConnection` async, synchronous,
 and streaming paths. Model names use the explicit `openai/` provider prefix.
 The direct OpenAI SDK workaround is removed. The existing dedicated Cencori

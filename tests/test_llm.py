@@ -134,15 +134,11 @@ def test_cookbook_luna_default_and_explicit_reasoning_override(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_openai_production_routes_tools_through_litellm(monkeypatch):
-    from unittest.mock import Mock
-
     create = AsyncMock(return_value={"choices": []})
     monkeypatch.setattr(
         "omnicoreagent.core.llm._get_litellm",
         lambda: SimpleNamespace(acompletion=create),
     )
-    direct = Mock(side_effect=AssertionError("OpenAI bypassed LiteLLM"))
-    monkeypatch.setattr("omnicoreagent.core.llm._get_openai", direct)
     connection = LLMConnection(
         {
             "provider": "openai",
@@ -171,7 +167,6 @@ async def test_openai_production_routes_tools_through_litellm(monkeypatch):
     assert params["max_completion_tokens"] == 200
     assert params["drop_params"] is False and params["num_retries"] == 0
     assert "run_id" not in params["messages"][0]
-    direct.assert_not_called()
 
 
 def test_openai_sync_production_routes_through_litellm(monkeypatch):
@@ -189,3 +184,16 @@ def test_openai_sync_production_routes_through_litellm(monkeypatch):
         connection.llm_call_sync([])
     create.assert_called_once()
     assert create.call_args.kwargs["model"] == "openai/gpt-5.6-luna"
+
+
+@pytest.mark.parametrize("as_dataclass", [False, True])
+def test_removed_provider_is_rejected(as_dataclass):
+    from omnicoreagent.core.runtime.config import ModelConfig, normalize_model_config
+
+    config = {"provider": "cencori", "model": "test"}
+    if as_dataclass:
+        config = ModelConfig(**config)
+    with pytest.raises(ValueError, match="Unsupported provider"):
+        normalize_model_config(config)
+    with pytest.raises(ValueError, match="Unsupported provider"):
+        LLMConnection({"provider": "cencori", "model": "test"}, api_key="test-key")

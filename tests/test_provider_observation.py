@@ -25,10 +25,6 @@ async def test_observation_uses_production_routing_and_restores_on_failure(monke
             await connection.llm_call([])
             assert create.call_args.kwargs["model"] == "openai/gpt-5.6-luna"
             assert counters["complete_requests"] == 1
-            from omnicoreagent.core import llm
-
-            with pytest.raises(AssertionError, match="bypassed LiteLLM"):
-                llm._get_openai()
             raise RuntimeError("synthetic")
     assert provider.acompletion is create
     assert LLMConnection.llm_call is original

@@ -77,7 +77,7 @@ def test_stream_refusal_and_length_finish_are_retained():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("provider", ["openai", "cencori", "groq"])
+@pytest.mark.parametrize("provider", ["openai", "groq"])
 async def test_provider_yields_before_completion_and_closes_stream(
     monkeypatch, provider
 ):
@@ -92,24 +92,11 @@ async def test_provider_yields_before_completion_and_closes_stream(
         finally:
             closed.append(True)
 
-    client = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(create=AsyncMock(return_value=chunks()))
-        ),
-        close=AsyncMock(),
+    create = AsyncMock(return_value=chunks())
+    monkeypatch.setattr(
+        "omnicoreagent.core.llm._get_litellm",
+        lambda: SimpleNamespace(acompletion=create),
     )
-    if provider == "cencori":
-        monkeypatch.setattr(
-            "omnicoreagent.core.llm._get_openai",
-            lambda: SimpleNamespace(AsyncOpenAI=lambda **kwargs: client),
-        )
-        create = client.chat.completions.create
-    else:
-        create = AsyncMock(return_value=chunks())
-        monkeypatch.setattr(
-            "omnicoreagent.core.llm._get_litellm",
-            lambda: SimpleNamespace(acompletion=create),
-        )
     connection = LLMConnection(
         {"provider": provider, "model": "test", "api_key": "test"}
     )
@@ -125,8 +112,6 @@ async def test_provider_yields_before_completion_and_closes_stream(
     assert create.call_args.kwargs["stream"] is True
     assert create.call_args.kwargs["stream_options"] == {"include_usage": True}
     assert closed == [True]
-    if provider == "cencori":
-        client.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio

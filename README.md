@@ -361,7 +361,7 @@ uses.
 | **Agent Skills** | Loads packaged capabilities implemented with Python, Bash, or Node.js. |
 | **BM25 Tool Retrieval** | Selects relevant tools from large tool sets so the prompt stays focused. |
 | **Runtime Backend Switching** | Switches memory backends at runtime when configured. |
-| **Universal Models** | Supports OpenAI, Anthropic, Gemini, Groq, Ollama, DeepSeek, Mistral, OpenRouter, Azure, and Cencori through the runtime model layer. |
+| **Universal Models** | Supports OpenAI, Anthropic, Gemini, Groq, Ollama, DeepSeek, Mistral, OpenRouter, and Azure through the runtime model layer. |
 
 ---
 

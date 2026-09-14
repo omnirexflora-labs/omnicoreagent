@@ -39,12 +39,6 @@ def _get_litellm():
     return litellm
 
 
-def _get_openai():
-    import openai
-
-    return openai
-
-
 def retry_with_backoff(max_retries=3, base_delay=1, max_delay=60, backoff_factor=2):
     def decorator(func):
         async def async_wrapper(*args, **kwargs):
@@ -140,7 +134,7 @@ def _sleep_before_retry(*args):
 
 
 class LLMConnection:
-    """Provider connection through LiteLLM, with a dedicated Cencori endpoint."""
+    """Provider connection through LiteLLM."""
 
     def __init__(self, model_config: dict[str, Any], api_key: str | None = None):
         self.model_config = dict(model_config or {})
@@ -166,7 +160,6 @@ class LLMConnection:
             raise ValueError("LLM_API_KEY not found in environment variables")
 
         provider_model_map = {
-            "cencori": model,
             "openai": f"openai/{model}",
             "anthropic": f"anthropic/{model}",
             "groq": f"groq/{model}",
@@ -180,7 +173,9 @@ class LLMConnection:
         }
 
         provider_key = provider.lower() if isinstance(provider, str) else ""
-        full_model = provider_model_map.get(provider_key, model)
+        if provider_key not in provider_model_map:
+            raise ValueError(f"Unsupported provider: {provider}")
+        full_model = provider_model_map[provider_key]
 
         if provider_key in {"azure", "azureopenai"}:
             azure_endpoint = self.model_config.get("azure_endpoint")
@@ -217,7 +212,6 @@ class LLMConnection:
             "openrouter": "OPENROUTER_API_KEY",
             "azure": "AZURE_API_KEY",
             "azureopenai": "AZURE_API_KEY",
-            "cencori": "CENCORI_API_KEY",
         }
         env_name = env_names.get(provider)
         if env_name and self.llm_api_key:
@@ -256,15 +250,6 @@ class LLMConnection:
     ):
         try:
             params = self._completion_params(messages, tools)
-            if self.llm_config["provider"].lower() == "cencori":
-                openai = _get_openai()
-                client = openai.AsyncOpenAI(
-                    **self._cencori_client_options(),
-                )
-                try:
-                    return await client.chat.completions.create(**params)
-                finally:
-                    await client.close()
             litellm = _get_litellm()
             params.update(api_key=self.llm_api_key, drop_params=False, num_retries=0)
             return await litellm.acompletion(**params)
@@ -283,15 +268,6 @@ class LLMConnection:
     ):
         try:
             params = self._completion_params(messages, tools)
-            if self.llm_config["provider"].lower() == "cencori":
-                openai = _get_openai()
-                client = openai.OpenAI(
-                    **self._cencori_client_options(),
-                )
-                try:
-                    return client.chat.completions.create(**params)
-                finally:
-                    client.close()
             litellm = _get_litellm()
             params.update(api_key=self.llm_api_key, drop_params=False, num_retries=0)
             return litellm.completion(**params)
@@ -313,37 +289,24 @@ class LLMConnection:
         params = self._completion_params(messages, tools)
         params.update(stream=True, stream_options={"include_usage": True})
         assembler = ModelStreamAssembler()
-        client = None
         stream = None
         try:
-            if self.llm_config["provider"].lower() == "cencori":
-                client = _get_openai().AsyncOpenAI(
-                    **self._cencori_client_options(),
-                )
-                stream = await client.chat.completions.create(**params)
-            else:
-                litellm = _get_litellm()
-                params.update(
-                    api_key=self.llm_api_key, drop_params=False, num_retries=0
-                )
-                stream = await litellm.acompletion(**params)
+            litellm = _get_litellm()
+            params.update(api_key=self.llm_api_key, drop_params=False, num_retries=0)
+            stream = await litellm.acompletion(**params)
             async for chunk in stream:
                 for event in assembler.feed(chunk):
                     yield event
             yield {"type": "turn_complete", "turn": assembler.finish()}
         finally:
-            try:
-                if stream is not None:
-                    close = getattr(stream, "aclose", None) or getattr(
-                        stream, "close", None
-                    )
-                    if close is not None:
-                        result = close()
-                        if inspect.isawaitable(result):
-                            await result
-            finally:
-                if client is not None:
-                    await client.close()
+            if stream is not None:
+                close = getattr(stream, "aclose", None) or getattr(
+                    stream, "close", None
+                )
+                if close is not None:
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await result
 
     def _completion_params(
         self, messages: list[Any], tools: list[dict[str, Any]] | None = None
@@ -363,11 +326,3 @@ class LLMConnection:
         if self.llm_config["provider"].lower() == "openai" and "max_tokens" in params:
             params["max_completion_tokens"] = params.pop("max_tokens")
         return params
-
-    def _cencori_client_options(self):
-        # Retries belong to our request boundary. Never replay a partial stream.
-        return {
-            "api_key": self.llm_api_key,
-            "max_retries": 0,
-            "base_url": "https://api.cencori.com/v1",
-        }
