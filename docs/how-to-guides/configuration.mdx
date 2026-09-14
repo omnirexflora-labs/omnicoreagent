@@ -74,6 +74,31 @@ Optional workspace variables:
 Telemetry events and traces work in-process by default. Set exporter variables
 only when traces should leave the process for an OTLP-compatible backend.
 
+The built-in telemetry recorder does not require LangSmith, Opik, OpenTelemetry,
+or any other external service. Configure its recording and redaction policy
+directly on the agent when you need more or less evidence:
+
+```python
+agent = OmniCoreAgent(
+    ...,
+    telemetry_config={
+        "record_inputs": True,
+        "record_outputs": True,
+        "record_tool_results": True,
+        "record_model_prompts": False,
+        "record_model_responses": False,
+        "max_payload_bytes": 64_000,
+        "strict": False,
+    },
+)
+```
+
+The effective policy is recorded as a non-secret configuration fingerprint in
+each agent trace. The default store is in-memory for lightweight local use;
+pass a `JsonlTelemetryStore` when traces must survive a process restart. An
+exporter is an optional outbound copy of a completed built-in trace and is not
+part of the runtime execution path.
+
 | Exporter | Variables |
 |----------|-----------|
 | **OTLP/HTTP** | `OTEL_EXPORTER_OTLP_ENDPOINT` or explicit exporter `endpoint` |

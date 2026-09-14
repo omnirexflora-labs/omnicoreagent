@@ -25,6 +25,23 @@ from omnicoreagent.core.telemetry import (
 )
 
 
+def test_telemetry_config_fingerprint_is_stable_and_policy_sensitive():
+    first = TelemetryConfig(redact_keys=["token", "api_key"])
+    second = TelemetryConfig(redact_keys=["api_key", "token"])
+    changed = TelemetryConfig(record_model_responses=True)
+
+    assert first.fingerprint() == second.fingerprint()
+    assert first.fingerprint() != changed.fingerprint()
+
+
+def test_telemetry_trace_metadata_round_trips_telemetry_config_version():
+    metadata = TelemetryTraceMetadata(telemetry_config_version="abc123")
+
+    restored = TelemetryTraceMetadata.from_dict(metadata.model_dump())
+
+    assert restored.telemetry_config_version == "abc123"
+
+
 def test_telemetry_records_serialize_and_validate():
     actor = TelemetryActor(type=ActorType.AGENT, name="assistant")
     span = TelemetrySpan(

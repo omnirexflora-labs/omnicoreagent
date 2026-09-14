@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 from typing import Any
@@ -35,6 +35,27 @@ class TelemetryConfig:
     offload_large_payloads: bool = False
     offload_target: str = "workspace"
     strict: bool = False
+
+    @classmethod
+    def from_value(cls, value: "TelemetryConfig | dict[str, Any] | None") -> "TelemetryConfig | None":
+        """Normalize the public telemetry configuration boundary.
+
+        ``None`` is preserved so an explicitly supplied recorder can remain the
+        source of its own configuration.  Dictionaries are accepted at the
+        facade boundary for parity with the other runtime configuration objects.
+        """
+        if value is None or isinstance(value, cls):
+            return value
+        if isinstance(value, dict):
+            return cls(**value)
+        raise TypeError("telemetry_config must be a TelemetryConfig, dict, or None")
+
+    def fingerprint(self) -> str:
+        """Return a stable, non-secret identifier for this effective policy."""
+        payload = asdict(self)
+        payload["redact_keys"] = sorted(str(key).lower() for key in self.redact_keys)
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
 
 
 def redact_payload(value: Any, config: TelemetryConfig) -> Any:

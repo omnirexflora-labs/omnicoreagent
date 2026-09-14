@@ -18,6 +18,7 @@ from omnicoreagent.core.telemetry import (
     TraceFilter,
     TraceStatus,
     ActorType,
+    TelemetryConfig,
 )
 
 
@@ -68,6 +69,7 @@ async def test_run_records_completed_telemetry_trace() -> None:
     assert trace.status == TraceStatus.COMPLETED
     assert trace.metadata.agent_name == "telemetry-agent"
     assert trace.metadata.model == "gpt-5.4-mini"
+    assert trace.metadata.telemetry_config_version == agent.telemetry_config.fingerprint()
     assert [event.event_type for event in trace.events] == [
         "user_message",
         "final_answer",
@@ -317,6 +319,57 @@ def test_ensure_telemetry_derives_store_from_supplied_stream() -> None:
     assert agent.telemetry_store is store
     assert agent.telemetry_recorder.store is store
     assert agent.telemetry_stream.store is store
+
+
+def test_ensure_telemetry_uses_facade_telemetry_config_without_exporters() -> None:
+    store = InMemoryTelemetryStore()
+    config = TelemetryConfig(
+        record_model_prompts=True,
+        record_model_responses=True,
+        strict=True,
+    )
+    agent = OmniCoreAgent(
+        name="telemetry-agent",
+        system_instruction="You are a test agent.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini", "api_key": "key"},
+        telemetry_store=store,
+        telemetry_config=config,
+    )
+
+    agent._ensure_telemetry()
+
+    assert agent.telemetry_recorder.config is config
+    assert agent.telemetry_recorder.exporters == []
+    assert agent._telemetry_metadata()["telemetry_config_version"] == config.fingerprint()
+
+
+def test_ensure_telemetry_rejects_facade_recorder_config_mismatch() -> None:
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store, TelemetryConfig(strict=False))
+    agent = OmniCoreAgent(
+        name="telemetry-agent",
+        system_instruction="You are a test agent.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini", "api_key": "key"},
+        telemetry_store=store,
+        telemetry_recorder=recorder,
+        telemetry_config=TelemetryConfig(strict=True),
+    )
+
+    with pytest.raises(ValueError, match="telemetry_config must match"):
+        agent._ensure_telemetry()
+
+
+def test_telemetry_config_accepts_dictionary_at_facade_boundary() -> None:
+    agent = OmniCoreAgent(
+        name="telemetry-agent",
+        system_instruction="You are a test agent.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini", "api_key": "key"},
+        telemetry_config={"record_model_responses": True},
+    )
+
+    agent._ensure_telemetry()
+
+    assert agent.telemetry_config.record_model_responses is True
 
 
 @pytest.mark.asyncio

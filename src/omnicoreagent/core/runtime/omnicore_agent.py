@@ -28,6 +28,7 @@ from omnicoreagent.core.telemetry import (
     TelemetryRecorder,
     TelemetryStream,
     TelemetryStreamScope,
+    TelemetryConfig,
     TraceFilter,
     TraceStatus,
     build_telemetry_exporter,
@@ -59,6 +60,7 @@ class OmniCoreAgent:
         telemetry_exporters: Optional[List[Any]] = None,
         prompt_builder: Optional[Any] = None,
         debug: bool = False,
+        telemetry_config: Optional[Any] = None,
     ):
         """
         Initialize the OmniCoreAgent with user-friendly configuration.
@@ -77,6 +79,8 @@ class OmniCoreAgent:
             telemetry_recorder: Optional telemetry recorder
             telemetry_stream: Optional telemetry stream
             telemetry_exporters: Optional telemetry exporters
+            telemetry_config: Optional TelemetryConfig or dictionary controlling
+                built-in recording, redaction, and payload policy
             debug: Enable debug logging
         """
         self.name = name
@@ -96,6 +100,7 @@ class OmniCoreAgent:
         self.telemetry_recorder = telemetry_recorder
         self.telemetry_stream = telemetry_stream
         self.telemetry_exporters = self._build_telemetry_exporters(telemetry_exporters)
+        self.telemetry_config = TelemetryConfig.from_value(telemetry_config)
         if prompt_builder:
             self.prompt_builder = prompt_builder
         else:
@@ -209,13 +214,21 @@ class OmniCoreAgent:
         if self.telemetry_recorder is None:
             self.telemetry_recorder = TelemetryRecorder(
                 self.telemetry_store,
+                config=self.telemetry_config,
                 exporters=self.telemetry_exporters,
             )
-        elif self.telemetry_recorder.store is not self.telemetry_store:
-            raise ValueError(
-                "telemetry_recorder.store must be the same object as telemetry_store"
-            )
         else:
+            if self.telemetry_recorder.store is not self.telemetry_store:
+                raise ValueError(
+                    "telemetry_recorder.store must be the same object as telemetry_store"
+                )
+            if self.telemetry_config is not None:
+                recorder_config = getattr(self.telemetry_recorder, "config", None)
+                if recorder_config != self.telemetry_config:
+                    raise ValueError(
+                        "telemetry_config must match telemetry_recorder.config when "
+                        "both are provided"
+                    )
             existing_exporters = getattr(self.telemetry_recorder, "exporters", None)
             if existing_exporters is None:
                 raise ValueError(
@@ -229,6 +242,11 @@ class OmniCoreAgent:
                 if exporter not in existing_exporters:
                     existing_exporters.append(exporter)
 
+        if self.telemetry_config is None:
+            self.telemetry_config = getattr(
+                self.telemetry_recorder, "config", TelemetryConfig()
+            )
+
         if self.telemetry_stream is None:
             self.telemetry_stream = TelemetryStream(self.telemetry_store)
         elif self.telemetry_stream.store is not self.telemetry_store:
@@ -240,11 +258,15 @@ class OmniCoreAgent:
         return TelemetryActor(type=ActorType.AGENT, name=self.name)
 
     def _telemetry_metadata(self) -> dict[str, Any]:
-        return {
+        metadata = {
             "agent_name": self.name,
             "model_provider": self.model_config.get("provider"),
             "model": self.model_config.get("model"),
         }
+        fingerprint = getattr(self.telemetry_config, "fingerprint", None)
+        if callable(fingerprint):
+            metadata["telemetry_config_version"] = fingerprint()
+        return metadata
 
     def _telemetry_scope(
         self,

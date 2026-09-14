@@ -1,0 +1,233 @@
+# Built-in Telemetry Migration Plan
+
+This plan covers the telemetry work after the native tool runtime migration.
+The goal is a complete, useful telemetry system owned by OmniCoreAgent itself.
+External exporters such as LangSmith, Opik, and OTLP backends remain optional
+adapters. They must never be required for a run, trace lookup, replay, API
+stream, background job, or deep-agent execution to work.
+
+The source snapshot for this plan is branch `refactor/native-tool-runtime`,
+commit `8841795abda60388117ff5a1b32b3a633ede3a3a`.
+
+## Current boundary
+
+The current built-in path is:
+
+```text
+runtime -> TelemetryRecorder -> TelemetryStore -> TelemetryStream -> OmniServe SSE
+```
+
+Normal agent runs already record model, tool, observation, memory, workspace,
+guardrail, governance, and finalization evidence. `agent.stream()` delivers
+live runtime events, while telemetry replay/follow is exposed separately by
+the agent API and OmniServe telemetry SSE routes.
+
+The current system is not yet a complete execution graph:
+
+- the default store is process-local memory;
+- recorder writes are best effort unless a caller constructs a strict recorder;
+- model prompts and model responses are omitted by default;
+- dynamic and configured child agents create separate traces without a parent
+  trace link or returned child trace identifier;
+- background lifecycle traces and agent execution traces can share a `run_id`;
+- serving and agent boundaries are correlated by identifiers but are not one
+  parent/child graph;
+- telemetry redaction and payload policy are not available through
+  `AgentConfig` or a first-class `telemetry_config` argument.
+
+These are telemetry design issues. They should be resolved before changing
+PromptGuard, governance, or the MCP adapter so failures in those systems remain
+diagnosable with built-in evidence.
+
+## Rules for every phase
+
+1. Built-in telemetry is the runtime source of truth.
+2. No paid service, external trace collector, or exporter is required for
+   execution or streaming.
+3. External exporters consume completed built-in traces and cannot change
+   runtime behavior or identity.
+4. Every trace, span, and event remains inspectable through local APIs.
+5. Partial, failed, cancelled, timeout, and safety-halted traces are retained.
+6. Redaction occurs before persistence, and secrets never become a required
+   trace input.
+7. Parent/child, run, session, task, and serving relationships are explicit
+   and queryable.
+8. Active text streaming and telemetry streaming remain separate contracts,
+   but both are backed by the same runtime execution evidence.
+9. Existing conversation memory, workspace storage, offload references, and
+   background task stores are not erased or silently converted.
+10. Each phase changes one contract, adds focused tests, runs the full suite,
+    records live validation where applicable, and ends in its own commit.
+
+## Migration units
+
+### 1. Establish the built-in telemetry contract
+
+Existing contract: callers may inject a store, recorder, stream, or exporters;
+otherwise the facade creates an in-memory store and recorder.
+
+Work:
+
+- add a first-class `TelemetryConfig` path to the agent construction/config
+  boundary;
+- make built-in recording, redaction, truncation, strictness, and optional
+  local payload references explicit;
+- keep in-memory storage as the lightweight default and document JSONL as the
+  built-in local durable option;
+- ensure exporters are optional and fail independently from stored traces;
+- expose effective telemetry configuration in trace metadata without exposing
+  secrets.
+
+Verification:
+
+- construction with no telemetry integrations;
+- custom redaction and model-recording settings;
+- strict and non-strict store failures;
+- JSONL restart/reload;
+- exporter absence and exporter failure;
+- normal run and public result remain functional with no exporter installed.
+
+### 2. Correct execution lineage and trace correlation
+
+Existing contract: normal runtime work shares one trace, but child agents,
+background lifecycle, and serving boundaries may create separate traces that
+only share `run_id` or `session_id`.
+
+Work:
+
+- define the built-in lineage model for agent, child, background, and serving
+  traces;
+- pass the parent telemetry store and recorder into dynamic and configured
+  child agents;
+- record parent trace/span and child trace identifiers on both sides of a
+  delegation boundary;
+- add a queryable trace-family/lineage operation so “all evidence for this
+  run” does not depend on latest-trace ordering;
+- preserve async context isolation for parallel tools and parallel children;
+- make background and serving relationships explicit rather than relying on
+  ambiguous shared `run_id` values.
+
+Verification:
+
+- one local tool and one parallel tool batch;
+- dynamic deep-agent spawn with workspace output;
+- configured child agent;
+- background execution and retry/cancel/timeout;
+- `/run` and `/run/sync` serving boundaries;
+- concurrent sessions and concurrent runs sharing one session.
+
+### 3. Make the trace store complete without external infrastructure
+
+Existing contract: `InMemoryTelemetryStore` supports live/replay and
+`JsonlTelemetryStore` supports local append/reload; there is no required
+external telemetry backend.
+
+Work:
+
+- define retention and restart behavior for in-memory and JSONL stores;
+- make JSONL writes safe enough for concurrent runtime use and clear about
+  partial records;
+- add a built-in local durable option at the application boundary where
+  needed, without making cloud observability a dependency;
+- preserve trace/event cursors across reload where the store contract promises
+  replay;
+- surface incomplete evidence instead of silently returning a successful
+  trace when persistence failed.
+
+Verification:
+
+- process restart and JSONL recovery;
+- concurrent writes;
+- malformed record recovery;
+- cursor replay and reconnect;
+- trace normalization after partial failure.
+
+### 4. Finish telemetry-backed streaming and API behavior
+
+Existing contract: text deltas and tool events can be delivered live; telemetry
+events can be replayed/followed through agent APIs and OmniServe SSE.
+
+Work:
+
+- verify every public event has stable run/session/trace correlation;
+- make telemetry SSE replay and live follow behavior deterministic;
+- define queue overflow and disconnect behavior;
+- keep `/run` final responses and trace retrieval usable after cancellation,
+  timeout, or handled failure;
+- document that full traces are finalized at run completion while events are
+  available during execution;
+- identify remaining provider/model buffering separately from telemetry.
+
+Verification:
+
+- direct `stream()`;
+- telemetry replay from a cursor;
+- live telemetry follow;
+- OmniServe `/run` SSE and telemetry SSE;
+- cancellation and timeout;
+- reconnect after a client disconnect.
+
+### 5. Connect governance and PromptGuard evidence
+
+This phase does not redesign either subsystem yet. It ensures their decisions
+are represented consistently in the built-in trace before their behavior is
+changed.
+
+Work:
+
+- record policy requests, decisions, approvals, sandbox outcomes, and denied
+  operations with stable evidence IDs;
+- record PromptGuard checks, blocks, and tool-output scrubbing outcomes;
+- distinguish input safety decisions from capability authorization;
+- include effective policy and guardrail configuration fingerprints where
+  useful, without storing secrets.
+
+Verification:
+
+- allow, deny, approval, budget, and sandbox governance cases;
+- safe, suspicious, dangerous, and critical guardrail cases;
+- local, workspace, artifact, MCP, and subagent boundaries.
+
+### 6. Upgrade the MCP adapter against the installed v2 SDK
+
+This phase comes after lineage and evidence are reliable.
+
+Work:
+
+- adapt stdio, SSE, and streamable HTTP construction to the installed MCP v2
+  signatures;
+- preserve concrete server/tool identity through resolution, governance,
+  observations, and telemetry;
+- define connect, reconnect, cleanup, timeout, and partial-server behavior;
+- remove or replace configuration fields that do not control behavior;
+- run real local MCP server smoke tests and API/telemetry checks.
+
+No MCP implementation work belongs in the earlier phases.
+
+## First implementation checkpoint
+
+The first code checkpoint will implement only migration unit 1: expose the
+built-in telemetry configuration cleanly and prove that execution remains fully
+functional without external exporters. It will not change PromptGuard,
+governance policy semantics, MCP, context strategy, workspace storage, or model
+streaming behavior.
+
+The next checkpoint will then implement lineage propagation and trace-family
+lookup. That is the first point at which dynamic child trace completeness can
+be corrected safely.
+
+## Open decisions to resolve during implementation
+
+- Should a production local deployment select JSONL explicitly, or should the
+  default become JSONL when a workspace is configured?
+- Should child runs remain separate linked traces or become nested `agent.run`
+  spans in the parent's trace?
+- Should `/telemetry/traces` return trace families, individual traces, or both?
+- Which model prompt/response fields are safe to opt into for debugging?
+- What retention policy should apply to local JSONL traces and offloaded
+  telemetry payload references?
+- Should telemetry persistence failure fail a run in production, or mark the
+  trace incomplete while allowing the run to continue?
+
+Each decision will be made against a small test and recorded before the related
+implementation is committed.
