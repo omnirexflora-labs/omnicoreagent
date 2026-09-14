@@ -16,6 +16,7 @@ class TelemetryConfig:
     # is the built-in durable local option; no external exporter is required.
     storage: str = "auto"
     storage_path: str | None = None
+    retention_days: int | None = 7
     record_inputs: bool = True
     record_outputs: bool = True
     record_model_prompts: bool = False
@@ -49,6 +50,8 @@ class TelemetryConfig:
             )
         if self.storage_path is not None and not str(self.storage_path).strip():
             raise ValueError("telemetry storage_path must not be empty")
+        if self.retention_days is not None and self.retention_days < 0:
+            raise ValueError("telemetry retention_days must be non-negative or None")
 
     @classmethod
     def from_value(cls, value: "TelemetryConfig | dict[str, Any] | None") -> "TelemetryConfig | None":

@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 import asyncio
 from collections import defaultdict
 from collections.abc import AsyncIterator
+from datetime import timedelta
+import os
 from pathlib import Path
 import json
 from typing import Any
@@ -279,8 +281,14 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
 
 
 class JsonlTelemetryStore(AbstractTelemetryStore):
-    def __init__(self, path: str | Path) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        retention_days: int | None = None,
+    ) -> None:
         self.path = Path(path)
+        self.retention_days = retention_days
         self._inner = InMemoryTelemetryStore()
         self._loaded = False
         self._lock = asyncio.Lock()
@@ -373,6 +381,42 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             except Exception:
                 continue
         self._loaded = True
+        if self.retention_days is not None:
+            await self._prune_expired_unlocked(self.retention_days)
+
+    async def prune(self, retention_days: int | None = None) -> int:
+        """Remove ended traces older than the configured age and compact JSONL.
+
+        Active traces are always retained. ``None`` disables cleanup and
+        returns zero. The operation is safe to call after construction and
+        returns the number of removed traces.
+        """
+        async with self._lock:
+            await self._load_unlocked()
+            days = self.retention_days if retention_days is None else retention_days
+            if days is None:
+                return 0
+            return await self._prune_expired_unlocked(days)
+
+    async def _prune_expired_unlocked(self, retention_days: int) -> int:
+        if retention_days < 0:
+            raise ValueError("retention_days must be non-negative or None")
+        cutoff = utc_now() - timedelta(days=retention_days)
+        traces = await self._inner.list_traces()
+        expired = {
+            trace.trace_id
+            for trace in traces
+            if trace.ended_at is not None and trace.ended_at < cutoff
+        }
+        if not expired:
+            return 0
+        survivors = [trace for trace in traces if trace.trace_id not in expired]
+        rebuilt = InMemoryTelemetryStore()
+        for trace in survivors:
+            await rebuilt.upsert_trace(trace)
+        self._inner = rebuilt
+        await self._rewrite_records_unlocked(survivors)
+        return len(expired)
 
     async def _replay_record_unlocked(self, record: dict[str, Any]) -> None:
         record_type = record["record_type"]
@@ -409,9 +453,34 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         line = json.dumps(record, sort_keys=True) + "\n"
         await asyncio.to_thread(_append_text, self.path, line)
 
+    async def _rewrite_records_unlocked(self, traces: list[TelemetryTrace]) -> None:
+        records = []
+        for trace in traces:
+            records.append(
+                json.dumps(
+                    {
+                        "record_id": telemetry_id("telemetry_record"),
+                        "record_type": "trace_upsert",
+                        "recorded_at": utc_now().isoformat(),
+                        "payload": to_plain(trace.model_dump()),
+                    },
+                    sort_keys=True,
+                )
+            )
+        content = "" if not records else "\n".join(records) + "\n"
+        temporary = self.path.with_name(f".{self.path.name}.tmp")
+        await asyncio.to_thread(_write_text, temporary, content)
+        await asyncio.to_thread(os.replace, temporary, self.path)
+
 
 def _append_text(path: Path, text: str) -> None:
     with path.open("a", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def _write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
         handle.write(text)
 
 

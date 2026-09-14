@@ -1,4 +1,5 @@
 import asyncio
+from datetime import timedelta
 
 import pytest
 
@@ -23,6 +24,7 @@ from omnicoreagent.core.telemetry import (
     TraceStatus,
     current_telemetry_context,
 )
+from omnicoreagent.core.telemetry.models import utc_now
 
 
 def test_telemetry_config_fingerprint_is_stable_and_policy_sensitive():
@@ -41,6 +43,8 @@ def test_telemetry_storage_policy_validates_and_omits_path_from_fingerprint():
     assert first.fingerprint() == second.fingerprint()
     with pytest.raises(ValueError, match="storage must be one of"):
         TelemetryConfig(storage="otlp")
+    with pytest.raises(ValueError, match="retention_days"):
+        TelemetryConfig(retention_days=-1)
 
 
 def test_telemetry_trace_metadata_round_trips_telemetry_config_version():
@@ -228,6 +232,45 @@ async def test_jsonl_store_persists_trace_events_and_spans(tmp_path):
     assert trace.trace_id == "trace-jsonl"
     assert trace.status == TraceStatus.COMPLETED
     assert [event.event_type for event in trace.events] == ["agent_start"]
+
+
+@pytest.mark.asyncio
+async def test_jsonl_store_prunes_old_ended_traces_and_keeps_active_traces(tmp_path):
+    path = tmp_path / "telemetry.jsonl"
+    writer = JsonlTelemetryStore(path)
+
+    old = TelemetryTrace(
+        trace_id="trace-old",
+        root_span_id="span-old",
+        status=TraceStatus.COMPLETED,
+        started_at=utc_now() - timedelta(days=3),
+        ended_at=utc_now() - timedelta(days=2),
+    )
+    recent = TelemetryTrace(
+        trace_id="trace-recent",
+        root_span_id="span-recent",
+        status=TraceStatus.COMPLETED,
+        started_at=utc_now(),
+        ended_at=utc_now(),
+    )
+    active = TelemetryTrace(
+        trace_id="trace-active",
+        root_span_id="span-active",
+        status=TraceStatus.RUNNING,
+        started_at=utc_now() - timedelta(days=30),
+    )
+    await writer.upsert_trace(old)
+    await writer.upsert_trace(recent)
+    await writer.upsert_trace(active)
+
+    reloaded = JsonlTelemetryStore(path)
+    removed = await reloaded.prune(retention_days=1)
+
+    assert removed == 1
+    assert await reloaded.get_trace("trace-old") is None
+    assert await reloaded.get_trace("trace-recent") is not None
+    assert await reloaded.get_trace("trace-active") is not None
+    assert "trace-old" not in path.read_text()
 
 
 @pytest.mark.asyncio

@@ -34,14 +34,20 @@ def default_telemetry_store(
         return InMemoryTelemetryStore()
 
     if mode == "jsonl":
-        return JsonlTelemetryStore(_telemetry_jsonl_path(config, workspace_config))
+        return JsonlTelemetryStore(
+            _telemetry_jsonl_path(config, workspace_config),
+            retention_days=config.retention_days,
+        )
 
     if workspace_config is None:
         return InMemoryTelemetryStore()
     resolved_workspace = resolve_workspace_config(workspace_config)
     if resolved_workspace.workspace_backend != "local":
         return InMemoryTelemetryStore()
-    return JsonlTelemetryStore(_telemetry_jsonl_path(config, resolved_workspace))
+    return JsonlTelemetryStore(
+        _telemetry_jsonl_path(config, resolved_workspace),
+        retention_days=config.retention_days,
+    )
 
 
 def _telemetry_jsonl_path(config: Any, workspace_config: Any = None) -> Path:
