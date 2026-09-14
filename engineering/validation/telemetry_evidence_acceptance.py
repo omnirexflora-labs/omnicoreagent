@@ -486,12 +486,43 @@ def check_fixture() -> None:
         lines = [line for line in persisted.read_text().splitlines() if line.strip()]
         if not lines:
             raise SystemExit(f"persisted JSONL fixture is empty: {persisted}")
+        records = []
         for line in lines:
             record = json.loads(line)
             if not isinstance(record, dict) or not isinstance(
                 record.get("record_type"), str
             ):
                 raise SystemExit(f"invalid JSONL record in {persisted}")
+            records.append(record)
+        document = json.loads(path.read_text())
+        portable_trace = document["trace"]
+        persisted_event_ids = {
+            record.get("payload", {}).get("event_id")
+            for record in records
+            if record.get("record_type") == "event"
+        }
+        persisted_span_ids = {
+            record.get("payload", {}).get("span_id")
+            for record in records
+            if record.get("record_type") == "span_start"
+        }
+        for record in records:
+            if record.get("record_type") == "trace_upsert":
+                persisted_span_ids.update(
+                    span.get("span_id")
+                    for span in record.get("payload", {}).get("spans", [])
+                    if isinstance(span, dict)
+                )
+        portable_event_ids = {
+            event.get("event_id") for event in portable_trace["events"]
+        }
+        if not persisted_event_ids.issubset(portable_event_ids):
+            raise SystemExit(f"JSONL event is absent from portable export: {persisted}")
+        portable_span_ids = {span.get("span_id") for span in portable_trace["spans"]}
+        if not persisted_span_ids.issubset(portable_span_ids):
+            raise SystemExit(f"JSONL span is absent from portable export: {persisted}")
+        # The normalizer may append a runtime_error bookkeeping event for
+        # capture gaps. That derived event is intentionally not persisted.
         if "/tmp/" in persisted.read_text():
             raise SystemExit(f"unsanitized temporary path in {persisted}")
     artifact = FIXTURE_DIR / "artifacts" / "bulk_report.json"
@@ -542,13 +573,27 @@ async def write_fixtures() -> None:
     check_fixture()
 
 
+async def run_and_check() -> None:
+    """Exercise persistence/export in a temporary workspace without rewriting fixtures."""
+    with tempfile.TemporaryDirectory(prefix="omni-telemetry-acceptance-") as temporary:
+        root = Path(temporary)
+        for case in CASE_NAMES:
+            document = await _run_case(case, root / case)
+            _assert_capture(document, case)
+    print(f"ran and checked {len(CASE_NAMES)} deterministic native scenarios")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write-fixtures", action="store_true")
     parser.add_argument("--check-fixture", action="store_true")
+    parser.add_argument("--run", action="store_true")
     args = parser.parse_args()
     if args.write_fixtures:
         asyncio.run(write_fixtures())
+        return
+    if args.run:
+        asyncio.run(run_and_check())
         return
     check_fixture()
 

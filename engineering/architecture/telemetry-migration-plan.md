@@ -15,7 +15,7 @@ stream, background job, or deep-agent execution to work.
 The source snapshot for this plan is branch `refactor/native-tool-runtime`.
 The plan was started at commit `8841795abda60388117ff5a1b32b3a633ede3a3a`;
 implementation checkpoints are listed below as they land. The current
-checkpoint is `0e1770f`.
+checkpoint is `3aa6cab`.
 
 ## Current boundary
 
@@ -90,7 +90,9 @@ request through LiteLLM and local tools. A large tool result was offloaded,
 the transformed observation was delivered to the model, and the JSONL trace was
 reloaded and re-imported through the portable contract. Tool failure and
 capture-restriction runs also passed, with execution success kept separate from
-partial evidence. See [the acceptance report](../validation/telemetry-evidence-acceptance.md).
+partial evidence. The independent-review gate is now closed by the sanitized
+full-trace and JSONL bundle at `3aa6cab`, checked by a credential-free script.
+See [the acceptance report](../validation/telemetry-evidence-acceptance.md).
 
 ## Rules for every phase
 
@@ -269,6 +271,12 @@ specifications, deterministic checks, evaluator judgments, comparisons, and
 release decisions against the portable evidence contract. MCP v2 remains a
 separate later unit because its installed
 SDK compatibility issue is already known and intentionally deferred.
+
+The acceptance fixture is preserved under
+`engineering/validation/fixtures/telemetry-evidence-acceptance/`. It contains
+the full transformed, failure, and capture-restricted trajectories in both
+portable JSON and sanitized JSONL forms, plus the referenced artifact. The
+review-only command does not import OmniCoreAgent or require a model provider.
 
 ## Decisions recorded before the persistence/API phase
 

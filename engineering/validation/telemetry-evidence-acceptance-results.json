@@ -1,32 +1,236 @@
 {
-  "snapshot": {
-    "branch": "refactor/native-tool-runtime",
-    "commit": "70e605df997e19370fdca5304a3eb883293c892c",
-    "host": "abiorh-hetzner",
-    "python": "3.14.4",
-    "model": "gpt-5.6-luna",
-    "provider": "openai via LiteLLM",
-    "litellm": "1.100.1",
-    "openai_sdk": "2.54.0"
-  },
   "capture_configuration": {
-    "storage": "jsonl",
+    "max_payload_bytes": 200000,
+    "privacy_boundary": "default telemetry redaction enabled",
     "record_model_prompts": true,
     "record_model_responses": true,
-    "max_payload_bytes": 200000,
-    "tool_offload": true,
-    "privacy_boundary": "default telemetry redaction enabled"
+    "storage": "jsonl",
+    "tool_offload": true
+  },
+  "limitations": [
+    "MCP transport was intentionally not exercised; MCP v2 compatibility remains a later unit.",
+    "The live fixture uses synthetic local tools and a temporary workspace.",
+    "The local machine showed an intermittent native shutdown fault; the same diagnostic completed cleanly on the remote host.",
+    "The remote live run used the default privacy policy, so its context payloads were partial; the committed synthetic fixture uses an explicit no-redaction policy to make independent reconstruction reviewable."
+  ],
+  "offline_review_fixture": {
+    "commit": "3aa6cab",
+    "credentials_required": false,
+    "directory": "engineering/validation/fixtures/telemetry-evidence-acceptance",
+    "raw_payloads_sanitized": true,
+    "runtime_free_check": "python engineering/validation/telemetry_evidence_acceptance.py --check-fixture",
+    "runtime_free_check_result": "checked 3 portable traces and 1 referenced artifact",
+    "runtime_execution_check": "PYTHONPATH=src .venv/bin/python engineering/validation/telemetry_evidence_acceptance.py --run",
+    "runtime_execution_check_result": "ran and checked 3 deterministic native scenarios",
+    "scenarios": {
+      "capture-restricted": {
+        "event_count": 7,
+        "event_types_in_order": [
+          "user_message",
+          "agent_step",
+          "context_assembly",
+          "model_call",
+          "model_response",
+          "final_answer",
+          "runtime_error"
+        ],
+        "evidence_status": "partial",
+        "execution_result_remains_success": true,
+        "final_answer": "CAPTURE_RESTRICTION_READY",
+        "incomplete": false,
+        "missing_evidence": [
+          {
+            "id": "span_capture-restricted_003",
+            "state": "not_recorded",
+            "type": "span_input"
+          },
+          {
+            "id": "event_capture-restricted_003",
+            "state": "not_recorded",
+            "type": "event_input"
+          },
+          {
+            "id": "event_capture-restricted_004",
+            "state": "not_recorded",
+            "type": "event_output"
+          }
+        ],
+        "persisted_jsonl": "engineering/validation/fixtures/telemetry-evidence-acceptance/capture-restricted.jsonl",
+        "portable_contract_valid": true,
+        "portable_json": "engineering/validation/fixtures/telemetry-evidence-acceptance/capture-restricted.json",
+        "portable_reimport_equal": true,
+        "restriction_reported": true,
+        "span_count": 4,
+        "trace_status": "completed"
+      },
+      "failure": {
+        "error_event_present": true,
+        "error_message": "synthetic tool failure for acceptance",
+        "event_count": 18,
+        "event_types_in_order": [
+          "user_message",
+          "agent_step",
+          "context_assembly",
+          "model_call",
+          "model_response",
+          "tool_batch_start",
+          "tool_requested",
+          "tool_resolved",
+          "tool_call",
+          "tool_error",
+          "tool_observation",
+          "observation_pipeline_end",
+          "tool_batch_end",
+          "agent_step",
+          "context_assembly",
+          "model_call",
+          "model_response",
+          "final_answer"
+        ],
+        "evidence_status": "complete",
+        "execution_outcome_separate_from_evidence_completeness": true,
+        "final_answer": "FAILURE_ACKNOWLEDGED",
+        "incomplete": false,
+        "persisted_jsonl": "engineering/validation/fixtures/telemetry-evidence-acceptance/failure.jsonl",
+        "portable_contract_valid": true,
+        "portable_json": "engineering/validation/fixtures/telemetry-evidence-acceptance/failure.json",
+        "portable_reimport_equal": true,
+        "span_count": 9,
+        "trace_status": "completed"
+      },
+      "transformed": {
+        "artifact_readback_marker_present": true,
+        "causal_order": [
+          "tool_requested",
+          "tool_resolved",
+          "tool_result",
+          "workspace_offload",
+          "tool_observation"
+        ],
+        "causal_relationships_verified": true,
+        "event_count": 30,
+        "event_types_in_order": [
+          "user_message",
+          "agent_step",
+          "context_assembly",
+          "model_call",
+          "model_response",
+          "tool_batch_start",
+          "tool_requested",
+          "tool_resolved",
+          "tool_call",
+          "tool_result",
+          "workspace_offload",
+          "tool_observation",
+          "observation_pipeline_end",
+          "tool_batch_end",
+          "agent_step",
+          "context_assembly",
+          "model_call",
+          "model_response",
+          "tool_batch_start",
+          "tool_requested",
+          "tool_resolved",
+          "workspace_read",
+          "tool_observation",
+          "observation_pipeline_end",
+          "tool_batch_end",
+          "agent_step",
+          "context_assembly",
+          "model_call",
+          "model_response",
+          "final_answer"
+        ],
+        "evidence_status": "complete",
+        "executor_result_bytes": 5610,
+        "final_answer": "ACCEPTANCE_READY",
+        "incomplete": false,
+        "model_observation_bytes": 859,
+        "next_model_context_contains_observation": true,
+        "observation_contains_offload_preview": true,
+        "persisted_jsonl": "engineering/validation/fixtures/telemetry-evidence-acceptance/transformed.jsonl",
+        "portable_contract_valid": true,
+        "portable_json": "engineering/validation/fixtures/telemetry-evidence-acceptance/transformed.json",
+        "portable_reimport_equal": true,
+        "quality_requirement_supported": true,
+        "span_count": 14,
+        "tool_call_id": "call_bulk_report",
+        "trace_status": "completed"
+      }
+    },
+    "script": "engineering/validation/telemetry_evidence_acceptance.py"
   },
   "quality_requirement": "The final answer must report ACCEPTANCE_READY only after reading the marker from the large tool result artifact.",
   "scenarios": {
-    "transformed_observation_persisted_reload": {
-      "trace_status": "completed",
+    "capture_restriction_explicit_gap": {
+      "event_count": 10,
       "evidence_status": "partial",
+      "execution_result_remains_success": true,
       "incomplete": false,
+      "missing_evidence_types": [
+        "event_input",
+        "event_output",
+        "span_input",
+        "span_output"
+      ],
+      "restriction_reported": true,
+      "span_count": 7,
+      "trace_id": "trace_36123491abef4d778da6419789d08f1e",
+      "trace_status": "completed"
+    },
+    "tool_failure_persisted_and_recoverable": {
+      "error_event_ids": [
+        "event_f9ebcc93aee94236bf84d9feb884f6a8",
+        "event_normalizer_trace_9a00a1ed7f4c4e2c975d039de1cf6e0a_capture_gaps"
+      ],
+      "error_visible_in_evidence": true,
+      "event_count": 38,
+      "evidence_status": "partial",
+      "execution_outcome_separate_from_evidence_completeness": true,
+      "final_answer_present": true,
+      "incomplete": false,
+      "span_count": 21,
+      "trace_id": "trace_9a00a1ed7f4c4e2c975d039de1cf6e0a",
+      "trace_status": "completed"
+    },
+    "transformed_observation_persisted_reload": {
+      "artifact_readback": {
+        "call_id": "call_J141IVmWswcpVnucEmLn59W7",
+        "event_id": "event_80baa9a5dea845a78cb463dcb2cc534b",
+        "marker_present": true
+      },
+      "causal_relationships_verified": true,
+      "context_snapshots": [
+        {
+          "capture_state": "redacted",
+          "context_digest": "871a1f9f2716e8c9d6390b199eb17d904fed3f040ec046df7ecc6d8de4d87b66",
+          "event_id": "event_a0f17dac163c491fa5f19f1168a733dd",
+          "message_count": 2,
+          "tool_count": 15
+        },
+        {
+          "capture_state": "redacted",
+          "context_digest": "b4eee382558da2c2b710d76e839ed4f9502b34573c8caebb49c6a50e3d141d69",
+          "event_id": "event_7e202e27bb4f47d7bfc3d304ddbc7570",
+          "message_count": 4,
+          "tool_count": 16
+        },
+        {
+          "capture_state": "redacted",
+          "context_digest": "ae858dcefad0d7576b693450d592d6643299f145fc45fe0bee8b4911b5d8261b",
+          "event_id": "event_5dc66ead03d246cabd9bb1eb717594f4",
+          "message_count": 6,
+          "tool_count": 16
+        },
+        {
+          "capture_state": "redacted",
+          "context_digest": "a2816502eec036f738233a6c2d4cfde561d3727d341d690837a4041ac53193a3",
+          "event_id": "event_dbf7bcc523a548de9dddf639addc3c5e",
+          "message_count": 8,
+          "tool_count": 16
+        }
+      ],
       "event_count": 52,
-      "span_count": 28,
-      "trace_id": "trace_e8cb36e5c1e94cb4bdadc6927d428e93",
-      "run_id": "run_8db6553cb52949bb9ae8965ab8fcdbb9",
       "event_types": [
         "agent_step",
         "context_assembly",
@@ -48,116 +252,60 @@
         "workspace_offload",
         "workspace_read"
       ],
-      "context_snapshots": [
-        {
-          "event_id": "event_a0f17dac163c491fa5f19f1168a733dd",
-          "capture_state": "redacted",
-          "message_count": 2,
-          "tool_count": 15,
-          "context_digest": "871a1f9f2716e8c9d6390b199eb17d904fed3f040ec046df7ecc6d8de4d87b66"
-        },
-        {
-          "event_id": "event_7e202e27bb4f47d7bfc3d304ddbc7570",
-          "capture_state": "redacted",
-          "message_count": 4,
-          "tool_count": 16,
-          "context_digest": "b4eee382558da2c2b710d76e839ed4f9502b34573c8caebb49c6a50e3d141d69"
-        },
-        {
-          "event_id": "event_5dc66ead03d246cabd9bb1eb717594f4",
-          "capture_state": "redacted",
-          "message_count": 6,
-          "tool_count": 16,
-          "context_digest": "ae858dcefad0d7576b693450d592d6643299f145fc45fe0bee8b4911b5d8261b"
-        },
-        {
-          "event_id": "event_dbf7bcc523a548de9dddf639addc3c5e",
-          "capture_state": "redacted",
-          "message_count": 8,
-          "tool_count": 16,
-          "context_digest": "a2816502eec036f738233a6c2d4cfde561d3727d341d690837a4041ac53193a3"
-        }
-      ],
-      "tool_result": {
-        "event_id": "event_5e60fe21b9a94ceba9b2f34315118c07",
-        "call_id": "call_ihpkvsN9HGpQxeFvon9PfI1p",
-        "status": "success",
-        "capture_state": "available",
-        "bytes": 6032,
-        "executor_marker_present": true
-      },
-      "transformation": {
-        "event_id": "event_13436143b3ed43b2945faf5803d98e3a",
-        "reference": "[TOOL RESPONSE OFFLOADED]\nTool: bulk_report\nArtifact ID: bulk_report_20260914_221724_4cb82659\nOriginal size: 1507 tokens \u2192 Preview: 41 tokens (saved 1466 tokens)\n\n--- PREVIEW ---\nnoise line\\nnoise line\\nnoise line\\nnoise line\\nnoise line\\nnoise line\\nnoise line\\nnoise line\\nnoise line\\nnoise line\\n\n... [truncated, 1 more lines]\n--- END PREVIEW ---\n\n\ud83d\udcc1 Full response saved to: /tmp/omni-telemetry-acceptance-tve1jb8g/workspace/artifacts/bulk_report_20260914_221724_4cb82659.txt\n\ud83d\udca1 Use read_artifact('bulk_report_20260914_221724_4cb82659') to load full content when needed.",
-        "call_id": "call_ihpkvsN9HGpQxeFvon9PfI1p"
-      },
-      "model_observation": {
-        "event_id": "event_3b64c70a0c5a4cf9b30adfc786cfa116",
-        "call_id": "call_ihpkvsN9HGpQxeFvon9PfI1p",
-        "observation_for": "call_ihpkvsN9HGpQxeFvon9PfI1p",
-        "capture_state": "available",
-        "bytes": 690,
-        "is_offloaded_preview": true
-      },
-      "artifact_readback": {
-        "event_id": "event_80baa9a5dea845a78cb463dcb2cc534b",
-        "call_id": "call_J141IVmWswcpVnucEmLn59W7",
-        "marker_present": true
-      },
+      "evidence_status": "partial",
       "final_answer": {
         "event_id": "event_728db47f32d3429fa9786b1a5442d6b2",
         "response": "ACCEPTANCE_READY"
       },
-      "causal_relationships_verified": true,
+      "incomplete": false,
       "jsonl_persisted_reload_equal": true,
+      "model_observation": {
+        "bytes": 690,
+        "call_id": "call_ihpkvsN9HGpQxeFvon9PfI1p",
+        "capture_state": "available",
+        "event_id": "event_3b64c70a0c5a4cf9b30adfc786cfa116",
+        "is_offloaded_preview": true,
+        "observation_for": "call_ihpkvsN9HGpQxeFvon9PfI1p"
+      },
       "portable_contract_valid": true,
       "portable_reimport_equal": true,
+      "privacy_note": "Context payloads are present with redaction state; the evidence status remains partial because privacy redaction prevents a claim of byte-for-byte reconstruction.",
       "quality_requirement_supported": true,
-      "privacy_note": "Context payloads are present with redaction state; the evidence status remains partial because privacy redaction prevents a claim of byte-for-byte reconstruction."
-    },
-    "tool_failure_persisted_and_recoverable": {
+      "run_id": "run_8db6553cb52949bb9ae8965ab8fcdbb9",
+      "span_count": 28,
+      "tool_result": {
+        "bytes": 6032,
+        "call_id": "call_ihpkvsN9HGpQxeFvon9PfI1p",
+        "capture_state": "available",
+        "event_id": "event_5e60fe21b9a94ceba9b2f34315118c07",
+        "executor_marker_present": true,
+        "status": "success"
+      },
+      "trace_id": "trace_e8cb36e5c1e94cb4bdadc6927d428e93",
       "trace_status": "completed",
-      "evidence_status": "partial",
-      "incomplete": false,
-      "event_count": 38,
-      "span_count": 21,
-      "trace_id": "trace_9a00a1ed7f4c4e2c975d039de1cf6e0a",
-      "error_event_ids": [
-        "event_f9ebcc93aee94236bf84d9feb884f6a8",
-        "event_normalizer_trace_9a00a1ed7f4c4e2c975d039de1cf6e0a_capture_gaps"
-      ],
-      "error_visible_in_evidence": true,
-      "final_answer_present": true,
-      "execution_outcome_separate_from_evidence_completeness": true
-    },
-    "capture_restriction_explicit_gap": {
-      "trace_status": "completed",
-      "evidence_status": "partial",
-      "incomplete": false,
-      "event_count": 10,
-      "span_count": 7,
-      "trace_id": "trace_36123491abef4d778da6419789d08f1e",
-      "missing_evidence_types": [
-        "event_input",
-        "event_output",
-        "span_input",
-        "span_output"
-      ],
-      "restriction_reported": true,
-      "execution_result_remains_success": true
+      "transformation": {
+        "call_id": "call_ihpkvsN9HGpQxeFvon9PfI1p",
+        "event_id": "event_13436143b3ed43b2945faf5803d98e3a",
+        "reference": "[TOOL RESPONSE OFFLOADED]\nTool: bulk_report\nArtifact ID: bulk_report_20260914_221724_4cb82659\nOriginal size: 1507 tokens \u2192 Preview: 41 tokens (saved 1466 tokens)\n\n--- PREVIEW ---\nnoise line\\nnoise line\\nnoise line\\nnoise line\\nnoise line\\nnoise line\\nnoise line\\nnoise line\\nnoise line\\nnoise line\\n\n... [truncated, 1 more lines]\n--- END PREVIEW ---\n\n\ud83d\udcc1 Full response saved to: /tmp/omni-telemetry-acceptance-tve1jb8g/workspace/artifacts/bulk_report_20260914_221724_4cb82659.txt\n\ud83d\udca1 Use read_artifact('bulk_report_20260914_221724_4cb82659') to load full content when needed."
+      }
     }
   },
-  "verification": {
-    "remote_live_scenarios_passed": 3,
-    "remote_live_scenarios_failed": 0,
-    "remote_focused_tests": "134 passed",
-    "local_full_regression": "1,177 passed, 14 skipped",
-    "raw_trace_files": "generated outside the repository; compact evidence is recorded here"
+  "snapshot": {
+    "branch": "refactor/native-tool-runtime",
+    "commit": "70e605df997e19370fdca5304a3eb883293c892c",
+    "host": "abiorh-hetzner",
+    "litellm": "1.100.1",
+    "model": "gpt-5.6-luna",
+    "openai_sdk": "2.54.0",
+    "provider": "openai via LiteLLM",
+    "python": "3.14.4"
   },
-  "limitations": [
-    "MCP transport was intentionally not exercised; MCP v2 compatibility remains a later unit.",
-    "The live fixture uses synthetic local tools and a temporary workspace.",
-    "The default telemetry privacy policy redacts some context fields, so byte-for-byte prompt reconstruction is not claimed.",
-    "The local machine showed an intermittent native shutdown fault; the same diagnostic completed cleanly on the remote host."
-  ]
+  "verification": {
+    "local_full_regression": "1,177 passed, 14 skipped",
+    "offline_review_fixture": "3 scenarios checked from full portable traces and sanitized JSONL records; no credentials or runtime import required",
+    "raw_trace_files": "full sanitized traces and JSONL persistence records are committed in the offline review fixture; remote raw traces remain uncommitted",
+    "remote_focused_tests": "134 passed",
+    "remote_live_scenarios_failed": 0,
+    "remote_live_scenarios_passed": 3
+  }
 }

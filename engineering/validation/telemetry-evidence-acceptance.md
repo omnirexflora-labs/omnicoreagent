@@ -1,62 +1,104 @@
-# Telemetry evidence acceptance — remote live run
+# Telemetry evidence acceptance
 
-This checkpoint tests whether a persisted OmniCoreAgent execution can be handed
-to a reviewer as evidence for a concrete quality requirement. It ran on the
-remote host `abiorh-hetzner` from branch `refactor/native-tool-runtime` at
-`70e605df997e19370fdca5304a3eb883293c892c`.
+This checkpoint has two evidence sources. The remote run at commit
+`70e605df997e19370fdca5304a3eb883293c892c` exercised a real
+`gpt-5.6-luna` request through LiteLLM and local tools. The reviewable,
+credential-free bundle was generated from the same native execution path and
+committed at `3aa6cab`.
 
-The runtime used Python 3.14.4, OpenAI `gpt-5.6-luna` through LiteLLM 1.100.1
-and OpenAI SDK 2.54.0. The credential was copied to a mode-600 temporary env
-file for the run and removed afterward. No credential was committed.
-
-The acceptance requirement was:
+The acceptance requirement is:
 
 > The final answer must report `ACCEPTANCE_READY` only after reading the marker
 > from the large tool result artifact.
 
-Telemetry used JSONL persistence, model prompt/response capture enabled, a
-200,000-byte telemetry payload limit, local tool-result offload, and the default
-privacy boundary.
+## Independent review package
 
-## Results
+The [acceptance script](telemetry_evidence_acceptance.py) provides a review
+mode and two optional execution modes:
 
-The transformed-observation scenario completed a real native-tool run and then
-opened a fresh `JsonlTelemetryStore` over the persisted file. The evidence export
-passed portable-contract validation and re-imported byte-for-byte at the JSON
-envelope level.
+```text
+python engineering/validation/telemetry_evidence_acceptance.py --check-fixture
+PYTHONPATH=src .venv/bin/python engineering/validation/telemetry_evidence_acceptance.py --run
+PYTHONPATH=src .venv/bin/python engineering/validation/telemetry_evidence_acceptance.py --write-fixtures
+```
 
-| Boundary | Evidence observed |
+The first command uses only the standard library and the committed JSON. It
+checks the published envelope shape, identifiers, relationships, event order,
+the executor result versus model observation, next-turn context delivery,
+artifact readback, failure evidence, and explicit capture gaps. The `--run`
+command performs the same deterministic native execution and persistence/export
+checks in a temporary directory without changing committed files. The
+`--write-fixtures` command additionally writes a refreshed sanitized bundle.
+
+The bundle is the complete retained evidence for each synthetic execution, not
+a list of selected identifiers:
+
+| File | Contents |
 | --- | --- |
-| Request and context | `user_message` plus four `context_assembly` snapshots containing messages, tool catalogs, and context digests. Context payloads carry `redacted` capture state under the default privacy policy. |
-| Executor result | `tool_result` for `bulk_report`, call ID `call_ihpkvsN9HGpQxeFvon9PfI1p`, 6,032 captured bytes, marker present. |
-| Transformation | `workspace_offload` records the same call ID and artifact reference. |
-| Model observation | `tool_observation` points to the same call ID through `observation_for`; the delivered message is a 690-byte offload preview. |
-| Follow-up read | `workspace_read` records the native `read_artifact` call and the marker is present in its captured output. |
-| Final result | `final_answer` contains `ACCEPTANCE_READY`. |
-| Persistence/export | JSONL reload, standalone schema validation, and portable re-import all passed. |
+| `fixtures/telemetry-evidence-acceptance/transformed.json` | Full portable envelope with all retained spans, events, payloads, capture descriptors, and causal metadata. |
+| `fixtures/telemetry-evidence-acceptance/transformed.jsonl` | Sanitized JSONL records written by the persistence store, including replayable trace, span, and event records. |
+| `fixtures/telemetry-evidence-acceptance/artifacts/bulk_report.json` | The complete offloaded tool result referenced by the transformed trace. |
+| `fixtures/telemetry-evidence-acceptance/failure.json` and `.jsonl` | Full tool-failure trajectory and persisted records. |
+| `fixtures/telemetry-evidence-acceptance/capture-restricted.json` and `.jsonl` | Full successful trajectory with model capture disabled and explicit missing-evidence descriptors. |
 
-The complete event and span inventory, identifiers, capture states, and checks
-are in [telemetry-evidence-acceptance-results.json](telemetry-evidence-acceptance-results.json).
-The raw portable traces were generated outside the repository and are not
-committed because they contain full model/tool payloads, even though this
-fixture used synthetic data.
+All identifiers are stable aliases and all payloads are synthetic. Temporary
+workspace paths and credentials are removed. The JSONL and portable files retain
+the same event and span payloads, timestamps, capture states, and relationships
+that a reviewer needs to reconstruct the run.
 
-The failure scenario used a real local tool that raised an exception. Its
-error event and final answer survived persistence and export. The capture
-restriction scenario disabled model and tool-result capture; the run still
-completed successfully while the exported evidence reported `partial` status
-and explicit `not_recorded` gaps. This confirms execution outcome and evidence
-completeness remain separate.
+## What the transformed trace establishes
 
-## Verification
+The transformed scenario starts with a user request and model context that
+contains the system instruction and tool catalog. The first model turn requests
+`bulk_report` with call ID `call_bulk_report`. The local executor returns the
+large JSON result, and the `tool_result` event retains that value with its
+capture byte count and marker. The offloader then records a `workspace_offload`
+event for the same call ID. The following `tool_observation` event contains the
+smaller `[TOOL RESPONSE OFFLOADED]` message delivered to the model and points
+back to the call through `observation_for`.
 
-- Remote live acceptance scenarios: **3 passed, 0 failed**.
-- Remote focused telemetry suite: **134 passed**.
-- Local full regression: **1,177 passed, 14 skipped**.
-- MCP v2 transport was intentionally deferred as previously agreed.
+The next `context_assembly` event includes that tool observation in its captured
+messages. The model requests `read_artifact` with the stable artifact ID; the
+`workspace_read` event contains the full artifact and the acceptance marker.
+The final model response and `final_answer` event are `ACCEPTANCE_READY`.
+The checker verifies the causal order
+`tool_requested → tool_resolved → tool_result → workspace_offload →
+tool_observation`, the shared call identity, the size reduction, the next-turn
+context, and the final answer. This lets a reviewer decide whether the stated
+quality requirement is supported from the evidence itself.
 
-The local machine produced an intermittent native shutdown fault during one
-live process. The same diagnostic completed cleanly on the remote host, so the
-acceptance result is based on the remote execution. The live fixture uses a
-temporary workspace; production artifact-retention and MCP verification remain
-separate follow-up work.
+The transformed trace has complete evidence under the fixture's explicit
+synthetic no-redaction policy. The earlier remote run used the default privacy
+policy and therefore correctly reported partial evidence where context payloads
+were redacted; that policy limitation did not mean the execution failed.
+
+## Failure and capture boundaries
+
+The failure fixture executes a local tool that raises
+`synthetic tool failure for acceptance`. Its `tool_error` and error observation
+remain in the persisted trace, and the next model turn returns
+`FAILURE_ACKNOWLEDGED`. The trace is completed and its evidence is complete,
+showing that a recoverable tool error is distinct from a failed request.
+
+The capture-restricted fixture completes with
+`CAPTURE_RESTRICTION_READY` while model responses and tool-result capture are
+disabled. Its trace status is `completed`, its evidence status is `partial`,
+and the portable envelope lists `not_recorded` boundaries. This keeps execution
+outcome separate from evidence completeness.
+
+## Remote live result
+
+The remote run used Python 3.14.4, LiteLLM 1.100.1, and OpenAI SDK 2.54.0. It
+passed three scenarios: transformed observation with JSONL reload and portable
+re-import, a recoverable tool failure, and a successful run with restricted
+capture. The compact machine-readable summary remains in
+[telemetry-evidence-acceptance-results.json](telemetry-evidence-acceptance-results.json),
+but the committed fixture above is the material for independent review.
+
+The remote transformed run included a `runtime_error` event produced by the
+normalizer's `capture_gaps` bookkeeping because the default privacy policy
+redacted context payloads. It was not an execution exception. The report now
+describes that event explicitly and no longer calls a selected summary a
+“complete event and span inventory.”
+
+MCP v2 transport was intentionally not exercised; it remains a later unit.
