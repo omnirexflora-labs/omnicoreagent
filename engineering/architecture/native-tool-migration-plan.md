@@ -247,10 +247,15 @@ reliability units:
    boundary defects remain documented in `native-runtime-reassessment.md`.
    This branch will not add a compatibility fallback or silently preserve the
    broken adapter while the known MCP work is out of scope.
-4. **Dead-path and documentation cleanup.** Re-audit remaining XML-era/manual
-   extraction and obsolete external exporter or workflow examples only after
-   active callers are proven absent. Delete obsolete files and examples; retain
-   XML as task data and historical discovery evidence.
+4. **Dead-path and documentation cleanup — workflow example complete.** The
+   retired seven-stage advanced due diligence workflow and its package,
+   tools, bootstrap, README, and navigation entries were deleted in
+   `d196576`. The retained real-application due diligence example is a normal
+   `OmniCoreAgent` run and remains covered by the cookbook tests. Historical
+   discovery evidence still points at the investigated source snapshot; it is
+   not an active import or documentation link. The remaining XML-era/manual
+   extraction and optional exporter audit is still required before the final
+   integration gate.
 5. **Production integration gate.** Run the supported local/deep/background
    matrix, privacy and governance failure paths, telemetry persistence and
    streaming checks, then record provider-specific and remote-store limits.
