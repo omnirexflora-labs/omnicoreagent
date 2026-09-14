@@ -166,14 +166,17 @@ class NativeToolCatalog:
             if key in self.visible
         ]
 
-    def resolve(self, request: ToolRequest) -> tuple[ToolBinding, dict[str, Any]]:
+    def resolve(
+        self, request: ToolRequest, *, arguments: dict[str, Any] | None = None
+    ) -> tuple[ToolBinding, dict[str, Any]]:
         key = request.name.lower()
         if key not in self.visible:
             raise ValueError(
                 f"Tool '{request.name}' is not available; discover it first if hidden"
             )
         binding = self.bindings[key]
-        arguments = request.decode_arguments()
+        if arguments is None:
+            arguments = request.decode_arguments()
         from jsonschema import Draft202012Validator
 
         error = next(

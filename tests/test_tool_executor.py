@@ -154,3 +154,16 @@ def test_partial_subagent_envelope_retains_status_and_data():
     )
     assert result["status"] == "partial"
     assert result["data"] == {"failed": 1}
+
+
+def test_data_and_message_keys_do_not_guess_a_result_envelope():
+    executor = ToolExecutor(None)
+    for payload in (
+        {"data": "value", "unit": "kg"},
+        {"data": 0},
+        {"message": "business text"},
+        {"status": {"nested": "business state"}, "data": 0},
+    ):
+        result = executor._normalize_result("business", {}, payload)
+        assert result["status"] == "success"
+        assert result["data"] == payload

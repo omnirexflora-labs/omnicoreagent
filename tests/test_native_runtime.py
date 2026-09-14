@@ -609,3 +609,66 @@ async def test_large_single_batch_does_not_disable_tools():
     result, _ = await run(model, registry=registry)
     assert result["answer"] == "Done"
     assert model.requests[1][1]
+
+
+@pytest.mark.asyncio
+async def test_business_payload_survives_execution_history_and_next_request():
+    registry = ToolRegistry()
+    payload = {"data": 0, "unit": "kg", "message": "measurement"}
+
+    @registry.register_tool(name="measurement")
+    async def measurement():
+        return payload
+
+    model = Model([turn(calls=[call("measurement", "{}")]), turn("Done")])
+    result, memory = await run(model, registry=registry)
+    assert result["answer"] == "Done"
+    tool_message = next(m for m in model.requests[1][0] if m["role"] == "tool")
+    assert json.loads(tool_message["content"])["data"] == payload
+    stored = await memory.get_messages("session", "test")
+    tool_records = [m for m in stored if m["role"] == "tool"]
+    assert len(tool_records) == 1
+    assert tool_records[0]["content"] == tool_message["content"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("allowed", [False, True])
+async def test_governed_native_history_is_written_once_after_redaction(allowed):
+    from omnicoreagent.governance import GovernanceEngine, policy_from_mapping
+
+    registry = ToolRegistry()
+    effects = []
+
+    @registry.register_tool(name="lookup")
+    async def lookup(secret: str):
+        effects.append(secret)
+        return "safe result"
+
+    policy = policy_from_mapping(
+        {
+            "name": "native-history",
+            "mode": "strict",
+            "rules": {
+                "allow" if allowed else "deny": [
+                    {"rule_id": "lookup", "capability": "tool.local.call"}
+                ]
+            },
+        }
+    )
+    model = Model(
+        [turn(calls=[call("lookup", '{"secret":"sensitive-value"}')]), turn("Done")]
+    )
+    _, memory = await run(
+        model, registry=registry, governance_engine=GovernanceEngine(policy)
+    )
+    records = await memory.get_messages("session", "test")
+    results = [r for r in records if r["role"] == "tool"]
+    assert len(results) == 1
+    assert "sensitive-value" not in str(records)
+    normalized = json.loads(results[0]["content"])
+    assert normalized["status"] == ("success" if allowed else "error")
+    assert effects == (["sensitive-value"] if allowed else [])
+    if not allowed:
+        assert normalized["governance_error_code"] == "policy_denied"
+    incoming = next(m for m in model.requests[1][0] if m["role"] == "tool")
+    assert incoming["content"] == results[0]["content"]

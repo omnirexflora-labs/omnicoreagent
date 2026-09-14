@@ -140,3 +140,17 @@ agent = OmniCoreAgent(
 Use Local Tools for custom business logic, internal APIs, or Python functionality
 that belongs to your application. Use MCP for shared external services.
 </Tip>
+
+## Tool return values
+
+Ordinary values, including dictionaries with `data` or `message` fields, are
+preserved as tool data. An explicit result envelope uses `status` (`success`,
+`partial`, or `error`) and only `data`, `message`, and/or `error` alongside it.
+A dictionary containing only `error` and optionally `message` is also an error
+envelope. Raise an exception for a failed execution, or return an explicit error
+envelope. To return a business dictionary that has exactly an envelope shape,
+wrap it in `{"status": "success", "data": business_dictionary}`.
+
+The agent runtime owns persistence: it writes one result per native call ID after
+output guarding and optional offloading. Tool functions and execution handlers do
+not receive a conversation-history callback.

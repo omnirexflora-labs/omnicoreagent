@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from copy import deepcopy
+from dataclasses import dataclass
 
 from omnicoreagent.core.agents.loop_detection import ToolInteraction
 from omnicoreagent.core.model_protocol import ModelTurn
@@ -15,6 +16,13 @@ from omnicoreagent.core.tools.tool_observation_guardrail import scrub_tool_resul
 from omnicoreagent.core.types import AgentState, ToolCallResult
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
+
+
+@dataclass
+class ToolFeedback:
+    message: dict
+    metadata: dict
+    interaction: ToolInteraction
 
 
 class CallbackHandler:
@@ -38,17 +46,26 @@ async def execute_native_turn(
     run_usage,
     telemetry_recorder=None,
 ):
+    # Decode once. Freeze resolution against the schemas supplied for this turn;
+    # discovery cannot unlock a sibling in the same batch.
+    decoded_arguments = {}
+    resolutions = {}
+    for request in turn.tool_calls:
+        try:
+            arguments = request.decode_arguments()
+            decoded_arguments[request.id] = arguments
+            resolutions[request.id] = catalog.resolve(request, arguments=arguments)
+        except ValueError as exc:
+            resolutions[request.id] = exc
+
     assistant = turn.assistant_message()
     stored_calls = deepcopy(assistant["tool_calls"])
     if agent.governance_engine is not None:
         for stored in stored_calls:
-            try:
-                args = json.loads(stored["function"]["arguments"])
-                stored["function"]["arguments"] = json.dumps(
-                    {key: "[REDACTED]" for key in args}
-                )
-            except (ValueError, TypeError):
-                stored["function"]["arguments"] = "{}"
+            args = decoded_arguments.get(stored["id"], {})
+            stored["function"]["arguments"] = json.dumps(
+                {key: "[REDACTED]" for key in args}
+            )
     metadata = {
         "agent_name": agent.agent_name,
         "interaction_version": 2,
@@ -62,23 +79,9 @@ async def execute_native_turn(
     session_state.messages.append(assistant)
     session_state.state = AgentState.TOOL_CALLING
 
-    async def deferred_history(**kwargs):
-        # Only approved/offloaded results are persisted below, exactly once.
-        pass
-
-    # Resolve against the schemas supplied for this turn. Discovery may only
-    # unlock calls for the next request, never race siblings in this batch.
-    resolutions = {}
-    for request in turn.tool_calls:
-        try:
-            resolutions[request.id] = catalog.resolve(request)
-        except ValueError as exc:
-            resolutions[request.id] = exc
-
-    interactions = {}
-
     async def one(request):
         resolved = None
+        signature_args = deepcopy(decoded_arguments.get(request.id, request.arguments))
         try:
             resolution = resolutions[request.id]
             if isinstance(resolution, ValueError):
@@ -159,8 +162,6 @@ async def execute_native_turn(
             async with asyncio.timeout(agent.tool_call_timeout):
                 result = await agent.governed_tool_runner.execute(
                     single_tool=resolved,
-                    add_message_to_history=deferred_history,
-                    session_id=session_id,
                     telemetry_recorder=telemetry_recorder,
                 )
         except asyncio.CancelledError:
@@ -191,14 +192,13 @@ async def execute_native_turn(
         result = scrub_tool_results([result], agent.guardrail)[0]
         # Loop signatures use normalized, guarded contents before artifact IDs
         # and governed-history redaction can change their representation.
-        signature_args = arguments if resolved is not None else request.arguments
         signature_result = {
             key: value for key, value in result.items() if key != "args"
         }
         binding = catalog.bindings.get(request.name.lower())
         if request.name.lower() not in catalog.visible:
             binding = None
-        interactions[request.id] = ToolInteraction(
+        interaction = ToolInteraction(
             provider=binding.provider if binding else "unavailable",
             server=binding.server if binding else None,
             name=binding.name if binding else request.name.lower(),
@@ -226,21 +226,30 @@ async def execute_native_turn(
                 },
             )
         content = json.dumps(result, ensure_ascii=False, default=str)
-        return {"role": "tool", "content": content, "tool_call_id": request.id}
+        return ToolFeedback(
+            message={"role": "tool", "content": content, "tool_call_id": request.id},
+            metadata={
+                "agent_name": agent.agent_name,
+                "interaction_version": 2,
+                "tool_call_id": request.id,
+                "tool": result["tool_name"],
+                "args": result.get("args", {}),
+            },
+            interaction=interaction,
+        )
 
     batch_span = None
     if telemetry_recorder is not None:
         batch_args = []
         for request in turn.tool_calls:
-            try:
-                arguments = request.decode_arguments()
-                batch_args.append(
-                    {key: "[REDACTED]" for key in arguments}
-                    if agent.governance_engine
-                    else arguments
-                )
-            except ValueError:
-                batch_args.append({"invalid_arguments": True})
+            arguments = decoded_arguments.get(request.id)
+            batch_args.append(
+                {"invalid_arguments": True}
+                if arguments is None
+                else {key: "[REDACTED]" for key in arguments}
+                if agent.governance_engine
+                else arguments
+            )
         payload = {"tool_count": len(turn.tool_calls), "tool_batch_args": batch_args}
         batch_span = await telemetry_recorder.start_span(
             name="tool.batch",
@@ -252,26 +261,20 @@ async def execute_native_turn(
 
     persisted_ids = set()
 
-    async def persist_one(result):
-        normalized = json.loads(result["content"])
+    async def persist_one(feedback):
+        message = feedback.message
         await add_message_to_history(
             role="tool",
-            content=result["content"],
+            content=message["content"],
             session_id=session_id,
-            metadata={
-                "agent_name": agent.agent_name,
-                "interaction_version": 2,
-                "tool_call_id": result["tool_call_id"],
-                "tool": normalized["tool_name"],
-                "args": normalized.get("args", {}),
-            },
+            metadata=feedback.metadata,
         )
-        session_state.messages.append(result)
-        persisted_ids.add(result["tool_call_id"])
+        session_state.messages.append(message)
+        persisted_ids.add(message["tool_call_id"])
 
     async def persist_results(results):
         for result in results:
-            if result["tool_call_id"] in persisted_ids:
+            if result.message["tool_call_id"] in persisted_ids:
                 continue
             write = asyncio.create_task(persist_one(result))
             try:
@@ -286,7 +289,7 @@ async def execute_native_turn(
     try:
         results = await asyncio.gather(*tasks)
         session_state.loop_detector.record_round(
-            [interactions[request.id] for request in turn.tool_calls]
+            [result.interaction for result in results]
         )
         await persist_results(results)
         session_state.state = AgentState.OBSERVING
@@ -305,7 +308,7 @@ async def execute_native_turn(
         outcomes = await asyncio.gather(*tasks, return_exceptions=True)
         if isinstance(exc, asyncio.CancelledError):
             await persist_results(
-                [result for result in outcomes if isinstance(result, dict)]
+                [result for result in outcomes if isinstance(result, ToolFeedback)]
             )
         if telemetry_recorder is not None and batch_span is not None:
             await telemetry_recorder.end_span(

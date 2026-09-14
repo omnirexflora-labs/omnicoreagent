@@ -47,25 +47,10 @@ class CountingExecutor:
 
     async def execute(
         self,
-        agent_name,
         tool_args,
         tool_name,
-        tool_call_id,
-        add_message_to_history,
-        session_id,
     ):
         self.calls += 1
-        await add_message_to_history(
-            role="tool",
-            content=f"{tool_name}:ok",
-            metadata={
-                "tool_call_id": tool_call_id,
-                "tool": tool_name,
-                "args": tool_args,
-                "agent_name": agent_name,
-            },
-            session_id=session_id,
-        )
         return {
             "tool_name": tool_name,
             "args": tool_args,
@@ -174,7 +159,6 @@ async def test_governance_denies_local_tool_without_executing(session_state):
         agent_name="test_agent",
         governance_engine=GovernanceEngine(_governance_policy()),
     )
-    history = []
     tool_calls = [
         ToolCallResult(
             tool_executor=executor,
@@ -185,20 +169,15 @@ async def test_governance_denies_local_tool_without_executing(session_state):
         )
     ]
 
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        history.append({"role": role, "content": content, "metadata": metadata or {}})
-
     tools_results = await execute_calls(
         runner,
         tool_call_results=tool_calls,
-        add_message_to_history=add_message_to_history,
-        session_id="governed-local",
         telemetry_recorder=None,
     )
     assert executor.calls == 0
     assert tools_results[0]["status"] == "error"
     assert "Governance denied tool execution" in tools_results[0].get("message", "")
-    assert history[0]["metadata"]["governance_error_code"] == "policy_denied"
+    assert tools_results[0]["governance_error_code"] == "policy_denied"
 
 
 @pytest.mark.asyncio
@@ -208,7 +187,6 @@ async def test_governance_denies_workspace_write_without_executing(session_state
         agent_name="test_agent",
         governance_engine=GovernanceEngine(_governance_policy()),
     )
-    history = []
     tool_calls = [
         ToolCallResult(
             tool_executor=executor,
@@ -219,20 +197,15 @@ async def test_governance_denies_workspace_write_without_executing(session_state
         )
     ]
 
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        history.append({"role": role, "content": content, "metadata": metadata or {}})
-
     tools_results = await execute_calls(
         runner,
         tool_call_results=tool_calls,
-        add_message_to_history=add_message_to_history,
-        session_id="governed-workspace",
         telemetry_recorder=None,
     )
     assert executor.calls == 0
     assert tools_results[0]["status"] == "error"
     assert "Governance denied tool execution" in tools_results[0].get("message", "")
-    assert history[0]["metadata"]["governance"]["reason_code"] == "matched_deny"
+    assert tools_results[0]["governance"]["reason_code"] == "matched_deny"
 
 
 @pytest.mark.asyncio
@@ -242,7 +215,6 @@ async def test_governance_allows_workspace_read(session_state):
         agent_name="test_agent",
         governance_engine=GovernanceEngine(_governance_policy()),
     )
-    history = []
     tool_calls = [
         ToolCallResult(
             tool_executor=executor,
@@ -253,14 +225,9 @@ async def test_governance_allows_workspace_read(session_state):
         )
     ]
 
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        history.append({"role": role, "content": content, "metadata": metadata or {}})
-
     tools_results = await execute_calls(
         runner,
         tool_call_results=tool_calls,
-        add_message_to_history=add_message_to_history,
-        session_id="governed-workspace-read",
         telemetry_recorder=None,
     )
     assert executor.calls == 1
@@ -275,7 +242,6 @@ async def test_governance_requires_policy_for_mcp_tool(session_state):
         agent_name="test_agent",
         governance_engine=GovernanceEngine(_governance_policy()),
     )
-    history = []
     tool_calls = [
         ToolCallResult(
             tool_executor=executor,
@@ -287,21 +253,15 @@ async def test_governance_requires_policy_for_mcp_tool(session_state):
         )
     ]
 
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        history.append({"role": role, "content": content, "metadata": metadata or {}})
-
     tools_results = await execute_calls(
         runner,
         tool_call_results=tool_calls,
-        add_message_to_history=add_message_to_history,
-        session_id="governed-mcp",
         telemetry_recorder=None,
     )
     assert executor.calls == 0
     assert tools_results[0]["status"] == "error"
     assert "Unknown capability denied" in tools_results[0].get("message", "")
-    assert history[0]["metadata"]["args"] == "[REDACTED]"
-    assert history[0]["metadata"]["governance_error_code"] == "unknown_capability"
+    assert tools_results[0]["governance_error_code"] == "unknown_capability"
 
 
 @pytest.mark.asyncio
@@ -311,7 +271,6 @@ async def test_governance_interactive_default_requires_mcp_approval(session_stat
         agent_name="test_agent",
         governance_engine=GovernanceEngine(build_default_policy("interactive-dev")),
     )
-    history = []
     tool_calls = [
         ToolCallResult(
             tool_executor=executor,
@@ -323,20 +282,15 @@ async def test_governance_interactive_default_requires_mcp_approval(session_stat
         )
     ]
 
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        history.append({"role": role, "content": content, "metadata": metadata or {}})
-
     tools_results = await execute_calls(
         runner,
         tool_call_results=tool_calls,
-        add_message_to_history=add_message_to_history,
-        session_id="governed-mcp-approval",
         telemetry_recorder=None,
     )
     assert executor.calls == 0
     assert tools_results[0]["status"] == "error"
     assert "Matched ask policy rule" in tools_results[0].get("message", "")
-    assert history[0]["metadata"]["governance_error_code"] == "approval_required"
+    assert tools_results[0]["governance_error_code"] == "approval_required"
 
 
 @pytest.mark.asyncio
@@ -345,7 +299,6 @@ async def test_governance_allows_specific_mcp_tool(session_state):
     runner = GovernedToolRunner(
         agent_name="test_agent", governance_engine=GovernanceEngine(_mcp_policy())
     )
-    history = []
     tool_calls = [
         ToolCallResult(
             tool_executor=executor,
@@ -357,20 +310,14 @@ async def test_governance_allows_specific_mcp_tool(session_state):
         )
     ]
 
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        history.append({"role": role, "content": content, "metadata": metadata or {}})
-
     tools_results = await execute_calls(
         runner,
         tool_call_results=tool_calls,
-        add_message_to_history=add_message_to_history,
-        session_id="governed-mcp-allow",
         telemetry_recorder=None,
     )
     assert executor.calls == 1
     assert tools_results[0]["status"] == "success"
     assert tools_results[0]["args"] == "[REDACTED]"
-    assert history[0]["metadata"]["args"] == "[REDACTED]"
     assert tools_results[0]["data"] == "search_docs:ok"
 
 
@@ -380,7 +327,6 @@ async def test_governance_denies_specific_mcp_tool_on_allowed_server(session_sta
     runner = GovernedToolRunner(
         agent_name="test_agent", governance_engine=GovernanceEngine(_mcp_policy())
     )
-    history = []
     tool_calls = [
         ToolCallResult(
             tool_executor=executor,
@@ -392,20 +338,15 @@ async def test_governance_denies_specific_mcp_tool_on_allowed_server(session_sta
         )
     ]
 
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        history.append({"role": role, "content": content, "metadata": metadata or {}})
-
     tools_results = await execute_calls(
         runner,
         tool_call_results=tool_calls,
-        add_message_to_history=add_message_to_history,
-        session_id="governed-mcp-deny",
         telemetry_recorder=None,
     )
     assert executor.calls == 0
     assert tools_results[0]["status"] == "error"
     assert "Governance denied tool execution" in tools_results[0].get("message", "")
-    assert history[0]["metadata"]["governance_error_code"] == "policy_denied"
+    assert tools_results[0]["governance_error_code"] == "policy_denied"
 
 
 @pytest.mark.asyncio
@@ -416,7 +357,6 @@ async def test_governance_budget_is_atomic_for_parallel_tool_batch(session_state
         agent_name="test_agent",
         governance_engine=GovernanceEngine(_budget_policy(max_requests=1)),
     )
-    history = []
     tool_calls = [
         ToolCallResult(
             tool_executor=first,
@@ -434,14 +374,9 @@ async def test_governance_budget_is_atomic_for_parallel_tool_batch(session_state
         ),
     ]
 
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        history.append({"role": role, "content": content, "metadata": metadata or {}})
-
     tools_results = await execute_calls(
         runner,
         tool_call_results=tool_calls,
-        add_message_to_history=add_message_to_history,
-        session_id="governed-budget",
         telemetry_recorder=None,
     )
     statuses = [result["status"] for result in tools_results]
@@ -457,7 +392,6 @@ async def test_governance_denial_redacts_args_in_history_and_result(session_stat
         agent_name="test_agent",
         governance_engine=GovernanceEngine(_governance_policy()),
     )
-    history = []
     tool_calls = [
         ToolCallResult(
             tool_executor=executor,
@@ -468,19 +402,13 @@ async def test_governance_denial_redacts_args_in_history_and_result(session_stat
         )
     ]
 
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        history.append({"role": role, "content": content, "metadata": metadata or {}})
-
     tools_results = await execute_calls(
         runner,
         tool_call_results=tool_calls,
-        add_message_to_history=add_message_to_history,
-        session_id="governed-redact",
         telemetry_recorder=None,
     )
     assert executor.calls == 0
     assert tools_results[0]["args"] == {}
-    assert history[0]["metadata"]["args"] == "[REDACTED]"
 
 
 @pytest.mark.asyncio
@@ -510,16 +438,10 @@ async def test_governance_denial_emits_policy_telemetry_without_tool_args(
             tool_provider="local",
         )
     ]
-    history = []
-
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        history.append({"role": role, "content": content, "metadata": metadata or {}})
 
     await execute_calls(
         runner,
         tool_call_results=tool_calls,
-        add_message_to_history=add_message_to_history,
-        session_id="governed-telemetry",
         telemetry_recorder=recorder,
     )
     await recorder.end_trace()
@@ -563,21 +485,14 @@ async def test_governed_successful_tool_telemetry_redacts_result_args(session_st
             tool_provider="workspace",
         )
     ]
-    history = []
-
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        history.append({"role": role, "content": content, "metadata": metadata or {}})
 
     tools_results = await execute_calls(
         runner,
         tool_call_results=tool_calls,
-        add_message_to_history=add_message_to_history,
-        session_id="governed-success-telemetry",
         telemetry_recorder=recorder,
     )
     await recorder.end_trace()
     assert tools_results[0]["args"] == "[REDACTED]"
-    assert history[0]["metadata"]["args"] == "[REDACTED]"
     trace = await store.get_trace("trace-governance-success")
     assert trace is not None
     workspace_event = next(
@@ -605,14 +520,9 @@ async def test_governance_denied_workspace_write_does_not_touch_real_storage(
         governance_engine=GovernanceEngine(_governance_policy()),
     )
 
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        return None
-
     tools_results = await execute_calls(
         runner,
         tool_call_results=[resolved],
-        add_message_to_history=add_message_to_history,
-        session_id="real-workspace-deny",
         telemetry_recorder=None,
     )
     assert tools_results[0]["status"] == "error"
@@ -636,14 +546,9 @@ async def test_governance_allows_real_workspace_write_and_read(session_state, tm
         governance_engine=GovernanceEngine(_allow_workspace_policy()),
     )
 
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        return None
-
     tools_results = await execute_calls(
         runner,
         tool_call_results=[resolved],
-        add_message_to_history=add_message_to_history,
-        session_id="real-workspace-allow",
         telemetry_recorder=None,
     )
     assert tools_results[0]["status"] == "success"
@@ -668,14 +573,9 @@ async def test_governance_controls_real_artifact_tool_execution(
         governance_engine=GovernanceEngine(_allow_workspace_policy()),
     )
 
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        return None
-
     tools_results = await execute_calls(
         runner,
         tool_call_results=[resolved],
-        add_message_to_history=add_message_to_history,
-        session_id="artifact-allow",
         telemetry_recorder=None,
     )
     assert tools_results[0]["status"] == "success"
@@ -696,12 +596,8 @@ async def test_artifact_tools_are_recorded_as_workspace_reads(runner, session_st
     class FakeExecutor:
         async def execute(
             self,
-            agent_name,
             tool_args,
             tool_name,
-            tool_call_id,
-            add_message_to_history,
-            session_id,
         ):
             return {
                 "tool_name": tool_name,
@@ -710,9 +606,6 @@ async def test_artifact_tools_are_recorded_as_workspace_reads(runner, session_st
                 "data": "artifact content",
                 "message": None,
             }
-
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        return None
 
     await execute_calls(
         runner,
@@ -725,8 +618,6 @@ async def test_artifact_tools_are_recorded_as_workspace_reads(runner, session_st
                 tool_provider="artifact",
             )
         ],
-        add_message_to_history=add_message_to_history,
-        session_id="chat-artifact",
         telemetry_recorder=recorder,
     )
     await recorder.end_trace()
@@ -760,24 +651,9 @@ async def test_workspace_tool_telemetry_respects_tool_result_suppression(
     class FakeExecutor:
         async def execute(
             self,
-            agent_name,
             tool_args,
             tool_name,
-            tool_call_id,
-            add_message_to_history,
-            session_id,
         ):
-            await add_message_to_history(
-                role="tool",
-                content="secret file contents",
-                metadata={
-                    "tool_call_id": tool_call_id,
-                    "tool": tool_name,
-                    "args": tool_args,
-                    "agent_name": agent_name,
-                },
-                session_id=session_id,
-            )
             return {
                 "tool_name": tool_name,
                 "args": tool_args,
@@ -785,9 +661,6 @@ async def test_workspace_tool_telemetry_respects_tool_result_suppression(
                 "data": "secret file contents",
                 "message": None,
             }
-
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        return None
 
     await execute_calls(
         runner,
@@ -800,8 +673,6 @@ async def test_workspace_tool_telemetry_respects_tool_result_suppression(
                 tool_provider="workspace",
             )
         ],
-        add_message_to_history=add_message_to_history,
-        session_id="chat801",
         telemetry_recorder=recorder,
     )
     await recorder.end_trace()
@@ -832,12 +703,8 @@ async def test_artifact_error_result_is_recorded_as_workspace_read_error(
     class FakeExecutor:
         async def execute(
             self,
-            agent_name,
             tool_args,
             tool_name,
-            tool_call_id,
-            add_message_to_history,
-            session_id,
         ):
             return {
                 "tool_name": tool_name,
@@ -846,9 +713,6 @@ async def test_artifact_error_result_is_recorded_as_workspace_read_error(
                 "data": None,
                 "message": "Artifact 'missing' not found.",
             }
-
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        return None
 
     tools_results = await execute_calls(
         runner,
@@ -861,8 +725,6 @@ async def test_artifact_error_result_is_recorded_as_workspace_read_error(
                 tool_provider="artifact",
             )
         ],
-        add_message_to_history=add_message_to_history,
-        session_id="chat-artifact-error",
         telemetry_recorder=recorder,
     )
     await recorder.end_trace()
@@ -891,12 +753,8 @@ async def test_artifact_error_result_is_normalized_without_telemetry(
     class FakeExecutor:
         async def execute(
             self,
-            agent_name,
             tool_args,
             tool_name,
-            tool_call_id,
-            add_message_to_history,
-            session_id,
         ):
             return {
                 "tool_name": tool_name,
@@ -905,9 +763,6 @@ async def test_artifact_error_result_is_normalized_without_telemetry(
                 "data": None,
                 "message": "Artifact 'missing' not found.",
             }
-
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        return None
 
     tools_results = await execute_calls(
         runner,
@@ -920,8 +775,6 @@ async def test_artifact_error_result_is_normalized_without_telemetry(
                 tool_provider="artifact",
             )
         ],
-        add_message_to_history=add_message_to_history,
-        session_id="chat-artifact-error-no-telemetry",
     )
     assert tools_results[0].get("message", "") == "Artifact 'missing' not found."
     assert tools_results[0]["status"] == "error"
@@ -937,12 +790,8 @@ async def test_artifact_content_starting_with_error_stays_success(
     class FakeExecutor:
         async def execute(
             self,
-            agent_name,
             tool_args,
             tool_name,
-            tool_call_id,
-            add_message_to_history,
-            session_id,
         ):
             return {
                 "tool_name": tool_name,
@@ -951,9 +800,6 @@ async def test_artifact_content_starting_with_error_stays_success(
                 "data": "Error: compiler output from stored artifact",
                 "message": None,
             }
-
-    async def add_message_to_history(role, content, metadata=None, session_id=None):
-        return None
 
     tools_results = await execute_calls(
         runner,
@@ -966,8 +812,6 @@ async def test_artifact_content_starting_with_error_stays_success(
                 tool_provider="artifact",
             )
         ],
-        add_message_to_history=add_message_to_history,
-        session_id="chat-artifact-error-content",
     )
     assert tools_results[0]["data"] == "Error: compiler output from stored artifact"
     assert tools_results[0]["status"] == "success"
@@ -977,16 +821,12 @@ async def execute_calls(
     runner,
     *,
     tool_call_results,
-    add_message_to_history,
-    session_id,
     telemetry_recorder=None,
 ):
     return await asyncio.gather(
         *[
             runner.execute(
                 single_tool=call,
-                add_message_to_history=add_message_to_history,
-                session_id=session_id,
                 telemetry_recorder=telemetry_recorder,
             )
             for call in tool_call_results

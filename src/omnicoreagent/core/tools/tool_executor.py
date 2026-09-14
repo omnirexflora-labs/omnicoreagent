@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
 from omnicoreagent.core.tools.base_tool_handler import BaseToolHandler
@@ -17,13 +16,8 @@ class ToolExecutor:
 
     async def execute(
         self,
-        agent_name: str,
         tool_name: str,
         tool_args: dict[str, Any],
-        tool_call_id: str,
-        add_message_to_history: Callable[[str, str, dict | None], Any],
-        session_id: str = None,
-        **kwargs,
     ) -> dict[str, Any]:
         try:
             result = await self.tool_handler.call(tool_name, tool_args)
@@ -37,20 +31,6 @@ class ToolExecutor:
                 "data": None,
                 "message": str(e),
             }
-
-        await add_message_to_history(
-            role="tool",
-            content=normalized["data"]
-            if normalized["data"] is not None
-            else normalized["message"],
-            metadata={
-                "tool_call_id": tool_call_id,
-                "tool": tool_name,
-                "args": tool_args,
-                "agent_name": agent_name,
-            },
-            session_id=session_id,
-        )
 
         return normalized
 
@@ -134,19 +114,13 @@ class ToolExecutor:
         status = result.get("status")
         keys = set(result)
 
-        if status in RESULT_ENVELOPE_STATUSES:
+        if isinstance(status, str) and status in RESULT_ENVELOPE_STATUSES:
             return keys.issubset(RESULT_ENVELOPE_KEYS)
 
         if "status" in result:
             return False
 
-        if "data" in result:
-            return True
-
         if "error" in result:
             return keys.issubset({"error", "message"})
-
-        if "message" in result and "status" not in result:
-            return keys.issubset(RESULT_ENVELOPE_KEYS)
 
         return False

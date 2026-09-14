@@ -2,6 +2,11 @@
 
 ## Unreleased — native tool runtime
 
+- Remove executor/governance history callbacks and redundant redaction/JSON
+  round-trips. The native runtime writes each guarded/offloaded result once.
+  Decode native arguments once; preserve ordinary dictionaries with data/message
+  keys instead of guessing they are result envelopes.
+
 - Detect native tool loops across complete rounds with concrete provider/server
   identities. Ignore execution order and generated IDs, retain changing sibling
   results as progress, and halt repeated invalid or unavailable calls consistently.
