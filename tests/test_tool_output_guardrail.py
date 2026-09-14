@@ -124,6 +124,7 @@ class TestScrubToolResultsDangerousContent:
         scrubbed = _scrub(agent, results)
         assert "[Tool output blocked by guardrail" in scrubbed[0]["data"]
         assert scrubbed[0]["status"] == "error"
+        assert scrubbed[0]["_guardrail_telemetry"]["action"] == "blocked"
 
     def test_delimiter_injection_blocked(self):
         guardrail = PromptInjectionGuard(DetectionConfig(strict_mode=True))

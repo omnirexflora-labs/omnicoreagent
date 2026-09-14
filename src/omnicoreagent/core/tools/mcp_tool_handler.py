@@ -67,6 +67,16 @@ class MCPToolHandler(BaseToolHandler):
                 "status": "error",
                 "data": None,
                 "message": f"[MCP response blocked by guardrail: {check.message}]",
+                "_guardrail_telemetry": {
+                    "source": "mcp_tool_output",
+                    "tool_name": tool_name,
+                    "field": "content",
+                    "action": "blocked",
+                    "threat_level": check.threat_level.value,
+                    "threat_score": check.threat_score,
+                    "input_hash": check.input_hash,
+                    "message": check.message,
+                },
             }
 
         return result

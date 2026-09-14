@@ -622,6 +622,9 @@ Rules:
   traces and compacts only ended traces older than the selected window.
 - non-strict persistence failures leave the run result usable and set
   `trace.incomplete`; strict persistence propagates the failure.
+- local and MCP tool output is scrubbed before the normal tool result event is
+  persisted; flagged or blocked decisions emit a guardrail event containing
+  tool identity and a content hash without retaining the unsanitized payload.
 
 ---
 

@@ -12,7 +12,6 @@ from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
 from omnicoreagent.core.tools.mcp_tool_handler import MCPToolHandler
 from omnicoreagent.core.tools.tool_executor import ToolExecutor
-from omnicoreagent.core.tools.tool_observation_guardrail import scrub_tool_results
 from omnicoreagent.core.types import AgentState, ToolCallResult
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
@@ -163,6 +162,7 @@ async def execute_native_turn(
                 result = await agent.governed_tool_runner.execute(
                     single_tool=resolved,
                     telemetry_recorder=telemetry_recorder,
+                    result_guardrail=agent.guardrail,
                 )
         except asyncio.CancelledError:
             result = {
@@ -189,7 +189,6 @@ async def execute_native_turn(
                 "data": None,
                 "message": str(exc),
             }
-        result = scrub_tool_results([result], agent.guardrail)[0]
         # Loop signatures use normalized, guarded contents before artifact IDs
         # and governed-history redaction can change their representation.
         signature_result = {

@@ -114,6 +114,11 @@ an evidence write. The run can still complete; strict telemetry configuration
 instead propagates the persistence error. Trace metadata also reports the
 effective built-in storage type (`memory` or `jsonl`).
 
+Tool output guardrail decisions are recorded before the normal tool result
+event. Blocked or suspicious output includes the tool identity, threat level,
+score, and content hash in telemetry while the unsanitized content stays out of
+the result event and model context.
+
 `trace_id` is the exact trace handle. `run_id` is a correlation and filtering
 handle; when more than one trace is correlated to the same run, `get_trace(
 run_id=...)` returns the latest matching trace.

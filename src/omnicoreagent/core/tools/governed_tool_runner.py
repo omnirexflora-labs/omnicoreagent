@@ -5,6 +5,7 @@ from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.types import (
     ToolCallResult,
 )
+from omnicoreagent.core.tools.tool_observation_guardrail import scrub_tool_results
 from omnicoreagent.governance.capabilities import tool_authority_requests
 from omnicoreagent.governance.errors import (
     GovernanceError,
@@ -28,6 +29,7 @@ class GovernedToolRunner:
         *,
         single_tool: ToolCallResult,
         telemetry_recorder: Any = None,
+        result_guardrail: Any = None,
     ) -> dict[str, Any]:
         if telemetry_recorder is None:
             governance_error = await self._authorize_single_tool(single_tool)
@@ -40,6 +42,9 @@ class GovernedToolRunner:
                 tool_args=single_tool.tool_args,
                 tool_name=single_tool.tool_name,
             )
+            if result_guardrail is not None:
+                result = scrub_tool_results([result], result_guardrail)[0]
+            result.pop("_guardrail_telemetry", None)
             if self.governance_engine is not None:
                 return _redact_tool_result_args(result)
             return result
@@ -96,6 +101,24 @@ class GovernedToolRunner:
                 tool_args=single_tool.tool_args,
                 tool_name=single_tool.tool_name,
             )
+            if result_guardrail is not None:
+                result = scrub_tool_results([result], result_guardrail)[0]
+            guardrail_signal = result.pop("_guardrail_telemetry", None)
+            if guardrail_signal is not None:
+                await telemetry_recorder.emit_event(
+                    "guardrail_violation"
+                    if guardrail_signal.get("action") == "blocked"
+                    else "guardrail_check",
+                    actor=TelemetryActor(type=ActorType.GUARDRAIL),
+                    input={
+                        "target": "tool_output",
+                        "tool_name": single_tool.tool_name,
+                        "tool_call_id": single_tool.tool_call_id,
+                        "tool_provider": single_tool.tool_provider,
+                        "tool_server": single_tool.tool_server,
+                    },
+                    output=guardrail_signal,
+                )
             if self.governance_engine is not None:
                 result = _redact_tool_result_args(result)
             telemetry_result = result

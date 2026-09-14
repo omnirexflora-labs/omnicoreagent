@@ -285,3 +285,4 @@ before the old open questions are treated as implementation-complete.
 | Built-in storage and retention | `94d3659`, `918a8a6` | Adaptive memory/JSONL selection, explicit overrides, effective-store metadata, and configurable local trace-age cleanup. Full suite: 1079 passed, 14 skipped. |
 | Incomplete best-effort traces | `6d38423` | Non-strict persistence loss is marked on the trace while strict mode still fails the operation. Focused suite: 73 passed. |
 | Serving lineage and run families | pending | Serving request traces become explicit parents of agent traces; run-ID family lookup is available alongside exact-trace lookup. |
+| Guardrail evidence boundary | pending | Tool outputs are scrubbed before result telemetry and flagged/blocked decisions carry structured guardrail evidence. |
