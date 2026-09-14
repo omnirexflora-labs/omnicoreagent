@@ -103,8 +103,9 @@ agents through the same entry point.
 
 ## Defaults Versus Harness Features
 
-The default agent stays light. Heavier harness behavior is enabled when the
-workload needs it.
+The default agent includes the protections needed for reliable multi-step
+execution. Capabilities that change the tool surface or require external
+services remain opt-in.
 
 | Capability | Default | Reason |
 |------------|---------|--------|
@@ -112,8 +113,8 @@ workload needs it.
 | Session memory | On | Agents need conversation continuity. |
 | Workspace files | On | Agents need a filesystem surface for notes and outputs. |
 | Guardrails | On in `full` mode | Input and tool-output safety should be available without extra wiring. |
-| Context management | Off until enabled | Small agents should not pay summarization/truncation overhead. |
-| Tool offload | Off until enabled | Only needed when tools produce large payloads. |
+| Context management | On | Keeps active messages within the configured budget before each model call. |
+| Tool offload | On | Keeps large tool payloads in workspace artifacts and sends a preview to the model. |
 | BM25 tool retrieval | Off until enabled | Only needed when the tool list is too large for the prompt. |
 | Dynamic subagents | Off until enabled | Only needed for delegated work. |
 | Agent skills | Off until enabled | Only needed when packaged capabilities are installed. |

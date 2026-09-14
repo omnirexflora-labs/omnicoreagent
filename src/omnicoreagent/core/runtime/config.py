@@ -78,7 +78,7 @@ def _default_memory_config() -> dict[str, Any]:
 
 def _default_context_management() -> dict[str, Any]:
     return {
-        "enabled": False,
+        "enabled": True,
         "mode": "token_budget",
         "value": 100000,
         "threshold_percent": 75,
@@ -89,7 +89,7 @@ def _default_context_management() -> dict[str, Any]:
 
 def _default_tool_offload() -> dict[str, Any]:
     return {
-        "enabled": False,
+        "enabled": True,
         "threshold_tokens": 500,
         "threshold_bytes": 2000,
         "max_preview_tokens": 150,
@@ -171,12 +171,14 @@ class AgentConfig:
 
         if self.enable_subagents:
             # Dynamic workers depend on a durable file surface for their output,
-            # and long-running delegation needs in-run context management to
-            # prevent the lead and workers from exhausting their context.
+            # in-run context management to prevent the lead and workers from
+            # exhausting their context, and tool offloading to keep large
+            # observations out of subsequent model requests.
             # Preserve all caller-supplied context settings, but do not allow
             # the required capability to be disabled by an incomplete config.
             self.enable_workspace_files = True
             self.context_management["enabled"] = True
+            self.tool_offload["enabled"] = True
 
     def model_dump(self) -> dict[str, Any]:
         data = {}

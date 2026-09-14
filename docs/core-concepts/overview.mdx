@@ -63,8 +63,8 @@ enabled explicitly through `agent_config` or installable extras.
 
 ## Defaults And Opt-In Capabilities
 
-OmniCoreAgent keeps the default path light. Production features are enabled by
-configuration or installed as extras when the workload needs them.
+OmniCoreAgent defaults to a bounded harness runtime. Capabilities that expand
+the tool surface or require external services remain configurable.
 
 | Capability | Default | How To Enable |
 |------------|---------|---------------|
@@ -72,17 +72,18 @@ configuration or installed as extras when the workload needs them.
 | Session memory | On | Uses the default memory router unless you pass another one. |
 | Workspace files | On | `enable_workspace_files=True` by default. |
 | Guardrails | On | `guardrail_mode="full"` by default. |
-| Context management | Off | `agent_config={"context_management": {"enabled": True}}` |
-| Tool output offload | Off | `agent_config={"tool_offload": {"enabled": True}}` |
+| Context management | On | Enabled by default; configure its budget and strategy under `context_management`. |
+| Tool output offload | On | Enabled by default; configure thresholds under `tool_offload`. |
 | BM25 tool retrieval | Off | `agent_config={"enable_advanced_tool_use": True}` |
 | Dynamic subagents | Off | `agent_config={"enable_subagents": True}` |
 | Agent skills | Off | `agent_config={"enable_agent_skills": True}` |
 | Redis/Postgres/MongoDB/S3/R2 | Installable extras | Install the matching package extra and configure the backend. |
 
 <Tip>
-When dynamic subagents are enabled, workspace files are enabled automatically.
-Subagents need a shared file surface for outputs, todos, notes, and task
-artifacts that the lead agent reads back.
+Workspace files, context management, and tool output offloading are enabled by
+default for the harness. Dynamic subagents enforce all three because workers
+need a shared file surface for outputs, todos, notes, and task artifacts that
+the lead agent reads back.
 </Tip>
 
 ---

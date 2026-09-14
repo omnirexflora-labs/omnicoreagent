@@ -496,6 +496,7 @@ class TestOmniCoreAgentSubagents:
                     "value": 50000,
                     "preserve_recent": 8,
                 },
+                "tool_offload": {"enabled": False},
             },
         )
 
@@ -507,6 +508,14 @@ class TestOmniCoreAgentSubagents:
             "strategy": "truncate",
             "preserve_recent": 8,
         }
+        assert config["tool_offload"]["enabled"] is True
+
+    def test_harness_defaults_bound_context_and_tool_results(self):
+        config = normalize_agent_config("Harness", None)
+
+        assert config["enable_workspace_files"] is True
+        assert config["context_management"]["enabled"] is True
+        assert config["tool_offload"]["enabled"] is True
 
     @pytest.mark.asyncio
     async def test_enable_subagents_registers_core_spawn_tool(self, model_config):

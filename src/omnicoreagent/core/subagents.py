@@ -77,6 +77,12 @@ class SubagentFactory:
         config["max_steps"] = min(config.get("max_steps", 15), 15)
         config["enable_subagents"] = False
         config["enable_workspace_files"] = True
+        context_management = dict(config.get("context_management") or {})
+        context_management["enabled"] = True
+        config["context_management"] = context_management
+        tool_offload = dict(config.get("tool_offload") or {})
+        tool_offload["enabled"] = True
+        config["tool_offload"] = tool_offload
         if self.governance_engine is not None:
             governance_config = dict(config.get("governance_config") or {})
             governance_config.update(
