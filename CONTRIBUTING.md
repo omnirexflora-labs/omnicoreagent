@@ -33,7 +33,7 @@ This project and everyone participating in it is governed by our Code of Conduct
    ```
 4. Install dependencies:
    ```bash
-   uv sync
+   uv sync --all-extras --all-groups --locked
    ```
 
 ## 💻 Development Setup
@@ -46,7 +46,7 @@ This project and everyone participating in it is governed by our Code of Conduct
 
 2. **Install Development Dependencies**
    ```bash
-   pip install -e ".[dev]"
+   uv sync --all-extras --all-groups --locked
    ```
 
 3. **Pre-commit Hooks**

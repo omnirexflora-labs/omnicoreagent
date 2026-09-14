@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://pepy.tech/projects/omnicoreagent"><img src="https://static.pepy.tech/badge/omnicoreagent" alt="PyPI Downloads"></a>
   <a href="https://badge.fury.io/py/omnicoreagent"><img src="https://badge.fury.io/py/omnicoreagent.svg" alt="PyPI version"></a>
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python Version"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.12+-blue.svg" alt="Python Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"></a>
 </p>
 
@@ -458,7 +458,7 @@ git clone https://github.com/omnirexflora-labs/omnicoreagent.git
 cd omnicoreagent
 
 uv venv && source .venv/bin/activate
-uv sync --dev
+uv sync --all-extras --all-groups --locked
 
 pytest tests/ -v
 pytest tests/ --cov=src --cov-report=term-missing
@@ -486,7 +486,7 @@ git clone https://github.com/omnirexflora-labs/omnicoreagent.git
 cd omnicoreagent
 
 uv venv && source .venv/bin/activate
-uv sync --dev
+uv sync --all-extras --all-groups --locked
 pre-commit install
 ```
 

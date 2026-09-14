@@ -2,6 +2,14 @@
 
 ## Unreleased — native tool runtime
 
+- Refresh direct, optional, development and build dependencies to the September 14,
+  2026 stable-release baseline; regenerate the complete dependency lock. OpenAI
+  SDK stays on 2.54.0 because LiteLLM 1.100.1 requires `<3.0.0`.
+- Breaking: require Python 3.12–3.14 to support the new dependency baseline,
+  including NumPy 2.5.3. Development and CI continue to use Python 3.12.
+- Install all project extras and development groups in CI, key environment caches
+  by `uv.lock`, and make the existing Ruff rules explicit across default changes.
+
 - Replace XML control with native function calls, strict JSON argument schemas,
   stable provider call IDs and correlated JSON tool results. XML task content is
   ordinary text and is never executable control syntax.

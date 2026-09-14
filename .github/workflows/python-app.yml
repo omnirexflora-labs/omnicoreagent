@@ -66,17 +66,17 @@ jobs:
       id: venv-cache
       with:
         path: .venv
-        key: venv-${{ hashFiles('**/pyproject.toml') }}
+        key: venv-py312-${{ hashFiles('**/uv.lock') }}
 
     - name: Ensure cache is healthy
       if: steps.venv-cache.outputs.cache-hit == 'true'
       shell: bash
       run: |
-        timeout 10s .venv/bin/python -m pip --version || rm -rf .venv
+        timeout 10s .venv/bin/python --version || rm -rf .venv
 
     - name: Install dependencies
       run: |
-        uv sync --group dev
+        uv sync --all-extras --all-groups --locked
 
     - name: Lint with ruff
       run: |
@@ -84,7 +84,7 @@ jobs:
 
     - name: Run unit tests with pytest
       run: |
-        uv run pytest -v tests -m "not requires_api_key and not requires_network and not broken_upstream"
+        uv run --no-sync pytest -v tests -m "not requires_api_key and not requires_network and not OpenAIIntegration"
       env:
         OMNICOREAGENT_TEST_REDIS_URL: redis://localhost:6379/0
         OMNICOREAGENT_TEST_MONGODB_URI: mongodb://localhost:27017
@@ -92,48 +92,8 @@ jobs:
 
     - name: Run live background manager backend tests
       run: |
-        uv run pytest -v tests/test_background_durable_manager_integration.py -rs
+        uv run --no-sync pytest -v tests/test_background_durable_manager_integration.py -rs
       env:
         OMNICOREAGENT_TEST_REDIS_URL: redis://localhost:6379/0
         OMNICOREAGENT_TEST_MONGODB_URI: mongodb://localhost:27017
         OMNICOREAGENT_TEST_MONGODB_DATABASE: omnicoreagent_test
-
-    # TODO: Re-enable these test sections when API keys are configured in CI secrets
-    # and broken_upstream tests are fixed to match current source code.
-    #
-    # - name: Run API-dependent tests
-    #   run: |
-    #     uv run pytest -v tests -m "requires_api_key or requires_network"
-    #   env:
-    #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-    #
-    # - name: Run broken upstream tests (pending fixes)
-    #   run: |
-    #     uv run pytest -v tests -m "broken_upstream"
-    #
-    # Broken upstream test details (tests written for older source, never updated):
-    #
-    # test_memory_tool_backend.py (71 tests) — requires_api_key + requires_network
-    #   Tests S3/R2 storage backends that need botocore credentials and network access.
-    #   Hangs indefinitely without API keys configured.
-    #
-    # test_background_agent.py::TestBackgroundOmniCoreAgent (8 tests) — broken_upstream
-    # test_background_agent.py::TestBackgroundAgentManager (5 tests) — broken_upstream
-    #   Fixture patches OmniCoreAgent._save_config_hidden which no longer exists on the class.
-    #
-    # test_llm.py::TestLLMConnection (5 tests) — broken_upstream
-    #   Mock fixture creates LLMConnection with a Mock that returns None from
-    #   get_loaded_config(), but __init__ now calls llm_configuration() which
-    #   expects a real config dict. Mock setup doesn't match current constructor.
-    #
-    # test_base.py::test_extract_action_or_answer_fallback_error — broken_upstream
-    #   Asserts error contains 'Response must use XML format' but actual message
-    #   was changed to 'PARSE ERROR: Response does not use required XML format...'.
-    #
-    # test_deep_agent.py::TestDeepAgentPromptBuilder::test_orchestration_prompt_structure — broken_upstream
-    #   Asserts 'task_complexity_detection' in orchestration prompt, but prompt
-    #   was restructured and no longer contains that string.
-    #
-    # test_deep_agent.py::TestDeepAgentInitialization::test_memory_tool_backend_always_local — broken_upstream
-    #   Asserts memory_tool_backend is forced to 'local', but DeepAgent no longer
-    #   overrides the backend — it accepts whatever is passed in agent_config.

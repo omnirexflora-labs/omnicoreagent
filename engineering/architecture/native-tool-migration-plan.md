@@ -171,3 +171,20 @@ Verification: 1,036 offline tests passed (13 external-service skips, 2 deselecte
 then 17 focused tests passed after the final regression/example edits. The
 [live report](../validation/luna-live-validation.md) records actual provider
 results and the remaining Responses/reasoning, provider, and remote-service gates.
+
+### Dependency baseline checkpoint — 2026-09-14
+
+Completed the user's requested full dependency refresh before further provider
+integration. All extras/groups are installed in the migration worktree's `.venv`;
+93 locked package versions changed. Python now requires 3.12–3.14. OpenAI stays on
+2.54.0 because current stable LiteLLM requires `<3.0.0`.
+
+Validation: 1,048 tests passed with isolated Redis/MongoDB, two cloud-credential
+skips, two model/network deselections; nine live application scenarios passed;
+direct LiteLLM high-effort Responses continuation passed. Lock consistency,
+installed dependency compatibility, lint and builds passed. See the
+[dependency report](../validation/dependency-refresh.md).
+
+Next implementation checkpoint remains lossless continuation records and
+LiteLLM Responses integration, as described in the current LiteLLM review. The
+SDK workaround has not been removed by a dependency-only checkpoint.
