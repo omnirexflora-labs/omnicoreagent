@@ -1,0 +1,830 @@
+{
+  "adapter": "omnicoreagent",
+  "contract": "omnicoreagent.execution-evidence/v1",
+  "execution_id": "run_id_capture-restricted",
+  "facts": [
+    {
+      "id": "event_capture-restricted_000",
+      "kind": "event"
+    },
+    {
+      "id": "event_capture-restricted_001",
+      "kind": "event"
+    },
+    {
+      "id": "event_capture-restricted_002",
+      "kind": "event"
+    },
+    {
+      "id": "event_capture-restricted_003",
+      "kind": "event"
+    },
+    {
+      "id": "event_capture-restricted_004",
+      "kind": "event"
+    },
+    {
+      "id": "event_capture-restricted_005",
+      "kind": "event"
+    }
+  ],
+  "final_output_references": [
+    {
+      "id": "event_capture-restricted_005",
+      "kind": "event",
+      "role": "final_output"
+    }
+  ],
+  "missing_evidence": [
+    {
+      "id": "span_capture-restricted_003",
+      "state": "not_recorded",
+      "type": "span_input"
+    },
+    {
+      "id": "event_capture-restricted_003",
+      "state": "not_recorded",
+      "type": "event_input"
+    },
+    {
+      "id": "event_capture-restricted_004",
+      "state": "not_recorded",
+      "type": "event_output"
+    }
+  ],
+  "schema_version": 1,
+  "source": "production",
+  "task": {
+    "requirement": "The final answer must report ACCEPTANCE_READY only after reading the marker from the large tool result artifact."
+  },
+  "trace": {
+    "agent_id": "telemetry_acceptance",
+    "ended_at": "2026-09-14T22:53:10.736965+00:00",
+    "events": [
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "user"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_capture-restricted_000",
+        "event_type": "user_message",
+        "input": {
+          "message": "Verify the telemetry evidence path."
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 50,
+          "policy_version": "55390fc5cb507c1b",
+          "reason": null,
+          "recorded_bytes": 50,
+          "reference": null,
+          "role": "request",
+          "source": "user",
+          "state": "available"
+        },
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "run_id": "run_id_capture-restricted",
+          "session_id": "session_id_capture-restricted"
+        },
+        "output": null,
+        "output_capture": null,
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 1,
+        "span_id": "span_capture-restricted_000",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.645691+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_capture-restricted"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": "telemetry_acceptance",
+          "type": "agent"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_capture-restricted_001",
+        "event_type": "agent_step",
+        "input": {
+          "step": 1
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 11,
+          "policy_version": "55390fc5cb507c1b",
+          "reason": null,
+          "recorded_bytes": 11,
+          "reference": null,
+          "role": "input:agent_step",
+          "source": "runtime",
+          "state": "available"
+        },
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "run_id": "run_id_capture-restricted",
+          "session_id": "session_id_capture-restricted"
+        },
+        "output": null,
+        "output_capture": null,
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 2,
+        "span_id": "span_capture-restricted_001",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.656011+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_capture-restricted"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "system"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_capture-restricted_002",
+        "event_type": "context_assembly",
+        "input": {
+          "context_digest": "78ae72b6a7e3719d09dd8e61f72dda10ea59bb5951c1c6a12d5e12c078f7619c",
+          "interaction_group_count": 2,
+          "message_count": 2,
+          "message_digests": [
+            "9c1698f6e7018e86748e65557f3e147b67d7f03e5a64777431d5534e7cd721db",
+            "14abc243b314b41e2c9fe218bac087ea9b778581938658904485373b57c63c42"
+          ],
+          "role_counts": {
+            "system": 1,
+            "user": 1
+          },
+          "tool_catalog_digest": "545d84caeda01be747ad2902628aa3c929bb17aeb4351b94d41ddf7821241a1f",
+          "tool_count": 11,
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ]
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 594,
+          "policy_version": "55390fc5cb507c1b",
+          "reason": null,
+          "recorded_bytes": 594,
+          "reference": null,
+          "role": "context",
+          "source": "runtime",
+          "state": "available"
+        },
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "context_digest": "78ae72b6a7e3719d09dd8e61f72dda10ea59bb5951c1c6a12d5e12c078f7619c",
+          "context_span_id": "span_capture-restricted_002",
+          "run_id": "run_id_capture-restricted",
+          "session_id": "session_id_capture-restricted"
+        },
+        "output": {
+          "context_digest": "78ae72b6a7e3719d09dd8e61f72dda10ea59bb5951c1c6a12d5e12c078f7619c",
+          "interaction_group_count": 2,
+          "message_count": 2,
+          "message_digests": [
+            "9c1698f6e7018e86748e65557f3e147b67d7f03e5a64777431d5534e7cd721db",
+            "14abc243b314b41e2c9fe218bac087ea9b778581938658904485373b57c63c42"
+          ],
+          "role_counts": {
+            "system": 1,
+            "user": 1
+          },
+          "tool_catalog_digest": "545d84caeda01be747ad2902628aa3c929bb17aeb4351b94d41ddf7821241a1f",
+          "tool_count": 11,
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ]
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 594,
+          "policy_version": "55390fc5cb507c1b",
+          "reason": null,
+          "recorded_bytes": 594,
+          "reference": null,
+          "role": "context",
+          "source": "runtime",
+          "state": "available"
+        },
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 3,
+        "span_id": "span_capture-restricted_002",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.667665+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_capture-restricted"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "model"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_capture-restricted_003",
+        "event_type": "model_call",
+        "input": null,
+        "input_capture": {
+          "checksum": null,
+          "content_type": null,
+          "original_bytes": null,
+          "policy_version": "55390fc5cb507c1b",
+          "reason": "model prompt capture disabled by telemetry policy",
+          "recorded_bytes": null,
+          "reference": null,
+          "role": "model_request",
+          "source": "provider",
+          "state": "not_recorded"
+        },
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "context_digest": "78ae72b6a7e3719d09dd8e61f72dda10ea59bb5951c1c6a12d5e12c078f7619c",
+          "context_span_id": "span_capture-restricted_002",
+          "model_span_id": "span_capture-restricted_003",
+          "run_id": "run_id_capture-restricted",
+          "session_id": "session_id_capture-restricted",
+          "streaming": false
+        },
+        "output": null,
+        "output_capture": null,
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 4,
+        "span_id": "span_capture-restricted_003",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.685018+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_capture-restricted"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "model"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_capture-restricted_004",
+        "event_type": "model_response",
+        "input": null,
+        "input_capture": null,
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "context_digest": "78ae72b6a7e3719d09dd8e61f72dda10ea59bb5951c1c6a12d5e12c078f7619c",
+          "context_span_id": "span_capture-restricted_002",
+          "model_call_event_id": "event_capture-restricted_003",
+          "model_span_id": "span_capture-restricted_003",
+          "run_id": "run_id_capture-restricted",
+          "session_id": "session_id_capture-restricted",
+          "tool_call_ids": []
+        },
+        "output": null,
+        "output_capture": {
+          "checksum": null,
+          "content_type": null,
+          "original_bytes": null,
+          "policy_version": "55390fc5cb507c1b",
+          "reason": "model response capture disabled by telemetry policy",
+          "recorded_bytes": null,
+          "reference": null,
+          "role": "model_response",
+          "source": "provider",
+          "state": "not_recorded"
+        },
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 5,
+        "span_id": "span_capture-restricted_003",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.690007+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_capture-restricted"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": "telemetry_acceptance",
+          "type": "agent"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_capture-restricted_005",
+        "event_type": "final_answer",
+        "input": null,
+        "input_capture": null,
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "run_id": "run_id_capture-restricted",
+          "session_id": "session_id_capture-restricted"
+        },
+        "output": {
+          "response": "CAPTURE_RESTRICTION_READY",
+          "status": "success",
+          "termination_reason": "stop"
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 92,
+          "policy_version": "55390fc5cb507c1b",
+          "reason": null,
+          "recorded_bytes": 92,
+          "reference": null,
+          "role": "output:final_answer",
+          "source": "runtime",
+          "state": "available"
+        },
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 6,
+        "span_id": "span_capture-restricted_000",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.723385+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_capture-restricted"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "system"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_capture-restricted_006",
+        "event_type": "runtime_error",
+        "input": null,
+        "input_capture": null,
+        "metadata": {
+          "normalizer": "capture_gaps"
+        },
+        "output": {
+          "capture_gaps": [
+            {
+              "id": "span_capture-restricted_003",
+              "state": "not_recorded",
+              "type": "span_input"
+            },
+            {
+              "id": "event_capture-restricted_003",
+              "state": "not_recorded",
+              "type": "event_input"
+            },
+            {
+              "id": "event_capture-restricted_004",
+              "state": "not_recorded",
+              "type": "event_output"
+            }
+          ]
+        },
+        "output_capture": null,
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 7,
+        "span_id": null,
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.641685+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_capture-restricted"
+      }
+    ],
+    "evidence_status": "partial",
+    "execution_surface": "interactive",
+    "incomplete": false,
+    "metadata": {
+      "agent_name": null,
+      "agent_version": null,
+      "constraint_config_version": null,
+      "extra": {},
+      "guardrail_config_version": null,
+      "guardrail_mode": null,
+      "memory_config_version": null,
+      "model": null,
+      "model_provider": null,
+      "privacy_config_version": null,
+      "prompt_version": null,
+      "tags": [
+        "capture_gaps"
+      ],
+      "telemetry_config_version": null,
+      "telemetry_payload_storage": null,
+      "telemetry_storage": null,
+      "tool_schema_version": null
+    },
+    "parent_span_id": null,
+    "parent_trace_id": null,
+    "provenance": {
+      "adapter": null,
+      "application_version": null,
+      "case_id": null,
+      "deployment_id": null,
+      "environment": null,
+      "environment_id": null,
+      "evaluation_id": null,
+      "external_ids": {},
+      "extra": {},
+      "source": "omnicoreagent",
+      "trial_id": null,
+      "verifier_reference": null
+    },
+    "root_span_id": "span_capture-restricted_000",
+    "run_id": "run_id_capture-restricted",
+    "schema_version": 3,
+    "session_id": "session_id_capture-restricted",
+    "spans": [
+      {
+        "actor": {
+          "id": null,
+          "name": "telemetry_acceptance",
+          "type": "agent"
+        },
+        "attributes": {},
+        "duration_ms": 96,
+        "ended_at": "2026-09-14T22:53:10.737400+00:00",
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_ids": [
+          "event_capture-restricted_000",
+          "event_capture-restricted_005"
+        ],
+        "input": {
+          "query": "Verify the telemetry evidence path."
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 48,
+          "policy_version": "55390fc5cb507c1b",
+          "reason": null,
+          "recorded_bytes": 48,
+          "reference": null,
+          "role": "request",
+          "source": "runtime",
+          "state": "available"
+        },
+        "kind": "agent.run",
+        "name": "agent.run",
+        "output": {
+          "response": "CAPTURE_RESTRICTION_READY"
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 41,
+          "policy_version": "55390fc5cb507c1b",
+          "reason": null,
+          "recorded_bytes": 41,
+          "reference": null,
+          "role": "final_output",
+          "source": "runtime",
+          "state": "available"
+        },
+        "parent_span_id": null,
+        "schema_version": 3,
+        "span_id": "span_capture-restricted_000",
+        "started_at": "2026-09-14T22:53:10.641630+00:00",
+        "status": "ok",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_capture-restricted"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": "telemetry_acceptance",
+          "type": "agent"
+        },
+        "attributes": {},
+        "duration_ms": 56,
+        "ended_at": "2026-09-14T22:53:10.707538+00:00",
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_ids": [
+          "event_capture-restricted_001"
+        ],
+        "input": {
+          "step": 1
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 11,
+          "policy_version": "55390fc5cb507c1b",
+          "reason": null,
+          "recorded_bytes": 11,
+          "reference": null,
+          "role": "input:agent.step",
+          "source": "runtime",
+          "state": "available"
+        },
+        "kind": "agent.step",
+        "name": "agent.step",
+        "output": {
+          "returned": true
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 18,
+          "policy_version": "55390fc5cb507c1b",
+          "reason": null,
+          "recorded_bytes": 18,
+          "reference": null,
+          "role": "output:agent.step",
+          "source": "runtime",
+          "state": "available"
+        },
+        "parent_span_id": "span_capture-restricted_000",
+        "schema_version": 3,
+        "span_id": "span_capture-restricted_001",
+        "started_at": "2026-09-14T22:53:10.651048+00:00",
+        "status": "ok",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_capture-restricted"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "system"
+        },
+        "attributes": {
+          "context_digest": "78ae72b6a7e3719d09dd8e61f72dda10ea59bb5951c1c6a12d5e12c078f7619c",
+          "message_digests": [
+            "9c1698f6e7018e86748e65557f3e147b67d7f03e5a64777431d5534e7cd721db",
+            "14abc243b314b41e2c9fe218bac087ea9b778581938658904485373b57c63c42"
+          ],
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ]
+        },
+        "duration_ms": 10,
+        "ended_at": "2026-09-14T22:53:10.673496+00:00",
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_ids": [
+          "event_capture-restricted_002"
+        ],
+        "input": {
+          "context_digest": "78ae72b6a7e3719d09dd8e61f72dda10ea59bb5951c1c6a12d5e12c078f7619c",
+          "interaction_group_count": 2,
+          "message_count": 2,
+          "message_digests": [
+            "9c1698f6e7018e86748e65557f3e147b67d7f03e5a64777431d5534e7cd721db",
+            "14abc243b314b41e2c9fe218bac087ea9b778581938658904485373b57c63c42"
+          ],
+          "role_counts": {
+            "system": 1,
+            "user": 1
+          },
+          "tool_catalog_digest": "545d84caeda01be747ad2902628aa3c929bb17aeb4351b94d41ddf7821241a1f",
+          "tool_count": 11,
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ]
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 594,
+          "policy_version": "55390fc5cb507c1b",
+          "reason": null,
+          "recorded_bytes": 594,
+          "reference": null,
+          "role": "context",
+          "source": "runtime",
+          "state": "available"
+        },
+        "kind": "context.assembly",
+        "name": "context.assembly",
+        "output": {
+          "context_digest": "78ae72b6a7e3719d09dd8e61f72dda10ea59bb5951c1c6a12d5e12c078f7619c",
+          "interaction_group_count": 2,
+          "message_count": 2,
+          "message_digests": [
+            "9c1698f6e7018e86748e65557f3e147b67d7f03e5a64777431d5534e7cd721db",
+            "14abc243b314b41e2c9fe218bac087ea9b778581938658904485373b57c63c42"
+          ],
+          "role_counts": {
+            "system": 1,
+            "user": 1
+          },
+          "tool_catalog_digest": "545d84caeda01be747ad2902628aa3c929bb17aeb4351b94d41ddf7821241a1f",
+          "tool_count": 11,
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ]
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 594,
+          "policy_version": "55390fc5cb507c1b",
+          "reason": null,
+          "recorded_bytes": 594,
+          "reference": null,
+          "role": "context",
+          "source": "runtime",
+          "state": "available"
+        },
+        "parent_span_id": "span_capture-restricted_001",
+        "schema_version": 3,
+        "span_id": "span_capture-restricted_002",
+        "started_at": "2026-09-14T22:53:10.663817+00:00",
+        "status": "ok",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_capture-restricted"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "model"
+        },
+        "attributes": {
+          "context_digest": "78ae72b6a7e3719d09dd8e61f72dda10ea59bb5951c1c6a12d5e12c078f7619c",
+          "context_span_id": "span_capture-restricted_002",
+          "streaming": false
+        },
+        "duration_ms": 21,
+        "ended_at": "2026-09-14T22:53:10.699612+00:00",
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_ids": [
+          "event_capture-restricted_003",
+          "event_capture-restricted_004"
+        ],
+        "input": null,
+        "input_capture": {
+          "checksum": null,
+          "content_type": null,
+          "original_bytes": null,
+          "policy_version": "55390fc5cb507c1b",
+          "reason": "model prompt capture disabled by telemetry policy",
+          "recorded_bytes": null,
+          "reference": null,
+          "role": "model_request",
+          "source": "provider",
+          "state": "not_recorded"
+        },
+        "kind": "model.call",
+        "name": "model.call",
+        "output": {
+          "context_digest": "78ae72b6a7e3719d09dd8e61f72dda10ea59bb5951c1c6a12d5e12c078f7619c",
+          "context_span_id": "span_capture-restricted_002",
+          "finish_reason": null,
+          "refusal": null,
+          "stream_stats": {
+            "delta_count": 0,
+            "event_types": {},
+            "streaming": false,
+            "visible_text_bytes": 0
+          },
+          "tool_call_ids": [],
+          "usage": null
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 322,
+          "policy_version": "55390fc5cb507c1b",
+          "reason": null,
+          "recorded_bytes": 322,
+          "reference": null,
+          "role": "model_response",
+          "source": "provider",
+          "state": "available"
+        },
+        "parent_span_id": "span_capture-restricted_001",
+        "schema_version": 3,
+        "span_id": "span_capture-restricted_003",
+        "started_at": "2026-09-14T22:53:10.678556+00:00",
+        "status": "ok",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_capture-restricted"
+      }
+    ],
+    "started_at": "2026-09-14T22:53:10.641685+00:00",
+    "status": "completed",
+    "suite_id": null,
+    "task_id": null,
+    "trace_id": "trace_id_capture-restricted",
+    "workflow_id": null
+  }
+}
