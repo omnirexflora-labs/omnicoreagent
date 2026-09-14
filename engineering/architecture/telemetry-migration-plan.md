@@ -288,4 +288,4 @@ before the old open questions are treated as implementation-complete.
 | Guardrail evidence boundary | `4dbdf87` | Tool outputs are scrubbed before result telemetry and flagged/blocked decisions carry structured guardrail evidence. Focused security/runtime tests: 100 passed. |
 | Governance evidence assertion | `a8d27fd` | Policy request and deny events are asserted to share the active trace and session; full regression: 1082 passed, 14 skipped. |
 | Live stream overflow | `0cac745` | In-memory subscriber eviction now delivers an explicit overflow failure so SSE clients can reconnect from a cursor; full regression: 1083 passed, 14 skipped. |
-| Built-in payload offload | pending | Redacted oversized telemetry payloads are stored content-addressably in local/workspace storage, with read/prune APIs and strict/best-effort failure behavior. |
+| Built-in payload offload | `2beea51` | Redacted oversized telemetry payloads are stored content-addressably in local/workspace storage, with read/prune APIs and strict/best-effort failure behavior; full regression: 1092 passed, 14 skipped. |
