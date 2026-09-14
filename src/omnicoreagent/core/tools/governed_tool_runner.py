@@ -64,6 +64,13 @@ class GovernedToolRunner:
             actor=telemetry_shape["actor"],
             input=telemetry_input,
         )
+        relationship_metadata = {
+            "tool_call_id": single_tool.tool_call_id,
+            "tool_span_id": span.span_id,
+            "tool_name": single_tool.tool_name,
+            "tool_provider": single_tool.tool_provider,
+            "tool_server": single_tool.tool_server,
+        }
         try:
             governance_error = await self._authorize_single_tool(single_tool)
             if governance_error is not None:
@@ -80,6 +87,7 @@ class GovernedToolRunner:
                         "type": governance_error.__class__.__name__,
                         "message": str(governance_error),
                     },
+                    metadata={**relationship_metadata, "phase": "authorization"},
                 )
                 await telemetry_recorder.end_span(
                     span.span_id,
@@ -96,6 +104,7 @@ class GovernedToolRunner:
                     telemetry_shape["call_event"],
                     actor=telemetry_shape["actor"],
                     input=telemetry_input,
+                    metadata={**relationship_metadata, "phase": "execution"},
                 )
             result = await single_tool.tool_executor.execute(
                 tool_args=single_tool.tool_args,
@@ -118,6 +127,7 @@ class GovernedToolRunner:
                         "tool_server": single_tool.tool_server,
                     },
                     output=guardrail_signal,
+                    metadata={**relationship_metadata, "phase": "output_guardrail"},
                 )
             if self.governance_engine is not None:
                 result = _redact_tool_result_args(result)
@@ -136,6 +146,7 @@ class GovernedToolRunner:
                 await telemetry_recorder.emit_event(
                     telemetry_shape["error_event"],
                     **event_kwargs,
+                    metadata={**relationship_metadata, "phase": "result"},
                 )
                 await telemetry_recorder.end_span(
                     span.span_id,
@@ -156,6 +167,7 @@ class GovernedToolRunner:
                 await telemetry_recorder.emit_event(
                     telemetry_shape["result_event"],
                     **event_kwargs,
+                    metadata={**relationship_metadata, "phase": "result"},
                 )
                 await telemetry_recorder.end_span(
                     span.span_id,
@@ -173,12 +185,14 @@ class GovernedToolRunner:
                     actor=telemetry_shape["actor"],
                     input=telemetry_input,
                     error={"type": exc.__class__.__name__, "message": str(exc)},
+                    metadata={**relationship_metadata, "phase": "exception"},
                 )
             else:
                 await telemetry_recorder.record_exception(
                     exc,
                     event_type=telemetry_shape["error_event"],
                     actor=telemetry_shape["actor"],
+                    metadata={**relationship_metadata, "phase": "exception"},
                 )
             await telemetry_recorder.end_span(
                 span.span_id,

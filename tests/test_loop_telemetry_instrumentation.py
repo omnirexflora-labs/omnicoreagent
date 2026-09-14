@@ -128,10 +128,13 @@ async def test_react_loop_records_model_step_and_parallel_tool_telemetry():
     assert "agent_step" in event_types
     assert event_types.count("model_call") == 2
     assert event_types.count("model_response") == 2
+    assert event_types.count("tool_requested") == 2
+    assert event_types.count("tool_resolved") == 2
     assert "tool_batch_start" in event_types
     assert "tool_batch_end" in event_types
     assert event_types.count("tool_call") == 2
     assert event_types.count("tool_result") == 2
+    assert event_types.count("tool_observation") == 2
     assert "observation_pipeline_end" in event_types
 
     tool_spans = [span for span in trace.spans if span.kind == "tool.call"]
@@ -143,3 +146,21 @@ async def test_react_loop_records_model_step_and_parallel_tool_telemetry():
         {"value": "one"},
         {"value": "two"},
     ]
+    response_event = next(
+        event for event in trace.events if event.event_type == "model_response"
+    )
+    assert response_event.metadata["tool_call_ids"] == ["alpha_id", "beta_id"]
+    observation_events = [
+        event for event in trace.events if event.event_type == "tool_observation"
+    ]
+    assert {
+        event.metadata["model_response_event_id"] for event in observation_events
+    } == {response_event.event_id}
+    assert {
+        event.output["message"]["tool_call_id"] for event in observation_events
+    } == {"alpha_id", "beta_id"}
+    tool_results = [event for event in trace.events if event.event_type == "tool_result"]
+    assert {event.metadata["tool_call_id"] for event in tool_results} == {
+        "alpha_id",
+        "beta_id",
+    }

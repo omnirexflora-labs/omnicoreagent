@@ -831,6 +831,7 @@ async def test_privacy_flags_block_model_and_tool_payloads():
     await recorder.emit_event("model_response", output={"content": "secret response"})
     await recorder.emit_event("tool_result", output={"data": "tool result"})
     await recorder.emit_event("mcp_tool_result", output={"data": "mcp result"})
+    await recorder.emit_event("tool_observation", output={"data": "observation"})
 
     trace = await store.get_trace("trace-privacy")
 
@@ -838,8 +839,10 @@ async def test_privacy_flags_block_model_and_tool_payloads():
     assert trace.events[1].output is None
     assert trace.events[2].output is None
     assert trace.events[3].output is None
+    assert trace.events[4].output is None
     assert trace.events[1].output_capture.state == CaptureState.NOT_RECORDED
     assert trace.events[2].output_capture.state == CaptureState.NOT_RECORDED
+    assert trace.events[4].output_capture.state == CaptureState.NOT_RECORDED
 
 
 def test_redaction_covers_common_secret_key_variants():

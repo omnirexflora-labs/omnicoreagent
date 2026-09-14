@@ -22,6 +22,7 @@ class ToolFeedback:
     message: dict
     metadata: dict
     interaction: ToolInteraction
+    observation_event_id: str | None = None
 
 
 class CallbackHandler:
@@ -44,6 +45,9 @@ async def execute_native_turn(
     add_message_to_history,
     run_usage,
     telemetry_recorder=None,
+    model_call_span_id: str | None = None,
+    model_response_event_id: str | None = None,
+    agent_step_span_id: str | None = None,
 ):
     # Decode once. Freeze resolution against the schemas supplied for this turn;
     # discovery cannot unlock a sibling in the same batch.
@@ -243,6 +247,28 @@ async def execute_native_turn(
                 },
             )
         content = json.dumps(result, ensure_ascii=False, default=str)
+        observation_event_id = None
+        if telemetry_recorder is not None:
+            observation_event = await telemetry_recorder.emit_event(
+                "tool_observation",
+                actor=TelemetryActor(type=ActorType.MODEL),
+                output={
+                    "tool_call_id": request.id,
+                    "tool_name": result["tool_name"],
+                    "message": {
+                        "role": "tool",
+                        "tool_call_id": request.id,
+                        "content": content,
+                    },
+                },
+                metadata={
+                    "batch_id": batch_id,
+                    "tool_call_id": request.id,
+                    "model_response_event_id": model_response_event_id,
+                    "observation_for": request.id,
+                },
+            )
+            observation_event_id = observation_event.event_id
         return ToolFeedback(
             message={"role": "tool", "content": content, "tool_call_id": request.id},
             metadata={
@@ -251,11 +277,14 @@ async def execute_native_turn(
                 "tool_call_id": request.id,
                 "tool": result["tool_name"],
                 "args": result.get("args", {}),
+                "observation_event_id": observation_event_id,
             },
             interaction=interaction,
+            observation_event_id=observation_event_id,
         )
 
     batch_span = None
+    batch_id = None
     if telemetry_recorder is not None:
         batch_args = []
         for request in turn.tool_calls:
@@ -274,7 +303,69 @@ async def execute_native_turn(
             actor=TelemetryActor(type=ActorType.TOOL),
             input=payload,
         )
-        await telemetry_recorder.emit_event("tool_batch_start", input=payload)
+        batch_id = batch_span.span_id
+        batch_metadata = {
+            "batch_id": batch_id,
+            "agent_step_span_id": agent_step_span_id,
+            "model_call_span_id": model_call_span_id,
+            "model_response_event_id": model_response_event_id,
+            "tool_call_ids": [request.id for request in turn.tool_calls],
+        }
+        await telemetry_recorder.emit_event(
+            "tool_batch_start",
+            input=payload,
+            metadata=batch_metadata,
+        )
+        for request in turn.tool_calls:
+            arguments = decoded_arguments.get(request.id)
+            requested_input = {
+                "tool_call_id": request.id,
+                "tool_name": request.name,
+                "arguments": (
+                    {key: "[REDACTED]" for key in arguments}
+                    if arguments is not None and agent.governance_engine
+                    else arguments
+                ),
+            }
+            resolution = resolutions[request.id]
+            resolution_output: dict = {
+                "status": "resolved" if isinstance(resolution, tuple) else "rejected",
+            }
+            if isinstance(resolution, tuple):
+                binding, _ = resolution
+                resolution_output.update(
+                    {
+                        "provider": binding.provider,
+                        "server": binding.server,
+                        "resolved_name": binding.name,
+                    }
+                )
+            else:
+                resolution_output.update(
+                    {
+                        "error_type": resolution.__class__.__name__,
+                        "error": str(resolution),
+                    }
+                )
+            relationship_metadata = {
+                **batch_metadata,
+                "tool_call_id": request.id,
+            }
+            await telemetry_recorder.emit_event(
+                "tool_requested",
+                actor=TelemetryActor(type=ActorType.MODEL),
+                input=requested_input,
+                output=resolution_output,
+                metadata=relationship_metadata,
+            )
+            if isinstance(resolution, tuple):
+                await telemetry_recorder.emit_event(
+                    "tool_resolved",
+                    actor=TelemetryActor(type=ActorType.SYSTEM),
+                    input=requested_input,
+                    output=resolution_output,
+                    metadata=relationship_metadata,
+                )
 
     persisted_ids = set()
 
@@ -311,11 +402,29 @@ async def execute_native_turn(
         await persist_results(results)
         session_state.state = AgentState.OBSERVING
         if telemetry_recorder is not None:
+            observation_ids = [
+                result.observation_event_id
+                for result in results
+                if result.observation_event_id
+            ]
             await telemetry_recorder.emit_event(
-                "observation_pipeline_end", output={"tool_count": len(results)}
+                "observation_pipeline_end",
+                output={
+                    "tool_count": len(results),
+                    "observation_event_ids": observation_ids,
+                },
+                metadata={
+                    "batch_id": batch_id,
+                    "model_response_event_id": model_response_event_id,
+                },
             )
             await telemetry_recorder.emit_event(
-                "tool_batch_end", output={"tool_count": len(results)}
+                "tool_batch_end",
+                output={"tool_count": len(results)},
+                metadata={
+                    "batch_id": batch_id,
+                    "model_response_event_id": model_response_event_id,
+                },
             )
             await telemetry_recorder.end_span(batch_span.span_id, status=SpanStatus.OK)
     except BaseException as exc:

@@ -82,7 +82,7 @@ def _capture_role(kind: str | None, direction: str) -> str:
         "mcp_tool_error",
     }:
         return "tool_result"
-    if normalized.startswith("observation"):
+    if normalized.startswith("observation") or normalized == "tool_observation":
         return "observation"
     if normalized.startswith("context"):
         return "context"
@@ -591,6 +591,7 @@ class TelemetryRecorder:
                 "tool.batch",
                 "tool_result",
                 "mcp_tool_result",
+                "tool_observation",
                 "workspace_read",
                 "workspace_write",
                 "workspace_delete",

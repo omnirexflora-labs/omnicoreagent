@@ -33,6 +33,8 @@ from omnicoreagent.core.logging import logger
 class AgentLlmStepResult:
     response: ModelTurn | None = None
     error_result: dict[str, Any] | None = None
+    model_call_span_id: str | None = None
+    model_response_event_id: str | None = None
 
 
 class AgentLlmStepRunner:
@@ -130,7 +132,7 @@ class AgentLlmStepRunner:
                         f"Context managed: now {len(session_state.messages)} messages"
                     )
 
-            response = await self._call_model(
+            response, model_call_span_id, model_response_event_id = await self._call_model(
                 llm_connection=llm_connection,
                 messages=session_state.messages,
                 tools=tools,
@@ -148,7 +150,11 @@ class AgentLlmStepRunner:
                     debug=debug,
                 )
                 response = normalize_model_turn(response)
-            return AgentLlmStepResult(response=response)
+            return AgentLlmStepResult(
+                response=response,
+                model_call_span_id=model_call_span_id,
+                model_response_event_id=model_response_event_id,
+            )
 
         except UsageLimitExceeded as e:
             error_message = f"Usage limit error: {e}"
@@ -189,7 +195,7 @@ class AgentLlmStepRunner:
         tools: list[dict[str, Any]] | None = None,
         on_event: Any = None,
         telemetry_recorder: Any = None,
-    ) -> Any:
+    ) -> tuple[Any, str | None, str | None]:
         async def request():
             if on_event is None:
                 return await llm_connection.llm_call(messages, tools=tools)
@@ -213,7 +219,12 @@ class AgentLlmStepRunner:
             return response
 
         if telemetry_recorder is None:
-            return await request()
+            return await request(), None, None
+
+        tool_names = sorted(
+            str(tool.get("function", {}).get("name", tool.get("name", "")))
+            for tool in tools or []
+        )
 
         span_context = await telemetry_recorder.start_span(
             name="model.call",
@@ -225,27 +236,44 @@ class AgentLlmStepRunner:
             await telemetry_recorder.emit_event(
                 "model_call",
                 actor=TelemetryActor(type=ActorType.MODEL),
-                input={"message_count": len(messages)},
+                input={
+                    "message_count": len(messages),
+                    "tool_count": len(tools or []),
+                    "tool_names": tool_names,
+                    "model_span_id": span_context.span_id,
+                },
+                metadata={"model_span_id": span_context.span_id},
             )
             response = await request()
-            await telemetry_recorder.emit_event(
+            normalized = normalize_model_turn(response)
+            response_payload = {
+                "content": normalized.text,
+                "tool_calls": [call.as_dict() for call in normalized.tool_calls],
+                "tool_call_ids": [call.id for call in normalized.tool_calls],
+                "finish_reason": normalized.finish_reason,
+                "refusal": normalized.refusal,
+                "usage": self._usage_payload(extract_response_usage(response)),
+            }
+            response_event = await telemetry_recorder.emit_event(
                 "model_response",
                 actor=TelemetryActor(type=ActorType.MODEL),
-                output={
-                    "content": normalize_model_turn(response).text,
-                    "tool_calls": [
-                        call.as_dict()
-                        for call in normalize_model_turn(response).tool_calls
-                    ],
-                    "usage": self._usage_payload(extract_response_usage(response)),
+                output=response_payload,
+                metadata={
+                    "model_span_id": span_context.span_id,
+                    "tool_call_ids": response_payload["tool_call_ids"],
                 },
             )
             await telemetry_recorder.end_span(
                 span_context.span_id,
                 status=SpanStatus.OK,
-                output={"usage": self._usage_payload(extract_response_usage(response))},
+                output={
+                    "finish_reason": normalized.finish_reason,
+                    "refusal": normalized.refusal,
+                    "tool_call_ids": response_payload["tool_call_ids"],
+                    "usage": response_payload["usage"],
+                },
             )
-            return response
+            return response, span_context.span_id, response_event.event_id
         except asyncio.CancelledError:
             await telemetry_recorder.end_span(
                 span_context.span_id,

@@ -315,6 +315,11 @@ class BaseReactAgent:
                             add_message_to_history=add_message_to_history,
                             run_usage=run_usage,
                             telemetry_recorder=telemetry_recorder,
+                            model_call_span_id=llm_step.model_call_span_id,
+                            model_response_event_id=llm_step.model_response_event_id,
+                            agent_step_span_id=(
+                                step_span.span_id if step_span is not None else None
+                            ),
                         )
                         if session_state.loop_detector.is_looping():
                             session_state.state = AgentState.STUCK
