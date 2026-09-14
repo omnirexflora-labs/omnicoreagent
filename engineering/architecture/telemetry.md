@@ -15,6 +15,11 @@ Background run lifecycle evidence is the one runtime adapter exception:
 `BackgroundEventLog` writes normalized background events and spans directly to
 `TelemetryStore` because it owns background event ordering and workspace mirrors.
 
+`OmniCoreEvidenceAdapter` is the evaluator-facing import boundary. It consumes
+normalized traces without changing runtime facts. A generic adapter fixture
+proves that an external trajectory can be mapped into the same portable view;
+controlled Harbor integration and evaluation judgments remain separate layers.
+
 ## Purpose
 
 OmniCoreAgent telemetry exists to:
@@ -175,6 +180,8 @@ The foundation phase provides:
 - JSONL telemetry storage
 - `TelemetryStream`
 - deterministic trace normalization
+- versioned capture descriptors, context digests, causal tool/observation links,
+  and portable evidence adapters
 - runtime evidence emission helpers
 
 The runtime facade wiring phase provides:

@@ -15,7 +15,7 @@ stream, background job, or deep-agent execution to work.
 The source snapshot for this plan is branch `refactor/native-tool-runtime`.
 The plan was started at commit `8841795abda60388117ff5a1b32b3a633ede3a3a`;
 implementation checkpoints are listed below as they land. The current
-checkpoint is `b67fb18`.
+checkpoint is `adfa91d`.
 
 ## Current boundary
 
@@ -75,6 +75,7 @@ unit starts.
 | 1. Versioned evidence metadata | Complete at `36d88f4` | 49 telemetry foundation/export tests passed; 202 runtime/telemetry tests passed; Ruff and diff checks passed. Traces, spans, and events preserve schema version, capture state, execution surface, provenance, and legacy evidence status. |
 | 2. Complete request trajectory | Complete at `407b0d4` | 83 focused model/runtime/telemetry tests passed; Ruff and diff checks passed. Model turns expose tool catalog/count and finish metadata; requested/resolved calls, execution events, batch IDs, and exact post-offload observations retain causal links. |
 | 3. Context and lineage evidence | Complete at `b67fb18` | Context assembly and compression preserve message/tool digests and opt-in prompt payloads; internal summary calls, memory reads/writes, workspace offloads, and subagent terminal links are correlated. Capture gaps mark traces partial and are surfaced by normalization. Focused suite: 102 passed. Full suite: 1,155 passed, 14 skipped, with one unrelated `tiktoken` encoding-cache failure in `tests/test_base.py::test_run_prepares_internal_tools_once_for_prompt_and_execution`. |
+| 4. Portable evidence adapters | Complete at `adfa91d` | `OmniCoreEvidenceAdapter` normalizes and validates built-in traces, preserves cross-trace lineage, exposes final-output references and capture gaps, and returns a judgment-free portable view. `GenericTraceEvidenceAdapter` proves an external trace shape can be imported while preserving unknown events as experimental facts. Adapter/docs/runtime suite: 111 passed. |
 
 ## Rules for every phase
 
