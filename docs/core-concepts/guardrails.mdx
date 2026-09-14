@@ -28,14 +28,16 @@ Guardrail enforcement is selected with `agent_config["guardrail_mode"]`:
 
 | Mode | User input | Tool output | Default |
 |------|------------|-------------|---------|
-| `full` | checked and unsafe input is blocked | suspicious output is recorded and dangerous/critical output is blocked | Yes |
+| `full` | checked and unsafe input is blocked | suspicious output follows `suspicious_output_action`; dangerous/critical output is always blocked | Yes |
 | `input_only` | checked and unsafe input is blocked | not checked by the agent runtime | No |
 | `off` | not checked | not checked | No |
 
 The mode is validated when the public agent configuration is built. Unknown
 values fail before a model connection or tool can be constructed. `strict_mode`
 changes the detection thresholds; low-risk results remain allowed, while the
-input boundary blocks results whose `is_safe` value is false.
+input boundary blocks results whose `is_safe` value is false. Detection settings
+are validated before runtime construction, including positive finite sensitivity,
+positive input length, booleans, logging level, and compilable regular expressions.
 
 ---
 
@@ -61,6 +63,7 @@ input boundary blocks results whose `is_safe` value is false.
 | `enable_entropy_analysis` | `bool` | `True` | Detects high-entropy payloads common in injections. |
 | `allowlist_patterns` | `list` | `[]` | List of regex patterns that bypass safety checks. |
 | `blocklist_patterns` | `list` | `[]` | Custom regex patterns to always block. |
+| `suspicious_output_action` | `"block"` or `"flag"` | `"block"` | Whether suspicious local tool output is blocked before it enters model context or only recorded and passed through. Dangerous and critical output is always blocked. |
 
 <Warning>
 Always enable guardrails in user-facing applications to prevent prompt injection attacks and ensure agent reliability.

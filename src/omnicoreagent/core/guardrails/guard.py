@@ -61,6 +61,11 @@ class PromptInjectionGuard:
             "critical_count": self.detection_stats.get("critical", 0),
         }
 
+    @property
+    def suspicious_output_action(self) -> str:
+        """Return the explicit policy for suspicious tool output."""
+        return self.config.suspicious_output_action
+
     def update_config(self, **kwargs):
         """Atomically validate and apply configuration updates.
 

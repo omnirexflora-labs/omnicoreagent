@@ -20,6 +20,9 @@ class ThreatLevel(Enum):
     CRITICAL = "critical"
 
 
+SUSPICIOUS_OUTPUT_ACTIONS = frozenset({"block", "flag"})
+
+
 @dataclass
 class DetectionConfig:
     """Configuration for detection parameters"""
@@ -35,6 +38,7 @@ class DetectionConfig:
     log_level: str = "INFO"
     allowlist_patterns: list[str] = field(default_factory=list)
     blocklist_patterns: list[str] = field(default_factory=list)
+    suspicious_output_action: str = "block"
 
     def __post_init__(self) -> None:
         """Validate the policy before an engine can consume it.
@@ -79,6 +83,16 @@ class DetectionConfig:
         self.blocklist_patterns = self._validate_patterns(
             "blocklist_patterns", self.blocklist_patterns
         )
+        if not isinstance(self.suspicious_output_action, str):
+            raise ValueError(
+                "suspicious_output_action must be one of: block, flag"
+            )
+        self.suspicious_output_action = self.suspicious_output_action.strip().lower()
+        if self.suspicious_output_action not in SUSPICIOUS_OUTPUT_ACTIONS:
+            allowed = ", ".join(sorted(SUSPICIOUS_OUTPUT_ACTIONS))
+            raise ValueError(
+                f"suspicious_output_action must be one of: {allowed}"
+            )
 
     @staticmethod
     def _validate_bool(name: str, value: Any) -> None:

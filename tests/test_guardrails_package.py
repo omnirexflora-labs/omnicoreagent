@@ -46,6 +46,14 @@ def test_detection_config_normalizes_logging_level_and_copies_patterns():
     assert config.allowlist_patterns is not patterns
 
 
+def test_suspicious_output_policy_defaults_to_block_and_accepts_flag():
+    assert DetectionConfig().suspicious_output_action == "block"
+    assert DetectionConfig(suspicious_output_action=" FLAG ").suspicious_output_action == "flag"
+
+    with pytest.raises(ValueError, match="suspicious_output_action"):
+        DetectionConfig(suspicious_output_action="pass")
+
+
 def test_update_config_rejects_unknown_fields_without_mutating_policy():
     guard = PromptInjectionGuard(DetectionConfig(max_input_length=100))
 
