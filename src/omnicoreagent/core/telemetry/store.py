@@ -27,6 +27,10 @@ from omnicoreagent.core.telemetry.models import (
 )
 
 
+class _TelemetryStreamOverflow(RuntimeError):
+    """Raised when a live telemetry subscriber cannot keep up."""
+
+
 class AbstractTelemetryStore(ABC):
     @abstractmethod
     async def append_event(self, trace_id: str, event: TelemetryEvent) -> None:
@@ -84,7 +88,11 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
         self._event_cursor = 0
         self._event_index: list[tuple[int, TelemetryEvent]] = []
         self._subscribers: dict[
-            int, tuple[TelemetryStreamScope, asyncio.Queue[tuple[int, TelemetryEvent]]]
+            int,
+            tuple[
+                TelemetryStreamScope,
+                asyncio.Queue[tuple[int, TelemetryEvent] | _TelemetryStreamOverflow],
+            ],
         ] = {}
         self._next_subscriber_id = 0
         self._lock = asyncio.Lock()
@@ -162,7 +170,9 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
         scope: TelemetryStreamScope,
         cursor: str | None,
     ) -> AsyncIterator[TelemetryEvent]:
-        queue: asyncio.Queue[tuple[int, TelemetryEvent]] = asyncio.Queue(maxsize=1000)
+        queue: asyncio.Queue[
+            tuple[int, TelemetryEvent] | _TelemetryStreamOverflow
+        ] = asyncio.Queue(maxsize=1000)
         async with self._lock:
             self._next_subscriber_id += 1
             subscriber_id = self._next_subscriber_id
@@ -176,7 +186,10 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
                 yield event
 
             while True:
-                _, event = await queue.get()
+                item = await queue.get()
+                if isinstance(item, _TelemetryStreamOverflow):
+                    raise item
+                _, event = item
                 if event.event_id in seen:
                     continue
                 trace = self._traces.get(event.trace_id)
@@ -278,6 +291,18 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
                 queue.put_nowait((self._event_cursor, stored_event))
             except asyncio.QueueFull:
                 self._subscribers.pop(subscriber_id, None)
+                # Keep one terminal marker in the queue so a consumer blocked
+                # on ``queue.get`` receives an explicit failure instead of
+                # waiting forever after being evicted.
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                queue.put_nowait(
+                    _TelemetryStreamOverflow(
+                        "Telemetry stream queue overflow; reconnect from a cursor"
+                    )
+                )
 
 
 class JsonlTelemetryStore(AbstractTelemetryStore):

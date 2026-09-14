@@ -217,6 +217,32 @@ async def test_telemetry_stream_isolates_sessions():
 
 
 @pytest.mark.asyncio
+async def test_live_telemetry_stream_reports_queue_overflow():
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    await recorder.start_trace(trace_id="trace-overflow", session_id="session-overflow")
+
+    scope = TelemetryStreamScope(session_id="session-overflow")
+    live = store.stream_after(scope, await store.get_stream_cursor(scope))
+    first_event = asyncio.create_task(anext(live))
+    await asyncio.sleep(0)
+
+    writes = [
+        asyncio.create_task(
+            recorder.emit_event("agent_step", input={"index": index})
+        )
+        for index in range(1002)
+    ]
+    await asyncio.gather(*writes)
+    await first_event
+
+    with pytest.raises(RuntimeError, match="queue overflow"):
+        for _ in range(1002):
+            await asyncio.wait_for(anext(live), timeout=1)
+    await live.aclose()
+
+
+@pytest.mark.asyncio
 async def test_jsonl_store_persists_trace_events_and_spans(tmp_path):
     path = tmp_path / "telemetry.jsonl"
     store = JsonlTelemetryStore(path)
