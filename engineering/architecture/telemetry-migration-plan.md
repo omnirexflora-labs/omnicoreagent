@@ -6,8 +6,9 @@ External exporters such as LangSmith, Opik, and OTLP backends remain optional
 adapters. They must never be required for a run, trace lookup, replay, API
 stream, background job, or deep-agent execution to work.
 
-The source snapshot for this plan is branch `refactor/native-tool-runtime`,
-commit `8841795abda60388117ff5a1b32b3a633ede3a3a`.
+The source snapshot for this plan is branch `refactor/native-tool-runtime`.
+The plan was started at commit `8841795abda60388117ff5a1b32b3a633ede3a3a`;
+implementation checkpoints are listed below as they land.
 
 ## Current boundary
 
@@ -216,18 +217,68 @@ The next checkpoint will then implement lineage propagation and trace-family
 lookup. That is the first point at which dynamic child trace completeness can
 be corrected safely.
 
-## Open decisions to resolve during implementation
+## Decisions recorded before the persistence/API phase
 
-- Should a production local deployment select JSONL explicitly, or should the
-  default become JSONL when a workspace is configured?
-- Should child runs remain separate linked traces or become nested `agent.run`
-  spans in the parent's trace?
-- Should `/telemetry/traces` return trace families, individual traces, or both?
-- Which model prompt/response fields are safe to opt into for debugging?
-- What retention policy should apply to local JSONL traces and offloaded
-  telemetry payload references?
-- Should telemetry persistence failure fail a run in production, or mark the
-  trace incomplete while allowing the run to continue?
+These decisions apply to the built-in telemetry path and do not require a
+vendor exporter or hosted tracing service.
 
-Each decision will be made against a small test and recorded before the related
-implementation is committed.
+### Storage selection
+
+The effective default is adaptive: an agent with an explicitly configured
+workspace uses local JSONL when no telemetry store is injected; an agent with
+no explicit durable workspace keeps the lightweight in-memory store. The
+configuration can always override this with `memory` or `jsonl`, and an
+explicitly injected store wins over either default. A JSONL path is derived
+from the local workspace when it is not supplied. Cloud workspace backends do
+not silently turn telemetry into a cloud dependency; callers select a durable
+telemetry store deliberately.
+
+### Child trace shape
+
+Child executions remain separate traces linked by `parent_trace_id` and
+`parent_span_id`. The parent delegation span records the child trace and run
+IDs. This preserves child retries, budgets, worker lifetimes, and retention
+boundaries, while a family query reconstructs the complete execution graph.
+
+### Trace API shape
+
+`/telemetry/traces` remains an individual-trace listing endpoint with filters
+and bounded results. Exact trace retrieval remains stable. Linked families are
+requested explicitly through `/telemetry/traces/{trace_id}/family`; implicit
+family expansion would make pagination, authorization, and retention behavior
+ambiguous.
+
+### Model I/O capture
+
+Model prompts and responses stay excluded by default. When debugging requires
+them, an explicit capture policy enables them through the same key redaction,
+size truncation, and optional workspace offload path used by other telemetry
+payloads. Model/provider metadata, token usage, tool identity, status, and
+redacted tool arguments/results remain the default evidence surface.
+
+### Retention
+
+Retention is configurable independently for JSONL trace records and offloaded
+payload references. The default is a bounded local retention window; callers
+can explicitly choose unlimited retention or an age/size policy appropriate to
+their deployment. Cleanup must be explicit and observable, and must not erase
+active traces or leave references to already-deleted payloads.
+
+### Persistence failure
+
+Telemetry persistence is best effort by default: a store failure marks the
+trace incomplete and the agent run may continue. `strict` is an explicit
+production policy that propagates persistence failures and fails the run. The
+effective strictness and storage policy are included in trace metadata so an
+operator can distinguish dropped evidence from an execution failure.
+
+The storage, retention, and failure policies will each land with focused tests
+before the old open questions are treated as implementation-complete.
+
+## Implementation checkpoints
+
+| Checkpoint | Commit | Result |
+| --- | --- | --- |
+| Built-in recording policy | `8f1e509` | First-class recorder policy, redaction fingerprint, strictness and model-I/O defaults. |
+| Linked child traces | `0461767`, `1720316`, `9395e03` | Dynamic/configured child propagation, family lookup/API, and parent span child IDs. |
+| Background lineage | `ff2f580` | Background lifecycle trace is installed as the parent context and reconstructed agents use the canonical store. Focused background suites: 125 passed. |
