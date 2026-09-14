@@ -34,12 +34,25 @@ def test_telemetry_config_fingerprint_is_stable_and_policy_sensitive():
     assert first.fingerprint() != changed.fingerprint()
 
 
+def test_telemetry_storage_policy_validates_and_omits_path_from_fingerprint():
+    first = TelemetryConfig(storage="jsonl", storage_path="/one/traces.jsonl")
+    second = TelemetryConfig(storage="jsonl", storage_path="/two/traces.jsonl")
+
+    assert first.fingerprint() == second.fingerprint()
+    with pytest.raises(ValueError, match="storage must be one of"):
+        TelemetryConfig(storage="otlp")
+
+
 def test_telemetry_trace_metadata_round_trips_telemetry_config_version():
-    metadata = TelemetryTraceMetadata(telemetry_config_version="abc123")
+    metadata = TelemetryTraceMetadata(
+        telemetry_config_version="abc123",
+        telemetry_storage="jsonl",
+    )
 
     restored = TelemetryTraceMetadata.from_dict(metadata.model_dump())
 
     assert restored.telemetry_config_version == "abc123"
+    assert restored.telemetry_storage == "jsonl"
 
 
 def test_telemetry_records_serialize_and_validate():

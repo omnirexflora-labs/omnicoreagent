@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from omnicoreagent.core.runtime.imports import runtime, runtime_logger
@@ -9,10 +10,53 @@ def default_memory_router() -> Any:
     return runtime("MemoryRouter")(memory_store_type="in_memory")
 
 
-def default_telemetry_store() -> Any:
-    from omnicoreagent.core.telemetry import InMemoryTelemetryStore
+def default_telemetry_store(
+    *,
+    telemetry_config: Any = None,
+    workspace_config: Any = None,
+) -> Any:
+    """Build the built-in telemetry store selected by the effective policy.
 
-    return InMemoryTelemetryStore()
+    Injected stores are handled by the caller. ``auto`` only opts into local
+    JSONL when a local workspace was explicitly configured; otherwise it keeps
+    the process-local fallback used by lightweight callers and tests.
+    """
+    from omnicoreagent.core.telemetry import (
+        InMemoryTelemetryStore,
+        JsonlTelemetryStore,
+        TelemetryConfig,
+    )
+    from omnicoreagent.core.workspace.config import resolve_workspace_config
+
+    config = TelemetryConfig.from_value(telemetry_config) or TelemetryConfig()
+    mode = config.storage
+    if mode == "memory":
+        return InMemoryTelemetryStore()
+
+    if mode == "jsonl":
+        return JsonlTelemetryStore(_telemetry_jsonl_path(config, workspace_config))
+
+    if workspace_config is None:
+        return InMemoryTelemetryStore()
+    resolved_workspace = resolve_workspace_config(workspace_config)
+    if resolved_workspace.workspace_backend != "local":
+        return InMemoryTelemetryStore()
+    return JsonlTelemetryStore(_telemetry_jsonl_path(config, resolved_workspace))
+
+
+def _telemetry_jsonl_path(config: Any, workspace_config: Any = None) -> Path:
+    if config.storage_path is not None:
+        return Path(config.storage_path).expanduser()
+
+    from omnicoreagent.core.workspace.config import resolve_workspace_config
+
+    resolved_workspace = resolve_workspace_config(workspace_config)
+    if resolved_workspace.workspace_backend != "local":
+        raise ValueError(
+            "telemetry storage='jsonl' requires storage_path when the workspace "
+            "backend is not local"
+        )
+    return resolved_workspace.local_namespace_path("telemetry") / "traces.jsonl"
 
 
 def build_guardrail(agent_name: str, agent_config: dict[str, Any]) -> tuple[str, Any]:

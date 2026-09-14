@@ -11,6 +11,7 @@ from omnicoreagent.core.agents.subagent_runner import SubAgentCallRunner
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.telemetry import (
     InMemoryTelemetryStore,
+    JsonlTelemetryStore,
     TelemetryStream,
     TelemetryRecorder,
     TelemetryActor,
@@ -21,6 +22,7 @@ from omnicoreagent.core.telemetry import (
     ActorType,
     TelemetryConfig,
 )
+from omnicoreagent.core.workspace.config import WorkspaceConfig
 
 
 def _initialized_agent(
@@ -453,6 +455,91 @@ def test_telemetry_config_accepts_dictionary_at_facade_boundary() -> None:
     agent._ensure_telemetry()
 
     assert agent.telemetry_config.record_model_responses is True
+
+
+def test_auto_telemetry_uses_jsonl_for_explicit_local_workspace(tmp_path) -> None:
+    agent = OmniCoreAgent(
+        name="durable-agent",
+        system_instruction="test",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        agent_config={
+            "workspace_config": WorkspaceConfig(workspace_dir=tmp_path),
+        },
+    )
+
+    agent._ensure_telemetry()
+
+    assert isinstance(agent.telemetry_store, JsonlTelemetryStore)
+    assert agent.telemetry_store.path == tmp_path / "telemetry" / "traces.jsonl"
+    assert agent._telemetry_metadata()["telemetry_storage"] == "jsonl"
+
+
+def test_explicit_memory_telemetry_overrides_workspace_auto(tmp_path) -> None:
+    agent = OmniCoreAgent(
+        name="ephemeral-agent",
+        system_instruction="test",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        agent_config={
+            "workspace_config": WorkspaceConfig(workspace_dir=tmp_path),
+        },
+        telemetry_config={"storage": "memory"},
+    )
+
+    agent._ensure_telemetry()
+
+    assert isinstance(agent.telemetry_store, InMemoryTelemetryStore)
+    assert agent._telemetry_metadata()["telemetry_storage"] == "memory"
+
+
+def test_explicit_jsonl_telemetry_accepts_a_path_without_workspace(tmp_path) -> None:
+    path = tmp_path / "traces.jsonl"
+    agent = OmniCoreAgent(
+        name="explicit-durable-agent",
+        system_instruction="test",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        telemetry_config={"storage": "jsonl", "storage_path": str(path)},
+    )
+
+    agent._ensure_telemetry()
+
+    assert isinstance(agent.telemetry_store, JsonlTelemetryStore)
+    assert agent.telemetry_store.path == path
+
+
+def test_auto_telemetry_keeps_memory_for_cloud_workspace(tmp_path) -> None:
+    agent = OmniCoreAgent(
+        name="cloud-agent",
+        system_instruction="test",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        agent_config={
+            "workspace_config": {
+                "workspace_backend": "s3",
+                "s3_bucket": "example",
+            }
+        },
+    )
+
+    agent._ensure_telemetry()
+
+    assert isinstance(agent.telemetry_store, InMemoryTelemetryStore)
+
+
+def test_jsonl_telemetry_requires_path_for_cloud_workspace() -> None:
+    agent = OmniCoreAgent(
+        name="cloud-durable-agent",
+        system_instruction="test",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        agent_config={
+            "workspace_config": {
+                "workspace_backend": "s3",
+                "s3_bucket": "example",
+            }
+        },
+        telemetry_config={"storage": "jsonl"},
+    )
+
+    with pytest.raises(ValueError, match="requires storage_path"):
+        agent._ensure_telemetry()
 
 
 @pytest.mark.asyncio

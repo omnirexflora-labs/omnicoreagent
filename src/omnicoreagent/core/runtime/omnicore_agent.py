@@ -209,7 +209,10 @@ class OmniCoreAgent:
             elif self.telemetry_stream is not None:
                 self.telemetry_store = self.telemetry_stream.store
             else:
-                self.telemetry_store = construction.default_telemetry_store()
+                self.telemetry_store = construction.default_telemetry_store(
+                    telemetry_config=self.telemetry_config,
+                    workspace_config=self.agent_config.get("workspace_config"),
+                )
 
         if self.telemetry_recorder is None:
             self.telemetry_recorder = TelemetryRecorder(
@@ -276,6 +279,12 @@ class OmniCoreAgent:
         fingerprint = getattr(self.telemetry_config, "fingerprint", None)
         if callable(fingerprint):
             metadata["telemetry_config_version"] = fingerprint()
+        if self.telemetry_store is not None:
+            storage_name = self.telemetry_store.__class__.__name__
+            metadata["telemetry_storage"] = {
+                "InMemoryTelemetryStore": "memory",
+                "JsonlTelemetryStore": "jsonl",
+            }.get(storage_name, storage_name)
         return metadata
 
     def _telemetry_scope(

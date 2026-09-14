@@ -359,6 +359,7 @@ class TelemetryTraceMetadata(SerializableTelemetryRecord):
     memory_config_version: str | None = None
     constraint_config_version: str | None = None
     telemetry_config_version: str | None = None
+    telemetry_storage: str | None = None
     tags: list[str] = field(default_factory=list)
 
     @classmethod
@@ -377,6 +378,7 @@ class TelemetryTraceMetadata(SerializableTelemetryRecord):
             memory_config_version=data.get("memory_config_version"),
             constraint_config_version=data.get("constraint_config_version"),
             telemetry_config_version=data.get("telemetry_config_version"),
+            telemetry_storage=data.get("telemetry_storage"),
             tags=list(data.get("tags") or []),
         )
 

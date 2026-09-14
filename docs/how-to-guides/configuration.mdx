@@ -82,6 +82,7 @@ directly on the agent when you need more or less evidence:
 agent = OmniCoreAgent(
     ...,
     telemetry_config={
+        "storage": "auto", # memory, jsonl, or auto
         "record_inputs": True,
         "record_outputs": True,
         "record_tool_results": True,
@@ -94,10 +95,12 @@ agent = OmniCoreAgent(
 ```
 
 The effective policy is recorded as a non-secret configuration fingerprint in
-each agent trace. The default store is in-memory for lightweight local use;
-pass a `JsonlTelemetryStore` when traces must survive a process restart. An
-exporter is an optional outbound copy of a completed built-in trace and is not
-part of the runtime execution path.
+each agent trace. With `storage: "auto"`, an explicitly configured local
+workspace selects the built-in JSONL store; callers without a durable workspace
+keep the in-memory default. Set `storage: "memory"` or `storage: "jsonl"` to
+override that choice, and set `storage_path` for an explicit JSONL location.
+An exporter is an optional outbound copy of a completed built-in trace and is
+not part of the runtime execution path.
 
 | Exporter | Variables |
 |----------|-----------|

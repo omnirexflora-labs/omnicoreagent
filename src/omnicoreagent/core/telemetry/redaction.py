@@ -11,6 +11,11 @@ REDACTION_MARKER = "[REDACTED]"
 
 @dataclass
 class TelemetryConfig:
+    # ``auto`` keeps the lightweight in-memory fallback unless a local
+    # workspace was explicitly configured at the runtime boundary. ``jsonl``
+    # is the built-in durable local option; no external exporter is required.
+    storage: str = "auto"
+    storage_path: str | None = None
     record_inputs: bool = True
     record_outputs: bool = True
     record_model_prompts: bool = False
@@ -36,6 +41,15 @@ class TelemetryConfig:
     offload_target: str = "workspace"
     strict: bool = False
 
+    def __post_init__(self) -> None:
+        self.storage = str(self.storage).lower().strip()
+        if self.storage not in {"auto", "memory", "jsonl"}:
+            raise ValueError(
+                "telemetry storage must be one of: auto, memory, jsonl"
+            )
+        if self.storage_path is not None and not str(self.storage_path).strip():
+            raise ValueError("telemetry storage_path must not be empty")
+
     @classmethod
     def from_value(cls, value: "TelemetryConfig | dict[str, Any] | None") -> "TelemetryConfig | None":
         """Normalize the public telemetry configuration boundary.
@@ -53,6 +67,9 @@ class TelemetryConfig:
     def fingerprint(self) -> str:
         """Return a stable, non-secret identifier for this effective policy."""
         payload = asdict(self)
+        # A path identifies a deployment location rather than the recording
+        # policy and may contain a local username or project name.
+        payload.pop("storage_path", None)
         payload["redact_keys"] = sorted(str(key).lower() for key in self.redact_keys)
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
