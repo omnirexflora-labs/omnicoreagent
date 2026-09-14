@@ -242,6 +242,93 @@ def test_generic_adapter_preserves_timing_usage_errors_and_capture_state():
     validate_portable_evidence_document(serialized)
 
 
+def test_external_partial_export_round_trips_without_inventing_values():
+    payload = {
+        "id": "vendor-partial",
+        "status": "future-status",
+        "schema_version": "future-schema",
+        "execution": {
+            "run_id": "vendor-partial-run",
+            "source": "production",
+            "surface": "production",
+        },
+        "provenance": {
+            "source": "vendor",
+            "application_version": "2.4.0",
+            "deployment_id": "prod-eu",
+        },
+        "metadata": {"model": "vendor-model", "region": "eu"},
+        "spans": [
+            {
+                "id": "vendor-root",
+                "kind": "agent",
+                "name": "root",
+                "status": "success",
+                "event_ids": ["vendor-final"],
+            }
+        ],
+        "events": [
+            {
+                "id": "vendor-final",
+                "type": "final_answer",
+                "span_id": "vendor-root",
+                "output": {"response": "done"},
+            }
+        ],
+    }
+
+    exported = GenericTraceEvidenceAdapter().import_trace(payload).model_dump()
+    assert exported["trace"]["status"] is None
+    assert exported["trace"]["schema_version"] is None
+    assert exported["adapter"] == "generic"
+    assert exported["source"] == "production"
+    assert exported["execution_id"] == "vendor-partial-run"
+
+    restored = OmniCoreEvidenceAdapter().import_document(
+        json.loads(json.dumps(exported))
+    )
+
+    assert restored.model_dump() == exported
+    assert restored.internal_trace is not None
+    assert restored.internal_trace.status == TraceStatus.RUNNING
+
+
+def test_generic_adapter_preserves_skipped_span_status():
+    payload = {
+        "id": "vendor-skipped",
+        "status": "success",
+        "spans": [
+            {
+                "id": "root",
+                "kind": "agent",
+                "name": "root",
+                "status": "success",
+            },
+            {
+                "id": "skipped-tool",
+                "parent_id": "root",
+                "kind": "tool",
+                "name": "optional_lookup",
+                "status": "skipped",
+            },
+        ],
+        "events": [],
+    }
+
+    evidence = GenericTraceEvidenceAdapter().import_trace(payload)
+
+    skipped = next(
+        span
+        for span in evidence.trace["spans"]
+        if span["span_id"] == "skipped-tool"
+    )
+    assert skipped["status"] == "skipped"
+    assert not any(
+        item.get("type") == "span_status" and item.get("id") == "skipped-tool"
+        for item in evidence.missing_evidence
+    )
+
+
 def test_generic_adapter_maps_external_shape_without_discarding_unknown_events():
     payload = {
         "id": "vendor-trace",

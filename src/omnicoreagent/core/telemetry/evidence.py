@@ -292,10 +292,48 @@ class OmniCoreEvidenceAdapter:
 
         validate_portable_evidence_document(value)
         document_task = task if task is not None else value.get("task")
-        return self.import_trace(
-            value["trace"],
-            task=dict(document_task) if isinstance(document_task, Mapping) else None,
-            source=str(value["source"]),
+        raw_trace = _json_value(value["trace"])
+        # The portable contract intentionally allows null status, timestamps,
+        # and schema versions when the producer cannot establish those facts.
+        # Runtime models remain strict, so use placeholders only for internal
+        # validation.  The returned evidence keeps the original JSON trace and
+        # envelope metadata exactly as supplied.
+        runtime_trace = _portable_trace_for_runtime(raw_trace)
+        normalized = TelemetryNormalizer().normalize(
+            TelemetryTrace.from_dict(runtime_trace)
+        )
+        _validate_trace(normalized)
+        final_outputs = tuple(
+            EvidenceReference(
+                kind=reference["kind"],
+                identifier=reference["id"],
+                role=reference.get("role"),
+            )
+            for reference in value["final_output_references"]
+        )
+        facts = tuple(
+            EvidenceReference(
+                kind=reference["kind"],
+                identifier=reference["id"],
+                role=reference.get("role"),
+            )
+            for reference in value["facts"]
+        )
+        return PortableExecutionEvidence(
+            execution_id=value["execution_id"],
+            source=value["source"],
+            adapter=value["adapter"],
+            schema_version=value["schema_version"],
+            task=(
+                dict(document_task)
+                if isinstance(document_task, Mapping)
+                else None
+            ),
+            trace=raw_trace,
+            final_output_references=final_outputs,
+            missing_evidence=tuple(_json_value(value["missing_evidence"])),
+            facts=facts,
+            _normalized_trace=normalized,
         )
 
 
@@ -429,6 +467,51 @@ def _is_portable_document(value: Mapping[str, Any]) -> bool:
         and value.get("contract") == PORTABLE_EVIDENCE_CONTRACT
         and isinstance(value.get("trace"), Mapping)
     )
+
+
+def _portable_trace_for_runtime(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Make nullable portable fields acceptable to strict runtime models.
+
+    ``null`` in the serialized contract means that the producer could not
+    establish a value.  It must never become a newly invented fact in the
+    exported evidence, so this conversion is used only for validation and the
+    private ``internal_trace`` accessor.
+    """
+
+    trace = dict(value)
+    if trace.get("status") is None or not _known_trace_status(trace.get("status")):
+        trace["status"] = TraceStatus.RUNNING.value
+    if not _valid_schema_version(trace.get("schema_version")):
+        trace["schema_version"] = 1
+    if trace.get("evidence_status") not in {
+        "complete",
+        "partial",
+        "unknown",
+    }:
+        trace["evidence_status"] = "unknown"
+
+    runtime_spans = []
+    for raw_span in trace.get("spans", []):
+        span = dict(raw_span)
+        if span.get("status") is None or not _known_span_status(span.get("status")):
+            span["status"] = SpanStatus.RUNNING.value
+        if not _valid_schema_version(span.get("schema_version")):
+            span["schema_version"] = 1
+        runtime_spans.append(span)
+    trace["spans"] = runtime_spans
+
+    runtime_events = []
+    for raw_event in trace.get("events", []):
+        event = dict(raw_event)
+        if not _valid_schema_version(event.get("schema_version")):
+            event["schema_version"] = 1
+        if event.get("event_type") not in FOUNDATION_EVENT_TYPES:
+            metadata = dict(event.get("metadata") or {})
+            metadata["experimental"] = True
+            event["metadata"] = metadata
+        runtime_events.append(event)
+    trace["events"] = runtime_events
+    return trace
 
 
 def _map_trace_metadata(value: Any) -> dict[str, Any]:
@@ -932,6 +1015,7 @@ def _map_span_status(value: Any) -> SpanStatus:
         "error": SpanStatus.ERROR,
         "cancelled": SpanStatus.CANCELLED,
         "timeout": SpanStatus.TIMEOUT,
+        "skipped": SpanStatus.SKIPPED,
     }.get(value, SpanStatus.RUNNING)
 
 
@@ -959,6 +1043,8 @@ def _map_trace_status(value: Any) -> TraceStatus:
         "error": TraceStatus.FAILED,
         "cancelled": TraceStatus.CANCELLED,
         "timeout": TraceStatus.TIMEOUT,
+        "aborted_resource_guard": TraceStatus.ABORTED_RESOURCE_GUARD,
+        "aborted_safety_guard": TraceStatus.ABORTED_SAFETY_GUARD,
         "partial": TraceStatus.PARTIAL,
     }.get(value, TraceStatus.RUNNING)
 
@@ -973,5 +1059,7 @@ def _known_trace_status(value: Any) -> bool:
         "error",
         "cancelled",
         "timeout",
+        "aborted_resource_guard",
+        "aborted_safety_guard",
         "partial",
     }
