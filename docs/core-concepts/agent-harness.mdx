@@ -87,7 +87,7 @@ The core loop is a controlled runtime cycle:
 1. Load session memory
 2. Assemble prompt and tool registry
 3. Check context before model call
-4. Call the provider adapter (OpenAI SDK or LiteLLM)
+4. Call LiteLLM (or the dedicated Cencori adapter when configured)
 5. Normalize the provider turn, retaining text, calls, finish reason and usage
 6. Resolve tool or agent calls
 7. Execute tool batch in parallel

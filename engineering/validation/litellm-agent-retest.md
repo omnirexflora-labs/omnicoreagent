@@ -7,7 +7,7 @@ OpenAI SDK 2.54.0, Python 3.12.13. Model: `gpt-5.6-luna`.
 ## Routing and scope
 
 Added `--adapter litellm` to the opt-in validation runner. A process-scoped
-[test adapter](litellm_adapter.py) routes `LLMConnection` complete/synchronous/
+test adapter (removed after production routing was switched) routes `LLMConnection` complete/synchronous/
 streaming requests through real `litellm.completion`/`acompletion`. It supplies the
 actual credential, native schemas, model messages and reasoning setting, and uses
 our existing complete-turn normalization and stream assembler. No model output is
@@ -69,6 +69,9 @@ report; the report records presence and counts only.
 
 ## Verification and reproduction
 
+The command below now uses production routing with observation only. The temporary
+`--adapter litellm` option and routing shim were removed after this historical run.
+
 **14 offline tests passed** in `test_live_validation_adapter.py` and
 `test_model_stream.py`. New checks verify real-adapter request construction via a
 mock transport, direct-adapter bypass detection, restoration after failure, early
@@ -77,7 +80,7 @@ results. Ruff and `git diff --check` pass. Production source was not changed.
 
 ```bash
 uv run --no-sync python engineering/validation/live_native_runtime.py \
-  --adapter litellm --env-file .env --report /tmp/litellm-agents.json
+  --require-litellm --env-file .env --report /tmp/litellm-agents.json
 ```
 
 To select the corrected streaming case, append

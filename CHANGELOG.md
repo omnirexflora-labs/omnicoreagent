@@ -2,6 +2,10 @@
 
 ## Unreleased — native tool runtime
 
+- Route production OpenAI async, sync and streaming calls through current LiteLLM;
+  remove the temporary direct-SDK workaround and test-only routing shim. Pass API
+  keys per connection and keep retry ownership at the runtime boundary.
+
 - Refresh direct, optional, development and build dependencies to the September 14,
   2026 stable-release baseline; regenerate the complete dependency lock. OpenAI
   SDK stays on 2.54.0 because LiteLLM 1.100.1 requires `<3.0.0`.

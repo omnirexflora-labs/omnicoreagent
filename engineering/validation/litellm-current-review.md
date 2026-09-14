@@ -127,3 +127,10 @@ and real HTTP SSE. All have passing results, with the initial streaming-assertio
 failure and its correction preserved in the report. A separate high-effort
 Responses round trip also passed again. Production routing is still unchanged;
 application Responses integration remains pending.
+
+## Production routing completed
+
+The [production routing checkpoint](production-litellm.md) removes the SDK
+workaround and the temporary test adapter. Nine scenarios now pass against the
+actual LiteLLM production path. Earlier statements here about pending routing
+refer to the historical review state; lossless Responses integration remains.

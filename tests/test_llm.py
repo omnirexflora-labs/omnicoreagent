@@ -25,7 +25,7 @@ class TestLLMConnection:
     def test_initialization(self, mock_llm_connection):
         cfg = mock_llm_connection.llm_config
         assert cfg["provider"] == "openai"
-        assert cfg["model"] == "gpt-4"
+        assert cfg["model"] == "openai/gpt-4"
         assert cfg["temperature"] == 0.7
 
     def test_llm_configuration_returns_expected_keys(self, mock_llm_connection):
@@ -133,19 +133,16 @@ def test_cookbook_luna_default_and_explicit_reasoning_override(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_openai_sdk_receives_tools_and_closes_client(monkeypatch):
-    create = AsyncMock(return_value={"choices": []})
-    client = SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
-        close=AsyncMock(),
-    )
+async def test_openai_production_routes_tools_through_litellm(monkeypatch):
     from unittest.mock import Mock
 
-    factory = Mock(return_value=client)
+    create = AsyncMock(return_value={"choices": []})
     monkeypatch.setattr(
-        "omnicoreagent.core.llm._get_openai",
-        lambda: SimpleNamespace(AsyncOpenAI=factory),
+        "omnicoreagent.core.llm._get_litellm",
+        lambda: SimpleNamespace(acompletion=create),
     )
+    direct = Mock(side_effect=AssertionError("OpenAI bypassed LiteLLM"))
+    monkeypatch.setattr("omnicoreagent.core.llm._get_openai", direct)
     connection = LLMConnection(
         {
             "provider": "openai",
@@ -153,8 +150,10 @@ async def test_openai_sdk_receives_tools_and_closes_client(monkeypatch):
             "max_tokens": 200,
             "reasoning_effort": "none",
         },
-        api_key="test-key",
+        api_key="first-key",
     )
+    # Another connection must not replace the first connection's request key.
+    LLMConnection({"provider": "openai", "model": "gpt-5.6-luna"}, api_key="second-key")
     tools = [
         {
             "type": "function",
@@ -164,36 +163,29 @@ async def test_openai_sdk_receives_tools_and_closes_client(monkeypatch):
     await connection.llm_call(
         [{"role": "user", "content": "probe", "run_id": "private"}], tools
     )
-    kwargs = create.call_args.kwargs
-    assert kwargs["tools"] == tools
-    assert kwargs["model"] == "gpt-5.6-luna"
-    assert kwargs["max_completion_tokens"] == 200
-    assert kwargs["reasoning_effort"] == "none"
-    assert "max_tokens" not in kwargs and "drop_params" not in kwargs
-    assert "run_id" not in kwargs["messages"][0]
-    assert factory.call_args.kwargs == {"api_key": "test-key", "max_retries": 0}
-    client.close.assert_awaited_once()
+    params = create.call_args.kwargs
+    assert params["model"] == "openai/gpt-5.6-luna"
+    assert params["api_key"] == "first-key"
+    assert params["tools"] == tools
+    assert params["reasoning_effort"] == "none"
+    assert params["max_completion_tokens"] == 200
+    assert params["drop_params"] is False and params["num_retries"] == 0
+    assert "run_id" not in params["messages"][0]
+    direct.assert_not_called()
 
 
-def test_openai_sync_client_closes_on_nonretryable_error(monkeypatch):
+def test_openai_sync_production_routes_through_litellm(monkeypatch):
     from unittest.mock import Mock
 
-    client = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(
-                create=Mock(side_effect=ValueError("bad request"))
-            )
-        ),
-        close=Mock(),
-    )
+    create = Mock(side_effect=ValueError("bad request"))
     monkeypatch.setattr(
-        "omnicoreagent.core.llm._get_openai",
-        lambda: SimpleNamespace(OpenAI=lambda **kwargs: client),
+        "omnicoreagent.core.llm._get_litellm",
+        lambda: SimpleNamespace(completion=create),
     )
     connection = LLMConnection(
         {"provider": "openai", "model": "gpt-5.6-luna"}, api_key="test-key"
     )
     with pytest.raises(ValueError, match="bad request"):
         connection.llm_call_sync([])
-    client.chat.completions.create.assert_called_once()
-    client.close.assert_called_once()
+    create.assert_called_once()
+    assert create.call_args.kwargs["model"] == "openai/gpt-5.6-luna"

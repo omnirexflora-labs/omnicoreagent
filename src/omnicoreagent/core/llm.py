@@ -140,7 +140,7 @@ def _sleep_before_retry(*args):
 
 
 class LLMConnection:
-    """Provider connection using the OpenAI SDK or LiteLLM."""
+    """Provider connection through LiteLLM, with a dedicated Cencori endpoint."""
 
     def __init__(self, model_config: dict[str, Any], api_key: str | None = None):
         self.model_config = dict(model_config or {})
@@ -167,7 +167,7 @@ class LLMConnection:
 
         provider_model_map = {
             "cencori": model,
-            "openai": model,
+            "openai": f"openai/{model}",
             "anthropic": f"anthropic/{model}",
             "groq": f"groq/{model}",
             "openrouter": f"openrouter/{model}",
@@ -256,17 +256,17 @@ class LLMConnection:
     ):
         try:
             params = self._completion_params(messages, tools)
-            if self.llm_config["provider"].lower() in {"openai", "cencori"}:
+            if self.llm_config["provider"].lower() == "cencori":
                 openai = _get_openai()
                 client = openai.AsyncOpenAI(
-                    **self._openai_client_options(),
+                    **self._cencori_client_options(),
                 )
                 try:
                     return await client.chat.completions.create(**params)
                 finally:
                     await client.close()
             litellm = _get_litellm()
-            params["drop_params"] = False
+            params.update(api_key=self.llm_api_key, drop_params=False, num_retries=0)
             return await litellm.acompletion(**params)
         except Exception as e:
             error_message = (
@@ -283,17 +283,17 @@ class LLMConnection:
     ):
         try:
             params = self._completion_params(messages, tools)
-            if self.llm_config["provider"].lower() in {"openai", "cencori"}:
+            if self.llm_config["provider"].lower() == "cencori":
                 openai = _get_openai()
                 client = openai.OpenAI(
-                    **self._openai_client_options(),
+                    **self._cencori_client_options(),
                 )
                 try:
                     return client.chat.completions.create(**params)
                 finally:
                     client.close()
             litellm = _get_litellm()
-            params["drop_params"] = False
+            params.update(api_key=self.llm_api_key, drop_params=False, num_retries=0)
             return litellm.completion(**params)
         except Exception as e:
             error_message = (
@@ -316,14 +316,16 @@ class LLMConnection:
         client = None
         stream = None
         try:
-            if self.llm_config["provider"].lower() in {"openai", "cencori"}:
+            if self.llm_config["provider"].lower() == "cencori":
                 client = _get_openai().AsyncOpenAI(
-                    **self._openai_client_options(),
+                    **self._cencori_client_options(),
                 )
                 stream = await client.chat.completions.create(**params)
             else:
                 litellm = _get_litellm()
-                params["drop_params"] = False
+                params.update(
+                    api_key=self.llm_api_key, drop_params=False, num_retries=0
+                )
                 stream = await litellm.acompletion(**params)
             async for chunk in stream:
                 for event in assembler.feed(chunk):
@@ -362,9 +364,10 @@ class LLMConnection:
             params["max_completion_tokens"] = params.pop("max_tokens")
         return params
 
-    def _openai_client_options(self):
+    def _cencori_client_options(self):
         # Retries belong to our request boundary. Never replay a partial stream.
-        options = {"api_key": self.llm_api_key, "max_retries": 0}
-        if self.llm_config["provider"].lower() == "cencori":
-            options["base_url"] = "https://api.cencori.com/v1"
-        return options
+        return {
+            "api_key": self.llm_api_key,
+            "max_retries": 0,
+            "base_url": "https://api.cencori.com/v1",
+        }

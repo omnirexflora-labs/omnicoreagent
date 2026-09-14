@@ -188,3 +188,15 @@ installed dependency compatibility, lint and builds passed. See the
 Next implementation checkpoint remains lossless continuation records and
 LiteLLM Responses integration, as described in the current LiteLLM review. The
 SDK workaround has not been removed by a dependency-only checkpoint.
+
+### Production routing checkpoint — 2026-09-14
+
+Completed: OpenAI async, sync and streaming production calls now use LiteLLM.
+Removed the direct-SDK workaround and temporary validation routing shim. Explicit
+per-connection API keys and runtime-owned retries apply to LiteLLM requests.
+Nine live production-path scenarios passed; full suite 1,038 passed, 13 external
+service skips, two deselected. Builds and lint passed. See the
+[production routing report](../validation/production-litellm.md).
+
+Only the lossless continuation/Responses integration portion of the provider
+follow-up remains; switching production routing is no longer pending.

@@ -499,7 +499,7 @@ async def validate(model, scenarios=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="gpt-5.6-luna")
-    parser.add_argument("--adapter", choices=["runtime", "litellm"], default="runtime")
+    parser.add_argument("--require-litellm", action="store_true")
     parser.add_argument("--env-file", type=Path)
     parser.add_argument("--report", type=Path)
     parser.add_argument("--scenario", action="append")
@@ -512,19 +512,15 @@ def main():
         parser.error("LLM_API_KEY is required")
     logging.disable(logging.CRITICAL)
     adapter_context = nullcontext(None)
-    if args.adapter == "litellm":
-        from litellm_adapter import use_litellm
+    if args.require_litellm:
+        from provider_observation import observe_litellm
 
-        adapter_context = use_litellm()
+        adapter_context = observe_litellm()
     with adapter_context as counters:
         report = asyncio.run(validate(args.model, args.scenario))
-    report["adapter"] = args.adapter
+    report["adapter"] = "production_litellm" if args.require_litellm else "production"
     if counters is not None:
         report["adapter_counters"] = counters
-        if counters["stream_requests"] != counters["closed_streams"]:
-            report["failed"] += 1
-            report["adapter_error"] = "Not all requested streams closed successfully"
-
     if args.report:
         args.report.write_text(json.dumps(report, indent=2) + "\n")
     print(

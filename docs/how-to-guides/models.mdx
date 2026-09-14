@@ -6,7 +6,8 @@ icon: 'microchip'
 
 # Universal Model Support
 
-OpenAI and Cencori use the OpenAI SDK; other supported providers use LiteLLM.
+OpenAI and other supported providers use LiteLLM. Cencori uses its dedicated
+OpenAI-compatible endpoint through the OpenAI SDK.
 All adapters return the same native turn and text-stream protocol:
 
 ---
@@ -65,7 +66,7 @@ Explicitly requested parameters are not silently dropped.
 To run the opt-in validation against your API key:
 
 ```bash
-PYTHONPATH=src python engineering/validation/live_native_runtime.py --env-file .env
+PYTHONPATH=src python engineering/validation/live_native_runtime.py --require-litellm --env-file .env
 ```
 
 Use `--scenario http_sse_live_delivery` to rerun one check and `--report /tmp/live.json`

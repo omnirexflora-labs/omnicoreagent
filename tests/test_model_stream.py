@@ -98,7 +98,7 @@ async def test_provider_yields_before_completion_and_closes_stream(
         ),
         close=AsyncMock(),
     )
-    if provider in {"openai", "cencori"}:
+    if provider == "cencori":
         monkeypatch.setattr(
             "omnicoreagent.core.llm._get_openai",
             lambda: SimpleNamespace(AsyncOpenAI=lambda **kwargs: client),
@@ -125,7 +125,7 @@ async def test_provider_yields_before_completion_and_closes_stream(
     assert create.call_args.kwargs["stream"] is True
     assert create.call_args.kwargs["stream_options"] == {"include_usage": True}
     assert closed == [True]
-    if provider in {"openai", "cencori"}:
+    if provider == "cencori":
         client.close.assert_awaited_once()
 
 
@@ -208,7 +208,7 @@ def test_tool_finish_without_call_fragments_is_not_an_empty_answer():
 
 
 @pytest.mark.asyncio
-async def test_openai_sdk_tool_chunks_retain_identity_and_arguments(monkeypatch):
+async def test_openai_litellm_tool_chunks_retain_identity_and_arguments(monkeypatch):
     from openai.types.chat import ChatCompletionChunk
 
     async def chunks():
@@ -225,15 +225,10 @@ async def test_openai_sdk_tool_chunks_retain_identity_and_arguments(monkeypatch)
                 **value,
             )
 
-    client = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(create=AsyncMock(return_value=chunks()))
-        ),
-        close=AsyncMock(),
-    )
+    create = AsyncMock(return_value=chunks())
     monkeypatch.setattr(
-        "omnicoreagent.core.llm._get_openai",
-        lambda: SimpleNamespace(AsyncOpenAI=lambda **kwargs: client),
+        "omnicoreagent.core.llm._get_litellm",
+        lambda: SimpleNamespace(acompletion=create),
     )
     connection = LLMConnection(
         {"provider": "openai", "model": "gpt-5.6-luna", "reasoning_effort": "none"},
@@ -247,4 +242,5 @@ async def test_openai_sdk_tool_chunks_retain_identity_and_arguments(monkeypatch)
         "receipt",
         {"code": "001"},
     )
-    client.close.assert_awaited_once()
+    assert create.call_args.kwargs["model"] == "openai/gpt-5.6-luna"
+    assert create.call_args.kwargs["num_retries"] == 0
