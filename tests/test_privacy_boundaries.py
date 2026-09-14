@@ -21,6 +21,7 @@ from omnicoreagent.core.workspace.files import WorkspaceFilesBackend
 from omnicoreagent.core.workspace.storage import LocalWorkspaceStorage
 from omnicoreagent.core.workspace.tools import WorkspaceFilesTool
 from omnicoreagent.serve.serialization import normalize_run_result
+from omnicoreagent.serve.sse import _public_error
 
 
 SENSITIVE_TEXT = (
@@ -201,3 +202,15 @@ def test_public_result_normalization_redacts_response():
 
     assert "alice@example.com" not in result["response"]
     assert "[REDACTED_EMAIL]" in result["response"]
+
+
+def test_public_stream_errors_redact_exception_text():
+    agent = type("Agent", (), {"privacy_filter": PrivacyFilter()})()
+
+    message = _public_error(
+        agent,
+        RuntimeError(f"provider rejected {SENSITIVE_TEXT}"),
+    )
+
+    assert "alice@example.com" not in message
+    assert "[REDACTED_EMAIL]" in message

@@ -38,6 +38,15 @@ class _EventStreamFailure:
     error: Exception
 
 
+def _public_error(agent: AgentType, error: BaseException) -> str:
+    """Keep exception text behind the same public privacy boundary as results."""
+    message = str(error)
+    privacy_filter = getattr(agent, "privacy_filter", None)
+    if privacy_filter is not None:
+        return privacy_filter.redact_text(message, boundary="public")
+    return message
+
+
 def format_sse_event(event_type: str, data: dict) -> str:
     """
     Format data as an SSE event string.
@@ -306,7 +315,11 @@ async def run_agent_stream(
                     events_after_cursor = []
                     yield format_sse_event(
                         "error",
-                        {"error": str(exc), "session_id": session_id, "run_id": run_id},
+                        {
+                            "error": _public_error(agent, exc),
+                            "session_id": session_id,
+                            "run_id": run_id,
+                        },
                     )
 
                 for event in events_after_cursor:
@@ -401,7 +414,7 @@ async def run_agent_stream(
         yield format_sse_event(
             "error",
             {
-                "error": str(e),
+                "error": _public_error(agent, e),
                 "session_id": session_id,
                 "run_id": run_id,
             },
@@ -463,7 +476,11 @@ async def stream_session_events(
             replay_events = []
             yield format_sse_event(
                 "error",
-                {"error": str(exc), "session_id": session_id, "run_id": run_id},
+                {
+                    "error": _public_error(agent, exc),
+                    "session_id": session_id,
+                    "run_id": run_id,
+                },
             )
 
         for event in replay_events:
@@ -500,7 +517,12 @@ async def stream_session_events(
     except Exception as e:
         logger.error(f"OmniServe SSE: Event replay error: {e}")
         yield format_sse_event(
-            "error", {"error": str(e), "session_id": session_id, "run_id": run_id}
+            "error",
+            {
+                "error": _public_error(agent, e),
+                "session_id": session_id,
+                "run_id": run_id,
+            },
         )
     finally:
         await _cancel_task(pump_task)
