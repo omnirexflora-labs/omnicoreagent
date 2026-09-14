@@ -3,7 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from omnicoreagent.core.telemetry import ActorType, TelemetryActor, TelemetryRecorder
-from omnicoreagent.governance.models import AuthorityRequest, PolicyDecision, to_plain
+from omnicoreagent.governance.models import (
+    ApprovalRequest,
+    ApprovalResult,
+    AuthorityRequest,
+    PolicyDecision,
+    to_plain,
+)
 
 
 GOVERNANCE_EVENT_TYPES = frozenset(
@@ -83,6 +89,40 @@ async def emit_policy_violation(
     )
 
 
+async def emit_approval_request(
+    recorder: TelemetryRecorder | None,
+    request: ApprovalRequest,
+    *,
+    strict: bool = False,
+) -> None:
+    if recorder is None:
+        return
+    await _emit(
+        recorder,
+        "approval_request_created",
+        input={"approval": to_plain(request)},
+        strict=strict,
+    )
+
+
+async def emit_approval_result(
+    recorder: TelemetryRecorder | None,
+    request: ApprovalRequest,
+    result: ApprovalResult,
+    *,
+    strict: bool = False,
+) -> None:
+    if recorder is None:
+        return
+    await _emit(
+        recorder,
+        "approval_resolved",
+        input={"approval_id": request.approval_id},
+        output={"approval": to_plain(request), "result": to_plain(result)},
+        strict=strict,
+    )
+
+
 async def _emit(
     recorder: TelemetryRecorder,
     event_type: str,
@@ -100,6 +140,8 @@ async def _emit(
         )
     except RuntimeError:
         # No active trace: governance can be evaluated outside the agent hot path.
+        if strict:
+            raise
         return
     except Exception:
         if strict or getattr(recorder.config, "strict", False):

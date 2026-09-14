@@ -186,6 +186,26 @@ Rules:
 - Migration may only preserve or narrow authority unless an application-owned
   migration explicitly allows expansion.
 
+## Runtime Integrity Constraints
+
+The policy model validates authority inputs before evaluation. Rule entries must
+agree with the rule bucket that contains them (`deny`, `ask`, or `allow`), and
+rule identifiers are unique within an envelope. Risk levels use the standard
+`low`, `medium`, `high`, and `critical` values; request budget costs and budget
+counters are finite and non-negative. Invalid policy or request data fails
+before an execution effect is attempted.
+
+Budget usage is mutable execution state. `used_requests` and `used_cost` are
+therefore excluded from the policy hash, while configured limits remain part of
+the hash. A restart may restore counters from a stored task snapshot without
+making an unchanged authority policy look different.
+
+An approval result must be an `ApprovalResult` for the exact approval request
+that produced it. The runtime records approval request and resolution evidence
+through built-in telemetry. A rule with `audit_required` needs an active
+recorder; its authority evidence is emitted with strict persistence semantics,
+so a failed audit write cannot silently become an allowed side effect.
+
 ---
 
 ## Policy Hash Canonicalization

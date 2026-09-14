@@ -22,6 +22,13 @@ def canonical_policy_payload(policy: PolicyEnvelope) -> dict[str, Any]:
     if not provenance.get("parent_policy_id"):
         provenance.pop("parent_policy_id", None)
     payload["provenance"] = provenance
+    # Budget counters are mutable execution state, not authority.  Keeping
+    # them out of the hash lets a policy snapshot survive authorized requests
+    # and restart restoration without changing the policy identity.
+    budget = payload.get("budget")
+    if budget is not None:
+        budget.pop("used_requests", None)
+        budget.pop("used_cost", None)
     return _normalize(payload)
 
 

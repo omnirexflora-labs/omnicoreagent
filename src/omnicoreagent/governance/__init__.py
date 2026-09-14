@@ -24,8 +24,10 @@ from omnicoreagent.governance.capabilities import (
 from omnicoreagent.governance.defaults import build_default_policy
 from omnicoreagent.governance.enforcement import GovernanceEngine
 from omnicoreagent.governance.errors import (
+    ApprovalInvalidError,
     ApprovalExpiredError,
     ApprovalRequiredError,
+    AuditRequiredError,
     BudgetExceededError,
     GovernanceError,
     PolicyDeniedError,
@@ -78,12 +80,18 @@ from omnicoreagent.governance.snapshots import (
     policy_snapshot_from_policy,
     require_current_policy_snapshot,
 )
-from omnicoreagent.governance.telemetry import GOVERNANCE_EVENT_TYPES
+from omnicoreagent.governance.telemetry import (
+    GOVERNANCE_EVENT_TYPES,
+    emit_approval_request,
+    emit_approval_result,
+)
 
 __all__ = [
+    "ApprovalInvalidError",
     "ApprovalExpiredError",
     "ApprovalRequest",
     "ApprovalRequiredError",
+    "AuditRequiredError",
     "ApprovalResolver",
     "ApprovalResult",
     "AuthorityRequest",
@@ -94,6 +102,8 @@ __all__ = [
     "DescriptorSource",
     "DescriptorTrust",
     "GOVERNANCE_EVENT_TYPES",
+    "emit_approval_request",
+    "emit_approval_result",
     "GovernanceEngine",
     "GovernanceError",
     "PolicyBudget",

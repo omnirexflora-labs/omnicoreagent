@@ -6,8 +6,10 @@ from datetime import timedelta
 from omnicoreagent.core.telemetry import TelemetryRecorder
 from omnicoreagent.governance.approvals import ApprovalResolver
 from omnicoreagent.governance.errors import (
+    ApprovalInvalidError,
     ApprovalExpiredError,
     ApprovalRequiredError,
+    AuditRequiredError,
     BudgetExceededError,
     PolicyDeniedError,
     PolicyEvaluationError,
@@ -18,6 +20,7 @@ from omnicoreagent.governance.evaluator import PolicyEvaluator
 from omnicoreagent.governance.hashing import attach_policy_hash
 from omnicoreagent.governance.models import (
     ApprovalRequest,
+    ApprovalResult,
     AuthorityRequest,
     PolicyDecision,
     PolicyEffect,
@@ -26,6 +29,8 @@ from omnicoreagent.governance.models import (
     utc_now,
 )
 from omnicoreagent.governance.telemetry import (
+    emit_approval_request,
+    emit_approval_result,
     emit_policy_decision,
     emit_policy_request,
     emit_policy_violation,
@@ -79,7 +84,10 @@ class GovernanceEngine:
         await emit_policy_decision(
             self.telemetry_recorder,
             decision,
-            strict=decision.constraints.strict_telemetry,
+            strict=(
+                decision.constraints.strict_telemetry
+                or decision.constraints.audit_required
+            ),
         )
         return decision
 
@@ -121,6 +129,7 @@ class GovernanceEngine:
                     metadata=_decision_metadata(budget_decision),
                 )
             decisions = [await self.evaluate(request) for request in requests]
+            self._require_audit_channel(decisions)
             self._raise_first_denied(decisions)
             for decision in decisions:
                 await self._raise_if_sandbox_required_without_route(
@@ -153,7 +162,10 @@ class GovernanceEngine:
                 await emit_policy_decision(
                     self.telemetry_recorder,
                     decisions[index],
-                    strict=decisions[index].constraints.strict_telemetry,
+                    strict=(
+                        decisions[index].constraints.strict_telemetry
+                        or decisions[index].constraints.audit_required
+                    ),
                 )
         return decisions
 
@@ -177,7 +189,7 @@ class GovernanceEngine:
             decision,
             reason_code=ReasonCode.SANDBOX_REQUIRED.value,
             metadata=metadata,
-            strict=decision.constraints.strict_telemetry,
+            strict=_decision_requires_strict_audit(decision),
         )
         raise SandboxRequiredError(
             "Policy requires routing through the sandbox execution boundary.",
@@ -237,6 +249,11 @@ class GovernanceEngine:
             ),
             metadata=dict(request.metadata),
         )
+        await emit_approval_request(
+            self.telemetry_recorder,
+            approval,
+            strict=_decision_requires_strict_audit(decision),
+        )
         if self.approval_resolver is None:
             decision.approval_id = approval.approval_id
             raise ApprovalRequiredError(
@@ -260,7 +277,42 @@ class GovernanceEngine:
                 ),
             )
         result = await self.approval_resolver.resolve(approval)
-        if result is None or not result.approved:
+        if result is None:
+            decision.approval_id = approval.approval_id
+            raise ApprovalRequiredError(
+                decision.reason or "Approval required.",
+                metadata=_decision_metadata(
+                    decision,
+                    reason_code=ReasonCode.APPROVAL_REQUIRED,
+                ),
+            )
+        if not isinstance(result, ApprovalResult):
+            raise ApprovalInvalidError(
+                "Approval resolver must return an ApprovalResult.",
+                metadata=_decision_metadata(
+                    decision,
+                    reason_code=ReasonCode.APPROVAL_REQUIRED,
+                ),
+            )
+        await emit_approval_result(
+            self.telemetry_recorder,
+            approval,
+            result,
+            strict=_decision_requires_strict_audit(decision),
+        )
+        if result.approval_id != approval.approval_id:
+            raise ApprovalInvalidError(
+                "Approval result does not match the requested approval.",
+                metadata={
+                    **_decision_metadata(
+                        decision,
+                        reason_code=ReasonCode.APPROVAL_REQUIRED,
+                    ),
+                    "expected_approval_id": approval.approval_id,
+                    "received_approval_id": result.approval_id,
+                },
+            )
+        if not result.approved:
             decision.approval_id = approval.approval_id
             raise ApprovalRequiredError(
                 result.reason if result is not None and result.reason else decision.reason,
@@ -286,9 +338,30 @@ class GovernanceEngine:
             await emit_policy_decision(
                 self.telemetry_recorder,
                 decision,
-                strict=decision.constraints.strict_telemetry,
+                strict=_decision_requires_strict_audit(decision),
             )
         return decision
+
+    def _require_audit_channel(self, decisions: list[PolicyDecision]) -> None:
+        for decision in decisions:
+            if not decision.constraints.audit_required:
+                continue
+            recorder = self.telemetry_recorder
+            active_context = (
+                recorder.current_context()
+                if recorder is not None
+                and hasattr(recorder, "current_context")
+                else None
+            )
+            if recorder is not None and active_context is not None:
+                continue
+            raise AuditRequiredError(
+                "Policy requires an active telemetry trace for authority audit.",
+                metadata=_decision_metadata(
+                    decision,
+                    reason_code=ReasonCode.POLICY_ERROR,
+                ),
+            )
 
     def _consume_budget(self, request: AuthorityRequest) -> None:
         budget = self.policy.budget
@@ -364,3 +437,9 @@ def _decision_metadata(
         "reason_code": (reason_code or decision.reason_code).value,
         "matched_rule_ids": list(decision.matched_rule_ids),
     }
+
+
+def _decision_requires_strict_audit(decision: PolicyDecision) -> bool:
+    return bool(
+        decision.constraints.strict_telemetry or decision.constraints.audit_required
+    )
