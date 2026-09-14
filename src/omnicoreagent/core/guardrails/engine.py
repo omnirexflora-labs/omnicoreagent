@@ -109,6 +109,14 @@ class DetectionEngine:
 
             total_score = int(total_score * self.config.sensitivity)
 
+            # Sensitivity may tune ordinary heuristics, but it must not turn a
+            # recognized instruction override, prompt extraction, or jailbreak
+            # into a safe request. Preserve the suspicious floor for these
+            # high-confidence pattern groups.
+            if self._has_high_risk_pattern(flags):
+                suspicious_floor = 10 if self.config.strict_mode else 15
+                total_score = max(total_score, suspicious_floor)
+
             result = self._calculate_threat(
                 total_score, flags, user_input, input_hash, start_time
             )
@@ -128,6 +136,18 @@ class DetectionEngine:
                 input_hash=input_hash if "input_hash" in locals() else "error",
                 start_time=start_time,
             )
+
+    @staticmethod
+    def _has_high_risk_pattern(flags: list[str]) -> bool:
+        high_risk_groups = {
+            "instruction_override",
+            "prompt_extraction",
+            "jailbreak_roleplay",
+            "context_manipulation",
+        }
+        return any(
+            flag.split(":", 1)[0] in high_risk_groups for flag in flags
+        )
 
     def _normalize_input(self, text: str) -> str:
         """Advanced normalization with obfuscation detection"""
