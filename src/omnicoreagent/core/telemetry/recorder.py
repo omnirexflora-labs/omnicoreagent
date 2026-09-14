@@ -110,6 +110,40 @@ def _contains_redaction_marker(value: Any) -> bool:
     return False
 
 
+def _capture_gaps(trace: TelemetryTrace) -> list[dict[str, str]]:
+    """Return payload boundaries that prevent a complete evidence claim."""
+    gaps: list[dict[str, str]] = []
+    unavailable = {
+        CaptureState.REDACTED,
+        CaptureState.TRUNCATED,
+        CaptureState.NOT_RECORDED,
+        CaptureState.MISSING,
+        CaptureState.INFERRED,
+    }
+    for record_type, records in (("span", trace.spans), ("event", trace.events)):
+        for record in records:
+            for direction in ("input", "output"):
+                capture = getattr(record, f"{direction}_capture", None)
+                if capture is None:
+                    continue
+                state = CaptureState(capture.state)
+                if state in unavailable or (
+                    state == CaptureState.OFFLOADED and not capture.reference
+                ):
+                    gaps.append(
+                        {
+                            "type": f"{record_type}_{direction}",
+                            "id": (
+                                record.span_id
+                                if record_type == "span"
+                                else record.event_id
+                            ),
+                            "state": state.value,
+                        }
+                    )
+    return gaps
+
+
 class TelemetryRecorder:
     def __init__(
         self,
@@ -296,7 +330,8 @@ class TelemetryRecorder:
                         "evidence_status": (
                             TraceEvidenceStatus.PARTIAL.value
                             if context.trace_id in self._incomplete_trace_ids
-                            else TraceEvidenceStatus.COMPLETE.value
+                            or _capture_gaps(trace)
+                            else trace.evidence_status.value
                         ),
                     },
                 ),

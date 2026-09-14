@@ -14,6 +14,7 @@ from omnicoreagent.core.runtime import (
     streaming,
 )
 from omnicoreagent.core.privacy import PrivacyFilter
+from omnicoreagent.core.interaction_history import stable_message_digest
 from omnicoreagent.core.runtime.imports import (
     LazyDefaultPromptBuilder,
     runtime,
@@ -585,6 +586,13 @@ class OmniCoreAgent:
     ) -> None:
         stored_content = self.privacy_filter.redact(content, boundary="memory")
         stored_metadata = self.privacy_filter.redact(metadata, boundary="memory")
+        stored_message_digest = stable_message_digest(
+            {
+                "role": role,
+                "content": stored_content,
+                "metadata": stored_metadata,
+            }
+        )
         if self.telemetry_recorder is None:
             await self.memory_router.store_message(
                 role, stored_content, stored_metadata, session_id
@@ -608,12 +616,12 @@ class OmniCoreAgent:
                 "memory_write",
                 actor=TelemetryActor(type=ActorType.MEMORY),
                 input={"role": role, "session_id": session_id},
-                output={"stored": True},
+                output={"stored": True, "message_digest": stored_message_digest},
             )
             await self.telemetry_recorder.end_span(
                 span.span_id,
                 status="ok",
-                output={"stored": True},
+                output={"stored": True, "message_digest": stored_message_digest},
             )
         except Exception as exc:
             await self.telemetry_recorder.emit_event(
@@ -644,16 +652,23 @@ class OmniCoreAgent:
         )
         try:
             messages = await self.memory_router.get_messages(session_id, agent_name)
+            message_digests = [stable_message_digest(message) for message in messages]
             await self.telemetry_recorder.emit_event(
                 "memory_read",
                 actor=TelemetryActor(type=ActorType.MEMORY),
                 input={"session_id": session_id, "agent_name": agent_name},
-                output={"message_count": len(messages)},
+                output={
+                    "message_count": len(messages),
+                    "message_digests": message_digests,
+                },
             )
             await self.telemetry_recorder.end_span(
                 span.span_id,
                 status="ok",
-                output={"message_count": len(messages)},
+                output={
+                    "message_count": len(messages),
+                    "message_digests": message_digests,
+                },
             )
             return messages
         except Exception as exc:

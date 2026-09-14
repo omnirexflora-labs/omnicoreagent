@@ -46,6 +46,7 @@ async def execute_native_turn(
     run_usage,
     telemetry_recorder=None,
     model_call_span_id: str | None = None,
+    model_call_event_id: str | None = None,
     model_response_event_id: str | None = None,
     agent_step_span_id: str | None = None,
 ):
@@ -237,15 +238,22 @@ async def execute_native_turn(
             tool_call_result=resolved,
         )
         if telemetry_recorder is not None and result.get("data") != original_data:
-            await telemetry_recorder.emit_event(
-                "workspace_offload",
-                actor=TelemetryActor(type=ActorType.WORKSPACE),
+                await telemetry_recorder.emit_event(
+                    "workspace_offload",
+                    actor=TelemetryActor(type=ActorType.WORKSPACE),
                 output={
                     "tool_call_id": request.id,
                     "tool_name": result["tool_name"],
-                    "reference": result.get("data"),
-                },
-            )
+                        "reference": result.get("data"),
+                    },
+                    metadata={
+                        "batch_id": batch_id,
+                        "tool_call_id": request.id,
+                        "model_call_event_id": model_call_event_id,
+                        "model_response_event_id": model_response_event_id,
+                        "phase": "tool_result_offload",
+                    },
+                )
         content = json.dumps(result, ensure_ascii=False, default=str)
         observation_event_id = None
         if telemetry_recorder is not None:
@@ -264,6 +272,7 @@ async def execute_native_turn(
                 metadata={
                     "batch_id": batch_id,
                     "tool_call_id": request.id,
+                    "model_call_event_id": model_call_event_id,
                     "model_response_event_id": model_response_event_id,
                     "observation_for": request.id,
                 },
@@ -308,6 +317,7 @@ async def execute_native_turn(
             "batch_id": batch_id,
             "agent_step_span_id": agent_step_span_id,
             "model_call_span_id": model_call_span_id,
+            "model_call_event_id": model_call_event_id,
             "model_response_event_id": model_response_event_id,
             "tool_call_ids": [request.id for request in turn.tool_calls],
         }
@@ -415,6 +425,7 @@ async def execute_native_turn(
                 },
                 metadata={
                     "batch_id": batch_id,
+                    "model_call_event_id": model_call_event_id,
                     "model_response_event_id": model_response_event_id,
                 },
             )
@@ -423,6 +434,7 @@ async def execute_native_turn(
                 output={"tool_count": len(results)},
                 metadata={
                     "batch_id": batch_id,
+                    "model_call_event_id": model_call_event_id,
                     "model_response_event_id": model_response_event_id,
                 },
             )

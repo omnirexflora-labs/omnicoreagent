@@ -128,6 +128,7 @@ async def test_react_loop_records_model_step_and_parallel_tool_telemetry():
     assert "agent_step" in event_types
     assert event_types.count("model_call") == 2
     assert event_types.count("model_response") == 2
+    assert event_types.count("context_assembly") == 2
     assert event_types.count("tool_requested") == 2
     assert event_types.count("tool_resolved") == 2
     assert "tool_batch_start" in event_types
@@ -150,12 +151,19 @@ async def test_react_loop_records_model_step_and_parallel_tool_telemetry():
         event for event in trace.events if event.event_type == "model_response"
     )
     assert response_event.metadata["tool_call_ids"] == ["alpha_id", "beta_id"]
+    model_call_event = next(
+        event for event in trace.events if event.event_type == "model_call"
+    )
+    assert response_event.metadata["model_call_event_id"] == model_call_event.event_id
     observation_events = [
         event for event in trace.events if event.event_type == "tool_observation"
     ]
     assert {
         event.metadata["model_response_event_id"] for event in observation_events
     } == {response_event.event_id}
+    assert {
+        event.metadata["model_call_event_id"] for event in observation_events
+    } == {model_call_event.event_id}
     assert {
         event.output["message"]["tool_call_id"] for event in observation_events
     } == {"alpha_id", "beta_id"}

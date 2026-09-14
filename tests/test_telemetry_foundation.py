@@ -212,6 +212,29 @@ async def test_recorder_captures_trace_span_event_and_redacts_payload():
 
 
 @pytest.mark.asyncio
+async def test_recorder_marks_trace_evidence_partial_when_capture_is_disabled():
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store, TelemetryConfig(record_model_responses=False))
+    context = await recorder.start_trace(trace_id="trace-capture-gap")
+    await recorder.emit_event(
+        "model_response", output={"content": "private response"}
+    )
+    await recorder.end_trace()
+
+    trace = await store.get_trace(context.trace_id)
+    assert trace.evidence_status == TraceEvidenceStatus.PARTIAL
+    assert trace.events[-1].output_capture.state == CaptureState.NOT_RECORDED
+
+    normalized = TelemetryNormalizer().normalize(trace)
+    assert normalized.evidence_status == TraceEvidenceStatus.PARTIAL
+    assert "capture_gaps" in normalized.metadata.tags
+    assert any(
+        event.metadata.get("normalizer") == "capture_gaps"
+        for event in normalized.events
+    )
+
+
+@pytest.mark.asyncio
 async def test_recorder_context_propagates_to_parallel_tasks():
     store = InMemoryTelemetryStore()
     recorder = TelemetryRecorder(store)

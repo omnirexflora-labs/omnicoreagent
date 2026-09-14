@@ -129,6 +129,7 @@ FOUNDATION_EVENT_TYPES = frozenset(
         "memory_write",
         "memory_update",
         "memory_eviction",
+        "context_assembly",
         "context_compression",
         "context_dropped",
         "context_restored",

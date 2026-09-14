@@ -27,6 +27,7 @@ from omnicoreagent.core.token_usage import (
 from omnicoreagent.core.types import SessionState
 from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.interaction_history import context_evidence, message_record
 
 
 @dataclass
@@ -34,6 +35,7 @@ class AgentLlmStepResult:
     response: ModelTurn | None = None
     error_result: dict[str, Any] | None = None
     model_call_span_id: str | None = None
+    model_call_event_id: str | None = None
     model_response_event_id: str | None = None
 
 
@@ -73,46 +75,61 @@ class AgentLlmStepRunner:
                 self.usage_limits.check_before_request(usage=run_usage)
 
             if self.context_manager.should_trigger(session_state.messages):
-                before_count = len(session_state.messages)
                 context_span = None
+                before_evidence = context_evidence(session_state.messages, tools)
+                compression_input = dict(before_evidence)
+                if telemetry_recorder is not None and telemetry_recorder.config.record_model_prompts:
+                    compression_input["messages"] = [
+                        message_record(message) for message in session_state.messages
+                    ]
                 try:
                     if telemetry_recorder is not None:
                         context_span = await telemetry_recorder.start_span(
                             name="context.compression",
                             kind="context.compression",
                             actor=TelemetryActor(type=ActorType.SYSTEM),
-                            input={"message_count": before_count},
+                            input=compression_input,
                         )
                     session_state.messages = await self.context_manager.manage_context(
                         messages=session_state.messages,
-                        summarize_fn=self._build_context_summarizer(llm_connection),
+                        summarize_fn=self._build_context_summarizer(
+                            llm_connection,
+                            telemetry_recorder=telemetry_recorder,
+                            parent_span_id=(
+                                context_span.span_id if context_span is not None else None
+                            ),
+                        ),
                     )
-                    after_count = len(session_state.messages)
+                    after_evidence = context_evidence(session_state.messages, tools)
+                    compression_output = {
+                        "before": before_evidence,
+                        "after": after_evidence,
+                        "dropped_message_digests": [
+                            digest
+                            for digest in before_evidence["message_digests"]
+                            if digest not in after_evidence["message_digests"]
+                        ],
+                        "stats": self.context_manager.get_stats(),
+                    }
                     if telemetry_recorder is not None:
                         await telemetry_recorder.emit_event(
                             "context_compression",
                             actor=TelemetryActor(type=ActorType.SYSTEM),
-                            input={"message_count": before_count},
-                            output={
-                                "message_count": after_count,
-                                "stats": self.context_manager.get_stats(),
-                            },
+                            input=compression_input,
+                            output=compression_output,
                         )
                         if context_span is not None:
                             await telemetry_recorder.end_span(
                                 context_span.span_id,
                                 status=SpanStatus.OK,
-                                output={
-                                    "message_count": after_count,
-                                    "stats": self.context_manager.get_stats(),
-                                },
+                                output=compression_output,
                             )
                 except Exception as exc:
                     if telemetry_recorder is not None and context_span is not None:
                         await telemetry_recorder.emit_event(
                             "context_dropped",
                             actor=TelemetryActor(type=ActorType.SYSTEM),
-                            input={"message_count": before_count},
+                            input=compression_input,
                             error={
                                 "type": exc.__class__.__name__,
                                 "message": str(exc),
@@ -132,12 +149,64 @@ class AgentLlmStepRunner:
                         f"Context managed: now {len(session_state.messages)} messages"
                     )
 
-            response, model_call_span_id, model_response_event_id = await self._call_model(
+            context_span = None
+            context_summary = context_evidence(session_state.messages, tools)
+            context_input = dict(context_summary)
+            if telemetry_recorder is not None:
+                if telemetry_recorder.config.record_model_prompts:
+                    context_input["messages"] = [
+                        message_record(message) for message in session_state.messages
+                    ]
+                    context_input["tools"] = tools or []
+                context_span = await telemetry_recorder.start_span(
+                    name="context.assembly",
+                    kind="context.assembly",
+                    actor=TelemetryActor(type=ActorType.SYSTEM),
+                    input=context_input,
+                    attributes={
+                        "context_digest": context_summary["context_digest"],
+                        "message_digests": context_summary["message_digests"],
+                        "tool_names": context_summary["tool_names"],
+                    },
+                )
+                try:
+                    await telemetry_recorder.emit_event(
+                        "context_assembly",
+                        actor=TelemetryActor(type=ActorType.SYSTEM),
+                        input=context_input,
+                        output=context_summary,
+                        metadata={
+                            "context_span_id": context_span.span_id,
+                            "context_digest": context_summary["context_digest"],
+                        },
+                    )
+                except Exception as exc:
+                    await telemetry_recorder.end_span(
+                        context_span.span_id,
+                        status=SpanStatus.ERROR,
+                        error={"type": exc.__class__.__name__, "message": str(exc)},
+                    )
+                    raise
+                else:
+                    await telemetry_recorder.end_span(
+                        context_span.span_id,
+                        status=SpanStatus.OK,
+                        output=context_summary,
+                    )
+
+            (
+                response,
+                model_call_span_id,
+                model_call_event_id,
+                model_response_event_id,
+            ) = await self._call_model(
                 llm_connection=llm_connection,
                 messages=session_state.messages,
                 tools=tools,
                 on_event=on_event,
                 telemetry_recorder=telemetry_recorder,
+                context_evidence=context_summary,
+                context_span_id=(context_span.span_id if context_span else None),
             )
             if response is None:
                 raise ValueError("Provider returned no response")
@@ -153,6 +222,7 @@ class AgentLlmStepRunner:
             return AgentLlmStepResult(
                 response=response,
                 model_call_span_id=model_call_span_id,
+                model_call_event_id=model_call_event_id,
                 model_response_event_id=model_response_event_id,
             )
 
@@ -195,7 +265,9 @@ class AgentLlmStepRunner:
         tools: list[dict[str, Any]] | None = None,
         on_event: Any = None,
         telemetry_recorder: Any = None,
-    ) -> tuple[Any, str | None, str | None]:
+        context_evidence: dict[str, Any] | None = None,
+        context_span_id: str | None = None,
+    ) -> tuple[Any, str | None, str | None, str | None]:
         async def request():
             if on_event is None:
                 return await llm_connection.llm_call(messages, tools=tools)
@@ -219,30 +291,45 @@ class AgentLlmStepRunner:
             return response
 
         if telemetry_recorder is None:
-            return await request(), None, None
+            return await request(), None, None, None
 
         tool_names = sorted(
             str(tool.get("function", {}).get("name", tool.get("name", "")))
             for tool in tools or []
         )
+        model_input = {
+            "message_count": len(messages),
+            "context_digest": (context_evidence or {}).get("context_digest"),
+        }
+        if telemetry_recorder.config.record_model_prompts:
+            model_input["messages"] = [message_record(message) for message in messages]
+            model_input["tools"] = tools or []
 
         span_context = await telemetry_recorder.start_span(
             name="model.call",
             kind="model.call",
             actor=TelemetryActor(type=ActorType.MODEL),
-            input={"message_count": len(messages)},
+            input=model_input,
+            attributes={
+                "context_digest": (context_evidence or {}).get("context_digest"),
+                "context_span_id": context_span_id,
+            },
         )
         try:
-            await telemetry_recorder.emit_event(
+            model_call_event = await telemetry_recorder.emit_event(
                 "model_call",
                 actor=TelemetryActor(type=ActorType.MODEL),
                 input={
-                    "message_count": len(messages),
+                    **model_input,
                     "tool_count": len(tools or []),
                     "tool_names": tool_names,
                     "model_span_id": span_context.span_id,
                 },
-                metadata={"model_span_id": span_context.span_id},
+                metadata={
+                    "model_span_id": span_context.span_id,
+                    "context_span_id": context_span_id,
+                    "context_digest": (context_evidence or {}).get("context_digest"),
+                },
             )
             response = await request()
             normalized = normalize_model_turn(response)
@@ -260,6 +347,9 @@ class AgentLlmStepRunner:
                 output=response_payload,
                 metadata={
                     "model_span_id": span_context.span_id,
+                    "model_call_event_id": model_call_event.event_id,
+                    "context_span_id": context_span_id,
+                    "context_digest": (context_evidence or {}).get("context_digest"),
                     "tool_call_ids": response_payload["tool_call_ids"],
                 },
             )
@@ -270,10 +360,17 @@ class AgentLlmStepRunner:
                     "finish_reason": normalized.finish_reason,
                     "refusal": normalized.refusal,
                     "tool_call_ids": response_payload["tool_call_ids"],
+                    "context_span_id": context_span_id,
+                    "context_digest": (context_evidence or {}).get("context_digest"),
                     "usage": response_payload["usage"],
                 },
             )
-            return response, span_context.span_id, response_event.event_id
+            return (
+                response,
+                span_context.span_id,
+                model_call_event.event_id,
+                response_event.event_id,
+            )
         except asyncio.CancelledError:
             await telemetry_recorder.end_span(
                 span_context.span_id,
@@ -293,7 +390,13 @@ class AgentLlmStepRunner:
             )
             raise
 
-    def _build_context_summarizer(self, llm_connection: Any):
+    def _build_context_summarizer(
+        self,
+        llm_connection: Any,
+        *,
+        telemetry_recorder: Any = None,
+        parent_span_id: str | None = None,
+    ):
         async def summarize_for_context(messages):
             from omnicoreagent.core.interaction_history import (
                 render_message,
@@ -314,7 +417,16 @@ class AgentLlmStepRunner:
                     "content": f"Here is the conversation history: {history_text}",
                 },
             ]
-            response = await llm_connection.llm_call(summary_messages)
+            if telemetry_recorder is None:
+                response = await llm_connection.llm_call(summary_messages)
+            else:
+                response, _, _, _ = await self._call_model(
+                    llm_connection=llm_connection,
+                    messages=summary_messages,
+                    telemetry_recorder=telemetry_recorder,
+                    context_evidence=context_evidence(summary_messages),
+                    context_span_id=parent_span_id,
+                )
             return extract_response_content(response, default="")
 
         return summarize_for_context

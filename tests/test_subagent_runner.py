@@ -80,6 +80,11 @@ async def test_subagent_runner_records_successful_outputs():
     assert subagent_spans[0].status == "ok"
     assert trace.events[0].span_id == subagent_spans[0].span_id
     assert trace.events[1].span_id == subagent_spans[0].span_id
+    assert trace.events[0].metadata["subagent_span_id"] == subagent_spans[0].span_id
+    assert trace.events[0].metadata["parent_trace_id"] == context.trace_id
+    assert trace.events[0].metadata["parent_span_id"] == trace.root_span_id
+    assert trace.events[1].metadata["spawn_event_id"] == trace.events[0].event_id
+    assert subagent_spans[0].output["terminal_event_id"] == trace.events[1].event_id
 
 
 @pytest.mark.asyncio

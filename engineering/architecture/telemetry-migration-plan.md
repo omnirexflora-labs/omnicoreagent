@@ -15,7 +15,8 @@ stream, background job, or deep-agent execution to work.
 The source snapshot for this plan is branch `refactor/native-tool-runtime`.
 The plan was started at commit `8841795abda60388117ff5a1b32b3a633ede3a3a`;
 implementation checkpoints are listed below as they land. The current
-checkpoint is `a8d27fd9f44cb517095a71a4650476fdfca87a9c`.
+checkpoint is `407b0d4`; the context and lineage checkpoint is being recorded
+with the next commit.
 
 ## Current boundary
 
@@ -74,7 +75,7 @@ unit starts.
 | --- | --- | --- |
 | 1. Versioned evidence metadata | Complete at `36d88f4` | 49 telemetry foundation/export tests passed; 202 runtime/telemetry tests passed; Ruff and diff checks passed. Traces, spans, and events preserve schema version, capture state, execution surface, provenance, and legacy evidence status. |
 | 2. Complete request trajectory | Complete at `407b0d4` | 83 focused model/runtime/telemetry tests passed; Ruff and diff checks passed. Model turns expose tool catalog/count and finish metadata; requested/resolved calls, execution events, batch IDs, and exact post-offload observations retain causal links. |
-| 3. Context and lineage evidence | Next | Record context snapshots/groups and explicit child/background/serving links without duplicating history. |
+| 3. Context and lineage evidence | Complete in working tree; checkpoint pending | Context assembly and compression preserve message/tool digests and opt-in prompt payloads; internal summary calls, memory reads/writes, workspace offloads, and subagent terminal links are correlated. Capture gaps mark traces partial and are surfaced by normalization. Focused telemetry/runtime tests passed; commit follows. |
 
 ## Rules for every phase
 
@@ -243,16 +244,16 @@ No MCP implementation work belongs in the earlier phases.
 
 ## First implementation checkpoint
 
-Migration units 1 through 5 have landed in the checkpoints below. They expose
-the built-in telemetry configuration, complete lineage and local persistence,
-mark partial evidence, correlate serving requests, and record sanitized
-guardrail and governance outcomes. They do not change PromptGuard detection
+The earlier operational telemetry units are already present. The evaluation
+evidence units below extend them without changing PromptGuard detection
 semantics, MCP behavior, context strategy, workspace storage, or model
-streaming.
+streaming. They keep runtime facts separate from future evaluator judgments.
 
-The next checkpoint is delivery hardening (migration unit 4): production tests
-for replay/follow cursors, reconnects, bounded queues, cancellation, and
-provider buffering. MCP v2 remains a separate later unit because its installed
+The next checkpoint is portable evidence adapters (migration unit 4): validate
+normalized traces and an independent adapter fixture before adding evaluators.
+Delivery hardening and production tests for replay/follow cursors, reconnects,
+bounded queues, cancellation, and provider buffering follow that boundary. MCP
+v2 remains a separate later unit because its installed
 SDK compatibility issue is already known and intentionally deferred.
 
 ## Decisions recorded before the persistence/API phase

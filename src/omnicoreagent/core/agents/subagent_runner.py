@@ -31,6 +31,13 @@ class SubAgentCallRunner:
         span = None
         agent = None
         cleanup_attempted = False
+        parent_context = (
+            telemetry_recorder.current_context()
+            if telemetry_recorder is not None
+            else None
+        )
+        spawn_event_id = None
+        terminal_event_id = None
         try:
             if telemetry_recorder is not None:
                 span = await telemetry_recorder.start_span(
@@ -43,7 +50,7 @@ class SubAgentCallRunner:
                         "parameters": call.get("parameters", {}),
                     },
                 )
-                await telemetry_recorder.emit_event(
+                spawn_event = await telemetry_recorder.emit_event(
                     "subagent_spawn",
                     actor=TelemetryActor(type=ActorType.AGENT, name=agent_name),
                     input={
@@ -51,7 +58,17 @@ class SubAgentCallRunner:
                         "session_id": session_id,
                         "parameters": call.get("parameters", {}),
                     },
+                    metadata={
+                        "subagent_span_id": span.span_id,
+                        "parent_trace_id": (
+                            parent_context.trace_id if parent_context else None
+                        ),
+                        "parent_span_id": (
+                            parent_context.span_id if parent_context else None
+                        ),
+                    },
                 )
+                spawn_event_id = spawn_event.event_id
             agent = resolve_agent(agent_name, sub_agents)
             if telemetry_recorder is not None:
                 inherit_telemetry = getattr(agent, "_inherit_telemetry", None)
@@ -74,12 +91,25 @@ class SubAgentCallRunner:
                 or result.get("status", "success") == "success"
             )
             if telemetry_recorder is not None:
-                await telemetry_recorder.emit_event(
+                child_trace_id = (
+                    result.get("trace_id") if isinstance(result, dict) else None
+                )
+                child_run_id = (
+                    result.get("run_id") if isinstance(result, dict) else None
+                )
+                terminal_event = await telemetry_recorder.emit_event(
                     "subagent_result" if succeeded else "subagent_error",
                     actor=TelemetryActor(type=ActorType.AGENT, name=agent_name),
                     input={"session_id": session_id, "agent_name": agent_name},
                     output={"result": result},
+                    metadata={
+                        "subagent_span_id": span.span_id if span else None,
+                        "spawn_event_id": spawn_event_id,
+                        "child_trace_id": child_trace_id,
+                        "child_run_id": child_run_id,
+                    },
                 )
+                terminal_event_id = terminal_event.event_id
             if telemetry_recorder is not None and span is not None:
                 child_trace_id = (
                     result.get("trace_id") if isinstance(result, dict) else None
@@ -95,6 +125,8 @@ class SubAgentCallRunner:
                         "status": "success" if succeeded else "error",
                         "child_trace_id": child_trace_id,
                         "child_run_id": child_run_id,
+                        "spawn_event_id": spawn_event_id,
+                        "terminal_event_id": terminal_event_id,
                     },
                 )
             return agent_name, result
@@ -110,16 +142,25 @@ class SubAgentCallRunner:
                         f"{cleanup_error}"
                     )
             if telemetry_recorder is not None:
-                await telemetry_recorder.emit_event(
+                terminal_event = await telemetry_recorder.emit_event(
                     "subagent_error",
                     actor=TelemetryActor(type=ActorType.AGENT, name=agent_name),
                     input={"session_id": session_id, "agent_name": agent_name},
                     error={"type": e.__class__.__name__, "message": "cancelled"},
+                    metadata={
+                        "subagent_span_id": span.span_id if span else None,
+                        "spawn_event_id": spawn_event_id,
+                    },
                 )
+                terminal_event_id = terminal_event.event_id
             if telemetry_recorder is not None and span is not None:
                 await telemetry_recorder.end_span(
                     span.span_id,
                     status=SpanStatus.CANCELLED,
+                    output={
+                        "spawn_event_id": spawn_event_id,
+                        "terminal_event_id": terminal_event_id,
+                    },
                     error={"type": e.__class__.__name__, "message": "cancelled"},
                 )
             raise
@@ -135,16 +176,25 @@ class SubAgentCallRunner:
                         f"{cleanup_error}"
                     )
             if telemetry_recorder is not None:
-                await telemetry_recorder.emit_event(
+                terminal_event = await telemetry_recorder.emit_event(
                     "subagent_error",
                     actor=TelemetryActor(type=ActorType.AGENT, name=agent_name),
                     input={"session_id": session_id, "agent_name": agent_name},
                     error={"type": e.__class__.__name__, "message": str(e)},
+                    metadata={
+                        "subagent_span_id": span.span_id if span else None,
+                        "spawn_event_id": spawn_event_id,
+                    },
                 )
+                terminal_event_id = terminal_event.event_id
             if telemetry_recorder is not None and span is not None:
                 await telemetry_recorder.end_span(
                     span.span_id,
                     status=SpanStatus.ERROR,
+                    output={
+                        "spawn_event_id": spawn_event_id,
+                        "terminal_event_id": terminal_event_id,
+                    },
                     error={"type": e.__class__.__name__, "message": str(e)},
                 )
             return agent_name, e

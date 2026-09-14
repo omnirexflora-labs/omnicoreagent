@@ -26,7 +26,10 @@ Every payload-bearing input or output has a capture state:
 | `inferred` | A derived adapter value is present but was not directly observed. |
 
 `None` payloads without a capture descriptor are treated as legacy records,
-not as proof that no value existed.
+not as proof that no value existed. A trace with any unavailable payload
+descriptor is reported as `partial`; this includes intentional privacy policy
+exclusions, so an evaluator cannot mistake a successful write for complete
+evidence.
 
 ## Evidence descriptor
 
@@ -64,6 +67,13 @@ extractors use these relationships:
 
 The event sequence is an ordering aid only. Parallel calls must remain
 independent unless an explicit causal reference says otherwise.
+
+Context digests identify the exact ordered message/tool catalog supplied to a
+model without requiring content retention. Prompt payloads are added to the
+context/model records only when `record_model_prompts` is enabled. Compression
+records before/after digests and the groups dropped or replaced. A context
+summary model request is a normal linked `model.call` span, so internal model
+work is not invisible to evaluation.
 
 ## Required normalized fields
 

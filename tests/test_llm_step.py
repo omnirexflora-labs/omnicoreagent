@@ -8,7 +8,9 @@ from omnicoreagent.core.agents import llm_step
 from omnicoreagent.core.agents.llm_step import AgentLlmStepRunner
 from omnicoreagent.core.telemetry import (
     ActorType,
+    CaptureState,
     InMemoryTelemetryStore,
+    TelemetryConfig,
     TelemetryActor,
     TelemetryRecorder,
 )
@@ -151,9 +153,56 @@ async def test_llm_step_records_context_compression_telemetry(monkeypatch):
     event = next(
         event for event in trace.events if event.event_type == "context_compression"
     )
-    assert event.input == {"message_count": 1}
-    assert event.output["message_count"] == 1
+    assert event.input["message_count"] == 1
+    assert event.input["context_digest"]
+    assert len(event.input["message_digests"]) == 1
+    assert event.output["before"]["message_count"] == 1
+    assert event.output["after"]["message_count"] == 1
+    assert len(event.output["dropped_message_digests"]) == 1
     assert event.output["stats"] == {"compressions": 1}
+    assembly = next(
+        event for event in trace.events if event.event_type == "context_assembly"
+    )
+    assert assembly.output["context_digest"]
+    assert assembly.output["message_count"] == 1
+    assert assembly.output["role_counts"] == {"system": 1}
+    assert sum(event.event_type == "model_call" for event in trace.events) == 2
+
+
+@pytest.mark.asyncio
+async def test_llm_step_context_capture_respects_prompt_policy(monkeypatch):
+    monkeypatch.setattr(llm_step, "usage", Usage())
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store, TelemetryConfig(record_model_prompts=True))
+    context = await recorder.start_trace(trace_id="trace-context-capture")
+
+    class LlmConnection:
+        async def llm_call(self, messages, tools=None):
+            return "done"
+
+    result = await make_runner().run(
+        session_state=make_session_state(),
+        llm_connection=LlmConnection(),
+        run_usage=Usage(),
+        session_id="chat-context",
+        telemetry_recorder=recorder,
+        tools=[
+            {
+                "type": "function",
+                "function": {"name": "lookup", "parameters": {"type": "object"}},
+            }
+        ],
+    )
+    await recorder.end_trace()
+
+    trace = await store.get_trace(context.trace_id)
+    assert result.response.text == "done"
+    assembly = next(
+        event for event in trace.events if event.event_type == "context_assembly"
+    )
+    assert assembly.input["messages"][0]["content"] == "hello"
+    assert assembly.input["tools"][0]["function"]["name"] == "lookup"
+    assert assembly.input_capture.state == CaptureState.AVAILABLE
 
 
 @pytest.mark.asyncio

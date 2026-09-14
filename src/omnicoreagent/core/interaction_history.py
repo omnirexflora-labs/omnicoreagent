@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from typing import Any
 
 
@@ -12,6 +13,68 @@ def message_record(message: Any) -> dict[str, Any]:
     if isinstance(message, dict):
         return message
     return vars(message)
+
+
+def stable_message_digest(message: Any) -> str:
+    """Return a stable identifier without retaining message content."""
+    encoded = json.dumps(
+        message_record(message),
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def context_evidence(
+    messages: list[Any], tools: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """Describe the exact model context using counts, digests, and identities.
+
+    Content is deliberately omitted. Callers may add the message/tool records only
+    when their telemetry policy explicitly permits prompt capture.
+    """
+    records = [message_record(message) for message in messages]
+    message_digests = [stable_message_digest(message) for message in messages]
+    role_counts: dict[str, int] = {}
+    for record in records:
+        role = str(record.get("role", "unknown"))
+        role_counts[role] = role_counts.get(role, 0) + 1
+    tool_definitions = list(tools or [])
+    tool_names = sorted(
+        str(tool.get("function", {}).get("name", tool.get("name", "")))
+        for tool in tool_definitions
+    )
+    canonical = {"messages": records, "tools": tool_definitions}
+    context_digest = hashlib.sha256(
+        json.dumps(
+            canonical,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
+    tool_catalog_digest = hashlib.sha256(
+        json.dumps(
+            tool_definitions,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "message_count": len(messages),
+        "role_counts": role_counts,
+        "interaction_group_count": len(interaction_groups(messages)),
+        "message_digests": message_digests,
+        "context_digest": context_digest,
+        "tool_count": len(tool_definitions),
+        "tool_names": tool_names,
+        "tool_catalog_digest": tool_catalog_digest,
+    }
 
 
 def message_calls(message: Any) -> list[dict[str, Any]]:
