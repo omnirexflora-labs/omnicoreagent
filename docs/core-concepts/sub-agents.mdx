@@ -35,16 +35,17 @@ agent = OmniCoreAgent(
     model_config={"provider": "openai", "model": "gpt-4o"},
     agent_config={
         "enable_subagents": True,
-        "context_management": {"enabled": True},
         "tool_offload": {"enabled": True},
     },
 )
 ```
 
 Workspace files are available by default, and `enable_subagents` also keeps
-them enabled for worker output. Dynamic workers are expected to save output with
-`write_file`, and the lead agent reads those paths with `read_file` before
-synthesizing.
+them enabled for worker output. Dynamic subagents also force in-run context
+management on while preserving any context budget, threshold, strategy, and
+retention settings supplied by the caller. Dynamic workers are expected to save
+output with `write_file`, and the lead agent reads those paths with `read_file`
+before synthesizing.
 
 ### `spawn_subagents`
 
@@ -69,7 +70,8 @@ items for parallel workers.
 ```
 
 Spawned workers inherit the parent's model, MCP tools, user local tools,
-workspace files, context management, and tool offloading. They do not inherit
+workspace files, context management, and tool offloading. Context management is
+enabled automatically for a parent with dynamic subagents. They do not inherit
 the lead agent's `spawn_subagents` tool, which keeps delegation controlled by
 the lead agent.
 

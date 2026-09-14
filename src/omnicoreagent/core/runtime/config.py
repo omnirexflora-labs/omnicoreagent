@@ -170,7 +170,13 @@ class AgentConfig:
         _validate_governance_config(self.governance_config)
 
         if self.enable_subagents:
+            # Dynamic workers depend on a durable file surface for their output,
+            # and long-running delegation needs in-run context management to
+            # prevent the lead and workers from exhausting their context.
+            # Preserve all caller-supplied context settings, but do not allow
+            # the required capability to be disabled by an incomplete config.
             self.enable_workspace_files = True
+            self.context_management["enabled"] = True
 
     def model_dump(self) -> dict[str, Any]:
         data = {}

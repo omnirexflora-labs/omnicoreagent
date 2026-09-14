@@ -486,6 +486,28 @@ class TestOmniCoreAgentSubagents:
         assert config["enable_subagents"] is True
         assert config["enable_workspace_files"] is True
 
+    def test_enable_subagents_forces_context_management(self):
+        config = normalize_agent_config(
+            "Harness",
+            {
+                "enable_subagents": True,
+                "context_management": {
+                    "enabled": False,
+                    "value": 50000,
+                    "preserve_recent": 8,
+                },
+            },
+        )
+
+        assert config["context_management"] == {
+            "enabled": True,
+            "mode": "token_budget",
+            "value": 50000,
+            "threshold_percent": 75,
+            "strategy": "truncate",
+            "preserve_recent": 8,
+        }
+
     @pytest.mark.asyncio
     async def test_enable_subagents_registers_core_spawn_tool(self, model_config):
         agent = OmniCoreAgent(
