@@ -25,6 +25,22 @@ SUPPORTED_MODELS_PROVIDERS = {
 }
 
 
+GUARDRAIL_MODES = frozenset({"off", "input_only", "full"})
+
+
+def normalize_guardrail_mode(value: Any) -> str:
+    """Normalize and validate the guardrail enforcement boundary."""
+    if not isinstance(value, str):
+        raise ValueError(
+            "guardrail_mode must be one of: off, input_only, full"
+        )
+    mode = value.strip().lower()
+    if mode not in GUARDRAIL_MODES:
+        allowed = ", ".join(sorted(GUARDRAIL_MODES))
+        raise ValueError(f"guardrail_mode must be one of: {allowed}; got '{value}'")
+    return mode
+
+
 class TransportType(str, Enum):
     STDIO = "stdio"
     SSE = "sse"
@@ -138,6 +154,9 @@ class AgentConfig:
     workspace_config: WorkspaceConfig | dict[str, Any] | None = None
 
     def __post_init__(self):
+        self.guardrail_mode = normalize_guardrail_mode(self.guardrail_mode)
+        if not isinstance(self.guardrail_config, dict):
+            raise ValueError("guardrail_config must be a dict")
         self.request_limit = 0 if self.request_limit is None else self.request_limit
         self.total_tokens_limit = (
             0 if self.total_tokens_limit is None else self.total_tokens_limit

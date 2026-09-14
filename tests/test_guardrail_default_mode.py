@@ -30,6 +30,23 @@ def _make_agent(agent_config: dict[str, Any] | None = None) -> OmniCoreAgent:
     )
 
 
+def test_guardrail_mode_is_normalized_at_the_public_config_boundary() -> None:
+    agent = _make_agent(agent_config={"guardrail_mode": " INPUT_ONLY "})
+
+    assert agent.agent_config["guardrail_mode"] == "input_only"
+
+
+@pytest.mark.parametrize("mode", ["unknown", "tool_only", "", None, 1])
+def test_invalid_guardrail_mode_fails_before_runtime_construction(mode: Any) -> None:
+    with pytest.raises(ValueError, match="guardrail_mode must be one of"):
+        _make_agent(agent_config={"guardrail_mode": mode})
+
+
+def test_guardrail_config_must_be_a_mapping() -> None:
+    with pytest.raises(ValueError, match="guardrail_config must be a dict"):
+        _make_agent(agent_config={"guardrail_config": ["strict_mode", True]})
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

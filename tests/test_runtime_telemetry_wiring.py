@@ -23,6 +23,7 @@ from omnicoreagent.core.telemetry import (
     TelemetryConfig,
 )
 from omnicoreagent.core.workspace.config import WorkspaceConfig
+from omnicoreagent.core.guardrails import DetectionConfig
 
 
 def _initialized_agent(
@@ -50,6 +51,25 @@ def _initialized_agent(
     agent.memory_router.store_message = AsyncMock()
     agent.memory_router.get_messages = AsyncMock(return_value=[])
     return agent
+
+
+def test_telemetry_metadata_identifies_effective_guardrail_policy() -> None:
+    agent = OmniCoreAgent(
+        name="guardrail-metadata-agent",
+        system_instruction="You are a test agent.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini", "api_key": "key"},
+        agent_config={
+            "guardrail_mode": "input_only",
+            "guardrail_config": {"strict_mode": True, "sensitivity": 1.2},
+        },
+    )
+
+    metadata = agent._telemetry_metadata()
+
+    assert metadata["guardrail_mode"] == "input_only"
+    assert metadata["guardrail_config_version"] == DetectionConfig(
+        strict_mode=True, sensitivity=1.2
+    ).fingerprint()
 
 
 @pytest.mark.asyncio

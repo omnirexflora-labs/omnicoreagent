@@ -24,6 +24,19 @@ agent = OmniCoreAgent(..., agent_config=agent_config)
 # result['guardrail_result'] -> Full metadata about the detected threat
 ```
 
+Guardrail enforcement is selected with `agent_config["guardrail_mode"]`:
+
+| Mode | User input | Tool output | Default |
+|------|------------|-------------|---------|
+| `full` | checked and unsafe input is blocked | suspicious output is recorded and dangerous/critical output is blocked | Yes |
+| `input_only` | checked and unsafe input is blocked | not checked by the agent runtime | No |
+| `off` | not checked | not checked | No |
+
+The mode is validated when the public agent configuration is built. Unknown
+values fail before a model connection or tool can be constructed. `strict_mode`
+changes the detection thresholds; low-risk results remain allowed, while the
+input boundary blocks results whose `is_safe` value is false.
+
 ---
 
 ## Key Protections
@@ -39,7 +52,7 @@ agent = OmniCoreAgent(..., agent_config=agent_config)
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `strict_mode` | `bool` | `False` | When `True`, any detection (even low confidence) blocks the request. |
+| `strict_mode` | `bool` | `False` | When `True`, lower score thresholds classify suspicious, dangerous, and critical inputs more aggressively. |
 | `sensitivity` | `float` | `1.0` | Scaling factor for threat scores. Lower reduces sensitivity; higher increases sensitivity. |
 | `max_input_length` | `int` | `10000` | Maximum allowed query length before blocking. |
 | `enable_encoding_detection` | `bool` | `True` | Detects base64, hex, and other obfuscation attempts. |

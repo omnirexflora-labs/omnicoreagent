@@ -13,6 +13,7 @@ from omnicoreagent.core.runtime import (
     summaries,
     streaming,
 )
+from omnicoreagent.core.guardrails.models import DetectionConfig
 from omnicoreagent.core.runtime.imports import (
     LazyDefaultPromptBuilder,
     runtime,
@@ -326,7 +327,14 @@ class OmniCoreAgent:
             "agent_name": self.name,
             "model_provider": self.model_config.get("provider"),
             "model": self.model_config.get("model"),
+            "guardrail_mode": self.agent_config.get("guardrail_mode", "full"),
         }
+        guardrail_mode = metadata["guardrail_mode"]
+        if guardrail_mode != "off":
+            guardrail_config = DetectionConfig(
+                **(self.agent_config.get("guardrail_config") or {})
+            )
+            metadata["guardrail_config_version"] = guardrail_config.fingerprint()
         fingerprint = getattr(self.telemetry_config, "fingerprint", None)
         if callable(fingerprint):
             metadata["telemetry_config_version"] = fingerprint()

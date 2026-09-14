@@ -236,6 +236,8 @@ metadata:
   tool_schema_version: string | null
   memory_config_version: string | null
   constraint_config_version: string | null
+  guardrail_mode: string | null
+  guardrail_config_version: string | null
   tags: list[string]
 spans: list[TelemetrySpan]
 events: list[TelemetryEvent]

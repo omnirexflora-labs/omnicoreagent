@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from omnicoreagent.core.runtime.imports import runtime, runtime_logger
+from omnicoreagent.core.runtime.config import normalize_guardrail_mode
 
 
 def default_memory_router() -> Any:
@@ -118,7 +119,7 @@ def _telemetry_jsonl_path(config: Any, workspace_config: Any = None) -> Path:
 
 
 def build_guardrail(agent_name: str, agent_config: dict[str, Any]) -> tuple[str, Any]:
-    guardrail_mode = agent_config.get("guardrail_mode", "full")
+    guardrail_mode = normalize_guardrail_mode(agent_config.get("guardrail_mode", "full"))
     if guardrail_mode == "off":
         runtime_logger().info(f"Guardrail disabled for agent '{agent_name}'")
         return guardrail_mode, None

@@ -22,6 +22,15 @@ def test_create_guard_applies_strict_and_sensitivity_config():
     assert guard.config.sensitivity == 1.5
 
 
+def test_detection_config_fingerprint_is_stable_and_policy_sensitive():
+    first = DetectionConfig(strict_mode=True, sensitivity=1.2)
+    second = DetectionConfig(strict_mode=True, sensitivity=1.2)
+    changed = DetectionConfig(strict_mode=False, sensitivity=1.2)
+
+    assert first.fingerprint() == second.fingerprint()
+    assert first.fingerprint() != changed.fingerprint()
+
+
 def test_quick_check_returns_serializable_detection_dict():
     result = quick_check("normal request")
 

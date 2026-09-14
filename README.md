@@ -434,7 +434,7 @@ agent_config = {
         "summary": {"enabled": False},
     },
     "enable_workspace_files": True,      # Default on
-    "guardrail_mode": "full",            # Default
+    "guardrail_mode": "full",            # full, input_only, or off
     "context_management": {"enabled": True},  # Default on
     "tool_offload": {"enabled": True},        # Default on
     "enable_advanced_tool_use": True,         # Default off

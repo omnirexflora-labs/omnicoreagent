@@ -358,6 +358,8 @@ class TelemetryTraceMetadata(SerializableTelemetryRecord):
     tool_schema_version: str | None = None
     memory_config_version: str | None = None
     constraint_config_version: str | None = None
+    guardrail_mode: str | None = None
+    guardrail_config_version: str | None = None
     telemetry_config_version: str | None = None
     telemetry_storage: str | None = None
     tags: list[str] = field(default_factory=list)
@@ -377,6 +379,8 @@ class TelemetryTraceMetadata(SerializableTelemetryRecord):
             tool_schema_version=data.get("tool_schema_version"),
             memory_config_version=data.get("memory_config_version"),
             constraint_config_version=data.get("constraint_config_version"),
+            guardrail_mode=data.get("guardrail_mode"),
+            guardrail_config_version=data.get("guardrail_config_version"),
             telemetry_config_version=data.get("telemetry_config_version"),
             telemetry_storage=data.get("telemetry_storage"),
             tags=list(data.get("tags") or []),

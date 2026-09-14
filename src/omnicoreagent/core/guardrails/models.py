@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+import hashlib
 from typing import Any
 
 
@@ -30,6 +31,24 @@ class DetectionConfig:
     log_level: str = "INFO"
     allowlist_patterns: list[str] = field(default_factory=list)
     blocklist_patterns: list[str] = field(default_factory=list)
+
+    def fingerprint(self) -> str:
+        """Return a stable, non-secret identifier for the effective policy."""
+        encoded = json.dumps(
+            {
+                key: value
+                for key, value in self.__dict__.items()
+                if key not in {"allowlist_patterns", "blocklist_patterns"}
+            }
+            | {
+                "allowlist_patterns": list(self.allowlist_patterns),
+                "blocklist_patterns": list(self.blocklist_patterns),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass
