@@ -54,6 +54,8 @@ class TelemetryRecorder:
         self.exporters = list(exporters or [])
         self._span_parent_contexts: dict[str, TelemetryContext | None] = {}
         self._span_sources: dict[str, str] = {}
+        self._incomplete_trace_ids: set[str] = set()
+        self._trace_templates: dict[str, TelemetryTrace] = {}
 
     def current_context(self) -> TelemetryContext | None:
         return current_telemetry_context()
@@ -112,7 +114,8 @@ class TelemetryRecorder:
             ),
             spans=[root_span],
         )
-        await self._write(self.store.upsert_trace(trace))
+        self._trace_templates[trace_id] = trace
+        await self._write(self.store.upsert_trace(trace), trace_id=trace_id)
         context = TelemetryContext(
             trace_id=trace_id,
             span_id=root_span.span_id,
@@ -139,8 +142,20 @@ class TelemetryRecorder:
         root_context: TelemetryContext | None = None
         parent_context: TelemetryContext | None = self._root_parent_context(context)
         try:
-            trace = await self._read(self.store.get_trace(context.trace_id))
+            trace = await self._read(
+                self.store.get_trace(context.trace_id),
+                trace_id=context.trace_id,
+            )
             if trace is None:
+                template = self._trace_templates.get(context.trace_id)
+                if template is not None:
+                    template.incomplete = True
+                    template.status = TraceStatus(status)
+                    template.ended_at = utc_now()
+                    await self._write(
+                        self.store.upsert_trace(template),
+                        trace_id=context.trace_id,
+                    )
                 return
             root_context = TelemetryContext(
                 trace_id=trace.trace_id,
@@ -181,11 +196,19 @@ class TelemetryRecorder:
             await self._write(
                 self.store.update_trace(
                     context.trace_id,
-                    {"status": TraceStatus(status).value, "ended_at": ended_at},
-                )
+                    {
+                        "status": TraceStatus(status).value,
+                        "ended_at": ended_at,
+                        "incomplete": context.trace_id in self._incomplete_trace_ids,
+                    },
+                ),
+                trace_id=context.trace_id,
             )
             if self.exporters:
-                trace = await self._read(self.store.get_trace(context.trace_id))
+                trace = await self._read(
+                    self.store.get_trace(context.trace_id),
+                    trace_id=context.trace_id,
+                )
                 if trace is not None:
                     await export_trace_to_many(
                         trace,
@@ -227,7 +250,10 @@ class TelemetryRecorder:
             input=self._record_input(input, source=kind),
             attributes=self._record_metadata(attributes or {}),
         )
-        await self._write(self.store.start_span(parent.trace_id, span))
+        await self._write(
+            self.store.start_span(parent.trace_id, span),
+            trace_id=parent.trace_id,
+        )
         context = parent.child(span.span_id)
         self._span_parent_contexts[span.span_id] = parent
         self._span_sources[span.span_id] = kind
@@ -255,7 +281,10 @@ class TelemetryRecorder:
             ),
             "error": self._record_error(error),
         }
-        await self._write(self.store.end_span(context.trace_id, target_span_id, patch))
+        await self._write(
+            self.store.end_span(context.trace_id, target_span_id, patch),
+            trace_id=context.trace_id,
+        )
         if target_span_id == context.span_id:
             set_telemetry_context(self._span_parent_contexts.get(target_span_id))
         self._span_parent_contexts.pop(target_span_id, None)
@@ -337,7 +366,10 @@ class TelemetryRecorder:
             duration_ms=duration_ms,
             metadata=recorded_metadata,
         )
-        await self._write(self.store.append_event(context.trace_id, event))
+        await self._write(
+            self.store.append_event(context.trace_id, event),
+            trace_id=context.trace_id,
+        )
         return event
 
     async def record_exception(
@@ -434,19 +466,21 @@ class TelemetryRecorder:
     def _record_metadata(self, value: dict[str, Any]) -> dict[str, Any]:
         return redact_payload(value, self.config)
 
-    async def _write(self, operation) -> None:
-        if self.config.strict:
-            await operation
-            return
+    async def _write(self, operation, *, trace_id: str | None = None) -> None:
         try:
             await operation
         except Exception:
-            return
+            if trace_id is not None:
+                self._incomplete_trace_ids.add(trace_id)
+            if self.config.strict:
+                raise
 
-    async def _read(self, operation):
-        if self.config.strict:
-            return await operation
+    async def _read(self, operation, *, trace_id: str | None = None):
         try:
             return await operation
         except Exception:
+            if trace_id is not None:
+                self._incomplete_trace_ids.add(trace_id)
+            if self.config.strict:
+                raise
             return None

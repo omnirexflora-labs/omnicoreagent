@@ -108,6 +108,11 @@ normalized = await agent.get_trace(result["trace_id"], normalize=True)
 trace_family = await agent.get_trace_family(trace_id=result["trace_id"])
 ```
 
+Traces expose `incomplete: true` when best-effort telemetry persistence lost
+an evidence write. The run can still complete; strict telemetry configuration
+instead propagates the persistence error. Trace metadata also reports the
+effective built-in storage type (`memory` or `jsonl`).
+
 `trace_id` is the exact trace handle. `run_id` is a correlation and filtering
 handle; when more than one trace is correlated to the same run, `get_trace(
 run_id=...)` returns the latest matching trace.

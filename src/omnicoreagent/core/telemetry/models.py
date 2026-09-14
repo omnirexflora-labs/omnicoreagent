@@ -389,6 +389,7 @@ class TelemetryTrace(SerializableTelemetryRecord):
     root_span_id: str
     parent_trace_id: str | None = None
     parent_span_id: str | None = None
+    incomplete: bool = False
     status: TraceStatus | str = TraceStatus.RUNNING
     started_at: datetime = field(default_factory=utc_now)
     ended_at: datetime | None = None

@@ -542,6 +542,7 @@ def _patch_trace(trace: TelemetryTrace, patch: dict[str, Any]) -> None:
 
 
 def _merge_trace(existing: TelemetryTrace, incoming: TelemetryTrace) -> None:
+    existing.incomplete = existing.incomplete or incoming.incomplete
     if _should_replace_trace_status(existing, incoming):
         existing.status = incoming.status
     if incoming.ended_at and (

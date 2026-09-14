@@ -88,6 +88,7 @@ agent = OmniCoreAgent(
         "record_tool_results": True,
         "record_model_prompts": False,
         "record_model_responses": False,
+        "retention_days": 7, # use None for unlimited local JSONL retention
         "max_payload_bytes": 64_000,
         "strict": False,
     },

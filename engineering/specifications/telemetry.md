@@ -223,6 +223,7 @@ workflow_id: string | null
 root_span_id: string
 parent_trace_id: string | null
 parent_span_id: string | null
+incomplete: bool
 status: running | completed | failed | cancelled | timeout | aborted_resource_guard | aborted_safety_guard | partial
 started_at: datetime
 ended_at: datetime | null
@@ -248,6 +249,9 @@ Rules:
   created this trace when it is a child trace. They may refer to a different
   trace; the child trace still has exactly one local root span.
 - partial traces are valid.
+- `incomplete` is true when best-effort persistence dropped one or more
+  evidence writes; it preserves the runtime status while making evidence loss
+  explicit.
 - failed or aborted traces must retain all evidence captured before failure.
 - `metadata` must preserve version fields needed for future regression
   evaluation.
@@ -587,6 +591,9 @@ Rules:
 Telemetry configuration must support:
 
 ```yaml
+storage: auto | memory | jsonl
+storage_path: string | null
+retention_days: integer | null
 record_inputs: bool
 record_outputs: bool
 record_model_prompts: bool
@@ -608,6 +615,13 @@ Rules:
 - offloaded payloads must store a reference, size, content type when known, and
   checksum when available.
 - secrets must not be stored by default.
+- `storage: auto` selects JSONL only for an explicitly configured local
+  workspace; otherwise it selects in-memory storage. An injected store takes
+  precedence over this policy.
+- `retention_days: null` disables age cleanup. JSONL cleanup retains active
+  traces and compacts only ended traces older than the selected window.
+- non-strict persistence failures leave the run result usable and set
+  `trace.incomplete`; strict persistence propagates the failure.
 
 ---
 

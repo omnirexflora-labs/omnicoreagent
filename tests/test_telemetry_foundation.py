@@ -87,6 +87,7 @@ def test_telemetry_records_serialize_and_validate():
     restored = TelemetryTrace.from_dict(dumped)
 
     assert restored.trace_id == "trace-1"
+    assert restored.incomplete is False
     assert restored.spans[0].kind == "agent.run"
     assert restored.events[0].event_type == "agent_start"
     assert restored.events[0].token_usage.total_tokens is None
@@ -488,6 +489,31 @@ async def test_recorder_best_effort_suppresses_store_errors():
     context = await recorder.start_trace(trace_id="trace-best-effort")
 
     assert context.trace_id == "trace-best-effort"
+
+
+@pytest.mark.asyncio
+async def test_recorder_marks_trace_incomplete_after_best_effort_write_failure():
+    class FlakyStore(InMemoryTelemetryStore):
+        fail_next_event = True
+
+        async def append_event(self, trace_id, event):
+            if self.fail_next_event:
+                self.fail_next_event = False
+                raise RuntimeError("event write failed")
+            await super().append_event(trace_id, event)
+
+    store = FlakyStore()
+    recorder = TelemetryRecorder(store, TelemetryConfig(strict=False))
+
+    await recorder.start_trace(trace_id="trace-incomplete")
+    await recorder.emit_event("agent_start")
+    await recorder.end_trace()
+
+    trace = await store.get_trace("trace-incomplete")
+    assert trace is not None
+    assert trace.status == TraceStatus.COMPLETED
+    assert trace.incomplete is True
+    assert current_telemetry_context() is None
 
 
 @pytest.mark.asyncio
