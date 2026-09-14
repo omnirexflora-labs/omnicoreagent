@@ -68,6 +68,13 @@ unit starts.
    after the trace contract is proven. Evaluation records must reference facts
    and must not mutate them.
 
+### Evaluation-evidence execution log
+
+| Unit | Status | Evidence |
+| --- | --- | --- |
+| 1. Versioned evidence metadata | Complete at `36d88f4` | 49 telemetry foundation/export tests passed; 202 runtime/telemetry tests passed; Ruff and diff checks passed. Traces, spans, and events preserve schema version, capture state, execution surface, provenance, and legacy evidence status. |
+| 2. Complete request trajectory | Next | Add stable causal identifiers and distinguish executor results from model observations. |
+
 ## Rules for every phase
 
 1. Built-in telemetry is the runtime source of truth.
