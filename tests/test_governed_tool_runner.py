@@ -404,7 +404,7 @@ async def test_governance_denial_redacts_result_args():
 async def test_governance_denial_emits_policy_telemetry_without_tool_args():
     store = InMemoryTelemetryStore()
     recorder = TelemetryRecorder(store)
-    await recorder.start_trace(
+    context = await recorder.start_trace(
         trace_id="trace-governance-denial",
         session_id="governed-telemetry",
         actor=TelemetryActor(type=ActorType.AGENT, name="test_agent"),
@@ -447,6 +447,13 @@ async def test_governance_denial_emits_policy_telemetry_without_tool_args():
     )
     assert "api_key" not in str(request_event.input)
     assert "secret" not in str(request_event.input)
+    assert request_event.trace_id == context.trace_id
+    assert request_event.metadata["session_id"] == "governed-telemetry"
+    decision_event = next(
+        event for event in trace.events if event.event_type == "policy_decision_deny"
+    )
+    assert decision_event.trace_id == context.trace_id
+    assert decision_event.metadata["session_id"] == "governed-telemetry"
 
 
 @pytest.mark.asyncio
