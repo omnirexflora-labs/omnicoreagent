@@ -8,7 +8,6 @@ import unicodedata
 from collections import Counter
 from datetime import datetime
 from math import log2
-from typing import Any
 
 from omnicoreagent.core.guardrails.models import DetectionConfig, DetectionResult, ThreatLevel
 from omnicoreagent.core.guardrails.patterns import PatternManager
@@ -21,7 +20,6 @@ class DetectionEngine:
         self.config = config
         self.pattern_manager = PatternManager()
         self.logger = self._setup_logger()
-        self._benign_patterns = self._compile_benign_patterns()
 
     def _setup_logger(self) -> logging.Logger:
         """Setup logging"""
@@ -35,34 +33,6 @@ class DetectionEngine:
             logger.addHandler(handler)
         logger.setLevel(getattr(logging, self.config.log_level))
         return logger
-
-    def _compile_benign_patterns(self) -> list[re.Pattern]:
-        """Compile benign context patterns"""
-        patterns = [
-            r"help me (?:ignore|avoid|overcome|manage|deal with|handle)",
-            r"how (?:do|can|could|should|would) I (?:ignore|avoid|prevent|stop)",
-            r"teach(?:ing)? (?:me|us) to (?:ignore|disregard|avoid)",
-            r"(?:show|tell|explain) me (?:how|why|what|when|where)",
-            r"pretend (?:you're|you are) (?:a |an )?(?:teacher|tutor|guide|helper|expert|coach|assistant)",
-            r"act as (?:a |an )?(?:teacher|tutor|guide|helper|expert|professional|assistant)",
-            r"roleplay (?:a |an )?(?:lesson|scenario|conversation|dialogue|situation)",
-            r"simulate (?:a |an )?(?:conversation|dialogue|interview|scenario|situation)",
-            r"what are your (?:thoughts|views|opinions|capabilities|features|limitations)",
-            r"explain your (?:reasoning|process|thinking|approach|method|logic)",
-            r"can you (?:help|assist|guide) me with",
-            r"I need (?:help|assistance|guidance) with",
-            r"what is (?:the|your) (?:best|recommended) way to",
-            r"how does (?:this|it|the system) work",
-            r"for (?:educational|learning|training|research) purposes",
-        ]
-
-        compiled = []
-        for pattern in patterns:
-            try:
-                compiled.append(re.compile(pattern, re.IGNORECASE))
-            except re.error:
-                continue
-        return compiled
 
     def analyze(self, user_input: str) -> DetectionResult:
         """Main analysis pipeline"""
@@ -112,18 +82,6 @@ class DetectionEngine:
                         )
 
             normalized = self._normalize_input(user_input)
-
-            if self._is_likely_benign(user_input, normalized):
-                result = self._analyze_with_reduced_sensitivity(user_input, normalized)
-                if result["threat_level"] in [ThreatLevel.SAFE, ThreatLevel.LOW_RISK]:
-                    result.update(
-                        {
-                            "input_hash": input_hash,
-                            "detection_time": datetime.now(),
-                            "input_length": len(user_input),
-                        }
-                    )
-                    return DetectionResult(**result)
 
             flags = []
             total_score = 0
@@ -221,30 +179,6 @@ class DetectionEngine:
         normalized = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", normalized)
 
         return normalized.strip().lower()
-
-    def _is_likely_benign(self, original: str, normalized: str) -> bool:
-        """Check if input is likely benign"""
-        for pattern in self._benign_patterns:
-            if pattern.search(original):
-                return True
-
-        benign_indicators = [
-            "help me understand",
-            "can you explain",
-            "how do i",
-            "what does",
-            "tutorial",
-            "example of",
-            "learn about",
-            "advice on",
-            "guide me",
-            "teach me",
-            "for learning",
-            "educational purpose",
-        ]
-
-        original_lower = original.lower()
-        return any(indicator in original_lower for indicator in benign_indicators)
 
     def _pattern_matching(self, normalized: str) -> tuple[int, list[str]]:
         """Pattern matching analysis"""
@@ -479,61 +413,6 @@ class DetectionEngine:
                 break
 
         return score, flags
-
-    def _analyze_with_reduced_sensitivity(
-        self, original: str, normalized: str
-    ) -> dict[str, Any]:
-        """Reduced sensitivity analysis for likely benign inputs"""
-        flags = []
-        score = 0
-
-        severe_patterns = [
-            (r"system\s*[:=]\s*(?:ignore|override|bypass|break)", 10),
-            (r"\bDAN\s*(?:mode|activate|enabled)", 9),
-            (
-                r"\byou\s+(?:are\s+now|have\s+become|will\s+be|must\s+be)\s+(?:DAN|STAN|MONG|EVIE|UCAR)\b",
-                18,
-            ),
-            (r"<\s*/?\s*system\s*>", 9),
-            (r"jailbreak", 8),
-            (r"ignore\s+all\s+previous\s+instructions", 12),
-        ]
-
-        for pattern_str, weight in severe_patterns:
-            if re.search(pattern_str, normalized, re.IGNORECASE):
-                flags.append(f"severe_pattern: {pattern_str[:30]}")
-                score += weight
-
-        if score >= 16:
-            return {
-                "threat_level": ThreatLevel.SUSPICIOUS,
-                "is_safe": False,
-                "flags": flags,
-                "confidence": 0.7,
-                "threat_score": score,
-                "message": "Flagged despite benign context",
-                "recommendations": ["Human review recommended"],
-            }
-        elif score >= 10:
-            return {
-                "threat_level": ThreatLevel.LOW_RISK,
-                "is_safe": True,
-                "flags": flags,
-                "confidence": 0.4,
-                "threat_score": score,
-                "message": "Low risk patterns detected",
-                "recommendations": ["Monitor for similar patterns"],
-            }
-
-        return {
-            "threat_level": ThreatLevel.SAFE,
-            "is_safe": True,
-            "flags": [],
-            "confidence": 0.95,
-            "threat_score": 0,
-            "message": "Input accepted",
-            "recommendations": [],
-        }
 
     def _calculate_threat(
         self,
