@@ -211,6 +211,7 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 | `GET` | `/telemetry/events` | Yes* | Return stored telemetry events filtered by `trace_id`, `run_id`, `session_id`, `task_id`, or `event_type` |
 | `GET` | `/telemetry/events/stream` | Yes* | Replay and follow telemetry events over SSE for `session_id`; add `run_id` to isolate one run |
 | `GET` | `/telemetry/traces` | Yes* | List traces filtered by trace, run, session, task, agent, workflow, model, or status |
+| `GET` | `/telemetry/traces/{trace_id}/family` | Yes* | Return all traces linked to one execution boundary |
 | `GET` | `/telemetry/traces/{trace_id}` | Yes* | Return one exact trace |
 | `GET` | `/telemetry/runs/{run_id}/trace` | Yes* | Return the latest trace correlated to one run |
 | `GET` | `/telemetry/sessions/{session_id}/trace` | Yes* | Return the latest trace for one session |

@@ -833,6 +833,64 @@ class OmniCoreAgent:
             traces = [normalizer.normalize(trace) for trace in traces]
         return [trace.model_dump() for trace in traces]
 
+    async def get_trace_family(
+        self,
+        identifier: str | None = None,
+        *,
+        trace_id: str | None = None,
+        run_id: str | None = None,
+        normalize: bool = False,
+    ) -> list[Dict[str, Any]]:
+        """Return all locally stored traces linked to one execution boundary.
+
+        A family follows explicit parent links in both directions. For a
+        ``run_id`` seed, every trace carrying that run id is included before
+        linked ancestors and descendants are added. This avoids treating the
+        latest trace for a session as the complete execution history.
+        """
+        selectors = [value is not None for value in (trace_id, run_id)]
+        if identifier is not None and any(selectors):
+            raise ValueError("Use either identifier or trace lookup keyword arguments")
+        if sum(selectors) > 1:
+            raise ValueError("Use only one of trace_id or run_id")
+        if identifier is not None:
+            trace_id = identifier
+        if trace_id is None and run_id is None:
+            raise TypeError("get_trace_family() requires trace_id or run_id")
+
+        self._ensure_telemetry()
+        traces = await self.telemetry_store.list_traces()
+        by_id = {trace.trace_id: trace for trace in traces}
+        children: dict[str, set[str]] = {}
+        if trace_id is not None:
+            seed_ids = {trace_id} if trace_id in by_id else set()
+        else:
+            seed_ids = {trace.trace_id for trace in traces if trace.run_id == run_id}
+
+        for trace in traces:
+            if trace.parent_trace_id:
+                children.setdefault(trace.parent_trace_id, set()).add(trace.trace_id)
+
+        family_ids: set[str] = set()
+        pending = list(seed_ids)
+        while pending:
+            current = pending.pop()
+            if current in family_ids:
+                continue
+            trace = by_id.get(current)
+            if trace is None:
+                continue
+            family_ids.add(current)
+            if trace.parent_trace_id:
+                pending.append(trace.parent_trace_id)
+            pending.extend(children.get(current, ()))
+
+        selected = [trace for trace in traces if trace.trace_id in family_ids]
+        if normalize:
+            normalizer = TelemetryNormalizer()
+            selected = [normalizer.normalize(trace) for trace in selected]
+        return [trace.model_dump() for trace in selected]
+
     async def get_telemetry_stream_cursor(
         self,
         *,

@@ -108,6 +108,31 @@ async def test_child_agent_run_shares_store_and_records_parent_trace_link() -> N
 
 
 @pytest.mark.asyncio
+async def test_get_trace_family_follows_parent_and_child_traces() -> None:
+    store = InMemoryTelemetryStore()
+    agent = _initialized_agent(store=store)
+    recorder = agent.telemetry_recorder
+
+    await recorder.start_trace(trace_id="trace-family-parent", run_id="run-parent")
+    await recorder.start_trace(trace_id="trace-family-child", run_id="run-child")
+    await recorder.end_trace()
+    await recorder.end_trace()
+
+    family = await agent.get_trace_family(trace_id="trace-family-parent")
+
+    assert [trace["trace_id"] for trace in family] == [
+        "trace-family-parent",
+        "trace-family-child",
+    ]
+
+    child_family = await agent.get_trace_family(trace_id="trace-family-child")
+    assert [trace["trace_id"] for trace in child_family] == [
+        "trace-family-parent",
+        "trace-family-child",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_run_records_completed_trace_when_initializing_normally() -> None:
     store = InMemoryTelemetryStore()
     agent = OmniCoreAgent(

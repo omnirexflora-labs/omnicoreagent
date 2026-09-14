@@ -105,11 +105,16 @@ run:
 latest_session_trace = await agent.get_latest_trace("research_1")
 run_correlated_trace = await agent.get_trace(run_id=result["run_id"])
 normalized = await agent.get_trace(result["trace_id"], normalize=True)
+trace_family = await agent.get_trace_family(trace_id=result["trace_id"])
 ```
 
 `trace_id` is the exact trace handle. `run_id` is a correlation and filtering
 handle; when more than one trace is correlated to the same run, `get_trace(
 run_id=...)` returns the latest matching trace.
+
+`get_trace_family(...)` follows explicit parent trace links in both directions,
+so deep-agent child traces can be retrieved together with the parent without
+depending on latest-trace ordering.
 
 The trace is intentionally dependency-free inside the runtime. Exporters are
 optional adapters layered on top of this internal trace model.

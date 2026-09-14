@@ -1304,6 +1304,41 @@ class TestEndpoints:
         agent = server_client.app.state.agent
         agent.get_trace.assert_awaited_with(trace_id="trace_endpoint", normalize=False)
 
+    def test_telemetry_trace_family_endpoint_uses_explicit_lineage_accessor(
+        self, server_client
+    ):
+        agent = server_client.app.state.agent
+        agent.get_trace_family = AsyncMock(
+            return_value=[
+                {
+                    "trace_id": "trace_endpoint",
+                    "run_id": "run_endpoint",
+                    "status": "completed",
+                    "events": [],
+                    "spans": [],
+                },
+                {
+                    "trace_id": "trace_child",
+                    "run_id": "run_child",
+                    "parent_trace_id": "trace_endpoint",
+                    "status": "completed",
+                    "events": [],
+                    "spans": [],
+                },
+            ]
+        )
+
+        resp = server_client.get("/telemetry/traces/trace_endpoint/family")
+
+        assert resp.status_code == 200
+        assert [item["trace_id"] for item in resp.json()["traces"]] == [
+            "trace_endpoint",
+            "trace_child",
+        ]
+        agent.get_trace_family.assert_awaited_with(
+            trace_id="trace_endpoint", normalize=False
+        )
+
     def test_telemetry_run_trace_endpoint_uses_run_id(self, server_client):
         resp = server_client.get("/telemetry/runs/run_endpoint/trace")
 

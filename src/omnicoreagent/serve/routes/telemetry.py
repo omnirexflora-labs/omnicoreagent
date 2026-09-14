@@ -351,6 +351,32 @@ def create_telemetry_router() -> APIRouter:
         )
 
     @router.get(
+        "/traces/{trace_id}/family",
+        response_model=TelemetryTraceListResponse,
+        summary="Get linked telemetry trace family",
+        description="Return all traces linked to one execution boundary by parent trace links.",
+    )
+    async def get_trace_family(
+        request: Request,
+        trace_id: str,
+        normalize: bool = Query(default=False),
+    ) -> TelemetryTraceListResponse:
+        agent = get_agent(request)
+        get_family = getattr(agent, "get_trace_family", None)
+        if not callable(get_family):
+            raise HTTPException(status_code=501, detail="Trace families are unavailable")
+        traces = await _maybe_await(
+            get_family(trace_id=trace_id, normalize=normalize)
+        )
+        if not traces:
+            raise HTTPException(status_code=404, detail=f"Trace not found: {trace_id}")
+        return TelemetryTraceListResponse(
+            filters=_clean_filters(trace_id=trace_id, normalize=normalize),
+            traces=list(traces),
+            count=len(traces),
+        )
+
+    @router.get(
         "/traces/{trace_id}",
         response_model=TelemetryTraceDetailResponse,
         summary="Get exact telemetry trace",
