@@ -110,6 +110,7 @@ class BackgroundAgentManager:
             worker_id=self.worker_id,
             lease_seconds=self.lease_seconds,
             memory_router=self.memory_router,
+            telemetry_store=self.telemetry_store,
             governance_engine=self.governance_engine,
             event_log=self._event_log,
             emit_run=self._emit_run,
@@ -639,6 +640,7 @@ class BackgroundAgentManager:
             agents=self._agents,
             task_store=self.task_store,
             memory_router=self.memory_router,
+            telemetry_store=self.telemetry_store,
         )
 
     async def _emit_run(

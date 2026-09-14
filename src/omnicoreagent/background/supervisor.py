@@ -33,6 +33,11 @@ from omnicoreagent.background.run_helpers import (
     run_until_terminal_sleep_seconds,
 )
 from omnicoreagent.background.store.base import AbstractTaskStore
+from omnicoreagent.core.telemetry import (
+    TelemetryContext,
+    reset_telemetry_context,
+    set_telemetry_context,
+)
 from omnicoreagent.background.transitions import BackgroundRunTransitions
 from omnicoreagent.governance.capabilities import background_run_authority_request
 from omnicoreagent.governance.errors import GovernanceError
@@ -65,6 +70,7 @@ class BackgroundSupervisor:
         worker_id: str,
         lease_seconds: int,
         memory_router: Any = None,
+        telemetry_store: Any = None,
         governance_engine: Any = None,
         event_log: BackgroundEventLog,
         emit_run: Callable[..., Awaitable[None]] | None = None,
@@ -74,6 +80,7 @@ class BackgroundSupervisor:
         self.worker_id = worker_id
         self.lease_seconds = lease_seconds
         self.memory_router = memory_router
+        self.telemetry_store = telemetry_store
         self.governance_engine = governance_engine
         self.event_log = event_log
         self._emit_run = emit_run
@@ -338,6 +345,7 @@ class BackgroundSupervisor:
             agents=self.agents,
             task_store=self.task_store,
             memory_router=self.memory_router,
+            telemetry_store=self.telemetry_store,
         )
         if agent is None:
             await self.mark_terminal(claimed, RunStatus.FAILED, "agent missing")
@@ -572,17 +580,30 @@ class BackgroundSupervisor:
         except (TypeError, ValueError):
             kwargs["run_id"] = run.run_id
 
-        async def invoke():
-            if getattr(agent, "mcp_tools", None):
-                await agent.connect_mcp_servers()
-            return await agent.run(**kwargs)
-
-        coro = invoke()
-        return (
-            await asyncio.wait_for(coro, timeout=timeout_seconds)
-            if timeout_seconds
-            else await coro
+        context_token = set_telemetry_context(
+            TelemetryContext(
+                trace_id=self.event_log.telemetry_trace_id(run.run_id),
+                span_id=self.event_log.telemetry_span_id(run.run_id),
+                run_id=run.run_id,
+                session_id=run.session_id,
+                task_id=run.task_id,
+                agent_id=run.agent_id,
+            )
         )
+        try:
+            async def invoke():
+                if getattr(agent, "mcp_tools", None):
+                    await agent.connect_mcp_servers()
+                return await agent.run(**kwargs)
+
+            coro = invoke()
+            return (
+                await asyncio.wait_for(coro, timeout=timeout_seconds)
+                if timeout_seconds
+                else await coro
+            )
+        finally:
+            reset_telemetry_context(context_token)
 
     async def handle_attempt_failure(
         self,

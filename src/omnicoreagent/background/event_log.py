@@ -460,8 +460,16 @@ class BackgroundEventLog:
         return f"trace_background_{run_id}"
 
     @staticmethod
+    def telemetry_trace_id(run_id: str) -> str:
+        return BackgroundEventLog._telemetry_trace_id(run_id)
+
+    @staticmethod
     def _telemetry_span_id(run_id: str) -> str:
         return f"span_background_{run_id}"
+
+    @staticmethod
+    def telemetry_span_id(run_id: str) -> str:
+        return BackgroundEventLog._telemetry_span_id(run_id)
 
     @staticmethod
     def prepare_event_trace(events: list[dict[str, Any]]) -> list[dict[str, Any]]:

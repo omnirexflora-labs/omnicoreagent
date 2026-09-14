@@ -45,7 +45,12 @@ from omnicoreagent.background.models import (
 from omnicoreagent.background.event_log import BackgroundEventLog
 from omnicoreagent.background.recovery import BackgroundRunRecovery
 from omnicoreagent.background.transitions import BackgroundRunTransitions
-from omnicoreagent.core.telemetry import TelemetryStreamScope
+from omnicoreagent.core.telemetry import (
+    InMemoryTelemetryStore,
+    TelemetryRecorder,
+    TelemetryStreamScope,
+    current_telemetry_context,
+)
 from omnicoreagent.governance import (
     BudgetExceededError,
     GovernanceEngine,
@@ -1416,6 +1421,60 @@ async def test_background_run_lifecycle_events_emit_to_telemetry():
         and event.output["path"].endswith(("run.json", "events.jsonl"))
         for event in trace.events
     )
+
+
+@pytest.mark.asyncio
+async def test_background_agent_trace_is_linked_to_lifecycle_trace():
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+
+    class TelemetryAgent:
+        name = "telemetry-agent"
+        system_instruction = "test"
+        model_config = {"provider": "openai", "model": "gpt-5.4-mini"}
+        agent_config = {}
+        mcp_tools = []
+
+        async def run(self, query, session_id, run_id=None):
+            await recorder.start_trace(
+                name="agent.run",
+                kind="agent.run",
+                run_id=run_id,
+                session_id=session_id,
+                agent_id=self.name,
+            )
+            await recorder.end_trace(output={"response": "complete"})
+            return {"response": "complete"}
+
+    manager = BackgroundAgentManager(
+        task_store="in_memory",
+        telemetry_store=store,
+    )
+    await manager.register_agent("agent", TelemetryAgent())
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    run = await manager.run_now("task", wait=True)
+
+    traces = await store.list_traces()
+    child = next(
+        trace
+        for trace in traces
+        if trace.run_id == run.run_id
+        and trace.trace_id != f"trace_background_{run.run_id}"
+    )
+    assert child.parent_trace_id == f"trace_background_{run.run_id}"
+    assert child.parent_span_id == f"span_background_{run.run_id}"
+    family = await store.list_traces()
+    assert {trace.trace_id for trace in family} >= {
+        f"trace_background_{run.run_id}",
+        child.trace_id,
+    }
+    assert current_telemetry_context() is None
 
 
 @pytest.mark.asyncio

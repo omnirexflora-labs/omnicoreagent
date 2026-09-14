@@ -27,6 +27,7 @@ async def resolve_agent(
     agents: dict[str, Any],
     task_store: AbstractTaskStore,
     memory_router: Any,
+    telemetry_store: Any = None,
 ) -> Any | None:
     """Resolve a registered runtime agent, reconstructing from spec when possible."""
     agent = agents.get(agent_id)
@@ -49,6 +50,7 @@ async def resolve_agent(
             **({"workspace_config": spec.workspace_config} if spec.workspace_config else {}),
         },
         memory_router=memory_router,
+        telemetry_store=telemetry_store,
     )
     agents[agent_id] = agent
     return agent
