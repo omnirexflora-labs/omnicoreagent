@@ -189,6 +189,10 @@ The foundation phase provides:
   and portable evidence adapters
 - bounded provider stream statistics on `model.call` spans, including partial
   stream terminal states without token-by-token payload capture
+- standalone JSON evidence envelope and schema validation independent of
+  internal telemetry model classes
+- bounded persistence and exporter delivery with visible best-effort failures
+  and strict opt-in propagation
 - runtime evidence emission helpers
 
 The runtime facade wiring phase provides:
