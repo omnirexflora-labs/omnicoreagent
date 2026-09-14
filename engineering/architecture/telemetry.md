@@ -20,6 +20,11 @@ normalized traces without changing runtime facts. A generic adapter fixture
 proves that an external trajectory can be mapped into the same portable view;
 controlled Harbor integration and evaluation judgments remain separate layers.
 
+Telemetry event copies used for replay and follow may include a store-local
+`stream_cursor`. OmniServe emits that position as the SSE `id` field and accepts
+it through `cursor` or `Last-Event-ID` on reconnect. The cursor is transport
+state; stable evidence references remain `event_id`, `span_id`, and `trace_id`.
+
 ## Purpose
 
 OmniCoreAgent telemetry exists to:
