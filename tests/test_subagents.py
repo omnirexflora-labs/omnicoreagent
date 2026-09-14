@@ -16,6 +16,7 @@ from omnicoreagent.core.workspace.tools import (
 )
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.runtime.config import normalize_agent_config
+from omnicoreagent.core.telemetry import InMemoryTelemetryStore, TelemetryRecorder
 
 
 @pytest.fixture
@@ -77,6 +78,24 @@ class TestSubagentFactory:
         assert "Test task" in agent.system_instruction
         assert agent.agent_config["enable_workspace_files"] is True
         assert agent.agent_config["enable_subagents"] is False
+
+    def test_create_subagent_shares_built_in_telemetry_components(self, model_config):
+        store = InMemoryTelemetryStore()
+        recorder = TelemetryRecorder(store)
+        factory = SubagentFactory(
+            base_model_config=model_config,
+            telemetry_recorder=recorder,
+        )
+
+        child = factory.create_subagent(
+            name="traced",
+            role="Test role",
+            task="Test task",
+            output_path="/workspace/test/output.md",
+        )
+
+        assert child.telemetry_store is store
+        assert child.telemetry_recorder is recorder
 
     def test_create_subagent_uses_custom_prompt_builder(self, model_config):
         factory = SubagentFactory(

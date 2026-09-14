@@ -37,6 +37,7 @@ class SubagentFactory:
         prompt_builder: Optional[Any] = None,
         memory_router: Optional[Any] = None,
         governance_engine: Optional[Any] = None,
+        telemetry_recorder: Optional[Any] = None,
         debug: Optional[bool] = False,
     ):
         """
@@ -50,6 +51,7 @@ class SubagentFactory:
             prompt_builder: Optional prompt builder with build_subagent_prompt support
             memory_router: MemoryRouter instance
             governance_engine: Optional governed execution policy engine
+            telemetry_recorder: Parent recorder used for child trace correlation
             debug: Debug mode
         """
         self.base_model_config = base_model_config
@@ -60,6 +62,7 @@ class SubagentFactory:
         self.agent_config = agent_config or {}
         self.prompt_builder = prompt_builder
         self.governance_engine = governance_engine
+        self.telemetry_recorder = telemetry_recorder
         self._active_subagents: Dict[str, Any] = {}
 
     def _build_subagent_config(
@@ -195,6 +198,12 @@ When you have completed the task:
             mcp_tools=self.mcp_tools,
             local_tools=self._build_subagent_local_tools(),
             memory_router=self.memory_router,
+            telemetry_store=(
+                self.telemetry_recorder.store
+                if self.telemetry_recorder is not None
+                else None
+            ),
+            telemetry_recorder=self.telemetry_recorder,
             debug=self.debug,
         )
 
@@ -238,6 +247,8 @@ When you have completed the task:
                     "data": {
                         "subagent_name": name,
                         "output_path": output_path,
+                        "trace_id": result.get("trace_id"),
+                        "run_id": result.get("run_id"),
                         "error": response[:500] if len(response) > 500 else response,
                         "governance": self._governance_reference(),
                     },
@@ -256,6 +267,8 @@ When you have completed the task:
                     "data": {
                         "subagent_name": name,
                         "output_path": output_path,
+                        "trace_id": result.get("trace_id"),
+                        "run_id": result.get("run_id"),
                         "error": output_error,
                         "summary": response[:500] if len(response) > 500 else response,
                         "termination_reason": "missing_output",
@@ -271,6 +284,8 @@ When you have completed the task:
                 "data": {
                     "subagent_name": name,
                     "output_path": output_path,
+                    "trace_id": result.get("trace_id"),
+                    "run_id": result.get("run_id"),
                     "summary": response[:500] if len(response) > 500 else response,
                     "governance": self._governance_reference(),
                 },
@@ -286,6 +301,8 @@ When you have completed the task:
                     "data": {
                         "subagent_name": name,
                         "output_path": output_path,
+                        "trace_id": None,
+                        "run_id": None,
                         "error": error_msg,
                         "governance": self._governance_reference(),
                 },

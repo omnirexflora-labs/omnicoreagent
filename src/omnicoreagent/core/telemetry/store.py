@@ -481,6 +481,8 @@ def _merge_trace(existing: TelemetryTrace, incoming: TelemetryTrace) -> None:
         existing.ended_at = incoming.ended_at
     existing.run_id = incoming.run_id or existing.run_id
     existing.session_id = incoming.session_id or existing.session_id
+    existing.parent_trace_id = incoming.parent_trace_id or existing.parent_trace_id
+    existing.parent_span_id = incoming.parent_span_id or existing.parent_span_id
     existing.task_id = incoming.task_id or existing.task_id
     existing.suite_id = incoming.suite_id or existing.suite_id
     existing.agent_id = incoming.agent_id or existing.agent_id

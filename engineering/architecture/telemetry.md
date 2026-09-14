@@ -253,6 +253,8 @@ Use separate identifiers for separate concerns:
 | `trace_id` | Telemetry execution id. Primary key for one trace. |
 | `span_id` | Timed operation id inside a trace. |
 | `event_id` | Point-in-time evidence id. |
+| `parent_trace_id` | Trace that created this child trace, when applicable. |
+| `parent_span_id` | Span in the parent trace that created this child trace, when applicable. |
 | `run_id` | Runtime/background run id. |
 | `session_id` | Conversation continuity id. |
 | `task_id` | Background/evaluation task id when present. |

@@ -221,6 +221,8 @@ suite_id: string | null
 agent_id: string | null
 workflow_id: string | null
 root_span_id: string
+parent_trace_id: string | null
+parent_span_id: string | null
 status: running | completed | failed | cancelled | timeout | aborted_resource_guard | aborted_safety_guard | partial
 started_at: datetime
 ended_at: datetime | null
@@ -242,6 +244,9 @@ Rules:
 
 - a trace must contain exactly one root span.
 - `root_span_id` must refer to a span in `spans`.
+- `parent_trace_id` and `parent_span_id` identify the execution boundary that
+  created this trace when it is a child trace. They may refer to a different
+  trace; the child trace still has exactly one local root span.
 - partial traces are valid.
 - failed or aborted traces must retain all evidence captured before failure.
 - `metadata` must preserve version fields needed for future regression
@@ -389,10 +394,10 @@ Rules:
 - nested spans default to the current span as parent.
 - parallel tool calls share the same trace and parent `tool.batch` span.
 - each tool call gets its own child `tool.call` or `mcp.tool.call` span.
-- subagent execution is represented as child spans inside the parent trace in
-  the foundation design.
-- linked traces are out of scope until a future specification defines
-  `parent_trace_id`, trace links, and cross-trace evidence rules.
+- subagent execution records an explicit parent span. Child runtime traces may
+  remain separate while preserving the parent link and shared store.
+- trace-family queries must follow `parent_trace_id` links instead of relying
+  on shared `run_id` or latest-trace ordering.
 - background runs create or resume telemetry context from `run_id` and
   `session_id`.
 

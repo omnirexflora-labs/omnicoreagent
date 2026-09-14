@@ -385,6 +385,8 @@ class TelemetryTraceMetadata(SerializableTelemetryRecord):
 class TelemetryTrace(SerializableTelemetryRecord):
     trace_id: str
     root_span_id: str
+    parent_trace_id: str | None = None
+    parent_span_id: str | None = None
     status: TraceStatus | str = TraceStatus.RUNNING
     started_at: datetime = field(default_factory=utc_now)
     ended_at: datetime | None = None

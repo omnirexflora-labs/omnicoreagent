@@ -65,6 +65,8 @@ class TelemetryRecorder:
         kind: str = "agent.run",
         actor: TelemetryActor | None = None,
         trace_id: str | None = None,
+        parent_trace_id: str | None = None,
+        parent_span_id: str | None = None,
         run_id: str | None = None,
         session_id: str | None = None,
         task_id: str | None = None,
@@ -75,6 +77,14 @@ class TelemetryRecorder:
         input: dict[str, Any] | None = None,
     ) -> TelemetryContext:
         trace_id = trace_id or telemetry_id("trace")
+        current_parent = self.current_context()
+        if (
+            current_parent is not None
+            and current_parent.trace_id != trace_id
+            and parent_trace_id is None
+        ):
+            parent_trace_id = current_parent.trace_id
+            parent_span_id = current_parent.span_id
         actor = actor or TelemetryActor(type=ActorType.AGENT)
         root_span = TelemetrySpan(
             trace_id=trace_id,
@@ -86,6 +96,8 @@ class TelemetryRecorder:
         trace = TelemetryTrace(
             trace_id=trace_id,
             root_span_id=root_span.span_id,
+            parent_trace_id=parent_trace_id,
+            parent_span_id=parent_span_id,
             status=TraceStatus.RUNNING,
             run_id=run_id,
             session_id=session_id,

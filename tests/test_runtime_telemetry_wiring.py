@@ -84,6 +84,30 @@ async def test_run_records_completed_telemetry_trace() -> None:
 
 
 @pytest.mark.asyncio
+async def test_child_agent_run_shares_store_and_records_parent_trace_link() -> None:
+    store = InMemoryTelemetryStore()
+    parent = _initialized_agent(store=store)
+    await parent.telemetry_recorder.start_trace(
+        trace_id="trace-parent",
+        run_id="run-parent",
+        session_id="session-parent",
+    )
+
+    child = _initialized_agent(store=store)
+    child.telemetry_recorder = parent.telemetry_recorder
+    child.telemetry_stream = parent.telemetry_stream
+    child.agent.run = AsyncMock(return_value="child done")
+
+    result = await child.run("child task", session_id="session-child")
+
+    child_trace = await store.get_trace(result["trace_id"])
+    assert child_trace.parent_trace_id == "trace-parent"
+    assert child_trace.parent_span_id == parent.telemetry_recorder.current_context().span_id
+
+    await parent.telemetry_recorder.end_trace()
+
+
+@pytest.mark.asyncio
 async def test_run_records_completed_trace_when_initializing_normally() -> None:
     store = InMemoryTelemetryStore()
     agent = OmniCoreAgent(

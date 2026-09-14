@@ -17,6 +17,7 @@ def prepare_dynamic_subagents(
     memory_router: Any,
     governance_engine: Any = None,
     debug: bool,
+    telemetry_recorder: Any = None,
 ) -> tuple[Any, Any]:
     if not enabled:
         return existing_factory, local_tools
@@ -36,6 +37,7 @@ def prepare_dynamic_subagents(
         prompt_builder=prompt_builder,
         memory_router=memory_router,
         governance_engine=governance_engine,
+        telemetry_recorder=telemetry_recorder,
         debug=debug,
     )
     runtime("build_subagent_tools")(factory, local_tools)

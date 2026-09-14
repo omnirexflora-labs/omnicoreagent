@@ -612,6 +612,22 @@ async def test_nested_trace_end_restores_outer_context():
 
 
 @pytest.mark.asyncio
+async def test_nested_trace_records_parent_trace_and_span_link():
+    recorder = TelemetryRecorder(InMemoryTelemetryStore())
+    await recorder.start_trace(trace_id="trace-parent")
+    parent_context = current_telemetry_context()
+
+    await recorder.start_trace(trace_id="trace-child")
+
+    child = await recorder.store.get_trace("trace-child")
+    assert child.parent_trace_id == "trace-parent"
+    assert child.parent_span_id == parent_context.span_id
+
+    await recorder.end_trace()
+    await recorder.end_trace()
+
+
+@pytest.mark.asyncio
 async def test_end_trace_closes_active_child_spans_and_clears_context():
     store = InMemoryTelemetryStore()
     recorder = TelemetryRecorder(store)

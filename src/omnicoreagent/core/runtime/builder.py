@@ -68,6 +68,7 @@ def build_agent_runtime(
         prompt_builder=prompt_builder,
         memory_router=memory_router,
         governance_engine=governance_engine,
+        telemetry_recorder=telemetry_recorder,
         debug=debug,
     )
 
