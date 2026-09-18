@@ -217,10 +217,24 @@ def _redact(value: Any, redact_keys: set[str]) -> Any:
     return value
 
 
-# A key whose last word is one of these names a quantity or category, not a
-# credential: ``max_tokens``, ``prompt_token_count``, ``token_type``.
+# A key whose last word is one of these names a quantity, unit, or category,
+# not a credential: ``max_tokens``, ``prompt_token_count``, ``token_type``,
+# ``time_to_first_delta_ms``.
 _NON_SECRET_LAST_WORDS = frozenset(
-    {"count", "counts", "details", "limit", "limits", "budget", "tokens", "type", "usage"}
+    {
+        "budget",
+        "bytes",
+        "count",
+        "counts",
+        "details",
+        "limit",
+        "limits",
+        "ms",
+        "seconds",
+        "tokens",
+        "type",
+        "usage",
+    }
 )
 
 

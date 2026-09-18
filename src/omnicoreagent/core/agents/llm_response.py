@@ -35,18 +35,27 @@ def extract_response_usage(response: Any) -> Usage | None:
     if isinstance(raw_usage, Usage):
         return raw_usage
 
-    def get_value(name: str, default: int = 0) -> int:
-        if isinstance(raw_usage, dict):
-            value = raw_usage.get(name, default)
-        else:
-            value = getattr(raw_usage, name, default)
-        return int(value or 0)
+    def get(value: Any, name: str) -> Any:
+        if isinstance(value, dict):
+            return value.get(name)
+        return getattr(value, name, None)
 
+    def get_value(name: str) -> int:
+        return int(get(raw_usage, name) or 0)
+
+    details: dict[str, int] = {}
+    cached = get(get(raw_usage, "prompt_tokens_details"), "cached_tokens")
+    reasoning = get(get(raw_usage, "completion_tokens_details"), "reasoning_tokens")
+    if cached:
+        details["cached_input_tokens"] = int(cached)
+    if reasoning:
+        details["reasoning_tokens"] = int(reasoning)
     return Usage(
         requests=1,
         request_tokens=get_value("prompt_tokens"),
         response_tokens=get_value("completion_tokens"),
         total_tokens=get_value("total_tokens"),
+        details=details,
     )
 
 
@@ -119,5 +128,10 @@ def normalize_model_turn(response: Any):
             key: get(message, key)
             for key in ("reasoning_content",)
             if get(message, key) is not None
+        },
+        response_metadata={
+            key: get(response, key)
+            for key in ("id", "model")
+            if get(response, key) is not None
         },
     )

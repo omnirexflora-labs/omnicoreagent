@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import aclosing
 from dataclasses import dataclass
+import time
 from typing import Any
 
 from omnicoreagent.core.agents.llm_response import (
@@ -28,6 +29,7 @@ from omnicoreagent.core.types import SessionState
 from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.interaction_history import context_evidence, message_record
+from omnicoreagent.core.llm import MODEL_RETRY_OBSERVER
 
 
 @dataclass
@@ -291,6 +293,7 @@ class AgentLlmStepRunner:
             "visible_text_bytes": 0,
             "event_types": {},
         }
+        timing: dict[str, float | None] = {"started": None, "first_delta": None}
 
         async def request():
             if on_event is None:
@@ -305,6 +308,8 @@ class AgentLlmStepRunner:
                             raise ValueError("Provider stream returned multiple turns")
                         response = event["turn"]
                     else:
+                        if timing["first_delta"] is None:
+                            timing["first_delta"] = time.perf_counter()
                         event_type = str(event.get("type", "unknown"))
                         stream_stats["delta_count"] += 1
                         event_types = stream_stats["event_types"]
@@ -367,8 +372,22 @@ class AgentLlmStepRunner:
                     "streaming": stream_stats["streaming"],
                 },
             )
-            response = await request()
+            retries: list[dict[str, Any]] = []
+            retry_token = MODEL_RETRY_OBSERVER.set(retries.append)
+            timing["started"] = time.perf_counter()
+            try:
+                response = await request()
+            finally:
+                MODEL_RETRY_OBSERVER.reset(retry_token)
             normalized = normalize_model_turn(response)
+            model_facts = self._model_call_facts(
+                llm_connection,
+                telemetry_recorder,
+                timing=timing,
+                retries=retries,
+                normalized=normalized,
+                usage=extract_response_usage(response),
+            )
             response_payload = {
                 "content": normalized.text,
                 "tool_calls": [call.as_dict() for call in normalized.tool_calls],
@@ -388,19 +407,21 @@ class AgentLlmStepRunner:
                     "context_span_id": context_span_id,
                     "context_digest": (context_evidence or {}).get("context_digest"),
                     "tool_call_ids": response_payload["tool_call_ids"],
+                    # Facts about the call itself are metadata so they are
+                    # recorded under every capture policy.
+                    "model_call": model_facts,
                 },
             )
             await telemetry_recorder.end_span(
                 span_context.span_id,
                 status=SpanStatus.OK,
                 output={
-                    "finish_reason": normalized.finish_reason,
-                    "refusal": normalized.refusal,
                     "tool_call_ids": response_payload["tool_call_ids"],
                     "context_span_id": context_span_id,
                     "context_digest": (context_evidence or {}).get("context_digest"),
                     "stream_stats": stream_stats,
                     "usage": response_payload["usage"],
+                    **model_facts,
                 },
             )
             return (
@@ -413,22 +434,99 @@ class AgentLlmStepRunner:
             await telemetry_recorder.end_span(
                 span_context.span_id,
                 status=SpanStatus.CANCELLED,
-                output={"stream_stats": stream_stats},
+                output={
+                    "stream_stats": stream_stats,
+                    **self._model_call_facts(
+                        llm_connection,
+                        telemetry_recorder,
+                        timing=timing,
+                        retries=locals().get("retries", []),
+                    ),
+                },
             )
             raise
         except Exception as exc:
+            failed_facts = self._model_call_facts(
+                llm_connection,
+                telemetry_recorder,
+                timing=timing,
+                retries=locals().get("retries", []),
+            )
             await telemetry_recorder.record_exception(
                 exc,
                 event_type="model_error",
                 actor=TelemetryActor(type=ActorType.MODEL),
+                metadata={
+                    "model_span_id": span_context.span_id,
+                    "model_call": failed_facts,
+                },
             )
             await telemetry_recorder.end_span(
                 span_context.span_id,
                 status=SpanStatus.ERROR,
-                output={"stream_stats": stream_stats},
+                output={"stream_stats": stream_stats, **failed_facts},
                 error={"type": exc.__class__.__name__, "message": str(exc)},
             )
             raise
+
+    @staticmethod
+    def _model_call_facts(
+        llm_connection: Any,
+        telemetry_recorder: Any,
+        *,
+        timing: dict[str, float | None],
+        retries: list[dict[str, Any]],
+        normalized: ModelTurn | None = None,
+        usage: Usage | None = None,
+    ) -> dict[str, Any]:
+        """Describe one model call: identity, settings, tokens, timing, attempts."""
+        now = time.perf_counter()
+        started = timing.get("started")
+        first_delta = timing.get("first_delta")
+        settings_getter = getattr(llm_connection, "request_settings", None)
+        try:
+            request_settings = settings_getter() if callable(settings_getter) else None
+        except Exception:
+            request_settings = None
+        tokens = None
+        if usage is not None:
+            details = usage.details or {}
+            tokens = {
+                "input": usage.request_tokens,
+                "output": usage.response_tokens,
+                "total": usage.total_tokens,
+            }
+            if "cached_input_tokens" in details:
+                tokens["cached_input"] = details["cached_input_tokens"]
+            if "reasoning_tokens" in details:
+                tokens["reasoning"] = details["reasoning_tokens"]
+        response_metadata = normalized.response_metadata if normalized else {}
+        return {
+            "request_settings": request_settings,
+            "provider_response_id": response_metadata.get("id"),
+            "provider_model": response_metadata.get("model"),
+            "finish_reason": normalized.finish_reason if normalized else None,
+            "refused": bool(normalized.refusal) if normalized else False,
+            "tokens": tokens,
+            "latency_ms": (
+                round((now - started) * 1000, 3) if started is not None else None
+            ),
+            # First streamed output delivered to the caller (text deltas);
+            # a turn that streams only tool-call deltas has none.
+            "time_to_first_delta_ms": (
+                round((first_delta - started) * 1000, 3)
+                if started is not None and first_delta is not None
+                else None
+            ),
+            "attempts": len(retries) + 1,
+            "retries": [
+                {
+                    **retry,
+                    "message": telemetry_recorder.redact_text(str(retry["message"])),
+                }
+                for retry in retries
+            ],
+        }
 
     def _build_context_summarizer(
         self,

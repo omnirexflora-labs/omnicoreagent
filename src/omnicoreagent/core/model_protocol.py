@@ -63,6 +63,9 @@ class ModelTurn:
     usage: Usage | None = None
     refusal: str | None = None
     provider_fields: dict[str, Any] = field(default_factory=dict)
+    # Provider response identity (``id``, served ``model``). Evidence only;
+    # never sent back to the model.
+    response_metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def text(self) -> str:

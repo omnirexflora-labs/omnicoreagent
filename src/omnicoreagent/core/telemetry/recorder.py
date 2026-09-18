@@ -876,6 +876,10 @@ class TelemetryRecorder:
             stack=stack,
         )
 
+    def redact_text(self, value: str) -> str:
+        """Apply the telemetry privacy boundary to free text before recording it."""
+        return self._record_text(value)
+
     def _record_text(self, value: str) -> str:
         """Apply the telemetry privacy boundary to free text such as errors."""
 

@@ -23,10 +23,14 @@ class ModelStreamAssembler:
         self.calls: dict[int, dict[str, Any]] = {}
         self.finish_reason = None
         self.usage = None
+        self.response_id = None
+        self.response_model = None
 
     def feed(self, chunk: Any) -> list[dict[str, Any]]:
         if field(chunk, "usage") is not None:
             self.usage = field(chunk, "usage")
+        self.response_id = self.response_id or field(chunk, "id")
+        self.response_model = self.response_model or field(chunk, "model")
         events = []
         for choice in field(chunk, "choices", []) or []:
             if field(choice, "index", 0) != 0:
@@ -94,6 +98,8 @@ class ModelStreamAssembler:
             message["refusal"] = self.refusal
         return normalize_model_turn(
             {
+                "id": self.response_id,
+                "model": self.response_model,
                 "choices": [{"message": message, "finish_reason": self.finish_reason}],
                 "usage": self.usage,
             }

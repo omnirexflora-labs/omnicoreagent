@@ -5,6 +5,8 @@ import os
 import random
 import time
 import warnings
+from collections.abc import Callable
+from contextvars import ContextVar
 from typing import Any
 
 from omnicoreagent.core.logging import logger
@@ -39,6 +41,30 @@ def _get_litellm():
     return litellm
 
 
+# Receives one record per retried provider failure, so telemetry can show
+# every attempt of a model call rather than only the final outcome.
+MODEL_RETRY_OBSERVER: ContextVar[Callable[[dict[str, Any]], None] | None] = ContextVar(
+    "omnicoreagent_model_retry_observer", default=None
+)
+
+
+def _notify_retry(attempt: int, error: Exception, delay: float) -> None:
+    observer = MODEL_RETRY_OBSERVER.get()
+    if observer is None:
+        return
+    try:
+        observer(
+            {
+                "attempt": attempt,
+                "error_type": error.__class__.__name__,
+                "message": str(error),
+                "delay_seconds": delay,
+            }
+        )
+    except Exception:
+        logger.debug("Model retry observer failed", exc_info=True)
+
+
 def retry_with_backoff(max_retries=3, base_delay=1, max_delay=60, backoff_factor=2):
     def decorator(func):
         async def async_wrapper(*args, **kwargs):
@@ -56,16 +82,16 @@ def retry_with_backoff(max_retries=3, base_delay=1, max_delay=60, backoff_factor
                             f"Max retries ({max_retries}) exceeded. Last error: {e}"
                         )
                         break
-                    await asyncio.sleep(
-                        _retry_delay(
-                            e,
-                            attempt,
-                            max_retries,
-                            base_delay,
-                            max_delay,
-                            backoff_factor,
-                        )
+                    delay = _retry_delay(
+                        e,
+                        attempt,
+                        max_retries,
+                        base_delay,
+                        max_delay,
+                        backoff_factor,
                     )
+                    _notify_retry(attempt + 1, e, delay)
+                    await asyncio.sleep(delay)
             raise last_exception
 
         def sync_wrapper(*args, **kwargs):
@@ -307,6 +333,14 @@ class LLMConnection:
                     result = close()
                     if inspect.isawaitable(result):
                         await result
+
+    def request_settings(self) -> dict[str, Any]:
+        """The model and generation settings sent with every request."""
+        settings = {"model": self.llm_config["model"]}
+        for key in ("temperature", "max_tokens", "top_p", "reasoning_effort"):
+            if self.llm_config.get(key) is not None:
+                settings[key] = self.llm_config[key]
+        return settings
 
     def _completion_params(
         self, messages: list[Any], tools: list[dict[str, Any]] | None = None

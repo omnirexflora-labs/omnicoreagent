@@ -1125,6 +1125,8 @@ def test_redaction_keeps_token_usage_and_limits_visible():
             "max_tokens": 100,
             "token_limit": 2000,
             "tokenizer": "cl100k",
+            "time_to_first_token_ms": 42.5,
+            "token_bytes": 12,
         },
         TelemetryConfig(),
     )
@@ -1140,6 +1142,8 @@ def test_redaction_keeps_token_usage_and_limits_visible():
         "max_tokens": 100,
         "token_limit": 2000,
         "tokenizer": "cl100k",
+        "time_to_first_token_ms": 42.5,
+        "token_bytes": 12,
     }
 
 
