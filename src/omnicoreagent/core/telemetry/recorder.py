@@ -34,6 +34,7 @@ from omnicoreagent.core.telemetry.redaction import (
     TelemetryConfig,
     redact_payload,
     redact_sensitive_payload,
+    redact_sensitive_text,
 )
 from omnicoreagent.core.privacy import PrivacyFilter
 from omnicoreagent.core.telemetry.store import AbstractTelemetryStore
@@ -146,6 +147,24 @@ def _capture_gaps(trace: TelemetryTrace) -> list[dict[str, str]]:
                             "state": state.value,
                         }
                     )
+            error = getattr(record, "error", None)
+            stack_capture = (
+                error.metadata.get("stack_capture")
+                if error is not None and isinstance(error.metadata, dict)
+                else None
+            )
+            if isinstance(stack_capture, dict):
+                gaps.append(
+                    {
+                        "type": f"{record_type}_error_stack",
+                        "id": (
+                            record.span_id
+                            if record_type == "span"
+                            else record.event_id
+                        ),
+                        "state": str(stack_capture.get("state")),
+                    }
+                )
     return gaps
 
 
@@ -167,7 +186,7 @@ class TelemetryRecorder:
         self._span_sources: dict[str, str] = {}
         self._incomplete_trace_ids: set[str] = set()
         self._trace_templates: dict[str, TelemetryTrace] = {}
-        self._pending_payload_failure = False
+        self._trace_span_ids: dict[str, set[str]] = {}
         self._payload_trace_hint: str | None = None
 
     def current_context(self) -> TelemetryContext | None:
@@ -248,11 +267,10 @@ class TelemetryRecorder:
             ),
             spans=[root_span],
         )
-        if self._pending_payload_failure or trace_id in self._incomplete_trace_ids:
+        if trace_id in self._incomplete_trace_ids:
             trace.incomplete = True
-            self._incomplete_trace_ids.add(trace_id)
-            self._pending_payload_failure = False
         self._trace_templates[trace_id] = trace
+        self._trace_span_ids.setdefault(trace_id, set()).add(root_span.span_id)
         await self._write(self.store.upsert_trace(trace), trace_id=trace_id)
         context = TelemetryContext(
             trace_id=trace_id,
@@ -287,12 +305,8 @@ class TelemetryRecorder:
             if trace is None:
                 template = self._trace_templates.get(context.trace_id)
                 if template is not None:
-                    template.incomplete = True
-                    template.status = TraceStatus(status)
-                    template.ended_at = utc_now()
-                    await self._write(
-                        self.store.upsert_trace(template),
-                        trace_id=context.trace_id,
+                    await self._persist_template_end(
+                        template, status=status, output=output, error=error
                     )
                 return
             root_context = TelemetryContext(
@@ -331,17 +345,23 @@ class TelemetryRecorder:
                     output=output if span.span_id == trace.root_span_id else None,
                     error=error if span.span_id == trace.root_span_id else None,
                 )
+            # Capture gaps are computed on the final records: the root span's
+            # output descriptor only exists after it has been ended above.
+            final_trace = await self._read(
+                self.store.get_trace(context.trace_id),
+                trace_id=context.trace_id,
+            )
+            incomplete = context.trace_id in self._incomplete_trace_ids
             await self._write(
                 self.store.update_trace(
                     context.trace_id,
                     {
                         "status": TraceStatus(status).value,
                         "ended_at": ended_at,
-                        "incomplete": context.trace_id in self._incomplete_trace_ids,
+                        "incomplete": incomplete,
                         "evidence_status": (
                             TraceEvidenceStatus.PARTIAL.value
-                            if context.trace_id in self._incomplete_trace_ids
-                            or _capture_gaps(trace)
+                            if incomplete or _capture_gaps(final_trace or trace)
                             else trace.evidence_status.value
                         ),
                     },
@@ -383,7 +403,53 @@ class TelemetryRecorder:
                             }
                         )
         finally:
+            self._release_trace(context.trace_id)
             set_telemetry_context(parent_context)
+
+    async def _persist_template_end(
+        self,
+        template: TelemetryTrace,
+        *,
+        status: TraceStatus | str,
+        output: dict[str, Any] | None,
+        error: TelemetryError | dict[str, Any] | None,
+    ) -> None:
+        """Persist a closed trace from local state when the store is unreadable.
+
+        The stored copy cannot be inspected, so the result is always marked
+        incomplete and partial rather than inheriting the template's defaults.
+        """
+
+        trace_status = TraceStatus(status)
+        ended_at = utc_now()
+        for span in template.spans:
+            if span.span_id != template.root_span_id:
+                continue
+            recorded_output, output_capture = self._capture_output(
+                output, source=span.kind
+            )
+            span.status = _span_status_for_trace_status(trace_status)
+            span.ended_at = ended_at
+            span.output = recorded_output
+            span.output_capture = output_capture
+            span.error = self._record_error(error)
+        template.incomplete = True
+        template.evidence_status = TraceEvidenceStatus.PARTIAL
+        template.status = trace_status
+        template.ended_at = ended_at
+        await self._write(
+            self.store.upsert_trace(template),
+            trace_id=template.trace_id,
+        )
+
+    def _release_trace(self, trace_id: str) -> None:
+        """Drop per-trace recorder state once a trace has been finalized."""
+
+        self._trace_templates.pop(trace_id, None)
+        self._incomplete_trace_ids.discard(trace_id)
+        for span_id in self._trace_span_ids.pop(trace_id, set()):
+            self._span_parent_contexts.pop(span_id, None)
+            self._span_sources.pop(span_id, None)
 
     def _root_parent_context(self, context: TelemetryContext) -> TelemetryContext | None:
         current_span_id = context.span_id
@@ -426,6 +492,7 @@ class TelemetryRecorder:
         context = parent.child(span.span_id)
         self._span_parent_contexts[span.span_id] = parent
         self._span_sources[span.span_id] = kind
+        self._trace_span_ids.setdefault(parent.trace_id, set()).add(span.span_id)
         set_telemetry_context(context)
         return context
 
@@ -460,6 +527,9 @@ class TelemetryRecorder:
             set_telemetry_context(self._span_parent_contexts.get(target_span_id))
         self._span_parent_contexts.pop(target_span_id, None)
         self._span_sources.pop(target_span_id, None)
+        span_ids = self._trace_span_ids.get(context.trace_id)
+        if span_ids is not None:
+            span_ids.discard(target_span_id)
 
     @asynccontextmanager
     async def span(
@@ -687,6 +757,15 @@ class TelemetryRecorder:
         state = CaptureState.AVAILABLE
         reference = None
         reason = None
+        if isinstance(recorded, dict) and recorded.get("not_recorded"):
+            return None, TelemetryCapture(
+                state=CaptureState.NOT_RECORDED,
+                source=_capture_source(source),
+                role=role,
+                original_bytes=original_bytes,
+                policy_version=self.config.fingerprint(),
+                reason=str(recorded.get("reason") or "payload was not recorded"),
+            )
         if isinstance(recorded, dict) and recorded.get("offloaded"):
             state = CaptureState.OFFLOADED
             reference = recorded.get("reference")
@@ -719,14 +798,43 @@ class TelemetryRecorder:
         if error is None:
             return None
         record = TelemetryError.from_dict(error) if isinstance(error, dict) else error
-        stack = self._record_payload({"stack": record.stack}).get("stack")
+        metadata = self._record_payload(record.metadata)
+        if not isinstance(metadata, dict):
+            metadata = {}
+        stack = self._record_text(record.stack) if record.stack else None
+        if stack is not None:
+            encoded = stack.encode("utf-8", errors="replace")
+            limit = max(self.config.max_payload_bytes, 0)
+            if len(encoded) > limit:
+                # The innermost frames are at the end of a Python traceback.
+                stack = encoded[len(encoded) - limit :].decode(
+                    "utf-8", errors="replace"
+                )
+                metadata["stack_capture"] = {
+                    "state": CaptureState.TRUNCATED.value,
+                    "original_bytes": len(encoded),
+                    "recorded_bytes": len(stack.encode("utf-8")),
+                }
         return TelemetryError(
             type=record.type,
-            message=record.message,
+            message=self._record_text(record.message),
             retryable=record.retryable,
-            metadata=self._record_payload(record.metadata),
+            metadata=metadata,
             stack=stack,
         )
+
+    def _record_text(self, value: str) -> str:
+        """Apply the telemetry privacy boundary to free text such as errors."""
+
+        try:
+            text = self.privacy_filter.redact_text(str(value), boundary="telemetry")
+        except Exception as exc:
+            # An unfiltered value must never be persisted.
+            self._mark_payload_failure()
+            if self.config.strict:
+                raise
+            return f"[not recorded: privacy redaction failed: {exc.__class__.__name__}]"
+        return redact_sensitive_text(text, self.config)
 
     def _record_metadata(self, value: dict[str, Any]) -> dict[str, Any]:
         return self._record_payload(value)
@@ -734,24 +842,42 @@ class TelemetryRecorder:
     def _record_payload(self, value: Any) -> Any:
         try:
             value = self.privacy_filter.redact(value, boundary="telemetry")
+        except Exception as exc:
+            # An unfiltered value must never be persisted.
+            self._mark_payload_failure()
+            if self.config.strict:
+                raise
+            return {
+                "not_recorded": True,
+                "reason": f"privacy redaction failed: {exc.__class__.__name__}",
+            }
+        try:
             return redact_payload(
                 value,
                 self.config,
                 payload_store=self.payload_store,
             )
-        except Exception:
-            trace_id = self._payload_trace_hint
-            if trace_id is None:
-                context = self.current_context()
-                trace_id = context.trace_id if context is not None else None
-            if trace_id is None:
-                self._pending_payload_failure = True
-            else:
-                self._incomplete_trace_ids.add(trace_id)
+        except Exception as exc:
+            self._mark_payload_failure()
             if self.config.strict:
                 raise
             fallback = replace(self.config, offload_large_payloads=False)
-            return redact_payload(value, fallback)
+            recorded = redact_payload(value, fallback)
+            if isinstance(recorded, dict) and recorded.get("truncated"):
+                recorded["reason"] = (
+                    f"payload offload failed: {exc.__class__.__name__}"
+                )
+            return recorded
+
+    def _mark_payload_failure(self) -> None:
+        """Attribute a payload failure to the trace being recorded."""
+
+        trace_id = self._payload_trace_hint
+        if trace_id is None:
+            context = self.current_context()
+            trace_id = context.trace_id if context is not None else None
+        if trace_id is not None:
+            self._incomplete_trace_ids.add(trace_id)
 
     async def _write(self, operation, *, trace_id: str | None = None) -> None:
         try:

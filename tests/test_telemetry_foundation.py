@@ -29,6 +29,7 @@ from omnicoreagent.core.telemetry import (
     current_telemetry_context,
 )
 from omnicoreagent.core.telemetry.models import utc_now
+from omnicoreagent.core.privacy import PrivacyFilter
 
 
 def test_telemetry_config_fingerprint_is_stable_and_policy_sensitive():
@@ -936,3 +937,227 @@ def test_root_and_core_exports_include_telemetry_companions():
         assert module.TelemetryTraceMetadata is TelemetryTraceMetadata
         assert module.OTelTraceMapper is OTelTraceMapper
         assert module.InMemoryTelemetryExporter is InMemoryTelemetryExporter
+
+
+@pytest.mark.asyncio
+async def test_end_trace_counts_final_output_capture_gap():
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store, TelemetryConfig(record_outputs=False))
+    context = await recorder.start_trace(trace_id="trace-final-gap")
+
+    await recorder.end_trace(output={"response": "private answer"})
+
+    trace = await store.get_trace(context.trace_id)
+    root = next(span for span in trace.spans if span.span_id == trace.root_span_id)
+    assert root.output_capture.state == CaptureState.NOT_RECORDED
+    assert trace.evidence_status == TraceEvidenceStatus.PARTIAL
+
+
+@pytest.mark.asyncio
+async def test_end_trace_read_failure_persists_partial_closed_trace():
+    class BrokenReadStore(InMemoryTelemetryStore):
+        async def get_trace(self, trace_id):
+            raise RuntimeError("read failed")
+
+    store = BrokenReadStore()
+    recorder = TelemetryRecorder(store, TelemetryConfig(strict=False))
+    await recorder.start_trace(trace_id="trace-read-fallback")
+
+    await recorder.end_trace()
+
+    trace = await InMemoryTelemetryStore.get_trace(store, "trace-read-fallback")
+    root = next(span for span in trace.spans if span.span_id == trace.root_span_id)
+    assert trace.incomplete is True
+    assert trace.status == TraceStatus.COMPLETED
+    assert trace.evidence_status == TraceEvidenceStatus.PARTIAL
+    assert root.status != SpanStatus.RUNNING
+    assert root.ended_at is not None
+
+
+@pytest.mark.asyncio
+async def test_recorder_redacts_error_message_and_stack():
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    context = await recorder.start_trace(trace_id="trace-error-redaction")
+
+    await recorder.emit_event(
+        "runtime_error",
+        error={
+            "type": "ProviderError",
+            "message": "failed for a@b.com api_key=sk-SECRET Authorization: Bearer abc.def",
+            "stack": 'File "x.py"\n  token="tok-SECRET"',
+        },
+    )
+    await recorder.end_trace()
+
+    trace = await store.get_trace(context.trace_id)
+    error = trace.events[-1].error
+    assert "sk-SECRET" not in error.message
+    assert "abc.def" not in error.message
+    assert "a@b.com" not in error.message
+    assert "ProviderError" == error.type
+    assert "tok-SECRET" not in error.stack
+
+
+@pytest.mark.asyncio
+async def test_recorder_keeps_oversized_error_stack_reference():
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store, TelemetryConfig(max_payload_bytes=200))
+    context = await recorder.start_trace(trace_id="trace-large-stack")
+
+    await recorder.emit_event(
+        "runtime_error",
+        error={"type": "Boom", "message": "boom", "stack": "frame\n" * 500},
+    )
+    await recorder.end_trace()
+
+    trace = await store.get_trace(context.trace_id)
+    stack = trace.events[-1].error.stack
+    assert stack
+    assert len(stack) < 3000
+    assert trace.evidence_status == TraceEvidenceStatus.PARTIAL
+
+
+@pytest.mark.asyncio
+async def test_recorder_releases_per_trace_state_after_end():
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    await recorder.start_trace(trace_id="trace-release")
+    async with recorder.span(name="work", kind="agent.step"):
+        pass
+
+    await recorder.end_trace()
+
+    assert recorder._trace_templates == {}
+    assert recorder._incomplete_trace_ids == set()
+    assert recorder._span_parent_contexts == {}
+    assert recorder._span_sources == {}
+
+
+@pytest.mark.asyncio
+async def test_privacy_filter_failure_never_persists_raw_payload():
+    class BrokenPrivacyFilter:
+        def redact(self, value, *, boundary):
+            raise RuntimeError("filter unavailable")
+
+        def redact_text(self, value, *, boundary):
+            raise RuntimeError("filter unavailable")
+
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store, privacy_filter=BrokenPrivacyFilter())
+    context = await recorder.start_trace(trace_id="trace-privacy-failure")
+    await recorder.emit_event(
+        "user_message", input={"content": "reach me at a@b.com"}
+    )
+    await recorder.emit_event(
+        "runtime_error",
+        error={"type": "Boom", "message": "failed for a@b.com", "stack": "a@b.com"},
+    )
+    await recorder.end_trace()
+
+    trace = await store.get_trace(context.trace_id)
+    error = trace.events[-1].error
+    assert error.message.startswith("[not recorded: privacy redaction failed")
+    event = trace.events[-2]
+    assert event.input is None
+    assert event.input_capture.state == CaptureState.NOT_RECORDED
+    assert "privacy redaction failed" in event.input_capture.reason
+    assert "a@b.com" not in str(trace.model_dump())
+    assert trace.incomplete is True
+    assert trace.evidence_status == TraceEvidenceStatus.PARTIAL
+
+
+@pytest.mark.asyncio
+async def test_payload_failure_outside_trace_does_not_mark_next_trace():
+    class BrokenPrivacyFilter:
+        def redact(self, value, *, boundary):
+            raise RuntimeError("filter unavailable")
+
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store, privacy_filter=BrokenPrivacyFilter())
+    recorder._record_payload({"value": 1})
+    recorder.privacy_filter = PrivacyFilter()
+
+    context = await recorder.start_trace(trace_id="trace-after-orphan-failure")
+    await recorder.end_trace()
+
+    trace = await store.get_trace(context.trace_id)
+    assert trace.incomplete is False
+    assert trace.evidence_status == TraceEvidenceStatus.COMPLETE
+
+
+@pytest.mark.asyncio
+async def test_offload_failure_falls_back_to_truncation_with_reason():
+    class BrokenPayloadStore:
+        def write(self, value, *, checksum, content_type):
+            raise OSError("disk full")
+
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(
+        store,
+        TelemetryConfig(max_payload_bytes=100, offload_large_payloads=True),
+        payload_store=BrokenPayloadStore(),
+    )
+    context = await recorder.start_trace(trace_id="trace-offload-failure")
+    await recorder.emit_event("tool_result", output={"content": "x" * 1000})
+    await recorder.end_trace()
+
+    trace = await store.get_trace(context.trace_id)
+    capture = trace.events[-1].output_capture
+    assert capture.state == CaptureState.TRUNCATED
+    assert "payload offload failed: OSError" in capture.reason
+    assert trace.incomplete is True
+    assert trace.evidence_status == TraceEvidenceStatus.PARTIAL
+
+
+def test_redaction_keeps_token_usage_and_limits_visible():
+    from omnicoreagent.core.telemetry.redaction import redact_sensitive_payload
+
+    redacted = redact_sensitive_payload(
+        {
+            "usage": {
+                "request_tokens": 10,
+                "response_tokens": 5,
+                "total_tokens": 15,
+                "prompt_tokens_details": {"cached_tokens": 2},
+                "prompt_token_count": 10,
+            },
+            "max_tokens": 100,
+            "token_limit": 2000,
+            "tokenizer": "cl100k",
+        },
+        TelemetryConfig(),
+    )
+
+    assert redacted == {
+        "usage": {
+            "request_tokens": 10,
+            "response_tokens": 5,
+            "total_tokens": 15,
+            "prompt_tokens_details": {"cached_tokens": 2},
+            "prompt_token_count": 10,
+        },
+        "max_tokens": 100,
+        "token_limit": 2000,
+        "tokenizer": "cl100k",
+    }
+
+
+def test_redaction_matches_secret_key_segments_and_spellings():
+    from omnicoreagent.core.telemetry.redaction import redact_sensitive_payload
+
+    secrets = {
+        "token": "a",
+        "accessToken": "b",
+        "x-api-key": "c",
+        "sessiontoken": "d",
+        "id_token": "e",
+        "db_password": "f",
+        "Authorization": "g",
+        "secret_key": "h",
+        "Set-Cookie": "i",
+    }
+
+    redacted = redact_sensitive_payload(secrets, TelemetryConfig())
+
+    assert set(redacted.values()) == {"[REDACTED]"}

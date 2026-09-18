@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 import math
+import re
 from typing import Any
 
 from omnicoreagent.core.telemetry.payloads import TelemetryPayloadStore
@@ -124,6 +125,38 @@ def redact_sensitive_payload(value: Any, config: TelemetryConfig) -> Any:
     return _redact(value, {key.lower() for key in config.redact_keys})
 
 
+_CREDENTIAL_SCHEME = re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+")
+_INLINE_ASSIGNMENT = re.compile(
+    r"""(?P<key>[A-Za-z_][\w-]*)(?P<sep>["']?\s*[=:]\s*)(?P<quote>["']?)"""
+    r"""(?P<value>[^\s"',;&}]+)"""
+)
+
+
+def redact_sensitive_text(value: str, config: TelemetryConfig) -> str:
+    """Redact ``key=value`` credentials and auth schemes inside free text.
+
+    Error messages and stacks are strings rather than mappings, so key-based
+    payload redaction cannot see a secret embedded in them.
+    """
+
+    redact_keys = {key.lower() for key in config.redact_keys}
+    text = _CREDENTIAL_SCHEME.sub(
+        lambda match: f"{match.group(1)} {REDACTION_MARKER}", value
+    )
+
+    def replace(match: re.Match[str]) -> str:
+        if not _should_redact_key(match.group("key"), redact_keys):
+            return match.group(0)
+        if match.group("value") == REDACTION_MARKER:
+            return match.group(0)
+        return (
+            f"{match.group('key')}{match.group('sep')}"
+            f"{match.group('quote')}{REDACTION_MARKER}"
+        )
+
+    return _INLINE_ASSIGNMENT.sub(replace, text)
+
+
 def _redact(value: Any, redact_keys: set[str]) -> Any:
     if isinstance(value, dict):
         return {
@@ -139,9 +172,35 @@ def _redact(value: Any, redact_keys: set[str]) -> Any:
     return value
 
 
+# A key whose last word is one of these names a quantity or category, not a
+# credential: ``max_tokens``, ``prompt_token_count``, ``token_type``.
+_NON_SECRET_LAST_WORDS = frozenset(
+    {"count", "counts", "details", "limit", "limits", "budget", "tokens", "type", "usage"}
+)
+
+
+def _key_words(key: str) -> list[str]:
+    snake = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key)
+    return [word for word in re.split(r"[^a-z0-9]+", snake.lower()) if word]
+
+
 def _should_redact_key(key: str, redact_keys: set[str]) -> bool:
-    normalized = key.replace("-", "_").lower()
-    return any(pattern in normalized for pattern in redact_keys)
+    words = _key_words(key)
+    if not words or words[-1] in _NON_SECRET_LAST_WORDS:
+        return False
+    joined = f"_{'_'.join(words)}_"
+    compact = "".join(words)
+    for pattern in redact_keys:
+        pattern_words = _key_words(pattern)
+        if not pattern_words:
+            continue
+        # Match whole words (``client_secret``) or a run-together suffix
+        # (``sessiontoken``), never a fragment such as ``tokenizer``.
+        if f"_{'_'.join(pattern_words)}_" in joined or compact.endswith(
+            "".join(pattern_words)
+        ):
+            return True
+    return False
 
 
 def _truncate_or_reference(
