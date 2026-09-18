@@ -479,7 +479,11 @@ async def test_real_tool_batch_history_survives_a_new_agent_run():
     } == {"record found", "record missing"}
     assert all("metadata" not in m for m in results)
     contents = [m["content"] for m in messages]
-    assert "look up both records" in contents
+    # The earlier query is replayed with the prefix it was first sent with.
+    assert any(
+        c and c.startswith("[CURRENT_DATETIME: ") and c.endswith("\n\nlook up both records")
+        for c in contents
+    )
     assert "One found, one missing." in contents
     assert "Previous work summary" in contents
     assert "Worker completed" in contents

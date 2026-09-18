@@ -330,18 +330,22 @@ class BaseReactAgent:
             )
         session_state.messages.append(Message(role="user", content=query))
         self.prompt_context_builder.inject_current_datetime(session_state.messages)
+        context_prefix = _datetime_prefix(session_state.messages[-1], query)
         await self._record_runtime_message(
             telemetry_recorder,
             session_state.messages[-1],
             kind="current_datetime",
-            content=_datetime_prefix(session_state.messages[-1], query),
+            content=context_prefix,
         )
 
+        # History keeps the query itself; the prefix is stored beside it so a
+        # later run resends this message exactly as the model first saw it,
+        # which keeps the provider's prompt cache prefix intact.
         await add_message_to_history(
             role="user",
             content=query,
             session_id=session_id,
-            metadata={"agent_name": self.agent_name},
+            metadata={"agent_name": self.agent_name, "context_prefix": context_prefix},
         )
         if session_state.state not in [
             AgentState.IDLE,

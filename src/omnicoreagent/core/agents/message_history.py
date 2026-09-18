@@ -71,7 +71,12 @@ class AgentMessageHistoryLoader:
             return
 
         self._clear_or_flush_pending(session_state=session_state)
-        session_state.messages.append(Message(role="user", content=message.content))
+        # Resend the runtime prefix the model saw with this query (for
+        # example the current datetime), so the replayed context is identical.
+        prefix = (message.metadata or {}).get("context_prefix") or ""
+        session_state.messages.append(
+            Message(role="user", content=prefix + (message.content or ""))
+        )
 
     def _apply_assistant_message(
         self, message: Message, session_state: SessionState
