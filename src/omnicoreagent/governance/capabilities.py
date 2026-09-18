@@ -239,7 +239,6 @@ def mcp_server_authority_request(
         mcp_server=server_name,
         metadata={
             "server_name": server_name,
-            "requested_name": server.get("requested_name"),
             "transport_type": transport,
             "has_explicit_env": bool(server.get("env")),
             "url": _redacted_url(server.get("url")),

@@ -7,13 +7,20 @@ from typing import Any
 
 @dataclass(slots=True)
 class ConnectedServer:
-    requested_name: str
+    """One connected server, identified by its configured name.
+
+    ``server_info`` is what the server reported about itself; it is metadata
+    only, because the server controls it.
+    """
+
     server_name: str
     session: Any
     read_stream: Any
     write_stream: Any
     transport_type: str
     stack: AsyncExitStack
+    server_info: dict[str, Any] | None = None
+    protocol_version: str | None = None
 
     def session_info(self) -> dict[str, Any]:
         return {
@@ -23,6 +30,8 @@ class ConnectedServer:
             "connected": True,
             "transport_type": self.transport_type,
             "stack": self.stack,
+            "server_info": self.server_info,
+            "protocol_version": self.protocol_version,
         }
 
 
@@ -44,7 +53,7 @@ class MCPClientState:
             )
 
         self.server_names.append(connected_server.server_name)
-        self.added_servers_names[connected_server.requested_name] = (
+        self.added_servers_names[connected_server.server_name] = (
             connected_server.server_name
         )
         self.sessions[connected_server.server_name] = connected_server.session_info()
@@ -54,9 +63,6 @@ class MCPClientState:
 
     def resolve_server_name(self, name: str) -> str:
         name_lower = name.lower()
-        for requested_name, server_name in self.added_servers_names.items():
-            if name_lower in {requested_name.lower(), server_name.lower()}:
-                return server_name
         for server_name in self.server_names:
             if name_lower == server_name.lower():
                 return server_name

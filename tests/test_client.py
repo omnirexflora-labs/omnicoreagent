@@ -230,40 +230,6 @@ class TestMCPClient:
         open_transport.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_governance_reauthorizes_reported_mcp_server_identity(
-        self,
-        mock_client,
-    ):
-        mock_client.governance_engine = GovernanceEngine(_strict_mcp_connection_policy())
-        server_info = MagicMock()
-        server_info.name = "unexpected-server"
-        reported_session = AsyncMock()
-        reported_session.initialize = AsyncMock()
-        # mcp 2 reports the server's identity on the session.
-        reported_session.server_info = server_info
-        reported_session.list_tools = AsyncMock(return_value=MagicMock(tools=[]))
-        mock_transport = (AsyncMock(), AsyncMock())
-        mock_stack = AsyncMock()
-        mock_stack.enter_async_context.return_value = reported_session
-
-        with patch(
-            "omnicoreagent.mcp_clients_connection.client.AsyncExitStack",
-            return_value=mock_stack,
-        ), patch(
-            "omnicoreagent.mcp_clients_connection.client.open_server_transport",
-            AsyncMock(return_value=(*mock_transport, "stdio")),
-        ) as open_transport:
-            with pytest.raises(UnknownCapabilityError):
-                await mock_client._connect_to_single_server(
-                    MOCK_MCP_SERVERS[0],
-                    "server1",
-                )
-
-        open_transport.assert_awaited_once()
-        mock_stack.aclose.assert_awaited_once()
-        assert "unexpected-server" not in mock_client.sessions
-
-    @pytest.mark.asyncio
     async def test_unsupported_mcp_transport_fails_before_transport(self, mock_client):
         mock_client.governance_engine = GovernanceEngine(_strict_mcp_connection_policy())
         server = {
@@ -370,9 +336,9 @@ class TestMCPClient:
                 "connection_type": "stdio",
             },
         }
-        mock_client.added_servers_names = {"added_server": "test_server"}
+        mock_client.added_servers_names = {"test_server": "test_server"}
 
-        result = await mock_client.remove_server("added_server")
+        result = await mock_client.remove_server("TEST_SERVER")
 
         assert "disconnected successfully" in result
         mock_stack.aclose.assert_awaited_once()

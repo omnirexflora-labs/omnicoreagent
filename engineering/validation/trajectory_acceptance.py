@@ -154,7 +154,8 @@ def check_trajectory(
     assert malformed["raw_arguments"] == "{broken", malformed
     assert malformed["rejection_reason"] == "invalid_arguments", malformed
     failed = next(c for c in step_one if c["tool_call_id"] == "c_err")
-    assert failed["error"] and failed["error"]["message"], failed
+    # If this ever fails, say whether the trace lost a write (incomplete).
+    assert failed["error"] and failed["error"]["message"], (failed, t["incomplete"])
     checked.append("4 tool calls")
 
     # 5. Observations reach the next model call exactly
@@ -371,9 +372,9 @@ def _tools():
 
 
 _MODEL = {"provider": "openai", "model": "gpt-5.4-mini", "api_key": "scripted"}
-# Long enough for the delegated child run on a loaded machine; `slow` far
-# exceeds it.
-TOOL_CALL_TIMEOUT = 3
+# Long enough for the delegated child run on a heavily loaded machine (3 s
+# timed out at load average 10); `slow` far exceeds it.
+TOOL_CALL_TIMEOUT = 10
 
 _AGENT_CONFIG = {
     "guardrail_mode": "off",

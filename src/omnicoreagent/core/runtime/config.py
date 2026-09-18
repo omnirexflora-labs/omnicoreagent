@@ -4,7 +4,11 @@ from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from enum import Enum
 from os import PathLike
 from typing import Any
-import uuid
+import hashlib
+import json
+from pathlib import Path
+import re
+from urllib.parse import urlparse
 
 from omnicoreagent.core.privacy import PrivacyConfig
 from omnicoreagent.core.workspace.config import (
@@ -82,8 +86,19 @@ class MCPToolConfig:
     def __post_init__(self):
         self.transport_type = TransportType(self.transport_type)
         if not self.name:
-            base = self.command or self.url or "mcp_tool"
-            self.name = f"{base}_{uuid.uuid4().hex[:6]}"
+            self.name = _default_mcp_server_name(self)
+
+
+def _default_mcp_server_name(tool: MCPToolConfig) -> str:
+    """A stable name from what identifies the server, so an unnamed server
+    keeps the same identity in governance and telemetry across runs."""
+    source = Path(tool.command).name if tool.command else urlparse(tool.url or "").hostname
+    base = re.sub(r"[^a-z0-9]+", "_", (source or "mcp").lower())
+    identity = json.dumps(
+        [tool.transport_type.value, tool.command, tool.args, tool.url], sort_keys=True
+    )
+    digest = hashlib.sha256(identity.encode()).hexdigest()[:6]
+    return f"{base.strip('_') or 'mcp'}_{digest}"
 
 
 def _default_memory_config() -> dict[str, Any]:

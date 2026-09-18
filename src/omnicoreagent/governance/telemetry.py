@@ -162,6 +162,7 @@ def _request_correlation(request: AuthorityRequest) -> dict[str, Any]:
         "risk_level": request.risk_level,
         "tool_call_id": metadata.get("tool_call_id"),
         "tool_name": metadata.get("tool_name"),
+        "mcp_server": request.mcp_server,
     }
 
 

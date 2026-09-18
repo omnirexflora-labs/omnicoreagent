@@ -112,6 +112,11 @@ class MCPClient:
             logger.info(f"start servers task error: {e}")
 
     async def _connect_to_single_server(self, server, server_added_name):
+        # The configured name is the identity: routing, governance, and
+        # telemetry all use it. What the server reports is metadata.
+        server_name = server_added_name
+        if self.state.has_server(server_name):
+            return f"{server_name} is already connected. Disconnect it and try again."
         try:
             await self._authorize_server_connection(server)
             stack = AsyncExitStack()
@@ -143,29 +148,20 @@ class MCPClient:
             )
             await session.initialize()
             reported = session.server_info
-            server_name = (reported.name if reported else None) or server_added_name
-            if server_name != server_added_name:
-                await self._authorize_server_connection(
-                    server,
-                    resolved_server_name=server_name,
-                )
-            if self.state.has_server(server_name):
-                error_message = (
-                    f"{server_name} is already connected. Disconnect it and try again."
-                )
-                if self.debug:
-                    logger.error(error_message)
-                await stack.aclose()
-                return error_message
             self.state.add_server(
                 ConnectedServer(
-                    requested_name=server_added_name,
                     server_name=server_name,
                     session=session,
                     read_stream=read_stream,
                     write_stream=write_stream,
                     transport_type=transport_type,
                     stack=stack,
+                    server_info=(
+                        {"name": reported.name, "version": reported.version}
+                        if reported
+                        else None
+                    ),
+                    protocol_version=session.protocol_version,
                 )
             )
             if self.debug:
@@ -194,22 +190,10 @@ class MCPClient:
             logger.error(error_message)
             return error_message
 
-    async def _authorize_server_connection(
-        self,
-        server: dict[str, Any],
-        *,
-        resolved_server_name: str | None = None,
-    ) -> None:
+    async def _authorize_server_connection(self, server: dict[str, Any]) -> None:
         if self.governance_engine is None:
             return
-        server_identity = dict(server)
-        if resolved_server_name is not None:
-            server_identity["name"] = resolved_server_name
-            server_identity["requested_name"] = server.get("name")
-        request = mcp_server_authority_request(
-            server=server_identity,
-            actor="mcp_client",
-        )
+        request = mcp_server_authority_request(server=server, actor="mcp_client")
         await self.governance_engine.authorize(request)
 
     async def _load_server_tools(self, server_name: str) -> list[Any]:
@@ -260,14 +244,13 @@ class MCPClient:
     async def remove_server(self, name: str) -> str:
         """Disconnect and remove a server by name."""
         try:
-            old_name = name
             server_name = self.state.resolve_server_name(name)
             if len(self.sessions) == 1:
                 return (
                     f"Cannot remove {name}: at least one server must remain connected."
                 )
             session_info = self.sessions[server_name]
-            await self._close_session(server_name=old_name, session_info=session_info)
+            await self._close_session(server_name=server_name, session_info=session_info)
         except ValueError as e:
             error_message = f"Error removing server: {str(e)}"
             logger.error(error_message)
