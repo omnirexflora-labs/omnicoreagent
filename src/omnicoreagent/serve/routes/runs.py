@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.runtime.deadline import run_with_timeout
 from omnicoreagent.core.telemetry import TraceStatus
 
 from ..models import ErrorResponse, RunRequest, RunResponse
@@ -87,13 +88,8 @@ def create_runs_router() -> APIRouter:
                 body.query,
                 **build_run_kwargs(agent, session_id=session_id, run_id=run_id),
             )
-            if config.request_timeout > 0:
-                result = await asyncio.wait_for(
-                    run_coro,
-                    timeout=config.request_timeout,
-                )
-            else:
-                result = await run_coro
+            # A deadline marks the agent trace as timed out, not cancelled.
+            result = await run_with_timeout(run_coro, config.request_timeout)
             normalized = normalize_run_result(
                 result,
                 agent_name=get_agent_name(agent),

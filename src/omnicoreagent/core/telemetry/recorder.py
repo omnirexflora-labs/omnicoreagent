@@ -220,13 +220,16 @@ class TelemetryRecorder:
     ) -> TelemetryContext:
         trace_id = trace_id or telemetry_id("trace")
         current_parent = self.current_context()
-        if (
-            current_parent is not None
-            and current_parent.trace_id != trace_id
-            and parent_trace_id is None
-        ):
-            parent_trace_id = current_parent.trace_id
-            parent_span_id = current_parent.span_id
+        inherited = (
+            current_parent
+            if current_parent is not None and current_parent.trace_id != trace_id
+            else None
+        )
+        if inherited is not None and parent_trace_id is None:
+            parent_trace_id = inherited.trace_id
+            parent_span_id = inherited.span_id
+        if inherited is not None and task_id is None:
+            task_id = inherited.task_id
         actor = actor or TelemetryActor(type=ActorType.AGENT)
         previous_payload_trace_hint = self._payload_trace_hint
         self._payload_trace_hint = trace_id
@@ -267,6 +270,13 @@ class TelemetryRecorder:
             ),
             spans=[root_span],
         )
+        if inherited is not None and inherited.attempt_id is not None:
+            trace.metadata.extra.setdefault(
+                "background_attempt_id", inherited.attempt_id
+            )
+            trace.metadata.extra.setdefault(
+                "background_attempt_number", inherited.attempt_number
+            )
         if trace_id in self._incomplete_trace_ids:
             trace.incomplete = True
         self._trace_templates[trace_id] = trace
@@ -281,6 +291,8 @@ class TelemetryRecorder:
             suite_id=suite_id,
             agent_id=agent_id,
             workflow_id=workflow_id,
+            attempt_id=inherited.attempt_id if inherited is not None else None,
+            attempt_number=inherited.attempt_number if inherited is not None else None,
         )
         self._span_parent_contexts[root_span.span_id] = self.current_context()
         self._span_sources[root_span.span_id] = kind

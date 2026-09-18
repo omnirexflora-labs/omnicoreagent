@@ -16,6 +16,13 @@ from omnicoreagent.core.logging import logger
 from omnicoreagent.governance.capabilities import subagent_spawn_authority_requests
 from omnicoreagent.governance.snapshots import derive_subagent_policy
 from omnicoreagent.core.workspace.paths import WORKSPACE_FILE_PATH_PREFIXES
+from omnicoreagent.core.agents.subagent_helpers import (
+    accepts_run_id,
+    find_child_trace_id,
+    finish_delegation,
+    new_child_run_id,
+)
+from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 
 
 class SubagentFactory:
@@ -219,6 +226,12 @@ When you have completed the task:
     ) -> Dict[str, Any]:
         """
         Create and run a subagent, return result.
+
+        The spawn is recorded as a ``subagent.run`` delegation span on the
+        parent trace. The child's run id is assigned before it starts, so the
+        delegation, the child trace, and the returned result stay linked on
+        success, error, and cancellation; the workspace output check is part
+        of the delegation evidence.
         """
         logger.info(f"Spawning subagent '{name}' for task: {task[:50]}...")
 
@@ -228,12 +241,26 @@ When you have completed the task:
             task=task,
             output_path=output_path,
         )
+        child_run_id = new_child_run_id() if accepts_run_id(agent) else None
+        delegation = await self._start_delegation(
+            agent=agent,
+            name=name,
+            role=role,
+            task=task,
+            output_path=output_path,
+            child_run_id=child_run_id,
+        )
+        child_trace_id = None
 
         try:
             if self.mcp_tools:
                 await agent.connect_mcp_servers()
 
-            result = await agent.run(str(task))
+            result = await agent.run(
+                str(task), **({"run_id": child_run_id} if child_run_id else {})
+            )
+            child_trace_id = result.get("trace_id")
+            child_run_id = result.get("run_id") or child_run_id
             response = result.get("response", str(result)) or ""
             if not isinstance(response, str):
                 response = str(response)
@@ -242,13 +269,20 @@ When you have completed the task:
 
             if is_error:
                 logger.warning(f"Subagent '{name}' returned an error response")
+                await self._finish_delegation(
+                    delegation,
+                    child_run_id=child_run_id,
+                    child_trace_id=child_trace_id,
+                    status=SpanStatus.ERROR,
+                    error={"type": "SubagentError", "message": response[:500]},
+                )
                 return {
                     "status": "error",
                     "data": {
                         "subagent_name": name,
                         "output_path": output_path,
-                        "trace_id": result.get("trace_id"),
-                        "run_id": result.get("run_id"),
+                        "trace_id": child_trace_id,
+                        "run_id": child_run_id,
                         "error": response[:500] if len(response) > 500 else response,
                         "governance": self._governance_reference(),
                     },
@@ -256,19 +290,32 @@ When you have completed the task:
                 }
 
             output_error = self._workspace_output_error(agent, output_path)
+            workspace_output = {
+                "path": output_path,
+                "verified": output_error is None,
+                "error": output_error,
+            }
             if output_error is not None:
                 logger.warning(
                     "Subagent '%s' completed without a usable workspace output: %s",
                     name,
                     output_error,
                 )
+                await self._finish_delegation(
+                    delegation,
+                    child_run_id=child_run_id,
+                    child_trace_id=child_trace_id,
+                    status=SpanStatus.ERROR,
+                    error={"type": "MissingWorkspaceOutput", "message": output_error},
+                    workspace_output=workspace_output,
+                )
                 return {
                     "status": "error",
                     "data": {
                         "subagent_name": name,
                         "output_path": output_path,
-                        "trace_id": result.get("trace_id"),
-                        "run_id": result.get("run_id"),
+                        "trace_id": child_trace_id,
+                        "run_id": child_run_id,
                         "error": output_error,
                         "summary": response[:500] if len(response) > 500 else response,
                         "termination_reason": "missing_output",
@@ -278,33 +325,62 @@ When you have completed the task:
                 }
 
             logger.info(f"Subagent '{name}' completed task")
+            await self._finish_delegation(
+                delegation,
+                child_run_id=child_run_id,
+                child_trace_id=child_trace_id,
+                status=SpanStatus.OK,
+                workspace_output=workspace_output,
+            )
 
             return {
                 "status": "success",
                 "data": {
                     "subagent_name": name,
                     "output_path": output_path,
-                    "trace_id": result.get("trace_id"),
-                    "run_id": result.get("run_id"),
+                    "trace_id": child_trace_id,
+                    "run_id": child_run_id,
                     "summary": response[:500] if len(response) > 500 else response,
                     "governance": self._governance_reference(),
                 },
                 "message": f"Subagent '{name}' completed. Requested output path: {output_path}",
             }
 
+        except asyncio.CancelledError as e:
+            await self._finish_delegation(
+                delegation,
+                child_run_id=child_run_id,
+                child_trace_id=child_trace_id,
+                status=SpanStatus.CANCELLED,
+                error={"type": e.__class__.__name__, "message": "cancelled"},
+            )
+            raise
+
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Subagent '{name}' failed: {error_msg}")
+            child_trace_id = child_trace_id or await find_child_trace_id(
+                self.telemetry_recorder,
+                run_id=child_run_id,
+                parent_trace_id=delegation["parent_trace_id"],
+            )
+            await self._finish_delegation(
+                delegation,
+                child_run_id=child_run_id,
+                child_trace_id=child_trace_id,
+                status=SpanStatus.ERROR,
+                error={"type": e.__class__.__name__, "message": error_msg},
+            )
 
             return {
                 "status": "error",
-                    "data": {
-                        "subagent_name": name,
-                        "output_path": output_path,
-                        "trace_id": None,
-                        "run_id": None,
-                        "error": error_msg,
-                        "governance": self._governance_reference(),
+                "data": {
+                    "subagent_name": name,
+                    "output_path": output_path,
+                    "trace_id": child_trace_id,
+                    "run_id": child_run_id,
+                    "error": error_msg,
+                    "governance": self._governance_reference(),
                 },
                 "message": f"Subagent '{name}' failed: {error_msg}",
             }
@@ -313,6 +389,82 @@ When you have completed the task:
             await agent.cleanup()
             if name in self._active_subagents:
                 del self._active_subagents[name]
+
+    async def _start_delegation(
+        self,
+        *,
+        agent: Any,
+        name: str,
+        role: str,
+        task: str,
+        output_path: str,
+        child_run_id: str | None,
+    ) -> Dict[str, Any]:
+        recorder = self.telemetry_recorder
+        parent_context = recorder.current_context() if recorder is not None else None
+        delegation: Dict[str, Any] = {
+            "agent_name": getattr(agent, "name", name),
+            "span": None,
+            "spawn_event_id": None,
+            "parent_context": parent_context,
+            "parent_trace_id": parent_context.trace_id if parent_context else None,
+        }
+        if parent_context is None:
+            return delegation
+        actor = TelemetryActor(type=ActorType.AGENT, name=delegation["agent_name"])
+        spawn_input = {
+            "agent_name": delegation["agent_name"],
+            "role": role,
+            "task": task,
+            "output_path": output_path,
+        }
+        span = await recorder.start_span(
+            name=f"subagent:{delegation['agent_name']}",
+            kind="subagent.run",
+            actor=actor,
+            input=spawn_input,
+        )
+        spawn_event = await recorder.emit_event(
+            "subagent_spawn",
+            actor=actor,
+            input=spawn_input,
+            metadata={
+                "subagent_span_id": span.span_id,
+                "parent_trace_id": parent_context.trace_id,
+                "parent_span_id": parent_context.span_id,
+                "child_run_id": child_run_id,
+                "dynamic": True,
+            },
+        )
+        delegation["span"] = span
+        delegation["spawn_event_id"] = spawn_event.event_id
+        return delegation
+
+    async def _finish_delegation(
+        self,
+        delegation: Dict[str, Any],
+        *,
+        child_run_id: str | None,
+        child_trace_id: str | None,
+        status: SpanStatus,
+        error: Dict[str, Any] | None = None,
+        workspace_output: Dict[str, Any] | None = None,
+    ) -> None:
+        if delegation["span"] is None:
+            return
+        await finish_delegation(
+            self.telemetry_recorder,
+            delegation["span"],
+            agent_name=delegation["agent_name"],
+            session_id=None,
+            spawn_event_id=delegation["spawn_event_id"],
+            parent_context=delegation["parent_context"],
+            child_run_id=child_run_id,
+            child_trace_id=child_trace_id,
+            status=status,
+            error=error,
+            workspace_output=workspace_output,
+        )
 
     @staticmethod
     def _workspace_output_error(agent: Any, output_path: str) -> str | None:

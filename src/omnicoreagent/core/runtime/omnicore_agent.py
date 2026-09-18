@@ -15,6 +15,7 @@ from omnicoreagent.core.runtime import (
 )
 from omnicoreagent.core.privacy import PrivacyFilter
 from omnicoreagent.core.interaction_history import stable_message_digest
+from omnicoreagent.core.runtime.deadline import current_stop_reason
 from omnicoreagent.core.runtime.imports import (
     LazyDefaultPromptBuilder,
     runtime,
@@ -599,9 +600,14 @@ class OmniCoreAgent:
             return self.privacy_filter.redact(formatted_response, boundary="public")
         except asyncio.CancelledError as exc:
             if trace_context is not None and not trace_finalizing:
+                stopped_status = (
+                    TraceStatus.TIMEOUT
+                    if current_stop_reason() == "timeout"
+                    else TraceStatus.CANCELLED
+                )
                 try:
                     await self._end_trace_after_failure(
-                        trace_context, exc, status=TraceStatus.CANCELLED
+                        trace_context, exc, status=stopped_status
                     )
                 except Exception as telemetry_exc:
                     # Cancellation must keep propagating; a strict telemetry
@@ -639,13 +645,17 @@ class OmniCoreAgent:
         current = recorder.current_context()
         if current is None or current.trace_id != trace_context.trace_id:
             set_telemetry_context(trace_context)
-        error = {"type": exc.__class__.__name__, "message": str(exc)}
+        error = (
+            {"type": "TimeoutError", "message": "Run exceeded its deadline"}
+            if status == TraceStatus.TIMEOUT
+            else {"type": exc.__class__.__name__, "message": str(exc)}
+        )
         try:
-            if status == TraceStatus.CANCELLED:
+            if status in {TraceStatus.CANCELLED, TraceStatus.TIMEOUT}:
                 await recorder.emit_event(
                     "final_state",
                     actor=self._telemetry_actor(),
-                    output={"status": TraceStatus.CANCELLED.value},
+                    output={"status": status.value},
                 )
             else:
                 await recorder.record_exception(
@@ -1120,7 +1130,9 @@ class OmniCoreAgent:
                 pending.append(trace.parent_trace_id)
             pending.extend(children.get(current, ()))
 
-        selected = [trace for trace in traces if trace.trace_id in family_ids]
+        selected = _lineage_order(
+            [trace for trace in traces if trace.trace_id in family_ids]
+        )
         if normalize:
             normalizer = TelemetryNormalizer()
             selected = [normalizer.normalize(trace) for trace in selected]
@@ -1209,3 +1221,40 @@ class OmniCoreAgent:
         """Clean up MCP servers without removing the agent and the config"""
         if self.mcp_client:
             await self.mcp_client.cleanup()
+
+
+def _lineage_order(traces: list[TelemetryTrace]) -> list[TelemetryTrace]:
+    """Order a trace family parent-first, depth-first, siblings by start time.
+
+    A parent and child can start within the same clock tick, so start time
+    alone cannot guarantee that a parent is listed before its children.
+    """
+
+    def start_key(trace: TelemetryTrace) -> tuple[Any, str]:
+        return (trace.started_at, trace.trace_id)
+
+    by_id = {trace.trace_id: trace for trace in traces}
+    children: dict[str, list[TelemetryTrace]] = {}
+    roots: list[TelemetryTrace] = []
+    for trace in traces:
+        if trace.parent_trace_id in by_id and trace.parent_trace_id != trace.trace_id:
+            children.setdefault(trace.parent_trace_id, []).append(trace)
+        else:
+            roots.append(trace)
+    ordered: list[TelemetryTrace] = []
+    seen: set[str] = set()
+    stack = sorted(roots, key=start_key, reverse=True)
+    while stack:
+        trace = stack.pop()
+        if trace.trace_id in seen:
+            continue
+        seen.add(trace.trace_id)
+        ordered.append(trace)
+        stack.extend(
+            sorted(children.get(trace.trace_id, []), key=start_key, reverse=True)
+        )
+    # A malformed parent cycle has no root; keep those traces in start order.
+    ordered.extend(
+        trace for trace in sorted(traces, key=start_key) if trace.trace_id not in seen
+    )
+    return ordered

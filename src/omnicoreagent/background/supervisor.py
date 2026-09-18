@@ -39,6 +39,7 @@ from omnicoreagent.core.telemetry import (
     set_telemetry_context,
 )
 from omnicoreagent.background.transitions import BackgroundRunTransitions
+from omnicoreagent.core.runtime.deadline import run_with_timeout
 from omnicoreagent.governance.capabilities import background_run_authority_request
 from omnicoreagent.governance.errors import GovernanceError
 from omnicoreagent.governance.snapshots import (
@@ -471,6 +472,7 @@ class BackgroundSupervisor:
                 query=query,
                 run=running.run,
                 timeout_seconds=running.task.timeout_seconds,
+                attempt=running.attempt,
             )
         )
         self.track_active_agent_task(running.run.run_id, agent_task)
@@ -571,6 +573,7 @@ class BackgroundSupervisor:
         query: str,
         run: BackgroundRun,
         timeout_seconds: int | None,
+        attempt: BackgroundAttempt | None = None,
     ) -> Any:
         kwargs = {"query": query, "session_id": run.session_id}
         try:
@@ -588,6 +591,10 @@ class BackgroundSupervisor:
                 session_id=run.session_id,
                 task_id=run.task_id,
                 agent_id=run.agent_id,
+                attempt_id=attempt.attempt_id if attempt is not None else None,
+                attempt_number=(
+                    attempt.attempt_number if attempt is not None else None
+                ),
             )
         )
         try:
@@ -596,12 +603,8 @@ class BackgroundSupervisor:
                     await agent.connect_mcp_servers()
                 return await agent.run(**kwargs)
 
-            coro = invoke()
-            return (
-                await asyncio.wait_for(coro, timeout=timeout_seconds)
-                if timeout_seconds
-                else await coro
-            )
+            # A deadline marks the run as timed out, not cancelled, in its trace.
+            return await run_with_timeout(invoke(), timeout_seconds)
         finally:
             reset_telemetry_context(context_token)
 

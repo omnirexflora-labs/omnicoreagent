@@ -1008,3 +1008,45 @@ async def test_strict_telemetry_failure_does_not_replace_cancellation() -> None:
         if trace.trace_id != "trace-serve"
     )
     assert child.status == TraceStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_trace_family_lists_parents_before_children_with_equal_start_times() -> None:
+    from omnicoreagent.core.telemetry.models import utc_now
+
+    store = InMemoryTelemetryStore()
+    agent = _initialized_agent(store=store)
+    same_instant = utc_now()
+
+    def trace(trace_id, parent=None):
+        root = TelemetrySpan(
+            trace_id=trace_id,
+            name="agent.run",
+            kind="agent.run",
+            actor=TelemetryActor(type=ActorType.AGENT),
+        )
+        return TelemetryTrace(
+            trace_id=trace_id,
+            root_span_id=root.span_id,
+            parent_trace_id=parent,
+            started_at=same_instant,
+            spans=[root],
+        )
+
+    # Identifiers sort in the opposite order to the lineage.
+    for item in (
+        trace("trace-z-root"),
+        trace("trace-b-child", "trace-z-root"),
+        trace("trace-a-grandchild", "trace-b-child"),
+        trace("trace-c-child", "trace-z-root"),
+    ):
+        await store.upsert_trace(item)
+
+    family = await agent.get_trace_family(trace_id="trace-a-grandchild")
+
+    assert [item["trace_id"] for item in family] == [
+        "trace-z-root",
+        "trace-b-child",
+        "trace-a-grandchild",
+        "trace-c-child",
+    ]

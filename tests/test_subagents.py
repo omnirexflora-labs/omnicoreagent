@@ -2,7 +2,7 @@
 Tests for OmniCoreAgent dynamic subagent harness support.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -191,7 +191,7 @@ class TestSubagentFactory:
 
         assert result["status"] == "success"
         mock_connect.assert_awaited_once()
-        mock_run.assert_awaited_once_with("Research topic X")
+        mock_run.assert_awaited_once_with("Research topic X", run_id=ANY)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

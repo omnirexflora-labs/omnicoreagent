@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator
 from uuid import uuid4
 
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.runtime.deadline import run_with_timeout
 
 from .serialization import normalize_event, normalize_run_result
 from .state import get_agent_name
@@ -245,10 +246,8 @@ async def _run_agent_with_timeout(
     kwargs = build_run_kwargs(agent, session_id=session_id, run_id=run_id)
     if on_event is not None and accepts_keyword(signature(agent.run), "on_event"):
         kwargs["on_event"] = on_event
-    run_coro = agent.run(query, **kwargs)
-    if timeout_seconds and timeout_seconds > 0:
-        return await asyncio.wait_for(run_coro, timeout=timeout_seconds)
-    return await run_coro
+    # A deadline marks the agent trace as timed out, not cancelled.
+    return await run_with_timeout(agent.run(query, **kwargs), timeout_seconds)
 
 
 async def _drain_event_queue(

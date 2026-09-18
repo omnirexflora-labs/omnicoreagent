@@ -5,7 +5,10 @@ from typing import Any
 
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.agents.subagent_helpers import (
+    accepts_run_id,
     build_kwargs,
+    finish_delegation,
+    new_child_run_id,
     resolve_agent,
 )
 from omnicoreagent.core.logging import logger
@@ -37,7 +40,8 @@ class SubAgentCallRunner:
             else None
         )
         spawn_event_id = None
-        terminal_event_id = None
+        child_run_id = None
+        child_trace_id = None
         try:
             if telemetry_recorder is not None:
                 span = await telemetry_recorder.start_span(
@@ -50,6 +54,11 @@ class SubAgentCallRunner:
                         "parameters": call.get("parameters", {}),
                     },
                 )
+            agent = resolve_agent(agent_name, sub_agents)
+            # The child's run id is assigned here so the delegation stays
+            # linked to the child trace on every terminal path.
+            child_run_id = new_child_run_id() if accepts_run_id(agent) else None
+            if telemetry_recorder is not None:
                 spawn_event = await telemetry_recorder.emit_event(
                     "subagent_spawn",
                     actor=TelemetryActor(type=ActorType.AGENT, name=agent_name),
@@ -66,16 +75,17 @@ class SubAgentCallRunner:
                         "parent_span_id": (
                             parent_context.span_id if parent_context else None
                         ),
+                        "child_run_id": child_run_id,
                     },
                 )
                 spawn_event_id = spawn_event.event_id
-            agent = resolve_agent(agent_name, sub_agents)
-            if telemetry_recorder is not None:
                 inherit_telemetry = getattr(agent, "_inherit_telemetry", None)
                 if callable(inherit_telemetry):
                     inherit_telemetry(telemetry_recorder)
             params = dict(call.get("parameters", {}))
             params["session_id"] = session_id
+            if child_run_id is not None:
+                params["run_id"] = child_run_id
             kwargs = build_kwargs(agent, params)
 
             if hasattr(agent, "mcp_tools") and agent.mcp_tools:
@@ -90,45 +100,21 @@ class SubAgentCallRunner:
                 not isinstance(result, dict)
                 or result.get("status", "success") == "success"
             )
-            if telemetry_recorder is not None:
-                child_trace_id = (
-                    result.get("trace_id") if isinstance(result, dict) else None
-                )
-                child_run_id = (
-                    result.get("run_id") if isinstance(result, dict) else None
-                )
-                terminal_event = await telemetry_recorder.emit_event(
-                    "subagent_result" if succeeded else "subagent_error",
-                    actor=TelemetryActor(type=ActorType.AGENT, name=agent_name),
-                    input={"session_id": session_id, "agent_name": agent_name},
-                    output={"result": result},
-                    metadata={
-                        "subagent_span_id": span.span_id if span else None,
-                        "spawn_event_id": spawn_event_id,
-                        "child_trace_id": child_trace_id,
-                        "child_run_id": child_run_id,
-                    },
-                )
-                terminal_event_id = terminal_event.event_id
-            if telemetry_recorder is not None and span is not None:
-                child_trace_id = (
-                    result.get("trace_id") if isinstance(result, dict) else None
-                )
-                child_run_id = (
-                    result.get("run_id") if isinstance(result, dict) else None
-                )
-                await telemetry_recorder.end_span(
-                    span.span_id,
-                    status=SpanStatus.OK if succeeded else SpanStatus.ERROR,
-                    output={
-                        "agent_name": agent_name,
-                        "status": "success" if succeeded else "error",
-                        "child_trace_id": child_trace_id,
-                        "child_run_id": child_run_id,
-                        "spawn_event_id": spawn_event_id,
-                        "terminal_event_id": terminal_event_id,
-                    },
-                )
+            if isinstance(result, dict):
+                child_trace_id = result.get("trace_id")
+                child_run_id = result.get("run_id") or child_run_id
+            await finish_delegation(
+                telemetry_recorder,
+                span,
+                agent_name=agent_name,
+                session_id=session_id,
+                spawn_event_id=spawn_event_id,
+                parent_context=parent_context,
+                child_run_id=child_run_id,
+                child_trace_id=child_trace_id,
+                status=SpanStatus.OK if succeeded else SpanStatus.ERROR,
+                output={"result": result},
+            )
             return agent_name, result
 
         except asyncio.CancelledError as e:
@@ -141,28 +127,18 @@ class SubAgentCallRunner:
                         f"Failed to cleanup cancelled sub-agent {agent_name}: "
                         f"{cleanup_error}"
                     )
-            if telemetry_recorder is not None:
-                terminal_event = await telemetry_recorder.emit_event(
-                    "subagent_error",
-                    actor=TelemetryActor(type=ActorType.AGENT, name=agent_name),
-                    input={"session_id": session_id, "agent_name": agent_name},
-                    error={"type": e.__class__.__name__, "message": "cancelled"},
-                    metadata={
-                        "subagent_span_id": span.span_id if span else None,
-                        "spawn_event_id": spawn_event_id,
-                    },
-                )
-                terminal_event_id = terminal_event.event_id
-            if telemetry_recorder is not None and span is not None:
-                await telemetry_recorder.end_span(
-                    span.span_id,
-                    status=SpanStatus.CANCELLED,
-                    output={
-                        "spawn_event_id": spawn_event_id,
-                        "terminal_event_id": terminal_event_id,
-                    },
-                    error={"type": e.__class__.__name__, "message": "cancelled"},
-                )
+            await finish_delegation(
+                telemetry_recorder,
+                span,
+                agent_name=agent_name,
+                session_id=session_id,
+                spawn_event_id=spawn_event_id,
+                parent_context=parent_context,
+                child_run_id=child_run_id,
+                child_trace_id=child_trace_id,
+                status=SpanStatus.CANCELLED,
+                error={"type": e.__class__.__name__, "message": "cancelled"},
+            )
             raise
 
         except Exception as e:
@@ -175,28 +151,18 @@ class SubAgentCallRunner:
                         f"Failed to cleanup sub-agent {agent_name} after error: "
                         f"{cleanup_error}"
                     )
-            if telemetry_recorder is not None:
-                terminal_event = await telemetry_recorder.emit_event(
-                    "subagent_error",
-                    actor=TelemetryActor(type=ActorType.AGENT, name=agent_name),
-                    input={"session_id": session_id, "agent_name": agent_name},
-                    error={"type": e.__class__.__name__, "message": str(e)},
-                    metadata={
-                        "subagent_span_id": span.span_id if span else None,
-                        "spawn_event_id": spawn_event_id,
-                    },
-                )
-                terminal_event_id = terminal_event.event_id
-            if telemetry_recorder is not None and span is not None:
-                await telemetry_recorder.end_span(
-                    span.span_id,
-                    status=SpanStatus.ERROR,
-                    output={
-                        "spawn_event_id": spawn_event_id,
-                        "terminal_event_id": terminal_event_id,
-                    },
-                    error={"type": e.__class__.__name__, "message": str(e)},
-                )
+            await finish_delegation(
+                telemetry_recorder,
+                span,
+                agent_name=agent_name,
+                session_id=session_id,
+                spawn_event_id=spawn_event_id,
+                parent_context=parent_context,
+                child_run_id=child_run_id,
+                child_trace_id=child_trace_id,
+                status=SpanStatus.ERROR,
+                error={"type": e.__class__.__name__, "message": str(e)},
+            )
             return agent_name, e
 
     async def _cleanup_agent(self, agent_name: str, agent: Any) -> None:

@@ -601,12 +601,14 @@ class BackgroundAgentManager:
         query: str,
         run: BackgroundRun,
         timeout_seconds: int | None,
+        attempt: BackgroundAttempt | None = None,
     ) -> Any:
         return await self._supervisor.run_agent_with_run_context(
             agent=agent,
             query=query,
             run=run,
             timeout_seconds=timeout_seconds,
+            attempt=attempt,
         )
 
     async def _handle_attempt_failure(
