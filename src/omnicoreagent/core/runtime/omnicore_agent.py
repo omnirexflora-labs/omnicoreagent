@@ -16,8 +16,15 @@ from omnicoreagent.core.runtime import (
 )
 from omnicoreagent.core.privacy import PrivacyFilter
 from omnicoreagent.core.interaction_history import stable_message_digest
-from omnicoreagent.core.runtime.deadline import current_stop_reason
+from omnicoreagent.core.runtime.deadline import (
+    complete_despite_cancellation,
+    current_stop_reason,
+)
 from omnicoreagent.core.telemetry.payloads import payload_references
+from omnicoreagent.core.telemetry.summary import (
+    final_model_response_event_id,
+    summarize_trace,
+)
 from omnicoreagent.core.runtime.imports import (
     LazyDefaultPromptBuilder,
     runtime,
@@ -569,15 +576,20 @@ class OmniCoreAgent:
                     input={"query": query},
                     output=blocked_response.get("guardrail_result"),
                 )
+                run_summary = await self._run_summary(trace_context.trace_id)
                 await self.telemetry_recorder.emit_event(
                     "final_answer",
                     actor=self._telemetry_actor(),
                     output={"response": blocked_response["response"]},
+                    metadata=run_summary,
                 )
                 trace_finalizing = True
                 await self.telemetry_recorder.end_trace(
                     status=TraceStatus.ABORTED_SAFETY_GUARD,
-                    output={"response": blocked_response["response"]},
+                    output={
+                        "response": blocked_response["response"],
+                        "run_summary": run_summary["run_summary"],
+                    },
                 )
                 blocked_response["trace_id"] = trace_context.trace_id
                 blocked_response["run_id"] = run_id
@@ -630,6 +642,7 @@ class OmniCoreAgent:
                     else TraceStatus.FAILED.value,
                 )
             )
+            run_summary = await self._run_summary(trace_context.trace_id)
             await self.telemetry_recorder.emit_event(
                 "final_answer",
                 actor=self._telemetry_actor(),
@@ -638,6 +651,7 @@ class OmniCoreAgent:
                     "status": formatted_response.get("status", "success"),
                     "termination_reason": formatted_response.get("termination_reason"),
                 },
+                metadata=run_summary,
             )
             trace_finalizing = True
             await self.telemetry_recorder.end_trace(
@@ -646,6 +660,7 @@ class OmniCoreAgent:
                     "response": formatted_response.get("response"),
                     "status": formatted_response.get("status", "success"),
                     "termination_reason": formatted_response.get("termination_reason"),
+                    "run_summary": run_summary["run_summary"],
                 },
             )
             formatted_response["trace_id"] = trace_context.trace_id
@@ -659,8 +674,11 @@ class OmniCoreAgent:
                     else TraceStatus.CANCELLED
                 )
                 try:
-                    await self._end_trace_after_failure(
-                        trace_context, exc, status=stopped_status
+                    # Cleanup must finish even if the caller keeps cancelling.
+                    await complete_despite_cancellation(
+                        self._end_trace_after_failure(
+                            trace_context, exc, status=stopped_status
+                        )
                     )
                 except Exception as telemetry_exc:
                     # Cancellation must keep propagating; a strict telemetry
@@ -764,22 +782,61 @@ class OmniCoreAgent:
             if status == TraceStatus.TIMEOUT
             else {"type": exc.__class__.__name__, "message": str(exc)}
         )
+        # A failed, cancelled, or timed-out run still consumed steps, tokens,
+        # and cost; its totals are recorded with its terminal event.
+        run_summary = await self._run_summary(trace_context.trace_id)
         try:
             if status in {TraceStatus.CANCELLED, TraceStatus.TIMEOUT}:
                 await recorder.emit_event(
                     "final_state",
                     actor=self._telemetry_actor(),
                     output={"status": status.value},
+                    metadata=run_summary,
                 )
             else:
                 await recorder.record_exception(
                     exc,
                     event_type="runtime_error",
                     actor=self._telemetry_actor(),
-                    metadata={"phase": "agent.run"},
+                    metadata={"phase": "agent.run", **run_summary},
                 )
         finally:
-            await recorder.end_trace(status=status, error=error)
+            await recorder.end_trace(
+                status=status,
+                error=error,
+                output={"run_summary": run_summary["run_summary"]},
+            )
+
+    async def _run_summary(self, trace_id: str) -> Dict[str, Any]:
+        """Totals for the run so far, with its subagents' tokens and cost added."""
+        recorder = self.telemetry_recorder
+        trace = await recorder.read_trace(trace_id)
+        if trace is None:
+            return {"run_summary": None, "final_model_response_event_id": None}
+        summary = summarize_trace(trace)
+        combined_tokens = dict(summary["tokens"])
+        combined_cost = summary["estimated_cost_usd"] or 0.0
+        cost_complete = summary["cost_complete"] or summary["model_calls"]["total"] == 0
+        for child_id in summary["subagents"]["child_trace_ids"]:
+            child = await recorder.read_trace(child_id)
+            if child is None:
+                cost_complete = False
+                continue
+            child_summary = summarize_trace(child)
+            for key, value in child_summary["tokens"].items():
+                combined_tokens[key] = combined_tokens.get(key, 0) + value
+            combined_cost += child_summary["estimated_cost_usd"] or 0.0
+            if child_summary["model_calls"]["total"] and not child_summary["cost_complete"]:
+                cost_complete = False
+        summary["including_subagents"] = {
+            "tokens": combined_tokens,
+            "estimated_cost_usd": round(combined_cost, 10),
+            "cost_complete": cost_complete,
+        }
+        return {
+            "run_summary": summary,
+            "final_model_response_event_id": final_model_response_event_id(trace),
+        }
 
     def stream(
         self, query: str, session_id: str | None = None, run_id: str | None = None

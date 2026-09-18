@@ -16,6 +16,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TypeVar
 
+from omnicoreagent.core.logging import logger
+
 T = TypeVar("T")
 
 
@@ -60,7 +62,10 @@ async def run_with_timeout(awaitable: Awaitable[T], timeout: float | None) -> T:
         done, _ = await asyncio.wait({task}, timeout=timeout)
     except asyncio.CancelledError:
         task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        # Wait for the run to record its cancellation even if this caller is
+        # cancelled again (anyio re-delivers cancellation at every await);
+        # forwarding a second cancel would interrupt that cleanup.
+        await complete_despite_cancellation(task)
         raise
     if task in done:
         return task.result()
@@ -102,3 +107,55 @@ async def stop_after(timeout: float | None) -> AsyncIterator[None]:
     finally:
         handle.cancel()
         _STOP_REASON.reset(token)
+
+
+_MISSING = object()
+
+# Upper bound on finishing cleanup while the caller keeps being cancelled.
+CLEANUP_BOUND_SECONDS = 10.0
+
+
+async def complete_despite_cancellation(
+    awaitable: Awaitable[T], bound_seconds: float = CLEANUP_BOUND_SECONDS
+) -> T | None:
+    """Run cleanup to completion even if the caller is cancelled again.
+
+    Repeated cancellation of the caller is absorbed until the work finishes or
+    ``bound_seconds`` pass; the caller then re-raises its own cancellation.
+    Returns the work's result, or ``None`` if it failed or was cut off.
+
+    The work runs in its own task, so its context variable changes (such as a
+    trace ending and restoring its parent's telemetry context) are copied
+    back to the caller, as if it had run inline.
+    """
+    task = asyncio.ensure_future(awaitable)
+    loop = asyncio.get_running_loop()
+    try:
+        _propagate = task.get_context
+    except AttributeError:  # pragma: no cover - not a Task
+        _propagate = None
+    deadline = loop.time() + bound_seconds
+    while not task.done():
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            task.cancel()
+            break
+        try:
+            await asyncio.wait({task}, timeout=remaining)
+        except asyncio.CancelledError:
+            continue
+    await asyncio.gather(task, return_exceptions=True)
+    if _propagate is not None:
+        for variable, value in _propagate().items():
+            if variable.get(_MISSING) is not value:
+                variable.set(value)
+    if task.cancelled():
+        logger.warning("Cleanup did not finish within %s seconds", bound_seconds)
+        return None
+    if task.exception() is not None:
+        logger.warning(
+            "Cleanup failed during cancellation: %s",
+            task.exception().__class__.__name__,
+        )
+        return None
+    return task.result()

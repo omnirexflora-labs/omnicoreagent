@@ -189,6 +189,20 @@ the others through event metadata, which is kept under every capture policy:
 Under governance, tool arguments and delegation parameters are recorded
 redacted, and policy decisions carry the `tool_call_id` they authorized.
 
+### Run totals
+
+Every run ends with a `run_summary`, recorded in the metadata of its terminal
+event (`final_answer`, or `runtime_error` / `final_state` for failed, cancelled,
+and timed-out runs) and in the root span output: steps; model calls by purpose
+and failures; `input`, `output`, `total`, `cached_input`, and `reasoning`
+tokens; `estimated_cost_usd` and whether every call's cost was known; model
+latency and retries; tool calls by outcome (`success`, `error`, `rejected`,
+`timeout`, `cancelled`, `denied`); compressions; runtime messages; subagents and
+their child trace IDs; workspace changes; offloaded results; and duration.
+`including_subagents` adds the child runs' tokens and cost. The `final_answer`
+event also carries `final_model_response_event_id`, the model response that
+produced the answer.
+
 `execution_surface` records how the run was entered: `interactive` for a direct
 `agent.run(...)`, `serve` through OmniServe, and `background` for background
 attempts. Label a run or attach external identity without changing execution:

@@ -39,39 +39,16 @@ from omnicoreagent.core.telemetry import (
     set_telemetry_context,
 )
 from omnicoreagent.background.transitions import BackgroundRunTransitions
-from omnicoreagent.core.runtime.deadline import run_with_timeout
+from omnicoreagent.core.runtime.deadline import (
+    complete_despite_cancellation as _complete_despite_cancellation,
+    run_with_timeout,
+)
 from omnicoreagent.governance.capabilities import background_run_authority_request
 from omnicoreagent.governance.errors import GovernanceError
 from omnicoreagent.governance.snapshots import (
     attach_policy_snapshot,
     require_current_policy_snapshot,
 )
-
-
-# Upper bound on recording an interrupted attempt during shutdown.
-_INTERRUPTED_ATTEMPT_RECORD_SECONDS = 10.0
-
-
-async def _complete_despite_cancellation(awaitable: Awaitable[Any]) -> Any:
-    """Run bookkeeping to completion even if the caller is cancelled again.
-
-    Repeated cancellation is absorbed until the bookkeeping finishes or its
-    time bound expires; the caller then re-raises its original cancellation.
-    """
-    task = asyncio.ensure_future(awaitable)
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + _INTERRUPTED_ATTEMPT_RECORD_SECONDS
-    while not task.done():
-        remaining = deadline - loop.time()
-        if remaining <= 0:
-            task.cancel()
-            break
-        try:
-            await asyncio.wait({task}, timeout=remaining)
-        except asyncio.CancelledError:
-            continue
-    await asyncio.gather(task, return_exceptions=True)
-    return task.result() if not task.cancelled() and task.exception() is None else None
 
 
 @dataclass(slots=True)

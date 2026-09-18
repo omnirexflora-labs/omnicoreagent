@@ -206,3 +206,20 @@ async def test_stop_after_marks_timeouts_and_leaves_outer_cancels_alone():
         await task
 
     assert seen == ["timeout", None]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_despite_cancellation_keeps_context_changes():
+    from contextvars import ContextVar
+
+    from omnicoreagent.core.runtime.deadline import complete_despite_cancellation
+
+    marker: ContextVar[str] = ContextVar("marker", default="before")
+
+    async def cleanup():
+        await asyncio.sleep(0.01)
+        marker.set("after")
+        return "done"
+
+    assert await complete_despite_cancellation(cleanup()) == "done"
+    assert marker.get() == "after"

@@ -429,6 +429,15 @@ class TelemetryRecorder:
             self._release_trace(context.trace_id)
             set_telemetry_context(parent_context)
 
+    async def read_trace(self, trace_id: str) -> TelemetryTrace | None:
+        """Read a stored trace within the persistence bound; ``None`` on failure."""
+        try:
+            return await self._bounded(
+                self.store.get_trace(trace_id), self.config.persistence_timeout_seconds
+            )
+        except Exception:
+            return None
+
     async def update_trace_metadata(self, values: dict[str, Any]) -> None:
         """Merge values into the active trace's metadata.
 

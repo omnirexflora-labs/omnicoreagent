@@ -7,7 +7,10 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from omnicoreagent.core.logging import logger
-from omnicoreagent.core.runtime.deadline import run_with_timeout
+from omnicoreagent.core.runtime.deadline import (
+    complete_despite_cancellation,
+    run_with_timeout,
+)
 from omnicoreagent.core.telemetry import TraceStatus
 
 from ..models import ErrorResponse, RunRequest, RunResponse
@@ -96,14 +99,28 @@ def create_runs_router() -> APIRouter:
                 privacy_filter=getattr(agent, "privacy_filter", None),
             )
             normalized["run_id"] = normalized.get("run_id") or run_id
+            succeeded = normalized.get("status", "success") == "success"
+            # The request trace reports the agent's real outcome.
             await finish_serve_trace(
                 serve_trace,
+                status=TraceStatus.COMPLETED if succeeded else TraceStatus.FAILED,
                 output={
-                    "status": "completed",
+                    "status": normalized.get("status", "success"),
                     "agent_trace_id": normalized.get("trace_id"),
                 },
             )
             return RunResponse(session_id=session_id, **normalized)
+        except asyncio.CancelledError:
+            # A dropped or cancelled request must not leave its trace running;
+            # the server may cancel again while this is recorded.
+            await complete_despite_cancellation(
+                finish_serve_trace(
+                    serve_trace,
+                    status=TraceStatus.CANCELLED,
+                    error={"type": "CancelledError", "message": "Request cancelled"},
+                )
+            )
+            raise
         except asyncio.TimeoutError:
             await finish_serve_trace(
                 serve_trace,
