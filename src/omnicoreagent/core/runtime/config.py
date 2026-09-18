@@ -82,6 +82,10 @@ class MCPToolConfig:
     timeout: int | None = 60
     sse_read_timeout: int | None = 120
     auth: dict[str, Any] | None = None
+    # Transport, handshake, and tool listing must finish within this.
+    connect_timeout: float | None = 30.0
+    # Per tool call; None leaves only the agent's tool timeout.
+    call_timeout: float | None = None
 
     def __post_init__(self):
         self.transport_type = TransportType(self.transport_type)

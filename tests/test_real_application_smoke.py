@@ -1,8 +1,8 @@
 from __future__ import annotations
 from omnicoreagent.core.model_protocol import ModelTurn, ToolRequest
 import re
-from types import SimpleNamespace
 import pytest
+from mcp import types
 from omnicoreagent.core.agents.base import BaseReactAgent
 from omnicoreagent.core.telemetry import (
     ActorType,
@@ -88,16 +88,19 @@ class ScriptedHarnessLlm:
 
 
 class FakeMcpSession:
-    async def call_tool(self, tool_name, tool_args):
+    """Answers like an mcp 2 ``ClientSession`` with real SDK result types."""
+
+    async def call_tool(self, tool_name, tool_args, read_timeout_seconds=None):
+        import json
+
+        from mcp import types
+
         assert tool_name == "external_risk_lookup"
-        return {
-            "status": "success",
-            "data": {
-                "customer_id": tool_args["customer_id"],
-                "risk": "low",
-                "source": "fake-mcp",
-            },
-        }
+        risk = {"customer_id": tool_args["customer_id"], "risk": "low", "source": "fake-mcp"}
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=json.dumps(risk))],
+            structured_content=risk,
+        )
 
 
 @pytest.mark.asyncio
@@ -174,10 +177,10 @@ async def test_full_stack_harness_run_uses_tools_workspace_offload_and_telemetry
         sessions={"crm": {"session": FakeMcpSession()}},
         mcp_tools={
             "crm": [
-                SimpleNamespace(
+                types.Tool(
                     name="external_risk_lookup",
                     description="Customer external risk",
-                    inputSchema={
+                    input_schema={
                         "type": "object",
                         "properties": {"customer_id": {"type": "string"}},
                         "required": ["customer_id"],

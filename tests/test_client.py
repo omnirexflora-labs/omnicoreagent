@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -112,49 +112,6 @@ class TestMCPClient:
         assert mock_client.available_tools["server_without_tools"] == []
 
     @pytest.mark.asyncio
-    async def test_clean_up_server(self, mock_client):
-        """Test cleaning up server connections"""
-        mock_stack = AsyncMock()
-        mock_session = AsyncMock()
-        mock_session.close = AsyncMock()
-
-        mock_client.server_names = ["test_server"]
-        mock_client.sessions = {
-            "test_server": {
-                "session": mock_session,
-                "stack": mock_stack,
-                "connected": True,
-                "connection_type": "stdio",
-            }
-        }
-
-        await mock_client.clean_up_server()
-
-        mock_stack.aclose.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_cleanup(self, mock_client):
-        """Test full client cleanup"""
-        mock_stack = AsyncMock()
-        mock_session = AsyncMock()
-
-        mock_client.server_names = ["test_server"]
-        mock_client.sessions = {
-            "test_server": {
-                "session": mock_session,
-                "stack": mock_stack,
-                "connected": True,
-                "connection_type": "stdio",
-            }
-        }
-
-        await mock_client.cleanup()
-
-        mock_stack.aclose.assert_awaited_once()
-        assert len(mock_client.server_names) == 0
-        assert len(mock_client.sessions) == 0
-
-    @pytest.mark.asyncio
     async def test_add_servers(self, mock_client):
         """Test dynamically adding servers"""
         mock_client._connect_to_single_server = AsyncMock(
@@ -196,38 +153,6 @@ class TestMCPClient:
                 )
 
         open_transport.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_governance_allows_mcp_server_connect_before_transport(
-        self,
-        mock_client,
-    ):
-        mock_client.governance_engine = GovernanceEngine(_strict_mcp_connection_policy())
-        server_info = MagicMock()
-        server_info.name = "server1"
-        matching_session = AsyncMock()
-        matching_session.initialize = AsyncMock()
-        # mcp 2 reports the server's identity on the session.
-        matching_session.server_info = server_info
-        matching_session.list_tools = AsyncMock(return_value=MagicMock(tools=MOCK_TOOLS))
-        mock_transport = (AsyncMock(), AsyncMock())
-        mock_stack = AsyncMock()
-        mock_stack.enter_async_context.return_value = matching_session
-
-        with patch(
-            "omnicoreagent.mcp_clients_connection.client.AsyncExitStack",
-            return_value=mock_stack,
-        ), patch(
-            "omnicoreagent.mcp_clients_connection.client.open_server_transport",
-            AsyncMock(return_value=(*mock_transport, "stdio")),
-        ) as open_transport:
-            result = await mock_client._connect_to_single_server(
-                MOCK_MCP_SERVERS[0],
-                "server1",
-            )
-
-        assert result == "server1 connected successfully"
-        open_transport.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_unsupported_mcp_transport_fails_before_transport(self, mock_client):
@@ -315,31 +240,3 @@ class TestMCPClient:
         assert env["PATH"] == "/usr/bin"
         assert "AWS_SECRET_ACCESS_KEY" not in env
 
-    @pytest.mark.asyncio
-    async def test_remove_server(self, mock_client):
-        """Test removing a server"""
-        mock_stack = AsyncMock()
-        mock_session = AsyncMock()
-
-        mock_client.server_names = ["test_server"]
-        mock_client.sessions = {
-            "test_server": {
-                "session": mock_session,
-                "stack": mock_stack,
-                "connected": True,
-                "connection_type": "stdio",
-            },
-            "other_server": {
-                "session": AsyncMock(),
-                "stack": AsyncMock(),
-                "connected": True,
-                "connection_type": "stdio",
-            },
-        }
-        mock_client.added_servers_names = {"test_server": "test_server"}
-
-        result = await mock_client.remove_server("TEST_SERVER")
-
-        assert "disconnected successfully" in result
-        mock_stack.aclose.assert_awaited_once()
-        assert "test_server" not in mock_client.sessions

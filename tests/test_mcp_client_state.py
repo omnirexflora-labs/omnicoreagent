@@ -1,4 +1,3 @@
-from contextlib import AsyncExitStack
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,7 +12,7 @@ def make_connected_server(name: str = "weather") -> ConnectedServer:
         read_stream=AsyncMock(),
         write_stream=AsyncMock(),
         transport_type="stdio",
-        stack=AsyncExitStack(),
+        connection=None,
         server_info={"name": "probe-server", "version": "1.2.3"},
         protocol_version="2025-11-25",
     )
