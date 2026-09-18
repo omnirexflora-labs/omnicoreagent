@@ -203,6 +203,15 @@ Split from A5 during implementation (2026-09-18).
   secrets. Time to first token is recorded as `time_to_first_delta_ms` because
   tool-call-only streams expose no measurable first token.
 
+### B3b. Cost and standard usage fields
+Added by the reassessment after B3 (2026-09-18).
+- Record the provider-reported cost of each call (LiteLLM `response_cost`) as
+  `cost_usd` in the model call facts; `null` when the provider supplies none.
+- Populate the standard `token_usage` and `cost_usd` fields of the
+  `model.call` span and `model_response` event. They were never set by the
+  runtime, so the OTel/LangSmith/Opik exporters and portable consumers saw no
+  token usage or cost.
+
 ### B4. Tool record
 - Malformed arguments keep the raw string and the parse error in
   `tool_requested`.
@@ -211,19 +220,25 @@ Split from A5 during implementation (2026-09-18).
   originating model event ID, and the `tool_resolved` event ID.
 - Subagent calls report their real provider identity.
 - Under governance, arguments used are recorded as redacted rather than
-  omitted.
+  omitted, and delegation parameters follow the same redaction as tool
+  arguments (they were stored unredacted).
 
 ### B5. Observation and context links
 - `tool_observation` references its tool result event and tool span.
 - The next `context_assembly` records which observation event IDs it
   delivered to the model, which gives the observation → next model turn link.
 - Runtime-injected messages (stuck and empty-response nudges) are events.
+- Every `model.call` records its purpose (`agent_turn` or `context_summary`)
+  so internal model work is distinguishable from agent turns.
 
 ### B6. Finalization and run totals
 - `final_answer` references the model response event that produced it and
   any output artifact references.
 - A run summary (checklist item 9) is computed at `end_trace` and stored on
   the root span output and the `final_answer` event.
+- Serve traces report the agent's real outcome: `/run/sync` recorded
+  `completed` even when the agent returned an error, and a cancelled request
+  left the serve trace `running`.
 
 ### B7. Trajectory reader
 - `agent.get_trajectory(run_id=… | trace_id=…)` returns a documented, ordered
@@ -256,6 +271,16 @@ Update `telemetry-evidence-coverage.md` (correcting the overstated
 observation claims), `telemetry-evidence.md`, the observability guide, and the
 migration plan log.
 
+## Reassessment after B3 (2026-09-18)
+
+Checklist status: items 1, 2, 7, and the runtime side of 10 are done; item 3 is
+done except cost and the standard usage fields (B3b); items 4, 5, 6, 8, and 9
+remain (B4 to B6); the reader (B7), the portable import checks (B8), and the
+proof (C1, C2) follow. A real trace with the new events still validates
+against the portable JSON schema. Deliberately not planned now: pagination for
+trace-family endpoints, and retaining pre-guardrail raw tool results (kept as
+a hash by design).
+
 ## Out of scope for this plan
 
 Harbor integration, the evaluation layer, production sampling, follow-up and
@@ -276,4 +301,4 @@ Phase C passes.
 | A6 | Complete | `0247a99` | 8 new tests: independent payload retention and config validation; payload references collected from descriptors and offloaded stubs; pruning removes expired traces and orphaned payloads while keeping every payload a kept trace references; automatic cleanup runs once per agent and is reported in the status; the in-memory store evicts only the oldest finished traces and keeps live followers attached; the default memory store is bounded; the background event log forgets finished runs; `GET /telemetry/retention`. Full suite 1,233 passed, 14 skipped; acceptance checks passed; ruff clean. Phase A complete. |
 | B1 | Complete | `56cdecf` | 12 new tests: capture presets (fill only unset fields, round-trip, full capture records model responses); durable JSONL default in the workspace directory; memory as explicit opt-out; cloud workspaces keep a local file; one shared store per file; default agents and manager share it; a default agent's trace survives a restart; shutdown during attempt start records the run (verified RUNNING without the fix); a finished run's events include its terminal event. 2 cloud-workspace tests moved to the new contract. Docs updated. Full suite 1,245 passed, 14 skipped; acceptance checks passed; ruff clean; nothing written to the repository workspace. |
 | B2 | Complete | `3ece487` | 12 new tests on a real `OmniCoreAgent` run with a scripted model: the `run_configuration` header (model and settings, limits, context/memory/offload config, features, fingerprints, tool catalog, system prompt digest) is recorded before the first step, links to the first `context_assembly` digests, never contains credentials, and survives `record_outputs=False`; trace versions are filled, stable across identical harnesses and changed by a different prompt; explicit `agent_version` wins; prompt text follows the capture policy; `run(tags=, provenance=)`; surfaces `interactive`, `serve`, `background`. Observability guide updated. Full suite 1,257 passed, 14 skipped; acceptance checks passed; ruff clean. |
-| B3 | Complete | (this commit) | 7 new model-step tests (tokens incl. cached and reasoning, provider response ID and served model, request settings, latency, time to first streamed delta, retries on success and failure, facts kept with `record_outputs=False`, raw arguments exact under full capture, refusal text not leaked). Live LiteLLM check (`gpt-5.4-mini`, non-streaming and streaming, local tool): real tokens (1,471 in / 21 out; 1,024 cached), `chatcmpl-...` IDs, latency, first delta 1.57 s on the streamed answer, API key absent from both traces. Full suite 1,264 passed, 14 skipped; acceptance checks passed; ruff clean. |
+| B3 | Complete | `b46504a` | 7 new model-step tests (tokens incl. cached and reasoning, provider response ID and served model, request settings, latency, time to first streamed delta, retries on success and failure, facts kept with `record_outputs=False`, raw arguments exact under full capture, refusal text not leaked). Live LiteLLM check (`gpt-5.4-mini`, non-streaming and streaming, local tool): real tokens (1,471 in / 21 out; 1,024 cached), `chatcmpl-...` IDs, latency, first delta 1.57 s on the streamed answer, API key absent from both traces. Full suite 1,264 passed, 14 skipped; acceptance checks passed; ruff clean. |
