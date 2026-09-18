@@ -110,6 +110,7 @@ class PrivacyFilter:
     # (``trace_cbe5ba4111...``) and corrupted evidence links.
     _CARD = re.compile(r"(?<!\w)(?:\d[ -]?){12,18}\d(?!\w)")
     _PHONE = re.compile(r"(?<!\w)\+?\d[\d().\-\s]{8,}\d(?!\w)")
+    _ISO_DATE = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
 
     _MARKERS = {
         "email": "[REDACTED_EMAIL]",
@@ -178,8 +179,13 @@ class PrivacyFilter:
         return self._MARKERS["credit_card"] if self._luhn_valid(digits) else match.group()
 
     def _replace_phone(self, match: re.Match[str]) -> str:
-        digits = re.sub(r"\D", "", match.group())
-        return self._MARKERS["phone"] if len(digits) >= 10 else match.group()
+        text = match.group()
+        # Dates and timestamps (2026-09-18 12) have the digit shape of a phone
+        # number; rewriting them corrupted recorded evidence.
+        if self._ISO_DATE.search(text):
+            return text
+        digits = re.sub(r"\D", "", text)
+        return self._MARKERS["phone"] if len(digits) >= 10 else text
 
     @staticmethod
     def _luhn_valid(digits: str) -> bool:

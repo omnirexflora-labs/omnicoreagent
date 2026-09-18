@@ -25,6 +25,7 @@ from omnicoreagent.core.telemetry.summary import (
     final_model_response_event_id,
     summarize_trace,
 )
+from omnicoreagent.core.telemetry.trajectory import build_trajectory
 from omnicoreagent.core.runtime.imports import (
     LazyDefaultPromptBuilder,
     runtime,
@@ -1308,6 +1309,79 @@ class OmniCoreAgent:
             normalizer = TelemetryNormalizer()
             selected = [normalizer.normalize(trace) for trace in selected]
         return [trace.model_dump() for trace in selected]
+
+    async def get_trajectory(
+        self,
+        identifier: str | None = None,
+        *,
+        trace_id: str | None = None,
+        run_id: str | None = None,
+        include_children: bool = True,
+        max_depth: int = 5,
+    ) -> Dict[str, Any] | None:
+        """Return one run as an ordered trajectory, from request to final answer.
+
+        Look up by ``trace_id`` (exact) or ``run_id`` (the latest agent run with
+        that ID; other traces for the run are listed in
+        ``other_trace_ids_for_run``). Delegated child runs are nested under the
+        tool call that started them. See ``build_trajectory`` for the shape.
+        """
+        if identifier is not None and (trace_id is not None or run_id is not None):
+            raise ValueError("Use either identifier or trace_id/run_id")
+        if trace_id is None and run_id is None:
+            trace_id = identifier
+        if trace_id is None and run_id is None:
+            raise TypeError("get_trajectory() requires trace_id or run_id")
+        self._ensure_telemetry()
+        other_trace_ids: list[str] = []
+        if trace_id is not None:
+            trace = await self.telemetry_store.get_trace(trace_id)
+        else:
+            candidates = [
+                candidate
+                for candidate in await self.telemetry_store.list_traces(
+                    TraceFilter(run_id=run_id)
+                )
+                if candidate.spans
+                and any(
+                    span.span_id == candidate.root_span_id and span.kind == "agent.run"
+                    for span in candidate.spans
+                )
+            ]
+            trace = candidates[-1] if candidates else None
+            other_trace_ids = [c.trace_id for c in candidates[:-1]]
+        if trace is None:
+            return None
+        trajectory = await self._trajectory_for(
+            trace, include_children=include_children, depth=max_depth, seen=set()
+        )
+        if run_id is not None:
+            trajectory["other_trace_ids_for_run"] = other_trace_ids
+        return trajectory
+
+    async def _trajectory_for(
+        self,
+        trace: TelemetryTrace,
+        *,
+        include_children: bool,
+        depth: int,
+        seen: set[str],
+    ) -> Dict[str, Any]:
+        seen.add(trace.trace_id)
+        children: dict[str, Dict[str, Any]] = {}
+        if include_children and depth > 0:
+            for child_id in summarize_trace(trace)["subagents"]["child_trace_ids"]:
+                if child_id in seen:
+                    continue
+                child = await self.telemetry_store.get_trace(child_id)
+                if child is not None:
+                    children[child_id] = await self._trajectory_for(
+                        child,
+                        include_children=include_children,
+                        depth=depth - 1,
+                        seen=seen,
+                    )
+        return build_trajectory(trace, children=children)
 
     async def get_telemetry_stream_cursor(
         self,

@@ -474,6 +474,37 @@ def create_telemetry_router() -> APIRouter:
         )
 
     @router.get(
+        "/runs/{run_id}/trajectory",
+        summary="Get run trajectory",
+        description=(
+            "Return the latest agent run with this run_id as an ordered trajectory: "
+            "request, harness, steps (context, model calls, tool calls, "
+            "observations), final answer, totals, and capture gaps, with child "
+            "runs nested under the tool call that started them."
+        ),
+    )
+    async def get_run_trajectory(request: Request, run_id: str) -> dict[str, Any]:
+        return await _trajectory_or_404(request, run_id=run_id)
+
+    @router.get(
+        "/traces/{trace_id}/trajectory",
+        summary="Get trace trajectory",
+        description="Return one trace as an ordered trajectory.",
+    )
+    async def get_trace_trajectory(request: Request, trace_id: str) -> dict[str, Any]:
+        return await _trajectory_or_404(request, trace_id=trace_id)
+
+    async def _trajectory_or_404(request: Request, **lookup: str) -> dict[str, Any]:
+        agent = get_agent(request)
+        get_trajectory = getattr(agent, "get_trajectory", None)
+        if not callable(get_trajectory):
+            raise HTTPException(status_code=501, detail="Trajectories are unavailable")
+        trajectory = await get_trajectory(**lookup)
+        if trajectory is None:
+            raise HTTPException(status_code=404, detail="Trajectory not found")
+        return trajectory
+
+    @router.get(
         "/retention",
         summary="Get telemetry retention status",
         description=(

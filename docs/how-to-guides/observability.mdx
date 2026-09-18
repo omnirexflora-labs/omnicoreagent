@@ -128,6 +128,36 @@ so deep-agent child traces can be retrieved together with the parent without
 depending on latest-trace ordering. A family lists each parent before its
 children.
 
+### Read a run as a trajectory
+
+`get_trajectory` returns one run in order, from request to final answer:
+
+```python
+trajectory = await agent.get_trajectory(run_id=result["run_id"])
+# or: await agent.get_trajectory(result["trace_id"])
+
+for step in trajectory["steps"]:
+    for call in step["model_calls"]:
+        print(step["step"], call["purpose"], call["facts"]["tokens"], call["response"])
+    for tool in step["tool_calls"]:
+        print(tool["tool_name"], tool["raw_arguments"], tool["outcome"], tool["observation"])
+print(trajectory["final"], trajectory["totals"])
+```
+
+The structure (`omnicoreagent.trajectory/v1`) holds the request, the harness
+header and versions, runtime messages, and each step's context assemblies,
+model calls (request, response, facts, and the observations it newly
+received), and tool calls (raw and parsed arguments, outcome, governance
+decisions, result, and the exact observation returned to the model). A
+delegated run is nested under the tool call that started it
+(`subagent.child_trajectory`). The final section, the run totals, and the
+capture gaps close it. Every event of the trace appears once: events that fit
+no named slot are listed in `other_events` where they occurred, so nothing is
+hidden. Payloads appear only where the capture policy recorded them; each is
+paired with its capture state. OmniServe serves the same structure at
+`GET /telemetry/runs/{run_id}/trajectory` and
+`GET /telemetry/traces/{trace_id}/trajectory`.
+
 ### Run header
 
 Before the first model step, every run records a `run_configuration` event

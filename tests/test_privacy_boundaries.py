@@ -247,3 +247,28 @@ def test_privacy_filter_still_redacts_standalone_card_numbers():
         redacted = privacy.redact_text(text, boundary="public")
         assert "[REDACTED_CREDIT_CARD]" in redacted, text
         assert "4111" not in redacted, text
+
+
+def test_privacy_filter_keeps_dates_and_timestamps_intact():
+    privacy = PrivacyFilter()
+
+    for text in (
+        "[CURRENT_DATETIME: 2026-09-18 12:15:12 UTC]",
+        "Invoice due 2026-09-18.",
+        "created_at=2026-09-18T12:15:12Z",
+        "window 2026-09-18 12 to 2026-09-19 08",
+    ):
+        assert privacy.redact_text(text, boundary="telemetry") == text, text
+
+
+def test_privacy_filter_still_redacts_phone_numbers():
+    privacy = PrivacyFilter()
+
+    for text in (
+        "+1 (555) 123-4567",
+        "call 555-123-4567 today",
+        "07700 900123",
+        "+44 20 7946 0958",
+    ):
+        redacted = privacy.redact_text(text, boundary="telemetry")
+        assert "[REDACTED_PHONE]" in redacted, text

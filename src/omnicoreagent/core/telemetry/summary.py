@@ -61,7 +61,7 @@ def summarize_trace(trace: TelemetryTrace) -> dict[str, Any]:
             kind = str(event.metadata.get("kind"))
             runtime_messages[kind] = runtime_messages.get(kind, 0) + 1
 
-    tool_calls = _tool_outcomes(trace)
+    tool_calls = tool_outcomes(trace)
     by_outcome = {outcome: 0 for outcome in TOOL_OUTCOMES}
     for outcome in tool_calls.values():
         by_outcome[outcome] += 1
@@ -128,7 +128,8 @@ def final_model_response_event_id(trace: TelemetryTrace) -> str | None:
     return responses[-1].event_id if responses else None
 
 
-def _tool_outcomes(trace: TelemetryTrace) -> dict[str, str]:
+def tool_outcomes(trace: TelemetryTrace) -> dict[str, str]:
+    """Outcome of every tool call in the trace, keyed by tool call ID."""
     outcomes: dict[str, str] = {}
     span_status = {span.span_id: span.status for span in trace.spans}
     tool_spans: dict[str, str] = {}
