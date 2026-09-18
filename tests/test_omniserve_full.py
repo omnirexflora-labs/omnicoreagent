@@ -1545,6 +1545,35 @@ class TestEndpoints:
         assert resp.status_code == 200
         assert '"status": "ended"' in resp.text
 
+    def test_legacy_session_event_stream_accepts_last_event_id(self):
+        class ResumeTelemetryAgent:
+            name = "ResumeTelemetryAgent"
+
+            def get_telemetry_events_after(self, *, cursor, session_id, run_id):
+                assert cursor == "7"
+                assert session_id == "legacy-session"
+                return []
+
+            async def stream_telemetry_after(self, *, cursor, session_id, run_id):
+                assert cursor == "7"
+                if False:
+                    yield {}
+
+        server = OmniServe(
+            agent=ResumeTelemetryAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+        client = TestClient(server.app, raise_server_exceptions=False)
+
+        resp = client.get(
+            "/events/legacy-session",
+            headers={"Last-Event-ID": "7"},
+        )
+
+        assert resp.status_code == 200
+        assert '"status": "ended"' in resp.text
+        assert "error" not in resp.text
+
     def test_events_list_endpoint_defensively_filters_run_id(self):
         class UnfilteredTelemetryAgent:
             name = "UnfilteredTelemetryAgent"

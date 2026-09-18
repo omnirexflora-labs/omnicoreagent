@@ -101,6 +101,8 @@ work continues.
   replay position, so a backlog larger than the queue no longer overflows.
 - The legacy `/events/{session_id}` route honours `Last-Event-ID`.
 - Duplicate-suppression memory is bounded.
+- The store's own live follow uses the same cursor high-water mark instead of
+  an unbounded set of delivered event IDs.
 
 ### A5. Lineage store sharing
 - `BackgroundAgentManager.register_agent` aligns the agent with the manager's
@@ -123,10 +125,17 @@ work continues.
 
 ## Phase B: complete trajectory
 
-### B1. Capture policy
+### B1. Capture and storage policy
 - Add `TelemetryConfig.capture` with `default` and `full`; `full` enables
   model prompts/responses and full tool payloads through the same redaction,
   truncation, and offload path. Explicit field settings still override.
+- Durable storage by default (decided 2026-09-18): `storage="auto"` writes
+  JSONL even when no workspace is configured, at the default local workspace
+  path `./workspace/telemetry/traces.jsonl`. `storage="memory"` becomes an
+  explicit opt-in. A cloud workspace still does not make telemetry a cloud
+  dependency; it uses the same local file unless a path is configured. The
+  effective store and path stay visible in trace metadata, and the docs state
+  where traces live.
 
 ### B2. Run header
 - At `agent.run` start, record the harness snapshot (checklist item 2) in
@@ -210,4 +219,5 @@ Phase C passes.
 | --- | --- | --- | --- |
 | A1 | Complete | `1abc441` | 10 new recorder/redaction tests; telemetry, runtime, loop, LLM-step and governance suites 158 passed; full suite 1,187 passed, 14 skipped; acceptance `--check-fixture` and `--run` passed; ruff clean. |
 | A2 | Complete | `1a23a8a` | 5 new runtime tests (strict exporter error and timeout, strict store failure, strict finalization failure, cancellation during strict failure) all leave the parent trace running and the parent context restored. Strict exporter failures now raise `TelemetryExportError` (exporter name, original exception as `__cause__`) and record `telemetry_error`; 2 existing tests updated to that contract. Full suite 1,192 passed, 14 skipped; acceptance checks passed; ruff clean. |
-| A3 | Complete | (this commit) | 7 new store tests: cursors survive reload, a corrupt line (counted in `skipped_records`, trace marked incomplete and partial), embedded upsert events, prune with a live follower, compaction plus reload, a timed-out write followed by the next write, and loading the previous record format. Full suite 1,199 passed, 14 skipped; acceptance checks passed; ruff clean. |
+| A3 | Complete | `fca989d` | 7 new store tests: cursors survive reload, a corrupt line (counted in `skipped_records`, trace marked incomplete and partial), embedded upsert events, prune with a live follower, compaction plus reload, a timed-out write followed by the next write, and loading the previous record format. Full suite 1,199 passed, 14 skipped; acceptance checks passed; ruff clean. |
+| A4 | Complete | (this commit) | 3 new tests: resuming with a 1,200-event backlog then following live (previously always overflowed), the legacy `/events/{session_id}` route honouring `Last-Event-ID`, and bounded duplicate tracking. Full suite 1,202 passed, 14 skipped; acceptance checks passed; ruff clean. Open item: `test_configured_child_inherits_parent_telemetry_and_is_linked` failed once in about 62 runs of the combined serve/telemetry suites and could not be reproduced (0 in 150 isolated runs, 0 in 30 baseline runs at `fca989d`); the test now reports the child exception if it recurs. |

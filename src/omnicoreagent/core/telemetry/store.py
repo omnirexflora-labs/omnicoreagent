@@ -187,22 +187,24 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
             self._subscribers[subscriber_id] = (scope, queue)
             replay = self._events_after_unlocked(scope, cursor)
 
-        seen: set[str] = set()
+        # Replay and live notifications are both in cursor order, so the last
+        # delivered cursor suppresses duplicates without unbounded memory.
+        delivered = _parse_stream_cursor(cursor)
         try:
             for event in replay:
-                seen.add(event.event_id)
+                delivered = max(delivered, int(event.stream_cursor))
                 yield event
 
             while True:
                 item = await queue.get()
                 if isinstance(item, _TelemetryStreamOverflow):
                     raise item
-                _, event = item
-                if event.event_id in seen:
+                event_cursor, event = item
+                if event_cursor <= delivered:
                     continue
                 trace = self._traces.get(event.trace_id)
                 if scope.matches(event, trace):
-                    seen.add(event.event_id)
+                    delivered = event_cursor
                     yield _copy_event(event)
         finally:
             async with self._lock:

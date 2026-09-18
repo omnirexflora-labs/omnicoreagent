@@ -180,7 +180,10 @@ async def test_configured_child_inherits_parent_telemetry_and_is_linked() -> Non
         telemetry_recorder=parent.telemetry_recorder,
     )
 
+    # The runner returns the exception instead of raising; surface it.
+    assert isinstance(result, dict), repr(result)
     child_trace = await store.get_trace(result["trace_id"])
+    assert child_trace is not None, result
     assert child_trace.parent_trace_id == "trace-configured-parent"
     parent_trace = await store.get_trace("trace-configured-parent")
     delegation_span = next(span for span in parent_trace.spans if span.kind == "subagent.run")

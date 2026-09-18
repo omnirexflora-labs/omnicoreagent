@@ -438,3 +438,52 @@ async def test_lifecycle_queue_overflow_is_explicit_failure():
     failure = queue.get_nowait()
     assert isinstance(failure, _EventStreamFailure)
     assert "overflow" in str(failure.error)
+
+
+@pytest.mark.asyncio
+async def test_stream_session_events_resumes_large_backlog_then_follows_live():
+    agent = _TelemetryAgent()
+    recorder = TelemetryRecorder(agent.store)
+    await recorder.start_trace(
+        trace_id="trace-backlog",
+        run_id="run_backlog",
+        session_id="session-backlog",
+    )
+    backlog = 1200
+    for index in range(backlog):
+        await recorder.emit_event("agent_step", output={"index": index})
+
+    stream = stream_session_events(agent, "session-backlog", cursor="1")
+    received: list[str] = []
+    live_sent = False
+    async for chunk in stream:
+        name = _event_name(chunk)
+        assert name != "error", chunk
+        if name == "agent_step":
+            received.append(_event_data(chunk)["event_id"])
+            if len(received) == backlog - 1 and not live_sent:
+                live_sent = True
+                await recorder.emit_event("final_answer", output={"response": "live"})
+        if name == "final_answer":
+            break
+    await stream.aclose()
+
+    assert len(received) == backlog - 1
+    assert len(set(received)) == len(received)
+
+
+def test_sse_seen_events_memory_is_bounded():
+    from omnicoreagent.serve.sse import _SeenEvents
+
+    seen = _SeenEvents(max_ids=10)
+    for index in range(100):
+        assert seen.first_time({"event_id": f"event-{index}"})
+    assert len(seen._ids) <= 10
+    assert not seen.first_time({"event_id": "event-99"})
+
+    ordered = _SeenEvents(max_ids=10)
+    assert ordered.first_time({"event_id": "a", "stream_cursor": "5"})
+    assert not ordered.first_time({"event_id": "b", "stream_cursor": "5"})
+    assert not ordered.first_time({"event_id": "c", "stream_cursor": "4"})
+    assert ordered.first_time({"event_id": "d", "stream_cursor": "6"})
+    assert ordered._ids == set()
