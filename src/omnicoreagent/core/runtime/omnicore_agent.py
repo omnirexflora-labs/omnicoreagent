@@ -122,6 +122,12 @@ class OmniCoreAgent:
         self.telemetry_store = telemetry_store
         self.telemetry_recorder = telemetry_recorder
         self.telemetry_stream = telemetry_stream
+        # A caller-chosen store is never silently replaced by a background
+        # manager's store; a derived default may be.
+        self._telemetry_store_explicit = any(
+            component is not None
+            for component in (telemetry_store, telemetry_recorder, telemetry_stream)
+        )
         self.telemetry_exporters = self._build_telemetry_exporters(telemetry_exporters)
         self.telemetry_config = TelemetryConfig.from_value(telemetry_config)
         self.telemetry_payload_store = telemetry_payload_store
@@ -328,6 +334,56 @@ class OmniCoreAgent:
         self.telemetry_config = getattr(recorder, "config", None)
         self.telemetry_payload_store = getattr(recorder, "payload_store", None)
         self.privacy_filter = getattr(recorder, "privacy_filter", self.privacy_filter)
+        self._bind_telemetry_components()
+
+    def _adopt_telemetry_store(self, store: Any) -> None:
+        """Record into a shared store while keeping this agent's policy.
+
+        Used when a background manager owns telemetry for the agents it runs,
+        so lifecycle and attempt traces live in one store. The agent's
+        recording policy (config, exporters, payload store, privacy filter)
+        is preserved; only the destination changes.
+        """
+        if self.telemetry_store is store:
+            return
+        if self._telemetry_store_explicit:
+            raise ValueError(
+                f"Agent {self.name!r} was given its own telemetry store; pass the "
+                "same telemetry store to the agent and the background manager"
+            )
+        recorder = self.telemetry_recorder
+        config = self.telemetry_config or getattr(recorder, "config", None)
+        exporters = list(getattr(recorder, "exporters", None) or self.telemetry_exporters)
+        payload_store = self.telemetry_payload_store or getattr(
+            recorder, "payload_store", None
+        )
+        self.telemetry_store = store
+        self.telemetry_stream = TelemetryStream(store)
+        self.telemetry_config = config
+        self.telemetry_exporters = exporters
+        self.telemetry_payload_store = payload_store
+        self.telemetry_recorder = TelemetryRecorder(
+            store,
+            config=config,
+            exporters=exporters,
+            payload_store=payload_store,
+            privacy_filter=self.privacy_filter,
+        )
+        self._bind_telemetry_components()
+
+    def _bind_telemetry_components(self) -> None:
+        """Point components that captured a recorder at build time to the current one."""
+        recorder = self.telemetry_recorder
+        engine = getattr(self.agent, "governance_engine", None)
+        if engine is not None:
+            engine.telemetry_recorder = recorder
+            sandbox = getattr(engine, "sandbox_runtime", None)
+            if sandbox is not None and hasattr(sandbox, "telemetry_recorder"):
+                sandbox.telemetry_recorder = recorder
+        if self._subagent_factory is not None and hasattr(
+            self._subagent_factory, "telemetry_recorder"
+        ):
+            self._subagent_factory.telemetry_recorder = recorder
 
     def _telemetry_actor(self) -> TelemetryActor:
         return TelemetryActor(type=ActorType.AGENT, name=self.name)

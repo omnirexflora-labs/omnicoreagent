@@ -23,6 +23,7 @@ from omnicoreagent.core.telemetry import (
     TelemetrySpan,
     TelemetryTrace,
     TelemetryTraceMetadata,
+    TraceEvidenceStatus,
     TraceStatus,
 )
 from omnicoreagent.core.telemetry.models import utc_now
@@ -49,6 +50,9 @@ class BackgroundEventLog:
         self.event_sequences: dict[str, int] = {}
         self.event_tasks: set[asyncio.Task] = set()
         self._telemetry_traces: set[str] = set()
+        # Background traces that lost an event (failed or timed-out write);
+        # the next successful write marks them incomplete.
+        self._lost_event_trace_ids: set[str] = set()
 
     async def emit_run(
         self, event_name: str, run: BackgroundRun, **extra_payload: Any
@@ -260,6 +264,10 @@ class BackgroundEventLog:
                 timeout=self.append_timeout_seconds,
             )
         except Exception:
+            if event.get("run_id") is not None:
+                self._lost_event_trace_ids.add(
+                    self._telemetry_trace_id(str(event["run_id"]))
+                )
             return
 
     async def append_workspace_telemetry_event(
@@ -283,6 +291,7 @@ class BackgroundEventLog:
                 timeout=self.append_timeout_seconds,
             )
         except Exception:
+            self._lost_event_trace_ids.add(self._telemetry_trace_id(run.run_id))
             return
 
     async def _append_workspace_telemetry_event(
@@ -364,9 +373,11 @@ class BackgroundEventLog:
         span_id: str,
         event: dict[str, Any],
     ) -> None:
-        if self.telemetry_store is None or trace_id in self._telemetry_traces:
+        if self.telemetry_store is None:
             return
-        self._telemetry_traces.add(trace_id)
+        if trace_id in self._telemetry_traces:
+            await self._mark_lost_events(trace_id)
+            return
         await self.telemetry_store.upsert_trace(
             TelemetryTrace(
                 trace_id=trace_id,
@@ -404,6 +415,19 @@ class BackgroundEventLog:
                 ],
             )
         )
+        # Only a stored trace counts as created; a failed or cancelled upsert
+        # is retried by the next event instead of dropping every later one.
+        self._telemetry_traces.add(trace_id)
+        await self._mark_lost_events(trace_id)
+
+    async def _mark_lost_events(self, trace_id: str) -> None:
+        if trace_id not in self._lost_event_trace_ids:
+            return
+        await self.telemetry_store.update_trace(
+            trace_id,
+            {"incomplete": True, "evidence_status": TraceEvidenceStatus.PARTIAL.value},
+        )
+        self._lost_event_trace_ids.discard(trace_id)
 
     async def _finish_telemetry_trace(
         self,

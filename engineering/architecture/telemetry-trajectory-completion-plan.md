@@ -107,14 +107,28 @@ work continues.
 ### A5. Lineage store sharing
 - `BackgroundAgentManager.register_agent` aligns the agent with the manager's
   telemetry store/recorder, so background and attempt traces share one store.
+  The agent keeps its own recording policy (config, exporters, payload store,
+  privacy filter). An agent explicitly given a different store is rejected
+  with a clear error instead of having its traces silently moved.
 - Background trace creation is recorded as created only after the upsert
   succeeds; a failed upsert is retried rather than silently dropping later
   events.
-- A configured child initialized before delegation re-binds its governance
-  and sandbox recorders when it inherits telemetry.
+- Rebinding telemetry (delegation or background registration) also rebinds
+  every component that captured the recorder at build time: the governance
+  engine, its sandbox runtime, and the dynamic subagent factory.
+- A background event lost to a failed or timed-out write marks the
+  background trace incomplete and partial. Found during A5: dropped events
+  were silent and the trace still claimed complete evidence.
+
+### A5b. Delegation and attempt identity
+Split from A5 during implementation (2026-09-18).
 - Configured and dynamic subagent paths record child trace/run IDs on success,
   error, and cancellation, in span attributes rather than only in the
   tool-result payload.
+- Background attempts: each attempt's agent trace carries the attempt ID and
+  number, and the background trace links every attempt's trace.
+- A run stopped by a timeout (background attempt, `/run`, `/run/sync`) is
+  recorded as `timeout`, not `cancelled`.
 
 ### A6. Retention and memory bounds
 - Payload retention is configured independently of trace retention.
@@ -220,4 +234,5 @@ Phase C passes.
 | A1 | Complete | `1abc441` | 10 new recorder/redaction tests; telemetry, runtime, loop, LLM-step and governance suites 158 passed; full suite 1,187 passed, 14 skipped; acceptance `--check-fixture` and `--run` passed; ruff clean. |
 | A2 | Complete | `1a23a8a` | 5 new runtime tests (strict exporter error and timeout, strict store failure, strict finalization failure, cancellation during strict failure) all leave the parent trace running and the parent context restored. Strict exporter failures now raise `TelemetryExportError` (exporter name, original exception as `__cause__`) and record `telemetry_error`; 2 existing tests updated to that contract. Full suite 1,192 passed, 14 skipped; acceptance checks passed; ruff clean. |
 | A3 | Complete | `fca989d` | 7 new store tests: cursors survive reload, a corrupt line (counted in `skipped_records`, trace marked incomplete and partial), embedded upsert events, prune with a live follower, compaction plus reload, a timed-out write followed by the next write, and loading the previous record format. Full suite 1,199 passed, 14 skipped; acceptance checks passed; ruff clean. |
-| A4 | Complete | (this commit) | 3 new tests: resuming with a 1,200-event backlog then following live (previously always overflowed), the legacy `/events/{session_id}` route honouring `Last-Event-ID`, and bounded duplicate tracking. Full suite 1,202 passed, 14 skipped; acceptance checks passed; ruff clean. Open item: `test_configured_child_inherits_parent_telemetry_and_is_linked` failed once in about 62 runs of the combined serve/telemetry suites and could not be reproduced (0 in 150 isolated runs, 0 in 30 baseline runs at `fca989d`); the test now reports the child exception if it recurs. |
+| A4 | Complete | `32fa6ae` | 3 new tests: resuming with a 1,200-event backlog then following live (previously always overflowed), the legacy `/events/{session_id}` route honouring `Last-Event-ID`, and bounded duplicate tracking. Full suite 1,202 passed, 14 skipped; acceptance checks passed; ruff clean. Open item: `test_configured_child_inherits_parent_telemetry_and_is_linked` failed once in about 62 runs of the combined serve/telemetry suites and could not be reproduced (0 in 150 isolated runs, 0 in 30 baseline runs at `fca989d`); the test now reports the child exception if it recurs. |
+| A5 | Complete | (this commit) | 8 new tests: registration shares the manager store and keeps the agent's recording policy; an explicit different store is rejected; governance, sandbox, and subagent-factory recorders are rebound on registration and on delegation; a failed or slow first upsert no longer loses the background trace, and lost events mark it partial; with default settings a background run's family (lifecycle trace plus attempt trace) is complete from the agent (verified empty under the old behavior). Full suite 1,210 passed, 14 skipped; acceptance checks passed; ruff clean. |

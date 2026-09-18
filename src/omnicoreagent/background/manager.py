@@ -129,6 +129,11 @@ class BackgroundAgentManager:
         if existing and not replace:
             raise AgentAlreadyRegisteredError(f"Agent already registered: {agent_id}")
 
+        adopt_telemetry_store = getattr(agent, "_adopt_telemetry_store", None)
+        if callable(adopt_telemetry_store):
+            # Lifecycle, attempt, and agent traces must share one store so a
+            # background run's family can be reconstructed.
+            adopt_telemetry_store(self.telemetry_store)
         spec = spec_from_agent(agent_id, agent)
         self._agents[agent_id] = agent
         await self.task_store.save_agent(spec)
