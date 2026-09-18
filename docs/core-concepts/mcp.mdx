@@ -54,6 +54,30 @@ Process communication with local CLI tools:
 }
 ```
 
+Hosted MCP servers work the same way. You.com runs a public MCP server for
+live web search and URL content extraction — no local process needed:
+
+```python
+# Keyless profile: basic web search, no API key or OAuth required
+{
+    "name": "you_search",
+    "transport_type": "streamable_http",
+    "url": "https://api.you.com/mcp?profile=free"
+}
+
+# Authenticated: full You.com toolset with a Bearer token
+# (API keys: https://you.com/platform/api-keys)
+{
+    "name": "you_search",
+    "transport_type": "streamable_http",
+    "url": "https://api.you.com/mcp",
+    "headers": {
+        "Authorization": "Bearer your-youcom-api-key"
+    },
+    "timeout": 60
+}
+```
+
 ### 3. sse — Server-Sent Events
 
 ```python
