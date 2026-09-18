@@ -92,6 +92,9 @@ work continues.
   identifiable, is marked incomplete.
 - A timed-out write cannot run concurrently with the next write (writes are
   serialized on a single writer, not only by the async lock).
+- Each JSONL record starts with its `trace_id`, so a record truncated by a
+  crash can still be attributed to its trace. Found during A3: with sorted
+  keys the identifier was near the end of the line and lost on truncation.
 
 ### A4. Delivery
 - SSE resume with a cursor replays once; the live pump starts after the
@@ -206,4 +209,5 @@ Phase C passes.
 | Unit | Status | Commit | Evidence |
 | --- | --- | --- | --- |
 | A1 | Complete | `1abc441` | 10 new recorder/redaction tests; telemetry, runtime, loop, LLM-step and governance suites 158 passed; full suite 1,187 passed, 14 skipped; acceptance `--check-fixture` and `--run` passed; ruff clean. |
-| A2 | Complete | (this commit) | 5 new runtime tests (strict exporter error and timeout, strict store failure, strict finalization failure, cancellation during strict failure) all leave the parent trace running and the parent context restored. Strict exporter failures now raise `TelemetryExportError` (exporter name, original exception as `__cause__`) and record `telemetry_error`; 2 existing tests updated to that contract. Full suite 1,192 passed, 14 skipped; acceptance checks passed; ruff clean. |
+| A2 | Complete | `1a23a8a` | 5 new runtime tests (strict exporter error and timeout, strict store failure, strict finalization failure, cancellation during strict failure) all leave the parent trace running and the parent context restored. Strict exporter failures now raise `TelemetryExportError` (exporter name, original exception as `__cause__`) and record `telemetry_error`; 2 existing tests updated to that contract. Full suite 1,192 passed, 14 skipped; acceptance checks passed; ruff clean. |
+| A3 | Complete | (this commit) | 7 new store tests: cursors survive reload, a corrupt line (counted in `skipped_records`, trace marked incomplete and partial), embedded upsert events, prune with a live follower, compaction plus reload, a timed-out write followed by the next write, and loading the previous record format. Full suite 1,199 passed, 14 skipped; acceptance checks passed; ruff clean. |
