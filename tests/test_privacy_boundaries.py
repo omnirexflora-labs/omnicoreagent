@@ -214,3 +214,36 @@ def test_public_stream_errors_redact_exception_text():
 
     assert "alice@example.com" not in message
     assert "[REDACTED_EMAIL]" in message
+
+
+def test_privacy_filter_never_corrupts_generated_identifiers_or_digests():
+    privacy = PrivacyFilter()
+    # Generated identifiers and digests can contain a Luhn-valid digit run.
+    identifier = "trace_cbe5ba4111111111111111fc7c9541fde89"
+    digest = "4111111111111111" + "a" * 48
+    payload = {
+        "child_trace_id": identifier,
+        "model_call_event_id": "event_ab4111111111111111cd",
+        "context_digest": digest,
+        "message_digests": [digest, "ff4111111111111111ee"],
+        "reference": f"telemetry://payload/{digest}",
+        "result": {"data": {"trace_id": identifier, "note": f"see {identifier}"}},
+    }
+
+    assert privacy.redact(payload, boundary="telemetry") == payload
+    assert privacy.redact(payload, boundary="public") == payload
+
+
+def test_privacy_filter_still_redacts_standalone_card_numbers():
+    privacy = PrivacyFilter()
+
+    for text in (
+        "4111111111111111",
+        "card 4111 1111 1111 1111.",
+        "card:4111-1111-1111-1111",
+        "numbers (4111111111111111)",
+        "order-4111111111111111",
+    ):
+        redacted = privacy.redact_text(text, boundary="public")
+        assert "[REDACTED_CREDIT_CARD]" in redacted, text
+        assert "4111" not in redacted, text

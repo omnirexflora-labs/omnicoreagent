@@ -105,7 +105,10 @@ class PrivacyFilter:
 
     _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
     _SSN = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
-    _CARD = re.compile(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)")
+    # A card number must be a standalone token. Without word boundaries the
+    # pattern matched digit runs inside generated identifiers and hex digests
+    # (``trace_cbe5ba4111...``) and corrupted evidence links.
+    _CARD = re.compile(r"(?<!\w)(?:\d[ -]?){12,18}\d(?!\w)")
     _PHONE = re.compile(r"(?<!\w)\+?\d[\d().\-\s]{8,}\d(?!\w)")
 
     _MARKERS = {
