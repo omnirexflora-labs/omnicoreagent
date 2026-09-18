@@ -100,6 +100,7 @@ async def execute_native_turn(
 
     async def one(request):
         resolved = None
+        outcome: dict = {}
         signature_args = deepcopy(decoded_arguments.get(request.id, request.arguments))
         try:
             resolution = resolutions[request.id]
@@ -193,6 +194,7 @@ async def execute_native_turn(
                         **call_links.get(request.id, {}),
                         "tool_provider": binding.provider,
                     },
+                    telemetry_outcome=outcome,
                 )
         except asyncio.CancelledError:
             result = {
@@ -301,9 +303,17 @@ async def execute_native_turn(
                     "model_call_event_id": model_call_event_id,
                     "model_response_event_id": model_response_event_id,
                     "observation_for": request.id,
+                    # What this observation was built from; a rejected call
+                    # has no execution record, only its request.
+                    "tool_requested_event_id": call_links.get(request.id, {}).get(
+                        "tool_requested_event_id"
+                    ),
+                    "tool_span_id": outcome.get("tool_span_id"),
+                    "tool_result_event_id": outcome.get("tool_result_event_id"),
                 },
             )
             observation_event_id = observation_event.event_id
+            session_state.observation_event_ids[request.id] = observation_event_id
         return ToolFeedback(
             message={"role": "tool", "content": content, "tool_call_id": request.id},
             metadata={

@@ -129,3 +129,7 @@ class SessionState(SerializableRecord):
     loop_detector: Any
     assistant_with_tool_calls: dict | None
     pending_tool_responses: list[dict]
+    # Telemetry evidence only (never sent to the model): the observation event
+    # recorded for each tool call, and those already delivered to the model.
+    observation_event_ids: dict[str, str] = field(default_factory=dict)
+    delivered_observation_event_ids: set[str] = field(default_factory=set)

@@ -40,7 +40,7 @@ from omnicoreagent.core.agents.session_state import AgentSessionStateStore
 from omnicoreagent.core.agents.subagent_runner import SubAgentCallRunner
 from omnicoreagent.core.tools.tool_result_offloader import ToolResultOffloader
 from omnicoreagent.core.privacy import PrivacyFilter
-from omnicoreagent.core.interaction_history import context_evidence
+from omnicoreagent.core.interaction_history import context_evidence, stable_message_digest
 
 
 if TYPE_CHECKING:
@@ -173,6 +173,35 @@ class BaseReactAgent:
             debug=debug,
         )
 
+    async def _record_runtime_message(
+        self,
+        telemetry_recorder: Any,
+        message: Any,
+        *,
+        kind: str,
+        content: str | None = None,
+    ) -> None:
+        """Record text the runtime added to the model context.
+
+        ``message_digest`` equals the digest the next context assembly records
+        for this message, so the two can be matched. The text is harness text,
+        recorded in metadata under every capture policy.
+        """
+        if telemetry_recorder is None:
+            return
+        await telemetry_recorder.emit_event(
+            "runtime_message",
+            actor=TelemetryActor(type=ActorType.SYSTEM, name=self.agent_name),
+            metadata={
+                "kind": kind,
+                "role": getattr(message, "role", None),
+                "content": content if content is not None else message.content,
+                "message_digest": stable_message_digest(
+                    message, canonicalizer=telemetry_recorder.canonicalize_for_digest
+                ),
+            },
+        )
+
     async def _record_run_configuration(
         self,
         telemetry_recorder: Any,
@@ -301,6 +330,12 @@ class BaseReactAgent:
             )
         session_state.messages.append(Message(role="user", content=query))
         self.prompt_context_builder.inject_current_datetime(session_state.messages)
+        await self._record_runtime_message(
+            telemetry_recorder,
+            session_state.messages[-1],
+            kind="current_datetime",
+            content=_datetime_prefix(session_state.messages[-1], query),
+        )
 
         await add_message_to_history(
             role="user",
@@ -414,11 +449,13 @@ class BaseReactAgent:
                         )
                         if session_state.loop_detector.is_looping():
                             session_state.state = AgentState.STUCK
-                            session_state.messages.append(
-                                Message(
-                                    role="user",
-                                    content="Repeated tool calls are not making progress. Give your best answer with the available results and explain remaining limitations. Tools are disabled.",
-                                )
+                            recovery = Message(
+                                role="user",
+                                content="Repeated tool calls are not making progress. Give your best answer with the available results and explain remaining limitations. Tools are disabled.",
+                            )
+                            session_state.messages.append(recovery)
+                            await self._record_runtime_message(
+                                telemetry_recorder, recovery, kind="loop_recovery"
                             )
                     elif turn.text.strip():
                         if telemetry_recorder is not None and step_span is not None:
@@ -436,11 +473,13 @@ class BaseReactAgent:
                             start_time=start_time,
                         )
                     else:
-                        session_state.messages.append(
-                            Message(
-                                role="user",
-                                content="The previous response was empty. Provide an answer or use an available tool.",
-                            )
+                        retry = Message(
+                            role="user",
+                            content="The previous response was empty. Provide an answer or use an available tool.",
+                        )
+                        session_state.messages.append(retry)
+                        await self._record_runtime_message(
+                            telemetry_recorder, retry, kind="empty_response_retry"
                         )
                     if telemetry_recorder is not None and step_span is not None:
                         await telemetry_recorder.end_span(
@@ -469,3 +508,9 @@ class BaseReactAgent:
             "status": "error",
             "termination_reason": "max_steps",
         }
+
+
+def _datetime_prefix(message: Any, query: str) -> str:
+    """The text the runtime prepended to the user's query."""
+    content = str(getattr(message, "content", "") or "")
+    return content[: len(content) - len(query)] if content.endswith(query) else content

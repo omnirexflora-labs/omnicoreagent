@@ -171,6 +171,12 @@ class AgentLlmStepRunner:
                 canonicalizer=digest_canonicalizer,
             )
             context_input = dict(context_summary)
+            observation_ids = _context_observation_ids(session_state)
+            new_observation_ids = [
+                event_id
+                for event_id in observation_ids
+                if event_id not in session_state.delivered_observation_event_ids
+            ]
             if telemetry_recorder is not None:
                 if telemetry_recorder.config.record_model_prompts:
                     context_input["messages"] = [
@@ -197,6 +203,8 @@ class AgentLlmStepRunner:
                         metadata={
                             "context_span_id": context_span.span_id,
                             "context_digest": context_summary["context_digest"],
+                            "observation_event_ids": observation_ids,
+                            "new_observation_event_ids": new_observation_ids,
                         },
                     )
                 except Exception as exc:
@@ -226,7 +234,9 @@ class AgentLlmStepRunner:
                 telemetry_recorder=telemetry_recorder,
                 context_evidence=context_summary,
                 context_span_id=(context_span.span_id if context_span else None),
+                new_observation_event_ids=new_observation_ids,
             )
+            session_state.delivered_observation_event_ids.update(new_observation_ids)
             if response is None:
                 raise ValueError("Provider returned no response")
             if response is not None:
@@ -286,6 +296,8 @@ class AgentLlmStepRunner:
         telemetry_recorder: Any = None,
         context_evidence: dict[str, Any] | None = None,
         context_span_id: str | None = None,
+        purpose: str = "agent_turn",
+        new_observation_event_ids: list[str] | None = None,
     ) -> tuple[Any, str | None, str | None, str | None]:
         stream_stats: dict[str, Any] = {
             "streaming": on_event is not None,
@@ -353,6 +365,7 @@ class AgentLlmStepRunner:
                 "context_digest": (context_evidence or {}).get("context_digest"),
                 "context_span_id": context_span_id,
                 "streaming": stream_stats["streaming"],
+                "purpose": purpose,
             },
         )
         try:
@@ -370,6 +383,12 @@ class AgentLlmStepRunner:
                     "context_span_id": context_span_id,
                     "context_digest": (context_evidence or {}).get("context_digest"),
                     "streaming": stream_stats["streaming"],
+                    # Internal model work (context summaries) is marked so it
+                    # is never mistaken for an agent decision.
+                    "purpose": purpose,
+                    # Tool observations this call delivers to the model for
+                    # the first time: the observation -> next turn link.
+                    "new_observation_event_ids": list(new_observation_event_ids or []),
                 },
             )
             retries: list[dict[str, Any]] = []
@@ -384,6 +403,7 @@ class AgentLlmStepRunner:
                 llm_connection,
                 telemetry_recorder,
                 timing=timing,
+                purpose=purpose,
                 retries=retries,
                 normalized=normalized,
                 usage=extract_response_usage(response),
@@ -445,6 +465,7 @@ class AgentLlmStepRunner:
                         llm_connection,
                         telemetry_recorder,
                         timing=timing,
+                        purpose=purpose,
                         retries=locals().get("retries", []),
                     ),
                 },
@@ -455,6 +476,7 @@ class AgentLlmStepRunner:
                 llm_connection,
                 telemetry_recorder,
                 timing=timing,
+                purpose=purpose,
                 retries=locals().get("retries", []),
             )
             await telemetry_recorder.record_exception(
@@ -481,6 +503,7 @@ class AgentLlmStepRunner:
         *,
         timing: dict[str, float | None],
         retries: list[dict[str, Any]],
+        purpose: str = "agent_turn",
         normalized: ModelTurn | None = None,
         usage: Usage | None = None,
     ) -> dict[str, Any]:
@@ -516,6 +539,7 @@ class AgentLlmStepRunner:
                 cost = None
             cost_source = "price_table" if cost is not None else None
         return {
+            "purpose": purpose,
             "request_settings": request_settings,
             "provider_response_id": response_metadata.get("id"),
             "provider_model": response_metadata.get("model"),
@@ -584,6 +608,7 @@ class AgentLlmStepRunner:
                         canonicalizer=telemetry_recorder.canonicalize_for_digest,
                     ),
                     context_span_id=parent_span_id,
+                    purpose="context_summary",
                 )
             return extract_response_content(response, default="")
 
@@ -686,3 +711,17 @@ def _standard_token_usage(tokens: dict[str, Any] | None) -> dict[str, Any] | Non
         "completion_tokens": tokens.get("output"),
         "total_tokens": tokens.get("total"),
     }
+
+
+def _context_observation_ids(session_state: SessionState) -> list[str]:
+    """Observation events whose tool messages are in the model context, in order."""
+    known = getattr(session_state, "observation_event_ids", None) or {}
+    ids: list[str] = []
+    for message in session_state.messages:
+        record = message_record(message)
+        if record.get("role") != "tool":
+            continue
+        event_id = known.get(record.get("tool_call_id"))
+        if event_id is not None and event_id not in ids:
+            ids.append(event_id)
+    return ids

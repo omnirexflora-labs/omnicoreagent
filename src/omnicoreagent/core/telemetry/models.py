@@ -131,6 +131,7 @@ FOUNDATION_EVENT_TYPES = frozenset(
         "memory_eviction",
         "context_assembly",
         "run_configuration",
+        "runtime_message",
         "context_compression",
         "context_dropped",
         "context_restored",

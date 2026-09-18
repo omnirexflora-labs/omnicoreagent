@@ -162,6 +162,33 @@ records the same attempts on its `model_error` event. The raw tool-call
 argument strings the model produced are in the `model_response` output when
 model responses are recorded (`capture: "full"`).
 
+### Tool calls and observations
+
+A tool call is recorded from request to observation, and every record links to
+the others through event metadata, which is kept under every capture policy:
+
+- `tool_requested` keeps the exact raw argument text the model produced (even
+  invalid JSON) and, when rejected, a `rejection_reason` (`invalid_arguments`,
+  `unknown_tool`, `arguments_rejected`).
+- Execution records (`tool_call`, `tool_result`, `tool_error`) carry the
+  `batch_id`, the model call and response that requested them, and the
+  `tool_requested` / `tool_resolved` event IDs. A call that exceeds its time
+  limit is recorded as `timeout`, distinct from a cancelled run.
+- `tool_observation` is the exact message returned to the model. It carries the
+  `tool_result_event_id` and `tool_span_id` it was built from.
+- Each `context_assembly` lists the `observation_event_ids` in the model's
+  context and the `new_observation_event_ids` delivered for the first time; the
+  `model_call` event repeats the new ones. That is the link from an
+  observation to the model decision that first saw it.
+- Text the runtime adds to the model context (the current-datetime prefix,
+  empty-response retry, loop recovery) is a `runtime_message` event whose
+  `message_digest` matches the next context's message digest.
+- Every `model_call` records its `purpose`: `agent_turn`, or `context_summary`
+  for internal summarization.
+
+Under governance, tool arguments and delegation parameters are recorded
+redacted, and policy decisions carry the `tool_call_id` they authorized.
+
 `execution_surface` records how the run was entered: `interactive` for a direct
 `agent.run(...)`, `serve` through OmniServe, and `background` for background
 attempts. Label a run or attach external identity without changing execution:
