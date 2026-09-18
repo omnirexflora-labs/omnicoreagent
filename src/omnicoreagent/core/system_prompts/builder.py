@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from omnicoreagent.core.types import Message
@@ -46,7 +46,7 @@ class AgentPromptContextBuilder:
         self.enable_agent_skills = enable_agent_skills
         self.is_tool_offload_enabled = is_tool_offload_enabled
         self.skill_manager = skill_manager
-        self.clock = clock or datetime.now
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
 
     async def build_system_prompt(
         self,
@@ -112,7 +112,15 @@ class AgentPromptContextBuilder:
             if message.role != "user":
                 continue
 
-            datetime_info = f"[CURRENT_DATETIME: {self.clock().strftime('%Y-%m-%d %H:%M:%S %Z')}]\n\n"
+            now = self.clock()
+            # Always UTC and labelled, so the value does not depend on the
+            # server's local zone. A naive clock value is taken as UTC.
+            now = (
+                now.replace(tzinfo=timezone.utc)
+                if now.tzinfo is None
+                else now.astimezone(timezone.utc)
+            )
+            datetime_info = f"[CURRENT_DATETIME: {now.strftime('%Y-%m-%d %H:%M:%S')} UTC]\n\n"
             messages[index] = Message(
                 role="user",
                 content=datetime_info + message.content,

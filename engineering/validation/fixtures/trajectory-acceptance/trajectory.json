@@ -1,7 +1,7 @@
 {
   "agent_id": "lead",
   "capture_gaps": [],
-  "ended_at": "2026-09-18T17:54:49.144804+00:00",
+  "ended_at": "2026-09-18T18:04:38.799802+00:00",
   "evidence_status": "complete",
   "execution_surface": "interactive",
   "final": {
@@ -165,15 +165,15 @@
   "run_id": "run_0001",
   "runtime_messages": [
     {
-      "content": "[CURRENT_DATETIME: 2026-09-18 18:54:41 ]\n\n",
+      "content": "[CURRENT_DATETIME: 2026-09-18 18:04:30 UTC]\n\n",
       "event_id": "event_0008",
       "kind": "current_datetime",
-      "message_digest": "51af5b0955f826290039dd5eafb0d2b9f00844b90ff2c5eef421a9514087c3a3",
+      "message_digest": "fb7da28ee2123d674cf01a50acec542bd37b9d74646a2f6ace16826b6b40d0d4",
       "role": "user"
     }
   ],
   "session_id": "trajectory-acceptance",
-  "started_at": "2026-09-18T17:54:41.004415+00:00",
+  "started_at": "2026-09-18T18:04:30.262951+00:00",
   "status": "completed",
   "steps": [
     {
@@ -184,7 +184,7 @@
             "reference": null,
             "state": "available"
           },
-          "context_digest": "ca0b6a1c4095d04524f339ad2ee9010fb65802b640c4479571091ca9b14eda0e",
+          "context_digest": "decab93fb1b06e1e517b563d7d5f2c5d6a0b04a87fe1e1ca5304868000ea13d2",
           "event_id": "event_0009",
           "message_count": 2,
           "new_observation_event_ids": [],
@@ -219,18 +219,18 @@
           "type": "context_assembly"
         }
       ],
-      "duration_ms": 3928,
-      "ended_at": "2026-09-18T17:54:45.283857+00:00",
+      "duration_ms": 3985,
+      "ended_at": "2026-09-18T18:04:34.494421+00:00",
       "model_calls": [
         {
-          "context_digest": "ca0b6a1c4095d04524f339ad2ee9010fb65802b640c4479571091ca9b14eda0e",
+          "context_digest": "decab93fb1b06e1e517b563d7d5f2c5d6a0b04a87fe1e1ca5304868000ea13d2",
           "error": null,
           "facts": {
             "attempts": 1,
             "cost_source": "price_table",
             "estimated_cost_usd": 0.00010999999999999999,
             "finish_reason": "tool_calls",
-            "latency_ms": 0.099,
+            "latency_ms": 0.556,
             "provider_model": null,
             "provider_response_id": null,
             "purpose": "agent_turn",
@@ -250,7 +250,7 @@
           "outcome": "ok",
           "purpose": "agent_turn",
           "request": {
-            "context_digest": "ca0b6a1c4095d04524f339ad2ee9010fb65802b640c4479571091ca9b14eda0e",
+            "context_digest": "decab93fb1b06e1e517b563d7d5f2c5d6a0b04a87fe1e1ca5304868000ea13d2",
             "message_count": 2,
             "messages": [
               {
@@ -258,7 +258,7 @@
                 "role": "system"
               },
               {
-                "content": "[CURRENT_DATETIME: 2026-09-18 18:54:41 ]\n\nRun the trajectory acceptance scenario.",
+                "content": "[CURRENT_DATETIME: 2026-09-18 18:04:30 UTC]\n\nRun the trajectory acceptance scenario.",
                 "role": "user"
               }
             ],
@@ -863,7 +863,7 @@
       ],
       "runtime_messages": [],
       "span_id": "span_0005",
-      "started_at": "2026-09-18T17:54:41.355977+00:00",
+      "started_at": "2026-09-18T18:04:30.508964+00:00",
       "status": "ok",
       "step": 1,
       "tool_calls": [
@@ -1047,7 +1047,7 @@
               "reference": null,
               "state": "available"
             },
-            "content": "{\"tool_name\": \"big_report\", \"args\": {}, \"status\": \"success\", \"data\": \"[TOOL RESPONSE OFFLOADED]\\nTool: big_report\\nArtifact ID: big_report_20260918_185442_9b717cbd\\nOriginal size: 571 tokens \u2192 Preview: 169 tokens (saved 402 tokens)\\n\\n--- PREVIEW ---\\n{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line\\n... [truncated, 1 more lines]\\n--- END PREVIEW ---\\n\\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/big_report_20260918_185442_9b717cbd.json\\n\ud83d\udca1 Use read_artifact('big_report_20260918_185442_9b717cbd') to load full content when needed.\", \"message\": null}",
+            "content": "{\"tool_name\": \"big_report\", \"args\": {}, \"status\": \"success\", \"data\": \"[TOOL RESPONSE OFFLOADED]\\nTool: big_report\\nArtifact ID: big_report_20260918_190432_9b717cbd\\nOriginal size: 571 tokens \u2192 Preview: 169 tokens (saved 402 tokens)\\n\\n--- PREVIEW ---\\n{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line\\n... [truncated, 1 more lines]\\n--- END PREVIEW ---\\n\\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/big_report_20260918_190432_9b717cbd.json\\n\ud83d\udca1 Use read_artifact('big_report_20260918_190432_9b717cbd') to load full content when needed.\", \"message\": null}",
             "event_id": "event_0044",
             "tool_result_event_id": "event_0042"
           },
@@ -1127,7 +1127,7 @@
             "reference": null,
             "state": "available"
           },
-          "context_digest": "8f8f0070ae2a34e011e95dd1794bcb8851a5d19e5b21f45ed95f824eb01fba50",
+          "context_digest": "844696eaac411b1f36ac3493a055ee7cbfb98cf480e841d9132a24c2debf6a6b",
           "event_id": "event_0045",
           "message_count": 8,
           "new_observation_event_ids": [
@@ -1176,18 +1176,18 @@
           "type": "context_assembly"
         }
       ],
-      "duration_ms": 331,
-      "ended_at": "2026-09-18T17:54:45.620478+00:00",
+      "duration_ms": 510,
+      "ended_at": "2026-09-18T18:04:35.024437+00:00",
       "model_calls": [
         {
-          "context_digest": "8f8f0070ae2a34e011e95dd1794bcb8851a5d19e5b21f45ed95f824eb01fba50",
+          "context_digest": "844696eaac411b1f36ac3493a055ee7cbfb98cf480e841d9132a24c2debf6a6b",
           "error": null,
           "facts": {
             "attempts": 1,
             "cost_source": "price_table",
             "estimated_cost_usd": 0.00020099999999999998,
             "finish_reason": "stop",
-            "latency_ms": 0.086,
+            "latency_ms": 0.074,
             "provider_model": null,
             "provider_response_id": null,
             "purpose": "agent_turn",
@@ -1213,7 +1213,7 @@
           "outcome": "ok",
           "purpose": "agent_turn",
           "request": {
-            "context_digest": "8f8f0070ae2a34e011e95dd1794bcb8851a5d19e5b21f45ed95f824eb01fba50",
+            "context_digest": "844696eaac411b1f36ac3493a055ee7cbfb98cf480e841d9132a24c2debf6a6b",
             "message_count": 8,
             "messages": [
               {
@@ -1221,7 +1221,7 @@
                 "role": "system"
               },
               {
-                "content": "[CURRENT_DATETIME: 2026-09-18 18:54:41 ]\n\nRun the trajectory acceptance scenario.",
+                "content": "[CURRENT_DATETIME: 2026-09-18 18:04:30 UTC]\n\nRun the trajectory acceptance scenario.",
                 "role": "user"
               },
               {
@@ -1291,7 +1291,7 @@
                 "tool_call_id": "c_slow"
               },
               {
-                "content": "{\"tool_name\": \"big_report\", \"args\": {}, \"status\": \"success\", \"data\": \"[TOOL RESPONSE OFFLOADED]\\nTool: big_report\\nArtifact ID: big_report_20260918_185442_9b717cbd\\nOriginal size: 571 tokens \u2192 Preview: 169 tokens (saved 402 tokens)\\n\\n--- PREVIEW ---\\n{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line\\n... [truncated, 1 more lines]\\n--- END PREVIEW ---\\n\\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/big_report_20260918_185442_9b717cbd.json\\n\ud83d\udca1 Use read_artifact('big_report_20260918_185442_9b717cbd') to load full content when needed.\", \"message\": null}",
+                "content": "{\"tool_name\": \"big_report\", \"args\": {}, \"status\": \"success\", \"data\": \"[TOOL RESPONSE OFFLOADED]\\nTool: big_report\\nArtifact ID: big_report_20260918_190432_9b717cbd\\nOriginal size: 571 tokens \u2192 Preview: 169 tokens (saved 402 tokens)\\n\\n--- PREVIEW ---\\n{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line\\n... [truncated, 1 more lines]\\n--- END PREVIEW ---\\n\\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/big_report_20260918_190432_9b717cbd.json\\n\ud83d\udca1 Use read_artifact('big_report_20260918_190432_9b717cbd') to load full content when needed.\", \"message\": null}",
                 "role": "tool",
                 "tool_call_id": "c_big"
               }
@@ -1813,7 +1813,7 @@
         }
       ],
       "span_id": "span_0018",
-      "started_at": "2026-09-18T17:54:45.289408+00:00",
+      "started_at": "2026-09-18T18:04:34.514849+00:00",
       "status": "ok",
       "step": 2,
       "tool_calls": []
@@ -1826,7 +1826,7 @@
             "reference": null,
             "state": "available"
           },
-          "context_digest": "27211e2a55b3ddfd81d3837681c6f65883bfd6e2984028cb34fa24a7a9398945",
+          "context_digest": "fa7b5308e31f61d8f918db130d374ed958b363bb78ff0381e32d5e90b13d1fa0",
           "event_id": "event_0050",
           "message_count": 9,
           "new_observation_event_ids": [],
@@ -1869,18 +1869,18 @@
           "type": "context_assembly"
         }
       ],
-      "duration_ms": 487,
-      "ended_at": "2026-09-18T17:54:46.119143+00:00",
+      "duration_ms": 638,
+      "ended_at": "2026-09-18T18:04:35.668228+00:00",
       "model_calls": [
         {
-          "context_digest": "27211e2a55b3ddfd81d3837681c6f65883bfd6e2984028cb34fa24a7a9398945",
+          "context_digest": "fa7b5308e31f61d8f918db130d374ed958b363bb78ff0381e32d5e90b13d1fa0",
           "error": null,
           "facts": {
             "attempts": 1,
             "cost_source": "price_table",
             "estimated_cost_usd": 0.00031,
             "finish_reason": "tool_calls",
-            "latency_ms": 0.857,
+            "latency_ms": 0.0,
             "provider_model": null,
             "provider_response_id": null,
             "purpose": "agent_turn",
@@ -1900,7 +1900,7 @@
           "outcome": "ok",
           "purpose": "agent_turn",
           "request": {
-            "context_digest": "27211e2a55b3ddfd81d3837681c6f65883bfd6e2984028cb34fa24a7a9398945",
+            "context_digest": "fa7b5308e31f61d8f918db130d374ed958b363bb78ff0381e32d5e90b13d1fa0",
             "message_count": 9,
             "messages": [
               {
@@ -1908,7 +1908,7 @@
                 "role": "system"
               },
               {
-                "content": "[CURRENT_DATETIME: 2026-09-18 18:54:41 ]\n\nRun the trajectory acceptance scenario.",
+                "content": "[CURRENT_DATETIME: 2026-09-18 18:04:30 UTC]\n\nRun the trajectory acceptance scenario.",
                 "role": "user"
               },
               {
@@ -1978,7 +1978,7 @@
                 "tool_call_id": "c_slow"
               },
               {
-                "content": "{\"tool_name\": \"big_report\", \"args\": {}, \"status\": \"success\", \"data\": \"[TOOL RESPONSE OFFLOADED]\\nTool: big_report\\nArtifact ID: big_report_20260918_185442_9b717cbd\\nOriginal size: 571 tokens \u2192 Preview: 169 tokens (saved 402 tokens)\\n\\n--- PREVIEW ---\\n{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line\\n... [truncated, 1 more lines]\\n--- END PREVIEW ---\\n\\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/big_report_20260918_185442_9b717cbd.json\\n\ud83d\udca1 Use read_artifact('big_report_20260918_185442_9b717cbd') to load full content when needed.\", \"message\": null}",
+                "content": "{\"tool_name\": \"big_report\", \"args\": {}, \"status\": \"success\", \"data\": \"[TOOL RESPONSE OFFLOADED]\\nTool: big_report\\nArtifact ID: big_report_20260918_190432_9b717cbd\\nOriginal size: 571 tokens \u2192 Preview: 169 tokens (saved 402 tokens)\\n\\n--- PREVIEW ---\\n{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line\\n... [truncated, 1 more lines]\\n--- END PREVIEW ---\\n\\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/big_report_20260918_190432_9b717cbd.json\\n\ud83d\udca1 Use read_artifact('big_report_20260918_190432_9b717cbd') to load full content when needed.\", \"message\": null}",
                 "role": "tool",
                 "tool_call_id": "c_big"
               },
@@ -2474,7 +2474,7 @@
             "tool_calls": [
               {
                 "function": {
-                  "arguments": "{\"artifact_id\": \"big_report_20260918_185442_9b717cbd\"}",
+                  "arguments": "{\"artifact_id\": \"big_report_20260918_190432_9b717cbd\"}",
                   "name": "read_artifact"
                 },
                 "id": "c_read",
@@ -2532,13 +2532,13 @@
       ],
       "runtime_messages": [],
       "span_id": "span_0020",
-      "started_at": "2026-09-18T17:54:45.632288+00:00",
+      "started_at": "2026-09-18T18:04:35.029899+00:00",
       "status": "ok",
       "step": 3,
       "tool_calls": [
         {
           "arguments": {
-            "artifact_id": "big_report_20260918_185442_9b717cbd"
+            "artifact_id": "big_report_20260918_190432_9b717cbd"
           },
           "error": null,
           "event_ids": [
@@ -2554,18 +2554,18 @@
               "reference": null,
               "state": "available"
             },
-            "content": "{\"tool_name\": \"read_artifact\", \"args\": {\"artifact_id\": \"big_report_20260918_185442_9b717cbd\"}, \"status\": \"success\", \"data\": \"{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line 10 line 10 \\\", \\\"line 11 line 11 line 11 line 11 \\\", \\\"line 12 line 12 line 12 line 12 \\\", \\\"line 13 line 13 line 13 line 13 \\\", \\\"line 14 line 14 line 14 line 14 \\\", \\\"line 15 line 15 line 15 line 15 \\\", \\\"line 16 line 16 line 16 line 16 \\\", \\\"line 17 line 17 line 17 line 17 \\\", \\\"line 18 line 18 line 18 line 18 \\\", \\\"line 19 line 19 line 19 line 19 \\\", \\\"line 20 line 20 line 20 line 20 \\\", \\\"line 21 line 21 line 21 line 21 \\\", \\\"line 22 line 22 line 22 line 22 \\\", \\\"line 23 line 23 line 23 line 23 \\\", \\\"line 24 line 24 line 24 line 24 \\\", \\\"line 25 line 25 line 25 line 25 \\\", \\\"line 26 line 26 line 26 line 26 \\\", \\\"line 27 line 27 line 27 line 27 \\\", \\\"line 28 line 28 line 28 line 28 \\\", \\\"line 29 line 29 line 29 line 29 \\\", \\\"line 30 line 30 line 30 line 30 \\\", \\\"line 31 line 31 line 31 line 31 \\\", \\\"line 32 line 32 line 32 line 32 \\\", \\\"line 33 line 33 line 33 line 33 \\\", \\\"line 34 line 34 line 34 line 34 \\\", \\\"line 35 line 35 line 35 line 35 \\\", \\\"line 36 line 36 line 36 line 36 \\\", \\\"line 37 line 37 line 37 line 37 \\\", \\\"line 38 line 38 line 38 line 38 \\\", \\\"line 39 line 39 line 39 line 39 \\\"]}\", \"message\": null}",
+            "content": "{\"tool_name\": \"read_artifact\", \"args\": {\"artifact_id\": \"big_report_20260918_190432_9b717cbd\"}, \"status\": \"success\", \"data\": \"{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line 10 line 10 \\\", \\\"line 11 line 11 line 11 line 11 \\\", \\\"line 12 line 12 line 12 line 12 \\\", \\\"line 13 line 13 line 13 line 13 \\\", \\\"line 14 line 14 line 14 line 14 \\\", \\\"line 15 line 15 line 15 line 15 \\\", \\\"line 16 line 16 line 16 line 16 \\\", \\\"line 17 line 17 line 17 line 17 \\\", \\\"line 18 line 18 line 18 line 18 \\\", \\\"line 19 line 19 line 19 line 19 \\\", \\\"line 20 line 20 line 20 line 20 \\\", \\\"line 21 line 21 line 21 line 21 \\\", \\\"line 22 line 22 line 22 line 22 \\\", \\\"line 23 line 23 line 23 line 23 \\\", \\\"line 24 line 24 line 24 line 24 \\\", \\\"line 25 line 25 line 25 line 25 \\\", \\\"line 26 line 26 line 26 line 26 \\\", \\\"line 27 line 27 line 27 line 27 \\\", \\\"line 28 line 28 line 28 line 28 \\\", \\\"line 29 line 29 line 29 line 29 \\\", \\\"line 30 line 30 line 30 line 30 \\\", \\\"line 31 line 31 line 31 line 31 \\\", \\\"line 32 line 32 line 32 line 32 \\\", \\\"line 33 line 33 line 33 line 33 \\\", \\\"line 34 line 34 line 34 line 34 \\\", \\\"line 35 line 35 line 35 line 35 \\\", \\\"line 36 line 36 line 36 line 36 \\\", \\\"line 37 line 37 line 37 line 37 \\\", \\\"line 38 line 38 line 38 line 38 \\\", \\\"line 39 line 39 line 39 line 39 \\\"]}\", \"message\": null}",
             "event_id": "event_0062",
             "tool_result_event_id": "event_0061"
           },
           "outcome": "success",
           "provider": "artifact",
-          "raw_arguments": "{\"artifact_id\": \"big_report_20260918_185442_9b717cbd\"}",
+          "raw_arguments": "{\"artifact_id\": \"big_report_20260918_190432_9b717cbd\"}",
           "rejection_reason": null,
           "requested_event_id": "event_0059",
           "result": {
             "args": {
-              "artifact_id": "big_report_20260918_185442_9b717cbd"
+              "artifact_id": "big_report_20260918_190432_9b717cbd"
             },
             "data": "{\"marker\": \"BIG_MARKER\", \"lines\": [\"line 0 line 0 line 0 line 0 \", \"line 1 line 1 line 1 line 1 \", \"line 2 line 2 line 2 line 2 \", \"line 3 line 3 line 3 line 3 \", \"line 4 line 4 line 4 line 4 \", \"line 5 line 5 line 5 line 5 \", \"line 6 line 6 line 6 line 6 \", \"line 7 line 7 line 7 line 7 \", \"line 8 line 8 line 8 line 8 \", \"line 9 line 9 line 9 line 9 \", \"line 10 line 10 line 10 line 10 \", \"line 11 line 11 line 11 line 11 \", \"line 12 line 12 line 12 line 12 \", \"line 13 line 13 line 13 line 13 \", \"line 14 line 14 line 14 line 14 \", \"line 15 line 15 line 15 line 15 \", \"line 16 line 16 line 16 line 16 \", \"line 17 line 17 line 17 line 17 \", \"line 18 line 18 line 18 line 18 \", \"line 19 line 19 line 19 line 19 \", \"line 20 line 20 line 20 line 20 \", \"line 21 line 21 line 21 line 21 \", \"line 22 line 22 line 22 line 22 \", \"line 23 line 23 line 23 line 23 \", \"line 24 line 24 line 24 line 24 \", \"line 25 line 25 line 25 line 25 \", \"line 26 line 26 line 26 line 26 \", \"line 27 line 27 line 27 line 27 \", \"line 28 line 28 line 28 line 28 \", \"line 29 line 29 line 29 line 29 \", \"line 30 line 30 line 30 line 30 \", \"line 31 line 31 line 31 line 31 \", \"line 32 line 32 line 32 line 32 \", \"line 33 line 33 line 33 line 33 \", \"line 34 line 34 line 34 line 34 \", \"line 35 line 35 line 35 line 35 \", \"line 36 line 36 line 36 line 36 \", \"line 37 line 37 line 37 line 37 \", \"line 38 line 38 line 38 line 38 \", \"line 39 line 39 line 39 line 39 \"]}",
             "message": null,
@@ -2588,7 +2588,7 @@
       "context": [
         {
           "after": {
-            "context_digest": "791fdc5f65a902f75b50511443057600e43c3eee0132a13f9db4a258a4f4530d",
+            "context_digest": "79278aa8f9e4bfe34ad92ea0767ce7667de52ec98e8d156faa6d72ddb030842c",
             "interaction_group_count": 5,
             "message_count": 11,
             "message_digests": [
@@ -2599,10 +2599,10 @@
               "9e9591df6efb104d4199bd8cf6a197c5b55874b8f4427bd870a291781b9b7e2f",
               "f690931c9c5211bd6dd7277472b46afd221c59b65e83115f7b9854c91051dd13",
               "47f61e21eac71cbbcbded1682513f8f126614d39f25c99427ddf1b646503731b",
-              "85035459a7fdd612e9bf0ba168077f0376dc544d6696fe2261a4772f477dc622",
+              "9abfc5a3cb863ecda011905edec79eca84ca80edefd108a001c2db29bddfdded",
               "aacd816347f91b3802680bc233100f1c22cbc8f730b2db05c55258a098ba53f2",
-              "d4908fb1a7d324bd88fa19a1121e2dbea21d0c1df0a378b999f01eda2f012072",
-              "a5f0eb4dea45c3c37a252036062fef2b5e1e33a58c5f0b2dc27b7368e0960aad"
+              "ebdd3bb0928e99ce287c66c9e66e3ab6a93cb0c1afaa4063b6bb86be6bd1f065",
+              "86048fb8655cbc556dac0e30d6026cc64d1d32b777d6e5655c8d24c3f89b9417"
             ],
             "role_counts": {
               "assistant": 2,
@@ -2635,21 +2635,21 @@
             ]
           },
           "before": {
-            "context_digest": "69e569fb1444037fc1787eb0049383648f1bc7bc4ea0e9e10322ee61564e1da2",
+            "context_digest": "491c1f88288d87dd2e1169b271b291be9c9044b5def2d0e364c3ab21324a4e02",
             "interaction_group_count": 5,
             "message_count": 11,
             "message_digests": [
               "8b4df29ecd90e6b5a710a179b90b8c0a0bb466b29a82eace8f3798fb5ef1ce02",
-              "51af5b0955f826290039dd5eafb0d2b9f00844b90ff2c5eef421a9514087c3a3",
+              "fb7da28ee2123d674cf01a50acec542bd37b9d74646a2f6ace16826b6b40d0d4",
               "740fc342914449b2c2c0fab5e8cd5878e06a062f6490872746f2f4947e0b2fab",
               "1265cd042152c85773a1c23847385af1de41ff00f8f115d4a6ddfc7d286f859c",
               "9e9591df6efb104d4199bd8cf6a197c5b55874b8f4427bd870a291781b9b7e2f",
               "f690931c9c5211bd6dd7277472b46afd221c59b65e83115f7b9854c91051dd13",
               "47f61e21eac71cbbcbded1682513f8f126614d39f25c99427ddf1b646503731b",
-              "85035459a7fdd612e9bf0ba168077f0376dc544d6696fe2261a4772f477dc622",
+              "9abfc5a3cb863ecda011905edec79eca84ca80edefd108a001c2db29bddfdded",
               "aacd816347f91b3802680bc233100f1c22cbc8f730b2db05c55258a098ba53f2",
-              "d4908fb1a7d324bd88fa19a1121e2dbea21d0c1df0a378b999f01eda2f012072",
-              "a5f0eb4dea45c3c37a252036062fef2b5e1e33a58c5f0b2dc27b7368e0960aad"
+              "ebdd3bb0928e99ce287c66c9e66e3ab6a93cb0c1afaa4063b6bb86be6bd1f065",
+              "86048fb8655cbc556dac0e30d6026cc64d1d32b777d6e5655c8d24c3f89b9417"
             ],
             "role_counts": {
               "assistant": 2,
@@ -2695,7 +2695,7 @@
             "reference": null,
             "state": "available"
           },
-          "context_digest": "791fdc5f65a902f75b50511443057600e43c3eee0132a13f9db4a258a4f4530d",
+          "context_digest": "79278aa8f9e4bfe34ad92ea0767ce7667de52ec98e8d156faa6d72ddb030842c",
           "event_id": "event_0064",
           "message_count": 11,
           "new_observation_event_ids": [
@@ -2741,18 +2741,18 @@
           "type": "context_assembly"
         }
       ],
-      "duration_ms": 2096,
-      "ended_at": "2026-09-18T17:54:48.219229+00:00",
+      "duration_ms": 2225,
+      "ended_at": "2026-09-18T18:04:37.916014+00:00",
       "model_calls": [
         {
-          "context_digest": "4fc59c19b53faf107ba05f22ec37134ba5d8cf3aa28ae5b6c1334390d788578c",
+          "context_digest": "c5017aa8ee95668707a5fb5dca142c2b8bda59c8b5b18f264c358d71974fa799",
           "error": null,
           "facts": {
             "attempts": 1,
             "cost_source": "price_table",
             "estimated_cost_usd": 5.8e-05,
             "finish_reason": "stop",
-            "latency_ms": 0.06,
+            "latency_ms": 0.075,
             "provider_model": null,
             "provider_response_id": null,
             "purpose": "context_summary",
@@ -2772,7 +2772,7 @@
           "outcome": "ok",
           "purpose": "context_summary",
           "request": {
-            "context_digest": "4fc59c19b53faf107ba05f22ec37134ba5d8cf3aa28ae5b6c1334390d788578c",
+            "context_digest": "c5017aa8ee95668707a5fb5dca142c2b8bda59c8b5b18f264c358d71974fa799",
             "message_count": 2,
             "messages": [
               {
@@ -2780,7 +2780,7 @@
                 "role": "system"
               },
               {
-                "content": "Here is the conversation history: user: [CURRENT_DATETIME: 2026-09-18 18:54:41 ]\n\nRun the trajectory acceptance scenario.",
+                "content": "Here is the conversation history: user: [CURRENT_DATETIME: 2026-09-18 18:04:30 UTC]\n\nRun the trajectory acceptance scenario.",
                 "role": "user"
               }
             ],
@@ -2824,14 +2824,14 @@
           "response_event_id": "event_0066"
         },
         {
-          "context_digest": "791fdc5f65a902f75b50511443057600e43c3eee0132a13f9db4a258a4f4530d",
+          "context_digest": "79278aa8f9e4bfe34ad92ea0767ce7667de52ec98e8d156faa6d72ddb030842c",
           "error": null,
           "facts": {
             "attempts": 1,
             "cost_source": "price_table",
             "estimated_cost_usd": 0.00041,
             "finish_reason": "tool_calls",
-            "latency_ms": 0.731,
+            "latency_ms": 0.099,
             "provider_model": null,
             "provider_response_id": null,
             "purpose": "agent_turn",
@@ -2853,7 +2853,7 @@
           "outcome": "ok",
           "purpose": "agent_turn",
           "request": {
-            "context_digest": "791fdc5f65a902f75b50511443057600e43c3eee0132a13f9db4a258a4f4530d",
+            "context_digest": "79278aa8f9e4bfe34ad92ea0767ce7667de52ec98e8d156faa6d72ddb030842c",
             "message_count": 11,
             "messages": [
               {
@@ -2935,7 +2935,7 @@
                 "tool_call_id": "c_slow"
               },
               {
-                "content": "{\"tool_name\": \"big_report\", \"args\": {}, \"status\": \"success\", \"data\": \"[TOOL RESPONSE OFFLOADED]\\nTool: big_report\\nArtifact ID: big_report_20260918_185442_9b717cbd\\nOriginal size: 571 tokens \u2192 Preview: 169 tokens (saved 402 tokens)\\n\\n--- PREVIEW ---\\n{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line\\n... [truncated, 1 more lines]\\n--- END PREVIEW ---\\n\\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/big_report_20260918_185442_9b717cbd.json\\n\ud83d\udca1 Use read_artifact('big_report_20260918_185442_9b717cbd') to load full content when needed.\", \"message\": null}",
+                "content": "{\"tool_name\": \"big_report\", \"args\": {}, \"status\": \"success\", \"data\": \"[TOOL RESPONSE OFFLOADED]\\nTool: big_report\\nArtifact ID: big_report_20260918_190432_9b717cbd\\nOriginal size: 571 tokens \u2192 Preview: 169 tokens (saved 402 tokens)\\n\\n--- PREVIEW ---\\n{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line\\n... [truncated, 1 more lines]\\n--- END PREVIEW ---\\n\\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/big_report_20260918_190432_9b717cbd.json\\n\ud83d\udca1 Use read_artifact('big_report_20260918_190432_9b717cbd') to load full content when needed.\", \"message\": null}",
                 "role": "tool",
                 "tool_call_id": "c_big"
               },
@@ -2949,7 +2949,7 @@
                 "tool_calls": [
                   {
                     "function": {
-                      "arguments": "{\"artifact_id\": \"big_report_20260918_185442_9b717cbd\"}",
+                      "arguments": "{\"artifact_id\": \"big_report_20260918_190432_9b717cbd\"}",
                       "name": "read_artifact"
                     },
                     "id": "c_read",
@@ -2958,7 +2958,7 @@
                 ]
               },
               {
-                "content": "{\"tool_name\": \"read_artifact\", \"args\": {\"artifact_id\": \"big_report_20260918_185442_9b717cbd\"}, \"status\": \"success\", \"data\": \"{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line 10 line 10 \\\", \\\"line 11 line 11 line 11 line 11 \\\", \\\"line 12 line 12 line 12 line 12 \\\", \\\"line 13 line 13 line 13 line 13 \\\", \\\"line 14 line 14 line 14 line 14 \\\", \\\"line 15 line 15 line 15 line 15 \\\", \\\"line 16 line 16 line 16 line 16 \\\", \\\"line 17 line 17 line 17 line 17 \\\", \\\"line 18 line 18 line 18 line 18 \\\", \\\"line 19 line 19 line 19 line 19 \\\", \\\"line 20 line 20 line 20 line 20 \\\", \\\"line 21 line 21 line 21 line 21 \\\", \\\"line 22 line 22 line 22 line 22 \\\", \\\"line 23 line 23 line 23 line 23 \\\", \\\"line 24 line 24 line 24 line 24 \\\", \\\"line 25 line 25 line 25 line 25 \\\", \\\"line 26 line 26 line 26 line 26 \\\", \\\"line 27 line 27 line 27 line 27 \\\", \\\"line 28 line 28 line 28 line 28 \\\", \\\"line 29 line 29 line 29 line 29 \\\", \\\"line 30 line 30 line 30 line 30 \\\", \\\"line 31 line 31 line 31 line 31 \\\", \\\"line 32 line 32 line 32 line 32 \\\", \\\"line 33 line 33 line 33 line 33 \\\", \\\"line 34 line 34 line 34 line 34 \\\", \\\"line 35 line 35 line 35 line 35 \\\", \\\"line 36 line 36 line 36 line 36 \\\", \\\"line 37 line 37 line 37 line 37 \\\", \\\"line 38 line 38 line 38 line 38 \\\", \\\"line 39 line 39 line 39 line 39 \\\"]}\", \"message\": null}",
+                "content": "{\"tool_name\": \"read_artifact\", \"args\": {\"artifact_id\": \"big_report_20260918_190432_9b717cbd\"}, \"status\": \"success\", \"data\": \"{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line 10 line 10 \\\", \\\"line 11 line 11 line 11 line 11 \\\", \\\"line 12 line 12 line 12 line 12 \\\", \\\"line 13 line 13 line 13 line 13 \\\", \\\"line 14 line 14 line 14 line 14 \\\", \\\"line 15 line 15 line 15 line 15 \\\", \\\"line 16 line 16 line 16 line 16 \\\", \\\"line 17 line 17 line 17 line 17 \\\", \\\"line 18 line 18 line 18 line 18 \\\", \\\"line 19 line 19 line 19 line 19 \\\", \\\"line 20 line 20 line 20 line 20 \\\", \\\"line 21 line 21 line 21 line 21 \\\", \\\"line 22 line 22 line 22 line 22 \\\", \\\"line 23 line 23 line 23 line 23 \\\", \\\"line 24 line 24 line 24 line 24 \\\", \\\"line 25 line 25 line 25 line 25 \\\", \\\"line 26 line 26 line 26 line 26 \\\", \\\"line 27 line 27 line 27 line 27 \\\", \\\"line 28 line 28 line 28 line 28 \\\", \\\"line 29 line 29 line 29 line 29 \\\", \\\"line 30 line 30 line 30 line 30 \\\", \\\"line 31 line 31 line 31 line 31 \\\", \\\"line 32 line 32 line 32 line 32 \\\", \\\"line 33 line 33 line 33 line 33 \\\", \\\"line 34 line 34 line 34 line 34 \\\", \\\"line 35 line 35 line 35 line 35 \\\", \\\"line 36 line 36 line 36 line 36 \\\", \\\"line 37 line 37 line 37 line 37 \\\", \\\"line 38 line 38 line 38 line 38 \\\", \\\"line 39 line 39 line 39 line 39 \\\"]}\", \"message\": null}",
                 "role": "tool",
                 "tool_call_id": "c_read"
               }
@@ -3508,7 +3508,7 @@
       ],
       "runtime_messages": [],
       "span_id": "span_0027",
-      "started_at": "2026-09-18T17:54:46.123057+00:00",
+      "started_at": "2026-09-18T18:04:35.691237+00:00",
       "status": "ok",
       "step": 4,
       "tool_calls": [
@@ -3534,7 +3534,7 @@
               "reference": null,
               "state": "available"
             },
-            "content": "{\"tool_name\": \"delegate_researcher\", \"args\": {\"query\": \"check key b\"}, \"status\": \"success\", \"data\": \"[TOOL RESPONSE OFFLOADED]\\nTool: delegate_researcher\\nArtifact ID: delegate_researcher_20260918_185448_626e0400\\nOriginal size: 126 tokens \u2192 Preview: 126 tokens (saved 0 tokens)\\n\\n--- PREVIEW ---\\n{\\\"response\\\": \\\"child found b\\\", \\\"session_id\\\": \\\"trajectory-acceptance\\\", \\\"agent_name\\\": \\\"researcher\\\", \\\"metric\\\": \\\"Usage(requests=2, request_tokens=100, response_tokens=9, total_tokens=109, total_time=[REDACTED_PHONE], details={})\\\", \\\"status\\\": \\\"success\\\", \\\"termination_reason\\\": \\\"stop\\\", \\\"trace_id\\\": \\\"trace_0001\\\", \\\"run_id\\\": \\\"run_0002\\\"}\\n--- END PREVIEW ---\\n\\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/delegate_researcher_20260918_185448_626e0400.json\\n\ud83d\udca1 Use read_artifact('delegate_researcher_20260918_185448_626e0400') to load full content when needed.\", \"message\": null}",
+            "content": "{\"tool_name\": \"delegate_researcher\", \"args\": {\"query\": \"check key b\"}, \"status\": \"success\", \"data\": \"[TOOL RESPONSE OFFLOADED]\\nTool: delegate_researcher\\nArtifact ID: delegate_researcher_20260918_190437_ce31b8f3\\nOriginal size: 130 tokens \u2192 Preview: 130 tokens (saved 0 tokens)\\n\\n--- PREVIEW ---\\n{\\\"response\\\": \\\"child found b\\\", \\\"session_id\\\": \\\"trajectory-acceptance\\\", \\\"agent_name\\\": \\\"researcher\\\", \\\"metric\\\": \\\"Usage(requests=2, request_tokens=100, response_tokens=9, total_tokens=109, total_time=[REDACTED_PHONE], details={})\\\", \\\"status\\\": \\\"success\\\", \\\"termination_reason\\\": \\\"stop\\\", \\\"trace_id\\\": \\\"trace_0001\\\", \\\"run_id\\\": \\\"run_0002\\\"}\\n--- END PREVIEW ---\\n\\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/delegate_researcher_20260918_190437_ce31b8f3.json\\n\ud83d\udca1 Use read_artifact('delegate_researcher_20260918_190437_ce31b8f3') to load full content when needed.\", \"message\": null}",
             "event_id": "event_0080",
             "tool_result_event_id": "event_0078"
           },
@@ -3554,7 +3554,7 @@
                 "request_tokens": 100,
                 "requests": 2,
                 "response_tokens": 9,
-                "total_time": 1.3050491989997681,
+                "total_time": 0.7818476000029477,
                 "total_tokens": 109
               },
               "response": "child found b",
@@ -3579,7 +3579,7 @@
             "child_trajectory": {
               "agent_id": "researcher",
               "capture_gaps": [],
-              "ended_at": "2026-09-18T17:54:48.013312+00:00",
+              "ended_at": "2026-09-18T18:04:37.681254+00:00",
               "evidence_status": "complete",
               "execution_surface": "interactive",
               "final": {
@@ -3741,15 +3741,15 @@
               "run_id": "run_0002",
               "runtime_messages": [
                 {
-                  "content": "[CURRENT_DATETIME: 2026-09-18 18:54:46 ]\n\n",
+                  "content": "[CURRENT_DATETIME: 2026-09-18 18:04:36 UTC]\n\n",
                   "event_id": "event_0090",
                   "kind": "current_datetime",
-                  "message_digest": "701b54f6a1a06bbc0d30037cdd582c2cb1f82bf40782519dcc37a204e8984083",
+                  "message_digest": "e6f6fea82195c6b4eca31251f2e91f2706889337e6156c2287e9815d6ed2936f",
                   "role": "user"
                 }
               ],
               "session_id": "trajectory-acceptance",
-              "started_at": "2026-09-18T17:54:46.641384+00:00",
+              "started_at": "2026-09-18T18:04:36.727282+00:00",
               "status": "completed",
               "steps": [
                 {
@@ -3760,7 +3760,7 @@
                         "reference": null,
                         "state": "available"
                       },
-                      "context_digest": "0214f58b7eb864b9942edd8a39dfb451bd84f8f3b6a6419642b84bf1adbc9ae5",
+                      "context_digest": "c6dec5b6163cecbefe8c091a929ab6ac5090bf1cda4558802ee72749561135bf",
                       "event_id": "event_0091",
                       "message_count": 2,
                       "new_observation_event_ids": [],
@@ -3794,18 +3794,18 @@
                       "type": "context_assembly"
                     }
                   ],
-                  "duration_ms": 635,
-                  "ended_at": "2026-09-18T17:54:47.375935+00:00",
+                  "duration_ms": 308,
+                  "ended_at": "2026-09-18T18:04:37.296364+00:00",
                   "model_calls": [
                     {
-                      "context_digest": "0214f58b7eb864b9942edd8a39dfb451bd84f8f3b6a6419642b84bf1adbc9ae5",
+                      "context_digest": "c6dec5b6163cecbefe8c091a929ab6ac5090bf1cda4558802ee72749561135bf",
                       "error": null,
                       "facts": {
                         "attempts": 1,
                         "cost_source": "price_table",
                         "estimated_cost_usd": 4.4999999999999996e-05,
                         "finish_reason": "tool_calls",
-                        "latency_ms": 0.118,
+                        "latency_ms": 0.095,
                         "provider_model": null,
                         "provider_response_id": null,
                         "purpose": "agent_turn",
@@ -3825,7 +3825,7 @@
                       "outcome": "ok",
                       "purpose": "agent_turn",
                       "request": {
-                        "context_digest": "0214f58b7eb864b9942edd8a39dfb451bd84f8f3b6a6419642b84bf1adbc9ae5",
+                        "context_digest": "c6dec5b6163cecbefe8c091a929ab6ac5090bf1cda4558802ee72749561135bf",
                         "message_count": 2,
                         "messages": [
                           {
@@ -3833,7 +3833,7 @@
                             "role": "system"
                           },
                           {
-                            "content": "[CURRENT_DATETIME: 2026-09-18 18:54:46 ]\n\ncheck key b",
+                            "content": "[CURRENT_DATETIME: 2026-09-18 18:04:36 UTC]\n\ncheck key b",
                             "role": "user"
                           }
                         ],
@@ -4335,7 +4335,7 @@
                   ],
                   "runtime_messages": [],
                   "span_id": "span_0036",
-                  "started_at": "2026-09-18T17:54:46.740819+00:00",
+                  "started_at": "2026-09-18T18:04:36.988075+00:00",
                   "status": "ok",
                   "step": 1,
                   "tool_calls": [
@@ -4399,7 +4399,7 @@
                         "reference": null,
                         "state": "available"
                       },
-                      "context_digest": "388f9fb7c235773ae7e491bc0e6c624130580c1a72041668748636e33839df46",
+                      "context_digest": "26079f60f61fe030d76d9dd6e10ddbebc5b486a1b69b4db137749f657d218c8b",
                       "event_id": "event_0105",
                       "message_count": 4,
                       "new_observation_event_ids": [
@@ -4439,18 +4439,18 @@
                       "type": "context_assembly"
                     }
                   ],
-                  "duration_ms": 491,
-                  "ended_at": "2026-09-18T17:54:47.872910+00:00",
+                  "duration_ms": 255,
+                  "ended_at": "2026-09-18T18:04:37.557155+00:00",
                   "model_calls": [
                     {
-                      "context_digest": "388f9fb7c235773ae7e491bc0e6c624130580c1a72041668748636e33839df46",
+                      "context_digest": "26079f60f61fe030d76d9dd6e10ddbebc5b486a1b69b4db137749f657d218c8b",
                       "error": null,
                       "facts": {
                         "attempts": 1,
                         "cost_source": "price_table",
                         "estimated_cost_usd": 6.4e-05,
                         "finish_reason": "stop",
-                        "latency_ms": 0.064,
+                        "latency_ms": 0.1,
                         "provider_model": null,
                         "provider_response_id": null,
                         "purpose": "agent_turn",
@@ -4472,7 +4472,7 @@
                       "outcome": "ok",
                       "purpose": "agent_turn",
                       "request": {
-                        "context_digest": "388f9fb7c235773ae7e491bc0e6c624130580c1a72041668748636e33839df46",
+                        "context_digest": "26079f60f61fe030d76d9dd6e10ddbebc5b486a1b69b4db137749f657d218c8b",
                         "message_count": 4,
                         "messages": [
                           {
@@ -4480,7 +4480,7 @@
                             "role": "system"
                           },
                           {
-                            "content": "[CURRENT_DATETIME: 2026-09-18 18:54:46 ]\n\ncheck key b",
+                            "content": "[CURRENT_DATETIME: 2026-09-18 18:04:36 UTC]\n\ncheck key b",
                             "role": "user"
                           },
                           {
@@ -4965,7 +4965,7 @@
                   ],
                   "runtime_messages": [],
                   "span_id": "span_0042",
-                  "started_at": "2026-09-18T17:54:47.381995+00:00",
+                  "started_at": "2026-09-18T18:04:37.302172+00:00",
                   "status": "ok",
                   "step": 2,
                   "tool_calls": []
@@ -4977,7 +4977,7 @@
               "totals": {
                 "compressions": 0,
                 "cost_complete": true,
-                "duration_ms": 1333.563,
+                "duration_ms": 885.678,
                 "estimated_cost_usd": 0.000109,
                 "including_subagents": {
                   "cost_complete": true,
@@ -4996,7 +4996,7 @@
                   "failed": 0,
                   "total": 2
                 },
-                "model_latency_ms": 0.182,
+                "model_latency_ms": 0.195,
                 "model_retries": 0,
                 "offloaded_results": [],
                 "runtime_messages": {
@@ -5049,16 +5049,16 @@
       "context": [
         {
           "after": {
-            "context_digest": "d5069d8ccd437b3eff8279f21603f0a80862adcfee91d51f6a82db54bc9a3d17",
+            "context_digest": "19fea9c96630a48df9c3133deb529bbf31fc72da1a152dd7e5d9e1bacb71643c",
             "interaction_group_count": 4,
             "message_count": 6,
             "message_digests": [
               "8b4df29ecd90e6b5a710a179b90b8c0a0bb466b29a82eace8f3798fb5ef1ce02",
               "339634ef207319ac540c69eddf2bc78a7d03abf4f1dc8b10d6b5844e11372d9a",
-              "d4908fb1a7d324bd88fa19a1121e2dbea21d0c1df0a378b999f01eda2f012072",
-              "a5f0eb4dea45c3c37a252036062fef2b5e1e33a58c5f0b2dc27b7368e0960aad",
+              "ebdd3bb0928e99ce287c66c9e66e3ab6a93cb0c1afaa4063b6bb86be6bd1f065",
+              "86048fb8655cbc556dac0e30d6026cc64d1d32b777d6e5655c8d24c3f89b9417",
               "0b18632d35cb10bd2cf00bcc1cc5c2ec6491e5d05c0b6e4bbfdad7cab77fd4a2",
-              "9f3dc4396051e211964202306d3de7790766f9cef85d39f66e7297dc58e268a6"
+              "ba66f6f9480adf2af657109b142be1d38a582a945b7e0360bdb888e1571b04d1"
             ],
             "role_counts": {
               "assistant": 2,
@@ -5091,7 +5091,7 @@
             ]
           },
           "before": {
-            "context_digest": "8fde1e529dba21e64d2f71a91ffceb6019051c31afeaa1d392965976b9995ff8",
+            "context_digest": "27ebde22e997d6fc9212f1022f10160ef7bd8db6bad1cd0995cd04e530cc1a0d",
             "interaction_group_count": 6,
             "message_count": 13,
             "message_digests": [
@@ -5102,12 +5102,12 @@
               "9e9591df6efb104d4199bd8cf6a197c5b55874b8f4427bd870a291781b9b7e2f",
               "f690931c9c5211bd6dd7277472b46afd221c59b65e83115f7b9854c91051dd13",
               "47f61e21eac71cbbcbded1682513f8f126614d39f25c99427ddf1b646503731b",
-              "85035459a7fdd612e9bf0ba168077f0376dc544d6696fe2261a4772f477dc622",
+              "9abfc5a3cb863ecda011905edec79eca84ca80edefd108a001c2db29bddfdded",
               "aacd816347f91b3802680bc233100f1c22cbc8f730b2db05c55258a098ba53f2",
-              "d4908fb1a7d324bd88fa19a1121e2dbea21d0c1df0a378b999f01eda2f012072",
-              "a5f0eb4dea45c3c37a252036062fef2b5e1e33a58c5f0b2dc27b7368e0960aad",
+              "ebdd3bb0928e99ce287c66c9e66e3ab6a93cb0c1afaa4063b6bb86be6bd1f065",
+              "86048fb8655cbc556dac0e30d6026cc64d1d32b777d6e5655c8d24c3f89b9417",
               "0b18632d35cb10bd2cf00bcc1cc5c2ec6491e5d05c0b6e4bbfdad7cab77fd4a2",
-              "9f3dc4396051e211964202306d3de7790766f9cef85d39f66e7297dc58e268a6"
+              "ba66f6f9480adf2af657109b142be1d38a582a945b7e0360bdb888e1571b04d1"
             ],
             "role_counts": {
               "assistant": 3,
@@ -5153,7 +5153,7 @@
             "reference": null,
             "state": "available"
           },
-          "context_digest": "d5069d8ccd437b3eff8279f21603f0a80862adcfee91d51f6a82db54bc9a3d17",
+          "context_digest": "19fea9c96630a48df9c3133deb529bbf31fc72da1a152dd7e5d9e1bacb71643c",
           "event_id": "event_0109",
           "message_count": 6,
           "new_observation_event_ids": [
@@ -5195,18 +5195,18 @@
           "type": "context_assembly"
         }
       ],
-      "duration_ms": 547,
-      "ended_at": "2026-09-18T17:54:48.770416+00:00",
+      "duration_ms": 552,
+      "ended_at": "2026-09-18T18:04:38.472918+00:00",
       "model_calls": [
         {
-          "context_digest": "9d78ebc8e906acf74c1cb0eb3e9ed368d5e5f71f690ecc192b9ec638f66983bc",
+          "context_digest": "c70162c2e7efaf87b66f83b9183aa50c59af4e5962b74ecc9ec824ca5421585c",
           "error": null,
           "facts": {
             "attempts": 1,
             "cost_source": "price_table",
             "estimated_cost_usd": 5.8e-05,
             "finish_reason": "stop",
-            "latency_ms": 0.07,
+            "latency_ms": 0.075,
             "provider_model": null,
             "provider_response_id": null,
             "purpose": "context_summary",
@@ -5226,7 +5226,7 @@
           "outcome": "ok",
           "purpose": "context_summary",
           "request": {
-            "context_digest": "9d78ebc8e906acf74c1cb0eb3e9ed368d5e5f71f690ecc192b9ec638f66983bc",
+            "context_digest": "c70162c2e7efaf87b66f83b9183aa50c59af4e5962b74ecc9ec824ca5421585c",
             "message_count": 2,
             "messages": [
               {
@@ -5234,7 +5234,7 @@
                 "role": "system"
               },
               {
-                "content": "Here is the conversation history: user: [CONTEXT SUMMARY]\nSummary of earlier work.\nassistant: \nTool requests: [{\"id\": \"c_ok\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{\\\"key\\\": \\\"a\\\"}\"}}, {\"id\": \"c_err\", \"type\": \"function\", \"function\": {\"name\": \"explode\", \"arguments\": \"{}\"}}, {\"id\": \"c_bad\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{broken\"}}, {\"id\": \"c_slow\", \"type\": \"function\", \"function\": {\"name\": \"slow\", \"arguments\": \"{}\"}}, {\"id\": \"c_big\", \"type\": \"function\", \"function\": {\"name\": \"big_report\", \"arguments\": \"{}\"}}]\ntool: {\"tool_name\": \"lookup\", \"args\": {\"key\": \"a\"}, \"status\": \"success\", \"data\": {\"key\": \"a\", \"value\": 42}, \"message\": null}\nTool call ID: c_ok\ntool: {\"tool_name\": \"explode\", \"args\": {}, \"status\": \"error\", \"data\": null, \"message\": \"synthetic tool failure\"}\nTool call ID: c_err\ntool: {\"tool_name\": \"lookup\", \"args\": {}, \"status\": \"error\", \"data\": null, \"message\": \"Expecting property name enclosed in double quotes: line 1 column 2 (char 1)\"}\nTool call ID: c_bad\ntool: {\"tool_name\": \"slow\", \"args\": {}, \"status\": \"error\", \"data\": null, \"message\": \"Tool execution timed out\", \"error_type\": \"timeout\"}\nTool call ID: c_slow\ntool: {\"tool_name\": \"big_report\", \"args\": {}, \"status\": \"success\", \"data\": \"[TOOL RESPONSE OFFLOADED]\\nTool: big_report\\nArtifact ID: big_report_20260918_185442_9b717cbd\\nOriginal size: 571 tokens \u2192 Preview: 169 tokens (saved 402 tokens)\\n\\n--- PREVIEW ---\\n{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line\\n... [truncated, 1 more lines]\\n--- END PREVIEW ---\\n\\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/big_report_20260918_185442_9b717cbd.json\\n\ud83d\udca1 Use read_artifact('big_report_20260918_185442_9b717cbd') to load full content when needed.\", \"message\": null}\nTool call ID: c_big\nuser: The previous response was empty. Provide an answer or use an available tool.",
+                "content": "Here is the conversation history: user: [CONTEXT SUMMARY]\nSummary of earlier work.\nassistant: \nTool requests: [{\"id\": \"c_ok\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{\\\"key\\\": \\\"a\\\"}\"}}, {\"id\": \"c_err\", \"type\": \"function\", \"function\": {\"name\": \"explode\", \"arguments\": \"{}\"}}, {\"id\": \"c_bad\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{broken\"}}, {\"id\": \"c_slow\", \"type\": \"function\", \"function\": {\"name\": \"slow\", \"arguments\": \"{}\"}}, {\"id\": \"c_big\", \"type\": \"function\", \"function\": {\"name\": \"big_report\", \"arguments\": \"{}\"}}]\ntool: {\"tool_name\": \"lookup\", \"args\": {\"key\": \"a\"}, \"status\": \"success\", \"data\": {\"key\": \"a\", \"value\": 42}, \"message\": null}\nTool call ID: c_ok\ntool: {\"tool_name\": \"explode\", \"args\": {}, \"status\": \"error\", \"data\": null, \"message\": \"synthetic tool failure\"}\nTool call ID: c_err\ntool: {\"tool_name\": \"lookup\", \"args\": {}, \"status\": \"error\", \"data\": null, \"message\": \"Expecting property name enclosed in double quotes: line 1 column 2 (char 1)\"}\nTool call ID: c_bad\ntool: {\"tool_name\": \"slow\", \"args\": {}, \"status\": \"error\", \"data\": null, \"message\": \"Tool execution timed out\", \"error_type\": \"timeout\"}\nTool call ID: c_slow\ntool: {\"tool_name\": \"big_report\", \"args\": {}, \"status\": \"success\", \"data\": \"[TOOL RESPONSE OFFLOADED]\\nTool: big_report\\nArtifact ID: big_report_20260918_190432_9b717cbd\\nOriginal size: 571 tokens \u2192 Preview: 169 tokens (saved 402 tokens)\\n\\n--- PREVIEW ---\\n{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line\\n... [truncated, 1 more lines]\\n--- END PREVIEW ---\\n\\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/big_report_20260918_190432_9b717cbd.json\\n\ud83d\udca1 Use read_artifact('big_report_20260918_190432_9b717cbd') to load full content when needed.\", \"message\": null}\nTool call ID: c_big\nuser: The previous response was empty. Provide an answer or use an available tool.",
                 "role": "user"
               }
             ],
@@ -5278,14 +5278,14 @@
           "response_event_id": "event_0111"
         },
         {
-          "context_digest": "d5069d8ccd437b3eff8279f21603f0a80862adcfee91d51f6a82db54bc9a3d17",
+          "context_digest": "19fea9c96630a48df9c3133deb529bbf31fc72da1a152dd7e5d9e1bacb71643c",
           "error": null,
           "facts": {
             "attempts": 1,
             "cost_source": "price_table",
             "estimated_cost_usd": 0.00030399999999999996,
             "finish_reason": "stop",
-            "latency_ms": 0.07,
+            "latency_ms": 0.071,
             "provider_model": null,
             "provider_response_id": null,
             "purpose": "agent_turn",
@@ -5307,7 +5307,7 @@
           "outcome": "ok",
           "purpose": "agent_turn",
           "request": {
-            "context_digest": "d5069d8ccd437b3eff8279f21603f0a80862adcfee91d51f6a82db54bc9a3d17",
+            "context_digest": "19fea9c96630a48df9c3133deb529bbf31fc72da1a152dd7e5d9e1bacb71643c",
             "message_count": 6,
             "messages": [
               {
@@ -5328,7 +5328,7 @@
                 "tool_calls": [
                   {
                     "function": {
-                      "arguments": "{\"artifact_id\": \"big_report_20260918_185442_9b717cbd\"}",
+                      "arguments": "{\"artifact_id\": \"big_report_20260918_190432_9b717cbd\"}",
                       "name": "read_artifact"
                     },
                     "id": "c_read",
@@ -5337,7 +5337,7 @@
                 ]
               },
               {
-                "content": "{\"tool_name\": \"read_artifact\", \"args\": {\"artifact_id\": \"big_report_20260918_185442_9b717cbd\"}, \"status\": \"success\", \"data\": \"{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line 10 line 10 \\\", \\\"line 11 line 11 line 11 line 11 \\\", \\\"line 12 line 12 line 12 line 12 \\\", \\\"line 13 line 13 line 13 line 13 \\\", \\\"line 14 line 14 line 14 line 14 \\\", \\\"line 15 line 15 line 15 line 15 \\\", \\\"line 16 line 16 line 16 line 16 \\\", \\\"line 17 line 17 line 17 line 17 \\\", \\\"line 18 line 18 line 18 line 18 \\\", \\\"line 19 line 19 line 19 line 19 \\\", \\\"line 20 line 20 line 20 line 20 \\\", \\\"line 21 line 21 line 21 line 21 \\\", \\\"line 22 line 22 line 22 line 22 \\\", \\\"line 23 line 23 line 23 line 23 \\\", \\\"line 24 line 24 line 24 line 24 \\\", \\\"line 25 line 25 line 25 line 25 \\\", \\\"line 26 line 26 line 26 line 26 \\\", \\\"line 27 line 27 line 27 line 27 \\\", \\\"line 28 line 28 line 28 line 28 \\\", \\\"line 29 line 29 line 29 line 29 \\\", \\\"line 30 line 30 line 30 line 30 \\\", \\\"line 31 line 31 line 31 line 31 \\\", \\\"line 32 line 32 line 32 line 32 \\\", \\\"line 33 line 33 line 33 line 33 \\\", \\\"line 34 line 34 line 34 line 34 \\\", \\\"line 35 line 35 line 35 line 35 \\\", \\\"line 36 line 36 line 36 line 36 \\\", \\\"line 37 line 37 line 37 line 37 \\\", \\\"line 38 line 38 line 38 line 38 \\\", \\\"line 39 line 39 line 39 line 39 \\\"]}\", \"message\": null}",
+                "content": "{\"tool_name\": \"read_artifact\", \"args\": {\"artifact_id\": \"big_report_20260918_190432_9b717cbd\"}, \"status\": \"success\", \"data\": \"{\\\"marker\\\": \\\"BIG_MARKER\\\", \\\"lines\\\": [\\\"line 0 line 0 line 0 line 0 \\\", \\\"line 1 line 1 line 1 line 1 \\\", \\\"line 2 line 2 line 2 line 2 \\\", \\\"line 3 line 3 line 3 line 3 \\\", \\\"line 4 line 4 line 4 line 4 \\\", \\\"line 5 line 5 line 5 line 5 \\\", \\\"line 6 line 6 line 6 line 6 \\\", \\\"line 7 line 7 line 7 line 7 \\\", \\\"line 8 line 8 line 8 line 8 \\\", \\\"line 9 line 9 line 9 line 9 \\\", \\\"line 10 line 10 line 10 line 10 \\\", \\\"line 11 line 11 line 11 line 11 \\\", \\\"line 12 line 12 line 12 line 12 \\\", \\\"line 13 line 13 line 13 line 13 \\\", \\\"line 14 line 14 line 14 line 14 \\\", \\\"line 15 line 15 line 15 line 15 \\\", \\\"line 16 line 16 line 16 line 16 \\\", \\\"line 17 line 17 line 17 line 17 \\\", \\\"line 18 line 18 line 18 line 18 \\\", \\\"line 19 line 19 line 19 line 19 \\\", \\\"line 20 line 20 line 20 line 20 \\\", \\\"line 21 line 21 line 21 line 21 \\\", \\\"line 22 line 22 line 22 line 22 \\\", \\\"line 23 line 23 line 23 line 23 \\\", \\\"line 24 line 24 line 24 line 24 \\\", \\\"line 25 line 25 line 25 line 25 \\\", \\\"line 26 line 26 line 26 line 26 \\\", \\\"line 27 line 27 line 27 line 27 \\\", \\\"line 28 line 28 line 28 line 28 \\\", \\\"line 29 line 29 line 29 line 29 \\\", \\\"line 30 line 30 line 30 line 30 \\\", \\\"line 31 line 31 line 31 line 31 \\\", \\\"line 32 line 32 line 32 line 32 \\\", \\\"line 33 line 33 line 33 line 33 \\\", \\\"line 34 line 34 line 34 line 34 \\\", \\\"line 35 line 35 line 35 line 35 \\\", \\\"line 36 line 36 line 36 line 36 \\\", \\\"line 37 line 37 line 37 line 37 \\\", \\\"line 38 line 38 line 38 line 38 \\\", \\\"line 39 line 39 line 39 line 39 \\\"]}\", \"message\": null}",
                 "role": "tool",
                 "tool_call_id": "c_read"
               },
@@ -5356,7 +5356,7 @@
                 ]
               },
               {
-                "content": "{\"tool_name\": \"delegate_researcher\", \"args\": {\"query\": \"check key b\"}, \"status\": \"success\", \"data\": \"[TOOL RESPONSE OFFLOADED]\\nTool: delegate_researcher\\nArtifact ID: delegate_researcher_20260918_185448_626e0400\\nOriginal size: 126 tokens \u2192 Preview: 126 tokens (saved 0 tokens)\\n\\n--- PREVIEW ---\\n{\\\"response\\\": \\\"child found b\\\", \\\"session_id\\\": \\\"trajectory-acceptance\\\", \\\"agent_name\\\": \\\"researcher\\\", \\\"metric\\\": \\\"Usage(requests=2, request_tokens=100, response_tokens=9, total_tokens=109, total_time=[REDACTED_PHONE], details={})\\\", \\\"status\\\": \\\"success\\\", \\\"termination_reason\\\": \\\"stop\\\", \\\"trace_id\\\": \\\"trace_0001\\\", \\\"run_id\\\": \\\"run_0002\\\"}\\n--- END PREVIEW ---\\n\\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/delegate_researcher_20260918_185448_626e0400.json\\n\ud83d\udca1 Use read_artifact('delegate_researcher_20260918_185448_626e0400') to load full content when needed.\", \"message\": null}",
+                "content": "{\"tool_name\": \"delegate_researcher\", \"args\": {\"query\": \"check key b\"}, \"status\": \"success\", \"data\": \"[TOOL RESPONSE OFFLOADED]\\nTool: delegate_researcher\\nArtifact ID: delegate_researcher_20260918_190437_ce31b8f3\\nOriginal size: 130 tokens \u2192 Preview: 130 tokens (saved 0 tokens)\\n\\n--- PREVIEW ---\\n{\\\"response\\\": \\\"child found b\\\", \\\"session_id\\\": \\\"trajectory-acceptance\\\", \\\"agent_name\\\": \\\"researcher\\\", \\\"metric\\\": \\\"Usage(requests=2, request_tokens=100, response_tokens=9, total_tokens=109, total_time=[REDACTED_PHONE], details={})\\\", \\\"status\\\": \\\"success\\\", \\\"termination_reason\\\": \\\"stop\\\", \\\"trace_id\\\": \\\"trace_0001\\\", \\\"run_id\\\": \\\"run_0002\\\"}\\n--- END PREVIEW ---\\n\\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/delegate_researcher_20260918_190437_ce31b8f3.json\\n\ud83d\udca1 Use read_artifact('delegate_researcher_20260918_190437_ce31b8f3') to load full content when needed.\", \"message\": null}",
                 "role": "tool",
                 "tool_call_id": "c_child"
               }
@@ -5870,7 +5870,7 @@
       ],
       "runtime_messages": [],
       "span_id": "span_0046",
-      "started_at": "2026-09-18T17:54:48.223264+00:00",
+      "started_at": "2026-09-18T18:04:37.920851+00:00",
       "status": "ok",
       "step": 5,
       "tool_calls": []
@@ -5882,7 +5882,7 @@
   "totals": {
     "compressions": 2,
     "cost_complete": true,
-    "duration_ms": 7988.851,
+    "duration_ms": 8378.149,
     "estimated_cost_usd": 0.001451,
     "including_subagents": {
       "cost_complete": true,
@@ -5901,15 +5901,15 @@
       "failed": 0,
       "total": 7
     },
-    "model_latency_ms": 1.973,
+    "model_latency_ms": 0.95,
     "model_retries": 0,
     "offloaded_results": [
       {
-        "reference": "[TOOL RESPONSE OFFLOADED]\nTool: big_report\nArtifact ID: big_report_20260918_185442_9b717cbd\nOriginal size: 571 tokens \u2192 Preview: 169 tokens (saved 402 tokens)\n\n--- PREVIEW ---\n{\"marker\": \"BIG_MARKER\", \"lines\": [\"line 0 line 0 line 0 line 0 \", \"line 1 line 1 line 1 line 1 \", \"line 2 line 2 line 2 line 2 \", \"line 3 line 3 line 3 line 3 \", \"line 4 line 4 line 4 line 4 \", \"line 5 line 5 line 5 line 5 \", \"line 6 line 6 line 6 line 6 \", \"line 7 line 7 line 7 line 7 \", \"line 8 line 8 line 8 line 8 \", \"line 9 line 9 line 9 line 9 \", \"line 10 line 10 line\n... [truncated, 1 more lines]\n--- END PREVIEW ---\n\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/big_report_20260918_185442_9b717cbd.json\n\ud83d\udca1 Use read_artifact('big_report_20260918_185442_9b717cbd') to load full content when needed.",
+        "reference": "[TOOL RESPONSE OFFLOADED]\nTool: big_report\nArtifact ID: big_report_20260918_190432_9b717cbd\nOriginal size: 571 tokens \u2192 Preview: 169 tokens (saved 402 tokens)\n\n--- PREVIEW ---\n{\"marker\": \"BIG_MARKER\", \"lines\": [\"line 0 line 0 line 0 line 0 \", \"line 1 line 1 line 1 line 1 \", \"line 2 line 2 line 2 line 2 \", \"line 3 line 3 line 3 line 3 \", \"line 4 line 4 line 4 line 4 \", \"line 5 line 5 line 5 line 5 \", \"line 6 line 6 line 6 line 6 \", \"line 7 line 7 line 7 line 7 \", \"line 8 line 8 line 8 line 8 \", \"line 9 line 9 line 9 line 9 \", \"line 10 line 10 line\n... [truncated, 1 more lines]\n--- END PREVIEW ---\n\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/big_report_20260918_190432_9b717cbd.json\n\ud83d\udca1 Use read_artifact('big_report_20260918_190432_9b717cbd') to load full content when needed.",
         "tool_call_id": "c_big"
       },
       {
-        "reference": "[TOOL RESPONSE OFFLOADED]\nTool: delegate_researcher\nArtifact ID: delegate_researcher_20260918_185448_626e0400\nOriginal size: 126 tokens \u2192 Preview: 126 tokens (saved 0 tokens)\n\n--- PREVIEW ---\n{\"response\": \"child found b\", \"session_id\": \"trajectory-acceptance\", \"agent_name\": \"researcher\", \"metric\": \"Usage(requests=2, request_tokens=100, response_tokens=9, total_tokens=109, total_time=[REDACTED_PHONE], details={})\", \"status\": \"success\", \"termination_reason\": \"stop\", \"trace_id\": \"trace_0001\", \"run_id\": \"run_0002\"}\n--- END PREVIEW ---\n\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/delegate_researcher_20260918_185448_626e0400.json\n\ud83d\udca1 Use read_artifact('delegate_researcher_20260918_185448_626e0400') to load full content when needed.",
+        "reference": "[TOOL RESPONSE OFFLOADED]\nTool: delegate_researcher\nArtifact ID: delegate_researcher_20260918_190437_ce31b8f3\nOriginal size: 130 tokens \u2192 Preview: 130 tokens (saved 0 tokens)\n\n--- PREVIEW ---\n{\"response\": \"child found b\", \"session_id\": \"trajectory-acceptance\", \"agent_name\": \"researcher\", \"metric\": \"Usage(requests=2, request_tokens=100, response_tokens=9, total_tokens=109, total_time=[REDACTED_PHONE], details={})\", \"status\": \"success\", \"termination_reason\": \"stop\", \"trace_id\": \"trace_0001\", \"run_id\": \"run_0002\"}\n--- END PREVIEW ---\n\n\ud83d\udcc1 Full response saved to: <workspace>/artifacts/delegate_researcher_20260918_190437_ce31b8f3.json\n\ud83d\udca1 Use read_artifact('delegate_researcher_20260918_190437_ce31b8f3') to load full content when needed.",
         "tool_call_id": "c_child"
       }
     ],

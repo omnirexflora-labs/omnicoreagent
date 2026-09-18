@@ -141,8 +141,25 @@ def test_inject_current_datetime_updates_latest_user_message_only():
     ]
     builder.inject_current_datetime(messages)
     assert messages[1].content == "old user"
-    assert messages[3].content.startswith("[CURRENT_DATETIME: 2026-05-06 12:30:45 ")
+    assert messages[3].content.startswith("[CURRENT_DATETIME: 2026-05-06 12:30:45 UTC]")
     assert messages[3].content.endswith("\n\nlatest user")
+
+
+def test_injected_datetime_is_always_labelled_utc():
+    from datetime import timedelta, timezone
+
+    lagos = timezone(timedelta(hours=1))
+    builder = AgentPromptContextBuilder(
+        is_tool_offload_enabled=lambda: False,
+        clock=lambda: datetime(2026, 5, 6, 13, 30, 45, tzinfo=lagos),
+    )
+    messages = [Message(role="user", content="hi")]
+    builder.inject_current_datetime(messages)
+    assert messages[0].content == "[CURRENT_DATETIME: 2026-05-06 12:30:45 UTC]\n\nhi"
+
+    # The default clock reads UTC, not the server's local time.
+    default = AgentPromptContextBuilder(is_tool_offload_enabled=lambda: False)
+    assert default.clock().utcoffset() == timedelta(0)
 
 
 @pytest.mark.asyncio
