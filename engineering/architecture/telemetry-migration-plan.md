@@ -15,7 +15,12 @@ stream, background job, or deep-agent execution to work.
 The source snapshot for this plan is branch `refactor/native-tool-runtime`.
 The plan was started at commit `8841795abda60388117ff5a1b32b3a633ede3a3a`;
 implementation checkpoints are listed below as they land. The current
-checkpoint is `3aa6cab`.
+checkpoint is `77cfe15`: the
+[trajectory completion plan](telemetry-trajectory-completion-plan.md) finished
+Phases A to C1, and every `agent.run()` trace can now be read from request to
+final answer through `agent.get_trajectory()`. Its execution log is the
+detailed record of that work; this document keeps the longer-lived rules and
+decisions.
 
 ## Current boundary
 
@@ -31,14 +36,20 @@ live runtime events, while telemetry replay/follow is exposed separately by
 the agent API and OmniServe telemetry SSE routes. The built-in path works with
 no exporter or hosted tracing service installed.
 
-The completed checkpoint provides adaptive in-memory/JSONL storage, explicit
-retention and strictness policy, incomplete-trace marking for best-effort
-persistence failures, linked child/background/serving traces, and explicit
-trace-family lookup. Model prompts and responses remain excluded by default;
-when enabled they use the configured redaction, truncation, and built-in
+The completed checkpoint provides durable JSONL storage by default,
+automatic and observable retention, explicit strictness policy,
+incomplete-trace marking for best-effort persistence failures, linked
+child/background/serving traces with explicit family lookup, a run
+configuration header, per-step model facts (tokens, cost, latency, retries,
+provider response IDs), tool outcomes with raw malformed arguments,
+observations linked to the model call that received them, run totals, and an
+ordered trajectory reader. Model prompts and
+responses remain excluded by default; `TelemetryConfig(capture="full")`
+records them through the configured redaction, truncation, and built-in
 workspace/object-storage offload policy.
 
-The remaining telemetry work is evaluation integration. Delivery hardening now
+The remaining telemetry work is evaluation integration (Harbor, the
+evaluation layer, production feedback) and the MCP v2 adapter. Delivery hardening now
 includes resumable replay/follow cursors, public SSE positions, and bounded
 provider stream statistics that make model buffering observable without
 retaining token deltas. These checks are prerequisites for changing PromptGuard
@@ -93,6 +104,13 @@ capture-restriction runs also passed, with execution success kept separate from
 partial evidence. The independent-review gate is now closed by the sanitized
 full-trace and JSONL bundle at `3aa6cab`, checked by a credential-free script.
 See [the acceptance report](../validation/telemetry-evidence-acceptance.md).
+
+The trajectory acceptance at `77cfe15` extends this gate: one scripted scenario
+proves all ten checklist items of the
+[trajectory completion plan](telemetry-trajectory-completion-plan.md)
+directly, under default capture, and through OmniServe, and a live LiteLLM run
+reads end to end with complete evidence. See
+[the trajectory acceptance report](../validation/trajectory-acceptance.md).
 
 ## Rules for every phase
 
@@ -285,14 +303,13 @@ vendor exporter or hosted tracing service.
 
 ### Storage selection
 
-The effective default is adaptive: an agent with an explicitly configured
-workspace uses local JSONL when no telemetry store is injected; an agent with
-no explicit durable workspace keeps the lightweight in-memory store. The
-configuration can always override this with `memory` or `jsonl`, and an
-explicitly injected store wins over either default. A JSONL path is derived
-from the local workspace when it is not supplied. Cloud workspace backends do
-not silently turn telemetry into a cloud dependency; callers select a durable
-telemetry store deliberately.
+Superseded on 2026-09-18 (trajectory plan B1). The default is durable: with no
+store injected, an agent writes JSONL to `telemetry/traces.jsonl` in its local
+workspace directory, and every store for the same file is one shared object,
+so agents, the background manager, and OmniServe read the same records.
+`memory` is an explicit choice and is bounded by `memory_max_traces`. An
+injected store wins over either. Cloud workspace backends still keep telemetry
+in a local file; telemetry never becomes a cloud dependency by default.
 
 ### Child trace shape
 
@@ -311,8 +328,9 @@ ambiguous.
 
 ### Model I/O capture
 
-Model prompts and responses stay excluded by default. When debugging requires
-them, an explicit capture policy enables them through the same key redaction,
+Model prompts and responses stay excluded by default, and the trace marks them
+`not_recorded` and `partial`. `TelemetryConfig(capture="full")` is the single
+opt-in (decided 2026-09-18); it enables them through the same key redaction,
 size truncation, and optional workspace offload path used by other telemetry
 payloads. Model/provider metadata, token usage, tool identity, status, and
 redacted tool arguments/results remain the default evidence surface.
@@ -322,8 +340,11 @@ redacted tool arguments/results remain the default evidence surface.
 Retention is configurable independently for JSONL trace records and offloaded
 payload references. The default is a bounded local retention window; callers
 can explicitly choose unlimited retention or an age/size policy appropriate to
-their deployment. Cleanup must be explicit and observable, and must not erase
-active traces or leave references to already-deleted payloads.
+their deployment. Cleanup runs automatically once per agent and is observable
+(`agent.telemetry_retention_status()`, `GET /telemetry/retention`); it can also
+be run with `agent.prune_telemetry()`. It never erases active traces or leaves
+references to already-deleted payloads (decided 2026-09-18, trajectory plan
+A6).
 
 ### Persistence failure
 
@@ -333,8 +354,8 @@ production policy that propagates persistence failures and fails the run. The
 effective strictness and storage policy are included in trace metadata so an
 operator can distinguish dropped evidence from an execution failure.
 
-The storage, retention, and failure policies will each land with focused tests
-before the old open questions are treated as implementation-complete.
+The storage, retention, and failure policies have landed with focused tests
+(trajectory plan A3, A6, B1).
 
 ## Implementation checkpoints
 
@@ -351,3 +372,4 @@ before the old open questions are treated as implementation-complete.
 | Live stream overflow | `0cac745` | In-memory subscriber eviction now delivers an explicit overflow failure so SSE clients can reconnect from a cursor; full regression: 1083 passed, 14 skipped. |
 | Built-in payload offload | `2beea51` | Redacted oversized telemetry payloads are stored content-addressably in local/workspace storage, with read/prune APIs and strict/best-effort failure behavior; full regression: 1092 passed, 14 skipped. |
 | Payload failure lineage | `1355ab9` | Payload persistence failures are attributed to the trace being created, including nested child traces; full regression: 1093 passed, 14 skipped. |
+| Trajectory completion | `1abc441` to `77cfe15` | Trustworthy evidence, the run header, per-step, tool, and observation records, run totals, the trajectory reader, and the enforced portable contract; all ten checklist items proven directly, through OmniServe, and live. See the [trajectory completion plan](telemetry-trajectory-completion-plan.md). Full suite: 1,320 passed, 14 skipped. |

@@ -64,12 +64,21 @@ Events and spans retain existing trace/span/event identifiers. Evaluation
 extractors use these relationships:
 
 - model response event -> requested tool call IDs;
-- tool call -> model turn and resolution event;
+- tool call -> model turn and resolution event (`tool_call_id`,
+  `model_call_event_id`, `model_response_event_id`, `tool_requested_event_id`,
+  `tool_resolved_event_id`);
 - tool result -> tool call ID;
-- observation -> tool result and next model turn;
-- child run -> parent delegation call and parent result;
+- observation -> tool result (`tool_result_event_id`, `tool_span_id`, or
+  `tool_requested_event_id` for a rejected call) and next model turn (the
+  receiving `model_call` lists it in `new_observation_event_ids` exactly once;
+  `observation_event_ids` lists every observation still in its context);
+- child run -> parent delegation call and parent result (`child_trace_id`,
+  `child_run_id` on success, error, and cancellation);
 - context change -> input message/group identifiers and resulting context;
-- final answer -> terminal run and output artifact references.
+  runtime-injected messages are `runtime_message` events whose digests match
+  the next context;
+- final answer -> terminal run, the model response that produced it
+  (`final_model_response_event_id`), and output artifact references.
 
 The event sequence is an ordering aid only. Parallel calls must remain
 independent unless an explicit causal reference says otherwise.
@@ -100,6 +109,21 @@ statistics (`streaming`, delta count, visible text byte count, and event-type
 counts). It does not retain each token by default. A cancelled or failed stream
 keeps those statistics with its terminal span status, while the complete
 `model_response` payload remains governed by `record_model_responses`.
+
+## Reading a run
+
+`build_trajectory(trace)` (and `agent.get_trajectory(trace_id | run_id=...)`,
+`GET /telemetry/runs/{run_id}/trajectory`,
+`GET /telemetry/traces/{trace_id}/trajectory`) returns the
+`omnicoreagent.trajectory/v1` view of one run: the request, the harness from
+`run_configuration`, ordered steps with their context, model calls, tool calls
+and observations, runtime messages, compressions, delegated child
+trajectories, the final section, run totals, and the evidence status with its
+capture gaps. It is derived from the trace and never changes it. Every event of
+the trace appears exactly once; an event the reader cannot place is listed in
+`other_events` rather than dropped. The trajectory checklist and the tests
+behind each item are in the
+[evidence coverage map](../architecture/telemetry-evidence-coverage.md).
 
 ## Delivery failure and latency policy
 

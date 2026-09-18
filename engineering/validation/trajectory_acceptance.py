@@ -115,6 +115,8 @@ def check_trajectory(
     harness = t["harness"]
     assert harness["model"]["model"], harness["model"]
     assert harness["limits"]["max_steps"] == 12, harness["limits"]
+    # The header records the limit the runtime enforced on the tool calls.
+    assert harness["limits"]["tool_call_timeout"] == TOOL_CALL_TIMEOUT, harness["limits"]
     assert harness["context_management"]["strategy"] == "summarize_and_truncate"
     assert {"lookup", "explode", "slow", "big_report", "read_artifact", "delegate_researcher"} <= set(
         harness["tools"]["names"]
@@ -358,7 +360,7 @@ def _tools():
 
     @tools.register_tool("slow", description="Takes longer than the tool time limit.")
     async def slow() -> dict:
-        await asyncio.sleep(5)
+        await asyncio.sleep(TOOL_CALL_TIMEOUT * 20)
         return {}
 
     @tools.register_tool("big_report", description="Return a large report.")
@@ -369,9 +371,14 @@ def _tools():
 
 
 _MODEL = {"provider": "openai", "model": "gpt-5.4-mini", "api_key": "scripted"}
+# Long enough for the delegated child run on a loaded machine; `slow` far
+# exceeds it.
+TOOL_CALL_TIMEOUT = 3
+
 _AGENT_CONFIG = {
     "guardrail_mode": "off",
     "max_steps": 12,
+    "tool_call_timeout": TOOL_CALL_TIMEOUT,
     "context_management": {
         "enabled": True,
         "mode": "sliding_window",
@@ -409,7 +416,6 @@ async def build_scripted_agent(*, full_capture: bool):
     )
     await lead.initialize()
     lead.llm_connection = LeadModel()
-    lead.agent.tool_call_timeout = 1.0
     return lead
 
 

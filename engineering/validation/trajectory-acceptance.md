@@ -31,7 +31,7 @@ offloading:
 
 | Step | What happens |
 | --- | --- |
-| 1 | One parallel batch: `lookup` succeeds, `explode` raises, `lookup` with the malformed arguments `{broken` is rejected, `slow` exceeds the 1 s tool limit, and `big_report` returns a result large enough to be offloaded to a workspace artifact. |
+| 1 | One parallel batch: `lookup` succeeds, `explode` raises, `lookup` with the malformed arguments `{broken` is rejected, `slow` exceeds the 3 s tool limit (`tool_call_timeout`, recorded in the run header), and `big_report` returns a result large enough to be offloaded to a workspace artifact. |
 | 2 | The model returns an empty response; the runtime adds its empty-response retry message. |
 | 3 | The model reads the offloaded artifact by the ID it received in the observation. |
 | 4 | Context compression summarizes older messages (an internal `context_summary` model call); the model delegates to the `researcher` subagent, which makes its own tool call. |

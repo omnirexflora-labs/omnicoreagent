@@ -449,7 +449,10 @@ Rules:
 - JSONL records must be append-friendly.
 - JSONL reload must preserve trace lookup, scoped event replay, and run/session
   filtering behavior.
-- in-memory store is for tests and local development.
+- JSONL in the workspace (`telemetry/traces.jsonl`) is the default store;
+  stores for the same file are one shared object. The in-memory store is an
+  explicit choice for tests and local development and is bounded by
+  `memory_max_traces`.
 - Redis stream is not the canonical trace store.
 - storage failure behavior depends on recorder strict/best-effort mode.
 
@@ -694,7 +697,13 @@ Current runtime facade coverage:
   and `runtime_error`, then fail the trace before re-raising the original
   exception.
 - cancellations emit `user_message` and `final_state`, then mark the trace
-  `cancelled` before re-raising the cancellation.
+  `cancelled` before re-raising the cancellation. A run stopped by its own
+  deadline (`run_with_timeout`, background attempt timeout, `/run/sync`
+  timeout) is recorded as `timeout` instead.
+- before the first step, every run emits `run_configuration` (the harness
+  header), and its terminal event and root span output carry `run_summary`.
+- `get_trajectory(...)` returns the ordered `omnicoreagent.trajectory/v1` view
+  of a run.
 - `OmniCoreAgent` exposes telemetry trace lookup and telemetry stream
   replay/follow helpers.
 - `OmniCoreAgent` exposes manual telemetry export through `export_trace(...)`.
@@ -737,6 +746,11 @@ Current runtime loop coverage:
   `context_compression`; compression failure emits `context_dropped`.
 - parsed tool observations emit `observation_pipeline_start`,
   `observation_pipeline_end`, and `observation_pipeline_error` events.
+- native tool calls emit `tool_requested` and `tool_resolved` (with raw
+  arguments and a rejection reason for malformed or unknown calls), and every
+  call emits `tool_observation` with the exact message returned to the model.
+- runtime-injected messages (datetime prefix, empty-response retry, loop
+  recovery) emit `runtime_message`.
 - workspace offloading emits `workspace_offload`.
 - artifact access tools (`read_artifact`, `tail_artifact`, `search_artifact`,
   `list_artifacts`) are recorded as workspace reads because artifacts live in
@@ -756,8 +770,6 @@ Current remaining runtime internals:
 - direct workspace storage internals outside workspace command tools, artifact
   tools, offload, and background run workspace writes
 - approval telemetry paths that are reserved but not fully wired
-- cross-trace links between `serve.request`, background runs, subagents, and
-  agent traces
 - durable telemetry stores beyond in-memory and JSONL
 
 ---
