@@ -52,7 +52,7 @@ dependencies = [
     "pydantic[email]>=2.13.5",
     "mcp[cli]>=2.2.0",
     "jsonschema>=4.26.0",
-    "litellm>=1.100.1",
+    "litellm>=1.101.0",
     "click>=8.5.0",
     "docstring_parser>=0.18.0",
     "packaging>=26.3",
@@ -60,10 +60,10 @@ dependencies = [
 
 [project.optional-dependencies]
 redis = ["redis>=8.1.0"]
-postgres = ["sqlalchemy>=2.0.52", "psycopg2-binary>=2.9.13"]
+postgres = ["sqlalchemy>=2.0.54", "psycopg2-binary>=2.9.13"]
 mongodb = ["motor>=3.7.1", "pymongo>=4.18.1"]
-s3 = ["boto3>=1.43.93"]
-serve = ["fastapi>=0.141.1", "uvicorn>=0.52.4", "python-multipart>=0.0.32"]
+s3 = ["boto3>=1.43.98"]
+serve = ["fastapi>=0.141.1", "uvicorn>=0.53.0", "python-multipart>=0.0.32"]
 tokenizer = ["tiktoken>=0.14.0"]
 otel = [
     "opentelemetry-api>=1.44.0",
@@ -82,13 +82,13 @@ opik = [
 ]
 all = [
     "redis>=8.1.0",
-    "sqlalchemy>=2.0.52",
+    "sqlalchemy>=2.0.54",
     "psycopg2-binary>=2.9.13",
     "motor>=3.7.1",
     "pymongo>=4.18.1",
-    "boto3>=1.43.93",
+    "boto3>=1.43.98",
     "fastapi>=0.141.1",
-    "uvicorn>=0.52.4",
+    "uvicorn>=0.53.0",
     "python-multipart>=0.0.32",
     "tiktoken>=0.14.0",
     "opentelemetry-api>=1.44.0",
@@ -141,7 +141,7 @@ omnicoreagent = { workspace = true }
 
 [dependency-groups]
 dev = [
-    "boto3>=1.43.93",
+    "boto3>=1.43.98",
     "fastapi>=0.141.1",
     "pre-commit>=4.6.2",
     "motor>=3.7.1",
@@ -151,11 +151,11 @@ dev = [
     "python-multipart>=0.0.32",
     "pymongo>=4.18.1",
     "redis>=8.1.0",
-    "ruff>=0.16.7",
-    "sqlalchemy>=2.0.52",
+    "ruff>=0.16.8",
+    "sqlalchemy>=2.0.54",
     "tiktoken>=0.14.0",
-    "uvicorn>=0.52.4",
-    "hatch>=1.18.0",
+    "uvicorn>=0.53.0",
+    "hatch>=1.18.1",
     "twine>=7.0.0",
 ]
 
