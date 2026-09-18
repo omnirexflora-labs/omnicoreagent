@@ -129,13 +129,37 @@ while leaving the trace facts unchanged. A controlled adapter may attach task,
 case, trial, environment, and verifier metadata before handing the same view to
 a future evaluator.
 
+`validate_portable_evidence_document()` checks a document against the published
+JSON Schema, which ships inside the package
+(`omnicoreagent/core/telemetry/schemas/portable-execution-evidence.schema.json`,
+identical to the copy in this directory), then checks identity and
+relationships. The schema types the runtime's evidence metadata: model call
+facts (`model_call`), run totals (`run_summary`), the run header
+(`run_configuration`), and link fields such as `tool_call_id`,
+`model_response_event_id`, `tool_result_event_id`, and
+`new_observation_event_ids`. A capture descriptor whose state is
+`not_recorded`, `missing`, `truncated`, or `inferred` must carry a `reason`.
+Every `facts` and `final_output_references` entry of kind `event` or `span`
+must name a record in the trace. `import_document()` accepts any document the
+schema accepts (unknown fields, span kinds, and actor types are kept in the
+portable copy), raises only `EvidenceValidationError` for invalid input, and
+recomputes evidence completeness: a document claiming `complete` whose records
+contain capture gaps is returned as `partial`, with an `evidence_status_claim`
+entry and the gaps in `missing_evidence`.
+
 `GenericTraceEvidenceAdapter` is a small vendor-neutral import fixture. It maps
 common agent/model/tool span names to the foundation kinds and preserves unknown
 event types as experimental facts. It retains supplied timestamps, durations,
 usage, errors, capture descriptors, provenance, and parent relationships. When
 an external payload omits a required value, the serialized field is `null` and
 `missing_evidence` records the unknown field; the adapter does not fabricate a
-successful or complete execution. This proves that production evidence does
+successful or complete execution. A value the adapter must supply to satisfy
+the schema (span kind, actor, an event's span) is kept, recorded as `inferred`
+in `missing_evidence`, and named in `external_inferred_fields`; an absent event
+type becomes the experimental `external_event`; an invalid (for example
+negative) cost is `null`. Any unknown or inferred field makes the evidence
+`partial`, whatever the external producer claimed. The adapter never modifies
+its input. This proves that production evidence does
 not require OmniCoreAgent's internal classes; Harbor integration can use the
 same boundary later without making the runtime depend on Harbor.
 

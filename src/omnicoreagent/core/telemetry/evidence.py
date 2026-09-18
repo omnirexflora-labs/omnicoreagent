@@ -6,7 +6,10 @@ evaluator, score, or release-decision behavior.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import copy
+from dataclasses import dataclass, field, fields
+from functools import lru_cache
+from importlib.resources import files
 import json
 from typing import Any, Mapping
 
@@ -23,6 +26,7 @@ from omnicoreagent.core.telemetry.models import (
     TelemetrySpan,
     TelemetryTrace,
     TokenUsage,
+    TraceEvidenceStatus,
     TraceStatus,
     to_plain,
 )
@@ -125,7 +129,7 @@ def _serialize_trace(trace: TelemetryTrace) -> dict[str, Any]:
         missing = set(span.get("attributes", {}).get("external_missing_fields", []))
         for field_name in missing:
             if field_name != "timestamp":
-                span[field_name] = None
+                span[_SERIALIZED_FIELD.get(field_name, field_name)] = None
     for event in payload.get("events", []):
         missing = set(event.get("metadata", {}).get("external_missing_fields", []))
         if "timestamp" in missing:
@@ -145,6 +149,7 @@ def validate_portable_evidence_document(
 
     if not isinstance(value, Mapping):
         raise EvidenceValidationError("portable evidence must be an object")
+    _validate_against_schema(value)
     if value.get("contract") != PORTABLE_EVIDENCE_CONTRACT:
         raise EvidenceValidationError(
             f"portable evidence contract must be {PORTABLE_EVIDENCE_CONTRACT}"
@@ -226,6 +231,44 @@ def validate_portable_evidence_document(
             raise EvidenceValidationError(
                 "portable event references unknown parent event"
             )
+    known = {"event": event_set, "span": span_set}
+    for key in ("facts", "final_output_references"):
+        for reference in value.get(key) or []:
+            identifiers = known.get(reference.get("kind"))
+            if identifiers is not None and reference.get("id") not in identifiers:
+                raise EvidenceValidationError(
+                    f"portable {key} references unknown {reference.get('kind')} "
+                    f"{reference.get('id')}"
+                )
+
+
+@lru_cache(maxsize=1)
+def portable_evidence_schema() -> dict[str, Any]:
+    """The published JSON Schema for ``omnicoreagent.execution-evidence/v1``."""
+    return json.loads(
+        files("omnicoreagent.core.telemetry")
+        .joinpath("schemas/portable-execution-evidence.schema.json")
+        .read_text(encoding="utf-8")
+    )
+
+
+@lru_cache(maxsize=1)
+def _schema_validator():
+    from jsonschema import Draft202012Validator
+
+    return Draft202012Validator(portable_evidence_schema())
+
+
+def _validate_against_schema(value: Mapping[str, Any]) -> None:
+    errors = sorted(
+        _schema_validator().iter_errors(value), key=lambda error: list(error.path)
+    )
+    if errors:
+        error = errors[0]
+        location = "/".join(str(part) for part in error.path) or "(document)"
+        raise EvidenceValidationError(
+            f"portable evidence does not match its schema at {location}: {error.message}"
+        )
 
 
 def _required_identifier(value: Any, key: str) -> str:
@@ -298,11 +341,34 @@ class OmniCoreEvidenceAdapter:
         # Runtime models remain strict, so use placeholders only for internal
         # validation.  The returned evidence keeps the original JSON trace and
         # envelope metadata exactly as supplied.
-        runtime_trace = _portable_trace_for_runtime(raw_trace)
-        normalized = TelemetryNormalizer().normalize(
-            TelemetryTrace.from_dict(runtime_trace)
-        )
+        try:
+            runtime_trace = _portable_trace_for_runtime(raw_trace)
+            normalized = TelemetryNormalizer().normalize(
+                TelemetryTrace.from_dict(runtime_trace)
+            )
+        except EvidenceValidationError:
+            raise
+        except (TypeError, ValueError, KeyError) as exc:
+            raise EvidenceValidationError(
+                f"portable trace cannot be read: {exc}"
+            ) from exc
         _validate_trace(normalized)
+        missing_evidence = list(_json_value(value["missing_evidence"]))
+        recomputed = _missing_evidence(normalized)
+        if raw_trace.get("evidence_status") == "complete" and recomputed:
+            # A document cannot claim complete evidence its own records deny.
+            raw_trace["evidence_status"] = "partial"
+            missing_evidence = _dedupe_dicts(
+                [
+                    *missing_evidence,
+                    {
+                        "type": "evidence_status_claim",
+                        "claimed": "complete",
+                        "recomputed": "partial",
+                    },
+                    *recomputed,
+                ]
+            )
         final_outputs = tuple(
             EvidenceReference(
                 kind=reference["kind"],
@@ -331,7 +397,7 @@ class OmniCoreEvidenceAdapter:
             ),
             trace=raw_trace,
             final_output_references=final_outputs,
-            missing_evidence=tuple(_json_value(value["missing_evidence"])),
+            missing_evidence=tuple(missing_evidence),
             facts=facts,
             _normalized_trace=normalized,
         )
@@ -359,7 +425,7 @@ class GenericTraceEvidenceAdapter(OmniCoreEvidenceAdapter):
             return self.import_document(value, task=task)
         if isinstance(value, TelemetryTrace):
             return super().import_trace(value, task=task, source=source)
-        raw = dict(value)
+        raw = copy.deepcopy(dict(value))
         trace_id = str(raw.get("trace_id") or raw.get("id") or "").strip()
         raw_spans = list(raw.get("spans") or [])
         raw_events = list(raw.get("events") or [])
@@ -443,6 +509,9 @@ class GenericTraceEvidenceAdapter(OmniCoreEvidenceAdapter):
         if missing:
             normalized = evidence.internal_trace or trace
             _mark_external_missing(normalized, missing)
+            # Unknown or inferred fields mean the evidence is not complete,
+            # whatever the external producer claimed.
+            normalized.evidence_status = TraceEvidenceStatus.PARTIAL
             evidence.trace = _serialize_trace(normalized)
             evidence._normalized_trace = normalized
             evidence.missing_evidence = tuple(
@@ -478,7 +547,7 @@ def _portable_trace_for_runtime(value: Mapping[str, Any]) -> dict[str, Any]:
     private ``internal_trace`` accessor.
     """
 
-    trace = dict(value)
+    trace = _known_fields(TelemetryTrace, value)
     if trace.get("status") is None or not _known_trace_status(trace.get("status")):
         trace["status"] = TraceStatus.RUNNING.value
     if not _valid_schema_version(trace.get("schema_version")):
@@ -492,7 +561,13 @@ def _portable_trace_for_runtime(value: Mapping[str, Any]) -> dict[str, Any]:
 
     runtime_spans = []
     for raw_span in trace.get("spans", []):
-        span = dict(raw_span)
+        span = _known_fields(TelemetrySpan, raw_span)
+        if span.get("kind") not in FOUNDATION_SPAN_KINDS:
+            attributes = dict(span.get("attributes") or {})
+            attributes.setdefault("external_span_kind", span.get("kind"))
+            span["attributes"] = attributes
+            span["kind"] = "runtime.control"
+        span["actor"] = _known_actor(span.get("actor"))
         if span.get("status") is None or not _known_span_status(span.get("status")):
             span["status"] = SpanStatus.RUNNING.value
         if not _valid_schema_version(span.get("schema_version")):
@@ -502,7 +577,8 @@ def _portable_trace_for_runtime(value: Mapping[str, Any]) -> dict[str, Any]:
 
     runtime_events = []
     for raw_event in trace.get("events", []):
-        event = dict(raw_event)
+        event = _known_fields(TelemetryEvent, raw_event)
+        event["actor"] = _known_actor(event.get("actor"))
         if not _valid_schema_version(event.get("schema_version")):
             event["schema_version"] = 1
         if event.get("event_type") not in FOUNDATION_EVENT_TYPES:
@@ -512,6 +588,23 @@ def _portable_trace_for_runtime(value: Mapping[str, Any]) -> dict[str, Any]:
         runtime_events.append(event)
     trace["events"] = runtime_events
     return trace
+
+
+def _known_fields(model: type, value: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep the fields a runtime model accepts; the portable copy keeps the rest."""
+    names = {item.name for item in fields(model)}
+    return {key: item for key, item in value.items() if key in names}
+
+
+def _known_actor(value: Any) -> Any:
+    if not isinstance(value, Mapping):
+        return value
+    actor = dict(value)
+    try:
+        ActorType(actor.get("type"))
+    except ValueError:
+        actor["type"] = ActorType.SYSTEM.value
+    return actor
 
 
 def _map_trace_metadata(value: Any) -> dict[str, Any]:
@@ -558,7 +651,7 @@ def _positive_int(value: Any, *, default: int) -> int:
 
 
 def _number(value: Any) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
         return None
     return float(value)
 
@@ -720,6 +813,25 @@ def _external_missing_evidence(
                 missing.append(
                     {"type": "span_status", "id": identifier, "state": "unknown"}
                 )
+            # Values the adapter had to supply are recorded, never presented
+            # as observed facts.
+            if record_type == "span" and not (raw.get("kind") or raw.get("type")):
+                missing.append({"type": "span_kind", "id": identifier, "state": "inferred"})
+            if record_type == "event" and not (raw.get("event_type") or raw.get("type")):
+                missing.append(
+                    {"type": "event_event_type", "id": identifier, "state": "missing"}
+                )
+            if record_type == "event" and not raw.get("span_id"):
+                missing.append({"type": "event_span_id", "id": identifier, "state": "inferred"})
+            if not isinstance(raw.get("actor"), Mapping):
+                missing.append(
+                    {"type": f"{record_type}_actor", "id": identifier, "state": "inferred"}
+                )
+            cost = raw.get("estimated_cost_usd", raw.get("cost_usd"))
+            if cost is not None and _number(cost) is None:
+                missing.append(
+                    {"type": f"{record_type}_cost", "id": identifier, "state": "missing"}
+                )
     return missing
 
 
@@ -739,28 +851,31 @@ def _mark_external_missing(
         trace.metadata.extra["external_missing_fields"] = sorted(
             set(trace.metadata.extra["external_missing_fields"]) | trace_fields
         )
-    by_span: dict[str, set[str]] = {}
-    for item in missing:
-        if item["type"].startswith("span_") and item.get("id"):
-            by_span.setdefault(item["id"], set()).add(item["type"])
-    for span in trace.spans:
-        missing_fields = [
-            item_type.removeprefix("span_")
-            for item_type in by_span.get(span.span_id, set())
-        ]
-        if missing_fields:
-            span.attributes["external_missing_fields"] = sorted(missing_fields)
-    by_event: dict[str, set[str]] = {}
-    for item in missing:
-        if item["type"].startswith("event_") and item.get("id"):
-            by_event.setdefault(item["id"], set()).add(item["type"])
-    for event in trace.events:
-        missing_fields = [
-            item_type.removeprefix("event_")
-            for item_type in by_event.get(event.event_id, set())
-        ]
-        if missing_fields:
-            event.metadata["external_missing_fields"] = sorted(missing_fields)
+    for prefix, records, identifier, target in (
+        ("span_", trace.spans, "span_id", "attributes"),
+        ("event_", trace.events, "event_id", "metadata"),
+    ):
+        by_record: dict[str, set[str]] = {}
+        for item in missing:
+            if item["type"].startswith(prefix) and item.get("id"):
+                by_record.setdefault(item["id"], set()).add(item["type"].removeprefix(prefix))
+        for record in records:
+            names = by_record.get(getattr(record, identifier), set())
+            # Unknown values serialize as null; inferred values stay (they are
+            # required by the schema) and are named so no reader trusts them.
+            nullable = sorted(names & _NULLABLE_EXTERNAL_FIELDS)
+            inferred = sorted(names - _NULLABLE_EXTERNAL_FIELDS)
+            if nullable:
+                getattr(record, target)["external_missing_fields"] = nullable
+            if inferred:
+                getattr(record, target)["external_inferred_fields"] = inferred
+
+
+_NULLABLE_EXTERNAL_FIELDS = frozenset(
+    {"status", "started_at", "ended_at", "schema_version", "timestamp", "cost"}
+)
+# Missing-evidence names that differ from the serialized field they null.
+_SERIALIZED_FIELD = {"cost": "estimated_cost_usd"}
 
 
 def _valid_schema_version(value: Any) -> bool:
@@ -931,7 +1046,7 @@ def _map_external_span(raw: Mapping[str, Any], trace_id: str) -> TelemetrySpan:
 def _map_external_event(
     raw: Mapping[str, Any], trace_id: str, root_span_id: str
 ) -> TelemetryEvent:
-    event_type = str(raw.get("event_type") or raw.get("type") or "runtime_error")
+    event_type = str(raw.get("event_type") or raw.get("type") or "external_event")
     metadata = dict(raw.get("metadata") or {})
     if event_type not in FOUNDATION_EVENT_TYPES:
         metadata.setdefault("experimental", True)
