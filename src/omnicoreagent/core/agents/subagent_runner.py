@@ -26,10 +26,18 @@ class SubAgentCallRunner:
         sub_agents: list,
         session_id: str,
         telemetry_recorder: Any = None,
+        redact_parameters: bool = False,
     ) -> tuple[str, Any]:
         agent_name = call.get("agent")
         if not agent_name:
             raise ValueError("agent_call missing 'agent' field")
+        # Under governance delegation parameters are redacted in telemetry
+        # like any other tool arguments; the child still receives them.
+        recorded_parameters = (
+            {key: "[REDACTED]" for key in call.get("parameters", {})}
+            if redact_parameters
+            else call.get("parameters", {})
+        )
 
         span = None
         agent = None
@@ -51,7 +59,7 @@ class SubAgentCallRunner:
                     input={
                         "agent_name": agent_name,
                         "session_id": session_id,
-                        "parameters": call.get("parameters", {}),
+                        "parameters": recorded_parameters,
                     },
                 )
             agent = resolve_agent(agent_name, sub_agents)
@@ -65,7 +73,7 @@ class SubAgentCallRunner:
                     input={
                         "agent_name": agent_name,
                         "session_id": session_id,
-                        "parameters": call.get("parameters", {}),
+                        "parameters": recorded_parameters,
                     },
                     metadata={
                         "subagent_span_id": span.span_id,

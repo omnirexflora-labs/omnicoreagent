@@ -10,7 +10,8 @@ the reason before cancelling; ``OmniCoreAgent.run`` reads it with
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable
+from collections.abc import AsyncIterator, Awaitable
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TypeVar
@@ -67,3 +68,37 @@ async def run_with_timeout(awaitable: Awaitable[T], timeout: float | None) -> T:
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
     raise asyncio.TimeoutError(f"Run exceeded its {timeout} second deadline")
+
+
+@asynccontextmanager
+async def stop_after(timeout: float | None) -> AsyncIterator[None]:
+    """Like ``asyncio.timeout``, in the current task, recording the stop reason.
+
+    Code inside the block sees ``current_stop_reason() == "timeout"`` while it
+    handles the cancellation, and the block raises ``asyncio.TimeoutError``.
+    Running inline (no extra task) keeps work that already finished inside
+    the block from being cancelled with its caller.
+    """
+    if timeout is None or timeout <= 0:
+        yield
+        return
+    task = asyncio.current_task()
+    box = _StopReason(parent=_STOP_REASON.get())
+    token = _STOP_REASON.set(box)
+
+    def expire() -> None:
+        box.reason = "timeout"
+        task.cancel()
+
+    handle = asyncio.get_running_loop().call_later(timeout, expire)
+    try:
+        yield
+    except asyncio.CancelledError:
+        if box.reason == "timeout" and task.uncancel() == 0:
+            raise asyncio.TimeoutError(
+                f"Operation exceeded its {timeout} second deadline"
+            ) from None
+        raise
+    finally:
+        handle.cancel()
+        _STOP_REASON.reset(token)

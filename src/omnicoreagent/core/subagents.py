@@ -412,10 +412,12 @@ When you have completed the task:
         if parent_context is None:
             return delegation
         actor = TelemetryActor(type=ActorType.AGENT, name=delegation["agent_name"])
+        # Under governance the delegated task text is redacted like tool
+        # arguments; the child still receives it.
         spawn_input = {
             "agent_name": delegation["agent_name"],
             "role": role,
-            "task": task,
+            "task": "[REDACTED]" if self.governance_engine is not None else task,
             "output_path": output_path,
         }
         span = await recorder.start_span(

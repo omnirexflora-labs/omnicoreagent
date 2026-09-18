@@ -176,3 +176,33 @@ def test_served_sync_run_timeout_is_recorded_as_timeout():
     assert agent_trace.status == TraceStatus.TIMEOUT
     assert agent_trace.parent_trace_id == serve_trace.trace_id
     assert serve_trace.status == TraceStatus.TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_stop_after_marks_timeouts_and_leaves_outer_cancels_alone():
+    from omnicoreagent.core.runtime.deadline import current_stop_reason, stop_after
+
+    seen = []
+
+    async def body():
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            seen.append(current_stop_reason())
+            raise
+
+    with pytest.raises(asyncio.TimeoutError):
+        async with stop_after(0.02):
+            await body()
+
+    async def outer():
+        async with stop_after(5):
+            await body()
+
+    task = asyncio.create_task(outer())
+    await asyncio.sleep(0.02)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert seen == ["timeout", None]

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from omnicoreagent.core.agents.loop_detection import ToolInteraction
 from omnicoreagent.core.model_protocol import ModelTurn
+from omnicoreagent.core.runtime.deadline import stop_after
 from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
 from omnicoreagent.core.tools.mcp_tool_handler import MCPToolHandler
 from omnicoreagent.core.tools.tool_executor import ToolExecutor
@@ -54,13 +55,27 @@ async def execute_native_turn(
     # discovery cannot unlock a sibling in the same batch.
     decoded_arguments = {}
     resolutions = {}
+    rejection_reasons: dict[str, str] = {}
     for request in turn.tool_calls:
         try:
             arguments = request.decode_arguments()
-            decoded_arguments[request.id] = arguments
+        except ValueError as exc:
+            resolutions[request.id] = exc
+            rejection_reasons[request.id] = "invalid_arguments"
+            continue
+        decoded_arguments[request.id] = arguments
+        try:
             resolutions[request.id] = catalog.resolve(request, arguments=arguments)
         except ValueError as exc:
             resolutions[request.id] = exc
+            rejection_reasons[request.id] = (
+                "unknown_tool"
+                if request.name.lower() not in catalog.visible
+                else "arguments_rejected"
+            )
+    # Event IDs of each call's request/resolution records, so the execution
+    # records can point back to them.
+    call_links: dict[str, dict[str, str | None]] = {}
 
     assistant = turn.assistant_message()
     stored_calls = deepcopy(assistant["tool_calls"])
@@ -125,6 +140,7 @@ async def execute_native_turn(
                         [binding.agent],
                         session_id,
                         telemetry_recorder=telemetry_recorder,
+                        redact_parameters=agent.governance_engine is not None,
                     )
                     if isinstance(result, BaseException):
                         raise result
@@ -163,11 +179,20 @@ async def execute_native_turn(
                 binding.provider if binding.provider != "subagent" else "local",
                 binding.server,
             )
-            async with asyncio.timeout(agent.tool_call_timeout):
+            # The deadline records why it stopped the call, so the tool record
+            # reports a timeout distinctly from a cancelled run.
+            async with stop_after(agent.tool_call_timeout):
                 result = await agent.governed_tool_runner.execute(
                     single_tool=resolved,
                     telemetry_recorder=telemetry_recorder,
                     result_guardrail=agent.guardrail,
+                    telemetry_links={
+                        "batch_id": batch_id,
+                        "model_call_event_id": model_call_event_id,
+                        "model_response_event_id": model_response_event_id,
+                        **call_links.get(request.id, {}),
+                        "tool_provider": binding.provider,
+                    },
                 )
         except asyncio.CancelledError:
             result = {
@@ -185,6 +210,7 @@ async def execute_native_turn(
                 "status": "error",
                 "data": None,
                 "message": "Tool execution timed out",
+                "error_type": "timeout",
             }
         except Exception as exc:
             result = {
@@ -336,11 +362,19 @@ async def execute_native_turn(
                     if arguments is not None and agent.governance_engine
                     else arguments
                 ),
+                # The exact argument text the model produced, including text
+                # that is not valid JSON; redacted whole under governance.
+                "raw_arguments": (
+                    "[REDACTED]" if agent.governance_engine else request.arguments
+                ),
             }
             resolution = resolutions[request.id]
+            rejection_reason = rejection_reasons.get(request.id)
             resolution_output: dict = {
                 "status": "resolved" if isinstance(resolution, tuple) else "rejected",
             }
+            if rejection_reason is not None:
+                resolution_output["rejection_reason"] = rejection_reason
             if isinstance(resolution, tuple):
                 binding, _ = resolution
                 resolution_output.update(
@@ -360,22 +394,29 @@ async def execute_native_turn(
             relationship_metadata = {
                 **batch_metadata,
                 "tool_call_id": request.id,
+                "rejection_reason": rejection_reason,
             }
-            await telemetry_recorder.emit_event(
+            requested_event = await telemetry_recorder.emit_event(
                 "tool_requested",
                 actor=TelemetryActor(type=ActorType.MODEL),
                 input=requested_input,
                 output=resolution_output,
                 metadata=relationship_metadata,
             )
+            links = {"tool_requested_event_id": requested_event.event_id}
             if isinstance(resolution, tuple):
-                await telemetry_recorder.emit_event(
+                resolved_event = await telemetry_recorder.emit_event(
                     "tool_resolved",
                     actor=TelemetryActor(type=ActorType.SYSTEM),
                     input=requested_input,
                     output=resolution_output,
-                    metadata=relationship_metadata,
+                    metadata={
+                        **relationship_metadata,
+                        "tool_requested_event_id": requested_event.event_id,
+                    },
                 )
+                links["tool_resolved_event_id"] = resolved_event.event_id
+            call_links[request.id] = links
 
     persisted_ids = set()
 

@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any
 
+from omnicoreagent.core.runtime.deadline import current_stop_reason
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.types import (
     ToolCallResult,
@@ -30,7 +31,15 @@ class GovernedToolRunner:
         single_tool: ToolCallResult,
         telemetry_recorder: Any = None,
         result_guardrail: Any = None,
+        telemetry_links: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Authorize and execute one call.
+
+        ``telemetry_links`` connects the call's records to the model turn and
+        tool resolution that produced it; a ``tool_provider`` entry overrides
+        the provider reported in telemetry (subagent calls execute through the
+        local handler).
+        """
         if telemetry_recorder is None:
             governance_error = await self._authorize_single_tool(single_tool)
             if governance_error is not None:
@@ -49,15 +58,23 @@ class GovernedToolRunner:
                 return _redact_tool_result_args(result)
             return result
 
+        links = dict(telemetry_links or {})
+        reported_provider = links.pop("tool_provider", None) or single_tool.tool_provider
         telemetry_shape = _tool_telemetry_shape(single_tool)
         telemetry_input = {
             "tool_name": single_tool.tool_name,
             "tool_call_id": single_tool.tool_call_id,
-            "tool_provider": single_tool.tool_provider,
+            "tool_provider": reported_provider,
             "tool_server": single_tool.tool_server,
+            # Under governance argument values are redacted, not omitted, so
+            # the record still shows which arguments the call used.
+            "tool_args": (
+                {key: "[REDACTED]" for key in single_tool.tool_args}
+                if self.governance_engine is not None
+                and isinstance(single_tool.tool_args, dict)
+                else single_tool.tool_args
+            ),
         }
-        if self.governance_engine is None:
-            telemetry_input["tool_args"] = single_tool.tool_args
         span = await telemetry_recorder.start_span(
             name=single_tool.tool_name,
             kind=telemetry_shape["span_kind"],
@@ -65,10 +82,11 @@ class GovernedToolRunner:
             input=telemetry_input,
         )
         relationship_metadata = {
+            **links,
             "tool_call_id": single_tool.tool_call_id,
             "tool_span_id": span.span_id,
             "tool_name": single_tool.tool_name,
-            "tool_provider": single_tool.tool_provider,
+            "tool_provider": reported_provider,
             "tool_server": single_tool.tool_server,
         }
         try:
@@ -176,7 +194,25 @@ class GovernedToolRunner:
                 )
             return result
         except asyncio.CancelledError:
-            await telemetry_recorder.end_span(span.span_id, status=SpanStatus.CANCELLED)
+            if current_stop_reason() == "timeout":
+                timeout_error = {
+                    "type": "TimeoutError",
+                    "message": "Tool execution exceeded its time limit",
+                }
+                await telemetry_recorder.emit_event(
+                    telemetry_shape["error_event"],
+                    actor=telemetry_shape["actor"],
+                    input=telemetry_input if telemetry_shape["single_event"] else None,
+                    error=timeout_error,
+                    metadata={**relationship_metadata, "phase": "timeout"},
+                )
+                await telemetry_recorder.end_span(
+                    span.span_id, status=SpanStatus.TIMEOUT, error=timeout_error
+                )
+            else:
+                await telemetry_recorder.end_span(
+                    span.span_id, status=SpanStatus.CANCELLED
+                )
             raise
         except Exception as exc:
             if telemetry_shape["single_event"]:
@@ -223,6 +259,7 @@ class GovernedToolRunner:
                 tool_provider=single_tool.tool_provider,
                 tool_server=single_tool.tool_server,
                 actor=self.agent_name,
+                tool_call_id=single_tool.tool_call_id,
             )
             await self.governance_engine.authorize_all(requests)
         except (GovernanceError, ValueError) as exc:

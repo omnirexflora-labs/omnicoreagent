@@ -74,7 +74,9 @@ class GovernanceEngine:
                 reason_code=ReasonCode.POLICY_ERROR,
                 reason=str(exc) or "Policy evaluation failed closed.",
             )
-            await emit_policy_decision(self.telemetry_recorder, decision)
+            await emit_policy_decision(
+                self.telemetry_recorder, decision, request=request
+            )
             if isinstance(exc, PolicyEvaluationError):
                 raise
             raise PolicyEvaluationError(
@@ -84,6 +86,7 @@ class GovernanceEngine:
         await emit_policy_decision(
             self.telemetry_recorder,
             decision,
+            request=request,
             strict=(
                 decision.constraints.strict_telemetry
                 or decision.constraints.audit_required
@@ -162,6 +165,7 @@ class GovernanceEngine:
                 await emit_policy_decision(
                     self.telemetry_recorder,
                     decisions[index],
+                    request=requests[index],
                     strict=(
                         decisions[index].constraints.strict_telemetry
                         or decisions[index].constraints.audit_required

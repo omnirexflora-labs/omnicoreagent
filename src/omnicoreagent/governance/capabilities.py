@@ -82,6 +82,7 @@ def tool_authority_requests(
     tool_provider: str = "local",
     tool_server: str | None = None,
     actor: str = "agent",
+    tool_call_id: str | None = None,
 ) -> list[AuthorityRequest]:
     descriptor = tool_capability_descriptor(
         tool_name=tool_name,
@@ -110,6 +111,7 @@ def tool_authority_requests(
                 "tool_provider": tool_provider,
                 "tool_server": tool_server,
                 "target_role": role,
+                "tool_call_id": tool_call_id,
             },
         )
         for role, target in targets
