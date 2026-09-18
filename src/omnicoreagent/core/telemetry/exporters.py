@@ -21,6 +21,17 @@ from omnicoreagent.core.telemetry.normalizer import TelemetryNormalizer
 class TelemetryExportError(RuntimeError):
     """Raised when a telemetry exporter cannot export a trace."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        exporter: str | None = None,
+        error_type: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.exporter = exporter
+        self.error_type = error_type or self.__class__.__name__
+
 
 @dataclass(frozen=True)
 class TelemetryExportResult:
@@ -467,11 +478,16 @@ async def export_trace_to_many(
                 else await asyncio.wait_for(operation, timeout=timeout)
             )
         except Exception as exc:
+            name = getattr(exporter, "name", exporter.__class__.__name__)
             if strict:
-                raise
+                raise TelemetryExportError(
+                    f"{name} export failed: {exc.__class__.__name__}: {exc}",
+                    exporter=name,
+                    error_type=exc.__class__.__name__,
+                ) from exc
             results.append(
                 TelemetryExportResult(
-                    exporter=getattr(exporter, "name", exporter.__class__.__name__),
+                    exporter=name,
                     trace_id=trace.trace_id,
                     destination=None,
                     metadata={"error": str(exc), "error_type": exc.__class__.__name__},

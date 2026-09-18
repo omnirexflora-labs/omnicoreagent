@@ -867,3 +867,141 @@ async def test_parallel_runs_share_session_without_mixing_trace_context() -> Non
     }
     assert output_by_run_id[first["run_id"]] == "first"
     assert output_by_run_id[second["run_id"]] == "second"
+
+
+class _FailingExporter:
+    name = "failing-exporter"
+
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+
+    async def export_trace(self, trace):
+        raise self.exc
+
+
+class _FinalAnswerFailingStore(InMemoryTelemetryStore):
+    async def append_event(self, trace_id, event):
+        if event.event_type == "final_answer":
+            raise RuntimeError("store unavailable")
+        return await super().append_event(trace_id, event)
+
+
+def _strict_agent_under_parent(store, *, exporters=()):
+    recorder = TelemetryRecorder(
+        store, TelemetryConfig(strict=True), exporters=list(exporters)
+    )
+    agent = _initialized_agent(store=store)
+    agent.telemetry_recorder = recorder
+    agent.telemetry_config = recorder.config
+    return agent, recorder
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "exc", [RuntimeError("collector down"), asyncio.TimeoutError()]
+)
+async def test_strict_export_failure_does_not_end_parent_trace(exc) -> None:
+    from omnicoreagent.core.telemetry import TelemetryExportError
+    from omnicoreagent.core.telemetry.context import current_telemetry_context
+
+    store = InMemoryTelemetryStore()
+    agent, recorder = _strict_agent_under_parent(
+        store, exporters=[_FailingExporter(exc)]
+    )
+    recorder.exporters = []
+    parent = await recorder.start_trace(trace_id="trace-serve", kind="serve.request")
+    recorder.exporters = [_FailingExporter(exc)]
+
+    with pytest.raises(TelemetryExportError):
+        await agent.run("hello", session_id="session-strict")
+
+    assert current_telemetry_context() == parent
+    parent_trace = await store.get_trace("trace-serve")
+    assert parent_trace.status == TraceStatus.RUNNING
+    assert [event.event_type for event in parent_trace.events] == []
+
+    child = next(
+        trace
+        for trace in await store.list_traces(TraceFilter(session_id="session-strict"))
+        if trace.trace_id != "trace-serve"
+    )
+    assert child.status == TraceStatus.COMPLETED
+    error_events = [e for e in child.events if e.event_type == "telemetry_error"]
+    assert len(error_events) == 1
+    assert error_events[0].metadata["exporter"] == "failing-exporter"
+
+
+@pytest.mark.asyncio
+async def test_strict_store_failure_fails_own_trace_and_restores_parent() -> None:
+    from omnicoreagent.core.telemetry.context import current_telemetry_context
+
+    store = _FinalAnswerFailingStore()
+    agent, recorder = _strict_agent_under_parent(store)
+    parent = await recorder.start_trace(trace_id="trace-serve", kind="serve.request")
+
+    with pytest.raises(RuntimeError, match="store unavailable"):
+        await agent.run("hello", session_id="session-store")
+
+    assert current_telemetry_context() == parent
+    parent_trace = await store.get_trace("trace-serve")
+    assert parent_trace.status == TraceStatus.RUNNING
+    child = next(
+        trace
+        for trace in await store.list_traces(TraceFilter(session_id="session-store"))
+        if trace.trace_id != "trace-serve"
+    )
+    assert child.status == TraceStatus.FAILED
+    assert "runtime_error" in [event.event_type for event in child.events]
+
+
+@pytest.mark.asyncio
+async def test_strict_finalization_failure_does_not_touch_parent_trace() -> None:
+    from omnicoreagent.core.telemetry.context import current_telemetry_context
+
+    class FinalUpdateFailingStore(InMemoryTelemetryStore):
+        async def update_trace(self, trace_id, patch):
+            if trace_id != "trace-serve" and "ended_at" in patch:
+                raise RuntimeError("final update failed")
+            return await super().update_trace(trace_id, patch)
+
+    store = FinalUpdateFailingStore()
+    agent, recorder = _strict_agent_under_parent(store)
+    parent = await recorder.start_trace(trace_id="trace-serve", kind="serve.request")
+
+    with pytest.raises(RuntimeError, match="final update failed"):
+        await agent.run("hello", session_id="session-final")
+
+    assert current_telemetry_context() == parent
+    parent_trace = await store.get_trace("trace-serve")
+    assert parent_trace.status == TraceStatus.RUNNING
+    assert parent_trace.events == []
+    assert all(span.status.value == "running" for span in parent_trace.spans)
+
+
+@pytest.mark.asyncio
+async def test_strict_telemetry_failure_does_not_replace_cancellation() -> None:
+    from omnicoreagent.core.telemetry.context import current_telemetry_context
+
+    class FinalStateFailingStore(InMemoryTelemetryStore):
+        async def append_event(self, trace_id, event):
+            if event.event_type == "final_state":
+                raise RuntimeError("store unavailable")
+            return await super().append_event(trace_id, event)
+
+    store = FinalStateFailingStore()
+    agent, recorder = _strict_agent_under_parent(store)
+    agent.agent.run = AsyncMock(side_effect=asyncio.CancelledError())
+    parent = await recorder.start_trace(trace_id="trace-serve", kind="serve.request")
+
+    with pytest.raises(asyncio.CancelledError):
+        await agent.run("hello", session_id="session-cancel")
+
+    assert current_telemetry_context() == parent
+    parent_trace = await store.get_trace("trace-serve")
+    assert parent_trace.status == TraceStatus.RUNNING
+    child = next(
+        trace
+        for trace in await store.list_traces(TraceFilter(session_id="session-cancel"))
+        if trace.trace_id != "trace-serve"
+    )
+    assert child.status == TraceStatus.CANCELLED

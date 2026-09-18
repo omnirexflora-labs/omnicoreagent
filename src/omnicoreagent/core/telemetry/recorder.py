@@ -393,15 +393,19 @@ class TelemetryRecorder:
                     except asyncio.CancelledError:
                         raise
                     except Exception as exc:
-                        if self.config.strict:
-                            raise
+                        # The failure stays visible in the stored trace even
+                        # when strict mode propagates it to the caller.
                         await self._record_export_failure(
                             {
-                                "exporter": "telemetry",
+                                "exporter": getattr(exc, "exporter", None)
+                                or "telemetry",
                                 "error": str(exc),
-                                "error_type": exc.__class__.__name__,
+                                "error_type": getattr(exc, "error_type", None)
+                                or exc.__class__.__name__,
                             }
                         )
+                        if self.config.strict:
+                            raise
         finally:
             self._release_trace(context.trace_id)
             set_telemetry_context(parent_context)

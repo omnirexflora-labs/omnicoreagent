@@ -7,6 +7,7 @@ import pytest
 from omnicoreagent.core.telemetry import (
     InMemoryTelemetryStore,
     TelemetryConfig,
+    TelemetryExportError,
     TelemetryRecorder,
     TelemetryTrace,
     TraceStatus,
@@ -76,8 +77,12 @@ async def test_strict_exporter_timeout_fails_finalization():
     )
 
     await recorder.start_trace(trace_id="trace-strict-export-timeout")
-    with pytest.raises(asyncio.TimeoutError):
+    with pytest.raises(TelemetryExportError) as raised:
         await recorder.end_trace()
+
+    assert isinstance(raised.value.__cause__, asyncio.TimeoutError)
+    trace = await recorder.store.get_trace("trace-strict-export-timeout")
+    assert [event.event_type for event in trace.events] == ["telemetry_error"]
 
 
 def test_delivery_timeout_configuration_rejects_invalid_values():

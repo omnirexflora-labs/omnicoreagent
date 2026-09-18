@@ -23,7 +23,7 @@ from omnicoreagent.core.runtime.imports import (
 from omnicoreagent.core.telemetry import (
     ActorType,
     TelemetryActor,
-    TelemetryExportError,
+    TelemetryContext,
     TelemetryExporter,
     TelemetryTrace,
     TelemetryNormalizer,
@@ -35,6 +35,7 @@ from omnicoreagent.core.telemetry import (
     TraceStatus,
     build_telemetry_exporter,
     export_trace_to_many,
+    set_telemetry_context,
 )
 
 
@@ -411,6 +412,10 @@ class OmniCoreAgent:
 
         run_id = run_id or self.generate_run_id()
         trace_context = None
+        # Set once this run starts finalizing its own trace. A telemetry
+        # failure after that point has already restored the parent context,
+        # so the error handlers below must not record anything more.
+        trace_finalizing = False
         delivery = (
             streaming.StreamDelivery(
                 on_event,
@@ -460,6 +465,7 @@ class OmniCoreAgent:
                     actor=self._telemetry_actor(),
                     output={"response": blocked_response["response"]},
                 )
+                trace_finalizing = True
                 await self.telemetry_recorder.end_trace(
                     status=TraceStatus.ABORTED_SAFETY_GUARD,
                     output={"response": blocked_response["response"]},
@@ -523,6 +529,7 @@ class OmniCoreAgent:
                     "termination_reason": formatted_response.get("termination_reason"),
                 },
             )
+            trace_finalizing = True
             await self.telemetry_recorder.end_trace(
                 status=trace_status,
                 output={
@@ -535,37 +542,64 @@ class OmniCoreAgent:
             formatted_response["run_id"] = run_id
             return self.privacy_filter.redact(formatted_response, boundary="public")
         except asyncio.CancelledError as exc:
-            if trace_context is not None:
-                await self.telemetry_recorder.emit_event(
-                    "final_state",
-                    actor=self._telemetry_actor(),
-                    output={"status": TraceStatus.CANCELLED.value},
-                )
-                await self.telemetry_recorder.end_trace(
-                    status=TraceStatus.CANCELLED,
-                    error={"type": exc.__class__.__name__, "message": str(exc)},
-                )
-            raise
-        except TelemetryExportError:
+            if trace_context is not None and not trace_finalizing:
+                try:
+                    await self._end_trace_after_failure(
+                        trace_context, exc, status=TraceStatus.CANCELLED
+                    )
+                except Exception as telemetry_exc:
+                    # Cancellation must keep propagating; a strict telemetry
+                    # failure cannot replace it.
+                    runtime_logger().warning(
+                        f"Telemetry finalization failed during cancellation: "
+                        f"{telemetry_exc.__class__.__name__}"
+                    )
             raise
         except Exception as exc:
-            if self.telemetry_recorder.current_context() is None:
-                raise
-            if trace_context is not None:
-                await self.telemetry_recorder.record_exception(
-                    exc,
-                    event_type="runtime_error",
-                    actor=self._telemetry_actor(),
-                    metadata={"phase": "agent.run"},
-                )
-                await self.telemetry_recorder.end_trace(
-                    status=TraceStatus.FAILED,
-                    error={"type": exc.__class__.__name__, "message": str(exc)},
+            if trace_context is not None and not trace_finalizing:
+                await self._end_trace_after_failure(
+                    trace_context, exc, status=TraceStatus.FAILED
                 )
             raise
 
         finally:
             streaming.current_delivery.reset(delivery_token)
+
+    async def _end_trace_after_failure(
+        self,
+        trace_context: TelemetryContext,
+        exc: BaseException,
+        *,
+        status: TraceStatus,
+    ) -> None:
+        """Record a run failure on this run's own trace and end it.
+
+        The active context can differ from ``trace_context`` (for example a
+        nested span left open by the failure), but it must never be a parent
+        trace: failures are always attributed to the run's own trace.
+        """
+
+        recorder = self.telemetry_recorder
+        current = recorder.current_context()
+        if current is None or current.trace_id != trace_context.trace_id:
+            set_telemetry_context(trace_context)
+        error = {"type": exc.__class__.__name__, "message": str(exc)}
+        try:
+            if status == TraceStatus.CANCELLED:
+                await recorder.emit_event(
+                    "final_state",
+                    actor=self._telemetry_actor(),
+                    output={"status": TraceStatus.CANCELLED.value},
+                )
+            else:
+                await recorder.record_exception(
+                    exc,
+                    event_type="runtime_error",
+                    actor=self._telemetry_actor(),
+                    metadata={"phase": "agent.run"},
+                )
+        finally:
+            await recorder.end_trace(status=status, error=error)
 
     def stream(
         self, query: str, session_id: str | None = None, run_id: str | None = None

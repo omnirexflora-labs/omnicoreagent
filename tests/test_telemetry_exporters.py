@@ -226,8 +226,11 @@ async def test_agent_run_surfaces_non_telemetry_strict_export_error():
     agent.memory_router.store_message = AsyncMock()
     agent.memory_router.get_messages = AsyncMock(return_value=[])
 
-    with pytest.raises(OSError, match="disk full"):
+    with pytest.raises(TelemetryExportError, match="disk full") as raised:
         await agent.run("hello", session_id="session-export-os-error")
+
+    assert isinstance(raised.value.__cause__, OSError)
+    assert raised.value.exporter == "broken"
 
 
 def test_vendor_exporter_presets_build_otlp_headers(monkeypatch):

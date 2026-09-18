@@ -205,4 +205,5 @@ Phase C passes.
 
 | Unit | Status | Commit | Evidence |
 | --- | --- | --- | --- |
-| A1 | Complete | (this commit) | 10 new recorder/redaction tests; telemetry, runtime, loop, LLM-step and governance suites 158 passed; full suite 1,187 passed, 14 skipped; acceptance `--check-fixture` and `--run` passed; ruff clean. |
+| A1 | Complete | `1abc441` | 10 new recorder/redaction tests; telemetry, runtime, loop, LLM-step and governance suites 158 passed; full suite 1,187 passed, 14 skipped; acceptance `--check-fixture` and `--run` passed; ruff clean. |
+| A2 | Complete | (this commit) | 5 new runtime tests (strict exporter error and timeout, strict store failure, strict finalization failure, cancellation during strict failure) all leave the parent trace running and the parent context restored. Strict exporter failures now raise `TelemetryExportError` (exporter name, original exception as `__cause__`) and record `telemetry_error`; 2 existing tests updated to that contract. Full suite 1,192 passed, 14 skipped; acceptance checks passed; ruff clean. |
