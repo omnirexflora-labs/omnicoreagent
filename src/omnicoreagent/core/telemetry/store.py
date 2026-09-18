@@ -35,6 +35,28 @@ from omnicoreagent.core.telemetry.models import (
 )
 
 
+class _LoopLocks:
+    """One asyncio lock per running event loop.
+
+    A store can outlive an event loop (one store object is shared per file,
+    and scripts or tests call ``asyncio.run`` more than once). An
+    ``asyncio.Lock`` binds to the first loop that contends for it and then
+    fails in every later loop, which silently dropped best-effort writes.
+    """
+
+    def __init__(self) -> None:
+        self._locks: weakref.WeakKeyDictionary[
+            asyncio.AbstractEventLoop, asyncio.Lock
+        ] = weakref.WeakKeyDictionary()
+
+    def current(self) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        lock = self._locks.get(loop)
+        if lock is None:
+            lock = self._locks[loop] = asyncio.Lock()
+        return lock
+
+
 class _TelemetryStreamOverflow(RuntimeError):
     """Raised when a live telemetry subscriber cannot keep up."""
 
@@ -90,6 +112,10 @@ class AbstractTelemetryStore(ABC):
 
 
 class InMemoryTelemetryStore(AbstractTelemetryStore):
+    @property
+    def _lock(self) -> asyncio.Lock:
+        return self._loop_locks.current()
+
     def __init__(self, *, max_traces: int | None = None) -> None:
         if max_traces is not None and max_traces < 1:
             raise ValueError("max_traces must be positive or None")
@@ -112,7 +138,7 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
             ],
         ] = {}
         self._next_subscriber_id = 0
-        self._lock = asyncio.Lock()
+        self._loop_locks = _LoopLocks()
 
     async def append_event(self, trace_id: str, event: TelemetryEvent) -> None:
         if event.trace_id != trace_id:
@@ -445,6 +471,10 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
     the next one.
     """
 
+    @property
+    def _lock(self) -> asyncio.Lock:
+        return self._loop_locks.current()
+
     def __init__(
         self,
         path: str | Path,
@@ -458,7 +488,7 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         self.removed_total = 0
         self._inner = InMemoryTelemetryStore()
         self._loaded = False
-        self._lock = asyncio.Lock()
+        self._loop_locks = _LoopLocks()
         self._writer: ThreadPoolExecutor | None = None
 
     async def append_event(self, trace_id: str, event: TelemetryEvent) -> None:

@@ -269,6 +269,22 @@ def test_privacy_filter_still_redacts_phone_numbers():
         "call 555-123-4567 today",
         "07700 900123",
         "+44 20 7946 0958",
+        "tel-555-123-4567",
     ):
         redacted = privacy.redact_text(text, boundary="telemetry")
         assert "[REDACTED_PHONE]" in redacted, text
+
+
+def test_privacy_filter_never_alters_hyphenated_identifiers():
+    import uuid
+
+    privacy = PrivacyFilter()
+    samples = [
+        "chatcmpl-7fe09b14-1234-5678-9012-d995b29d39db",
+        "chatcmpl-78216495-2481-4239-bc1f-088422304425",
+        *(f"chatcmpl-{uuid.uuid4()}" for _ in range(3000)),
+        *(f"request {uuid.uuid4()} failed" for _ in range(1000)),
+    ]
+
+    altered = [s for s in samples if privacy.redact_text(s, boundary="telemetry") != s]
+    assert altered == []

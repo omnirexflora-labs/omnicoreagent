@@ -110,6 +110,12 @@ class PrivacyFilter:
     # (``trace_cbe5ba4111...``) and corrupted evidence links.
     _CARD = re.compile(r"(?<!\w)(?:\d[ -]?){12,18}\d(?!\w)")
     _PHONE = re.compile(r"(?<!\w)\+?\d[\d().\-\s]{8,}\d(?!\w)")
+    # Digit groups inside a UUID (provider response IDs such as
+    # ``chatcmpl-7fe09b14-1234-5678-9012-...``) can look like a phone or card
+    # number; a match inside a UUID is an identifier, not PII.
+    _UUID = re.compile(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    )
     _ISO_DATE = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
 
     _MARKERS = {
@@ -174,7 +180,15 @@ class PrivacyFilter:
             return self.config.redact_model_io
         return bool(getattr(self.config, f"redact_{boundary}"))
 
+    def _inside_uuid(self, match: re.Match[str]) -> bool:
+        return any(
+            uuid.start() <= match.start() and match.end() <= uuid.end()
+            for uuid in self._UUID.finditer(match.string)
+        )
+
     def _replace_card(self, match: re.Match[str]) -> str:
+        if self._inside_uuid(match):
+            return match.group()
         digits = re.sub(r"\D", "", match.group())
         return self._MARKERS["credit_card"] if self._luhn_valid(digits) else match.group()
 
@@ -182,7 +196,7 @@ class PrivacyFilter:
         text = match.group()
         # Dates and timestamps (2026-09-18 12) have the digit shape of a phone
         # number; rewriting them corrupted recorded evidence.
-        if self._ISO_DATE.search(text):
+        if self._ISO_DATE.search(text) or self._inside_uuid(match):
             return text
         digits = re.sub(r"\D", "", text)
         return self._MARKERS["phone"] if len(digits) >= 10 else text

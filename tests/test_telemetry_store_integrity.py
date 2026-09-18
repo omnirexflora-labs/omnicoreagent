@@ -263,3 +263,26 @@ async def test_jsonl_store_reads_records_written_in_previous_format(tmp_path):
     cursors = [int(event.stream_cursor) for event in events]
     assert cursors == sorted(cursors)
     assert len(set(cursors)) == len(cursors)
+
+
+@pytest.mark.parametrize("store_kind", ["memory", "jsonl"])
+def test_a_shared_store_keeps_every_event_across_event_loops(tmp_path, store_kind):
+    from omnicoreagent.core.telemetry import InMemoryTelemetryStore
+
+    store = (
+        InMemoryTelemetryStore()
+        if store_kind == "memory"
+        else JsonlTelemetryStore(tmp_path / "telemetry.jsonl")
+    )
+
+    async def burst(trace_id):
+        await store.upsert_trace(_trace(trace_id))
+        # Concurrent writes contend for the store lock.
+        await asyncio.gather(
+            *(store.append_event(trace_id, _event(trace_id, i)) for i in range(25))
+        )
+        return len((await store.get_trace(trace_id)).events)
+
+    # Each asyncio.run is a new event loop sharing the same store object.
+    assert asyncio.run(burst("trace-loop-1")) == 25
+    assert asyncio.run(burst("trace-loop-2")) == 25
