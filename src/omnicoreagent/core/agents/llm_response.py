@@ -129,9 +129,19 @@ def normalize_model_turn(response: Any):
             for key in ("reasoning_content",)
             if get(message, key) is not None
         },
-        response_metadata={
-            key: get(response, key)
-            for key in ("id", "model")
-            if get(response, key) is not None
-        },
+        response_metadata=_response_metadata(response, get),
     )
+
+
+def _response_metadata(response: Any, get) -> dict[str, Any]:
+    """Provider identity and cost; LiteLLM attaches its computed cost in hidden params."""
+    metadata = {
+        key: get(response, key)
+        for key in ("id", "model")
+        if get(response, key) is not None
+    }
+    hidden = get(response, "_hidden_params") or {}
+    cost = hidden.get("response_cost") if isinstance(hidden, dict) else None
+    if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+        metadata["cost_usd"] = float(cost)
+    return metadata

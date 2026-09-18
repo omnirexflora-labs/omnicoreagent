@@ -342,6 +342,30 @@ class LLMConnection:
                 settings[key] = self.llm_config[key]
         return settings
 
+    def estimate_cost(self, usage: Any) -> float | None:
+        """Price a call's token usage from LiteLLM's model price table.
+
+        Used when the provider response carries no cost (streamed calls).
+        Returns ``None`` when the model has no known price.
+        """
+        prompt_tokens = getattr(usage, "request_tokens", None)
+        completion_tokens = getattr(usage, "response_tokens", None)
+        if prompt_tokens is None or completion_tokens is None:
+            return None
+        details = getattr(usage, "details", None) or {}
+        try:
+            # Cached input is billed at a lower rate; ignoring it overstated
+            # the cost of a cached call about twice over.
+            prompt_cost, completion_cost = _get_litellm().cost_per_token(
+                model=self.llm_config["model"],
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cache_read_input_tokens=details.get("cached_input_tokens", 0),
+            )
+        except Exception:
+            return None
+        return float(prompt_cost + completion_cost)
+
     def _completion_params(
         self, messages: list[Any], tools: list[dict[str, Any]] | None = None
     ) -> dict[str, Any]:

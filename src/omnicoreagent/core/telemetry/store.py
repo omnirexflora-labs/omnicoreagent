@@ -24,6 +24,7 @@ from omnicoreagent.core.telemetry.models import (
     TelemetryStreamScope,
     TelemetryTrace,
     TelemetryTraceMetadata,
+    TokenUsage,
     TraceFilter,
     TraceStatus,
     duration_ms,
@@ -819,6 +820,8 @@ def _patch_span(span: TelemetrySpan, patch: dict[str, Any]) -> None:
             value = parse_datetime(value)
         elif key == "error" and isinstance(value, dict):
             value = TelemetryError.from_dict(value)
+        elif key == "token_usage" and isinstance(value, dict):
+            value = TokenUsage.from_dict(value)
         setattr(span, key, value)
     if span.ended_at is None:
         span.ended_at = utc_now()

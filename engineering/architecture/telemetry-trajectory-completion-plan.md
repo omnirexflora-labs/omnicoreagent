@@ -207,10 +207,15 @@ Split from A5 during implementation (2026-09-18).
 Added by the reassessment after B3 (2026-09-18).
 - Record the provider-reported cost of each call (LiteLLM `response_cost`) as
   `cost_usd` in the model call facts; `null` when the provider supplies none.
-- Populate the standard `token_usage` and `cost_usd` fields of the
+- Populate the standard `token_usage` and `estimated_cost_usd` fields of the
   `model.call` span and `model_response` event. They were never set by the
   runtime, so the OTel/LangSmith/Opik exporters and portable consumers saw no
   token usage or cost.
+- Cost is a LiteLLM price-table figure, not an invoiced amount, and records its
+  source (`provider_response` or `price_table`). Found during B3b: the
+  price-table estimate for streamed calls ignored the cached-input rate and
+  overstated a cached call about twice over; it now matches the provider's
+  figure exactly.
 
 ### B4. Tool record
 - Malformed arguments keep the raw string and the parse error in
@@ -302,3 +307,4 @@ Phase C passes.
 | B1 | Complete | `56cdecf` | 12 new tests: capture presets (fill only unset fields, round-trip, full capture records model responses); durable JSONL default in the workspace directory; memory as explicit opt-out; cloud workspaces keep a local file; one shared store per file; default agents and manager share it; a default agent's trace survives a restart; shutdown during attempt start records the run (verified RUNNING without the fix); a finished run's events include its terminal event. 2 cloud-workspace tests moved to the new contract. Docs updated. Full suite 1,245 passed, 14 skipped; acceptance checks passed; ruff clean; nothing written to the repository workspace. |
 | B2 | Complete | `3ece487` | 12 new tests on a real `OmniCoreAgent` run with a scripted model: the `run_configuration` header (model and settings, limits, context/memory/offload config, features, fingerprints, tool catalog, system prompt digest) is recorded before the first step, links to the first `context_assembly` digests, never contains credentials, and survives `record_outputs=False`; trace versions are filled, stable across identical harnesses and changed by a different prompt; explicit `agent_version` wins; prompt text follows the capture policy; `run(tags=, provenance=)`; surfaces `interactive`, `serve`, `background`. Observability guide updated. Full suite 1,257 passed, 14 skipped; acceptance checks passed; ruff clean. |
 | B3 | Complete | `b46504a` | 7 new model-step tests (tokens incl. cached and reasoning, provider response ID and served model, request settings, latency, time to first streamed delta, retries on success and failure, facts kept with `record_outputs=False`, raw arguments exact under full capture, refusal text not leaked). Live LiteLLM check (`gpt-5.4-mini`, non-streaming and streaming, local tool): real tokens (1,471 in / 21 out; 1,024 cached), `chatcmpl-...` IDs, latency, first delta 1.57 s on the streamed answer, API key absent from both traces. Full suite 1,264 passed, 14 skipped; acceptance checks passed; ruff clean. |
+| B3b | Complete | (this commit) | 5 new tests: provider cost and standard usage fields on span and event; price-table cost when the provider reports none; unknown cost stays unknown; fields survive JSONL reload and reach the OTel mapping (`gen_ai.usage.*`); the cached-input rate is used. Live LiteLLM: streamed (price table) and non-streamed (provider) costs match exactly for identical usage ($0.00052305). Full suite 1,269 passed, 14 skipped; acceptance checks passed; ruff clean. |

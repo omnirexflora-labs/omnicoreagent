@@ -397,8 +397,11 @@ class AgentLlmStepRunner:
                 "usage": self._usage_payload(extract_response_usage(response)),
                 "stream_stats": stream_stats,
             }
+            standard_usage = _standard_token_usage(model_facts["tokens"])
             response_event = await telemetry_recorder.emit_event(
                 "model_response",
+                token_usage=standard_usage,
+                estimated_cost_usd=model_facts["estimated_cost_usd"],
                 actor=TelemetryActor(type=ActorType.MODEL),
                 output=response_payload,
                 metadata={
@@ -415,6 +418,8 @@ class AgentLlmStepRunner:
             await telemetry_recorder.end_span(
                 span_context.span_id,
                 status=SpanStatus.OK,
+                token_usage=standard_usage,
+                estimated_cost_usd=model_facts["estimated_cost_usd"],
                 output={
                     "tool_call_ids": response_payload["tool_call_ids"],
                     "context_span_id": context_span_id,
@@ -501,6 +506,15 @@ class AgentLlmStepRunner:
             if "reasoning_tokens" in details:
                 tokens["reasoning"] = details["reasoning_tokens"]
         response_metadata = normalized.response_metadata if normalized else {}
+        cost = response_metadata.get("cost_usd")
+        cost_source = "provider_response" if cost is not None else None
+        estimate = getattr(llm_connection, "estimate_cost", None)
+        if cost is None and usage is not None and callable(estimate):
+            try:
+                cost = estimate(usage)
+            except Exception:
+                cost = None
+            cost_source = "price_table" if cost is not None else None
         return {
             "request_settings": request_settings,
             "provider_response_id": response_metadata.get("id"),
@@ -508,6 +522,9 @@ class AgentLlmStepRunner:
             "finish_reason": normalized.finish_reason if normalized else None,
             "refused": bool(normalized.refusal) if normalized else False,
             "tokens": tokens,
+            # A LiteLLM price-table figure, not an invoiced amount.
+            "estimated_cost_usd": cost,
+            "cost_source": cost_source,
             "latency_ms": (
                 round((now - started) * 1000, 3) if started is not None else None
             ),
@@ -658,3 +675,14 @@ class AgentLlmStepRunner:
             "total_time": request_usage.total_time,
             "details": request_usage.details,
         }
+
+
+def _standard_token_usage(tokens: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Map model call tokens onto the standard span/event ``token_usage`` field."""
+    if tokens is None:
+        return None
+    return {
+        "prompt_tokens": tokens.get("input"),
+        "completion_tokens": tokens.get("output"),
+        "total_tokens": tokens.get("total"),
+    }

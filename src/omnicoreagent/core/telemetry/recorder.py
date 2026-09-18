@@ -24,6 +24,7 @@ from omnicoreagent.core.telemetry.models import (
     TelemetryTrace,
     TelemetryTraceMetadata,
     TelemetryProvenance,
+    TokenUsage,
     TraceEvidenceStatus,
     TraceStatus,
     telemetry_id,
@@ -553,6 +554,8 @@ class TelemetryRecorder:
         status: SpanStatus | str = SpanStatus.OK,
         output: dict[str, Any] | None = None,
         error: TelemetryError | dict[str, Any] | None = None,
+        token_usage: dict[str, Any] | None = None,
+        estimated_cost_usd: float | None = None,
     ) -> None:
         context = self._require_context()
         target_span_id = span_id or context.span_id
@@ -569,6 +572,10 @@ class TelemetryRecorder:
             "output_capture": output_capture,
             "error": self._record_error(error),
         }
+        if token_usage is not None:
+            patch["token_usage"] = dict(token_usage)
+        if estimated_cost_usd is not None:
+            patch["estimated_cost_usd"] = estimated_cost_usd
         await self._write(
             self.store.end_span(context.trace_id, target_span_id, patch),
             trace_id=context.trace_id,
@@ -625,6 +632,8 @@ class TelemetryRecorder:
         metadata: dict[str, Any] | None = None,
         duration_ms: int | None = None,
         parent_event_id: str | None = None,
+        token_usage: dict[str, Any] | None = None,
+        estimated_cost_usd: float | None = None,
     ) -> TelemetryEvent:
         context = self._require_context()
         recorded_input, input_capture = self._capture_input(input, source=event_type)
@@ -661,6 +670,10 @@ class TelemetryRecorder:
             input_capture=input_capture,
             output_capture=output_capture,
         )
+        if token_usage is not None:
+            event.token_usage = TokenUsage.from_dict(token_usage)
+        if estimated_cost_usd is not None:
+            event.estimated_cost_usd = estimated_cost_usd
         await self._write(
             self.store.append_event(context.trace_id, event),
             trace_id=context.trace_id,

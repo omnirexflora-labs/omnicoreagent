@@ -269,3 +269,95 @@ async def test_failed_model_call_records_its_attempts(monkeypatch):
     assert error.metadata["model_call"]["attempts"] == 2
     assert len(error.metadata["model_call"]["retries"]) == 1
     assert error.metadata["model_call"]["request_settings"] == _SETTINGS
+
+
+@pytest.mark.asyncio
+async def test_provider_cost_and_standard_usage_fields_are_populated(monkeypatch):
+    monkeypatch.setattr(llm_step, "usage", Usage())
+    priced = _provider_response()
+    priced["_hidden_params"] = {"response_cost": 0.00042}
+    recorder = TelemetryRecorder(InMemoryTelemetryStore())
+
+    _, response, span = await _step(recorder, _Connection(priced))
+    facts = response.metadata["model_call"]
+
+    assert facts["estimated_cost_usd"] == 0.00042
+    assert facts["cost_source"] == "provider_response"
+    for record in (span, response):
+        assert record.token_usage.prompt_tokens == 120
+        assert record.token_usage.completion_tokens == 30
+        assert record.token_usage.total_tokens == 150
+        assert record.estimated_cost_usd == 0.00042
+
+
+@pytest.mark.asyncio
+async def test_price_table_cost_is_used_when_the_provider_reports_none(monkeypatch):
+    monkeypatch.setattr(llm_step, "usage", Usage())
+    recorder = TelemetryRecorder(InMemoryTelemetryStore())
+
+    class PricedConnection(_Connection):
+        def estimate_cost(self, usage):
+            return round(usage.request_tokens * 1e-6 + usage.response_tokens * 4e-6, 9)
+
+    _, response, span = await _step(recorder, PricedConnection())
+    facts = response.metadata["model_call"]
+
+    assert facts["cost_source"] == "price_table"
+    assert facts["estimated_cost_usd"] == pytest.approx(120e-6 + 120e-6)
+    assert span.estimated_cost_usd == facts["estimated_cost_usd"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_cost_stays_unknown(monkeypatch):
+    monkeypatch.setattr(llm_step, "usage", Usage())
+    recorder = TelemetryRecorder(InMemoryTelemetryStore())
+
+    _, response, span = await _step(recorder, _Connection())
+
+    assert response.metadata["model_call"]["estimated_cost_usd"] is None
+    assert response.metadata["model_call"]["cost_source"] is None
+    assert span.estimated_cost_usd is None
+
+
+@pytest.mark.asyncio
+async def test_standard_usage_fields_survive_jsonl_reload_and_reach_otel(
+    monkeypatch, tmp_path
+):
+    from omnicoreagent.core.telemetry import JsonlTelemetryStore, OTelTraceMapper
+
+    monkeypatch.setattr(llm_step, "usage", Usage())
+    priced = _provider_response()
+    priced["_hidden_params"] = {"response_cost": 0.00042}
+    path = tmp_path / "traces.jsonl"
+    recorder = TelemetryRecorder(JsonlTelemetryStore(path))
+
+    await _step(recorder, _Connection(priced))
+    reloaded = await JsonlTelemetryStore(path).get_trace("trace-model-step")
+    span = next(s for s in reloaded.spans if s.kind == "model.call")
+    assert span.token_usage.total_tokens == 150
+    assert span.estimated_cost_usd == 0.00042
+
+    [model_span] = [
+        record
+        for record in OTelTraceMapper().map_trace(reloaded)
+        if record.name == "model.call"
+    ]
+    assert model_span.attributes["gen_ai.usage.input_tokens"] == 120
+    assert model_span.attributes["gen_ai.usage.output_tokens"] == 30
+    assert model_span.attributes["omnicoreagent.estimated_cost_usd"] == 0.00042
+
+
+def test_price_table_estimate_uses_the_cached_input_rate():
+    from omnicoreagent.core.llm import LLMConnection
+
+    connection = LLMConnection.__new__(LLMConnection)
+    connection.llm_config = {"model": "openai/gpt-5.4-mini"}
+    uncached = Usage(request_tokens=1553, response_tokens=11, total_tokens=1564)
+    cached = Usage(
+        request_tokens=1553,
+        response_tokens=11,
+        total_tokens=1564,
+        details={"cached_input_tokens": 1024},
+    )
+
+    assert connection.estimate_cost(cached) < connection.estimate_cost(uncached)

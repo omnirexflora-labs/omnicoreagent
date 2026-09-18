@@ -152,9 +152,12 @@ it is kept under every capture policy: the request settings sent, the provider
 response ID and the exact model version served, the finish reason, whether the
 model refused (the refusal text itself follows the response capture policy),
 tokens (`input`, `output`, `total`, and `cached_input` / `reasoning` when the
-provider reports them), `latency_ms`, `time_to_first_delta_ms` for streamed
+provider reports them), `estimated_cost_usd` with its `cost_source` (a LiteLLM
+price-table figure, not an invoiced amount), `latency_ms`, `time_to_first_delta_ms` for streamed
 turns (the first streamed text delta; a turn that streams only tool calls has
-none), and `attempts` with every retried provider failure. A failed call
+none), and `attempts` with every retried provider failure. Tokens and cost
+also fill the standard `token_usage` and `estimated_cost_usd` fields of the
+`model.call` span, which exporters map to `gen_ai.usage.*` attributes. A failed call
 records the same attempts on its `model_error` event. The raw tool-call
 argument strings the model produced are in the `model_response` output when
 model responses are recorded (`capture: "full"`).
