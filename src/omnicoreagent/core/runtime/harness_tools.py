@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from omnicoreagent.core.runtime.imports import runtime
+from omnicoreagent.core.tools.mcp_results import mcp_tool_definition
 
 
 def prepare_dynamic_subagents(
@@ -58,17 +59,4 @@ def available_tools(mcp_client: Any, local_tools: Any) -> list[dict[str, Any]]:
 
 
 def _available_mcp_tool(tool: Any) -> dict[str, Any]:
-    if isinstance(tool, dict):
-        return {
-            "name": tool.get("name", ""),
-            "description": tool.get("description", ""),
-            "inputSchema": tool.get("inputSchema", {}),
-            "type": "mcp",
-        }
-
-    return {
-        "name": tool.name,
-        "description": tool.description,
-        "inputSchema": tool.inputSchema,
-        "type": "mcp",
-    }
+    return {**mcp_tool_definition(tool), "type": "mcp"}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 from types import SimpleNamespace
+
+from mcp import types
 import pytest
 from omnicoreagent.core.runtime.harness_tools import (
     available_tools,
@@ -49,10 +51,10 @@ def test_available_tools_combines_mcp_dicts_objects_and_local_tools():
                     "description": "Dict MCP tool",
                     "inputSchema": {"type": "object"},
                 },
-                SimpleNamespace(
+                types.Tool(
                     name="object_tool",
                     description="Object MCP tool",
-                    inputSchema={"type": "object"},
+                    input_schema={"type": "object"},
                 ),
             ]
         }

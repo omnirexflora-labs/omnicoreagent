@@ -4,6 +4,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from omnicoreagent.core.tools.base_tool_handler import BaseToolHandler
+from omnicoreagent.core.tools.mcp_results import is_mcp_call_result, mcp_result_text
 
 if TYPE_CHECKING:
     from omnicoreagent.core.guardrails import PromptInjectionGuard
@@ -41,13 +42,9 @@ class MCPToolHandler(BaseToolHandler):
             return result
 
         text = None
-        if hasattr(result, "content") and isinstance(result.content, list):
-            texts = [
-                getattr(item, "text", None)
-                for item in result.content
-                if hasattr(item, "text")
-            ]
-            text = " ".join(t for t in texts if t)
+        if is_mcp_call_result(result):
+            # Structured content reaches the model too, so it is checked.
+            text = mcp_result_text(result)
         elif isinstance(result, dict):
             text = str(result.get("data") or result.get("message") or "")
         elif isinstance(result, str):

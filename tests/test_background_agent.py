@@ -2255,12 +2255,21 @@ async def test_cancel_after_failed_attempt_blocks_retry_requeue():
     assert latest.cancel_requested_at is not None
     assert len(attempts) == 1
     assert attempts[-1].status == AttemptStatus.CANCELLED
-    assert [event["event"] for event in events] == [
+    names = [event["event"] for event in events]
+    # A slow attempt (a loaded machine) also heartbeats every lease/4 while
+    # it runs; heartbeats may only fall between start and cancellation.
+    lifecycle = [name for name in names if name != "background_run_heartbeat"]
+    assert lifecycle == [
         "background_run_queued",
         "background_run_claimed",
         "background_run_started",
         "background_run_cancelled",
     ]
+    heartbeats = [i for i, name in enumerate(names) if name == "background_run_heartbeat"]
+    assert all(
+        names.index("background_run_started") < i < names.index("background_run_cancelled")
+        for i in heartbeats
+    )
 
 
 @pytest.mark.asyncio

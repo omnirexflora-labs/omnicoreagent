@@ -1,7 +1,7 @@
 import json
-from types import SimpleNamespace
 
 import pytest
+from mcp import types
 
 from omnicoreagent.core.model_protocol import ToolRequest
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
@@ -47,9 +47,7 @@ def test_colliding_mcp_and_local_names_have_stable_concrete_bindings():
     async def lookup(query: str):
         return query
 
-    tool = SimpleNamespace(
-        name="lookup", description="lookup", inputSchema={"type": "object"}
-    )
+    tool = types.Tool(name="lookup", description="lookup", input_schema={"type": "object"})
     catalog = NativeToolCatalog(
         local_tools=registry, mcp_tools={"one": [tool], "two": [tool]}
     )

@@ -12,6 +12,7 @@ from typing import Any
 
 from omnicoreagent.core.model_protocol import ToolRequest
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
+from omnicoreagent.core.tools.mcp_results import mcp_tool_definition
 
 ALWAYS_VISIBLE_TOOL_NAMES = frozenset(
     {
@@ -91,16 +92,7 @@ class NativeToolCatalog:
                 candidates.append((tool, provider, None, None))
         for server, tools in (mcp_tools or {}).items():
             for tool in tools:
-                data = (
-                    tool
-                    if isinstance(tool, dict)
-                    else {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "inputSchema": tool.inputSchema,
-                    }
-                )
-                candidates.append((data, "mcp", server, None))
+                candidates.append((mcp_tool_definition(tool), "mcp", server, None))
         for agent in sub_agents or []:
             schema = ToolRegistry()._infer_schema(agent.run)
             runtime_parameters = {"session_id", "run_id", "on_event"}

@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from omnicoreagent.core.tools.base_tool_handler import BaseToolHandler
+from omnicoreagent.core.tools.mcp_results import (
+    is_mcp_call_result,
+    normalize_mcp_call_result,
+)
 
 RESULT_ENVELOPE_STATUSES = {"success", "partial", "error"}
 RESULT_ENVELOPE_KEYS = {"status", "data", "message", "error"}
@@ -64,37 +68,8 @@ class ToolExecutor:
                         or "(Tool executed successfully but returned no data; This likely means the action completed or is async.)"
                     )
 
-        elif hasattr(result, "content"):
-            blocks = []
-            for block in result.content or []:
-                if hasattr(block, "model_dump"):
-                    blocks.append(block.model_dump(exclude_none=True))
-                elif isinstance(block, dict):
-                    blocks.append(block)
-                else:
-                    blocks.append(
-                        {"type": "text", "text": str(getattr(block, "text", block))}
-                    )
-            structured = getattr(result, "structuredContent", None)
-            if (
-                len(blocks) == 1
-                and blocks[0].get("type") == "text"
-                and structured is None
-            ):
-                data = blocks[0].get("text", "")
-            else:
-                data = {"content": blocks}
-                if structured is not None:
-                    data["structuredContent"] = structured
-            status = "error" if getattr(result, "isError", False) else "success"
-            message = (
-                (
-                    "\n".join(block.get("text", "") for block in blocks)
-                    or "MCP tool failed"
-                )
-                if status == "error"
-                else None
-            )
+        elif is_mcp_call_result(result):
+            status, data, message = normalize_mcp_call_result(result)
 
         else:
             data = result

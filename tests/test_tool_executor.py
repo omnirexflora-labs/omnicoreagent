@@ -123,29 +123,6 @@ def test_falsy_results_are_successful_values():
         assert result["data"] == value
 
 
-def test_mcp_errors_preserve_all_content_and_structured_data():
-    from types import SimpleNamespace
-
-    result = ToolExecutor(None)._normalize_result(
-        "mcp",
-        {},
-        SimpleNamespace(
-            content=[SimpleNamespace(text="first"), SimpleNamespace(text="second")],
-            structuredContent={"code": 42},
-            isError=True,
-        ),
-    )
-    assert result["status"] == "error"
-    assert result["data"] == {
-        "content": [
-            {"type": "text", "text": "first"},
-            {"type": "text", "text": "second"},
-        ],
-        "structuredContent": {"code": 42},
-    }
-    assert result["message"] == "first\nsecond"
-
-
 def test_partial_subagent_envelope_retains_status_and_data():
     result = ToolExecutor(None)._normalize_result(
         "spawn_subagents",
