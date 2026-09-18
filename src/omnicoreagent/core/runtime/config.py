@@ -72,6 +72,7 @@ class MCPToolConfig:
     url: str | None = None
     command: str | None = None
     args: list[str] | None = None
+    cwd: str | None = None
     headers: dict[str, str] | None = None
     env: dict[str, str] | None = None
     timeout: int | None = 60

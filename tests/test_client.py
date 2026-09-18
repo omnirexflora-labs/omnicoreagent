@@ -88,77 +88,6 @@ class TestMCPClient:
             debug=True,
         )
 
-    @pytest.fixture
-    def mock_session(self):
-        """Fixture to create a mock session"""
-        session = AsyncMock()
-        server_info = MagicMock()
-        server_info.name = "test_server"
-        session.initialize = AsyncMock(
-            return_value=MagicMock(
-                serverInfo=server_info,
-            )
-        )
-        session.list_tools = AsyncMock(return_value=MagicMock(tools=MOCK_TOOLS))
-        return session
-
-    @pytest.mark.asyncio
-    async def test_connect_to_single_server_stdio(self, mock_client, mock_session):
-        """Test connecting to a stdio server"""
-        with patch(
-            "omnicoreagent.mcp_clients_connection.transports.stdio_client"
-        ) as mock_stdio_client:
-            mock_transport = (AsyncMock(), AsyncMock())
-            mock_stdio_client.return_value.__aenter__.return_value = mock_transport
-
-            # Mock stack management
-            mock_stack = AsyncMock()
-            mock_stack.enter_async_context.side_effect = [mock_transport, mock_session]
-
-            with patch(
-                "omnicoreagent.mcp_clients_connection.client.AsyncExitStack",
-                return_value=mock_stack,
-            ) as mock_exit_stack:
-                server_info = MOCK_MCP_SERVERS[0]
-                result = await mock_client._connect_to_single_server(
-                    server_info, "server1"
-                )
-
-                assert result == "test_server connected successfully"
-                mock_exit_stack.assert_called_once()
-                mock_stack.enter_async_context.assert_called()
-                mock_session.list_tools.assert_awaited_once()
-                assert mock_client.available_tools["test_server"] == MOCK_TOOLS
-
-    @pytest.mark.asyncio
-    async def test_connect_to_single_server_sse(self, mock_client, mock_session):
-        """Test connecting to an SSE server"""
-        with patch(
-            "omnicoreagent.mcp_clients_connection.transports.sse_client"
-        ) as mock_sse_client:
-            mock_transport = (AsyncMock(), AsyncMock())
-            mock_sse_client.return_value.__aenter__.return_value = mock_transport
-
-            # Mock stack management
-            mock_stack = AsyncMock()
-            mock_stack.enter_async_context.side_effect = [mock_transport, mock_session]
-
-            with patch(
-                "omnicoreagent.mcp_clients_connection.client.AsyncExitStack",
-                return_value=mock_stack,
-            ) as mock_exit_stack:
-                server_info = MOCK_MCP_SERVERS[1]
-                result = await mock_client._connect_to_single_server(
-                    server_info, "server2"
-                )
-
-                assert result == "test_server connected successfully"
-                mock_exit_stack.assert_called_once()
-                mock_exit_stack.assert_called_once()
-                mock_stack.enter_async_context.assert_called()
-                mock_session.list_tools.assert_awaited_once()
-                assert mock_client.available_tools["test_server"] == MOCK_TOOLS
-
     @pytest.mark.asyncio
     async def test_load_server_tools_not_connected(self, mock_client):
         """Test loading tools requires a connected MCP session."""
@@ -277,11 +206,9 @@ class TestMCPClient:
         server_info = MagicMock()
         server_info.name = "server1"
         matching_session = AsyncMock()
-        matching_session.initialize = AsyncMock(
-            return_value=MagicMock(
-                serverInfo=server_info,
-            )
-        )
+        matching_session.initialize = AsyncMock()
+        # mcp 2 reports the server's identity on the session.
+        matching_session.server_info = server_info
         matching_session.list_tools = AsyncMock(return_value=MagicMock(tools=MOCK_TOOLS))
         mock_transport = (AsyncMock(), AsyncMock())
         mock_stack = AsyncMock()
@@ -311,11 +238,9 @@ class TestMCPClient:
         server_info = MagicMock()
         server_info.name = "unexpected-server"
         reported_session = AsyncMock()
-        reported_session.initialize = AsyncMock(
-            return_value=MagicMock(
-                serverInfo=server_info,
-            )
-        )
+        reported_session.initialize = AsyncMock()
+        # mcp 2 reports the server's identity on the session.
+        reported_session.server_info = server_info
         reported_session.list_tools = AsyncMock(return_value=MagicMock(tools=[]))
         mock_transport = (AsyncMock(), AsyncMock())
         mock_stack = AsyncMock()

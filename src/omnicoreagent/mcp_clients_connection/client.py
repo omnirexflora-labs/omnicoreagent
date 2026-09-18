@@ -1,9 +1,8 @@
 import asyncio
 from contextlib import AsyncExitStack
-from datetime import timedelta
 from typing import Any
 
-from mcp import ClientSession
+from mcp import ClientSession, types
 
 from omnicoreagent.core.llm import LLMConnection
 from omnicoreagent.core.logging import logger
@@ -18,6 +17,16 @@ from omnicoreagent.mcp_clients_connection.state import (
     MCPClientState,
 )
 from omnicoreagent.mcp_clients_connection.transports import open_server_transport
+
+
+SESSION_READ_TIMEOUT_SECONDS = 300.0
+
+
+def _client_info() -> types.Implementation:
+    """How OmniCoreAgent identifies itself in the MCP handshake."""
+    from omnicoreagent import __version__
+
+    return types.Implementation(name="omnicoreagent", version=__version__)
 
 
 class MCPClient:
@@ -128,11 +137,13 @@ class MCPClient:
                 ClientSession(
                     read_stream,
                     write_stream,
-                    read_timeout_seconds=timedelta(seconds=300),
+                    read_timeout_seconds=SESSION_READ_TIMEOUT_SECONDS,
+                    client_info=_client_info(),
                 )
             )
-            init_result = await session.initialize()
-            server_name = init_result.serverInfo.name
+            await session.initialize()
+            reported = session.server_info
+            server_name = (reported.name if reported else None) or server_added_name
             if server_name != server_added_name:
                 await self._authorize_server_connection(
                     server,

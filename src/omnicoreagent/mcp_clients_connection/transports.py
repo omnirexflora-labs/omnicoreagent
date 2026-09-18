@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import os
 from contextlib import AsyncExitStack
-from datetime import timedelta
 from typing import Any
 
 from mcp import StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
+from mcp.shared._httpx_utils import create_mcp_http_client
+import httpx2
 
 from omnicoreagent.core.logging import logger
 
@@ -82,8 +83,8 @@ async def _open_sse_transport(
     debug: bool = False,
 ) -> tuple[Any, Any, str]:
     url = server.get("url", "")
-    timeout = server.get("timeout", 60)
-    sse_read_timeout = server.get("sse_read_timeout", 120)
+    timeout = float(server.get("timeout", 60))
+    sse_read_timeout = float(server.get("sse_read_timeout", 120))
     if debug:
         logger.info(f"SSE connection to {url} with timeout {timeout}")
 
@@ -110,22 +111,21 @@ async def _open_streamable_http_transport(
     debug: bool = False,
 ) -> tuple[Any, Any, str]:
     url = server.get("url", "")
-    timeout = timedelta(seconds=int(server.get("timeout", 60)))
-    sse_read_timeout = timedelta(seconds=int(server.get("sse_read_timeout", 120)))
+    timeout = float(server.get("timeout", 60))
+    sse_read_timeout = float(server.get("sse_read_timeout", 120))
     if debug:
         logger.info(f"Streamable HTTP connection to {url} with timeout {timeout}")
 
-    client_kwargs = {
-        "url": url,
-        "headers": server.get("headers", {}),
-        "timeout": timeout,
-        "sse_read_timeout": sse_read_timeout,
-    }
-    if oauth_auth is not None:
-        client_kwargs["auth"] = oauth_auth
-
-    read_stream, write_stream, _ = await stack.enter_async_context(
-        streamable_http_client(**client_kwargs)
+    # mcp 2 takes headers, timeouts, and auth on the HTTP client itself.
+    http_client = await stack.enter_async_context(
+        create_mcp_http_client(
+            headers=server.get("headers") or None,
+            timeout=httpx2.Timeout(timeout, read=sse_read_timeout),
+            auth=oauth_auth,
+        )
+    )
+    read_stream, write_stream = await stack.enter_async_context(
+        streamable_http_client(url, http_client=http_client)
     )
     return read_stream, write_stream, "streamable_http"
 
@@ -135,15 +135,19 @@ async def _open_stdio_transport(
     stack: AsyncExitStack,
     server: dict[str, Any],
 ) -> tuple[Any, Any, str]:
-    server_params = StdioServerParameters(
-        command=server["command"],
-        args=server["args"],
-        env=build_stdio_env(server),
-    )
     read_stream, write_stream = await stack.enter_async_context(
-        stdio_client(server_params)
+        stdio_client(stdio_server_parameters(server))
     )
     return read_stream, write_stream, "stdio"
+
+
+def stdio_server_parameters(server: dict[str, Any]) -> StdioServerParameters:
+    return StdioServerParameters(
+        command=server["command"],
+        args=list(server.get("args") or []),
+        env=build_stdio_env(server),
+        cwd=server.get("cwd"),
+    )
 
 
 def build_stdio_env(server: dict[str, Any]) -> dict[str, str] | None:
