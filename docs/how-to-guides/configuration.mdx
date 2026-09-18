@@ -82,13 +82,15 @@ directly on the agent when you need more or less evidence:
 agent = OmniCoreAgent(
     ...,
     telemetry_config={
-        "storage": "auto", # memory, jsonl, or auto
+        "storage": "auto", # auto (durable JSONL), jsonl, or memory
+        "capture": "default", # default (privacy-first) or full
         "record_inputs": True,
         "record_outputs": True,
         "record_tool_results": True,
         "record_model_prompts": False,
         "record_model_responses": False,
-        "retention_days": 7, # use None for unlimited local JSONL retention
+        "retention_days": 7, # use None to keep every trace
+        "payload_retention_days": 7,
         "offload_large_payloads": False,
         "offload_target": "workspace", # workspace or object_storage
         "max_payload_bytes": 64_000,
@@ -98,10 +100,26 @@ agent = OmniCoreAgent(
 ```
 
 The effective policy is recorded as a non-secret configuration fingerprint in
-each agent trace. With `storage: "auto"`, an explicitly configured local
-workspace selects the built-in JSONL store; callers without a durable workspace
-keep the in-memory default. Set `storage: "memory"` or `storage: "jsonl"` to
-override that choice, and set `storage_path` for an explicit JSONL location.
+each agent trace. Traces are durable by default: `storage: "auto"` writes JSONL
+to `storage_path` when set, otherwise to `telemetry/traces.jsonl` in the local
+workspace directory (`OMNICOREAGENT_WORKSPACE_DIR`, default `./workspace`). A
+cloud workspace does not move telemetry to the cloud; traces stay in that local
+file unless a path is configured. Every agent and background manager that
+resolves the same file shares one store. Set `storage: "memory"` to keep traces
+in process memory only (bounded by `memory_max_traces`).
+
+`capture: "default"` is privacy-first: model prompts and responses are not
+recorded, and the trace marks them `not_recorded`. `capture: "full"` records the
+complete trajectory, including model input and output, still redacted,
+truncated, and offloaded under the same policy. Any `record_*` field you set
+explicitly overrides the preset.
+
+Finished traces older than `retention_days` and unreferenced payloads older
+than `payload_retention_days` are removed automatically once per agent before
+its first run; a payload referenced by a kept trace is never removed. Run
+`await agent.prune_telemetry()` to apply retention on demand and
+`agent.telemetry_retention_status()` (or `GET /telemetry/retention` in
+OmniServe) to see what was removed.
 An exporter is an optional outbound copy of a completed built-in trace and is
 not part of the runtime execution path.
 
@@ -332,7 +350,7 @@ mcp_tools = [
 ## 5. Persistence Configuration
 
 Pass a `MemoryRouter` to customize conversation memory. Runtime evidence is
-recorded through telemetry, which defaults to in-memory storage.
+recorded through telemetry, which is stored durably in local JSONL by default.
 
 ```python
 from omnicoreagent import MemoryRouter

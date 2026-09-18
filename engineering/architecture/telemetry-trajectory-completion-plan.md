@@ -165,6 +165,17 @@ Split from A5 during implementation (2026-09-18).
   dependency; it uses the same local file unless a path is configured. The
   effective store and path stay visible in trace metadata, and the docs state
   where traces live.
+- The test suite points `OMNICOREAGENT_WORKSPACE_DIR` at a temporary directory
+  so durable defaults never write into the repository.
+- Found during B1 (pre-existing races exposed once telemetry did real I/O):
+  shutdown cancelling an attempt while it was starting left the run RUNNING
+  with a live heartbeat; a second cancellation could interrupt recording the
+  interrupted attempt; a finished run's events could be read before its
+  terminal event was recorded. Attempt start and interruption bookkeeping now
+  complete under cancellation (bounded), and reading a finished run's events
+  waits for its terminal event within the replay timeout.
+- A6 had added a second payload-reference collector next to the existing
+  `prune_telemetry_payloads()`; both now share `payload_references`.
 
 ### B2. Run header
 - At `agent.run` start, record the harness snapshot (checklist item 2) in
@@ -253,4 +264,5 @@ Phase C passes.
 | A5 | Complete | `1c7f820` | 8 new tests: registration shares the manager store and keeps the agent's recording policy; an explicit different store is rejected; governance, sandbox, and subagent-factory recorders are rebound on registration and on delegation; a failed or slow first upsert no longer loses the background trace, and lost events mark it partial; with default settings a background run's family (lifecycle trace plus attempt trace) is complete from the agent (verified empty under the old behavior). Full suite 1,210 passed, 14 skipped; acceptance checks passed; ruff clean. |
 | A5b | Complete | `082ac12` | 13 new tests: configured delegation records child trace/run IDs on success, error, and cancellation (IDs in event metadata, retained under every capture policy); dynamic spawns get a delegation span with workspace output verification and keep the child identity when the child raises; background retry attempts carry their attempt ID/number and task ID; timeouts (direct deadline, background attempt, `/run/sync`) are recorded as `timeout` while caller cancellation stays `cancelled`; families list parents first even with equal start times. Full suite 1,223 passed, 14 skipped; acceptance checks passed; ruff clean. The A4 open item was traced to identifier redaction and is fixed in the next commit. |
 | A1 follow-up | Complete | `4c0dbac` | Card numbers must be standalone tokens. 2 new privacy tests (identifiers, digests, references, and IDs inside free text are never altered; standalone and hyphen-joined card numbers are still redacted). The lineage test that failed 2 in 300 runs now passes 300 of 300. Full suite 1,225 passed, 14 skipped; acceptance checks passed; ruff clean. Resolves the A4 open item. |
-| A6 | Complete | (this commit) | 8 new tests: independent payload retention and config validation; payload references collected from descriptors and offloaded stubs; pruning removes expired traces and orphaned payloads while keeping every payload a kept trace references; automatic cleanup runs once per agent and is reported in the status; the in-memory store evicts only the oldest finished traces and keeps live followers attached; the default memory store is bounded; the background event log forgets finished runs; `GET /telemetry/retention`. Full suite 1,233 passed, 14 skipped; acceptance checks passed; ruff clean. Phase A complete. |
+| A6 | Complete | `0247a99` | 8 new tests: independent payload retention and config validation; payload references collected from descriptors and offloaded stubs; pruning removes expired traces and orphaned payloads while keeping every payload a kept trace references; automatic cleanup runs once per agent and is reported in the status; the in-memory store evicts only the oldest finished traces and keeps live followers attached; the default memory store is bounded; the background event log forgets finished runs; `GET /telemetry/retention`. Full suite 1,233 passed, 14 skipped; acceptance checks passed; ruff clean. Phase A complete. |
+| B1 | Complete | (this commit) | 12 new tests: capture presets (fill only unset fields, round-trip, full capture records model responses); durable JSONL default in the workspace directory; memory as explicit opt-out; cloud workspaces keep a local file; one shared store per file; default agents and manager share it; a default agent's trace survives a restart; shutdown during attempt start records the run (verified RUNNING without the fix); a finished run's events include its terminal event. 2 cloud-workspace tests moved to the new contract. Docs updated. Full suite 1,245 passed, 14 skipped; acceptance checks passed; ruff clean; nothing written to the repository workspace. |

@@ -1869,6 +1869,46 @@ async def test_inline_timeout_shutdown_requeues_retryable_run():
 
 
 @pytest.mark.asyncio
+async def test_shutdown_during_attempt_start_records_the_interrupted_run():
+    from omnicoreagent.core.telemetry import InMemoryTelemetryStore
+
+    class SlowTelemetryStore(InMemoryTelemetryStore):
+        """A store whose writes genuinely suspend, like file or network I/O."""
+
+        async def append_event(self, trace_id, event):
+            await asyncio.sleep(0.05)
+            return await super().append_event(trace_id, event)
+
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(
+        task_store=store, telemetry_store=SlowTelemetryStore()
+    )
+    await manager.register_agent("agent", FakeAgent(response="complete", delay=0.2))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    run = await manager.run_now("task", wait=True, timeout_seconds=0.01)
+    await wait_for(lambda: manager.list_attempts(run.run_id), timeout=0.5)
+    await manager.shutdown()
+
+    latest = await store.get_run(run.run_id)
+    attempts = await store.list_attempts(run.run_id)
+    assert latest.status == RunStatus.FAILED
+    assert attempts[0].status == AttemptStatus.FAILED
+    assert attempts[0].error == "worker shutdown"
+    leaked = [
+        task
+        for task in asyncio.all_tasks()
+        if task is not asyncio.current_task() and "heartbeat" in repr(task)
+    ]
+    assert leaked == []
+
+
+@pytest.mark.asyncio
 async def test_manager_run_now_missing_or_disabled_task_raises():
     manager = BackgroundAgentManager(task_store="in_memory")
     await manager.register_agent("agent", FakeAgent())
@@ -3510,3 +3550,30 @@ async def test_returned_runtime_error_is_a_failed_background_run():
     assert result.status == RunStatus.FAILED
     events = await manager.get_run_events(result.run_id)
     assert "background_run_completed" not in {event["event"] for event in events}
+
+
+@pytest.mark.asyncio
+async def test_terminal_run_events_include_the_terminal_event_being_recorded():
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store)
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    queued = await manager.run_now("task")
+    await manager._event_log.emit_run("background_run_started", queued)
+    completed = queued.model_copy(update={"status": RunStatus.COMPLETED})
+
+    async def record_terminal_event_later():
+        # The terminal status is visible before its event is recorded.
+        await asyncio.sleep(0.1)
+        await manager._event_log.emit_run("background_run_completed", completed)
+
+    recorder = asyncio.create_task(record_terminal_event_later())
+    events = await manager._event_log.get_run_events(completed)
+    await recorder
+
+    assert events[-1]["event"] == "background_run_completed"

@@ -9,6 +9,7 @@ from typing import Any
 from omnicoreagent.background.models import (
     INITIAL_EVENT_NAMES,
     TERMINAL_EVENT_NAMES,
+    TERMINAL_RUN_STATUSES,
     BackgroundRun,
     RunStatus,
 )
@@ -134,6 +135,20 @@ class BackgroundEventLog:
     async def get_run_events(self, run: BackgroundRun | None) -> list[dict[str, Any]]:
         if not run:
             return []
+        events = await self._read_run_events(run)
+        if run.status not in TERMINAL_RUN_STATUSES:
+            return events
+        # A run's terminal status becomes visible before its terminal event is
+        # recorded. A reader of a finished run gets that event, waiting at most
+        # the replay timeout (the event may never come if the worker died).
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.replay_timeout_seconds
+        while not _ends_with_terminal_event(events) and loop.time() < deadline:
+            await asyncio.sleep(0.01)
+            events = await self._read_run_events(run)
+        return events
+
+    async def _read_run_events(self, run: BackgroundRun) -> list[dict[str, Any]]:
         await self.drain_event_tasks(run.run_id)
         events = self.prepare_event_trace(self.local_events.get(run.run_id) or [])
         workspace_events = self.prepare_event_trace(
@@ -529,3 +544,7 @@ class BackgroundEventLog:
         ):
             return []
         return normalized
+
+
+def _ends_with_terminal_event(events: list[dict[str, Any]]) -> bool:
+    return bool(events) and events[-1].get("event") in TERMINAL_EVENT_NAMES

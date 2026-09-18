@@ -597,6 +597,9 @@ Telemetry configuration must support:
 storage: auto | memory | jsonl
 storage_path: string | null
 retention_days: integer | null
+payload_retention_days: integer | null
+memory_max_traces: integer | null
+capture: default | full
 record_inputs: bool
 record_outputs: bool
 record_model_prompts: bool
@@ -627,11 +630,19 @@ Rules:
 - secrets must not be stored by default.
 - common PII is redacted before telemetry persistence at the privacy boundary;
   the effective privacy policy is identified by `privacy_config_version`.
-- `storage: auto` selects JSONL only for an explicitly configured local
-  workspace; otherwise it selects in-memory storage. An injected store takes
-  precedence over this policy.
+- `storage: auto` and `storage: jsonl` write durable local JSONL: the explicit
+  `storage_path`, otherwise `telemetry/traces.jsonl` in the local workspace
+  directory, including when the workspace backend is S3 or R2. `memory` is an
+  explicit opt-out bounded by `memory_max_traces`. An injected store takes
+  precedence. One store object is shared per resolved file path.
+- `capture: default` leaves model prompts and responses unrecorded;
+  `capture: full` records them. A preset fills only `record_*` fields that are
+  not set explicitly.
 - `retention_days: null` disables age cleanup. JSONL cleanup retains active
   traces and compacts only ended traces older than the selected window.
+  Payloads use `payload_retention_days` and are never removed while a kept trace
+  references them. Cleanup runs automatically once per agent and on demand;
+  its results are observable through the retention status.
 - non-strict persistence failures leave the run result usable and set
   `trace.incomplete`; strict persistence propagates the failure.
 - local and MCP tool output is scrubbed before the normal tool result event is

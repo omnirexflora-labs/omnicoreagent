@@ -18,35 +18,19 @@ def default_telemetry_store(
 ) -> Any:
     """Build the built-in telemetry store selected by the effective policy.
 
-    Injected stores are handled by the caller. ``auto`` only opts into local
-    JSONL when a local workspace was explicitly configured; otherwise it keeps
-    the process-local fallback used by lightweight callers and tests.
+    Injected stores are handled by the caller. ``auto`` and ``jsonl`` write
+    durable local JSONL (``storage_path``, or ``telemetry/traces.jsonl`` in the
+    local workspace directory); ``memory`` is an explicit opt-out. Every
+    component that resolves the same file shares one store object.
     """
-    from omnicoreagent.core.telemetry import (
-        InMemoryTelemetryStore,
-        JsonlTelemetryStore,
-        TelemetryConfig,
-    )
-    from omnicoreagent.core.workspace.config import resolve_workspace_config
+    from omnicoreagent.core.telemetry import InMemoryTelemetryStore, TelemetryConfig
+    from omnicoreagent.core.telemetry.store import shared_jsonl_telemetry_store
 
     config = TelemetryConfig.from_value(telemetry_config) or TelemetryConfig()
-    mode = config.storage
-    if mode == "memory":
+    if config.storage == "memory":
         return InMemoryTelemetryStore(max_traces=config.memory_max_traces)
-
-    if mode == "jsonl":
-        return JsonlTelemetryStore(
-            _telemetry_jsonl_path(config, workspace_config),
-            retention_days=config.retention_days,
-        )
-
-    if workspace_config is None:
-        return InMemoryTelemetryStore(max_traces=config.memory_max_traces)
-    resolved_workspace = resolve_workspace_config(workspace_config)
-    if resolved_workspace.workspace_backend != "local":
-        return InMemoryTelemetryStore(max_traces=config.memory_max_traces)
-    return JsonlTelemetryStore(
-        _telemetry_jsonl_path(config, resolved_workspace),
+    return shared_jsonl_telemetry_store(
+        _telemetry_jsonl_path(config, workspace_config),
         retention_days=config.retention_days,
     )
 
@@ -107,13 +91,17 @@ def _telemetry_jsonl_path(config: Any, workspace_config: Any = None) -> Path:
     if config.storage_path is not None:
         return Path(config.storage_path).expanduser()
 
-    from omnicoreagent.core.workspace.config import resolve_workspace_config
+    from omnicoreagent.core.workspace.config import (
+        WorkspaceConfig,
+        resolve_workspace_config,
+    )
 
     resolved_workspace = resolve_workspace_config(workspace_config)
     if resolved_workspace.workspace_backend != "local":
-        raise ValueError(
-            "telemetry storage='jsonl' requires storage_path when the workspace "
-            "backend is not local"
+        # A cloud workspace never makes telemetry a cloud dependency: traces
+        # stay in the local workspace directory unless a path is configured.
+        resolved_workspace = WorkspaceConfig(
+            workspace_dir=WorkspaceConfig.from_env().workspace_dir
         )
     return resolved_workspace.local_namespace_path("telemetry") / "traces.jsonl"
 

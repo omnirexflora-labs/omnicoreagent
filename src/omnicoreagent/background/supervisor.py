@@ -48,6 +48,32 @@ from omnicoreagent.governance.snapshots import (
 )
 
 
+# Upper bound on recording an interrupted attempt during shutdown.
+_INTERRUPTED_ATTEMPT_RECORD_SECONDS = 10.0
+
+
+async def _complete_despite_cancellation(awaitable: Awaitable[Any]) -> Any:
+    """Run bookkeeping to completion even if the caller is cancelled again.
+
+    Repeated cancellation is absorbed until the bookkeeping finishes or its
+    time bound expires; the caller then re-raises its original cancellation.
+    """
+    task = asyncio.ensure_future(awaitable)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _INTERRUPTED_ATTEMPT_RECORD_SECONDS
+    while not task.done():
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            task.cancel()
+            break
+        try:
+            await asyncio.wait({task}, timeout=remaining)
+        except asyncio.CancelledError:
+            continue
+    await asyncio.gather(task, return_exceptions=True)
+    return task.result() if not task.cancelled() and task.exception() is None else None
+
+
 @dataclass(slots=True)
 class _RunningAttempt:
     task: BackgroundTaskSpec
@@ -177,6 +203,24 @@ class BackgroundSupervisor:
         task.add_done_callback(_forget)
         return task
 
+    async def _record_interrupted_attempt(self, running: _RunningAttempt) -> bool:
+        """Record a cancelled attempt; return True if cancellation was requested."""
+        try:
+            if await self.task_store.is_cancel_requested(running.run.run_id):
+                await self.mark_attempt_cancelled(running.attempt, running.run)
+                await self.mark_terminal(running.run, RunStatus.CANCELLED, "cancelled")
+                return True
+            await self.handle_attempt_failure(
+                running.task,
+                running.run,
+                running.attempt,
+                "exception",
+                RuntimeError("worker shutdown"),
+            )
+            return False
+        finally:
+            await self.cleanup_running_attempt(running)
+
     async def cancel_inline_execution_tasks(self) -> None:
         pending = [
             task for task in self.inline_execution_tasks.values() if not task.done()
@@ -278,7 +322,20 @@ class BackgroundSupervisor:
             return
         task, agent = target
 
-        running = await self.start_claimed_attempt(claimed, task, agent)
+        # Starting an attempt moves the run to RUNNING, creates the attempt,
+        # starts its heartbeat, and records lifecycle events. A cancellation
+        # in the middle of that used to leave the run RUNNING with a live
+        # heartbeat, so the start completes and the interruption is recorded.
+        start = asyncio.ensure_future(self.start_claimed_attempt(claimed, task, agent))
+        try:
+            running = await asyncio.shield(start)
+        except asyncio.CancelledError:
+            running = await _complete_despite_cancellation(start)
+            if running is not None:
+                await _complete_despite_cancellation(
+                    self._record_interrupted_attempt(running)
+                )
+            raise
         if running is None:
             return
 
@@ -293,22 +350,14 @@ class BackgroundSupervisor:
                     f"{result.get('response', '')}"
                 )
         except asyncio.CancelledError:
-            try:
-                if await self.task_store.is_cancel_requested(running.run.run_id):
-                    await self.mark_attempt_cancelled(running.attempt, running.run)
-                    await self.mark_terminal(
-                        running.run, RunStatus.CANCELLED, "cancelled"
-                    )
-                    return
-                await self.handle_attempt_failure(
-                    running.task,
-                    running.run,
-                    running.attempt,
-                    "exception",
-                    RuntimeError("worker shutdown"),
-                )
-            finally:
-                await self.cleanup_running_attempt(running)
+            # Shutdown can cancel this task again while the interrupted
+            # attempt is being recorded; with stores that do real I/O that
+            # left the run RUNNING forever. The bookkeeping finishes first.
+            cancelled_by_request = await _complete_despite_cancellation(
+                self._record_interrupted_attempt(running)
+            )
+            if cancelled_by_request:
+                return
             raise
         except asyncio.TimeoutError as exc:
             try:

@@ -213,8 +213,10 @@ correlated export, but when a serving trace and an agent trace share the same
 Large captured values may be represented by content-addressed
 `telemetry://payload/...` references. The built-in payload store writes the
 redacted value to the configured workspace or explicit local payload directory;
-use `agent.read_telemetry_payload(reference)` to retrieve it and
-`agent.prune_telemetry_payloads()` to apply the configured retention window.
+use `agent.read_telemetry_payload(reference)` to retrieve it. Retention runs
+automatically once per agent; `agent.prune_telemetry()` applies it on demand and
+`agent.telemetry_retention_status()` reports what was removed. A payload
+referenced by a kept trace is never removed.
 
 <Tip>
 Use metrics for cost and performance monitoring, events for live UI streaming,

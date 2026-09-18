@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
 from dotenv import dotenv_values
 
 
@@ -34,3 +35,15 @@ def pytest_configure(config):
     if mongodb_database:
         os.environ.setdefault("MONGODB_DB_NAME", mongodb_database)
         os.environ.setdefault("OMNICOREAGENT_TEST_MONGODB_DATABASE", mongodb_database)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_default_workspace(monkeypatch, tmp_path_factory):
+    """Keep default workspace and telemetry files out of the repository.
+
+    Telemetry is durable by default and writes under the default workspace
+    directory. Tests that exercise the default path itself override this.
+    """
+    monkeypatch.setenv(
+        "OMNICOREAGENT_WORKSPACE_DIR", str(tmp_path_factory.mktemp("workspace"))
+    )

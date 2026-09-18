@@ -12,6 +12,7 @@ from pathlib import Path
 import json
 import re
 from typing import Any
+import weakref
 
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.telemetry.models import (
@@ -719,6 +720,38 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
 
 
 _TRACE_ID_IN_RECORD = re.compile(r'"trace_id":\s*"([^"]+)"')
+
+
+_SHARED_JSONL_STORES: "weakref.WeakValueDictionary[Path, JsonlTelemetryStore]" = (
+    weakref.WeakValueDictionary()
+)
+
+
+def shared_jsonl_telemetry_store(
+    path: str | Path,
+    *,
+    retention_days: int | None = None,
+) -> JsonlTelemetryStore:
+    """Return the process-wide store for one JSONL file.
+
+    Two store objects appending to the same file would keep separate indexes,
+    assign conflicting stream cursors, and interleave writes, so every agent
+    and manager that resolves the same path shares one object.
+    """
+    resolved = Path(path).expanduser().resolve()
+    store = _SHARED_JSONL_STORES.get(resolved)
+    if store is None:
+        store = JsonlTelemetryStore(resolved, retention_days=retention_days)
+        _SHARED_JSONL_STORES[resolved] = store
+    elif store.retention_days != retention_days:
+        logger.warning(
+            "Telemetry store %s is already open with retention_days=%s; "
+            "ignoring retention_days=%s",
+            resolved,
+            store.retention_days,
+            retention_days,
+        )
+    return store
 
 
 def _append_text(path: Path, text: str) -> None:

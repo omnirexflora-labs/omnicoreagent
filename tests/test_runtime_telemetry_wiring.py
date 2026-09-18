@@ -569,7 +569,11 @@ def test_explicit_jsonl_telemetry_accepts_a_path_without_workspace(tmp_path) -> 
     assert agent.telemetry_store.path == path
 
 
-def test_auto_telemetry_keeps_memory_for_cloud_workspace(tmp_path) -> None:
+@pytest.mark.parametrize("storage", ["auto", "jsonl"])
+def test_cloud_workspace_keeps_telemetry_in_local_jsonl(
+    monkeypatch, tmp_path, storage
+) -> None:
+    monkeypatch.setenv("OMNICOREAGENT_WORKSPACE_DIR", str(tmp_path))
     agent = OmniCoreAgent(
         name="cloud-agent",
         system_instruction="test",
@@ -580,29 +584,13 @@ def test_auto_telemetry_keeps_memory_for_cloud_workspace(tmp_path) -> None:
                 "s3_bucket": "example",
             }
         },
+        telemetry_config={"storage": storage},
     )
 
     agent._ensure_telemetry()
 
-    assert isinstance(agent.telemetry_store, InMemoryTelemetryStore)
-
-
-def test_jsonl_telemetry_requires_path_for_cloud_workspace() -> None:
-    agent = OmniCoreAgent(
-        name="cloud-durable-agent",
-        system_instruction="test",
-        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
-        agent_config={
-            "workspace_config": {
-                "workspace_backend": "s3",
-                "s3_bucket": "example",
-            }
-        },
-        telemetry_config={"storage": "jsonl"},
-    )
-
-    with pytest.raises(ValueError, match="requires storage_path"):
-        agent._ensure_telemetry()
+    assert isinstance(agent.telemetry_store, JsonlTelemetryStore)
+    assert agent.telemetry_store.path == (tmp_path / "telemetry" / "traces.jsonl").resolve()
 
 
 @pytest.mark.asyncio

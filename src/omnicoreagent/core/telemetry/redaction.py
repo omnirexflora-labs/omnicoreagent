@@ -12,6 +12,26 @@ from omnicoreagent.core.telemetry.payloads import TelemetryPayloadStore
 
 REDACTION_MARKER = "[REDACTED]"
 
+# Recording presets. ``default`` is privacy-first: model prompts and
+# responses are not recorded. ``full`` records the complete trajectory,
+# still redacted, truncated, and offloaded under the same policy.
+CAPTURE_PRESETS: dict[str, dict[str, bool]] = {
+    "default": {
+        "record_inputs": True,
+        "record_outputs": True,
+        "record_model_prompts": False,
+        "record_model_responses": False,
+        "record_tool_results": True,
+    },
+    "full": {
+        "record_inputs": True,
+        "record_outputs": True,
+        "record_model_prompts": True,
+        "record_model_responses": True,
+        "record_tool_results": True,
+    },
+}
+
 
 class TelemetryPayloadError(RuntimeError):
     """Raised when configured oversized-payload storage is unavailable."""
@@ -31,11 +51,14 @@ class TelemetryConfig:
     payload_retention_days: int | None = 7
     # Upper bound on finished traces kept by an in-memory store.
     memory_max_traces: int | None = 1000
-    record_inputs: bool = True
-    record_outputs: bool = True
-    record_model_prompts: bool = False
-    record_model_responses: bool = False
-    record_tool_results: bool = True
+    # A preset fills every ``record_*`` field left unset (``None``); a field
+    # set explicitly always wins. After construction all are booleans.
+    capture: str = "default"
+    record_inputs: bool | None = None
+    record_outputs: bool | None = None
+    record_model_prompts: bool | None = None
+    record_model_responses: bool | None = None
+    record_tool_results: bool | None = None
     max_payload_bytes: int = 64_000
     redact_keys: list[str] = field(
         default_factory=lambda: [
@@ -59,6 +82,16 @@ class TelemetryConfig:
     export_timeout_seconds: float | None = 5.0
 
     def __post_init__(self) -> None:
+        self.capture = str(self.capture).lower().strip()
+        if self.capture not in CAPTURE_PRESETS:
+            allowed = ", ".join(sorted(CAPTURE_PRESETS))
+            raise ValueError(f"telemetry capture must be one of: {allowed}")
+        for field_name, preset in CAPTURE_PRESETS[self.capture].items():
+            value = getattr(self, field_name)
+            if value is None:
+                setattr(self, field_name, preset)
+            elif not isinstance(value, bool):
+                raise ValueError(f"telemetry {field_name} must be a bool or None")
         self.storage = str(self.storage).lower().strip()
         if self.storage not in {"auto", "memory", "jsonl"}:
             raise ValueError(

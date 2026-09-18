@@ -42,20 +42,6 @@ from omnicoreagent.core.telemetry import (
 )
 
 
-def _telemetry_payload_references(value: Any) -> set[str]:
-    references: set[str] = set()
-    if isinstance(value, dict):
-        reference = value.get("reference")
-        if isinstance(reference, str) and reference.startswith("telemetry://payload/"):
-            references.add(reference)
-        for item in value.values():
-            references.update(_telemetry_payload_references(item))
-    elif isinstance(value, list):
-        for item in value:
-            references.update(_telemetry_payload_references(item))
-    return references
-
-
 class OmniCoreAgent:
     """
     Public facade for the OmniCoreAgent runtime.
@@ -674,9 +660,7 @@ class OmniCoreAgent:
             payload_store = self.telemetry_payload_store
             prune_payloads = getattr(payload_store, "prune", None)
             if callable(prune_payloads):
-                references: set[str] = set()
-                for trace in await self.telemetry_store.list_traces():
-                    references |= payload_references(trace)
+                references = await self._stored_payload_references()
                 summary["payloads_removed"] = await asyncio.to_thread(
                     prune_payloads, references=references
                 )
@@ -1018,17 +1002,17 @@ class OmniCoreAgent:
         payload_store = self.telemetry_payload_store
         if payload_store is None:
             return 0
-        traces = await self.telemetry_store.list_traces()
-        references = {
-            reference
-            for trace in traces
-            for reference in _telemetry_payload_references(trace.model_dump())
-        }
         return await asyncio.to_thread(
             payload_store.prune,
             retention_days,
-            references=references,
+            references=await self._stored_payload_references(),
         )
+
+    async def _stored_payload_references(self) -> set[str]:
+        references: set[str] = set()
+        for trace in await self.telemetry_store.list_traces():
+            references |= payload_references(trace)
+        return references
 
     async def export_trace(
         self,

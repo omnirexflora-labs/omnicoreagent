@@ -36,7 +36,8 @@ from omnicoreagent.background.store.base import AbstractTaskStore
 from omnicoreagent.background.store.router import TaskStoreRouter
 from omnicoreagent.background.supervisor import BackgroundSupervisor
 from omnicoreagent.background.workspace_io import BackgroundWorkspaceIO
-from omnicoreagent.core.telemetry import InMemoryTelemetryStore, TelemetryStream
+from omnicoreagent.core.runtime import construction
+from omnicoreagent.core.telemetry import TelemetryStream
 from omnicoreagent.governance.capabilities import (
     background_run_authority_request,
     background_task_authority_request,
@@ -68,10 +69,12 @@ class BackgroundAgentManager:
     ) -> None:
         self.task_store = TaskStoreRouter.create(task_store)
         self.memory_router = memory_router
+        # With no store supplied the manager uses the same durable default as
+        # agents, so default agents and their manager share one store.
         self.telemetry_store = telemetry_store or (
             telemetry_stream.store
             if telemetry_stream is not None
-            else InMemoryTelemetryStore()
+            else construction.default_telemetry_store()
         )
         self.telemetry_stream = telemetry_stream or TelemetryStream(
             self.telemetry_store

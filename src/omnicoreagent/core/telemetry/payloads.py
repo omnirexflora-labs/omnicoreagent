@@ -167,38 +167,24 @@ def _validate_checksum(checksum: str) -> None:
 def payload_references(trace: Any) -> set[str]:
     """Return every payload reference a trace depends on.
 
-    References appear in capture descriptors and in offloaded stubs inside
-    payloads, metadata, attributes, and error metadata.
+    Any ``reference`` value with the payload prefix counts, wherever it sits:
+    capture descriptors and offloaded stubs in payloads, metadata,
+    attributes, and error metadata.
     """
     references: set[str] = set()
 
     def visit(value: Any) -> None:
         if isinstance(value, dict):
             reference = value.get("reference")
-            if (
-                value.get("offloaded")
-                and isinstance(reference, str)
-                and reference.startswith(_PAYLOAD_REFERENCE_PREFIX)
-            ):
-                references.add(reference)
-            for item in value.values():
-                visit(item)
-        elif isinstance(value, (list, tuple)):
-            for item in value:
-                visit(item)
-
-    for record in [*trace.spans, *trace.events]:
-        for direction in ("input", "output"):
-            capture = getattr(record, f"{direction}_capture", None)
-            reference = getattr(capture, "reference", None)
             if isinstance(reference, str) and reference.startswith(
                 _PAYLOAD_REFERENCE_PREFIX
             ):
                 references.add(reference)
-            visit(getattr(record, direction, None))
-        visit(getattr(record, "metadata", None))
-        visit(getattr(record, "attributes", None))
-        error = getattr(record, "error", None)
-        if error is not None:
-            visit(error.metadata)
+            for item in value.values():
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(trace.model_dump() if hasattr(trace, "model_dump") else trace)
     return references
