@@ -213,7 +213,7 @@ class TelemetryRecorder:
         suite_id: str | None = None,
         agent_id: str | None = None,
         workflow_id: str | None = None,
-        execution_surface: str = "interactive",
+        execution_surface: str | None = None,
         provenance: TelemetryProvenance | dict[str, Any] | None = None,
         metadata: TelemetryTraceMetadata | dict[str, Any] | None = None,
         input: dict[str, Any] | None = None,
@@ -230,6 +230,11 @@ class TelemetryRecorder:
             parent_span_id = inherited.span_id
         if inherited is not None and task_id is None:
             task_id = inherited.task_id
+        execution_surface = (
+            execution_surface
+            or (inherited.execution_surface if inherited is not None else None)
+            or "interactive"
+        )
         actor = actor or TelemetryActor(type=ActorType.AGENT)
         previous_payload_trace_hint = self._payload_trace_hint
         self._payload_trace_hint = trace_id
@@ -293,6 +298,7 @@ class TelemetryRecorder:
             workflow_id=workflow_id,
             attempt_id=inherited.attempt_id if inherited is not None else None,
             attempt_number=inherited.attempt_number if inherited is not None else None,
+            execution_surface=execution_surface,
         )
         self._span_parent_contexts[root_span.span_id] = self.current_context()
         self._span_sources[root_span.span_id] = kind
@@ -421,6 +427,34 @@ class TelemetryRecorder:
         finally:
             self._release_trace(context.trace_id)
             set_telemetry_context(parent_context)
+
+    async def update_trace_metadata(self, values: dict[str, Any]) -> None:
+        """Merge values into the active trace's metadata.
+
+        Used for facts known only after the trace starts, such as the tool
+        catalog and system prompt versions. ``tags`` are appended.
+        """
+        context = self._require_context()
+        trace = await self._read(
+            self.store.get_trace(context.trace_id), trace_id=context.trace_id
+        )
+        if trace is None:
+            return
+        merged = trace.metadata.model_dump()
+        for key, value in values.items():
+            if key == "tags":
+                merged["tags"] = list(dict.fromkeys([*merged.get("tags", []), *value]))
+            elif key == "extra":
+                merged["extra"] = {**merged.get("extra", {}), **value}
+            else:
+                merged[key] = value
+        await self._write(
+            self.store.update_trace(
+                context.trace_id,
+                {"metadata": self._record_metadata(merged)},
+            ),
+            trace_id=context.trace_id,
+        )
 
     async def _persist_template_end(
         self,
@@ -695,7 +729,10 @@ class TelemetryRecorder:
                 policy_version=self.config.fingerprint(),
                 reason="capture disabled by telemetry policy",
             )
-        if source in {"model.call", "model_call"} and not self.config.record_model_prompts:
+        if (
+            source in {"model.call", "model_call", "run_configuration"}
+            and not self.config.record_model_prompts
+        ):
             return None, TelemetryCapture(
                 state=CaptureState.NOT_RECORDED,
                 source=descriptor_source,

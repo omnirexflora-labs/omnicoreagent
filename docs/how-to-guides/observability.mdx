@@ -125,7 +125,37 @@ run_id=...)` returns the latest matching trace.
 
 `get_trace_family(...)` follows explicit parent trace links in both directions,
 so deep-agent child traces can be retrieved together with the parent without
-depending on latest-trace ordering.
+depending on latest-trace ordering. A family lists each parent before its
+children.
+
+### Run header
+
+Before the first model step, every run records a `run_configuration` event
+describing the harness the model ran with: model and generation settings (never
+credentials), step and token limits, context management, memory and tool
+offload settings, enabled features, governance policy hash, configuration
+fingerprints, the model-facing tool catalog (count, sorted names, providers, and
+schema digest), and the system prompt digest. The prompt text itself is recorded
+only with `capture: "full"`. The header lives in the event metadata, so it is
+recorded under every capture policy.
+
+The same run fills the trace's `agent_version`, `prompt_version`,
+`tool_schema_version`, and `memory_config_version`. They are content hashes, so
+two runs with the same harness share them and any change to the prompt, tools,
+model, or settings changes them. Set `agent_config={"agent_version": "..."}` to
+record your own agent version instead.
+
+`execution_surface` records how the run was entered: `interactive` for a direct
+`agent.run(...)`, `serve` through OmniServe, and `background` for background
+attempts. Label a run or attach external identity without changing execution:
+
+```python
+result = await agent.run(
+    "Summarize the incident",
+    tags=["nightly"],
+    provenance={"evaluation_id": "eval-7", "case_id": "case-42", "trial_id": "3"},
+)
+```
 
 The trace is intentionally dependency-free inside the runtime. Exporters are
 optional adapters layered on top of this internal trace model.

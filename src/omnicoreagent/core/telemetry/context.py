@@ -17,6 +17,9 @@ class TelemetryContext:
     # Set for a background attempt and inherited by the traces it starts.
     attempt_id: str | None = None
     attempt_number: int | None = None
+    # How the run was entered (interactive, serve, background, controlled);
+    # traces started beneath it inherit it.
+    execution_surface: str | None = None
 
     def child(self, span_id: str) -> TelemetryContext:
         return replace(self, span_id=span_id)

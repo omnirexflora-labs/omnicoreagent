@@ -148,6 +148,9 @@ GOVERNANCE_CONFIG_KEYS = frozenset(_default_governance_config())
 @dataclass
 class AgentConfig:
     agent_name: str = "OmniCoreAgent"
+    # Recorded as the trace's agent_version; a content hash of the harness
+    # (prompt, tools, model, and settings) is used when it is not set.
+    agent_version: str | None = None
     request_limit: int = 0
     total_tokens_limit: int = 0
     max_steps: int = 50
@@ -170,6 +173,10 @@ class AgentConfig:
 
     def __post_init__(self):
         self.guardrail_mode = normalize_guardrail_mode(self.guardrail_mode)
+        if self.agent_version is not None and (
+            not isinstance(self.agent_version, str) or not self.agent_version.strip()
+        ):
+            raise ValueError("agent_version must be a non-empty string or None")
         if not isinstance(self.guardrail_config, dict):
             raise ValueError("guardrail_config must be a dict")
         self.request_limit = 0 if self.request_limit is None else self.request_limit

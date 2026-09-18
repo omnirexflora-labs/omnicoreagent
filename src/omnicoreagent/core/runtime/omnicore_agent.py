@@ -410,6 +410,53 @@ class OmniCoreAgent:
             metadata["telemetry_payload_storage"] = payload_storage_name
         return metadata
 
+    def _telemetry_run_header(self) -> dict[str, Any]:
+        """Describe the harness this run executes with, without secrets.
+
+        The inner loop adds the model-facing tool catalog and system prompt
+        and records the result as the run's ``run_configuration`` event.
+        """
+        config = self.agent_config
+        metadata = self._telemetry_metadata()
+        engine = getattr(self.agent, "governance_engine", None)
+        policy = getattr(engine, "policy", None)
+        return {
+            "agent": {"name": self.name, "version": config.get("agent_version")},
+            "model": {
+                "provider": self.model_config.get("provider"),
+                "model": self.model_config.get("model"),
+                "settings": _model_settings(self.model_config),
+            },
+            "limits": {
+                "max_steps": config.get("max_steps"),
+                "tool_call_timeout": config.get("tool_call_timeout"),
+                "request_limit": config.get("request_limit"),
+                "total_tokens_limit": config.get("total_tokens_limit"),
+            },
+            "context_management": dict(config.get("context_management") or {}),
+            "memory": dict(config.get("memory_config") or {}),
+            "tool_offload": dict(config.get("tool_offload") or {}),
+            "features": {
+                "subagents": bool(config.get("enable_subagents")),
+                "advanced_tool_use": bool(config.get("enable_advanced_tool_use")),
+                "workspace_files": bool(config.get("enable_workspace_files")),
+                "agent_skills": bool(config.get("enable_agent_skills")),
+                "mcp_servers": len(self.mcp_tools or []),
+            },
+            "guardrail": {"mode": metadata.get("guardrail_mode")},
+            "governance": {
+                "enabled": engine is not None,
+                "policy_hash": getattr(
+                    getattr(policy, "provenance", None), "policy_hash", None
+                ),
+            },
+            "fingerprints": {
+                "privacy": metadata.get("privacy_config_version"),
+                "telemetry": metadata.get("telemetry_config_version"),
+                "guardrail": metadata.get("guardrail_config_version"),
+            },
+        }
+
     def _telemetry_scope(
         self,
         *,
@@ -441,6 +488,9 @@ class OmniCoreAgent:
         session_id: Optional[str] = None,
         run_id: Optional[str] = None,
         on_event: Any = None,
+        *,
+        tags: Optional[List[str]] = None,
+        provenance: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run the agent with a query and optional session ID.
@@ -449,6 +499,11 @@ class OmniCoreAgent:
             query: The user query
             session_id: Optional session ID for session continuity
             run_id: Optional run ID for serving/telemetry correlation
+            tags: Optional labels recorded on the run's trace
+            provenance: Optional external identity for the trace, such as
+                ``evaluation_id``, ``case_id``, ``trial_id``,
+                ``environment_id``, or ``external_ids``; recorded without
+                changing execution
 
         Returns:
             Dict containing response, session_id, trace_id, and run_id.
@@ -487,7 +542,8 @@ class OmniCoreAgent:
                 run_id=run_id,
                 session_id=session_id,
                 agent_id=self.name,
-                metadata=self._telemetry_metadata(),
+                provenance=provenance,
+                metadata={**self._telemetry_metadata(), "tags": list(tags or [])},
                 input={"query": query},
             )
             await self.telemetry_recorder.emit_event(
@@ -551,6 +607,7 @@ class OmniCoreAgent:
                 message_history=self._get_messages_with_telemetry,
                 debug=self.debug,
                 telemetry_recorder=self.telemetry_recorder,
+                telemetry_run_header=self._telemetry_run_header(),
                 **execution.build_agent_run_kwargs(
                     mcp_client=self.mcp_client,
                     local_tools=self.local_tools,
@@ -1315,3 +1372,22 @@ def _lineage_order(traces: list[TelemetryTrace]) -> list[TelemetryTrace]:
         trace for trace in sorted(traces, key=start_key) if trace.trace_id not in seen
     )
     return ordered
+
+
+_MODEL_CONFIG_IDENTITY_KEYS = frozenset({"provider", "model"})
+_MODEL_CONFIG_PRIVATE_MARKERS = ("key", "secret", "token_", "endpoint", "host", "url")
+
+
+def _model_settings(model_config: dict[str, Any]) -> dict[str, Any]:
+    """Generation settings from a model config, excluding credentials and endpoints."""
+    settings: dict[str, Any] = {}
+    for key, value in model_config.items():
+        name = str(key).lower()
+        if name in _MODEL_CONFIG_IDENTITY_KEYS or value in (None, "N/A"):
+            continue
+        if any(marker in name for marker in _MODEL_CONFIG_PRIVATE_MARKERS):
+            continue
+        if name.startswith("azure_") or name.startswith("aws_"):
+            continue
+        settings[key] = value
+    return settings

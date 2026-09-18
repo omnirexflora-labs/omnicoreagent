@@ -23,6 +23,7 @@ from omnicoreagent.core.telemetry.models import (
     TelemetrySpan,
     TelemetryStreamScope,
     TelemetryTrace,
+    TelemetryTraceMetadata,
     TraceFilter,
     TraceStatus,
     duration_ms,
@@ -842,6 +843,8 @@ def _patch_trace(trace: TelemetryTrace, patch: dict[str, Any]) -> None:
             value = TraceEvidenceStatus(value)
         elif key == "ended_at":
             value = parse_datetime(value)
+        elif key == "metadata" and isinstance(value, dict):
+            value = TelemetryTraceMetadata.from_dict(value)
         setattr(trace, key, value)
 
 

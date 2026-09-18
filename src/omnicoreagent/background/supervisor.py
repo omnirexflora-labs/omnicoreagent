@@ -644,6 +644,7 @@ class BackgroundSupervisor:
                 attempt_number=(
                     attempt.attempt_number if attempt is not None else None
                 ),
+                execution_surface="background",
             )
         )
         try:

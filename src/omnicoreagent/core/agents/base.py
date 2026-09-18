@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import time
 
 from collections.abc import Callable
@@ -38,6 +40,7 @@ from omnicoreagent.core.agents.session_state import AgentSessionStateStore
 from omnicoreagent.core.agents.subagent_runner import SubAgentCallRunner
 from omnicoreagent.core.tools.tool_result_offloader import ToolResultOffloader
 from omnicoreagent.core.privacy import PrivacyFilter
+from omnicoreagent.core.interaction_history import context_evidence
 
 
 if TYPE_CHECKING:
@@ -170,6 +173,85 @@ class BaseReactAgent:
             debug=debug,
         )
 
+    async def _record_run_configuration(
+        self,
+        telemetry_recorder: Any,
+        *,
+        header: dict[str, Any] | None,
+        messages: list[Any],
+        catalog: NativeToolCatalog,
+    ) -> None:
+        """Record the harness the model runs with, before its first step.
+
+        Digests use the same privacy-safe canonical form as each step's
+        context evidence, so the tool schema digest equals the first step's
+        ``tool_catalog_digest`` while the catalog is unchanged. The system
+        prompt text is recorded only when model prompt capture is enabled.
+        """
+        system_messages = [
+            message for message in messages if getattr(message, "role", None) == "system"
+        ]
+        system_prompt = "\n\n".join(
+            str(getattr(message, "content", "") or "") for message in system_messages
+        )
+        definitions = catalog.definitions()
+        evidence = context_evidence(
+            system_messages,
+            definitions,
+            canonicalizer=telemetry_recorder.canonicalize_for_digest,
+        )
+        prompt_digest = hashlib.sha256(
+            "".join(evidence["message_digests"]).encode("utf-8")
+        ).hexdigest()
+        providers: dict[str, int] = {}
+        for key in catalog.visible:
+            binding = catalog.bindings.get(key)
+            if binding is not None:
+                provider = str(getattr(binding, "provider", "unknown"))
+                providers[provider] = providers.get(provider, 0) + 1
+        configuration = dict(header or {})
+        configuration["tools"] = {
+            "count": evidence["tool_count"],
+            "names": evidence["tool_names"],
+            "by_provider": dict(sorted(providers.items())),
+            "schema_digest": evidence["tool_catalog_digest"],
+        }
+        configuration["system_prompt"] = {
+            "digest": prompt_digest,
+            "bytes": len(system_prompt.encode("utf-8")),
+            "message_digests": evidence["message_digests"],
+        }
+        agent = dict(configuration.get("agent") or {"name": self.agent_name})
+        if not agent.get("version"):
+            harness = {key: value for key, value in configuration.items() if key != "agent"}
+            agent["version"] = hashlib.sha256(
+                json.dumps(harness, sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()[:16]
+        configuration["agent"] = agent
+        # Configuration is metadata, recorded under every capture policy; only
+        # the prompt text itself follows the model prompt policy.
+        await telemetry_recorder.emit_event(
+            "run_configuration",
+            actor=TelemetryActor(type=ActorType.AGENT, name=self.agent_name),
+            input={"system_prompt": system_prompt},
+            metadata={"run_configuration": configuration},
+        )
+        memory_config = {
+            key: configuration.get(key)
+            for key in ("memory", "context_management", "tool_offload")
+            if key in configuration
+        }
+        versions = {
+            "agent_version": agent["version"],
+            "prompt_version": prompt_digest[:16],
+            "tool_schema_version": evidence["tool_catalog_digest"][:16],
+        }
+        if memory_config:
+            versions["memory_config_version"] = hashlib.sha256(
+                json.dumps(memory_config, sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()[:16]
+        await telemetry_recorder.update_trace_metadata(versions)
+
     async def run(
         self,
         system_prompt: str,
@@ -185,6 +267,7 @@ class BaseReactAgent:
         telemetry_recorder: Any = None,
         sub_agents: list = None,
         on_event: Any = None,
+        telemetry_run_header: dict[str, Any] | None = None,
     ) -> Any:
         """Run native model turns, correlated tool results and final text."""
         session_state = self.session_state_store.reset_for_run(
@@ -209,6 +292,13 @@ class BaseReactAgent:
             catalog=catalog,
             session_id=session_id,
         )
+        if telemetry_recorder is not None:
+            await self._record_run_configuration(
+                telemetry_recorder,
+                header=telemetry_run_header,
+                messages=session_state.messages,
+                catalog=catalog,
+            )
         session_state.messages.append(Message(role="user", content=query))
         self.prompt_context_builder.inject_current_datetime(session_state.messages)
 
