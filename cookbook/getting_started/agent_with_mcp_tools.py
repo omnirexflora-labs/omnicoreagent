@@ -43,7 +43,14 @@ async def main():
                 "@modelcontextprotocol/server-filesystem",
                 str(workspace_dir),
             ],
-        }
+        },
+        # Remote MCP server (streamable_http) - You.com web search.
+        # Keyless profile: no API key or OAuth needed for basic web search.
+        {
+            "name": "you_search",
+            "transport_type": "streamable_http",
+            "url": "https://api.you.com/mcp?profile=free",
+        },
     ]
 
     # Create agent with MCP tools
