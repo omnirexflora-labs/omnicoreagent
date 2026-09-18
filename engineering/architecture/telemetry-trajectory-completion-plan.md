@@ -140,11 +140,17 @@ Split from A5 during implementation (2026-09-18).
   when both started in the same clock tick.
 
 ### A6. Retention and memory bounds
-- Payload retention is configured independently of trace retention.
-- Payload pruning protects every payload referenced by a retained trace and
-  runs as an explicit, observable operation.
-- The default in-memory store has a bounded retention policy, and the recorder
-  and background event log drop per-trace state for finished traces.
+- Payload retention is configured independently of trace retention
+  (`payload_retention_days`).
+- Payload pruning protects every payload referenced by a retained trace.
+- Cleanup is automatic and observable (decided 2026-09-18): the configured
+  window is applied once per agent before its first run and on demand with
+  `agent.prune_telemetry()`; every cleanup is logged and reported by
+  `agent.telemetry_retention_status()` and `GET /telemetry/retention`.
+  `retention_days=None` keeps every trace.
+- The default in-memory store keeps at most `memory_max_traces` finished
+  traces (running traces are never evicted), and the recorder and background
+  event log drop per-trace state for finished traces.
 
 ## Phase B: complete trajectory
 
@@ -246,4 +252,5 @@ Phase C passes.
 | A4 | Complete | `32fa6ae` | 3 new tests: resuming with a 1,200-event backlog then following live (previously always overflowed), the legacy `/events/{session_id}` route honouring `Last-Event-ID`, and bounded duplicate tracking. Full suite 1,202 passed, 14 skipped; acceptance checks passed; ruff clean. Open item: `test_configured_child_inherits_parent_telemetry_and_is_linked` failed once in about 62 runs of the combined serve/telemetry suites and could not be reproduced (0 in 150 isolated runs, 0 in 30 baseline runs at `fca989d`); the test now reports the child exception if it recurs. |
 | A5 | Complete | `1c7f820` | 8 new tests: registration shares the manager store and keeps the agent's recording policy; an explicit different store is rejected; governance, sandbox, and subagent-factory recorders are rebound on registration and on delegation; a failed or slow first upsert no longer loses the background trace, and lost events mark it partial; with default settings a background run's family (lifecycle trace plus attempt trace) is complete from the agent (verified empty under the old behavior). Full suite 1,210 passed, 14 skipped; acceptance checks passed; ruff clean. |
 | A5b | Complete | `082ac12` | 13 new tests: configured delegation records child trace/run IDs on success, error, and cancellation (IDs in event metadata, retained under every capture policy); dynamic spawns get a delegation span with workspace output verification and keep the child identity when the child raises; background retry attempts carry their attempt ID/number and task ID; timeouts (direct deadline, background attempt, `/run/sync`) are recorded as `timeout` while caller cancellation stays `cancelled`; families list parents first even with equal start times. Full suite 1,223 passed, 14 skipped; acceptance checks passed; ruff clean. The A4 open item was traced to identifier redaction and is fixed in the next commit. |
-| A1 follow-up | Complete | (this commit) | Card numbers must be standalone tokens. 2 new privacy tests (identifiers, digests, references, and IDs inside free text are never altered; standalone and hyphen-joined card numbers are still redacted). The lineage test that failed 2 in 300 runs now passes 300 of 300. Full suite 1,225 passed, 14 skipped; acceptance checks passed; ruff clean. Resolves the A4 open item. |
+| A1 follow-up | Complete | `4c0dbac` | Card numbers must be standalone tokens. 2 new privacy tests (identifiers, digests, references, and IDs inside free text are never altered; standalone and hyphen-joined card numbers are still redacted). The lineage test that failed 2 in 300 runs now passes 300 of 300. Full suite 1,225 passed, 14 skipped; acceptance checks passed; ruff clean. Resolves the A4 open item. |
+| A6 | Complete | (this commit) | 8 new tests: independent payload retention and config validation; payload references collected from descriptors and offloaded stubs; pruning removes expired traces and orphaned payloads while keeping every payload a kept trace references; automatic cleanup runs once per agent and is reported in the status; the in-memory store evicts only the oldest finished traces and keeps live followers attached; the default memory store is bounded; the background event log forgets finished runs; `GET /telemetry/retention`. Full suite 1,233 passed, 14 skipped; acceptance checks passed; ruff clean. Phase A complete. |

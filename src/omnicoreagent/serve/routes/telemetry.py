@@ -473,4 +473,21 @@ def create_telemetry_router() -> APIRouter:
             trace=trace,
         )
 
+    @router.get(
+        "/retention",
+        summary="Get telemetry retention status",
+        description=(
+            "Return the trace and payload retention policy and the most recent "
+            "automatic or explicit cleanup results."
+        ),
+    )
+    async def get_retention_status(request: Request) -> dict[str, Any]:
+        agent = get_agent(request)
+        status = getattr(agent, "telemetry_retention_status", None)
+        if not callable(status):
+            raise HTTPException(
+                status_code=501, detail="Telemetry retention status is unavailable"
+            )
+        return status()
+
     return router

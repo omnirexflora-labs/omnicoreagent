@@ -455,6 +455,9 @@ class BackgroundEventLog:
             trace_id,
             {"status": self._trace_status_for_event(event).value, "ended_at": ended_at},
         )
+        # The run is finished; keep no per-run state for it.
+        self._telemetry_traces.discard(trace_id)
+        self._lost_event_trace_ids.discard(trace_id)
 
     @staticmethod
     def _trace_status_for_event(event: dict[str, Any]) -> TraceStatus:

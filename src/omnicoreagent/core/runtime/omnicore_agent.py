@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import uuid
 
@@ -16,6 +17,7 @@ from omnicoreagent.core.runtime import (
 from omnicoreagent.core.privacy import PrivacyFilter
 from omnicoreagent.core.interaction_history import stable_message_digest
 from omnicoreagent.core.runtime.deadline import current_stop_reason
+from omnicoreagent.core.telemetry.payloads import payload_references
 from omnicoreagent.core.runtime.imports import (
     LazyDefaultPromptBuilder,
     runtime,
@@ -123,6 +125,9 @@ class OmniCoreAgent:
         self.telemetry_store = telemetry_store
         self.telemetry_recorder = telemetry_recorder
         self.telemetry_stream = telemetry_stream
+        self._telemetry_retention_started = False
+        self._telemetry_retention_last: dict[str, Any] | None = None
+        self._telemetry_retention_automatic_runs = 0
         # A caller-chosen store is never silently replaced by a background
         # manager's store; a derived default may be.
         self._telemetry_store_explicit = any(
@@ -466,6 +471,11 @@ class OmniCoreAgent:
             session_id = self.generate_session_id()
 
         self._ensure_telemetry()
+        if not self._telemetry_retention_started:
+            # The configured retention window applies once per agent, before
+            # its first trace, so disk use stays bounded without a manual call.
+            self._telemetry_retention_started = True
+            await self._apply_telemetry_retention(trigger="automatic")
 
         run_id = run_id or self.generate_run_id()
         trace_context = None
@@ -626,6 +636,69 @@ class OmniCoreAgent:
 
         finally:
             streaming.current_delivery.reset(delivery_token)
+
+    async def prune_telemetry(self) -> Dict[str, Any]:
+        """Apply the configured trace and payload retention now.
+
+        Expired finished traces are removed first; payloads are then pruned
+        by their own retention window, except any payload still referenced by
+        a kept trace. Returns what was removed.
+        """
+        self._ensure_telemetry()
+        return await self._apply_telemetry_retention(trigger="explicit")
+
+    def telemetry_retention_status(self) -> Dict[str, Any]:
+        """Report the retention policy and the most recent cleanup results."""
+        self._ensure_telemetry()
+        trace_status = getattr(self.telemetry_store, "retention_status", None)
+        payload_status = getattr(self.telemetry_payload_store, "retention_status", None)
+        return {
+            "trace_store": trace_status() if callable(trace_status) else None,
+            "payload_store": payload_status() if callable(payload_status) else None,
+            "last_cleanup": self._telemetry_retention_last,
+            "automatic_runs": self._telemetry_retention_automatic_runs,
+        }
+
+    async def _apply_telemetry_retention(self, *, trigger: str) -> Dict[str, Any]:
+        summary: Dict[str, Any] = {
+            "trigger": trigger,
+            "traces_removed": 0,
+            "payloads_removed": 0,
+            "payloads_retained_by_reference": 0,
+            "error": None,
+        }
+        try:
+            prune_traces = getattr(self.telemetry_store, "prune", None)
+            if callable(prune_traces):
+                summary["traces_removed"] = await prune_traces(trigger=trigger)
+            payload_store = self.telemetry_payload_store
+            prune_payloads = getattr(payload_store, "prune", None)
+            if callable(prune_payloads):
+                references: set[str] = set()
+                for trace in await self.telemetry_store.list_traces():
+                    references |= payload_references(trace)
+                summary["payloads_removed"] = await asyncio.to_thread(
+                    prune_payloads, references=references
+                )
+                summary["payloads_retained_by_reference"] = (
+                    getattr(payload_store, "last_prune", None) or {}
+                ).get("retained_by_reference", len(references))
+        except Exception as exc:
+            # Retention is housekeeping; it never fails a run. The failure
+            # stays visible in the retention status.
+            summary["error"] = f"{exc.__class__.__name__}: {exc}"
+            runtime_logger().warning(f"Telemetry retention failed: {summary['error']}")
+        summary["at"] = datetime.now(timezone.utc).isoformat()
+        self._telemetry_retention_last = summary
+        if trigger == "automatic":
+            self._telemetry_retention_automatic_runs += 1
+        if summary["traces_removed"] or summary["payloads_removed"]:
+            runtime_logger().info(
+                f"Telemetry retention ({trigger}) removed "
+                f"{summary['traces_removed']} trace(s) and "
+                f"{summary['payloads_removed']} payload(s)"
+            )
+        return summary
 
     async def _end_trace_after_failure(
         self,

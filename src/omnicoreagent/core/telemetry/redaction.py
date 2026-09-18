@@ -24,7 +24,13 @@ class TelemetryConfig:
     # is the built-in durable local option; no external exporter is required.
     storage: str = "auto"
     storage_path: str | None = None
+    # Finished traces older than this are pruned automatically; ``None`` keeps
+    # every trace. Payloads have their own window, and a payload referenced by
+    # a kept trace is never pruned.
     retention_days: int | None = 7
+    payload_retention_days: int | None = 7
+    # Upper bound on finished traces kept by an in-memory store.
+    memory_max_traces: int | None = 1000
     record_inputs: bool = True
     record_outputs: bool = True
     record_model_prompts: bool = False
@@ -67,6 +73,12 @@ class TelemetryConfig:
             )
         if self.retention_days is not None and self.retention_days < 0:
             raise ValueError("telemetry retention_days must be non-negative or None")
+        if self.payload_retention_days is not None and self.payload_retention_days < 0:
+            raise ValueError(
+                "telemetry payload_retention_days must be non-negative or None"
+            )
+        if self.memory_max_traces is not None and self.memory_max_traces < 1:
+            raise ValueError("telemetry memory_max_traces must be positive or None")
         for field_name in ("persistence_timeout_seconds", "export_timeout_seconds"):
             value = getattr(self, field_name)
             if value is not None and (

@@ -32,7 +32,7 @@ def default_telemetry_store(
     config = TelemetryConfig.from_value(telemetry_config) or TelemetryConfig()
     mode = config.storage
     if mode == "memory":
-        return InMemoryTelemetryStore()
+        return InMemoryTelemetryStore(max_traces=config.memory_max_traces)
 
     if mode == "jsonl":
         return JsonlTelemetryStore(
@@ -41,10 +41,10 @@ def default_telemetry_store(
         )
 
     if workspace_config is None:
-        return InMemoryTelemetryStore()
+        return InMemoryTelemetryStore(max_traces=config.memory_max_traces)
     resolved_workspace = resolve_workspace_config(workspace_config)
     if resolved_workspace.workspace_backend != "local":
-        return InMemoryTelemetryStore()
+        return InMemoryTelemetryStore(max_traces=config.memory_max_traces)
     return JsonlTelemetryStore(
         _telemetry_jsonl_path(config, resolved_workspace),
         retention_days=config.retention_days,
@@ -84,13 +84,13 @@ def default_telemetry_payload_store(
         )
         return WorkspaceTelemetryPayloadStore(
             storage,
-            retention_days=config.retention_days,
+            retention_days=config.payload_retention_days,
         )
 
     if config.storage_path is not None:
         return LocalTelemetryPayloadStore(
             f"{Path(config.storage_path).expanduser()}.payloads",
-            retention_days=config.retention_days,
+            retention_days=config.payload_retention_days,
         )
 
     storage = create_workspace_storage(
@@ -99,7 +99,7 @@ def default_telemetry_payload_store(
     )
     return WorkspaceTelemetryPayloadStore(
         storage,
-        retention_days=config.retention_days,
+        retention_days=config.payload_retention_days,
     )
 
 

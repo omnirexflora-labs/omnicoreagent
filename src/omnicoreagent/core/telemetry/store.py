@@ -13,6 +13,7 @@ import json
 import re
 from typing import Any
 
+from omnicoreagent.core.logging import logger
 from omnicoreagent.core.telemetry.models import (
     TraceEvidenceStatus,
     SpanStatus,
@@ -86,7 +87,14 @@ class AbstractTelemetryStore(ABC):
 
 
 class InMemoryTelemetryStore(AbstractTelemetryStore):
-    def __init__(self) -> None:
+    def __init__(self, *, max_traces: int | None = None) -> None:
+        if max_traces is not None and max_traces < 1:
+            raise ValueError("max_traces must be positive or None")
+        # Finished traces beyond this bound are evicted oldest-first; running
+        # traces are never evicted. ``None`` keeps every trace (used as the
+        # index behind durable stores, which apply their own retention).
+        self.max_traces = max_traces
+        self.evicted_traces = 0
         self._traces: dict[str, TelemetryTrace] = {}
         self._trace_sequences: dict[str, int] = defaultdict(int)
         self._event_cursor = 0
@@ -146,6 +154,7 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
         _validate_trace_identity(trace)
         async with self._lock:
             self._merge_trace_unlocked(trace)
+            self._enforce_bound_unlocked()
 
     async def update_trace(self, trace_id: str, patch: dict[str, Any]) -> None:
         async with self._lock:
@@ -153,6 +162,23 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
             if trace is None:
                 raise KeyError(f"Unknown trace: {trace_id}")
             _patch_trace(trace, patch)
+            self._enforce_bound_unlocked()
+
+    def retention_status(self) -> dict[str, Any]:
+        return {"max_traces": self.max_traces, "evicted": self.evicted_traces}
+
+    def _enforce_bound_unlocked(self) -> None:
+        if self.max_traces is None or len(self._traces) <= self.max_traces:
+            return
+        finished = sorted(
+            (trace for trace in self._traces.values() if trace.ended_at is not None),
+            key=lambda trace: (trace.ended_at, trace.trace_id),
+        )
+        excess = len(self._traces) - self.max_traces
+        evicted = {trace.trace_id for trace in finished[:excess]}
+        if evicted:
+            self._remove_traces_unlocked(evicted)
+            self.evicted_traces += len(evicted)
 
     async def get_trace(self, trace_id: str) -> TelemetryTrace | None:
         async with self._lock:
@@ -268,17 +294,20 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
         """Remove traces in place, keeping subscribers and the cursor counter."""
 
         async with self._lock:
-            for trace_id in trace_ids:
-                self._traces.pop(trace_id, None)
-                self._trace_sequences.pop(trace_id, None)
-            kept: list[tuple[int, TelemetryEvent]] = []
-            for event_cursor, event in self._event_index:
-                if event.trace_id in trace_ids:
-                    self._event_cursors.pop(event.event_id, None)
-                    self._indexed_cursors.discard(event_cursor)
-                else:
-                    kept.append((event_cursor, event))
-            self._event_index = kept
+            self._remove_traces_unlocked(trace_ids)
+
+    def _remove_traces_unlocked(self, trace_ids: set[str]) -> None:
+        for trace_id in trace_ids:
+            self._traces.pop(trace_id, None)
+            self._trace_sequences.pop(trace_id, None)
+        kept: list[tuple[int, TelemetryEvent]] = []
+        for event_cursor, event in self._event_index:
+            if event.trace_id in trace_ids:
+                self._event_cursors.pop(event.event_id, None)
+                self._indexed_cursors.discard(event_cursor)
+            else:
+                kept.append((event_cursor, event))
+        self._event_index = kept
 
     def _events_after_unlocked(
         self,
@@ -422,6 +451,8 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         self.path = Path(path)
         self.retention_days = retention_days
         self.skipped_records = 0
+        self.last_prune: dict[str, Any] | None = None
+        self.removed_total = 0
         self._inner = InMemoryTelemetryStore()
         self._loaded = False
         self._lock = asyncio.Lock()
@@ -540,9 +571,14 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
                 )
         self._loaded = True
         if self.retention_days is not None:
-            await self._prune_expired_unlocked(self.retention_days)
+            await self._prune_expired_unlocked(self.retention_days, trigger="load")
 
-    async def prune(self, retention_days: int | None = None) -> int:
+    async def prune(
+        self,
+        retention_days: int | None = None,
+        *,
+        trigger: str = "explicit",
+    ) -> int:
         """Remove ended traces older than the configured age and compact JSONL.
 
         Active traces are always retained. ``None`` disables cleanup and
@@ -555,9 +591,17 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             days = self.retention_days if retention_days is None else retention_days
             if days is None:
                 return 0
-            return await self._prune_expired_unlocked(days)
+            return await self._prune_expired_unlocked(days, trigger=trigger)
 
-    async def _prune_expired_unlocked(self, retention_days: int) -> int:
+    def retention_status(self) -> dict[str, Any]:
+        return {
+            "retention_days": self.retention_days,
+            "last_prune": self.last_prune,
+            "removed_total": self.removed_total,
+            "skipped_records": self.skipped_records,
+        }
+
+    async def _prune_expired_unlocked(self, retention_days: int, *, trigger: str) -> int:
         if retention_days < 0:
             raise ValueError("retention_days must be non-negative or None")
         cutoff = utc_now() - timedelta(days=retention_days)
@@ -567,11 +611,24 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             for trace in traces
             if trace.ended_at is not None and trace.ended_at < cutoff
         }
-        if not expired:
-            return 0
-        await self._inner.remove_traces(expired)
-        survivors = [trace for trace in traces if trace.trace_id not in expired]
-        await self._rewrite_records_unlocked(survivors)
+        if expired:
+            await self._inner.remove_traces(expired)
+            survivors = [trace for trace in traces if trace.trace_id not in expired]
+            await self._rewrite_records_unlocked(survivors)
+        self.last_prune = {
+            "at": utc_now().isoformat(),
+            "trigger": trigger,
+            "retention_days": retention_days,
+            "removed": len(expired),
+        }
+        self.removed_total += len(expired)
+        if expired:
+            logger.info(
+                "Telemetry retention removed %d trace(s) older than %d day(s) from %s",
+                len(expired),
+                retention_days,
+                self.path,
+            )
         return len(expired)
 
     async def _replay_record_unlocked(self, record: dict[str, Any]) -> None:
