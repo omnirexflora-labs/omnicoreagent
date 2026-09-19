@@ -47,6 +47,8 @@ class ToolBinding:
     description: str
     parameters: dict[str, Any]
     agent: Any = None
+    # Safe to run again with the same arguments (crash recovery).
+    idempotent: bool = False
 
     def definition(self) -> dict[str, Any]:
         return {
@@ -64,6 +66,7 @@ class NativeToolCatalog:
         self, *, local_tools=None, mcp_tools=None, sub_agents=None, advanced=False
     ):
         candidates = []
+        idempotent: dict[tuple, bool] = {("discovery", None, "tools_retriever"): True}
         if advanced:
             candidates.append(
                 (
@@ -90,9 +93,14 @@ class NativeToolCatalog:
                     else "local"
                 )
                 candidates.append((tool, provider, None, None))
+                idempotent[(provider, None, tool["name"])] = _local_idempotent(
+                    local_tools, tool["name"], provider
+                )
         for server, tools in (mcp_tools or {}).items():
             for tool in tools:
-                candidates.append((mcp_tool_definition(tool), "mcp", server, None))
+                definition = mcp_tool_definition(tool)
+                candidates.append((definition, "mcp", server, None))
+                idempotent[("mcp", server, definition["name"])] = _mcp_idempotent(tool)
         for agent in sub_agents or []:
             schema = ToolRegistry()._infer_schema(agent.run)
             runtime_parameters = {"session_id", "run_id", "on_event"}
@@ -142,6 +150,7 @@ class NativeToolCatalog:
                 tool.get("description") or "",
                 parameters,
                 agent,
+                idempotent.get((provider, server, name), False),
             )
         self.visible = {
             key
@@ -207,3 +216,34 @@ class NativeToolCatalog:
         ]
         self.visible.update(selected)
         return [self.bindings[key].definition() for key in selected]
+
+
+def _local_idempotent(local_tools: Any, name: str, provider: str) -> bool:
+    """Built-in reads are idempotent; application tools declare it."""
+    from omnicoreagent.governance.capabilities import (
+        ARTIFACT_READ_TOOLS,
+        WORKSPACE_READ_TOOLS,
+    )
+
+    if provider == "workspace" and name in WORKSPACE_READ_TOOLS:
+        return True
+    if provider == "artifact" and name in ARTIFACT_READ_TOOLS:
+        return True
+    if provider == "skill" and name == "read_skill_file":
+        return True
+    is_idempotent = getattr(local_tools, "is_idempotent", None)
+    return bool(is_idempotent(name)) if callable(is_idempotent) else False
+
+
+def _mcp_idempotent(tool: Any) -> bool:
+    """An MCP tool declares it with the spec's readOnlyHint or idempotentHint."""
+    annotations = getattr(tool, "annotations", None)
+    if annotations is None and isinstance(tool, dict):
+        annotations = tool.get("annotations")
+    if annotations is None:
+        return False
+    if isinstance(annotations, dict):
+        return bool(annotations.get("readOnlyHint") or annotations.get("idempotentHint"))
+    return bool(
+        getattr(annotations, "readOnlyHint", False) or getattr(annotations, "idempotentHint", False)
+    )

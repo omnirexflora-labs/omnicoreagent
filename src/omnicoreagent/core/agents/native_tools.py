@@ -54,11 +54,15 @@ async def execute_native_turn(
     model_response_event_id: str | None = None,
     agent_step_span_id: str | None = None,
     resuming: bool = False,
+    unknown_outcome_ids: set[str] | None = None,
 ):
     """Run one model turn's tool calls.
 
     ``resuming`` runs calls of an assistant turn that is already in the
-    history (a run continuing after approval): the turn is not stored again.
+    history (a run continuing after approval or a crash): the turn is not
+    stored again. ``unknown_outcome_ids`` are calls a stopped process had
+    started and that are not safe to repeat: they are not run, and the model
+    is told their outcome is unknown.
     """
     # Decode once. Freeze resolution against the schemas supplied for this turn;
     # discovery cannot unlock a sibling in the same batch.
@@ -203,6 +207,8 @@ async def execute_native_turn(
                 binding.provider if binding.provider != "subagent" else "local",
                 binding.server,
             )
+            if request.id in (unknown_outcome_ids or set()):
+                raise _UnknownOutcome()
             # Recorded as started before it runs (write-ahead): if the run
             # stops now, its record shows this call may have had an effect.
             # If the record cannot be saved, the call does not run.
@@ -231,6 +237,22 @@ async def execute_native_turn(
                     },
                     telemetry_outcome=outcome,
                 )
+        except _UnknownOutcome:
+            result = {
+                "tool_name": request.name,
+                "args": {},
+                "status": "error",
+                "data": None,
+                "message": (
+                    "This call was interrupted before it finished (the process "
+                    "running it stopped), so its outcome is unknown: it may or "
+                    "may not have taken effect. Check before calling it again."
+                ),
+                "error_type": "unknown_outcome",
+            }
+            run = current_run()
+            if run is not None:
+                await run.tool_finished(tool_call_id=request.id, outcome="unknown")
         except asyncio.CancelledError:
             result = {
                 "tool_name": request.name,
@@ -562,6 +584,10 @@ async def execute_native_turn(
                 if approval["status"] == "pending" and approval.get("tool_call_id") in awaiting
             ]
         )
+
+
+class _UnknownOutcome(Exception):
+    """A recovered call that must not run again (not idempotent)."""
 
 
 def _waiting_for_approval(tool_call_id: str) -> bool:

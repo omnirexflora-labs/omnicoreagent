@@ -639,6 +639,25 @@ class OmniCoreAgent:
         run_id = run_id or self.generate_run_id()
         trace_context = None
         run_tracker = None
+        keep_alive = None
+        retry_of = None
+        if _resume is None and supports_run_state(self.memory_router):
+            # A known run ID: recover a run whose process died, refuse one that
+            # is still live, or start a finished or failed one again. Read from
+            # the router directly: initializing here would put an
+            # initialization failure outside the run's trace.
+            try:
+                existing = await self.memory_router.get_run_state(run_id)
+            except RunStateUnsupported:
+                existing = None
+            if existing is not None:
+                problem = _not_resumable(existing, run_id)
+                if problem is None:
+                    _resume = existing
+                elif existing["status"] in {"running", "awaiting_approval"}:
+                    raise ValueError(problem)
+                else:
+                    retry_of = existing
         # Set once this run starts finalizing its own trace. A telemetry
         # failure after that point has already restored the parent context,
         # so the error handlers below must not record anything more.
@@ -692,17 +711,27 @@ class OmniCoreAgent:
                 await self.initialize()
 
             # The run's durable record lives in the chosen memory store.
-            if _resume is None:
+            lease_seconds = int(self.agent_config.get("run_lease_seconds") or 60)
+            if _resume is not None:
+                run_tracker = RunTracker.from_record(
+                    self.memory_router, _resume, lease_seconds=lease_seconds
+                )
+            elif retry_of is not None:
+                run_tracker = RunTracker.new_attempt(
+                    self.memory_router, retry_of, lease_seconds=lease_seconds
+                )
+            else:
                 run_tracker = RunTracker(
                     self.memory_router,
                     run_id=run_id,
                     session_id=session_id,
                     agent_name=self.name,
                     agent_version=self.agent_config.get("agent_version"),
+                    lease_seconds=lease_seconds,
                 )
-            else:
-                run_tracker = RunTracker.from_record(self.memory_router, _resume)
             await run_tracker.start(trace_context.trace_id)
+            # Keeps the heartbeat fresh during long model or tool calls.
+            keep_alive = asyncio.create_task(run_tracker.keep_alive())
 
             blocked_response = None if _resume is not None else await execution.blocked_guardrail_response(
                 guardrail=self.guardrail,
@@ -879,6 +908,8 @@ class OmniCoreAgent:
             raise
 
         finally:
+            if keep_alive is not None:
+                keep_alive.cancel()
             streaming.current_delivery.reset(delivery_token)
 
     async def prune_telemetry(self) -> Dict[str, Any]:
@@ -972,16 +1003,16 @@ class OmniCoreAgent:
             return None
 
     async def resume(self, run_id: str, on_event: Any = None) -> Dict[str, Any]:
-        """Continue a run that was waiting for approval, once every approval
-        it asked for has been decided (see ``resolve_approval``)."""
+        """Continue a run: one waiting for approval once every approval is
+        decided (see ``resolve_approval``), or one whose process stopped
+        (its heartbeat is older than ``run_lease_seconds``). Completed tool
+        calls never run again."""
         record = await self.get_run(run_id)
         if record is None:
             raise LookupError(f"No run {run_id}")
-        if record["status"] != "awaiting_approval":
-            raise ValueError(f"Run {run_id} is {record['status']}; only a waiting run can resume")
-        pending = [a["approval_id"] for a in record.get("approvals", []) if a["status"] == "pending"]
-        if pending:
-            raise ValueError(f"Run {run_id} is still waiting for approval: {', '.join(pending)}")
+        problem = _not_resumable(record, run_id)
+        if problem is not None:
+            raise ValueError(problem)
         return await self.run(
             None, session_id=record["session_id"], run_id=run_id, on_event=on_event, _resume=record
         )
@@ -1847,3 +1878,22 @@ def _public_approval(approval: dict[str, Any], record: dict[str, Any]) -> dict[s
         "reason": approval.get("reason"),
         "expires_at": approval.get("expires_at"),
     }
+
+
+def _not_resumable(record: dict[str, Any], run_id: str) -> Optional[str]:
+    """Why a run cannot be continued now, or None if it can."""
+    from omnicoreagent.core.runs import lease_expired
+
+    status = record["status"]
+    if status == "awaiting_approval":
+        pending = [a["approval_id"] for a in record.get("approvals", []) if a["status"] == "pending"]
+        if pending:
+            return f"Run {run_id} is still waiting for approval: {', '.join(pending)}"
+        return None
+    if status == "interrupted":
+        return None
+    if status == "running":
+        if lease_expired(record):
+            return None
+        return f"Run {run_id} is running in another process (its heartbeat is current)"
+    return f"Run {run_id} is {status}; only a waiting or stopped run can resume"

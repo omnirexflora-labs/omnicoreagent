@@ -186,6 +186,9 @@ class AgentConfig:
     # Environment variables host skill scripts receive beyond the minimal set
     # (PATH, HOME, locale, TMPDIR, TERM); secrets are not passed by default.
     skill_script_env: list[str] = field(default_factory=list)
+    # A live run refreshes its heartbeat within this many seconds; a run whose
+    # heartbeat is older can be recovered by another process.
+    run_lease_seconds: int = 60
     memory_config: dict[str, Any] = field(default_factory=_default_memory_config)
     enable_workspace_files: bool = True
     guardrail_config: dict[str, Any] = field(default_factory=dict)
@@ -204,6 +207,12 @@ class AgentConfig:
             not isinstance(self.agent_version, str) or not self.agent_version.strip()
         ):
             raise ValueError("agent_version must be a non-empty string or None")
+        if (
+            isinstance(self.run_lease_seconds, bool)
+            or not isinstance(self.run_lease_seconds, int)
+            or self.run_lease_seconds < 1
+        ):
+            raise ValueError("run_lease_seconds must be a positive integer")
         if not isinstance(self.skill_script_env, (list, tuple)) or not all(
             isinstance(name, str) and name for name in self.skill_script_env
         ):

@@ -15,12 +15,16 @@ class Tool:
         description: str,
         inputSchema: dict[str, Any],
         function: Callable,
+        idempotent: bool = False,
     ):
         self.name = name
         self.description = description
         self.inputSchema = inputSchema
         self.function = function
         self.provider = "local"
+        # Safe to run again with the same arguments (a recovered run re-runs
+        # an interrupted call only when this is true).
+        self.idempotent = bool(idempotent)
         self.internal_provider = False
         self.is_async = asyncio.iscoroutinefunction(function)
 
@@ -92,7 +96,16 @@ class ToolRegistry:
         name: str | None = None,
         inputSchema: dict[str, Any] | None = None,
         description: str = "",
+        idempotent: bool = False,
     ):
+        """Register a function as a tool.
+
+        ``idempotent=True`` declares that running it again with the same
+        arguments has no further effect, so a run recovered after a crash may
+        re-run an interrupted call; otherwise the model is told its outcome
+        is unknown.
+        """
+
         def decorator(func: Callable):
             tool_name = name or func.__name__.lower()
 
@@ -107,6 +120,7 @@ class ToolRegistry:
                 description=final_description.strip(),
                 inputSchema=final_schema,
                 function=func,
+                idempotent=idempotent,
             )
             self.tools[tool_name.lower()] = tool
             self._internal_tool_providers.pop(tool_name.lower(), None)
@@ -133,6 +147,10 @@ class ToolRegistry:
 
     def get_tool_provider(self, name: str) -> str:
         return self._internal_tool_providers.get(name.lower(), "local")
+
+    def is_idempotent(self, name: str) -> bool:
+        tool = self.get_tool(name)
+        return bool(getattr(tool, "idempotent", False))
 
     def list_tools(self) -> list[Tool]:
         return list(self.tools.values())

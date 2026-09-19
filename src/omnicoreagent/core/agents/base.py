@@ -421,11 +421,12 @@ class BaseReactAgent:
             current_steps = 0
             if resume is not None:
                 current_steps = int(resume.get("step") or 0)
-                pending = _pending_calls(resume)
+                pending, unknown = _pending_calls(resume, catalog)
                 if pending:
                     await execute_native_turn(
                         self,
                         turn=ModelTurn(tool_calls=tuple(pending), finish_reason="tool_calls"),
+                        unknown_outcome_ids=unknown,
                         catalog=catalog,
                         local_tools=runtime_local_tools,
                         sessions=sessions,
@@ -610,9 +611,16 @@ def _datetime_prefix(message: Any, query: str) -> str:
     return content[: len(content) - len(query)] if content.endswith(query) else content
 
 
-def _pending_calls(record: dict[str, Any]) -> list:
-    """The calls of the paused step that have no result yet, as the model made
-    them, or with the arguments an approver edited."""
+def _pending_calls(record: dict[str, Any], catalog: Any) -> tuple[list, set[str]]:
+    """The calls of the stopped step that have no result yet, and which of
+    them have an unknown outcome.
+
+    A call that never started runs. A call waiting for approval runs through
+    governance, which applies the recorded decision (with edited arguments if
+    the approver changed them). A call that started but never finished (the
+    process stopped) runs again only if its tool is idempotent; otherwise its
+    outcome is unknown and the model is told so instead.
+    """
     from omnicoreagent.core.model_protocol import ToolRequest
 
     messages = record["context"]["messages"]
@@ -626,7 +634,7 @@ def _pending_calls(record: dict[str, Any]) -> list:
         None,
     )
     if turn_index is None:
-        return []
+        return [], set()
     answered = {
         (m.get("metadata") or {}).get("tool_call_id") for m in messages[turn_index + 1 :]
     }
@@ -635,7 +643,8 @@ def _pending_calls(record: dict[str, Any]) -> list:
         for approval in record.get("approvals", [])
         if approval.get("edited_arguments") is not None
     }
-    pending = []
+    states = {c["tool_call_id"]: c["state"] for c in record.get("tool_calls", [])}
+    pending, unknown = [], set()
     for call in messages[turn_index]["metadata"]["tool_calls"]:
         if call["id"] in answered:
             continue
@@ -644,4 +653,8 @@ def _pending_calls(record: dict[str, Any]) -> list:
         if call["id"] in edited:
             arguments = json.dumps(edited[call["id"]])
         pending.append(ToolRequest(call["id"], function.get("name"), arguments))
-    return pending
+        if states.get(call["id"]) in {"started", "interrupted"}:
+            binding = catalog.bindings.get(str(function.get("name")).lower())
+            if binding is None or not binding.idempotent:
+                unknown.add(call["id"])
+    return pending, unknown

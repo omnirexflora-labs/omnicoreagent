@@ -68,3 +68,40 @@ result = await agent.resume(run_id)
 Over OmniServe, the same flow is `POST /run/sync` (or `/run`), then
 `POST /runs/{run_id}/approvals/{approval_id}` and `POST /runs/{run_id}/resume`
 (see [OmniServe](/docs/how-to-guides/omniserve)).
+
+## Recovering a run after a crash
+
+A live run refreshes a heartbeat on its record. If its process dies (a crash,
+a deploy, a killed container), the record stays `running` with an old
+heartbeat. Once the heartbeat is older than `run_lease_seconds` (default 60),
+any process with the same memory store can continue it:
+
+```python
+result = await agent.resume(run_id)
+# or run again with the same run ID, as background recovery does:
+result = await agent.run(query, session_id=session_id, run_id=run_id)
+```
+
+- Completed tool calls never run again; their results are in the run's context.
+- A call that never started runs.
+- A call that started but never finished may or may not have taken effect. It
+  runs again only if its tool is idempotent; otherwise the model is told its
+  outcome is unknown and decides what to do.
+- A run whose heartbeat is current is refused: it is still running elsewhere.
+  Only one process can take a run over (saves are versioned).
+
+Declare a tool idempotent when running it twice with the same arguments has no
+further effect:
+
+```python
+@tools.register_tool("get_invoice", description="Fetch an invoice.", idempotent=True)
+def get_invoice(invoice_id: str) -> dict: ...
+```
+
+Built-in reads (workspace files, artifacts, skill files) are idempotent. An MCP
+tool is idempotent when its server marks it `readOnlyHint` or `idempotentHint`.
+
+Running a finished or failed run ID again starts a new attempt on the same
+record; the record keeps a summary of the earlier attempts. For background
+agents, keep `run_lease_seconds` at or below the background lease so a
+recovered background run is not refused as still running.

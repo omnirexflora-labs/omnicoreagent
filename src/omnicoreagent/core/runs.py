@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from omnicoreagent.core.logging import logger
 from omnicoreagent.governance.hashing import arguments_digest
@@ -82,9 +83,13 @@ class RunTracker:
         session_id: str,
         agent_name: str,
         agent_version: str | None = None,
+        lease_seconds: int = 60,
     ) -> None:
         self.store = store
         self.run_id = run_id
+        self.lease_seconds = lease_seconds
+        # This process's claim on the run; a recovered run gets a new owner.
+        self.owner = f"owner_{uuid4().hex}"
         # A store (or router) without async run-state methods, such as one
         # written before durable runs, keeps working; its runs are not durable.
         self.enabled = supports_run_state(store)
@@ -109,13 +114,21 @@ class RunTracker:
             # Approvals asked for during this run and what a person decided.
             "approvals": [],
             "error": None,
+            "owner": None,
+            "heartbeat_at": None,
+            "lease_seconds": lease_seconds,
+            "attempt": 1,
+            "previous_attempts": [],
             "created_at": _now(),
             "updated_at": None,
         }
 
     @classmethod
-    def from_record(cls, store: Any, record: dict[str, Any]) -> "RunTracker":
-        """Continue a stored run (a resume); the next save must match its version."""
+    def from_record(
+        cls, store: Any, record: dict[str, Any], *, lease_seconds: int = 60
+    ) -> "RunTracker":
+        """Continue a stored run (a resume or a recovery); the next save must
+        match its version, so two processes cannot both take it over."""
         record = dict(record)
         tracker = cls(
             store,
@@ -123,15 +136,55 @@ class RunTracker:
             session_id=record["session_id"],
             agent_name=record["agent_name"],
             agent_version=record.get("agent_version"),
+            lease_seconds=lease_seconds,
         )
         tracker._version = record.pop("version")
-        tracker.record = {**record, "status": "running"}
+        tracker.record = {
+            "attempt": 1,
+            "previous_attempts": [],
+            **record,
+            "status": "running",
+            "lease_seconds": lease_seconds,
+        }
+        return tracker
+
+    @classmethod
+    def new_attempt(
+        cls, store: Any, record: dict[str, Any], *, lease_seconds: int = 60
+    ) -> "RunTracker":
+        """Start a finished or failed run again (a retry with the same run ID),
+        keeping a summary of the earlier attempts."""
+        tracker = cls.from_record(store, record, lease_seconds=lease_seconds)
+        earlier = tracker.record
+        tracker.record = {
+            **earlier,
+            "attempt": int(earlier.get("attempt") or 1) + 1,
+            "previous_attempts": [
+                *earlier.get("previous_attempts", []),
+                {
+                    "attempt": earlier.get("attempt") or 1,
+                    "status": record["status"],
+                    "error": earlier.get("error"),
+                    "step": earlier.get("step"),
+                    "trace_ids": list(earlier.get("trace_ids") or []),
+                },
+            ],
+            "step": 0,
+            "tool_calls": [],
+            "approvals": [],
+            "context": {"history": None, "messages": []},
+            "usage": {},
+            "error": None,
+        }
         return tracker
 
     async def _save(self) -> None:
         if not self.enabled:
             return
         self.record["updated_at"] = _now()
+        if self.record["status"] == "running":
+            self.record["owner"] = self.owner
+            self.record["heartbeat_at"] = self.record["updated_at"]
         try:
             self._version = await self.store.save_run_state(
                 dict(self.record), expected_version=self._version
@@ -147,6 +200,22 @@ class RunTracker:
             if trace_id:
                 self.record["trace_ids"].append(trace_id)
             await self._save()
+
+    async def heartbeat(self) -> None:
+        async with self._lock:
+            await self._save()
+
+    async def keep_alive(self) -> None:
+        """Refresh the heartbeat while the run is live (runs as a task)."""
+        interval = max(self.lease_seconds / 3, 0.2)
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await self.heartbeat()
+            except RunStateConflict:
+                # Another process took the run over; this one must not write.
+                logger.warning(f"Run {self.run_id} was taken over by another process")
+                return
 
     async def step(self, number: int) -> None:
         async with self._lock:
@@ -239,6 +308,16 @@ class RunTracker:
             yield self
         finally:
             _CURRENT.reset(token)
+
+
+def lease_expired(record: dict[str, Any], now: datetime | None = None) -> bool:
+    """Whether a running record's owner has stopped refreshing its heartbeat."""
+    heartbeat = record.get("heartbeat_at")
+    if not heartbeat:
+        return True
+    lease = record.get("lease_seconds") or 60
+    age = ((now or datetime.now(timezone.utc)) - datetime.fromisoformat(heartbeat)).total_seconds()
+    return age > lease
 
 
 def _usage_dict(usage: Any) -> dict[str, Any]:
