@@ -12,6 +12,9 @@ Those tools run beside local Python tools, workspace tools, artifact tools,
 skills, subagent tools, and other harness tools. The agent sees one available
 tool surface; the runtime handles where each tool came from.
 
+OmniCoreAgent uses the official MCP Python SDK 2.x (`mcp>=2.2.0,<3`) and the
+standard handshake (protocol version `2025-11-25`).
+
 ---
 
 ## Transport Types
@@ -43,7 +46,7 @@ Process communication with local CLI tools:
     "timeout": 60
 }
 
-# With OAuth 2.0 (auto-starts callback server on localhost:3000)
+# With OAuth 2.0 (opens the browser to log in when the server requires it)
 {
     "name": "oauth_server",
     "transport_type": "streamable_http",
@@ -53,6 +56,8 @@ Process communication with local CLI tools:
     "url": "http://localhost:8000/mcp"
 }
 ```
+
+`streamable-http`, the spelling the MCP SDK uses, is accepted as well.
 
 ### 3. sse — Server-Sent Events
 
@@ -108,7 +113,134 @@ agent = OmniCoreAgent(
 await agent.connect_mcp_servers()
 tools = await agent.list_all_available_tools()  # All MCP + local tools
 result = await agent.run("List all Python files and get latest commits")
+await agent.cleanup_mcp_servers()
 ```
+
+---
+
+## Settings
+
+Each server is checked for its transport when the agent is created. A setting
+that does nothing for the transport (for example `headers` on a stdio server),
+an unknown setting, a wrong type, or a non-positive timeout raises a
+`ValueError` that names the server and the setting.
+
+| Setting | Transports | Meaning |
+|---------|------------|---------|
+| `name` | all | The server's identity (see below). Generated from the command or host when omitted. |
+| `transport_type` | all | `stdio` (default), `streamable_http`, or `sse`. |
+| `connect_timeout` | all | Seconds for the transport, the handshake, and listing every tool page. Default 30. |
+| `call_timeout` | all | Seconds per tool call. Off by default, so only the agent's `tool_call_timeout` applies. Keep it below that limit. |
+| `command`, `args`, `cwd`, `env` | stdio | The process to start. `command` is required; `env` is added to a small safe baseline environment. |
+| `url` | sse, streamable_http | Required; `http://` or `https://`. |
+| `headers` | sse, streamable_http | Sent with every request, for example a bearer token. |
+| `timeout`, `sse_read_timeout` | sse, streamable_http | HTTP timeouts in seconds. Default 60 and 120. |
+| `auth` | sse, streamable_http | `{"method": "oauth"}`, optionally with `callback_port` and `callback_timeout`. |
+
+---
+
+## Server Names
+
+The `name` you configure identifies the server everywhere: tool routing,
+governance policies (`mcp_server`), telemetry, and readiness. What the server
+reports about itself in the handshake (its name and version) is kept as
+metadata only, because the server controls it and it can change with an
+upgrade. Two servers may therefore report the same name, for example the same
+server run twice with different settings, as long as their configured names
+differ.
+
+A server without a `name` gets a stable one derived from its command or host,
+such as `npx_d37bf4`, so its identity does not change between runs. Giving each
+server an explicit name is clearer.
+
+---
+
+## Connecting and Disconnecting
+
+`await agent.connect_mcp_servers()` connects every configured server at once.
+OmniServe does this during startup. A server that fails to connect, or does not
+finish within `connect_timeout`, does not stop the others; its reason is
+recorded and reported (see Readiness and Telemetry below).
+A governance denial is raised.
+
+Each connection is opened and closed by its own task, and
+`await agent.cleanup_mcp_servers()` (or `agent.cleanup()`) closes every
+connection and stops stdio server processes. OmniServe does this on shutdown.
+
+---
+
+## Tool Results and Errors
+
+The model receives each result in the most direct form:
+
+- When the server returns **structured content**, that is the result. A text
+  block that only repeats it is dropped; other blocks, such as a warning or an
+  image, are kept beside it. A scalar the server wrapped as `{"result": value}`
+  is returned as the value.
+- A single text block is returned as text; several blocks are returned as a
+  list with their MCP field names (for example `mimeType`).
+- A tool that reports failure (`isError`) is an **error** result.
+- A **protocol error** from the server becomes an error result that keeps its
+  JSON-RPC code, for example `MCP error -32602: ...` for invalid arguments or
+  `MCP error -32001` when `call_timeout` expires. The code is also available in
+  the result data as `mcp_error`.
+
+Results pass through the agent's guardrail, including structured content,
+before the model sees them.
+
+---
+
+## Dropped Connections
+
+If a session drops while the agent is running (a stdio server process exits, or
+an HTTP server restarts and no longer knows the session), the next call
+reconnects once and is retried. If reconnecting fails, the call returns an
+error that names both causes and the server is marked disconnected with its
+last error. Each reconnect is recorded on the tool call it affected.
+
+---
+
+## OAuth
+
+With `"auth": {"method": "oauth"}`, the MCP SDK runs the OAuth authorization
+code flow with PKCE: server metadata discovery, dynamic client registration,
+and token exchange. When a login is needed, OmniCoreAgent starts a small
+callback server on `127.0.0.1`, opens the authorization URL in the browser, and
+waits for the redirect without blocking other work.
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `callback_port` | a free port | Loopback port of the redirect URI `http://127.0.0.1:<port>/callback`. Set it when the authorization server only accepts pre-registered redirect URIs. |
+| `callback_timeout` | 300 | Seconds to wait for the login to complete. |
+
+When the authorization server includes its issuer (`iss`) in the redirect, it
+is checked, so a redirect claiming a different authorization server is
+rejected. Tokens are kept in memory for the life of the process.
+
+---
+
+## Governance
+
+With governance enabled, connecting a server is authorized by its configured
+name before any process starts or network connection opens
+(`mcp.server.start` for stdio, `mcp.server.connect` for HTTP), and each tool
+call is authorized as `tool.mcp.call` with the configured `mcp_server` and
+`tool_name`. Governance is enabled with `governance_config` (see
+[Agent Configuration](/docs/how-to-guides/configuration#2-agent-configuration)).
+
+---
+
+## Readiness and Telemetry
+
+- `GET /ready` reports `mcp_connected` (every configured server connected) and
+  `mcp_servers`, each server's status (`connected`, `disconnected`, `failed`,
+  `not_connected`) and last error, so one failed server among several is
+  visible.
+- Each run's configuration header lists every server with its status, reported
+  name and version, protocol version, tool count, reconnects, and error. It
+  never includes commands, arguments, environment, URLs, or headers.
+- Each MCP tool call in the trajectory names its `provider` (`mcp`) and
+  `server`, and lists any reconnects. See [Observability](/docs/how-to-guides/observability).
 
 ---
 
@@ -118,7 +250,7 @@ result = await agent.run("List all Python files and get latest commits")
 |-----------|----------|-------------|
 | `stdio` | Local MCP servers, CLI tools | None (local process) |
 | `streamable_http` | Remote APIs, cloud services | Bearer token, OAuth 2.0 |
-| `sse` | Real-time data, streaming | Bearer token, custom headers |
+| `sse` | Real-time data, streaming | Bearer token, OAuth 2.0 |
 
 <Tip>
 Use MCP when the agent needs tools hosted by an MCP server. Choose `stdio` for

@@ -345,6 +345,15 @@ mcp_tools = [
 ]
 ```
 
+Each `name` is the server's identity in tool routing, governance, and
+telemetry. Settings are checked per transport when the agent is created:
+`command`, `args`, `cwd`, and `env` apply to stdio; `url`, `headers`,
+`timeout`, `sse_read_timeout`, and `auth` apply to `sse` and
+`streamable_http`; `connect_timeout` (default 30 s) and `call_timeout` apply to
+all. An unknown or inapplicable setting raises a `ValueError` naming the server.
+See [MCP Tools](/docs/core-concepts/mcp) for every setting, OAuth, errors, and
+reconnects.
+
 ---
 
 ## 5. Persistence Configuration

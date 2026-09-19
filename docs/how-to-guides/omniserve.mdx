@@ -221,7 +221,9 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 `/ready` returns `ready: true` only after the FastAPI lifespan has completed
 startup, the served agent is initialized, and any configured MCP servers are
 connected. Agents without MCP servers do not need an MCP client to pass
-readiness.
+readiness. The response's `mcp_servers` gives each configured server's status
+(`connected`, `disconnected`, `failed`, `not_connected`) and last error, so a
+single failed server among several is visible.
 
 ### Background Task Endpoints
 

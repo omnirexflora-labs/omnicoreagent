@@ -165,7 +165,9 @@ describing the harness the model ran with: model and generation settings (never
 credentials), step and token limits, context management, memory and tool
 offload settings, enabled features, governance policy hash, configuration
 fingerprints, the model-facing tool catalog (count, sorted names, providers, and
-schema digest), and the system prompt digest. The prompt text itself is recorded
+schema digest), the system prompt digest, and `mcp_servers`: each configured MCP
+server's status, reported name and version, protocol version, tool count,
+reconnects, and last error (never its command, URL, environment, or headers). The prompt text itself is recorded
 only with `capture: "full"`. The header lives in the event metadata, so it is
 recorded under every capture policy.
 
@@ -217,7 +219,17 @@ the others through event metadata, which is kept under every capture policy:
   for internal summarization.
 
 Under governance, tool arguments and delegation parameters are recorded
-redacted, and policy decisions carry the `tool_call_id` they authorized.
+redacted, and policy decisions carry the `tool_call_id` they authorized (and
+the `mcp_server` for MCP calls).
+
+MCP tool calls are recorded like local ones, as `mcp.tool.call` spans and
+`mcp_tool_call` / `mcp_tool_result` / `mcp_tool_error` events. In the
+trajectory each call names its `provider` (`mcp`) and `server` (the configured
+server name). A protocol error keeps its MCP code in the error message, for
+example `MCP error -32602`. When a dropped session is reconnected during a
+call, an `mcp_reconnect` event records it on that call (outcome `reconnected`
+or `failed`, the reason the session dropped, and any reconnect error); the
+trajectory lists these under the call's `reconnects`.
 
 ### Run totals
 

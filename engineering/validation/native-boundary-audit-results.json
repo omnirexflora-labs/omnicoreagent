@@ -1,40 +1,49 @@
 {
   "mcp_native_catalog": {
-    "passed": false,
-    "error": "'Tool' object has no attribute 'inputSchema'"
+    "passed": true
   },
   "mcp_public_tool_listing": {
-    "passed": false,
-    "error": "'Tool' object has no attribute 'inputSchema'"
+    "passed": true
   },
   "mcp_error_and_structured_result": {
-    "passed": false,
+    "passed": true,
     "actual": {
       "tool_name": "remote_echo",
       "args": {},
-      "status": "success",
-      "data": "synthetic failure",
-      "message": null
+      "status": "error",
+      "data": {
+        "structuredContent": {
+          "code": 42
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "synthetic failure"
+          }
+        ]
+      },
+      "message": "synthetic failure"
     }
   },
   "real_stdio_connection": {
-    "passed": false,
-    "outcome": "Failed to connect to server: unsupported operand type(s) for +: 'float' and 'datetime.timedelta'"
+    "passed": true,
+    "outcome": "native-audit connected successfully"
   },
   "http_transport_api": {
-    "passed": false,
-    "error": "streamable_http_client() got an unexpected keyword argument 'headers'"
+    "passed": true
   },
   "business_dictionary_preserved": {
-    "passed": false,
-    "actual": "value"
+    "passed": true,
+    "actual": {
+      "data": "value",
+      "unit": "kg"
+    }
   },
   "provider_specific_fields_retained": {
     "passed": false
   },
   "same_name_servers_have_distinct_loop_identity": {
-    "passed": false,
-    "loop_detected_after_six_alternating_server_results": true,
-    "note": "The recorder cannot accept provider/server identity; both bindings collapse to lookup."
+    "passed": true,
+    "note": "Five distinct server identities; transport-independent detector probe."
   }
 }

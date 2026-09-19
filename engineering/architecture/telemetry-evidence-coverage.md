@@ -41,6 +41,7 @@ links were added in B5 and are asserted by the observation tests below.
 | Delivery: SSE resume replays once, large backlog then live, `Last-Event-ID`, bounded duplicate tracking | `serve/sse.py`, `serve/routes/sessions.py` | `test_omniserve_sse.py::test_stream_session_events_resumes_after_supplied_cursor`, `::test_stream_session_events_resumes_large_backlog_then_follows_live`, `::test_sse_seen_events_memory_is_bounded` |
 | Privacy: redaction before storage; identifiers, digests, UUIDs, and dates never altered | `privacy.py`, `redaction.py` | `test_privacy_boundaries.py::test_privacy_filter_never_corrupts_generated_identifiers_or_digests`, `::test_privacy_filter_never_alters_hyphenated_identifiers`, `::test_privacy_filter_keeps_dates_and_timestamps_intact`, `::test_privacy_filter_still_redacts_standalone_card_numbers` |
 | Trajectory reader | `trajectory.build_trajectory`, `agent.get_trajectory`, `/telemetry/runs/{run_id}/trajectory`, `/telemetry/traces/{trace_id}/trajectory` | `test_telemetry_trajectory.py` (all tests) |
+| MCP: server status, calls, errors, reconnects | Run header `mcp_servers` from `MCPClient.server_status()`; `mcp.tool.call` spans; `mcp_reconnect` events on the affected call; trajectory `server` and `reconnects`; `/ready` `mcp_servers` | `test_telemetry_mcp.py` (all tests); the trajectory acceptance's MCP step (structured success, tool error, protocol error, per-call timeout, malformed arguments) |
 | Portable evidence contract | `OmniCoreEvidenceAdapter`, `GenericTraceEvidenceAdapter`, packaged JSON Schema | `test_telemetry_portable_contract.py` (all tests); `test_telemetry_evidence.py` |
 
 ## Known boundaries
@@ -51,7 +52,8 @@ links were added in B5 and are asserted by the observation tests below.
   capture policy; the trace records them as `not_recorded` and is `partial`.
 - A truncated payload cannot be recovered; the truncation is recorded.
 - The raw tool result before guardrail scrubbing is kept only as a hash.
-- MCP tools are not covered; the MCP v2 adapter is planned separately
-  ([MCP v2 migration plan](mcp-v2-migration-plan.md)).
+- MCP resources, prompts, and server-initiated sampling, elicitation, and roots
+  are not supported, so they are not recorded
+  ([MCP v2 completion plan](mcp-v2-completion-plan.md)).
 - Harbor trials, verifiers, and the evaluation layer consume this contract
   later; they are not runtime emitters.

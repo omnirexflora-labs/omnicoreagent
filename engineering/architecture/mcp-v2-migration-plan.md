@@ -1,7 +1,12 @@
 # MCP v2 SDK migration plan
 
+> **Resolved (2026-09-19).** Every breakage below was fixed by the
+> [MCP v2 completion plan](mcp-v2-completion-plan.md) (units M1 to M8), which
+> also records the maintainer's answers to the open questions at the end.
+> This document is kept as the research record.
+
 Research record, 2026-09-18, branch `refactor/native-tool-runtime`. No MCP
-code has changed yet. MCP work starts only after the telemetry trajectory plan
+code had changed yet. MCP work starts only after the telemetry trajectory plan
 ([telemetry-trajectory-completion-plan.md](telemetry-trajectory-completion-plan.md))
 passes Phase C.
 

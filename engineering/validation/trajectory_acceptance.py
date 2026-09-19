@@ -615,13 +615,31 @@ def run_live(env_file: str | None) -> dict[str, Any]:
             os.environ["OMNICOREAGENT_WORKSPACE_DIR"] = workspace
             agent = OmniCoreAgent(
                 name="live-acceptance",
-                system_instruction="Use the lookup_order tool, then answer in one short sentence.",
+                system_instruction=(
+                    "Use lookup_order for orders and weather for the weather, "
+                    "then answer in one short sentence."
+                ),
                 model_config={"provider": "openai", "model": model, "api_key": key},
                 local_tools=tools,
+                mcp_tools=[
+                    {
+                        "name": MCP_SERVER,
+                        "transport_type": "stdio",
+                        "command": sys.executable,
+                        "args": [str(ROOT / "engineering" / "validation" / "fixtures" / "acceptance_mcp_server.py")],
+                    }
+                ],
                 agent_config={"guardrail_mode": "off", "max_steps": 4},
                 telemetry_config={"capture": "full"},
             )
-            result = await agent.run("What is the status of order A-17?", session_id="live-acceptance")
+            await agent.connect_mcp_servers()
+            try:
+                result = await agent.run(
+                    "What is the status of order A-17, and what is the weather in Lagos?",
+                    session_id="live-acceptance",
+                )
+            finally:
+                await agent.cleanup_mcp_servers()
             trace = await agent.telemetry_store.get_trace(result["trace_id"])
             trajectory = await agent.get_trajectory(result["trace_id"])
             evidence = OmniCoreEvidenceAdapter().import_trace(trace).model_dump()
@@ -632,8 +650,15 @@ def run_live(env_file: str | None) -> dict[str, Any]:
             assert key not in dump, "API key found in the trace"
             assert trajectory["status"] == "completed"
             assert trajectory_event_ids(trajectory) == {e.event_id for e in trace.events}
-            assert calls and calls[0]["outcome"] == "success", calls
-            assert turns[1]["new_observation_event_ids"] == [calls[0]["observation"]["event_id"]]
+            by_tool = {call["tool_name"]: call for call in calls}
+            assert {"lookup_order", "weather"} <= set(by_tool), sorted(by_tool)
+            assert all(call["outcome"] == "success" for call in calls), calls
+            assert (by_tool["weather"]["provider"], by_tool["weather"]["server"]) == ("mcp", MCP_SERVER)
+            [mcp_server] = trajectory["harness"]["mcp_servers"]
+            assert mcp_server["status"] == "connected", mcp_server
+            # Every result reaches a later model turn exactly once.
+            delivered = [oid for turn in turns for oid in turn["new_observation_event_ids"]]
+            assert sorted(delivered) == sorted(c["observation"]["event_id"] for c in calls), delivered
             for turn in turns:
                 facts = turn["facts"]
                 assert facts["tokens"]["total"] > 0 and facts["provider_response_id"], facts
@@ -643,6 +668,8 @@ def run_live(env_file: str | None) -> dict[str, Any]:
                 "model": turns[0]["facts"]["provider_model"],
                 "steps": totals["steps"],
                 "tool_calls": totals["tool_calls"]["by_outcome"],
+                "calls": [(c["tool_name"], c["provider"], c["server"], c["outcome"]) for c in calls],
+                "mcp_server": {k: mcp_server[k] for k in ("status", "server_info", "protocol_version", "tool_count")},
                 "tokens": totals["tokens"],
                 "estimated_cost_usd": totals["estimated_cost_usd"],
                 "cost_complete": totals["cost_complete"],

@@ -73,24 +73,26 @@ model call, which is what full capture promises.
 
 ## Live result
 
-A real model through LiteLLM (Python 3.12.13, LiteLLM 1.100.1, `gpt-5.4-mini`)
-with one local tool, full capture:
+A real model through LiteLLM (Python 3.12.13, LiteLLM 1.101.0, mcp 2.2.0,
+`gpt-5.4-mini`) with one local tool and the acceptance MCP server over stdio,
+full capture, asked "What is the status of order A-17, and what is the weather
+in Lagos?":
 
 | Fact | Value |
 | --- | --- |
 | Steps | 2 |
-| Tool calls | 1 success, delivered to the next model call |
-| Tokens | 3,028 input, 32 output, 3,060 total, 2,048 cached input |
-| Estimated cost | $0.0010326 (every call priced) |
+| Tool calls | 2 success in one turn: `lookup_order` (local) and `weather` (MCP, server `acceptance_mcp`), both delivered to the next model call |
+| MCP server in the header | connected; `acceptance-mcp` 1.0.0, protocol `2025-11-25`, 4 tools |
+| Tokens | 3,260 input, 74 output, 3,334 total, 1,536 cached input |
+| Estimated cost | $0.0017412 (every call priced) |
 | Provider response IDs | 2 distinct |
-| Final answer | "Order A-17 is shipped." |
-| Events accounted for | 25 of 25 |
+| Final answer | "Order A-17 is shipped, and the weather in Lagos is 31°C and clear." |
+| Events accounted for | 31 of 31 |
 | Evidence | `complete`, no capture gaps |
 | API key in the trace | No |
 
 The portable evidence document of the live run validates against the
-published schema. (This live run predates the MCP step; the live MCP run is
-part of the MCP v2 completion plan's final unit.)
+published schema.
 
 ## Found during C1
 

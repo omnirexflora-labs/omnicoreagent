@@ -18,7 +18,7 @@ The cleanup accompanying this report does not repair those open defects.
 | Local single/multiple native calls | Implemented and tested; actual functions execute with JSON arguments and provider IDs. | `tests/test_native_runtime.py`; previous real Luna/LiteLLM run below. |
 | Parallel tool execution | Yes. `execute_native_turn` creates a task per call, gathers them, and persists results in request order. The added rendezvous test proves two different functions start before either finishes; this is stronger than counting two requests. | `test_native_batch_starts_distinct_tools_before_either_completes`; [runner](../../src/omnicoreagent/core/agents/native_tools.py). |
 | Failure/timeout within a batch | Tests preserve successful siblings, correlated failures, and cancellation history. Async timeout does not establish that a synchronous worker thread stops. | Native runtime and agent stream tests; [registry](../../src/omnicoreagent/core/tools/local_tools_registry.py). |
-| MCP | **Not working with the installed SDK at the tested boundaries.** Real stdio connection, SDK tool objects, error results and HTTP transport construction fail diagnostics. | [Diagnostic results](../validation/native-boundary-audit-results.json). Previous full-stack tests use a fake session. |
+| MCP | **Resolved (2026-09-19).** Was not working with the installed SDK; fixed by the [MCP v2 completion plan](mcp-v2-completion-plan.md). stdio, streamable HTTP, and SSE (with OAuth) work against real servers, including the official reference server; every MCP boundary check in the audit passes. | [Diagnostic results](../validation/native-boundary-audit-results.json); real-server tests `tests/test_mcp_*.py`; [interop check](../validation/mcp_interop.py). |
 | Workspace/artifact/skills | Native registry/authority/result paths remain in use. Workspace and offload effects have offline tests and previous live deep-agent evidence. Skill registration/authority has offline evidence, not a new live-model skill run. | Governed runner, workspace, skill and real-application tests; earlier live report. |
 | Configured children and dynamic deep agent | Delegate functions and typed `spawn_subagents` arrays reach ordinary child runs. Parallel child batches remain; they are not the deleted ParallelAgent workflow. | Native/subagent/stream suites; previous live configured-child and dynamic-child scenarios. |
 | History/context/offloading | Native assistant calls and `role=tool` results survive tested stores/context grouping. These remain necessary; native APIs require matching result IDs. | History/interaction/native tests, including continued sessions and results before offload. |
@@ -142,7 +142,9 @@ path was found. Historical discovery documents and literal-XML tests remain evid
 - `engineering/validation/native_boundary_audit.py` ran without a model or external
   service. It used real installed MCP types and launched the synthetic stdio server
   in `fixtures/native_audit_mcp_server.py`. The committed JSON records **failures**;
-  it is a diagnostic, not a green acceptance gate. HTTP fails at API binding before
+  it is a diagnostic, not a green acceptance gate. (Re-run 2026-09-19 after the
+  MCP v2 plan: 7 of 8 pass; `provider_specific_fields_retained` still fails, the
+  provider continuation gap in the row above.) HTTP fails at API binding before
   any network request. A separate public `connect_to_servers()` probe returned with
   empty sessions/tools, demonstrating silent unavailability.
 - The earlier 1,039-pass full suite at `ab7552c` remains historical evidence. It did
