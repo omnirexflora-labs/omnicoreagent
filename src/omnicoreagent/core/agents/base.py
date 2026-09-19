@@ -19,7 +19,7 @@ from omnicoreagent.core.types import (
 )
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.governed_tool_runner import GovernedToolRunner
-from omnicoreagent.core.runs import RunSuspended, current_run
+from omnicoreagent.core.runs import RunInterrupted, RunSuspended, current_run
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.logging import logger
@@ -327,6 +327,37 @@ class BaseReactAgent:
             privacy_filter=registry.privacy_filter,
         )
 
+    async def _deliver_steering(
+        self,
+        message: dict[str, Any],
+        *,
+        session_state: SessionState,
+        session_id: str,
+        add_message_to_history: Callable,
+        telemetry_recorder: Any,
+    ) -> None:
+        """A steering message becomes the next user message of the run."""
+        content = message["content"]
+        session_state.messages.append(Message(role="user", content=content))
+        await add_message_to_history(
+            role="user",
+            content=content,
+            session_id=session_id,
+            metadata={
+                "agent_name": self.agent_name,
+                "kind": "steering",
+                "steer_id": message["id"],
+                "sender": message.get("sender"),
+            },
+        )
+        if telemetry_recorder is not None:
+            await telemetry_recorder.emit_event(
+                "run_steered",
+                actor=TelemetryActor(type=ActorType.USER, name=message.get("sender")),
+                input={"message": content},
+                metadata={"steer_id": message["id"], "sender": message.get("sender")},
+            )
+
     async def _run(
         self,
         system_prompt: str,
@@ -441,8 +472,24 @@ class BaseReactAgent:
                 session_state.state not in [AgentState.FINISHED]
                 and current_steps < self.max_steps
             ):
-                current_steps += 1
                 run = current_run()
+                if run is not None:
+                    # Step boundary: take messages steered to this run, and
+                    # stop here if someone asked the run to.
+                    steered, stop = await run.check_external()
+                    if stop:
+                        interrupted = RunInterrupted("Run interrupted at a step boundary")
+                        interrupted.usage = run_usage
+                        raise interrupted
+                    for message in steered:
+                        await self._deliver_steering(
+                            message,
+                            session_state=session_state,
+                            session_id=session_id,
+                            add_message_to_history=add_message_to_history,
+                            telemetry_recorder=telemetry_recorder,
+                        )
+                current_steps += 1
                 if run is not None:
                     await run.step(current_steps)
                 step_span = None

@@ -105,3 +105,27 @@ Running a finished or failed run ID again starts a new attempt on the same
 record; the record keeps a summary of the earlier attempts. For background
 agents, keep `run_lease_seconds` at or below the background lease so a
 recovered background run is not refused as still running.
+
+## Steering and interrupting a run
+
+Send a running run a message; it arrives as a user message at the run's next
+step boundary (never in the middle of a model or tool call):
+
+```python
+await agent.steer(run_id, "also include the Q3 numbers", sender="alice")
+```
+
+A steering message is user input: the injection guardrail checks it before it
+is queued, and a blocked message never reaches the run. It is recorded in the
+run's history (`kind: "steering"`) and trace (`run_steered`). A message sent to
+a run that is waiting for approval or interrupted is delivered when it resumes.
+Only callers of your application can steer a run; tool output never can.
+
+Stop a run at its next step boundary, and continue it later:
+
+```python
+await agent.interrupt(run_id)       # the run returns status "interrupted"
+result = await agent.resume(run_id)
+```
+
+Unlike cancelling, an interrupted run keeps everything it has done.

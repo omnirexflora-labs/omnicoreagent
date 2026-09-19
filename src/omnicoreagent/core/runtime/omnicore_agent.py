@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 import uuid
 
 from omnicoreagent.core.runs import (
+    RunInterrupted,
     RunStateUnsupported,
     RunSuspended,
     RunTracker,
@@ -844,6 +845,27 @@ class OmniCoreAgent:
             formatted_response["trace_id"] = trace_context.trace_id
             formatted_response["run_id"] = run_id
             return self.privacy_filter.redact(formatted_response, boundary="public")
+        except RunInterrupted as interrupted:
+            # Stopped at a step boundary on request; resume() continues it.
+            await run_tracker.finish("interrupted", usage=getattr(interrupted, "usage", None))
+            await self.telemetry_recorder.emit_event(
+                "run_interrupted", actor=self._telemetry_actor(), metadata={"run_id": run_id}
+            )
+            trace_finalizing = True
+            await self.telemetry_recorder.end_trace(
+                status=TraceStatus.SUSPENDED, output={"status": "interrupted"}
+            )
+            return self.privacy_filter.redact(
+                {
+                    "response": None,
+                    "status": "interrupted",
+                    "session_id": session_id,
+                    "agent_name": self.name,
+                    "run_id": run_id,
+                    "trace_id": trace_context.trace_id,
+                },
+                boundary="public",
+            )
         except RunSuspended as suspended:
             # Waiting for a person: this trace segment ends; resume() starts
             # the next one for the same run.
@@ -1016,6 +1038,62 @@ class OmniCoreAgent:
         return await self.run(
             None, session_id=record["session_id"], run_id=run_id, on_event=on_event, _resume=record
         )
+
+    async def steer(
+        self, run_id: str, message: str, *, sender: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Send a message to a run; it arrives as a user message at the run's
+        next step boundary (or when a waiting or interrupted run resumes).
+
+        The message is user input: the injection guardrail checks it first,
+        and a blocked message is never queued.
+        """
+        from omnicoreagent.core.runs import update_from_outside
+        from uuid import uuid4
+
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError("The steering message is empty")
+        record = await self.get_run(run_id)
+        if record is None:
+            raise LookupError(f"No run {run_id}")
+        if record["status"] not in {"running", "awaiting_approval", "interrupted"}:
+            raise ValueError(f"Run {run_id} is {record['status']}; it cannot be steered")
+        if self.guardrail is not None:
+            check = self.guardrail.check(message)
+            if not check.is_safe:
+                runtime_logger().warning(f"Steering message for {run_id} blocked by guardrail")
+                return {
+                    "status": "blocked",
+                    "guardrail_result": check.to_dict() if hasattr(check, "to_dict") else None,
+                }
+        entry = {
+            "id": f"steer_{uuid4().hex}",
+            "content": message,
+            "sender": sender,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "delivered": False,
+        }
+        await update_from_outside(
+            self.memory_router, run_id, lambda r: r.setdefault("inbox", []).append(entry)
+        )
+        return {"status": "queued", "message_id": entry["id"]}
+
+    async def interrupt(self, run_id: str) -> Dict[str, Any]:
+        """Ask a running run to stop at its next step boundary; it becomes
+        ``interrupted`` and ``resume`` continues it."""
+        from omnicoreagent.core.runs import update_from_outside
+
+        record = await self.get_run(run_id)
+        if record is None:
+            raise LookupError(f"No run {run_id}")
+        if record["status"] != "running":
+            raise ValueError(
+                f"Run {run_id} is {record['status']}; only a running run can be interrupted"
+            )
+        await update_from_outside(
+            self.memory_router, run_id, lambda r: r.__setitem__("interrupt_requested", True)
+        )
+        return {"status": "interrupt_requested", "run_id": run_id}
 
     async def resolve_approval(
         self,

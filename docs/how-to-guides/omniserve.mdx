@@ -203,6 +203,8 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 | `GET` | `/runs/{run_id}` | Yes* | A run's durable record: status, step, usage, tool call states, approvals (never its saved conversation) |
 | `POST` | `/runs/{run_id}/approvals/{approval_id}` | Yes* | Decide an approval a paused run waits for: `{"decision": "approve" \| "deny", "approver", "note"?, "arguments"?}` |
 | `POST` | `/runs/{run_id}/resume` | Yes* | Continue a paused run once its approvals are decided |
+| `POST` | `/runs/{run_id}/steer` | Yes* | Send a running, waiting, or interrupted run a message for its next step: `{"message", "sender"?}` (422 if the guardrail blocks it) |
+| `POST` | `/runs/{run_id}/interrupt` | Yes* | Stop a running run at its next step boundary; resume continues it |
 | `GET` | `/health` | No | Health check |
 | `GET` | `/ready` | No | Readiness check |
 | `GET` | `/prometheus` | No | Prometheus metrics |

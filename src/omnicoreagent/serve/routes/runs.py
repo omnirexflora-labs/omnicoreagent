@@ -13,7 +13,13 @@ from omnicoreagent.core.runtime.deadline import (
 )
 from omnicoreagent.core.telemetry import TraceStatus
 
-from ..models import ApprovalDecisionRequest, ErrorResponse, RunRequest, RunResponse
+from ..models import (
+    ApprovalDecisionRequest,
+    ErrorResponse,
+    RunRequest,
+    RunResponse,
+    SteerRequest,
+)
 from ..serialization import normalize_run_result
 from ..sse import run_agent_stream
 from ..state import get_agent, get_agent_name, get_config, resolve_session_id
@@ -194,6 +200,43 @@ def create_runs_router() -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
         return _public_view(agent, approval)
+
+    @router.post(
+        "/runs/{run_id}/steer",
+        summary="Steer a run",
+        description=(
+            "Send a message to a running, waiting, or interrupted run; it arrives "
+            "as a user message at the run's next step boundary. The injection "
+            "guardrail checks it first (422 when blocked)."
+        ),
+        responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+    )
+    async def steer_run(request: Request, run_id: str, body: SteerRequest) -> dict:
+        agent = get_agent(request)
+        try:
+            result = await agent.steer(run_id, body.message, sender=body.sender)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        if result.get("status") == "blocked":
+            raise HTTPException(status_code=422, detail="Blocked by the injection guardrail")
+        return result
+
+    @router.post(
+        "/runs/{run_id}/interrupt",
+        summary="Interrupt a run",
+        description="Stop a running run at its next step boundary; resume continues it.",
+        responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+    )
+    async def interrupt_run(request: Request, run_id: str) -> dict:
+        agent = get_agent(request)
+        try:
+            return await agent.interrupt(run_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
 
     @router.post(
         "/runs/{run_id}/resume",

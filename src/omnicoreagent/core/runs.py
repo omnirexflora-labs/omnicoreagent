@@ -49,6 +49,10 @@ class RunSuspended(Exception):
         self.approvals = approvals
 
 
+class RunInterrupted(Exception):
+    """Someone asked the run to stop at its next step boundary."""
+
+
 class RunStateUnsupported(NotImplementedError):
     """The memory store does not keep run state."""
 
@@ -90,6 +94,9 @@ class RunTracker:
         self.lease_seconds = lease_seconds
         # This process's claim on the run; a recovered run gets a new owner.
         self.owner = f"owner_{uuid4().hex}"
+        # The owner stored when this tracker loaded the record (a resume),
+        # until this tracker's first save replaces it.
+        self._loaded_owner: str | None = None
         # A store (or router) without async run-state methods, such as one
         # written before durable runs, keeps working; its runs are not durable.
         self.enabled = supports_run_state(store)
@@ -119,6 +126,10 @@ class RunTracker:
             "lease_seconds": lease_seconds,
             "attempt": 1,
             "previous_attempts": [],
+            # Written by others while the run is live: steering messages and
+            # a request to stop at the next step.
+            "inbox": [],
+            "interrupt_requested": False,
             "created_at": _now(),
             "updated_at": None,
         }
@@ -139,12 +150,15 @@ class RunTracker:
             lease_seconds=lease_seconds,
         )
         tracker._version = record.pop("version")
+        tracker._loaded_owner = record.get("owner")
         tracker.record = {
             "attempt": 1,
             "previous_attempts": [],
+            "inbox": [],
             **record,
             "status": "running",
             "lease_seconds": lease_seconds,
+            "interrupt_requested": False,
         }
         return tracker
 
@@ -186,14 +200,69 @@ class RunTracker:
             self.record["owner"] = self.owner
             self.record["heartbeat_at"] = self.record["updated_at"]
         try:
-            self._version = await self.store.save_run_state(
-                dict(self.record), expected_version=self._version
-            )
+            for _ in range(5):
+                try:
+                    self._version = await self.store.save_run_state(
+                        dict(self.record), expected_version=self._version
+                    )
+                    return
+                except RunStateConflict:
+                    # Someone else wrote the record (a steering message, an
+                    # interrupt). Take their fields and save again, unless the
+                    # run now belongs to another process.
+                    if not await self._merge_external():
+                        raise
+            raise RunStateConflict(f"Run {self.run_id} keeps changing; could not save")
         except RunStateUnsupported:
             # A custom memory store without run state: the run still works,
             # it is just not durable.
             self.enabled = False
             logger.debug(f"Run state not kept for {self.run_id}: the memory store has none")
+
+    async def _merge_external(self) -> bool:
+        """Merge fields other writers own into this record; False on takeover."""
+        if self._version is None:
+            return False  # creating: the record exists, nothing to merge
+        stored = await self.store.get_run_state(self.run_id)
+        if stored is None or stored.get("owner") not in {None, self.owner, self._loaded_owner}:
+            return False
+        mine = {m["id"]: m for m in self.record.get("inbox", [])}
+        merged = []
+        for message in stored.get("inbox", []):
+            own = mine.pop(message["id"], None)
+            # Once delivered here, this process's copy (text removed) wins.
+            merged.append(own if own is not None and own.get("delivered") else message)
+        merged.extend(mine.values())
+        self.record["inbox"] = merged
+        self.record["interrupt_requested"] = bool(
+            stored.get("interrupt_requested") or self.record.get("interrupt_requested")
+        )
+        self._version = stored["version"]
+        return True
+
+    async def check_external(self) -> tuple[list[dict[str, Any]], bool]:
+        """At a step boundary: messages steered to this run, and whether it was
+        asked to stop. Delivered messages are marked so they arrive once."""
+        if not self.enabled:
+            return [], False
+        async with self._lock:
+            stored = await self.store.get_run_state(self.run_id)
+            if stored is None:
+                return [], False
+            if stored["version"] != self._version:
+                await self._merge_external()
+            waiting = [m for m in self.record.get("inbox", []) if not m.get("delivered")]
+            delivered = [dict(m) for m in waiting]
+            for message in waiting:
+                # The text now lives in the run's history (redacted as history
+                # is); the inbox keeps only a digest of it.
+                message["delivered"] = True
+                message["delivered_at"] = _now()
+                message["content_digest"] = arguments_digest(message.get("content"))
+                message["content"] = None
+            if waiting:
+                await self._save()
+            return delivered, bool(self.record.get("interrupt_requested"))
 
     async def start(self, trace_id: str | None) -> None:
         async with self._lock:
@@ -308,6 +377,24 @@ class RunTracker:
             yield self
         finally:
             _CURRENT.reset(token)
+
+
+async def update_from_outside(store: Any, run_id: str, change) -> dict[str, Any]:
+    """Change a run's record from outside the process running it (steering,
+    interrupt). ``change(record)`` edits the record; a concurrent save by the
+    run is retried against the fresh record."""
+    for _ in range(10):
+        record = await store.get_run_state(run_id)
+        if record is None:
+            raise LookupError(f"No run {run_id}")
+        version = record.pop("version")
+        result = change(record)
+        try:
+            await store.save_run_state(record, expected_version=version)
+            return result
+        except RunStateConflict:
+            await asyncio.sleep(0.01)
+    raise RunStateConflict(f"Run {run_id} keeps changing; try again")
 
 
 def lease_expired(record: dict[str, Any], now: datetime | None = None) -> bool:

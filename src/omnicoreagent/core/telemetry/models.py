@@ -193,6 +193,8 @@ FOUNDATION_EVENT_TYPES = frozenset(
         "sandbox_workspace_sync",
         "run_suspended",
         "run_resumed",
+        "run_steered",
+        "run_interrupted",
         "policy_violation",
         "secret_access_denied",
         "secret_access_brokered",

@@ -84,3 +84,21 @@ def test_the_sse_stream_reports_a_paused_run(tmp_path):
     assert payload["status"] == "awaiting_approval"
     assert payload["approvals"][0]["tool_name"] == "delete_file"
     assert any(b.startswith("event: run_suspended") for b in events)
+
+
+def test_a_paused_run_is_steered_over_http_and_hears_it_on_resume(tmp_path):
+    agent, server = _server(tmp_path, WRITE_AND_DELETE, DELETE, "done")
+    with TestClient(server.app) as client:
+        paused = _pause(client)
+        (approval,) = paused["approvals"]
+        run = f"/runs/{paused['run_id']}"
+
+        steered = client.post(f"{run}/steer", json={"message": "keep a backup", "sender": "alice"})
+        assert steered.status_code == 200 and steered.json()["status"] == "queued"
+        assert client.post(f"{run}/interrupt").status_code == 409  # only a running run
+        assert client.post("/runs/run_nope/steer", json={"message": "x"}).status_code == 404
+        client.post(f"{run}/approvals/{approval['approval_id']}", json={"decision": "approve", "approver": "a"})
+        assert client.post(f"{run}/resume").status_code == 200
+
+    model = agent.llm_connection
+    assert "keep a backup" in json.dumps(model.calls[-1])

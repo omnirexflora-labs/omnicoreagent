@@ -137,6 +137,13 @@ class ApprovalDecisionRequest(BaseModel):
     )
 
 
+class SteerRequest(BaseModel):
+    """A message for a run, delivered at its next step boundary."""
+
+    message: str = Field(..., min_length=1, description="The message for the run")
+    sender: Optional[str] = Field(None, description="Who sent it (recorded)")
+
+
 class HealthResponse(BaseModel):
     """Response model for health check endpoint."""
 
