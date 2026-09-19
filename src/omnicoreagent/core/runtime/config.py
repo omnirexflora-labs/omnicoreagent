@@ -79,8 +79,9 @@ class MCPToolConfig:
     cwd: str | None = None
     headers: dict[str, str] | None = None
     env: dict[str, str] | None = None
-    timeout: int | None = 60
-    sse_read_timeout: int | None = 120
+    # HTTP transports only; the transports default them to 60 s and 120 s.
+    timeout: float | None = None
+    sse_read_timeout: float | None = None
     auth: dict[str, Any] | None = None
     # Transport, handshake, and tool listing must finish within this.
     connect_timeout: float | None = 30.0
@@ -88,7 +89,7 @@ class MCPToolConfig:
     call_timeout: float | None = None
 
     def __post_init__(self):
-        self.transport_type = TransportType(self.transport_type)
+        self.transport_type = _transport_type(self.transport_type, self.name)
         if not self.name:
             self.name = _default_mcp_server_name(self)
 
@@ -293,18 +294,103 @@ def normalize_model_config(config: dict[str, Any] | ModelConfig) -> dict[str, An
     return data
 
 
+_MCP_COMMON_FIELDS = frozenset({"name", "transport_type", "connect_timeout", "call_timeout"})
+_MCP_STDIO_FIELDS = frozenset({"command", "args", "cwd", "env"})
+_MCP_HTTP_FIELDS = frozenset({"url", "headers", "timeout", "sse_read_timeout", "auth"})
+_MCP_AUTH_FIELDS = frozenset({"method", "callback_port", "callback_timeout"})
+
+
+def _transport_type(value: Any, name: str | None) -> TransportType:
+    text = getattr(value, "value", value)
+    text = "streamable_http" if text == "streamable-http" else text
+    try:
+        return TransportType(text)
+    except ValueError:
+        supported = ", ".join(t.value for t in TransportType)
+        raise ValueError(
+            f"MCP server {name!r}: Unsupported MCP transport_type {text!r}. "
+            f"Supported: {supported}"
+        ) from None
+
+
+def _positive(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+
+
+def _string_map(value: Any) -> bool:
+    return isinstance(value, dict) and all(
+        isinstance(k, str) and isinstance(v, str) for k, v in value.items()
+    )
+
+
+def _validate_mcp_server(data: dict[str, Any]) -> None:
+    """Reject settings that are wrong or that do nothing for the transport."""
+    name = data.get("name")
+
+    def fail(message: str) -> None:
+        raise ValueError(f"MCP server {name!r}: {message}")
+
+    transport = TransportType(data["transport_type"])
+    other = _MCP_HTTP_FIELDS if transport == TransportType.STDIO else _MCP_STDIO_FIELDS
+    other_names = "stdio" if transport != TransportType.STDIO else "sse, streamable_http"
+    for field_name in sorted(other & set(data)):
+        fail(f"'{field_name}' does not apply to {transport.value} (it applies to {other_names})")
+
+    if transport == TransportType.STDIO:
+        if not data.get("command"):
+            fail("command is required for stdio transport")
+    else:
+        url = data.get("url")
+        if not url:
+            fail(f"url is required for {transport.value} transport")
+        if not str(url).startswith(("http://", "https://")):
+            fail("url must start with http:// or https://")
+
+    if "args" in data and not (
+        isinstance(data["args"], list) and all(isinstance(a, str) for a in data["args"])
+    ):
+        fail("args must be a list of strings")
+    for field_name in ("env", "headers"):
+        if field_name in data and not _string_map(data[field_name]):
+            fail(f"{field_name} must map strings to strings")
+    for field_name in ("timeout", "sse_read_timeout", "connect_timeout", "call_timeout"):
+        if field_name in data and not _positive(data[field_name]):
+            fail(f"{field_name} must be a positive number of seconds")
+
+    auth = data.get("auth")
+    if auth is not None:
+        if not isinstance(auth, dict):
+            fail("auth must be a mapping such as {'method': 'oauth'}")
+        for key in sorted(set(auth) - _MCP_AUTH_FIELDS):
+            fail(f"Unknown auth setting {key!r}. Allowed: {', '.join(sorted(_MCP_AUTH_FIELDS))}")
+        if auth.get("method") != "oauth":
+            fail("auth method must be 'oauth' (use headers for a static token)")
+        port = auth.get("callback_port")
+        if port is not None and not (
+            isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535
+        ):
+            fail("auth callback_port must be an integer from 1 to 65535")
+        if "callback_timeout" in auth and not _positive(auth["callback_timeout"]):
+            fail("auth callback_timeout must be a positive number of seconds")
+
+
 def normalize_mcp_tool_config(config: dict[str, Any] | MCPToolConfig) -> dict[str, Any]:
-    tool = config if isinstance(config, MCPToolConfig) else MCPToolConfig(**config)
+    """Validate one MCP server's settings and return them as a plain mapping."""
+    if isinstance(config, MCPToolConfig):
+        tool = config
+    else:
+        known = _MCP_COMMON_FIELDS | _MCP_STDIO_FIELDS | _MCP_HTTP_FIELDS
+        for key in sorted(set(config) - known):
+            raise ValueError(
+                f"MCP server {config.get('name')!r}: Unknown MCP server setting {key!r}. "
+                f"Allowed: {', '.join(sorted(known))}"
+            )
+        tool = MCPToolConfig(**config)
     data = asdict(tool)
     data["transport_type"] = tool.transport_type.value
-
-    if tool.transport_type in {TransportType.SSE, TransportType.STREAMABLE_HTTP}:
-        if not tool.url:
-            raise ValueError(f"url is required for {tool.transport_type.value} transport")
-    elif tool.transport_type == TransportType.STDIO and not tool.command:
-        raise ValueError("command is required for stdio transport")
-
-    return {key: value for key, value in data.items() if value is not None}
+    data = {key: value for key, value in data.items() if value is not None}
+    _validate_mcp_server(data)
+    return data
 
 
 def normalize_mcp_tools(

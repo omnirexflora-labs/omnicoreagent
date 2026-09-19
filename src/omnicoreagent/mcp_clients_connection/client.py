@@ -106,12 +106,13 @@ class MCPClient:
         self.state.added_servers_names = value
 
     def _normalize_servers(self, servers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        from omnicoreagent.core.runtime.config import normalize_mcp_tool_config
+
         normalized = []
         for server in servers:
-            server_config = dict(server)
-            if not server_config.get("name"):
+            if not server.get("name"):
                 raise ValueError("Each MCP server config requires a name")
-            normalized.append(server_config)
+            normalized.append(normalize_mcp_tool_config(server))
         return normalized
 
     def _server_config(self, name: str) -> dict[str, Any]:

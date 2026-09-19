@@ -1917,7 +1917,7 @@ requires-dist = [
     { name = "markdown", marker = "extra == 'examples'", specifier = ">=3.10.3" },
     { name = "matplotlib", marker = "extra == 'all'", specifier = ">=3.11.2" },
     { name = "matplotlib", marker = "extra == 'examples'", specifier = ">=3.11.2" },
-    { name = "mcp", extras = ["cli"], specifier = ">=2.2.0" },
+    { name = "mcp", extras = ["cli"], specifier = ">=2.2.0,<3" },
     { name = "motor", marker = "extra == 'all'", specifier = ">=3.7.1" },
     { name = "motor", marker = "extra == 'mongodb'", specifier = ">=3.7.1" },
     { name = "numpy", marker = "extra == 'all'", specifier = ">=2.5.3" },
