@@ -1,0 +1,69 @@
+---
+title: "Sandbox Providers"
+description: "Where an agent's code runs: Docker, Modal, E2B, Daytona, Vercel, or your own service"
+---
+
+# Sandbox Providers
+
+Code the agent runs (`execute`, and skill scripts) runs in a sandbox. The
+provider decides where; everything else — governance, the workspace bridge,
+telemetry, your credentials — stays the same and stays in your process.
+
+```python
+agent_config = {
+    "governance_config": {
+        "enabled": True,
+        "sandbox_config": {"provider": "docker", "options": {"image": "python:3.12-slim"}},
+    },
+}
+```
+
+| Provider | Install | Runs where | Network |
+|---|---|---|---|
+| `docker` | `omnicoreagent[docker]` | Your machine or host | Off, or on; a host allowlist is refused |
+| `modal` | `omnicoreagent[modal]` | Modal | Off, on, or a host allowlist |
+| `e2b` | `omnicoreagent[e2b]` | E2B | Off or on; a host allowlist is refused |
+| `daytona` | `omnicoreagent[daytona]` | Daytona | Off, on, or a host allow list |
+| `vercel` | `omnicoreagent[vercel]` | Vercel Sandbox | Off or on |
+| `http` | built in | A service you run | Whatever your service enforces |
+
+Each hosted provider needs its own credentials in the environment (for
+example `modal token new`, `E2B_API_KEY`, `DAYTONA_API_KEY`, `VERCEL_TOKEN`).
+Those credentials stay in your process: they are never put inside a sandbox.
+
+Common options: `image`, `max_output_bytes`, and `timeout_seconds`. Docker
+adds `user`, `workdir_size`, `pids_limit`, `runtime` (`"runsc"` for gVisor)
+and `pull`; see [Security Model](/docs/core-concepts/security-model).
+
+## Your own sandbox service (`http`)
+
+For anything without a native adapter — a Cloudflare Worker using
+Cloudflare's Sandbox SDK, a service inside your own network — run a small
+service and point the agent at it:
+
+```python
+"sandbox_config": {
+    "provider": "http",
+    "options": {"base_url": "https://sandboxes.example.com", "token": "..."},
+}
+```
+
+The service answers five requests (each carrying your bearer token):
+
+| Request | Body | Answer |
+|---|---|---|
+| `POST /sessions` | `{"manifest": {image, working_dir, environment, network, resources}}` | `{"session_id": "..."}` |
+| `POST /sessions/{id}/exec` | `{command, cwd, env, timeout_seconds, stdin}` | `{exit_code, stdout, stderr, timed_out}` |
+| `PUT /sessions/{id}/files?path=` | raw bytes | 204 |
+| `GET /sessions/{id}/files?path=` | | raw bytes |
+| `DELETE /sessions/{id}` | | 204 |
+
+Your service is responsible for the isolation it promises: the manifest says
+what network policy the run expects, and a service that cannot honour it
+should refuse the session. Only the plain environment is sent; secret
+references stay in the harness.
+
+## Writing another provider
+
+`register_sandbox_provider("name", factory)` adds a provider of your own; it
+then works anywhere a provider name does (bring your own sandbox).

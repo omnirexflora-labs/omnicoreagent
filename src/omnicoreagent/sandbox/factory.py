@@ -24,9 +24,37 @@ def _modal(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
     return ModalSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
 
 
+def _e2b(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
+    from omnicoreagent.sandbox.e2b_sandbox import E2BSandboxRuntime
+
+    return E2BSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
+
+
+def _daytona(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
+    from omnicoreagent.sandbox.daytona_sandbox import DaytonaSandboxRuntime
+
+    return DaytonaSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
+
+
+def _vercel(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
+    from omnicoreagent.sandbox.vercel_sandbox import VercelSandboxRuntime
+
+    return VercelSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
+
+
+def _http(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
+    from omnicoreagent.sandbox.http_sandbox import HttpSandboxRuntime
+
+    return HttpSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
+
+
 _PROVIDERS: dict[str, SandboxProviderFactory] = {
     "docker": _docker,
     "modal": _modal,
+    "e2b": _e2b,
+    "daytona": _daytona,
+    "vercel": _vercel,
+    "http": _http,
     SandboxProvider.NONE.value: lambda options, telemetry_recorder: NoneSandboxRuntime(),
     SandboxProvider.LOCAL_TEST.value: lambda options, telemetry_recorder: LocalTestSandboxRuntime(
         telemetry_recorder=telemetry_recorder
