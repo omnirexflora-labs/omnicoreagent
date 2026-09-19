@@ -285,9 +285,10 @@ async def test_gvisor_is_an_option_and_a_missing_runtime_is_a_clear_error(sessio
     runtimes = (_client.info().get("Runtimes") or {})
     runtime = _runtime(runtime="runsc")
     if "runsc" not in runtimes:
+        before = {c.id for c in _leftovers()}
         with pytest.raises(SandboxUnsupportedError, match="runsc"):
             await session_of(runtime)
-        assert not _leftovers()
+        assert {c.id for c in _leftovers()} == before
         return
     session = await session_of(runtime)
     kernel = await _run(runtime, session, "dmesg")
@@ -317,10 +318,12 @@ async def test_sensitive_host_paths_are_never_mounted(source, session_of):
     path = os.path.expanduser(source)
     runtime = _runtime()
     manifest = SandboxManifest(workspace_mount=WorkspaceMount(source=path, target="/mnt/host"))
+    before = {c.id for c in _leftovers()}
 
     with pytest.raises(SandboxUnsupportedError, match="not be mounted"):
         await session_of(runtime, manifest)
-    assert not _leftovers()
+    # Compared with before, not required empty: other runs may have sandboxes.
+    assert {c.id for c in _leftovers()} == before
 
 
 @pytest.mark.asyncio

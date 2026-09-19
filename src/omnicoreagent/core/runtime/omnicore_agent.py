@@ -188,6 +188,8 @@ class OmniCoreAgent:
 
         self._create_agent()
         self._initialized = True
+        for warning in self._security_warnings():
+            runtime_logger().warning(f"{self.name}: {warning['message']}")
 
     def _create_agent(self):
         """Build and attach runtime components."""
@@ -480,6 +482,7 @@ class OmniCoreAgent:
             },
             "mcp_servers": self._mcp_server_status(),
             "guardrail": {"mode": metadata.get("guardrail_mode")},
+            "security_warnings": self._security_warnings(),
             "governance": {
                 "enabled": engine is not None,
                 "policy_hash": getattr(
@@ -492,6 +495,43 @@ class OmniCoreAgent:
                 "guardrail": metadata.get("guardrail_config_version"),
             },
         }
+
+    def _security_warnings(self) -> list[dict[str, str]]:
+        """Configurations where code runs with less protection than assumed."""
+        config = self.agent_config
+        governance = config.get("governance_config") or {}
+        engine = getattr(getattr(self, "agent", None), "governance_engine", None)
+        skill_manager = getattr(getattr(self, "agent", None), "skill_manager", None)
+        skills = bool(config.get("enable_agent_skills")) and bool(
+            getattr(skill_manager, "skills", None)
+        )
+        warnings = []
+        if engine is None:
+            if skills:
+                warnings.append(
+                    {
+                        "code": "ungoverned_host_scripts",
+                        "message": "Governance is off: skill scripts run on the host "
+                        "with no policy and no sandbox.",
+                    }
+                )
+            if governance.get("sandbox_config") or governance.get("sandbox_runtime"):
+                warnings.append(
+                    {
+                        "code": "sandbox_unused_without_governance",
+                        "message": "A sandbox is configured but governance is off, so "
+                        "nothing runs in it; enable governance to use it.",
+                    }
+                )
+        elif skills and not self.can_execute:
+            warnings.append(
+                {
+                    "code": "host_scripts_not_contained",
+                    "message": "Skill scripts run on the host: governed by policy but "
+                    "not contained by a sandbox.",
+                }
+            )
+        return warnings
 
     @property
     def can_execute(self) -> bool:
