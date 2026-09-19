@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+
+from omnicoreagent.core.continuation import strip_signed_id
 import hashlib
 from collections.abc import Callable
 from typing import Any
@@ -113,9 +115,20 @@ def render_message(message: Any) -> str:
     )
     calls = message_calls(record)
     if calls:
-        text += "\nTool requests: " + json.dumps(calls, ensure_ascii=False, default=str)
+        # Provider signatures mean nothing to a reader (or the summarizer).
+        readable = [
+            {
+                "id": strip_signed_id(call.get("id")),
+                "name": (call.get("function") or {}).get("name"),
+                "arguments": (call.get("function") or {}).get("arguments"),
+            }
+            if isinstance(call, dict)
+            else call
+            for call in calls
+        ]
+        text += "\nTool requests: " + json.dumps(readable, ensure_ascii=False, default=str)
     metadata = record.get("metadata") or record.get("msg_metadata") or {}
-    call_id = record.get("tool_call_id") or metadata.get("tool_call_id")
+    call_id = strip_signed_id(record.get("tool_call_id") or metadata.get("tool_call_id"))
     if record.get("role") == "tool" and call_id:
         text += f"\nTool call ID: {call_id}"
     return text

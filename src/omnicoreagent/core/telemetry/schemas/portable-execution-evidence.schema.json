@@ -767,6 +767,40 @@
           "items": {
             "type": "object"
           }
+        },
+        "continuation": {
+          "type": "object",
+          "description": "Presence of provider continuation data (signed thinking, encrypted reasoning, per-call signatures); the values themselves are never recorded.",
+          "properties": {
+            "thinking_blocks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "redacted_thinking": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reasoning_items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reasoning_details": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tool_call_signatures": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{16}$"
+            }
+          },
+          "required": [
+            "digest"
+          ],
+          "additionalProperties": true
         }
       },
       "additionalProperties": true

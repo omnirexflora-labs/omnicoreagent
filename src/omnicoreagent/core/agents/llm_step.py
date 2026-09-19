@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import time
 from typing import Any
 
+from omnicoreagent.core.continuation import continuation_summary
 from omnicoreagent.core.agents.llm_response import (
     extract_response_content,
     extract_response_usage,
@@ -410,6 +411,13 @@ class AgentLlmStepRunner:
             )
             response_payload = {
                 "content": normalized.text,
+                # Recorded only with model responses (capture="full"); the
+                # recorder masks signatures and encrypted values.
+                **(
+                    {"continuation": normalized.provider_fields}
+                    if normalized.provider_fields
+                    else {}
+                ),
                 "tool_calls": [call.as_dict() for call in normalized.tool_calls],
                 "tool_call_ids": [call.id for call in normalized.tool_calls],
                 "finish_reason": normalized.finish_reason,
@@ -567,6 +575,13 @@ class AgentLlmStepRunner:
                 }
                 for retry in retries
             ],
+            # Presence of provider continuation data (counts and a digest),
+            # recorded under every capture policy; the values never are.
+            **(
+                {"continuation": summary}
+                if (summary := continuation_summary(normalized)) is not None
+                else {}
+            ),
         }
 
     def _build_context_summarizer(
