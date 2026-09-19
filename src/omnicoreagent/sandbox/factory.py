@@ -12,7 +12,14 @@ from omnicoreagent.sandbox.none import NoneSandboxRuntime
 # Builds a backend from its options: factory(options, telemetry_recorder).
 SandboxProviderFactory = Callable[[dict[str, Any], Any], SandboxRuntime]
 
+def _docker(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
+    from omnicoreagent.sandbox.docker import DockerSandboxRuntime
+
+    return DockerSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
+
+
 _PROVIDERS: dict[str, SandboxProviderFactory] = {
+    "docker": _docker,
     SandboxProvider.NONE.value: lambda options, telemetry_recorder: NoneSandboxRuntime(),
     SandboxProvider.LOCAL_TEST.value: lambda options, telemetry_recorder: LocalTestSandboxRuntime(
         telemetry_recorder=telemetry_recorder
