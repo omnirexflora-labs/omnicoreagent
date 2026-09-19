@@ -11,6 +11,7 @@ from omnicoreagent.governance.capabilities import mcp_server_authority_request
 from omnicoreagent.governance.errors import GovernanceError
 from omnicoreagent.mcp_clients_connection.connection import ServerConnection
 from omnicoreagent.mcp_clients_connection.oauth import (
+    DEFAULT_CALLBACK_TIMEOUT_SECONDS,
     build_oauth_provider,
     is_oauth_enabled,
 )
@@ -43,6 +44,13 @@ async def list_all_tools(session: Any) -> list[Any]:
         cursor = page.next_cursor
         if not cursor:
             return tools
+
+
+def root_cause(error: BaseException) -> BaseException:
+    """The first real error inside the SDK's (possibly nested) task groups."""
+    while isinstance(error, BaseExceptionGroup) and error.exceptions:
+        error = error.exceptions[0]
+    return error
 
 
 class MCPClient:
@@ -142,11 +150,12 @@ class MCPClient:
         except (GovernanceError, ValueError):
             raise
         except Exception as exc:
+            cause = root_cause(exc)
             self.state.failures[server_name] = {
-                "error": str(exc) or exc.__class__.__name__,
-                "type": exc.__class__.__name__,
+                "error": str(cause) or cause.__class__.__name__,
+                "type": cause.__class__.__name__,
             }
-            error_message = f"Failed to connect to {server_name}: {exc}"
+            error_message = f"Failed to connect to {server_name}: {cause}"
             logger.error(error_message)
             return error_message
 
@@ -188,10 +197,13 @@ class MCPClient:
         """Runs inside the connection's owner task."""
         oauth_auth = None
         if is_oauth_enabled(server):
-            self.server_count += 1
+            auth = server["auth"]
             oauth_auth = build_oauth_provider(
                 server_url=server.get("url", ""),
-                callback_port=3000 + self.server_count,
+                callback_port=auth.get("callback_port"),
+                callback_timeout=float(
+                    auth.get("callback_timeout") or DEFAULT_CALLBACK_TIMEOUT_SECONDS
+                ),
             )
         read_stream, write_stream, transport_type = await open_server_transport(
             stack=stack, server=server, oauth_auth=oauth_auth, debug=self.debug
@@ -241,8 +253,9 @@ class MCPClient:
         try:
             connection, exposed = await self._open_connection(self._server_config(name))
         except Exception as exc:
-            info["last_error"] = str(exc) or exc.__class__.__name__
-            raise
+            cause = root_cause(exc)
+            info["last_error"] = str(cause) or cause.__class__.__name__
+            raise cause from exc
         info.update(
             session=exposed["session"],
             read_stream=exposed["read_stream"],

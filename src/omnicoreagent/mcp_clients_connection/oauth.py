@@ -1,19 +1,41 @@
+"""Interactive OAuth for MCP servers (authorization code with PKCE).
+
+The MCP SDK's ``OAuthClientProvider`` runs the protocol: discovery, dynamic
+client registration, PKCE, the RFC 9207 issuer check, and token exchange.
+This module supplies the two interactive parts: opening the authorization
+URL in a browser and receiving the redirect on a loopback callback server.
+"""
+
 from __future__ import annotations
 
+import asyncio
+import socket
 import threading
-import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from mcp.client.auth import OAuthClientProvider, TokenStorage
+from mcp.client.auth import AuthorizationCodeResult, OAuthClientProvider, TokenStorage
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
 
 from omnicoreagent.core.logging import logger
 
+DEFAULT_CALLBACK_TIMEOUT_SECONDS = 300.0
+_LOOPBACK = "127.0.0.1"
+
+_SUCCESS_PAGE = b"""<html><body><h1>Authorization successful</h1>
+<p>You can close this window and return to your application.</p></body></html>"""
+_FAILURE_PAGE = b"""<html><body><h1>Authorization failed</h1>
+<p>You can close this window and return to your application.</p></body></html>"""
+
+
+class OAuthCallbackError(Exception):
+    """The authorization server redirected with an error, or no redirect came."""
+
 
 class InMemoryTokenStorage(TokenStorage):
-    """Simple in-memory OAuth token storage."""
+    """OAuth tokens and client registration kept for the process lifetime."""
 
     def __init__(self):
         self._tokens: OAuthToken | None = None
@@ -32,100 +54,84 @@ class InMemoryTokenStorage(TokenStorage):
         self._client_info = client_info
 
 
-class CallbackHandler(BaseHTTPRequestHandler):
-    """HTTP handler that captures an OAuth redirect callback."""
+class OAuthCallbackServer:
+    """Loopback HTTP server that receives one authorization redirect.
 
-    def __init__(self, request, client_address, server, callback_data):
-        self.callback_data = callback_data
-        super().__init__(request, client_address, server)
+    The HTTP server runs in a thread; the redirect is handed to the event loop
+    through a future, so waiting never blocks the loop.
+    """
 
-    def do_GET(self):
-        parsed = urlparse(self.path)
-        query_params = parse_qs(parsed.query)
-
-        if "code" in query_params:
-            self.callback_data["authorization_code"] = query_params["code"][0]
-            self.callback_data["state"] = query_params.get("state", [None])[0]
-            self.send_response(200)
-            self.send_header("Content-type", "text/html")
-            self.end_headers()
-            self.wfile.write(b"""
-            <html>
-            <body>
-                <h1>Authorization Successful</h1>
-                <p>You can close this window and return to the terminal.</p>
-                <script>setTimeout(() => window.close(), 2000);</script>
-            </body>
-            </html>
-            """)
-        elif "error" in query_params:
-            self.callback_data["error"] = query_params["error"][0]
-            self.send_response(400)
-            self.send_header("Content-type", "text/html")
-            self.end_headers()
-            self.wfile.write(
-                f"""
-            <html>
-            <body>
-                <h1>Authorization Failed</h1>
-                <p>Error: {query_params["error"][0]}</p>
-                <p>You can close this window and return to the terminal.</p>
-            </body>
-            </html>
-            """.encode()
-            )
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-    def log_message(self, format, *args):
-        pass
-
-
-class CallbackServer:
-    """Small local callback server for interactive MCP OAuth."""
-
-    def __init__(self, port=3000):
+    def __init__(self, port: int) -> None:
         self.port = port
-        self.server = None
-        self.thread = None
-        self.callback_data = {"authorization_code": None, "state": None, "error": None}
+        self._server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
+        self._result: asyncio.Future[AuthorizationCodeResult] | None = None
 
-    def _create_handler_with_data(self):
-        callback_data = self.callback_data
+    async def start(self) -> None:
+        loop = asyncio.get_running_loop()
+        self._result = loop.create_future()
+        result = self._result
 
-        class DataCallbackHandler(CallbackHandler):
-            def __init__(self, request, client_address, server):
-                super().__init__(request, client_address, server, callback_data)
+        def deliver(outcome: AuthorizationCodeResult | BaseException) -> None:
+            if result.done():
+                return
+            if isinstance(outcome, BaseException):
+                result.set_exception(outcome)
+            else:
+                result.set_result(outcome)
 
-        return DataCallbackHandler
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 - http.server API
+                params = parse_qs(urlparse(self.path).query)
+                first = {key: values[0] for key, values in params.items()}
+                if "code" in first:
+                    outcome: Any = AuthorizationCodeResult(
+                        code=first["code"], state=first.get("state"), iss=first.get("iss")
+                    )
+                    self._reply(200, _SUCCESS_PAGE)
+                elif "error" in first:
+                    description = first.get("error_description")
+                    outcome = OAuthCallbackError(
+                        f"Authorization failed: {first['error']}"
+                        + (f" ({description})" if description else "")
+                    )
+                    self._reply(400, _FAILURE_PAGE)
+                else:
+                    self._reply(404, b"")
+                    return
+                loop.call_soon_threadsafe(deliver, outcome)
 
-    def start(self):
-        handler_class = self._create_handler_with_data()
-        self.server = HTTPServer(("localhost", self.port), handler_class)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-        logger.info(f"Started callback server on http://localhost:{self.port}")
+            def _reply(self, status: int, body: bytes) -> None:
+                self.send_response(status)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(body)
 
-    def stop(self):
-        if self.server:
-            self.server.shutdown()
-            self.server.server_close()
-        if self.thread:
-            self.thread.join(timeout=1)
+            def log_message(self, format, *args):
+                pass
 
-    def wait_for_callback(self, timeout=300):
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            if self.callback_data["authorization_code"]:
-                return self.callback_data["authorization_code"]
-            if self.callback_data["error"]:
-                raise Exception(f"OAuth error: {self.callback_data['error']}")
-            time.sleep(0.1)
-        raise Exception("Timeout waiting for OAuth callback")
+        self._server = HTTPServer((_LOOPBACK, self.port), Handler)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+        logger.info(f"OAuth callback listening on http://{_LOOPBACK}:{self.port}/callback")
 
-    def get_state(self):
-        return self.callback_data["state"]
+    async def wait(self, timeout: float) -> AuthorizationCodeResult:
+        assert self._result is not None, "start() first"
+        try:
+            return await asyncio.wait_for(asyncio.shield(self._result), timeout)
+        except asyncio.TimeoutError:
+            raise OAuthCallbackError(
+                f"No authorization redirect within {timeout:g}s"
+            ) from None
+
+    def stop(self) -> None:
+        if self._server is not None:
+            self._server.shutdown()
+            self._server.server_close()
+            self._server = None
+        if self._thread is not None:
+            self._thread.join(timeout=1)
+            self._thread = None
 
 
 def is_oauth_enabled(server: dict) -> bool:
@@ -133,33 +139,51 @@ def is_oauth_enabled(server: dict) -> bool:
     return bool(auth_config and auth_config.get("method") == "oauth")
 
 
-def build_oauth_provider(*, server_url: str, callback_port: int) -> OAuthClientProvider:
-    callback_server = CallbackServer(port=callback_port)
-    callback_server.start()
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind((_LOOPBACK, 0))
+        return sock.getsockname()[1]
 
-    async def callback_handler() -> tuple[str, str | None]:
-        logger.info("Waiting for authorization callback...")
-        try:
-            auth_code = callback_server.wait_for_callback(timeout=300)
-            return auth_code, callback_server.get_state()
-        finally:
-            callback_server.stop()
+
+def build_oauth_provider(
+    *,
+    server_url: str,
+    callback_port: int | None = None,
+    callback_timeout: float = DEFAULT_CALLBACK_TIMEOUT_SECONDS,
+) -> OAuthClientProvider:
+    """An httpx2 auth handler that logs in through the browser when needed.
+
+    The callback server starts only when a login is actually required, and
+    stops once the redirect arrives.
+    """
+    port = callback_port or _free_port()
+    callback = OAuthCallbackServer(port=port)
 
     async def redirect_handler(authorization_url: str) -> None:
-        logger.info(f"Opening browser for authorization: {authorization_url}")
-        webbrowser.open(authorization_url)
+        await callback.start()
+        logger.info(f"Opening browser for MCP authorization: {authorization_url}")
+        # Launching a browser can block; keep it off the event loop.
+        await asyncio.to_thread(webbrowser.open, authorization_url)
 
-    client_metadata_dict = {
-        "client_name": "omnicoreagent",
-        "redirect_uris": [f"http://localhost:{callback_port}/callback"],
-        "grant_types": ["authorization_code", "refresh_token"],
-        "response_types": ["code"],
-        "token_endpoint_auth_method": "client_secret_post",
-    }
+    async def callback_handler() -> AuthorizationCodeResult:
+        try:
+            return await callback.wait(timeout=callback_timeout)
+        finally:
+            # shutdown() waits for the server thread's poll; keep it off the loop.
+            await asyncio.to_thread(callback.stop)
 
+    client_metadata = OAuthClientMetadata.model_validate(
+        {
+            "client_name": "omnicoreagent",
+            "redirect_uris": [f"http://{_LOOPBACK}:{port}/callback"],
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "client_secret_post",
+        }
+    )
     return OAuthClientProvider(
-        server_url=server_url.replace("/mcp", "").replace("/sse", ""),
-        client_metadata=OAuthClientMetadata.model_validate(client_metadata_dict),
+        server_url=server_url,
+        client_metadata=client_metadata,
         storage=InMemoryTokenStorage(),
         redirect_handler=redirect_handler,
         callback_handler=callback_handler,
