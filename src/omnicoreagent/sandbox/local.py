@@ -43,6 +43,7 @@ class LocalTestSandboxRuntime(SandboxRuntime):
 
     provider = SandboxProvider.LOCAL_TEST.value
     supports_required_sandbox = True
+    supports_execution = True
     is_test_adapter = True
 
     def __init__(

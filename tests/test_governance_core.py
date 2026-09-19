@@ -1501,8 +1501,8 @@ async def test_omnicoreagent_initializes_governance_engine_from_agent_config():
         ({"policy": "bad"}, "policy must be a dict or PolicyEnvelope"),
         ({"policy_path": 123}, "policy_path must be a string or path-like"),
         (
-            {"sandbox_config": {"provider": "docker"}},
-            "sandbox_config.provider must be one of",
+            {"sandbox_config": {"provider": "no-such-provider"}},
+            "sandbox_config.provider must be a registered sandbox provider",
         ),
         (
             {"sandbox_config": {"provider": "local_test", "extra": True}},

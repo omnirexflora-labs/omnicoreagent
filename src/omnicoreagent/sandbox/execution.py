@@ -10,6 +10,7 @@ from omnicoreagent.governance.models import AuthorityRequest, AuthorityTarget
 from omnicoreagent.sandbox.base import SandboxRuntime
 from omnicoreagent.sandbox.errors import SandboxUnsupportedError
 from omnicoreagent.sandbox.models import (
+    SandboxSession,
     SandboxFilesystemDefault,
     SandboxAuthorityContext,
     SandboxExecRequest,
@@ -69,10 +70,43 @@ class SandboxExecutionService:
 
     def __init__(self, governance_engine: Any):
         self.governance_engine = governance_engine
+        self._open_sessions: set[str] = set()
 
-    async def execute(self, spec: SandboxCommandSpec | dict[str, Any]) -> SandboxExecResult:
+    async def open_session(
+        self, manifest: SandboxManifest | dict[str, Any] | None = None
+    ) -> SandboxSession:
+        """Authorize a manifest's scope once and create a session to reuse.
+
+        Each command in the session is still authorized on its own
+        (``process.exec``) by ``execute(..., session=...)``.
+        """
+        if isinstance(manifest, dict):
+            manifest = SandboxManifest(**manifest)
+        manifest = manifest or SandboxManifest()
+        runtime = self._runtime()
+        requests = _manifest_authority_requests(manifest, SandboxCommandSpec(command=["session"]))
+        if requests:
+            await self.governance_engine.authorize_all(requests)
+        session = await runtime.create(manifest)
+        self._open_sessions.add(session.session_id)
+        return session
+
+    async def close_session(self, session: SandboxSession) -> None:
+        if session.session_id not in self._open_sessions:
+            return
+        self._open_sessions.discard(session.session_id)
+        await self._runtime().terminate(session.session_id)
+
+    async def execute(
+        self,
+        spec: SandboxCommandSpec | dict[str, Any],
+        *,
+        session: SandboxSession | None = None,
+    ) -> SandboxExecResult:
         if isinstance(spec, dict):
             spec = SandboxCommandSpec(**spec)
+        if session is not None:
+            return await self._execute_in_session(spec, session)
         runtime = self._runtime()
         authority_request = _sandbox_authority_request(spec)
         manifest = spec.manifest or SandboxManifest()
@@ -107,6 +141,40 @@ class SandboxExecutionService:
         }
         if _should_cleanup(manifest, result):
             await runtime.terminate(session.session_id)
+        return result
+
+    async def _execute_in_session(
+        self, spec: SandboxCommandSpec, session: SandboxSession
+    ) -> SandboxExecResult:
+        if session.session_id not in self._open_sessions:
+            raise SandboxUnsupportedError(
+                f"Sandbox session {session.session_id} is closed or was not opened here"
+            )
+        if spec.manifest is not None:
+            raise ValueError("A command in an open session uses the session's manifest")
+        runtime = self._runtime()
+        decision = await self.governance_engine.authorize_sandboxed(
+            _sandbox_authority_request(spec)
+        )
+        authority = SandboxAuthorityContext.from_policy_decision(decision)
+        result = await runtime.execute(
+            session.session_id,
+            SandboxExecRequest(
+                command=spec.command,
+                authority=authority,
+                cwd=spec.cwd,
+                stdin=spec.stdin,
+                timeout_seconds=spec.timeout_seconds,
+                environment={str(key): str(value) for key, value in spec.environment.items()},
+                metadata=dict(spec.metadata),
+            ),
+        )
+        result.metadata = {
+            **dict(result.metadata),
+            "sandbox_session_id": session.session_id,
+            "sandbox_provider": getattr(runtime, "provider", session.provider),
+            "authority": authority.to_metadata(),
+        }
         return result
 
     def _runtime(self) -> SandboxRuntime:

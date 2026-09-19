@@ -17,6 +17,9 @@ class SandboxRuntime(ABC):
 
     provider: str = "unknown"
     supports_required_sandbox: bool = False
+    # Whether the backend can run commands; tools that execute are hidden from
+    # the model when it cannot.
+    supports_execution: bool = False
 
     @abstractmethod
     async def create(self, manifest: SandboxManifest) -> SandboxSession: ...
@@ -42,3 +45,12 @@ class SandboxRuntime(ABC):
 
     @abstractmethod
     async def terminate(self, session_id: str) -> None: ...
+
+    async def upload_files(self, session_id: str, files: dict[str, bytes]) -> None:
+        """Write several files into a session; providers may batch this."""
+        for path, content in files.items():
+            await self.write_file(session_id, path, content)
+
+    async def download_files(self, session_id: str, paths: list[str]) -> dict[str, bytes]:
+        """Read several files from a session; providers may batch this."""
+        return {path: await self.read_file(session_id, path) for path in paths}

@@ -530,7 +530,7 @@ def _validate_governance_config(value: dict[str, Any]):
             _validate_unknown_keys(
                 "governance_config.sandbox_config",
                 sandbox_config,
-                frozenset({"provider"}),
+                frozenset({"provider", "options"}),
             )
             provider = sandbox_config.get("provider", "none")
         else:
@@ -538,16 +538,18 @@ def _validate_governance_config(value: dict[str, Any]):
                 from omnicoreagent.sandbox import SandboxRuntimeConfig
 
                 valid_config = isinstance(sandbox_config, SandboxRuntimeConfig)
-                provider = sandbox_config.provider.value if valid_config else None
+                provider = sandbox_config.provider_name if valid_config else None
             except Exception:
                 valid_config = False
                 provider = None
             if not valid_config:
                 raise ValueError("governance_config.sandbox_config must be a dict or string")
-        if provider not in {"none", "local_test"}:
+        from omnicoreagent.sandbox import registered_sandbox_providers
+
+        if provider not in registered_sandbox_providers():
             raise ValueError(
-                "governance_config.sandbox_config.provider must be one of "
-                "{'none', 'local_test'}"
+                "governance_config.sandbox_config.provider must be a registered "
+                f"sandbox provider: {', '.join(registered_sandbox_providers())}"
             )
     profile = value.get("profile", "interactive-dev")
     if profile not in {"permissive-dev", "interactive-dev", "strict-production"}:

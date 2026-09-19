@@ -65,6 +65,10 @@ class ContinuationProviders:
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))
+                # No keep-alive: a pooled connection must never outlive this
+                # server and reach another test's server on a reused port.
+                self.send_header("Connection", "close")
+                self.close_connection = True
                 self.end_headers()
                 self.wfile.write(data)
 
@@ -77,6 +81,8 @@ class ContinuationProviders:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Content-Length", str(len(data)))
+                self.send_header("Connection", "close")
+                self.close_connection = True
                 self.end_headers()
                 self.wfile.write(data)
 

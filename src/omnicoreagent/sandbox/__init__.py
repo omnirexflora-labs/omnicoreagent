@@ -5,7 +5,12 @@ from omnicoreagent.sandbox.errors import (
     SandboxUnsupportedError,
 )
 from omnicoreagent.sandbox.execution import SandboxCommandSpec, SandboxExecutionService
-from omnicoreagent.sandbox.factory import SandboxRuntimeConfig, build_sandbox_runtime
+from omnicoreagent.sandbox.factory import (
+    SandboxRuntimeConfig,
+    build_sandbox_runtime,
+    register_sandbox_provider,
+    registered_sandbox_providers,
+)
 from omnicoreagent.sandbox.local import (
     LocalTestSandboxRuntime,
     SandboxCommand,
@@ -33,6 +38,8 @@ from omnicoreagent.sandbox.models import (
 from omnicoreagent.sandbox.none import NoneSandboxRuntime
 
 __all__ = [
+    "register_sandbox_provider",
+    "registered_sandbox_providers",
     "LocalTestSandboxRuntime",
     "NetworkPolicy",
     "NoneSandboxRuntime",

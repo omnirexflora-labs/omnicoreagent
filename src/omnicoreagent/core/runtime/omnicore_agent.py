@@ -493,6 +493,32 @@ class OmniCoreAgent:
             },
         }
 
+    @property
+    def can_execute(self) -> bool:
+        """Whether this agent has a sandbox that can run commands.
+
+        Uses the same check governance uses before allowing a sandboxed
+        action, so a tool is never offered that governance would refuse.
+        """
+        engine = getattr(getattr(self, "agent", None), "governance_engine", None)
+        runtime = getattr(engine, "sandbox_runtime", None)
+        return bool(
+            engine is not None
+            and getattr(runtime, "supports_execution", False)
+            and engine._sandbox_runtime_satisfies_required_boundary()
+        )
+
+    @property
+    def sandbox_execution(self):
+        """The governed route from this agent to its sandbox, or None."""
+        if not self.can_execute:
+            return None
+        if getattr(self, "_sandbox_execution", None) is None:
+            from omnicoreagent.sandbox import SandboxExecutionService
+
+            self._sandbox_execution = SandboxExecutionService(self.agent.governance_engine)
+        return self._sandbox_execution
+
     def _mcp_server_status(self) -> list[dict[str, Any]]:
         """Configured MCP servers with their state at the start of the run."""
         if self.mcp_client is not None:

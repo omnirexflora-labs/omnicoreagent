@@ -128,8 +128,8 @@ def test_build_sandbox_runtime_from_config():
     assert isinstance(local_runtime, LocalTestSandboxRuntime)
     assert build_sandbox_runtime(local_runtime) is local_runtime
 
-    with pytest.raises(ValueError, match="Unsupported sandbox provider"):
-        build_sandbox_runtime({"provider": "docker"})
+    with pytest.raises(ValueError, match="Unknown sandbox provider 'no-such-provider'"):
+        build_sandbox_runtime({"provider": "no-such-provider"})
 
 
 @pytest.mark.asyncio
