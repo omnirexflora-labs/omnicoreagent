@@ -82,6 +82,15 @@ def plain_copy(value: Any) -> Any:
     return deepcopy(value)
 
 
+def _without_empty(value: Any) -> Any:
+    """Drop empty entries of a mapping: LiteLLM attaches placeholders such as
+    ``provider_specific_fields={"citations": None}`` to every Anthropic message,
+    which are not continuation data."""
+    if isinstance(value, dict):
+        return {key: item for key, item in value.items() if item not in (None, [], {}, "")}
+    return value
+
+
 def normalize_model_turn(response: Any):
     """Retain the first completion's structured message without interpreting text."""
     from omnicoreagent.core.model_protocol import ModelTurn, ToolRequest
@@ -156,9 +165,9 @@ def normalize_model_turn(response: Any):
         usage=extract_response_usage(response),
         refusal=refusal,
         provider_fields={
-            key: plain_copy(get(message, key))
+            key: value
             for key in CONTINUATION_FIELDS
-            if get(message, key) not in (None, [], {}, "")
+            if (value := _without_empty(plain_copy(get(message, key)))) not in (None, [], {}, "")
         },
         response_metadata=_response_metadata(response, get),
     )

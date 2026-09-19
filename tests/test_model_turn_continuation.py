@@ -142,3 +142,21 @@ def test_continuation_data_is_a_copy_not_a_reference():
     assert turn.provider_fields["thinking_blocks"] == [
         {"type": "thinking", "thinking": "t", "signature": "s"}
     ]
+
+
+def test_empty_placeholder_fields_are_not_continuation_data():
+    turn = normalize_model_turn(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Order A-17 has shipped.",
+                        "provider_specific_fields": {"citations": None, "thinking_blocks": []},
+                    }
+                }
+            ]
+        }
+    )
+
+    assert turn.provider_fields == {}

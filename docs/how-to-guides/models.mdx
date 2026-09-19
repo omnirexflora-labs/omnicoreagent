@@ -74,6 +74,39 @@ to save its outcome.
 The validation makes paid model requests using synthetic tasks and tools. It does
 not print the API key. Override the model with `--model gpt-5.6-terra`.
 
+## Thinking and Reasoning Models
+
+Thinking models return data with each turn that must be sent back unchanged on
+the next request, or a multi-step tool loop fails on its next step. OmniCoreAgent
+keeps it with the turn and sends it back to the provider that issued it:
+
+| Provider | Data kept and returned |
+|----------|------------------------|
+| `anthropic` (extended thinking) | Signed `thinking` and `redacted_thinking` blocks |
+| `gemini` (thinking models) | The thought signature on each tool call |
+| `openrouter` (Claude, Gemini, and others) | `reasoning_details`, returned at the top level of the assistant message |
+
+This works with `run()` and `stream()`, across runs in the same session (the
+data is kept in stored history), and after context compression. Other
+providers receive exactly the fields they always did. Enable thinking with the
+provider's usual setting, for example:
+
+```python
+model_config = {"provider": "anthropic", "model": "claude-sonnet-4-5", "reasoning_effort": "low"}
+```
+
+Memory privacy redaction never alters signatures or encrypted reasoning. If
+the readable thinking text contains personal data that redaction must change,
+the stored copy of that turn leaves the signed data out (and records
+`continuation_dropped`) instead of storing a signature the provider would
+reject; the running agent keeps its own copy.
+
+Traces record that continuation data was present (counts and a digest on each
+model call) and never store signatures or encrypted values; the thinking text
+itself is recorded only with `capture="full"`.
+
+---
+
 ## Model Configuration Options
 
 ```python
