@@ -42,12 +42,13 @@ the default capture policy.
 
 ## Decisions (2026-09-19)
 
-1. **Live proof.** The maintainer will provide an OpenRouter key
-   (`OPENROUTER_API_KEY`), which proves Claude and Gemini models live through
-   OpenRouter. LiteLLM's direct Anthropic and Gemini paths are proven offline:
-   local fake provider servers speaking each provider's real wire format,
-   driven through LiteLLM's own request and response transformations. Direct
-   keys can be added later for live runs of those paths.
+1. **Proof without provider keys.** No Anthropic, Gemini, or OpenRouter key is
+   available now. All three paths (`anthropic`, `gemini`, `openrouter`) are
+   proven offline: local fake servers speaking each provider's real wire format
+   and rejecting a follow-up whose continuation data was changed or dropped,
+   reached through LiteLLM's real transformations for that provider. Direct
+   keys (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, optionally
+   `OPENROUTER_API_KEY`) are preferred for live runs and are added later.
 2. **Tool arguments in history.** History stores the real tool arguments, so
    the model sees its own past calls in later runs; governance redacts them
    only in telemetry. (Today history stores `[REDACTED]`.)
@@ -66,7 +67,7 @@ and encrypted items are never recorded, only their presence, count, and digest.
 | 4 | History | Stored history keeps the fields, reload restores them, every memory backend round-trips them, and the privacy filter never alters a signature, encrypted item, or signed tool-call ID. |
 | 5 | Context | Compression and summarization never split a turn from its continuation data, and the most recent tool turn always keeps it; summaries never include opaque blobs. |
 | 6 | Telemetry | Presence, type counts, and digests are recorded under every capture policy; thinking text only under full capture; signatures never; the portable schema types the new metadata. |
-| 7 | Proof | Offline end-to-end runs against fake Anthropic and Gemini servers fail before the fix and pass after; live OpenRouter runs with a Claude and a Gemini thinking model fail before and pass after; the boundary audit passes 8 of 8; a live OpenAI regression run passes. |
+| 7 | Proof | Offline end-to-end runs against fake Anthropic, Gemini, and OpenRouter servers fail before the fix and pass after, streaming and not; the boundary audit passes 8 of 8; a live OpenAI regression run passes; live runs for the other providers once keys exist. |
 
 ## Working rules
 
@@ -85,9 +86,7 @@ resemble them.
   `api_base`.
 - A scripted two-step tool run against each, non-streaming and streaming; they
   must fail today. These become the acceptance tests for P2 to P6.
-- A small live OpenRouter run with a Claude and a Gemini thinking model that
-  calls a tool twice, recording how it fails today (key loaded at runtime,
-  never printed).
+- The same for OpenRouter's chat format (`reasoning_details`).
 
 ### P2. Carry the fields in a model turn
 - `ModelTurn` carries message-level continuation fields; `ToolRequest` carries
@@ -128,8 +127,8 @@ resemble them.
   schema and trajectory reader updated.
 
 ### P7. Proof and documentation
-- The P1 runs pass, including live OpenRouter; boundary audit 8 of 8; live
-  OpenAI regression.
+- The P1 runs pass; boundary audit 8 of 8; live OpenAI regression; live
+  Anthropic, Gemini, and OpenRouter runs once keys exist.
 - Docs: models guide (reasoning and thinking models), observability guide.
 
 ## Out of scope
