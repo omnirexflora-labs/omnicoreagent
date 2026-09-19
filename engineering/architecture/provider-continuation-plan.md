@@ -30,7 +30,7 @@ four points, each an allowlist of one field:
 The expected effect is that a multi-step tool loop with Anthropic extended
 thinking fails on the second model call, and Gemini thinking models lose their
 signatures whenever the ID encoding is not used. That effect is inferred from
-the code and LiteLLM's transformations; P7 must prove it before the fix.
+the code and LiteLLM's transformations; P1 must prove it before the fix.
 
 ## Goal
 
