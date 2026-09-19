@@ -40,7 +40,7 @@
     }
   },
   "provider_specific_fields_retained": {
-    "passed": false
+    "passed": true
   },
   "same_name_servers_have_distinct_loop_identity": {
     "passed": true,

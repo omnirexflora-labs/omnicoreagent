@@ -5,6 +5,7 @@ Text (including XML) is content. Only structured tool requests can cause effects
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 import json
 from typing import Any
@@ -17,6 +18,11 @@ class ToolRequest:
     id: str
     name: str
     arguments: str
+    # Provider continuation data on this call, returned unchanged on the next
+    # request: ``provider_specific_fields`` of the call and, under
+    # ``function_provider_specific_fields``, of its function (Gemini's
+    # ``thought_signature`` lives here).
+    provider_fields: dict[str, Any] = field(default_factory=dict, compare=False)
 
     def __post_init__(self):
         for name in ("id", "name"):
@@ -48,11 +54,19 @@ class ToolRequest:
         return value
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        call: dict[str, Any] = {
             "id": self.id,
             "type": "function",
             "function": {"name": self.name, "arguments": self.arguments},
         }
+        fields = deepcopy(self.provider_fields)
+        if "provider_specific_fields" in fields:
+            call["provider_specific_fields"] = fields["provider_specific_fields"]
+        if "function_provider_specific_fields" in fields:
+            call["function"]["provider_specific_fields"] = fields[
+                "function_provider_specific_fields"
+            ]
+        return call
 
 
 @dataclass(frozen=True)
@@ -79,7 +93,12 @@ class ModelTurn:
         )
 
     def assistant_message(self) -> dict[str, Any]:
-        message = {"role": "assistant", "content": self.content, **self.provider_fields}
+        # Continuation data is returned as a copy so no caller can alter it.
+        message = {
+            "role": "assistant",
+            "content": self.content,
+            **deepcopy(self.provider_fields),
+        }
         if self.tool_calls:
             message["tool_calls"] = [call.as_dict() for call in self.tool_calls]
         if self.refusal is not None:

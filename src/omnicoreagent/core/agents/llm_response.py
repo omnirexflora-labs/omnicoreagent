@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from omnicoreagent.core.token_usage import Usage
@@ -59,6 +60,28 @@ def extract_response_usage(response: Any) -> Usage | None:
     )
 
 
+# Message fields a provider may need back unchanged on the next request:
+# reasoning text, Anthropic's signed thinking blocks, OpenAI reasoning items,
+# and provider-specific fields (OpenRouter's reasoning details, for example).
+CONTINUATION_FIELDS = (
+    "reasoning_content",
+    "thinking_blocks",
+    "reasoning_items",
+    "provider_specific_fields",
+)
+
+
+def _plain(value: Any) -> Any:
+    """A deep, JSON-shaped copy of a LiteLLM value (pydantic or mapping)."""
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(exclude_none=True)
+    if isinstance(value, dict):
+        return {key: _plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(item) for item in value]
+    return deepcopy(value)
+
+
 def normalize_model_turn(response: Any):
     """Retain the first completion's structured message without interpreting text."""
     from omnicoreagent.core.model_protocol import ModelTurn, ToolRequest
@@ -106,11 +129,19 @@ def normalize_model_turn(response: Any):
         if get(call, "type", "function") != "function":
             raise ValueError("Unsupported model tool call type")
         function = get(call, "function")
+        call_fields = {}
+        if get(call, "provider_specific_fields"):
+            call_fields["provider_specific_fields"] = _plain(get(call, "provider_specific_fields"))
+        if get(function, "provider_specific_fields"):
+            call_fields["function_provider_specific_fields"] = _plain(
+                get(function, "provider_specific_fields")
+            )
         calls.append(
             ToolRequest(
                 id=get(call, "id"),
                 name=get(function, "name"),
                 arguments=get(function, "arguments"),
+                provider_fields=call_fields,
             )
         )
     if len({call.id for call in calls}) != len(calls):
@@ -125,9 +156,9 @@ def normalize_model_turn(response: Any):
         usage=extract_response_usage(response),
         refusal=refusal,
         provider_fields={
-            key: get(message, key)
-            for key in ("reasoning_content",)
-            if get(message, key) is not None
+            key: _plain(get(message, key))
+            for key in CONTINUATION_FIELDS
+            if get(message, key) not in (None, [], {}, "")
         },
         response_metadata=_response_metadata(response, get),
     )
