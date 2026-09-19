@@ -16,6 +16,7 @@ next request, or the next request fails or loses the model's reasoning:
 | Anthropic extended thinking | `thinking_blocks`: `thinking` (with `signature`) and `redacted_thinking` (`data`) | assistant message | the assistant message |
 | Gemini thinking models | `thought_signature` | `provider_specific_fields` of each tool call (and its `function`) | the tool call; also encoded in the tool-call ID as `<id>__thought__<signature>` |
 | OpenAI reasoning items | `reasoning_items` | assistant message | the assistant message |
+| OpenRouter (Claude, Gemini, and others) | `reasoning_details` (signed for Claude, encrypted for others) | LiteLLM moves it into the message's `provider_specific_fields` | a top-level `reasoning_details` on the assistant message only; LiteLLM does not move it back (verified offline with `OpenrouterConfig.transform_request`) |
 | Any provider | `provider_specific_fields` | assistant message | provider-dependent |
 
 OmniCoreAgent keeps only `reasoning_content`. The other fields are dropped at
@@ -39,16 +40,17 @@ stored history, after context compression, and in streaming and non-streaming
 mode. The trace records that it was present without storing opaque blobs under
 the default capture policy.
 
-## Decisions to confirm
+## Decisions (2026-09-19)
 
-1. **Live proof.** Only an OpenAI key is available. Anthropic and Gemini are
-   proven offline: local fake provider servers speaking each provider's real
-   wire format, driven through LiteLLM's own request and response
-   transformations. A live run needs an Anthropic and a Gemini key.
-2. **Governance-redacted arguments in history.** Under governance, stored
-   history replaces tool arguments with `[REDACTED]`, so the next run sends the
-   model its own past calls with redacted arguments. Keep that (privacy first)
-   or store the real arguments in history and redact only in telemetry?
+1. **Live proof.** The maintainer will provide an OpenRouter key
+   (`OPENROUTER_API_KEY`), which proves Claude and Gemini models live through
+   OpenRouter. LiteLLM's direct Anthropic and Gemini paths are proven offline:
+   local fake provider servers speaking each provider's real wire format,
+   driven through LiteLLM's own request and response transformations. Direct
+   keys can be added later for live runs of those paths.
+2. **Tool arguments in history.** History stores the real tool arguments, so
+   the model sees its own past calls in later runs; governance redacts them
+   only in telemetry. (Today history stores `[REDACTED]`.)
 
 Decided by default (consistent with earlier decisions): thinking text follows
 the response capture policy (recorded only with `capture="full"`); signatures
@@ -64,7 +66,7 @@ and encrypted items are never recorded, only their presence, count, and digest.
 | 4 | History | Stored history keeps the fields, reload restores them, every memory backend round-trips them, and the privacy filter never alters a signature, encrypted item, or signed tool-call ID. |
 | 5 | Context | Compression and summarization never split a turn from its continuation data, and the most recent tool turn always keeps it; summaries never include opaque blobs. |
 | 6 | Telemetry | Presence, type counts, and digests are recorded under every capture policy; thinking text only under full capture; signatures never; the portable schema types the new metadata. |
-| 7 | Proof | Offline end-to-end runs against fake Anthropic and Gemini servers fail before the fix and pass after; the boundary audit passes 8 of 8; a live OpenAI regression run passes; live Anthropic and Gemini runs if keys are provided. |
+| 7 | Proof | Offline end-to-end runs against fake Anthropic and Gemini servers fail before the fix and pass after; live OpenRouter runs with a Claude and a Gemini thinking model fail before and pass after; the boundary audit passes 8 of 8; a live OpenAI regression run passes. |
 
 ## Working rules
 
@@ -83,6 +85,9 @@ resemble them.
   `api_base`.
 - A scripted two-step tool run against each, non-streaming and streaming; they
   must fail today. These become the acceptance tests for P2 to P6.
+- A small live OpenRouter run with a Claude and a Gemini thinking model that
+  calls a tool twice, recording how it fails today (key loaded at runtime,
+  never printed).
 
 ### P2. Carry the fields in a model turn
 - `ModelTurn` carries message-level continuation fields; `ToolRequest` carries
@@ -96,6 +101,11 @@ resemble them.
 
 ### P4. Request path
 - `LLMConnection.to_dict` forwards the continuation fields.
+- OpenRouter: `reasoning_details` is sent back as a top-level field of the
+  assistant message (LiteLLM leaves it inside `provider_specific_fields`).
+- `provider_specific_fields` is sent raw by LiteLLM's OpenAI-compatible
+  transformations; it is forwarded only where the target accepts it, so no
+  provider receives a field it rejects.
 - Proven per provider through LiteLLM's request transformation (offline): the
   Anthropic request contains the signed thinking block before the tool use;
   the Gemini request contains the signature on the function call part; the
@@ -108,7 +118,8 @@ resemble them.
   signed tool-call IDs (the C1 UUID bug is the precedent).
 - Round trip through the in-memory, SQL, Redis, and MongoDB stores that the
   test environment supports.
-- Decision 2 applied.
+- Decision 2 applied: history keeps real tool arguments; governance redaction
+  stays in telemetry only (tests for both).
 
 ### P6. Context management and telemetry
 - Compression and summarization keep each turn with its continuation data;
@@ -117,8 +128,8 @@ resemble them.
   schema and trajectory reader updated.
 
 ### P7. Proof and documentation
-- The P1 runs pass; boundary audit 8 of 8; live OpenAI regression; live
-  Anthropic and Gemini runs when keys are available.
+- The P1 runs pass, including live OpenRouter; boundary audit 8 of 8; live
+  OpenAI regression.
 - Docs: models guide (reasoning and thinking models), observability guide.
 
 ## Out of scope
