@@ -5,7 +5,12 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import uuid
 
-from omnicoreagent.core.runs import RunStateUnsupported, RunTracker, supports_run_state
+from omnicoreagent.core.runs import (
+    RunStateUnsupported,
+    RunTracker,
+    current_run,
+    supports_run_state,
+)
 from omnicoreagent.core.runtime import (
     builder,
     construction,
@@ -1022,6 +1027,10 @@ class OmniCoreAgent:
         metadata: dict | None = None,
         session_id: str | None = None,
     ) -> None:
+        run = current_run()
+        if run is not None:
+            # Every message says which request produced it.
+            metadata = {**(metadata or {}), "run_id": run.run_id}
         stored_content = self.privacy_filter.redact(content, boundary="memory")
         stored_metadata = _without_changed_continuation(
             metadata, self.privacy_filter.redact(metadata, boundary="memory")
@@ -1037,6 +1046,10 @@ class OmniCoreAgent:
             await self.memory_router.store_message(
                 role, stored_content, stored_metadata, session_id
             )
+            if run is not None:
+                await run.add_message(
+                    {"role": role, "content": stored_content, "metadata": stored_metadata}
+                )
             return
         span = await self.telemetry_recorder.start_span(
             name="memory.write",
@@ -1052,6 +1065,10 @@ class OmniCoreAgent:
             await self.memory_router.store_message(
                 role, stored_content, stored_metadata, session_id
             )
+            if run is not None:
+                await run.add_message(
+                    {"role": role, "content": stored_content, "metadata": stored_metadata}
+                )
             await self.telemetry_recorder.emit_event(
                 "memory_write",
                 actor=TelemetryActor(type=ActorType.MEMORY),
@@ -1083,7 +1100,9 @@ class OmniCoreAgent:
         agent_name: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.telemetry_recorder is None:
-            return await self.memory_router.get_messages(session_id, agent_name)
+            messages = await self.memory_router.get_messages(session_id, agent_name)
+            await _keep_run_history(messages)
+            return messages
         span = await self.telemetry_recorder.start_span(
             name="memory.read",
             kind="memory.read",
@@ -1092,6 +1111,7 @@ class OmniCoreAgent:
         )
         try:
             messages = await self.memory_router.get_messages(session_id, agent_name)
+            await _keep_run_history(messages)
             message_digests = [stable_message_digest(message) for message in messages]
             await self.telemetry_recorder.emit_event(
                 "memory_read",
@@ -1690,3 +1710,10 @@ def _model_settings(model_config: dict[str, Any]) -> dict[str, Any]:
             continue
         settings[key] = value
     return settings
+
+
+async def _keep_run_history(messages: list[dict[str, Any]]) -> None:
+    """The history a run loads first is the history it resumes from."""
+    run = current_run()
+    if run is not None:
+        await run.set_history(messages)

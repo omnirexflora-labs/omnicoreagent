@@ -148,7 +148,10 @@ async def test_a_completed_run_is_saved_with_its_steps_tool_calls_and_usage():
     assert (calls["c1"]["state"], calls["c1"]["outcome"]) == ("completed", "success")
     assert (calls["c2"]["state"], calls["c2"]["outcome"]) == ("completed", "error")
     assert len(calls["c1"]["arguments_digest"]) == 64
-    assert '"a"' not in str(run), "arguments are recorded as a digest, not in full"
+    # A tool call entry holds a digest, never the arguments (the run's context
+    # holds the conversation, stored exactly as the session history stores it).
+    assert '"a"' not in str(run["tool_calls"])
+    assert all("arguments" not in call for call in run["tool_calls"])
     assert run["usage"]["requests"] == 2
     assert ("lookup", "started") in seen[0]
 
@@ -355,3 +358,63 @@ async def test_concurrent_runs_in_one_session_keep_separate_records():
     assert [c["tool_call_id"] for c in two["tool_calls"]] == ["b1"]
     assert one["trace_ids"] != two["trace_ids"]
     assert {r["run_id"] for r in await first.list_runs(session_id="shared")} == {"run_one", "run_two"}
+
+
+# --- D2a: a run keeps its own working context ---------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_run_keeps_the_history_it_started_with_and_its_own_messages():
+    agent = await _agent(ScriptedModel("first answer", [("k1", "explode", "{}")], "second answer"), _tools([]))
+
+    first = await agent.run("first question", session_id="ctx")
+    second = await agent.run("second question", session_id="ctx")
+    record = await agent.get_run(second["run_id"])
+
+    history = [(m["role"], m["content"]) for m in record["context"]["history"]]
+    own = record["context"]["messages"]
+    assert history == [("user", "first question"), ("assistant", "first answer")]
+    assert [m["role"] for m in own] == ["user", "assistant", "tool", "assistant"]
+    assert own[0]["content"] == "second question"
+    assert all(m["metadata"]["run_id"] == second["run_id"] for m in own)
+    assert first["run_id"] != second["run_id"]
+
+
+@pytest.mark.asyncio
+async def test_messages_in_the_session_history_carry_their_run():
+    agent = await _agent(ScriptedModel("answer"), ToolRegistry())
+
+    result = await agent.run("question", session_id="tagged")
+    stored = await agent.memory_router.get_messages("tagged")
+
+    assert {m["metadata"].get("run_id") for m in stored} == {result["run_id"]}
+
+
+@pytest.mark.asyncio
+async def test_other_requests_and_summarization_cannot_change_a_runs_context():
+    agent = await _agent(ScriptedModel("a done", *[f"b{i} done" for i in range(6)]), ToolRegistry())
+    agent.memory_router.set_memory_config(mode="sliding_window", value=2)
+
+    first = await agent.run("run a", session_id="busy")
+    before = await agent.get_run(first["run_id"])
+    for i in range(6):  # other requests in the same session push the window on
+        await agent.run(f"run b{i}", session_id="busy")
+    after = await agent.get_run(first["run_id"])
+
+    assert after["context"] == before["context"]
+    assert [m["content"] for m in after["context"]["messages"]] == ["run a", "a done"]
+
+
+@pytest.mark.asyncio
+async def test_a_runs_context_is_stored_as_redacted_as_the_history():
+    from omnicoreagent.core.privacy import PrivacyFilter
+
+    agent = await _agent(ScriptedModel("noted"), ToolRegistry())
+    agent.privacy_filter = PrivacyFilter()
+
+    result = await agent.run("email me at someone@example.com", session_id="private")
+    record = await agent.get_run(result["run_id"])
+    stored = await agent.memory_router.get_messages("private")
+
+    assert "someone@example.com" not in str(record)
+    assert record["context"]["messages"][0]["content"] == stored[0]["content"]

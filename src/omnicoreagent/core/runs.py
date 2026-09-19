@@ -97,6 +97,12 @@ class RunTracker:
             "trace_ids": [],
             "tool_calls": [],
             "usage": {},
+            # The run's own working context: the session history exactly as
+            # this run loaded it, and the messages this run added. Session
+            # history is shared with other requests and can be windowed or
+            # summarized by them; this is not. Stored as history stores it
+            # (the same privacy redaction).
+            "context": {"history": None, "messages": []},
             "error": None,
             "created_at": _now(),
             "updated_at": None,
@@ -125,6 +131,19 @@ class RunTracker:
     async def step(self, number: int) -> None:
         async with self._lock:
             self.record["step"] = number
+            await self._save()
+
+    async def set_history(self, messages: list[dict[str, Any]]) -> None:
+        """Keep the history this run started from (only the first load counts)."""
+        async with self._lock:
+            if self.record["context"]["history"] is not None:
+                return
+            self.record["context"]["history"] = [dict(m) for m in messages]
+            await self._save()
+
+    async def add_message(self, message: dict[str, Any]) -> None:
+        async with self._lock:
+            self.record["context"]["messages"].append(dict(message))
             await self._save()
 
     async def tool_started(

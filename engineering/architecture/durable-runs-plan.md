@@ -26,8 +26,8 @@ each becomes a small layer on top.
   assistant turn with its tool calls, and each tool result go to the session
   history in the memory store (in memory, Redis, MongoDB, or SQL) as they
   happen (`add_message_to_history` in `core/agents/base.py`,
-  `native_tools.py`). The run state does not copy messages; it records what
-  history lacks.
+  `native_tools.py`). (Revised in D2a: the run record also keeps its own
+  working context; see "Run state".)
 - The loop has clear step boundaries (`agent.step` spans) and one tool
   dispatch point (`GovernedToolRunner`).
 - Governance produces an `ApprovalRequest` (capability, target, risk, reason,
@@ -62,6 +62,15 @@ tagged with their run. A resumed run must not read another request's
 messages that arrived while it waited, so from D2 every history message
 carries its `run_id`, and a resumed run rebuilds its context from the
 history as it was when the run started plus its own messages only.
+
+Revised in D2a: session history cannot be the source for resuming even with
+tags, because reads are windowed and other requests can summarize (mark
+inactive, or delete under the `delete` retention policy) messages while a run
+waits, including the run's own tool-call message. So the run record keeps its
+own working context: the history exactly as the run loaded it, and the
+messages the run added, stored as the history stores them (same privacy
+redaction, so nothing new is exposed). Nothing another request does to the
+session changes it. This replaces "the run state does not copy messages".
 
 The run state lives in the memory store the application already chose
 (in memory, SQL, Redis, or MongoDB), beside the session history it points
@@ -181,3 +190,4 @@ Each unit: failing tests first, full suite, commit and push, log below.
 | Unit | Status | Commit | Notes |
 | --- | --- | --- | --- |
 | D1 | Complete | `5669a0b` | New `core/runs.py`: `RunTracker` saves each run's record (status, step, usage, trace IDs, and each tool call with an arguments digest, never the arguments) through the memory store the application chose; `current_run()` is the running tracker. Run-state methods (`save_run_state` with compare-and-swap versions, `get_run_state`, `list_run_states`) on the memory store base (not abstract: a store or router without async run-state methods keeps working, not durable) and implemented for in memory, SQL (a `run_states` table, created on existing databases too), Redis (one hash per run, a session index, and a Lua compare-and-swap), and MongoDB (`<collection>_run_states`, updates matched on the version). The agent records the start, every step, each tool call as `started` before it runs (write-ahead; if that save fails the call does not run) and `completed` or `interrupted` (cancelled or timed out, effect unknown) after, and the end: `completed`, `failed` (including a provider error that ends the run with an error response), `blocked` (guardrail), or `cancelled`. Saves are serialized per run, so parallel tool calls cannot race on versions. `agent.get_run(run_id)` and `agent.list_runs(session_id=, status=)`. Choosing SQL, Redis, or MongoDB without its URL now logs a warning instead of info (the store silently falls back to in memory). Found and fixed during D1: the SQL and Redis connection managers were process-wide singletons, so a second store with a different database URL silently used the first one's database (reproduced for both); SQL engines are now per URL and each Redis store has its own client; the tests that reset the old singletons no longer need to. Redis and MongoDB were tested against real servers in throwaway containers (`redis:7-alpine`, `mongo:7`), which also ran the existing live Redis and MongoDB memory and background task store tests for the first time here. 19 new tests, including one per durable backend where a separate agent with a fresh connection reads a finished run. Full suite with the live backends 1,582 passed, 2 skipped (S3 and R2, which need cloud credentials); ruff clean. |
+| D2a | Complete | (this commit) | A run is bounded to its own request. Every message a run stores in the session history carries its `run_id`. The run record keeps its own working context: the history exactly as the run loaded it (first load only) and the messages it added, stored exactly as the history stores them (same privacy redaction). Other requests in the same session, the memory window, and summarization cannot change it (tested: six later runs with a two-message sliding window leave an earlier run's context byte-for-byte unchanged). The tool call entries still hold only an arguments digest; the context holds the conversation as the history does. The design changed from "no copied messages" because a windowed or summarized session history cannot be resumed from safely. 5 new tests. Full suite with live Redis and MongoDB 1,587 passed, 2 skipped (S3 and R2); ruff clean. |
