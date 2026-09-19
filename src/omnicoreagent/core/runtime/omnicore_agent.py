@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import uuid
 
 from omnicoreagent.core.runs import (
     RunStateUnsupported,
+    RunSuspended,
     RunTracker,
     current_run,
     supports_run_state,
@@ -606,6 +608,7 @@ class OmniCoreAgent:
         *,
         tags: Optional[List[str]] = None,
         provenance: Optional[Dict[str, Any]] = None,
+        _resume: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run the agent with a query and optional session ID.
@@ -660,28 +663,48 @@ class OmniCoreAgent:
                 agent_id=self.name,
                 provenance=provenance,
                 metadata={**self._telemetry_metadata(), "tags": list(tags or [])},
-                input={"query": query},
+                input={"query": query} if _resume is None else {"resumed_run_id": run_id},
             )
-            await self.telemetry_recorder.emit_event(
-                "user_message",
-                actor=TelemetryActor(type=ActorType.USER),
-                input={"message": query},
-            )
+            if _resume is None:
+                await self.telemetry_recorder.emit_event(
+                    "user_message",
+                    actor=TelemetryActor(type=ActorType.USER),
+                    input={"message": query},
+                )
+            else:
+                await self.telemetry_recorder.emit_event(
+                    "run_resumed",
+                    actor=self._telemetry_actor(),
+                    metadata={
+                        "previous_trace_ids": list(_resume.get("trace_ids") or []),
+                        "step": _resume.get("step"),
+                        "approvals": [
+                            {
+                                key: approval.get(key)
+                                for key in ("approval_id", "status", "approver", "note", "tool_name")
+                            }
+                            for approval in _resume.get("approvals") or []
+                        ],
+                    },
+                )
 
             if not self._initialized:
                 await self.initialize()
 
             # The run's durable record lives in the chosen memory store.
-            run_tracker = RunTracker(
-                self.memory_router,
-                run_id=run_id,
-                session_id=session_id,
-                agent_name=self.name,
-                agent_version=self.agent_config.get("agent_version"),
-            )
+            if _resume is None:
+                run_tracker = RunTracker(
+                    self.memory_router,
+                    run_id=run_id,
+                    session_id=session_id,
+                    agent_name=self.name,
+                    agent_version=self.agent_config.get("agent_version"),
+                )
+            else:
+                run_tracker = RunTracker.from_record(self.memory_router, _resume)
             await run_tracker.start(trace_context.trace_id)
 
-            blocked_response = await execution.blocked_guardrail_response(
+            blocked_response = None if _resume is not None else await execution.blocked_guardrail_response(
                 guardrail=self.guardrail,
                 query=query,
                 session_id=session_id,
@@ -734,7 +757,8 @@ class OmniCoreAgent:
                 response = await self.agent.run(
                     **({"on_event": emit_delta} if delivery is not None else {}),
                     system_prompt=runtime_prompt,
-                    query=query,
+                    query=query or "",
+                    resume=_resume,
                     llm_connection=self.llm_connection,
                     add_message_to_history=self._store_message_with_telemetry,
                     message_history=self._get_messages_with_telemetry,
@@ -791,6 +815,38 @@ class OmniCoreAgent:
             formatted_response["trace_id"] = trace_context.trace_id
             formatted_response["run_id"] = run_id
             return self.privacy_filter.redact(formatted_response, boundary="public")
+        except RunSuspended as suspended:
+            # Waiting for a person: this trace segment ends; resume() starts
+            # the next one for the same run.
+            await run_tracker.finish("awaiting_approval", usage=getattr(suspended, "usage", None))
+            approvals = [_public_approval(a, run_tracker.record) for a in suspended.approvals]
+            await self.telemetry_recorder.emit_event(
+                "run_suspended",
+                actor=self._telemetry_actor(),
+                metadata={
+                    "approvals": [
+                        {key: a.get(key) for key in ("approval_id", "tool_name", "capability", "tool_call_id")}
+                        for a in approvals
+                    ]
+                },
+            )
+            trace_finalizing = True
+            await self.telemetry_recorder.end_trace(
+                status=TraceStatus.SUSPENDED,
+                output={"status": "awaiting_approval", "approval_count": len(approvals)},
+            )
+            return self.privacy_filter.redact(
+                {
+                    "response": None,
+                    "status": "awaiting_approval",
+                    "approvals": approvals,
+                    "session_id": session_id,
+                    "agent_name": self.name,
+                    "run_id": run_id,
+                    "trace_id": trace_context.trace_id,
+                },
+                boundary="public",
+            )
         except asyncio.CancelledError as exc:
             await self._finish_run_record(run_tracker, "cancelled", exc)
             if trace_context is not None and not trace_finalizing:
@@ -914,6 +970,21 @@ class OmniCoreAgent:
             return await self.memory_router.get_run_state(run_id)
         except RunStateUnsupported:
             return None
+
+    async def resume(self, run_id: str, on_event: Any = None) -> Dict[str, Any]:
+        """Continue a run that was waiting for approval, once every approval
+        it asked for has been decided (see ``resolve_approval``)."""
+        record = await self.get_run(run_id)
+        if record is None:
+            raise LookupError(f"No run {run_id}")
+        if record["status"] != "awaiting_approval":
+            raise ValueError(f"Run {run_id} is {record['status']}; only a waiting run can resume")
+        pending = [a["approval_id"] for a in record.get("approvals", []) if a["status"] == "pending"]
+        if pending:
+            raise ValueError(f"Run {run_id} is still waiting for approval: {', '.join(pending)}")
+        return await self.run(
+            None, session_id=record["session_id"], run_id=run_id, on_event=on_event, _resume=record
+        )
 
     async def resolve_approval(
         self,
@@ -1749,3 +1820,30 @@ async def _keep_run_history(messages: list[dict[str, Any]]) -> None:
     run = current_run()
     if run is not None:
         await run.set_history(messages)
+
+
+def _public_approval(approval: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
+    """What an approver needs to decide: the call as the model made it."""
+    arguments = None
+    for message in reversed(record.get("context", {}).get("messages", [])):
+        for call in (message.get("metadata") or {}).get("tool_calls") or []:
+            if call.get("id") == approval.get("tool_call_id"):
+                raw = (call.get("function") or {}).get("arguments")
+                try:
+                    arguments = json.loads(raw) if isinstance(raw, str) else raw
+                except ValueError:
+                    arguments = raw
+                break
+        if arguments is not None:
+            break
+    return {
+        "approval_id": approval["approval_id"],
+        "tool_call_id": approval.get("tool_call_id"),
+        "tool_name": approval.get("tool_name"),
+        "capability": approval.get("capability"),
+        "target": approval.get("target"),
+        "arguments": arguments,
+        "risk_level": approval.get("risk_level"),
+        "reason": approval.get("reason"),
+        "expires_at": approval.get("expires_at"),
+    }

@@ -48,6 +48,8 @@ class TraceStatus(str, Enum):
     ABORTED_RESOURCE_GUARD = "aborted_resource_guard"
     ABORTED_SAFETY_GUARD = "aborted_safety_guard"
     PARTIAL = "partial"
+    # The run is waiting for a person; it continues in a new trace segment.
+    SUSPENDED = "suspended"
 
 
 class CaptureState(str, Enum):
@@ -189,6 +191,8 @@ FOUNDATION_EVENT_TYPES = frozenset(
         "sandbox_exec_failed",
         "sandbox_session_closed",
         "sandbox_workspace_sync",
+        "run_suspended",
+        "run_resumed",
         "policy_violation",
         "secret_access_denied",
         "secret_access_brokered",

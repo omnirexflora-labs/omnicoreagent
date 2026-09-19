@@ -40,6 +40,14 @@ class RunStateConflict(Exception):
     """A run record changed since it was read, or already exists."""
 
 
+class RunSuspended(Exception):
+    """The run is waiting for a person to decide one or more approvals."""
+
+    def __init__(self, approvals: list[dict[str, Any]]):
+        super().__init__(f"Run is waiting for {len(approvals)} approval(s)")
+        self.approvals = approvals
+
+
 class RunStateUnsupported(NotImplementedError):
     """The memory store does not keep run state."""
 
@@ -104,6 +112,21 @@ class RunTracker:
             "created_at": _now(),
             "updated_at": None,
         }
+
+    @classmethod
+    def from_record(cls, store: Any, record: dict[str, Any]) -> "RunTracker":
+        """Continue a stored run (a resume); the next save must match its version."""
+        record = dict(record)
+        tracker = cls(
+            store,
+            run_id=record["run_id"],
+            session_id=record["session_id"],
+            agent_name=record["agent_name"],
+            agent_version=record.get("agent_version"),
+        )
+        tracker._version = record.pop("version")
+        tracker.record = {**record, "status": "running"}
+        return tracker
 
     async def _save(self) -> None:
         if not self.enabled:
@@ -177,7 +200,8 @@ class RunTracker:
         async with self._lock:
             self.record["status"] = status
             if usage is not None:
-                self.record["usage"] = _usage_dict(usage)
+                # A resumed run adds this segment's usage to the earlier ones.
+                self.record["usage"] = _add_usage(self.record.get("usage") or {}, _usage_dict(usage))
             if error is not None:
                 self.record["error"] = {"type": type(error).__name__, "message": str(error)}
             await self._save()
@@ -222,3 +246,13 @@ def _usage_dict(usage: Any) -> dict[str, Any]:
         return dict(usage)
     fields = ("requests", "request_tokens", "response_tokens", "total_tokens")
     return {name: getattr(usage, name, None) for name in fields if hasattr(usage, name)}
+
+
+def _add_usage(before: dict[str, Any], segment: dict[str, Any]) -> dict[str, Any]:
+    total = dict(before)
+    for key, value in segment.items():
+        if isinstance(value, (int, float)) and isinstance(total.get(key), (int, float)):
+            total[key] = total[key] + value
+        elif value is not None:
+            total[key] = value
+    return total

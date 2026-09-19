@@ -19,7 +19,7 @@ from omnicoreagent.core.types import (
 )
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.governed_tool_runner import GovernedToolRunner
-from omnicoreagent.core.runs import current_run
+from omnicoreagent.core.runs import RunSuspended, current_run
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.logging import logger
@@ -34,6 +34,7 @@ from omnicoreagent.core.workspace.artifacts import (
 from omnicoreagent.core.agents.initial_messages import AgentInitialMessagePreparer
 from omnicoreagent.core.agents.llm_step import AgentLlmStepRunner
 from omnicoreagent.core.agents.native_tools import execute_native_turn
+from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.tools.native_catalog import NativeToolCatalog
 from omnicoreagent.core.agents.message_history import AgentMessageHistoryLoader
 from omnicoreagent.core.agents.run_outcome import AgentRunOutcomeHandler
@@ -342,8 +343,13 @@ class BaseReactAgent:
         sub_agents: list = None,
         on_event: Any = None,
         telemetry_run_header: dict[str, Any] | None = None,
+        resume: dict[str, Any] | None = None,
     ) -> Any:
-        """Run native model turns, correlated tool results and final text."""
+        """Run native model turns, correlated tool results and final text.
+
+        ``resume`` is a paused run's record: the run continues from its own
+        saved context, first running the calls that were waiting for approval.
+        """
         session_state = self.session_state_store.reset_for_run(
             session_id=session_id, debug=debug
         )
@@ -359,6 +365,14 @@ class BaseReactAgent:
             sub_agents=sub_agents,
             advanced=self.enable_advanced_tool_use,
         )
+        if resume is not None:
+            # The run's own context, never the shared session history.
+            saved = resume["context"]
+            saved_messages = [*(saved.get("history") or []), *saved["messages"]]
+
+            async def message_history(**_):
+                return [dict(message) for message in saved_messages]
+
         await self.initial_message_preparer.prepare(
             system_prompt=system_prompt,
             session_state=session_state,
@@ -373,25 +387,26 @@ class BaseReactAgent:
                 messages=session_state.messages,
                 catalog=catalog,
             )
-        session_state.messages.append(Message(role="user", content=query))
-        self.prompt_context_builder.inject_current_datetime(session_state.messages)
-        context_prefix = _datetime_prefix(session_state.messages[-1], query)
-        await self._record_runtime_message(
-            telemetry_recorder,
-            session_state.messages[-1],
-            kind="current_datetime",
-            content=context_prefix,
-        )
+        if resume is None:
+            session_state.messages.append(Message(role="user", content=query))
+            self.prompt_context_builder.inject_current_datetime(session_state.messages)
+            context_prefix = _datetime_prefix(session_state.messages[-1], query)
+            await self._record_runtime_message(
+                telemetry_recorder,
+                session_state.messages[-1],
+                kind="current_datetime",
+                content=context_prefix,
+            )
 
-        # History keeps the query itself; the prefix is stored beside it so a
-        # later run resends this message exactly as the model first saw it,
-        # which keeps the provider's prompt cache prefix intact.
-        await add_message_to_history(
-            role="user",
-            content=query,
-            session_id=session_id,
-            metadata={"agent_name": self.agent_name, "context_prefix": context_prefix},
-        )
+            # History keeps the query itself; the prefix is stored beside it so a
+            # later run resends this message exactly as the model first saw it,
+            # which keeps the provider's prompt cache prefix intact.
+            await add_message_to_history(
+                role="user",
+                content=query,
+                session_id=session_id,
+                metadata={"agent_name": self.agent_name, "context_prefix": context_prefix},
+            )
         if session_state.state not in [
             AgentState.IDLE,
             AgentState.ERROR,
@@ -404,6 +419,23 @@ class BaseReactAgent:
             new_state=AgentState.RUNNING, session_id=session_id, debug=debug
         ):
             current_steps = 0
+            if resume is not None:
+                current_steps = int(resume.get("step") or 0)
+                pending = _pending_calls(resume)
+                if pending:
+                    await execute_native_turn(
+                        self,
+                        turn=ModelTurn(tool_calls=tuple(pending), finish_reason="tool_calls"),
+                        catalog=catalog,
+                        local_tools=runtime_local_tools,
+                        sessions=sessions,
+                        session_state=session_state,
+                        session_id=session_id,
+                        add_message_to_history=add_message_to_history,
+                        run_usage=run_usage,
+                        telemetry_recorder=telemetry_recorder,
+                        resuming=True,
+                    )
             while (
                 session_state.state not in [AgentState.FINISHED]
                 and current_steps < self.max_steps
@@ -539,6 +571,16 @@ class BaseReactAgent:
                             status=SpanStatus.OK,
                             output={"returned": False},
                         )
+                except RunSuspended as suspended:
+                    # Waiting for a person is not a failure of the step.
+                    suspended.usage = run_usage
+                    if telemetry_recorder is not None and step_span is not None:
+                        await telemetry_recorder.end_span(
+                            step_span.span_id,
+                            status=SpanStatus.OK,
+                            output={"suspended": True},
+                        )
+                    raise
                 except BaseException as exc:
                     if telemetry_recorder is not None and step_span is not None:
                         await telemetry_recorder.end_span(
@@ -566,3 +608,40 @@ def _datetime_prefix(message: Any, query: str) -> str:
     """The text the runtime prepended to the user's query."""
     content = str(getattr(message, "content", "") or "")
     return content[: len(content) - len(query)] if content.endswith(query) else content
+
+
+def _pending_calls(record: dict[str, Any]) -> list:
+    """The calls of the paused step that have no result yet, as the model made
+    them, or with the arguments an approver edited."""
+    from omnicoreagent.core.model_protocol import ToolRequest
+
+    messages = record["context"]["messages"]
+    turn_index = next(
+        (
+            i
+            for i in range(len(messages) - 1, -1, -1)
+            if messages[i]["role"] == "assistant"
+            and (messages[i].get("metadata") or {}).get("tool_calls")
+        ),
+        None,
+    )
+    if turn_index is None:
+        return []
+    answered = {
+        (m.get("metadata") or {}).get("tool_call_id") for m in messages[turn_index + 1 :]
+    }
+    edited = {
+        approval.get("tool_call_id"): approval["edited_arguments"]
+        for approval in record.get("approvals", [])
+        if approval.get("edited_arguments") is not None
+    }
+    pending = []
+    for call in messages[turn_index]["metadata"]["tool_calls"]:
+        if call["id"] in answered:
+            continue
+        function = call.get("function") or {}
+        arguments = function.get("arguments") or "{}"
+        if call["id"] in edited:
+            arguments = json.dumps(edited[call["id"]])
+        pending.append(ToolRequest(call["id"], function.get("name"), arguments))
+    return pending

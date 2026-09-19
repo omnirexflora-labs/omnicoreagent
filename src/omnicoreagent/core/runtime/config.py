@@ -143,6 +143,9 @@ def _default_governance_config() -> dict[str, Any]:
         "policy_path": None,
         "project_root": None,
         "approval_resolver": None,
+        # With no resolver: "suspend" pauses the run until a person decides,
+        # "fail" refuses the call (the behaviour before durable runs).
+        "approval_mode": "suspend",
         "sandbox_runtime": None,
         "sandbox_config": None,
         "allow_test_sandbox_runtime": False,
@@ -524,6 +527,8 @@ def _validate_governance_config(value: dict[str, Any]):
         raise ValueError(
             "governance_config.allow_static_high_risk_approvals must be a boolean"
         )
+    if value.get("approval_mode", "suspend") not in {"suspend", "fail"}:
+        raise ValueError("governance_config.approval_mode must be 'suspend' or 'fail'")
     if not isinstance(value.get("allow_test_sandbox_runtime", False), bool):
         raise ValueError("governance_config.allow_test_sandbox_runtime must be a boolean")
     sandbox_config = value.get("sandbox_config")

@@ -47,7 +47,7 @@ from omnicoreagent.core.telemetry.exporters import (
 
 
 def _span_status_for_trace_status(status: TraceStatus) -> SpanStatus:
-    if status == TraceStatus.COMPLETED:
+    if status in {TraceStatus.COMPLETED, TraceStatus.SUSPENDED}:
         return SpanStatus.OK
     if status == TraceStatus.CANCELLED:
         return SpanStatus.CANCELLED

@@ -109,6 +109,9 @@ class RunApprovalResolver:
                 "request_digest": digest,
                 "status": "pending",
                 "capability": approval.capability,
+                # The actor is part of the digest; an edited call is rebuilt
+                # with it, so its approval matches the real request.
+                "actor": approval.actor,
                 "tool_name": metadata.get("tool_name"),
                 "tool_provider": metadata.get("tool_provider"),
                 "tool_server": metadata.get("tool_server"),
@@ -179,6 +182,7 @@ async def decide(
             tool_args=arguments,
             tool_provider=approval["tool_provider"] or "local",
             tool_server=approval.get("tool_server"),
+            actor=approval.get("actor") or "agent",
         )
         match = next(
             (r for r in edited if r.capability == approval["capability"]), edited[0]

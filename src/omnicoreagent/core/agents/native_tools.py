@@ -11,7 +11,7 @@ from typing import Any
 from omnicoreagent.core.agents.loop_detection import ToolInteraction
 from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.runtime.deadline import stop_after
-from omnicoreagent.core.runs import current_run
+from omnicoreagent.core.runs import RunSuspended, current_run
 from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
 from omnicoreagent.governance.errors import PolicyDeniedError
 from omnicoreagent.core.tools.mcp_tool_handler import MCPToolHandler
@@ -53,7 +53,13 @@ async def execute_native_turn(
     model_call_event_id: str | None = None,
     model_response_event_id: str | None = None,
     agent_step_span_id: str | None = None,
+    resuming: bool = False,
 ):
+    """Run one model turn's tool calls.
+
+    ``resuming`` runs calls of an assistant turn that is already in the
+    history (a run continuing after approval): the turn is not stored again.
+    """
     # Decode once. Freeze resolution against the schemas supplied for this turn;
     # discovery cannot unlock a sibling in the same batch.
     decoded_arguments = {}
@@ -91,11 +97,15 @@ async def execute_native_turn(
         "tool_calls": stored_calls,
         "model_message": {**assistant, "tool_calls": stored_calls},
     }
-    await add_message_to_history(
-        role="assistant", content=turn.text, metadata=metadata, session_id=session_id
-    )
-    session_state.messages.append(assistant)
+    if not resuming:
+        await add_message_to_history(
+            role="assistant", content=turn.text, metadata=metadata, session_id=session_id
+        )
+        session_state.messages.append(assistant)
     session_state.state = AgentState.TOOL_CALLING
+    # Calls governance asked a person to decide: their results are not stored
+    # (the call has not happened), and the run pauses after this step.
+    awaiting: set[str] = set()
 
     async def one(request):
         resolved = None
@@ -248,7 +258,13 @@ async def execute_native_turn(
                 "message": str(exc),
             }
         if run_call_started:
-            await _record_tool_outcome(request.id, result)
+            if _waiting_for_approval(request.id):
+                awaiting.add(request.id)
+                await current_run().tool_finished(
+                    tool_call_id=request.id, outcome=None, state="awaiting_approval"
+                )
+            else:
+                await _record_tool_outcome(request.id, result)
         # Loop signatures use normalized, guarded contents before artifact IDs
         # and governed-history redaction can change their representation.
         signature_result = {
@@ -472,6 +488,8 @@ async def execute_native_turn(
         for result in results:
             if result.message["tool_call_id"] in persisted_ids:
                 continue
+            if result.message["tool_call_id"] in awaiting:
+                continue
             write = asyncio.create_task(persist_one(result))
             try:
                 await asyncio.shield(write)
@@ -535,6 +553,24 @@ async def execute_native_turn(
                 error={"type": type(exc).__name__, "message": str(exc)},
             )
         raise
+    if awaiting:
+        run = current_run()
+        raise RunSuspended(
+            [
+                approval
+                for approval in run.record.get("approvals", [])
+                if approval["status"] == "pending" and approval.get("tool_call_id") in awaiting
+            ]
+        )
+
+
+def _waiting_for_approval(tool_call_id: str) -> bool:
+    """Whether governance recorded a pending approval for this call."""
+    run = current_run()
+    return run is not None and any(
+        approval.get("tool_call_id") == tool_call_id and approval["status"] == "pending"
+        for approval in run.record.get("approvals", [])
+    )
 
 
 def _is_governed(child: Any) -> bool:

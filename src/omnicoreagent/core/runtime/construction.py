@@ -229,9 +229,15 @@ def build_governance_engine(agent_config: dict[str, Any], telemetry_recorder: An
             governance_config.get("sandbox_config"),
             telemetry_recorder=telemetry_recorder,
         )
+    approval_resolver = governance_config.get("approval_resolver")
+    if approval_resolver is None and governance_config.get("approval_mode", "suspend") == "suspend":
+        from omnicoreagent.core.run_approvals import RunApprovalResolver
+
+        # An unanswered ask pauses the run until a person decides.
+        approval_resolver = RunApprovalResolver()
     return GovernanceEngine(
         policy,
-        approval_resolver=governance_config.get("approval_resolver"),
+        approval_resolver=approval_resolver,
         telemetry_recorder=telemetry_recorder,
         sandbox_runtime=sandbox_runtime,
         allow_test_sandbox_runtime=governance_config.get(
