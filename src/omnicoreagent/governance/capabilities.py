@@ -214,6 +214,9 @@ def tool_capability_name(*, tool_name: str, tool_provider: str) -> str:
         return "skill.script.run" if tool_name == "run_skill_script" else "skill.files.read"
     if tool_provider == "sandbox":
         return "sandbox.execute"
+    if tool_provider == "code":
+        # Running a program in Monty; each tool it calls is authorized on its own.
+        return "code.run"
     return "tool.local.call"
 
 
@@ -554,6 +557,8 @@ def tool_risk_level(*, tool_name: str, tool_provider: str) -> str:
         return "high"
     if tool_provider == "sandbox":
         return "high"
+    if tool_provider == "code":
+        return "medium"
     if tool_provider == "workspace":
         if tool_name == "clear_files":
             return "critical"
@@ -695,6 +700,8 @@ def _normalize_secret_ref(secret_ref: str) -> str:
 def _execution_surface(tool_provider: str, tool_name: str | None = None) -> str:
     if tool_provider == "sandbox":
         return "sandbox"
+    if tool_provider == "code":
+        return "code"
     if tool_provider == "skill":
         if tool_name != "run_skill_script":
             return "host"

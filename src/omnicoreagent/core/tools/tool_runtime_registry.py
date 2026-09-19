@@ -78,6 +78,7 @@ class ToolRuntimeRegistry:
         sandbox_execution: Any = None,
         tool_call_timeout: int = 60,
         skill_script_env: list[str] | None = None,
+        code_mode: Any = None,
     ):
         self.register_internal_tool = register_internal_tool
         self.tool_offloader = tool_offloader
@@ -92,6 +93,7 @@ class ToolRuntimeRegistry:
         self.sandbox_execution = sandbox_execution
         self.tool_call_timeout = tool_call_timeout
         self.skill_script_env = list(skill_script_env or [])
+        self.code_mode = code_mode
 
     def _workspace_for_runtime_tools(self) -> Workspace:
         if self.workspace is None:
@@ -110,6 +112,7 @@ class ToolRuntimeRegistry:
             or self.tool_offloader.config.enabled
             or (self.enable_agent_skills and self.skill_manager)
             or self.sandbox_execution is not None
+            or bool(getattr(self.code_mode, "enabled", False))
         )
 
         if registry is None and needs_internal_registry:
@@ -145,5 +148,20 @@ class ToolRuntimeRegistry:
             from omnicoreagent.core.tools.execution_tools import build_execution_tools
 
             build_execution_tools(registry, max_timeout_seconds=self.tool_call_timeout)
+
+        if getattr(self.code_mode, "enabled", False):
+            from omnicoreagent.core.tools.code_mode import (
+                build_code_mode_tool,
+                callable_name,
+                function_signature,
+            )
+
+            # Registered last, so its description lists every tool a program may call.
+            signatures = [
+                function_signature(tool["name"], tool.get("inputSchema") or {}, tool.get("description"))
+                for tool in registry.get_available_tools()
+                if self.code_mode.allows(tool["name"]) and callable_name(tool["name"])
+            ]
+            build_code_mode_tool(registry, config=self.code_mode, functions=signatures)
 
         return registry

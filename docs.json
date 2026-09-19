@@ -55,6 +55,7 @@
                             "docs/core-concepts/guardrails",
                             "docs/core-concepts/security-model",
                             "docs/core-concepts/durable-runs",
+                            "docs/core-concepts/code-mode",
                             "docs/core-concepts/sub-agents",
                             "docs/core-concepts/background-agents"
                         ]

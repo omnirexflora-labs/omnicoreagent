@@ -79,6 +79,7 @@ class BaseReactAgent:
         enable_workspace_files: bool = False,
         enable_agent_skills: bool = False,
         skill_script_env: list[str] | None = None,
+        code_mode: dict[str, Any] | None = None,
         context_management_config: dict = None,
         tool_offload_config: dict = None,
         workspace_config: WorkspaceConfig | dict | None = None,
@@ -100,6 +101,9 @@ class BaseReactAgent:
         self.enable_workspace_files = enable_workspace_files or enable_subagents
         self.enable_agent_skills = enable_agent_skills
         self.skill_manager = None
+        from omnicoreagent.core.tools.code_mode import CodeModeConfig
+
+        self.code_mode = CodeModeConfig.from_value(code_mode)
         self.usage_limits = UsageLimits(
             request_limit=self.request_limit, total_tokens_limit=self.total_tokens_limit
         )
@@ -150,6 +154,7 @@ class BaseReactAgent:
             enable_agent_skills=self.enable_agent_skills,
             skill_manager=self.skill_manager,
             skill_script_env=skill_script_env,
+            code_mode=self.code_mode,
             workspace_config=workspace_config,
             privacy_filter=privacy_filter,
         )

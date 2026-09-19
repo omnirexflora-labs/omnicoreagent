@@ -111,6 +111,182 @@ async def execute_native_turn(
     # (the call has not happened), and the run pauses after this step.
     awaiting: set[str] = set()
 
+    async def dispatch(call_id, binding, arguments, *, outcome, started, parent=None):
+        """Run one resolved call on the governed path: the handler for its
+        provider, the write-ahead run record, then the governed runner. Model
+        calls and calls from a program (``parent`` is the run_code call) both
+        go through here."""
+        if binding.provider == "subagent":
+
+            async def delegate(params):
+                if agent.governance_engine is not None:
+                    from omnicoreagent.governance.capabilities import (
+                        subagent_spawn_authority_requests,
+                    )
+
+                    # A governed agent must not reach tools through a
+                    # child that nothing governs.
+                    if not _is_governed(binding.agent):
+                        raise PolicyDeniedError(
+                            f"Delegation refused: agent '{binding.agent.name}' is not "
+                            "governed. A governed agent can only delegate to agents "
+                            "with governance enabled."
+                        )
+
+                    child_tools = getattr(binding.agent, "local_tools", None)
+                    await agent.governance_engine.authorize_all(
+                        subagent_spawn_authority_requests(
+                            subagent_specs=[
+                                {
+                                    "name": binding.agent.name,
+                                    "task": params.get("query", ""),
+                                }
+                            ],
+                            tool_names=[
+                                tool["name"]
+                                for tool in child_tools.get_available_tools()
+                            ]
+                            if child_tools
+                            else [],
+                            mcp_servers=list(
+                                getattr(binding.agent, "mcp_tools", {}) or {}
+                            ),
+                            memory_scope=session_id,
+                        )
+                    )
+                name, result = await agent.subagent_runner.run(
+                    {"agent": binding.agent.name, "parameters": params},
+                    [binding.agent],
+                    session_id,
+                    telemetry_recorder=telemetry_recorder,
+                    redact_parameters=agent.governance_engine is not None,
+                )
+                if isinstance(result, BaseException):
+                    raise result
+                if isinstance(result, dict) and isinstance(
+                    result.get("metric"), Usage
+                ):
+                    run_usage.incr(result["metric"])
+                return {
+                    "status": result.get("status", "success")
+                    if isinstance(result, dict)
+                    else "success",
+                    "data": result,
+                }
+
+            handler = CallbackHandler(delegate)
+        elif binding.provider == "discovery":
+
+            async def discover(params):
+                return {
+                    "status": "success",
+                    "data": catalog.discover(params["query"]),
+                }
+
+            handler = CallbackHandler(discover)
+        elif binding.provider == "mcp":
+            handler = MCPToolHandler(
+                sessions or {},
+                binding.server,
+                guardrail=agent.guardrail,
+                telemetry_recorder=telemetry_recorder,
+                tool_call_id=call_id,
+            )
+        elif binding.provider == "code":
+
+            async def program(params):
+                return await _run_code(call_id, params)
+
+            handler = CallbackHandler(program)
+        else:
+            handler = LocalToolHandler(local_tools)
+        resolved = ToolCallResult(
+            ToolExecutor(handler),
+            binding.name,
+            arguments,
+            call_id,
+            binding.provider if binding.provider != "subagent" else "local",
+            binding.server,
+        )
+        # Recorded as started before it runs (write-ahead): if the run
+        # stops now, its record shows this call may have had an effect.
+        # If the record cannot be saved, the call does not run.
+        run = current_run()
+        if run is not None:
+            await run.tool_started(
+                tool_call_id=call_id,
+                tool_name=binding.name,
+                provider=binding.provider,
+                arguments=arguments,
+                parent_tool_call_id=parent,
+            )
+            started["flag"] = True
+        # The deadline records why it stopped the call, so the tool record
+        # reports a timeout distinctly from a cancelled run.
+        async with stop_after(agent.tool_call_timeout):
+            result = await agent.governed_tool_runner.execute(
+                single_tool=resolved,
+                telemetry_recorder=telemetry_recorder,
+                result_guardrail=agent.guardrail,
+                telemetry_links={
+                    "batch_id": batch_id,
+                    "model_call_event_id": model_call_event_id,
+                    "model_response_event_id": model_response_event_id,
+                    **call_links.get(call_id, {}),
+                    "tool_provider": binding.provider,
+                    **({"parent_tool_call_id": parent} if parent else {}),
+                },
+                telemetry_outcome=outcome,
+            )
+        return result, resolved
+
+    async def _run_code(parent_id, params):
+        """Run a program in Monty; its tool calls are dispatched like model calls."""
+        from omnicoreagent.core.model_protocol import ToolRequest
+        from omnicoreagent.core.tools.code_mode import callable_name, run_program
+
+        config = agent.code_mode
+        numbers = iter(range(1, 1_000_000))
+
+        def tool_function(binding):
+            async def call(kwargs, args):
+                if args:
+                    names = list((binding.parameters or {}).get("properties") or {})
+                    kwargs = {**dict(zip(names, args)), **kwargs}
+                call_id = f"{parent_id}.{next(numbers)}"
+                resolved_binding, arguments = catalog.resolve(
+                    ToolRequest(call_id, binding.exposed_name, json.dumps(kwargs, default=str)),
+                    arguments=kwargs,
+                )
+                started = {"flag": False}
+                try:
+                    result, _ = await dispatch(
+                        call_id,
+                        resolved_binding,
+                        arguments,
+                        outcome={},
+                        started=started,
+                        parent=parent_id,
+                    )
+                except Exception as exc:
+                    result = {"status": "error", "message": str(exc)}
+                if started["flag"]:
+                    await _record_tool_outcome(call_id, result)
+                if result.get("status", "success") == "success":
+                    return result.get("data")
+                raise RuntimeError(result.get("message") or f"{binding.name} failed")
+
+            return call
+
+        functions = {
+            binding.name: tool_function(binding)
+            for binding in catalog.bindings.values()
+            if binding.provider not in {"code", "subagent", "discovery"}
+            and config.allows(binding.name)
+            and callable_name(binding.name)
+        }
+        return await run_program(params.get("code", ""), functions=functions, config=config)
+
     async def one(request):
         resolved = None
         outcome: dict = {}
@@ -121,122 +297,15 @@ async def execute_native_turn(
             if isinstance(resolution, ValueError):
                 raise resolution
             binding, arguments = resolution
-            if binding.provider == "subagent":
-
-                async def delegate(params):
-                    if agent.governance_engine is not None:
-                        from omnicoreagent.governance.capabilities import (
-                            subagent_spawn_authority_requests,
-                        )
-
-                        # A governed agent must not reach tools through a
-                        # child that nothing governs.
-                        if not _is_governed(binding.agent):
-                            raise PolicyDeniedError(
-                                f"Delegation refused: agent '{binding.agent.name}' is not "
-                                "governed. A governed agent can only delegate to agents "
-                                "with governance enabled."
-                            )
-
-                        child_tools = getattr(binding.agent, "local_tools", None)
-                        await agent.governance_engine.authorize_all(
-                            subagent_spawn_authority_requests(
-                                subagent_specs=[
-                                    {
-                                        "name": binding.agent.name,
-                                        "task": params.get("query", ""),
-                                    }
-                                ],
-                                tool_names=[
-                                    tool["name"]
-                                    for tool in child_tools.get_available_tools()
-                                ]
-                                if child_tools
-                                else [],
-                                mcp_servers=list(
-                                    getattr(binding.agent, "mcp_tools", {}) or {}
-                                ),
-                                memory_scope=session_id,
-                            )
-                        )
-                    name, result = await agent.subagent_runner.run(
-                        {"agent": binding.agent.name, "parameters": params},
-                        [binding.agent],
-                        session_id,
-                        telemetry_recorder=telemetry_recorder,
-                        redact_parameters=agent.governance_engine is not None,
-                    )
-                    if isinstance(result, BaseException):
-                        raise result
-                    if isinstance(result, dict) and isinstance(
-                        result.get("metric"), Usage
-                    ):
-                        run_usage.incr(result["metric"])
-                    return {
-                        "status": result.get("status", "success")
-                        if isinstance(result, dict)
-                        else "success",
-                        "data": result,
-                    }
-
-                handler = CallbackHandler(delegate)
-            elif binding.provider == "discovery":
-
-                async def discover(params):
-                    return {
-                        "status": "success",
-                        "data": catalog.discover(params["query"]),
-                    }
-
-                handler = CallbackHandler(discover)
-            elif binding.provider == "mcp":
-                handler = MCPToolHandler(
-                    sessions or {},
-                    binding.server,
-                    guardrail=agent.guardrail,
-                    telemetry_recorder=telemetry_recorder,
-                    tool_call_id=request.id,
-                )
-            else:
-                handler = LocalToolHandler(local_tools)
-            resolved = ToolCallResult(
-                ToolExecutor(handler),
-                binding.name,
-                arguments,
-                request.id,
-                binding.provider if binding.provider != "subagent" else "local",
-                binding.server,
-            )
             if request.id in (unknown_outcome_ids or set()):
                 raise _UnknownOutcome()
-            # Recorded as started before it runs (write-ahead): if the run
-            # stops now, its record shows this call may have had an effect.
-            # If the record cannot be saved, the call does not run.
-            run = current_run()
-            if run is not None:
-                await run.tool_started(
-                    tool_call_id=request.id,
-                    tool_name=binding.name,
-                    provider=binding.provider,
-                    arguments=arguments,
+            call_started = {"flag": False}
+            try:
+                result, resolved = await dispatch(
+                    request.id, binding, arguments, outcome=outcome, started=call_started
                 )
-                run_call_started = True
-            # The deadline records why it stopped the call, so the tool record
-            # reports a timeout distinctly from a cancelled run.
-            async with stop_after(agent.tool_call_timeout):
-                result = await agent.governed_tool_runner.execute(
-                    single_tool=resolved,
-                    telemetry_recorder=telemetry_recorder,
-                    result_guardrail=agent.guardrail,
-                    telemetry_links={
-                        "batch_id": batch_id,
-                        "model_call_event_id": model_call_event_id,
-                        "model_response_event_id": model_response_event_id,
-                        **call_links.get(request.id, {}),
-                        "tool_provider": binding.provider,
-                    },
-                    telemetry_outcome=outcome,
-                )
+            finally:
+                run_call_started = call_started["flag"]
         except _UnknownOutcome:
             result = {
                 "tool_name": request.name,

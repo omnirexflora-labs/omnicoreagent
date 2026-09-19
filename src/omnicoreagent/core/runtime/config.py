@@ -189,6 +189,8 @@ class AgentConfig:
     # A live run refreshes its heartbeat within this many seconds; a run whose
     # heartbeat is older can be recovered by another process.
     run_lease_seconds: int = 60
+    # Code mode: a run_code tool that runs Python in Monty (omnicoreagent[codemode]).
+    code_mode: dict[str, Any] = field(default_factory=dict)
     memory_config: dict[str, Any] = field(default_factory=_default_memory_config)
     enable_workspace_files: bool = True
     guardrail_config: dict[str, Any] = field(default_factory=dict)
@@ -207,6 +209,10 @@ class AgentConfig:
             not isinstance(self.agent_version, str) or not self.agent_version.strip()
         ):
             raise ValueError("agent_version must be a non-empty string or None")
+        if self.code_mode:
+            from omnicoreagent.core.tools.code_mode import CodeModeConfig
+
+            CodeModeConfig.from_value(self.code_mode)  # validates
         if (
             isinstance(self.run_lease_seconds, bool)
             or not isinstance(self.run_lease_seconds, int)

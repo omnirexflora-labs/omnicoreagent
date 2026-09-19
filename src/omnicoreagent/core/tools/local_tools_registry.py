@@ -6,7 +6,7 @@ from types import UnionType
 
 
 # Built-in tool families governance classifies by their own capabilities.
-INTERNAL_TOOL_PROVIDERS = frozenset({"workspace", "artifact", "skill", "sandbox"})
+INTERNAL_TOOL_PROVIDERS = frozenset({"workspace", "artifact", "skill", "sandbox", "code"})
 
 class Tool:
     def __init__(

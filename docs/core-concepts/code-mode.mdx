@@ -1,0 +1,65 @@
+---
+title: "Code Mode"
+description: "Let the model write a short Python program that calls your tools, safely"
+---
+
+# Code Mode
+
+With code mode, the agent gets a `run_code` tool. Instead of calling tools one
+at a time, the model writes a short Python program that calls them as
+functions, loops, filters, and computes, and gets back the program's result
+and what it printed. One model turn can do what would otherwise take many.
+
+```bash
+pip install "omnicoreagent[codemode]"
+```
+
+```python
+agent = OmniCoreAgent(
+    name="analyst",
+    system_instruction="Answer questions about orders.",
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    local_tools=tools,
+    agent_config={
+        "code_mode": {
+            "enabled": True,
+            "tools": ["get_order", "list_orders"],  # omit to allow every eligible tool
+            "max_duration_seconds": 30,
+            "max_tool_calls": 50,
+        },
+    },
+)
+```
+
+A program the model might write:
+
+```python
+late = []
+for order in list_orders(status="shipped"):
+    detail = get_order(order_id=order["id"])
+    if detail["days_in_transit"] > 7:
+        late.append(detail["id"])
+print(len(late), "late orders")
+late
+```
+
+## How it stays safe
+
+- Programs run in [Monty](https://github.com/pydantic/monty), Pydantic's
+  interpreter for a Python subset, in a separate worker process. A program
+  has no filesystem, network, or environment access; an attempt raises an
+  error inside the program.
+- Every tool call a program makes goes through the same path as a direct tool
+  call: governance authorizes it (a denied call raises an error the program
+  can catch), the run's record notes it before it starts, and it is recorded
+  in the trace.
+- A program is stopped at its time limit, memory limit (`max_memory_bytes`),
+  or tool-call limit, and its output is capped (`max_output_bytes`).
+- Under governance, running a program is its own capability (`code.run`); the
+  development profiles allow it, and `strict-production` needs a rule.
+
+## In the trace
+
+Each tool call a program made is listed under its `run_code` call in the
+trajectory (`code_calls`), with its own policy decision and outcome, and each
+has an ID of the form `<run_code call ID>.<n>`.

@@ -49,7 +49,7 @@ def _sandbox_ask_rules() -> list[PolicyRule]:
 
 
 def _sandbox_allow_rules() -> list[PolicyRule]:
-    """Contained execution and skill scripts, allowed by the dev profiles."""
+    """Contained execution, skill scripts, and code mode, allowed by the dev profiles."""
     return [
         PolicyRule(
             rule_id="allow_sandboxed_execution",
@@ -67,6 +67,13 @@ def _sandbox_allow_rules() -> list[PolicyRule]:
             rule_id="allow_skill_scripts",
             effect=PolicyEffect.ALLOW,
             capability="skill.*",
+        ),
+        # Programs run in Monty without OS access; each tool a program calls
+        # is authorized on its own.
+        PolicyRule(
+            rule_id="allow_code_mode",
+            effect=PolicyEffect.ALLOW,
+            capability="code.*",
         ),
     ]
 

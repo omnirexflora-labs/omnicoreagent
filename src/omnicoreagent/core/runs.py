@@ -313,11 +313,19 @@ class RunTracker:
             await self._save()
 
     async def tool_started(
-        self, *, tool_call_id: str, tool_name: str, provider: str | None, arguments: Any
+        self,
+        *,
+        tool_call_id: str,
+        tool_name: str,
+        provider: str | None,
+        arguments: Any,
+        parent_tool_call_id: str | None = None,
     ) -> None:
         async with self._lock:
             entry = {
                 "tool_call_id": tool_call_id,
+                # A call made by a program (run_code) names the run_code call.
+                "parent_tool_call_id": parent_tool_call_id,
                 "tool_name": tool_name,
                 "provider": provider,
                 "arguments_digest": arguments_digest(arguments),

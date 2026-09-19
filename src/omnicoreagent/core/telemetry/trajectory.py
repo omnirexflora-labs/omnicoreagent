@@ -109,8 +109,23 @@ def build_trajectory(
     # Tool calls are placed in the step whose span contains their records;
     # a call recorded outside every step is kept separately, never dropped.
     calls_outside_steps: list[dict[str, Any]] = []
+    built: dict[str, dict[str, Any]] = {}
     for call_id in call_order:
-        call = _tool_call(calls[call_id], outcomes.get(call_id), children, take)
+        built[call_id] = _tool_call(calls[call_id], outcomes.get(call_id), children, take)
+    for call_id in call_order:
+        call = built[call_id]
+        parent = next(
+            (
+                e.metadata.get("parent_tool_call_id")
+                for e in calls[call_id]["_events"]
+                if e.metadata.get("parent_tool_call_id")
+            ),
+            None,
+        )
+        if parent in built:
+            # A call a program made (run_code) is listed under that call.
+            built[parent].setdefault("code_calls", []).append(call)
+            continue
         owner = next(
             (step_for(event) for event in calls[call_id]["_events"] if step_for(event)),
             None,

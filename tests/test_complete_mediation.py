@@ -202,6 +202,7 @@ async def test_under_a_policy_with_no_allow_rules_no_tool_has_any_effect(tmp_pat
         ("run_skill_script", "skill", "skill.script.run", "host", "high"),
         ("read_skill_file", "skill", "skill.files.read", "host", "low"),
         ("execute", "sandbox", "sandbox.execute", "sandbox", "high"),
+        ("run_code", "code", "code.run", "code", "medium"),
         ("some_tool", "mcp", "tool.mcp.call", "mcp", "low"),
         ("my_tool", "local", "tool.local.call", "tool", "low"),
     ],
