@@ -54,10 +54,11 @@ A `RunRecord` per run, saved to a `RunStateStore`:
 Statuses: `running`, `awaiting_approval`, `interrupted`, `completed`,
 `failed`, `cancelled`.
 
-Messages come from the session history, so **crash recovery needs a durable
-memory store and a durable run store**. With the in-memory defaults, pause
-and resume works within one process, and the agent says (at start) that runs
-cannot survive a restart.
+The run state lives in the memory store the application already chose
+(in memory, SQL, Redis, or MongoDB), beside the session history it points
+into; there is no second store to configure. Crash recovery therefore works
+with any durable memory store. The in-memory store is for development: pause
+and resume work within one process, and nothing survives a restart.
 
 ### Approval: suspend and resume
 
@@ -132,12 +133,12 @@ result = await agent.resume(run_id)
 
 Each unit: failing tests first, full suite, commit and push, log below.
 
-- **D1. Run state and store.** `RunRecord`, `RunStateStore` with in-memory and
-  SQL (SQLite or PostgreSQL through SQLAlchemy, which the optional `postgres`
-  extra already installs) backends;
+- **D1. Run state.** `RunRecord`; run-state methods on the memory store,
+  implemented for all four built-in backends (in memory, SQL, Redis, MongoDB;
+  Redis and MongoDB tested against real servers in throwaway containers);
   saved at each step boundary and write-ahead around tool calls; optimistic
-  versioning; `agent.get_run(run_id)`. Startup notice when stores are not
-  durable.
+  versioning; `agent.get_run(run_id)`. A custom memory store without the
+  methods keeps working; its runs are simply not durable.
 - **D2. Approval suspend and resume.** Suspend on an unanswered ask; request
   digests and single-use, expiring approvals; `resolve_approval`, `resume`
   (in the same process); deny-with-note and approve-with-edits; trace events;
@@ -151,16 +152,15 @@ Each unit: failing tests first, full suite, commit and push, log below.
   guardrail, `steer` / `interrupt` in Python and OmniServe.
 - **D5. Sandbox continuity.** Close on suspend, reset notice on resume,
   workspace intact; tested with Docker.
-- **D6. Trajectory, docs, and proof.** Joined trajectory across segments;
-  Redis and MongoDB run stores; a "Durable runs" docs page; end-to-end tests
-  across every feature together.
+- **D6. Trajectory, docs, and proof.** Joined trajectory across segments; a
+  "Durable runs" docs page; end-to-end tests across every feature together.
 
 ## Decisions (confirmed 2026-09-19)
 
 | # | Question | Decision |
 | --- | --- | --- |
 | 1 | With governance on and no resolver, should an `ask` suspend the run (new) or fail the call (today)? | Suspend by default; `approval_mode="fail"` keeps today's behaviour. |
-| 2 | Which durable run store backends first? | In-memory and SQL in D1; Redis and MongoDB in D6. |
+| 2 | Where is run state stored? | In the memory store the application chose, all four backends in D1 (the maintainer's revision of "memory and SQL first": one store, nothing extra to configure; in-memory is for development, so no start-up notice). |
 | 3 | A non-idempotent call interrupted by a crash: tell the model the outcome is unknown, or require approval to run it again? | Tell the model; a retry is a new call, authorized like any other. |
 | 4 | A waiting run's sandbox: close it (workspace survives) or keep it alive? | Close it; the model is told on resume. |
 
