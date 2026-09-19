@@ -54,6 +54,15 @@ A `RunRecord` per run, saved to a `RunStateStore`:
 Statuses: `running`, `awaiting_approval`, `interrupted`, `completed`,
 `failed`, `cancelled`.
 
+A run record belongs to one request: it is keyed by `run_id`, and
+`session_id` is only stored on it for listing. Concurrent requests in one
+session keep separate records (tested). The session's message history,
+though, is shared by every request in the session, and messages are not
+tagged with their run. A resumed run must not read another request's
+messages that arrived while it waited, so from D2 every history message
+carries its `run_id`, and a resumed run rebuilds its context from the
+history as it was when the run started plus its own messages only.
+
 The run state lives in the memory store the application already chose
 (in memory, SQL, Redis, or MongoDB), beside the session history it points
 into; there is no second store to configure. Crash recovery therefore works
@@ -139,7 +148,10 @@ Each unit: failing tests first, full suite, commit and push, log below.
   saved at each step boundary and write-ahead around tool calls; optimistic
   versioning; `agent.get_run(run_id)`. A custom memory store without the
   methods keeps working; its runs are simply not durable.
-- **D2. Approval suspend and resume.** Suspend on an unanswered ask; request
+- **D2. Approval suspend and resume.** History messages tagged with their
+  `run_id`, and a resumed run's context limited to the history before it
+  started plus its own messages (tested with another request running in the
+  same session while it waits). Suspend on an unanswered ask; request
   digests and single-use, expiring approvals; `resolve_approval`, `resume`
   (in the same process); deny-with-note and approve-with-edits; trace events;
   OmniServe routes and SSE event.

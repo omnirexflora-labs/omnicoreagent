@@ -326,3 +326,32 @@ async def test_a_run_record_outlives_the_agent_that_made_it(backend, tmp_path, m
     assert run["status"] == "completed" and run["step"] == 2
     assert [(c["tool_name"], c["state"]) for c in run["tool_calls"]] == [("lookup", "completed")]
     assert [r["run_id"] for r in await second.list_runs(session_id=session)] == [result["run_id"]]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_runs_in_one_session_keep_separate_records():
+    gate = asyncio.Event()
+
+    class Interleaved(ScriptedModel):
+        async def llm_call(self, messages, tools=None, **kwargs):
+            await gate.wait()  # both runs are inside their loops before either proceeds
+            return await super().llm_call(messages, tools, **kwargs)
+
+    seen: list = []
+    first = await _agent(Interleaved([("a1", "lookup", '{"key": "first"}')], "first done"), _tools(seen))
+    second = await _agent(Interleaved([("b1", "explode", "{}")], "second done"), _tools(seen))
+    second.memory_router = first.memory_router  # one store, one session
+
+    runs = [
+        asyncio.create_task(first.run("one", session_id="shared", run_id="run_one")),
+        asyncio.create_task(second.run("two", session_id="shared", run_id="run_two")),
+    ]
+    await asyncio.sleep(0.2)
+    gate.set()
+    await asyncio.gather(*runs)
+
+    one, two = await first.get_run("run_one"), await first.get_run("run_two")
+    assert [c["tool_call_id"] for c in one["tool_calls"]] == ["a1"]
+    assert [c["tool_call_id"] for c in two["tool_calls"]] == ["b1"]
+    assert one["trace_ids"] != two["trace_ids"]
+    assert {r["run_id"] for r in await first.list_runs(session_id="shared")} == {"run_one", "run_two"}
