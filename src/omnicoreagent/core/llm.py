@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import inspect
+from copy import deepcopy
 import os
 import random
 import time
@@ -159,6 +160,17 @@ def _sleep_before_retry(*args):
     time.sleep(_retry_delay(*args))
 
 
+# Continuation data each provider's LiteLLM path reads back from the assistant
+# message. LiteLLM sends unknown fields to OpenAI-compatible providers as they
+# are, so each field goes only to the provider that uses it.
+CONTINUATION_FIELDS_BY_PROVIDER = {
+    "anthropic": frozenset({"thinking_blocks"}),
+    "gemini": frozenset({"provider_specific_fields"}),
+}
+# Providers that read continuation data from each tool call.
+TOOL_CALL_FIELDS_PROVIDERS = frozenset({"gemini"})
+
+
 class LLMConnection:
     """Provider connection through LiteLLM."""
 
@@ -266,7 +278,24 @@ class LLMConnection:
             "refusal",
             "reasoning_content",
         }
-        return {key: value for key, value in msg.items() if key in allowed}
+        provider = str(self.llm_config.get("provider", "")).lower()
+        allowed |= CONTINUATION_FIELDS_BY_PROVIDER.get(provider, frozenset())
+        sent = {key: deepcopy(value) for key, value in msg.items() if key in allowed}
+
+        if provider == "openrouter":
+            # LiteLLM keeps OpenRouter's reasoning details inside
+            # provider_specific_fields but sends them back only from the top level.
+            details = (msg.get("provider_specific_fields") or {}).get("reasoning_details")
+            if details:
+                sent["reasoning_details"] = deepcopy(details)
+        if sent.get("tool_calls") and provider not in TOOL_CALL_FIELDS_PROVIDERS:
+            # Per-call provider fields (Gemini's thought signature) stay with the
+            # provider that issued them.
+            for call in sent["tool_calls"]:
+                call.pop("provider_specific_fields", None)
+                if isinstance(call.get("function"), dict):
+                    call["function"].pop("provider_specific_fields", None)
+        return sent
 
     @retry_with_backoff(max_retries=3, base_delay=1, max_delay=30)
     async def llm_call(

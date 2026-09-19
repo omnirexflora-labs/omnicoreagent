@@ -69,26 +69,9 @@ async def _answer(agent: OmniCoreAgent, mode: str) -> str:
     return "".join(text)
 
 
-# Proven in P1 of the provider continuation plan: the thinking data is dropped,
-# so the second model call is rejected. Gemini passes only because LiteLLM also
-# encodes its signature in the tool-call ID, which OmniCoreAgent preserves.
-DROPPED_TODAY = {"anthropic", "openrouter"}
-
-
-def _case(provider: str, mode: str):
-    marks = (
-        [pytest.mark.xfail(strict=True, reason="continuation data dropped; plan units P2 to P4")]
-        if provider in DROPPED_TODAY
-        else []
-    )
-    return pytest.param(provider, mode, marks=marks, id=f"{provider}-{mode}")
-
-
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("provider", "mode"),
-    [_case(provider, mode) for provider in sorted(PROVIDERS) for mode in ("run", "stream")],
-)
+@pytest.mark.parametrize("mode", ["run", "stream"])
+@pytest.mark.parametrize("provider", sorted(PROVIDERS))
 async def test_a_two_step_tool_loop_keeps_the_providers_continuation_data(providers, provider, mode):
     agent = await _agent(provider)
 
