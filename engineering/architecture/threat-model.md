@@ -124,8 +124,14 @@ Numbering follows the incident record.
   application configured no sandbox). A policy rule that requires a sandbox is
   refused without one. Static approvals are refused for high-risk requests
   unless the application opts in.
-- Open: approvals cannot yet pause a run and wait for a person (Durable Runs,
-  D2); until then an `ask` without a resolver fails the call.
+- Controls (Durable Runs): an `ask` with no resolver pauses the run until a
+  person decides; the decision is bound to the exact request, used once, and
+  expires
+  (`tests/test_run_suspend.py::test_an_unanswered_ask_pauses_the_run_and_nothing_unapproved_runs`,
+  `tests/test_run_approvals.py::test_an_approval_applies_once_to_the_exact_request`).
+  A crashed run never repeats a completed call, and an interrupted call that is
+  not idempotent is reported, not re-run
+  (`tests/test_run_recovery.py::test_a_killed_process_is_finished_by_another_without_repeating_side_effects`).
 
 ### 9. Relaxed safety settings
 

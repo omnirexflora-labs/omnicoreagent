@@ -14,7 +14,7 @@ from omnicoreagent.background.agent_specs import resolve_agent
 from omnicoreagent.background.errors import RunLeaseError, RunNotFoundError
 from omnicoreagent.background.event_log import BackgroundEventLog
 from omnicoreagent.background.models import (
-    TERMINAL_RUN_STATUSES,
+    SETTLED_RUN_STATUSES,
     AttemptReason,
     AttemptStatus,
     BackgroundAttempt,
@@ -127,7 +127,7 @@ class BackgroundSupervisor:
             latest = await self.task_store.get_run(run_id)
             if not latest:
                 raise RunNotFoundError(f"Run not found: {run_id}")
-            if latest.status in TERMINAL_RUN_STATUSES:
+            if latest.status in SETTLED_RUN_STATUSES:
                 return latest
 
             if latest.status == RunStatus.QUEUED and is_run_due(latest):
@@ -255,7 +255,7 @@ class BackgroundSupervisor:
         latest = await self.task_store.get_run(run_id)
         if not latest:
             return
-        if latest.status == RunStatus.QUEUED:
+        if latest.status in {RunStatus.QUEUED, RunStatus.AWAITING_APPROVAL}:
             await self.mark_terminal(latest, RunStatus.CANCELLED, "cancelled")
         elif (
             latest.status == RunStatus.CLAIMED and latest.lease_owner == self.worker_id
@@ -320,7 +320,8 @@ class BackgroundSupervisor:
             result = await self.execute_agent_attempt(running)
             if (
                 isinstance(result, dict)
-                and result.get("status", "success") != "success"
+                # Waiting for approval is not a failure: the run is parked.
+                and result.get("status", "success") not in {"success", "awaiting_approval"}
             ):
                 raise RuntimeError(
                     f"Agent execution failed ({result.get('termination_reason', result['status'])}): "
@@ -507,6 +508,9 @@ class BackgroundSupervisor:
     async def complete_successful_attempt(
         self, running: _RunningAttempt, result: Any
     ) -> None:
+        if isinstance(result, dict) and result.get("status") == "awaiting_approval":
+            await self.park_for_approval(running, result)
+            return
         preview = result_preview(result)
         if await self.cancel_if_requested(running.run, running.attempt):
             return
@@ -531,6 +535,33 @@ class BackgroundSupervisor:
         if await self.cancel_if_requested(running.run, running.attempt):
             return
         await self.mark_completed_if_not_cancelled(running, preview)
+
+    async def park_for_approval(self, running: _RunningAttempt, result: dict) -> None:
+        """The agent paused for approval: the attempt is done, the run waits
+        (without a lease) until resume_run queues it again."""
+        if await self.cancel_if_requested(running.run, running.attempt):
+            return
+        await self.task_store.update_attempt(
+            running.attempt.attempt_id,
+            {"status": AttemptStatus.COMPLETED, "finished_at": utc_now()},
+            self.worker_id,
+            running.run.lease_token,
+        )
+        tools = ", ".join(
+            sorted({a.get("tool_name") or "?" for a in result.get("approvals") or []})
+        )
+        waiting = await self.transition_or_cancel(
+            run=running.run,
+            attempt=running.attempt,
+            expected={RunStatus.RUNNING},
+            next_status=RunStatus.AWAITING_APPROVAL,
+            patch={
+                **release_lease_patch(),
+                "result_preview": f"Waiting for approval: {tools}",
+            },
+        )
+        if waiting is not None:
+            await self.emit_run("background_run_awaiting_approval", waiting)
 
     async def transition_or_cancel(
         self,

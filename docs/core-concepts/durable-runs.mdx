@@ -138,3 +138,29 @@ the workspace after every command). When the run resumes, it gets a fresh
 sandbox with the workspace files, and the model is told the sandbox was reset:
 files outside the workspace, installed packages, and running processes are
 gone.
+
+## Background runs
+
+A background run whose agent pauses for approval goes to `awaiting_approval`
+(not `completed`): it keeps no worker lease and still holds its task's slot.
+After the approvals are decided, queue it again; the next attempt continues
+the same run:
+
+```python
+await agent.resolve_approval(run.run_id, approval_id, decision="approve", approver="alice")
+await manager.resume_run(run.run_id)
+```
+
+Over OmniServe: `POST /background/runs/{run_id}/resume`. Cancelling a waiting
+background run works as for a queued one.
+
+## One story per run
+
+Each pause, resume, recovery, or retry is its own trace segment. Read the whole
+run at once:
+
+```python
+story = await agent.get_run_trajectory(run_id)
+# story["segments"]: each segment's trajectory, in order
+# story["totals"]: summed across segments (each tool call counted once)
+```

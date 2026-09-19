@@ -170,6 +170,7 @@ FOUNDATION_EVENT_TYPES = frozenset(
         "background_run_timeout",
         "background_run_skipped",
         "background_run_recovered",
+        "background_run_awaiting_approval",
         "background_task_scheduled",
         "serve_request_start",
         "serve_request_end",

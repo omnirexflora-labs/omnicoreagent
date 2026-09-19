@@ -323,6 +323,29 @@ def create_background_router() -> APIRouter:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return BackgroundStatusResponse(status="cancel_requested")
 
+    @router.post(
+        "/runs/{run_id}/resume",
+        response_model=BackgroundStatusResponse,
+        summary="Queue a background run that was waiting for approval",
+        description=(
+            "After its approvals are decided (POST /runs/{run_id}/approvals/"
+            "{approval_id}), queue the run again; its next attempt continues the "
+            "same durable run."
+        ),
+        responses={404: _HTTP_ERROR, 409: _HTTP_ERROR, 503: _HTTP_ERROR},
+    )
+    async def resume_background_run(
+        request: Request, run_id: str
+    ) -> BackgroundStatusResponse:
+        manager = _require_background_manager(request)
+        try:
+            await manager.resume_run(run_id)
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return BackgroundStatusResponse(status="queued")
+
     @router.get(
         "/runs",
         response_model=BackgroundRunsResponse,

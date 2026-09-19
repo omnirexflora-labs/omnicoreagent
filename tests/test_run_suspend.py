@@ -202,3 +202,24 @@ def test_approval_mode_is_validated():
 
     with pytest.raises(ValueError, match="approval_mode"):
         AgentConfig(governance_config={"enabled": True, "approval_mode": "later"})
+
+
+@pytest.mark.asyncio
+async def test_a_paused_and_resumed_run_reads_as_one_trajectory(tmp_path):
+    model = RecordingModel(WRITE_AND_DELETE, DELETE, "cleaned up")
+    agent = await _agent(tmp_path, model)
+    paused = await agent.run("tidy up", session_id="story")
+    (approval,) = paused["approvals"]
+    await agent.resolve_approval(paused["run_id"], approval["approval_id"], decision="approve", approver="alice")
+    await agent.resume(paused["run_id"])
+
+    story = await agent.get_run_trajectory(paused["run_id"])
+
+    assert story["run_id"] == paused["run_id"] and story["status"] == "completed"
+    assert [s["status"] for s in story["segments"]] == ["suspended", "completed"]
+    assert story["segments"][0]["trajectory"]["request"]["message"] == "tidy up"
+    assert story["totals"]["model_calls"]["total"] == 3
+    assert story["totals"]["tool_calls"]["total"] == 3
+    assert story["approvals"][0]["approver"] == "alice"
+    assert "context" not in story
+    assert await agent.get_run_trajectory("run_nope") is None

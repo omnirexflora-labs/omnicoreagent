@@ -253,6 +253,7 @@ default and can be turned off with `OMNICOREAGENT_BACKGROUND_ENABLED=false` or
 | `POST` | `/background/tasks/{task_id}/resume` | Yes* | Resume scheduled dispatch |
 | `DELETE` | `/background/tasks/{task_id}` | Yes* | Delete a background task |
 | `POST` | `/background/runs/{run_id}/cancel` | Yes* | Cancel a queued or running run |
+| `POST` | `/background/runs/{run_id}/resume` | Yes* | Queue a background run that was waiting for approval, once its approvals are decided |
 | `GET` | `/background/runs` | Yes* | List background runs |
 | `GET` | `/background/runs/{run_id}` | Yes* | Inspect run status |
 | `GET` | `/background/runs/{run_id}/attempts` | Yes* | List run attempts |

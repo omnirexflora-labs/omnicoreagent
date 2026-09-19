@@ -15,6 +15,7 @@ from omnicoreagent.background.errors import (
     TaskNotFoundError,
 )
 from omnicoreagent.background.models import (
+    SETTLED_RUN_STATUSES,
     TERMINAL_RUN_STATUSES,
     BackgroundAgentSpec,
     BackgroundAttempt,
@@ -448,7 +449,7 @@ class BackgroundAgentManager:
             latest = await self.task_store.get_run(run_id)
             if not latest:
                 raise RunNotFoundError(f"Run not found: {run_id}")
-            if latest.status in TERMINAL_RUN_STATUSES:
+            if latest.status in SETTLED_RUN_STATUSES:
                 return latest
             if deadline is not None and asyncio.get_running_loop().time() >= deadline:
                 return latest
@@ -482,6 +483,34 @@ class BackgroundAgentManager:
                     background_run_authority_request(action="cancel", run=run)
                 )
         await self._supervisor.cancel_run(run_id)
+
+    async def resume_run(self, run_id: str) -> BackgroundRun:
+        """Queue a run that was waiting for approval, once the approvals are
+        decided (``agent.resolve_approval``). Its next attempt continues the
+        same durable run instead of starting over."""
+        self._sync_services_config()
+        run = await self.task_store.get_run(run_id)
+        if run is None:
+            raise RunNotFoundError(f"Run not found: {run_id}")
+        if run.status != RunStatus.AWAITING_APPROVAL:
+            raise ValueError(
+                f"Run {run_id} is {run.status.value}; only a run in awaiting_approval can be resumed"
+            )
+        if self.governance_engine is not None:
+            require_current_policy_snapshot(
+                run.metadata,
+                self.governance_engine,
+                surface=f"background run {run.run_id}",
+                required=True,
+            )
+            await self.governance_engine.authorize(
+                background_run_authority_request(action="start", run=run)
+            )
+        queued = await self.task_store.transition_run(
+            run_id, {RunStatus.AWAITING_APPROVAL}, RunStatus.QUEUED, {}, None, None
+        )
+        await self._emit_run("background_run_queued", queued)
+        return queued
 
     async def recover_expired_runs(self) -> None:
         self._sync_services_config()

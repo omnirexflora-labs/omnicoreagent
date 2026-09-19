@@ -1759,6 +1759,54 @@ class OmniCoreAgent:
             trajectory["other_trace_ids_for_run"] = other_trace_ids
         return trajectory
 
+    async def get_run_trajectory(self, run_id: str) -> Dict[str, Any] | None:
+        """One durable run as a single story across its trace segments (each
+        pause, resume, recovery, or new attempt is a segment), with totals
+        summed over the segments. The run's saved conversation is not
+        included."""
+        record = await self.get_run(run_id)
+        if record is None:
+            return None
+        segments = []
+        for trace_id in record.get("trace_ids") or []:
+            trajectory = await self.get_trajectory(trace_id=trace_id)
+            segments.append(
+                {
+                    "trace_id": trace_id,
+                    "status": (trajectory or {}).get("status"),
+                    "trajectory": trajectory,
+                }
+            )
+        totals: Dict[str, Any] = {}
+        outcomes: Dict[str, Any] = {}
+        for segment in segments:
+            trajectory = segment["trajectory"] or {}
+            totals = _add_totals(totals, trajectory.get("totals") or {})
+            calls = [c for step in trajectory.get("steps") or [] for c in step["tool_calls"]]
+            for call in [*calls, *(trajectory.get("tool_calls_outside_steps") or [])]:
+                # A call waiting for approval appears again when it runs on
+                # resume: count it once, with its latest outcome.
+                outcomes[call["tool_call_id"]] = call.get("outcome")
+        if segments:
+            by_outcome = {key: 0 for key in (totals.get("tool_calls") or {}).get("by_outcome", {})}
+            for outcome in outcomes.values():
+                if outcome is not None:
+                    by_outcome[outcome] = by_outcome.get(outcome, 0) + 1
+            totals["tool_calls"] = {"total": len(outcomes), "by_outcome": by_outcome}
+        return {
+            "run_id": run_id,
+            "session_id": record.get("session_id"),
+            "agent_name": record.get("agent_name"),
+            "status": record.get("status"),
+            "attempt": record.get("attempt"),
+            "previous_attempts": record.get("previous_attempts") or [],
+            "segments": segments,
+            "totals": totals,
+            "tool_calls": record.get("tool_calls") or [],
+            "approvals": record.get("approvals") or [],
+            "usage": record.get("usage") or {},
+        }
+
     async def _trajectory_for(
         self,
         trace: TelemetryTrace,
@@ -1975,3 +2023,19 @@ def _not_resumable(record: dict[str, Any], run_id: str) -> Optional[str]:
             return None
         return f"Run {run_id} is running in another process (its heartbeat is current)"
     return f"Run {run_id} is {status}; only a waiting or stopped run can resume"
+
+
+def _add_totals(total: Any, segment: Any) -> Any:
+    """Sum run totals across segments: numbers add, lists join, dicts merge."""
+    if isinstance(total, dict) and isinstance(segment, dict):
+        merged = dict(total)
+        for key, value in segment.items():
+            merged[key] = _add_totals(total[key], value) if key in total else value
+        return merged
+    if isinstance(total, bool) or isinstance(segment, bool):
+        return segment
+    if isinstance(total, (int, float)) and isinstance(segment, (int, float)):
+        return total + segment
+    if isinstance(total, list) and isinstance(segment, list):
+        return [*total, *segment]
+    return segment if segment is not None else total

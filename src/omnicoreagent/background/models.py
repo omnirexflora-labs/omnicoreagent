@@ -94,6 +94,8 @@ class RunStatus(str, Enum):
     CANCELLED = "cancelled"
     TIMEOUT = "timeout"
     SKIPPED = "skipped"
+    # The agent paused for a person's approval; resume_run queues it again.
+    AWAITING_APPROVAL = "awaiting_approval"
 
 
 TERMINAL_RUN_STATUSES = {
@@ -123,7 +125,12 @@ ACTIVE_RUN_STATUSES = {
     RunStatus.CLAIMED,
     RunStatus.RUNNING,
     RunStatus.RETRYING,
+    # Still the task's run: it holds the task's slot while it waits.
+    RunStatus.AWAITING_APPROVAL,
 }
+
+# A run that will not move until something outside the worker acts on it.
+SETTLED_RUN_STATUSES = {*TERMINAL_RUN_STATUSES, RunStatus.AWAITING_APPROVAL}
 
 
 class AttemptStatus(str, Enum):
