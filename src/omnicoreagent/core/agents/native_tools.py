@@ -78,13 +78,9 @@ async def execute_native_turn(
     call_links: dict[str, dict[str, str | None]] = {}
 
     assistant = turn.assistant_message()
+    # History keeps the real arguments so the model sees its own past calls in
+    # later runs; governance redacts them in telemetry, not here.
     stored_calls = deepcopy(assistant["tool_calls"])
-    if agent.governance_engine is not None:
-        for stored in stored_calls:
-            args = decoded_arguments.get(stored["id"], {})
-            stored["function"]["arguments"] = json.dumps(
-                {key: "[REDACTED]" for key in args}
-            )
     metadata = {
         "agent_name": agent.agent_name,
         "interaction_version": 2,

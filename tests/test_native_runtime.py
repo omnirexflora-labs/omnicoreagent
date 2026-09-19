@@ -664,7 +664,17 @@ async def test_governed_native_history_is_written_once_after_redaction(allowed):
     records = await memory.get_messages("session", "test")
     results = [r for r in records if r["role"] == "tool"]
     assert len(results) == 1
-    assert "sensitive-value" not in str(records)
+    # History keeps the assistant's real call (the model sees its own past
+    # calls); governance redacts arguments everywhere else, including the tool
+    # result the model receives.
+    [assistant] = [r for r in records if r["role"] == "assistant" and r["metadata"].get("has_tool_calls")]
+    [stored_call] = assistant["metadata"]["model_message"]["tool_calls"]
+    assert json.loads(stored_call["function"]["arguments"]) == {"secret": "sensitive-value"}
+    others = [r for r in records if r is not assistant]
+    assert "sensitive-value" not in str(others)
+    assert "sensitive-value" not in str(
+        {k: v for k, v in assistant.items() if k != "metadata"}
+    )
     normalized = json.loads(results[0]["content"])
     assert normalized["status"] == ("success" if allowed else "error")
     assert effects == (["sensitive-value"] if allowed else [])

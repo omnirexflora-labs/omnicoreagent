@@ -50,6 +50,33 @@ from omnicoreagent.core.telemetry import (
 )
 
 
+
+def _without_changed_continuation(original: Any, redacted: Any) -> Any:
+    """Never store continuation data that privacy redaction changed.
+
+    A provider signs its thinking text, so a redacted copy would be rejected
+    on a later request. When memory redaction must change it, that turn's
+    continuation data is not stored and ``continuation_dropped`` says which
+    fields were left out; the live run keeps its own unredacted copy.
+    """
+    if not isinstance(original, dict) or not isinstance(redacted, dict):
+        return redacted
+    source = original.get("model_message")
+    stored = redacted.get("model_message")
+    if not isinstance(source, dict) or not isinstance(stored, dict):
+        return redacted
+    from omnicoreagent.core.agents.llm_response import CONTINUATION_FIELDS
+
+    dropped = [
+        key
+        for key in CONTINUATION_FIELDS
+        if key in stored and key != "reasoning_content" and stored[key] != source.get(key)
+    ]
+    if not dropped:
+        return redacted
+    stored = {key: value for key, value in stored.items() if key not in dropped}
+    return {**redacted, "model_message": stored, "continuation_dropped": dropped}
+
 class OmniCoreAgent:
     """
     Public facade for the OmniCoreAgent runtime.
@@ -871,7 +898,9 @@ class OmniCoreAgent:
         session_id: str | None = None,
     ) -> None:
         stored_content = self.privacy_filter.redact(content, boundary="memory")
-        stored_metadata = self.privacy_filter.redact(metadata, boundary="memory")
+        stored_metadata = _without_changed_continuation(
+            metadata, self.privacy_filter.redact(metadata, boundary="memory")
+        )
         stored_message_digest = stable_message_digest(
             {
                 "role": role,

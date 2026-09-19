@@ -100,8 +100,18 @@ class PrivacyFilter:
             "checksum",
             "request_id",
             "decision_id",
+            # Tool-call and reasoning-item IDs; Gemini encodes its signature
+            # in the tool-call ID.
+            "id",
         }
     )
+    # Opaque provider values (signatures, encrypted reasoning) are not text.
+    # A PII pattern can only corrupt them, and a corrupted value makes the
+    # provider reject the next request.
+    _OPAQUE_KEYS = frozenset(
+        {"signature", "thought_signature", "thought_signatures", "encrypted_content"}
+    )
+    _OPAQUE_BLOCK_TYPES = frozenset({"redacted_thinking", "reasoning.encrypted"})
 
     _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
     _SSN = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
@@ -141,9 +151,12 @@ class PrivacyFilter:
         if not self.config.enabled or not self._enabled_for(boundary):
             return value
         if isinstance(value, dict):
+            if value.get("type") in self._OPAQUE_BLOCK_TYPES:
+                return value
             return {
                 key: item
                 if str(key).lower() in self._IDENTIFIER_KEYS
+                or str(key).lower() in self._OPAQUE_KEYS
                 else self.redact(item, boundary=boundary)
                 for key, item in value.items()
             }

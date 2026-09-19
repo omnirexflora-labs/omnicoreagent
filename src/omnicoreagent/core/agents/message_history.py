@@ -1,8 +1,25 @@
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any
+
+from omnicoreagent.core.agents.llm_response import CONTINUATION_FIELDS
 
 from omnicoreagent.core.types import Message, SessionState, ToolCall
 from omnicoreagent.core.logging import logger
+
+
+def _restored_call(call: Any) -> dict[str, Any]:
+    """A validated tool call with its provider fields (Gemini's signature)."""
+    call = call.model_dump() if hasattr(call, "model_dump") else deepcopy(dict(call))
+    call_fields = call.pop("provider_specific_fields", None)
+    function = dict(call.get("function") or {})
+    function_fields = function.pop("provider_specific_fields", None)
+    restored = ToolCall.model_validate({**call, "function": function}).model_dump()
+    if call_fields:
+        restored["provider_specific_fields"] = call_fields
+    if function_fields:
+        restored["function"]["provider_specific_fields"] = function_fields
+    return restored
 
 
 class AgentMessageHistoryLoader:
@@ -93,14 +110,13 @@ class AgentMessageHistoryLoader:
             session_state.assistant_with_tool_calls = {
                 "role": "assistant",
                 "content": native_message.get("content", message.content),
+                # Provider continuation data goes back exactly as stored.
                 **{
-                    key: native_message[key]
-                    for key in ("reasoning_content",)
+                    key: deepcopy(native_message[key])
+                    for key in CONTINUATION_FIELDS
                     if key in native_message
                 },
-                "tool_calls": (
-                    [ToolCall.model_validate(call).model_dump() for call in calls]
-                ),
+                "tool_calls": [_restored_call(call) for call in calls],
             }
             session_state.pending_tool_responses = []
             return
