@@ -71,14 +71,14 @@ CONTINUATION_FIELDS = (
 )
 
 
-def _plain(value: Any) -> Any:
+def plain_copy(value: Any) -> Any:
     """A deep, JSON-shaped copy of a LiteLLM value (pydantic or mapping)."""
     if hasattr(value, "model_dump"):
         value = value.model_dump(exclude_none=True)
     if isinstance(value, dict):
-        return {key: _plain(item) for key, item in value.items()}
+        return {key: plain_copy(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_plain(item) for item in value]
+        return [plain_copy(item) for item in value]
     return deepcopy(value)
 
 
@@ -131,9 +131,9 @@ def normalize_model_turn(response: Any):
         function = get(call, "function")
         call_fields = {}
         if get(call, "provider_specific_fields"):
-            call_fields["provider_specific_fields"] = _plain(get(call, "provider_specific_fields"))
+            call_fields["provider_specific_fields"] = plain_copy(get(call, "provider_specific_fields"))
         if get(function, "provider_specific_fields"):
-            call_fields["function_provider_specific_fields"] = _plain(
+            call_fields["function_provider_specific_fields"] = plain_copy(
                 get(function, "provider_specific_fields")
             )
         calls.append(
@@ -156,7 +156,7 @@ def normalize_model_turn(response: Any):
         usage=extract_response_usage(response),
         refusal=refusal,
         provider_fields={
-            key: _plain(get(message, key))
+            key: plain_copy(get(message, key))
             for key in CONTINUATION_FIELDS
             if get(message, key) not in (None, [], {}, "")
         },
