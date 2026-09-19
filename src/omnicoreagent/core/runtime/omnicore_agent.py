@@ -511,13 +511,7 @@ class OmniCoreAgent:
     @property
     def sandbox_execution(self):
         """The governed route from this agent to its sandbox, or None."""
-        if not self.can_execute:
-            return None
-        if getattr(self, "_sandbox_execution", None) is None:
-            from omnicoreagent.sandbox import SandboxExecutionService
-
-            self._sandbox_execution = SandboxExecutionService(self.agent.governance_engine)
-        return self._sandbox_execution
+        return getattr(getattr(self, "agent", None), "sandbox_execution", None)
 
     def _mcp_server_status(self) -> list[dict[str, Any]]:
         """Configured MCP servers with their state at the start of the run."""

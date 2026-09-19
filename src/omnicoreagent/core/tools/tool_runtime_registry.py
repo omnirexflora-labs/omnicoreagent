@@ -71,6 +71,8 @@ class ToolRuntimeRegistry:
         workspace: Workspace | None = None,
         workspace_config: WorkspaceConfig | dict | None = None,
         privacy_filter: PrivacyFilter | None = None,
+        sandbox_execution: Any = None,
+        tool_call_timeout: int = 60,
     ):
         self.register_internal_tool = register_internal_tool
         self.tool_offloader = tool_offloader
@@ -82,6 +84,8 @@ class ToolRuntimeRegistry:
         self.workspace = workspace
         self.workspace_config = workspace_config
         self.privacy_filter = privacy_filter
+        self.sandbox_execution = sandbox_execution
+        self.tool_call_timeout = tool_call_timeout
 
     def _workspace_for_runtime_tools(self) -> Workspace:
         if self.workspace is None:
@@ -99,6 +103,7 @@ class ToolRuntimeRegistry:
             or self.enable_workspace_files
             or self.tool_offloader.config.enabled
             or (self.enable_agent_skills and self.skill_manager)
+            or self.sandbox_execution is not None
         )
 
         if registry is None and needs_internal_registry:
@@ -128,5 +133,10 @@ class ToolRuntimeRegistry:
                 skill_manager=self.skill_manager,
                 registry=registry,
             )
+
+        if self.sandbox_execution is not None:
+            from omnicoreagent.core.tools.execution_tools import build_execution_tools
+
+            build_execution_tools(registry, max_timeout_seconds=self.tool_call_timeout)
 
         return registry

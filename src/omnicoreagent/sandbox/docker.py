@@ -106,7 +106,16 @@ class DockerSandboxRuntime(SandboxRuntime):
             run_options["mem_limit"] = _bytes(resources.memory)
         if resources.cpu:
             run_options["nano_cpus"] = int(float(resources.cpu) * 1_000_000_000)
-        container = await asyncio.to_thread(client.containers.run, **run_options)
+        creating = asyncio.ensure_future(asyncio.to_thread(client.containers.run, **run_options))
+        try:
+            container = await asyncio.shield(creating)
+        except asyncio.CancelledError:
+            # The thread still creates the container; remove it before letting
+            # the cancellation through, or it would be orphaned.
+            from omnicoreagent.core.runtime.deadline import complete_despite_cancellation
+
+            await complete_despite_cancellation(self._discard(creating))
+            raise
         session = SandboxSession(
             session_id=session_id,
             provider=self.provider,
@@ -128,6 +137,13 @@ class DockerSandboxRuntime(SandboxRuntime):
             await asyncio.to_thread(container.remove, force=True, v=True)
         except NotFound:
             pass
+
+    async def _discard(self, creating: "asyncio.Future") -> None:
+        try:
+            container = await creating
+        except Exception:
+            return
+        await asyncio.to_thread(container.remove, force=True, v=True)
 
     async def cleanup_orphans(self) -> int:
         """Remove every OmniCoreAgent sandbox container left by earlier processes."""

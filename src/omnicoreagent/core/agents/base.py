@@ -48,6 +48,20 @@ if TYPE_CHECKING:
     from omnicoreagent.core.workspace.config import WorkspaceConfig
 
 
+def _sandbox_execution(governance_engine: Any):
+    """A governed execution service when the configured sandbox can execute."""
+    runtime = getattr(governance_engine, "sandbox_runtime", None)
+    if (
+        governance_engine is None
+        or not getattr(runtime, "supports_execution", False)
+        or not governance_engine._sandbox_runtime_satisfies_required_boundary()
+    ):
+        return None
+    from omnicoreagent.sandbox import SandboxExecutionService
+
+    return SandboxExecutionService(governance_engine)
+
+
 class BaseReactAgent:
     """Autonomous agent implementing the ReAct paradigm for task solving through iterative reasoning and tool usage."""
 
@@ -119,9 +133,14 @@ class BaseReactAgent:
             agent_name=self.agent_name,
             governance_engine=self.governance_engine,
         )
+        # The governed route to a sandbox that can execute, or None. With it,
+        # the `execute` tool is offered and skill scripts run in the sandbox.
+        self.sandbox_execution = _sandbox_execution(self.governance_engine)
         self.tool_runtime_registry = ToolRuntimeRegistry(
             register_internal_tool=self.register_internal_tool,
             tool_offloader=self.tool_offloader,
+            sandbox_execution=self.sandbox_execution,
+            tool_call_timeout=tool_call_timeout,
             enable_advanced_tool_use=self.enable_advanced_tool_use,
             enable_subagents=self.enable_subagents,
             enable_workspace_files=self.enable_workspace_files,
@@ -281,7 +300,16 @@ class BaseReactAgent:
             ).hexdigest()[:16]
         await telemetry_recorder.update_trace_metadata(versions)
 
-    async def run(
+    async def run(self, *args, **kwargs) -> Any:
+        """Run one turn; a sandbox session opened by it is closed when it ends."""
+        if self.sandbox_execution is None:
+            return await self._run(*args, **kwargs)
+        from omnicoreagent.sandbox.scope import ExecutionScope
+
+        async with ExecutionScope(self.sandbox_execution).active():
+            return await self._run(*args, **kwargs)
+
+    async def _run(
         self,
         system_prompt: str,
         query: str,

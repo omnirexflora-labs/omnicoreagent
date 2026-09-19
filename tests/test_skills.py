@@ -2,13 +2,14 @@
 Tests for Agent Skills module.
 """
 
+import asyncio
 import sys
 import json
 import tempfile
 from pathlib import Path
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from omnicoreagent.core.skills.models import SkillMetadata
 from omnicoreagent.core.skills.manager import SkillManager
@@ -228,7 +229,7 @@ print(json.dumps({"args": sys.argv[1:]}))
     def test_run_skill_script_success(self):
         """Test running a skill script."""
         tool = self.registry.get_tool("run_skill_script")
-        result = tool.function("test-skill", "echo.py", ["hello", "world"])
+        result = asyncio.run(tool.function("test-skill", "echo.py", ["hello", "world"]))
 
         assert result["status"] == "success"
         output = json.loads(result["data"]["stdout"])
@@ -237,7 +238,7 @@ print(json.dumps({"args": sys.argv[1:]}))
     def test_run_skill_script_not_found(self):
         """Test running non-existent script."""
         tool = self.registry.get_tool("run_skill_script")
-        result = tool.function("test-skill", "nonexistent.py")
+        result = asyncio.run(tool.function("test-skill", "nonexistent.py"))
 
         assert result["status"] == "error"
         assert "not found" in result["message"].lower()
@@ -250,7 +251,7 @@ print(json.dumps({"args": sys.argv[1:]}))
         js_path.chmod(0o755)
 
         tool = self.registry.get_tool("run_skill_script")
-        result = tool.function("test-skill", "hello.js", ["World"])
+        result = asyncio.run(tool.function("test-skill", "hello.js", ["World"]))
 
         if result["status"] == "success":
             assert "Hello from Node World" in result["data"]["stdout"]
@@ -266,7 +267,7 @@ print(json.dumps({"args": sys.argv[1:]}))
         pl_path.chmod(0o755)
 
         tool = self.registry.get_tool("run_skill_script")
-        result = tool.function("test-skill", "hello.pl", ["World"])
+        result = asyncio.run(tool.function("test-skill", "hello.pl", ["World"]))
 
         if result["status"] == "success":
             assert "Hello from Perl World" in result["data"]["stdout"]
@@ -282,7 +283,7 @@ print(json.dumps({"args": sys.argv[1:]}))
         script_path.chmod(0o755)
 
         tool = self.registry.get_tool("run_skill_script")
-        result = tool.function("test-skill", "custom", ["World"])
+        result = asyncio.run(tool.function("test-skill", "custom", ["World"]))
 
         if result["status"] == "success":
             assert "Hello from Shebang World" in result["data"]["stdout"]
@@ -312,12 +313,13 @@ print(json.dumps({"args": sys.argv[1:]}))
             script_path = scripts_dir / script_name
             script_path.write_text("dummy")
 
-            with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+            with patch(
+                "omnicoreagent.core.skills.tools._run_on_host",
+                new=AsyncMock(return_value={"status": "success"}),
+            ) as mock_run:
+                asyncio.run(tool.function("test-skill", script_name, ["arg1"]))
 
-                tool.function("test-skill", script_name, ["arg1"])
-
-                # Verify the command built
+                # Verify the command built for the host
                 expected_cmd = prefix + [str(script_path.resolve()), "arg1"]
                 mock_run.assert_called_once()
                 actual_cmd = mock_run.call_args[0][0]

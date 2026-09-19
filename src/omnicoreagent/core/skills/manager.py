@@ -89,7 +89,9 @@ class SkillManager:
         """
         skill_path = (self.skills_root / skill_name).resolve()
 
-        if not str(skill_path).startswith(str(self.skills_root)):
+        # A string prefix check let "../skills-evil" pass for "/x/skills";
+        # the resolved path must be a real child of the skills root.
+        if skill_path == self.skills_root or not skill_path.is_relative_to(self.skills_root):
             raise RuntimeError(f"Invalid skill path: {skill_name}")
 
         if not skill_path.exists() or not skill_path.is_dir():
