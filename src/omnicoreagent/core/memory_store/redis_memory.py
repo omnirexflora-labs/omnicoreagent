@@ -1,5 +1,4 @@
 import json
-import os
 import uuid
 from typing import Any, List, Callable
 import redis.asyncio as redis
@@ -14,7 +13,6 @@ from omnicoreagent.core.summarizer.summarizer_engine import (
 from omnicoreagent.core.summarizer.summarizer_types import SummaryConfig
 from datetime import datetime, timezone
 
-REDIS_URL = os.environ.get("REDIS_URL")
 
 
 class RedisConnectionManager:
@@ -22,20 +20,14 @@ class RedisConnectionManager:
     Redis connection manager for efficient connection pooling and reuse.
     """
 
-    _instance = None
-    _lock = threading.RLock()
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    def __init__(self):
-        if not hasattr(self, "_initialized"):
-            self._initialized = True
-            self._client = None
-            self._connection_count = 0
-            logger.debug("RedisConnectionManager initialized")
+    def __init__(self, redis_url: str):
+        # One manager per store and URL: two stores with different URLs must
+        # never share a client.
+        self.redis_url = redis_url
+        self._lock = threading.RLock()
+        self._client = None
+        self._connection_count = 0
+        logger.debug("RedisConnectionManager initialized")
 
     async def get_client(self) -> redis.Redis:
         """Get or create Redis client with connection pooling."""
@@ -43,7 +35,7 @@ class RedisConnectionManager:
             if self._client is None:
                 try:
                     self._client = redis.from_url(
-                        REDIS_URL,
+                        self.redis_url,
                         decode_responses=True,
                         max_connections=20,
                         retry_on_timeout=True,
@@ -52,7 +44,7 @@ class RedisConnectionManager:
                         health_check_interval=30,
                     )
                     logger.debug(
-                        f"[RedisManager] Created Redis connection pool: {REDIS_URL}"
+                        "[RedisManager] Created Redis connection pool"
                     )
                 except Exception as e:
                     logger.error(f"[RedisManager] Failed to create Redis client: {e}")
@@ -83,15 +75,7 @@ class RedisConnectionManager:
                 logger.debug("[RedisManager] Closed all Redis connections")
 
 
-_redis_manager = None
 
-
-def get_redis_manager():
-    """Get the global Redis connection manager instance."""
-    global _redis_manager
-    if _redis_manager is None:
-        _redis_manager = RedisConnectionManager()
-    return _redis_manager
 
 
 class RedisMemoryStore(AbstractMemoryStore):
@@ -113,10 +97,7 @@ class RedisMemoryStore(AbstractMemoryStore):
             self.memory_config: dict[str, Any] = {}
             return
 
-        global REDIS_URL
-        REDIS_URL = redis_url
-
-        self._connection_manager = get_redis_manager()
+        self._connection_manager = RedisConnectionManager(redis_url)
         self._redis_client = None
         self.memory_config: dict[str, Any] = {}
         self.summary_config: dict[str, Any] = {}
@@ -503,3 +484,69 @@ class RedisMemoryStore(AbstractMemoryStore):
         finally:
             if self._connection_manager and client:
                 self._connection_manager.release_client()
+
+    # --- run state ---------------------------------------------------------
+    # One hash per run (version, session, status, data) and one set of run IDs
+    # per session. Saves are compare-and-swap in a Lua script, so they are
+    # atomic on the server.
+
+    _SAVE_RUN = """
+    local current = redis.call('HGET', KEYS[1], 'version')
+    if ARGV[1] == '' then
+        if current then return 0 end
+    elseif current ~= ARGV[1] then
+        return 0
+    end
+    redis.call('HSET', KEYS[1], 'version', ARGV[2], 'session_id', ARGV[3],
+               'status', ARGV[4], 'data', ARGV[5])
+    if ARGV[3] ~= '' then redis.call('SADD', KEYS[2], ARGV[6]) end
+    redis.call('SADD', KEYS[3], ARGV[6])
+    return 1
+    """
+
+    async def save_run_state(self, record: dict, expected_version: int | None) -> int:
+        from omnicoreagent.core.runs import RunStateConflict
+
+        client = await self._get_client()
+        run_id = record["run_id"]
+        session_id = record.get("session_id") or ""
+        version = (expected_version or 0) + 1
+        data = json.dumps({**record, "version": version}, default=str)
+        saved = await client.eval(
+            self._SAVE_RUN,
+            3,
+            f"omnicoreagent_run:{run_id}",
+            f"omnicoreagent_runs:session:{session_id}",
+            "omnicoreagent_runs:all",
+            "" if expected_version is None else str(expected_version),
+            str(version),
+            session_id,
+            record.get("status", "running"),
+            data,
+            run_id,
+        )
+        if not saved:
+            reason = "already exists" if expected_version is None else f"changed since version {expected_version}"
+            raise RunStateConflict(f"Run {run_id} {reason}")
+        return version
+
+    async def get_run_state(self, run_id: str) -> dict | None:
+        client = await self._get_client()
+        data = await client.hget(f"omnicoreagent_run:{run_id}", "data")
+        return json.loads(data) if data else None
+
+    async def list_run_states(
+        self, session_id: str | None = None, status: str | None = None, limit: int = 100
+    ) -> list[dict]:
+        client = await self._get_client()
+        key = (
+            f"omnicoreagent_runs:session:{session_id}"
+            if session_id is not None
+            else "omnicoreagent_runs:all"
+        )
+        records = []
+        for run_id in await client.smembers(key):
+            record = await self.get_run_state(run_id)
+            if record is not None and (status is None or record.get("status") == status):
+                records.append(record)
+        return sorted(records, key=lambda r: r.get("created_at") or "")[:limit]

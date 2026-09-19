@@ -6,7 +6,9 @@ import threading
 import asyncio
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
 from sqlalchemy import (
+    Integer,
     String,
+    update,
     Text,
     DateTime,
     create_engine,
@@ -49,21 +51,12 @@ class SQLConnectionManager:
     SQL connection manager for efficient session management and connection pooling.
     """
 
-    _instance = None
-    _lock = threading.RLock()
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        if not hasattr(self, "_initialized"):
-            self._initialized = True
-            self._engine = None
-            self._session_factory = None
-            self._session_count = 0
-            logger.debug("SQLConnectionManager initialized (singleton)")
+        self._lock = threading.RLock()
+        self._engine = None
+        self._session_factory = None
+        self._session_count = 0
+        logger.debug("SQLConnectionManager initialized")
 
     def initialize(self, db_url: str, **kwargs):
         """Initialize the SQL engine and session factory."""
@@ -136,15 +129,27 @@ class SQLConnectionManager:
                 logger.debug("[SQLManager] Closed all SQL connections")
 
 
-_sql_manager = None
+# One manager (engine and pool) per database URL: stores that point at the same
+# database share a pool; stores that point at different databases never do.
+_sql_managers: dict[str, SQLConnectionManager] = {}
+_sql_managers_lock = threading.RLock()
 
 
-def get_sql_manager():
-    """Get the global SQL connection manager instance."""
-    global _sql_manager
-    if _sql_manager is None:
-        _sql_manager = SQLConnectionManager()
-    return _sql_manager
+def get_sql_manager(db_url: str) -> SQLConnectionManager:
+    """The connection manager for one database URL."""
+    with _sql_managers_lock:
+        manager = _sql_managers.get(db_url)
+        if manager is None:
+            manager = _sql_managers[db_url] = SQLConnectionManager()
+        return manager
+
+
+def close_all_sql_managers() -> None:
+    """Close every SQL connection pool (for shutdown and tests)."""
+    with _sql_managers_lock:
+        for manager in _sql_managers.values():
+            manager.close_all()
+        _sql_managers.clear()
 
 
 class DynamicJSON(TypeDecorator):
@@ -196,6 +201,20 @@ class StorageMessage(Base):
     )
 
 
+class StorageRunState(Base):
+    """One durable run record; ``data`` holds the record as JSON."""
+
+    __tablename__ = "run_states"
+    run_id: Mapped[str] = mapped_column(String(DEFAULT_MAX_KEY_LENGTH), primary_key=True)
+    session_id: Mapped[str | None] = mapped_column(
+        String(DEFAULT_MAX_KEY_LENGTH), nullable=True, index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    data: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class DatabaseMessageStore(AbstractMemoryStore):
     """
     Database-backed message store for storing, retrieving, and clearing messages by session.
@@ -208,7 +227,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
         self.summarize_fn: Callable = None
 
         if db_url:
-            self._sql_manager = get_sql_manager()
+            self._sql_manager = get_sql_manager(db_url)
             self._sql_manager.initialize(db_url, **kwargs)
 
             db_engine = self._sql_manager.get_engine()
@@ -216,10 +235,10 @@ class DatabaseMessageStore(AbstractMemoryStore):
             inspector = inspect(db_engine)
             existing_tables = inspector.get_table_names()
 
-            if "messages" not in existing_tables:
-                Base.metadata.create_all(db_engine)
-            else:
+            if "messages" in existing_tables:
                 self._migrate_add_columns(db_engine, inspector)
+            # Creates only the tables that are missing (such as run_states).
+            Base.metadata.create_all(db_engine)
 
             logger.debug(f"DatabaseMessageStore initialized with: {db_url}")
         else:
@@ -538,3 +557,87 @@ class DatabaseMessageStore(AbstractMemoryStore):
                 self._release_session(session)
 
         await asyncio.to_thread(_mark)
+
+    # --- run state ---------------------------------------------------------
+
+    async def save_run_state(self, record: dict, expected_version: int | None) -> int:
+        from sqlalchemy.exc import IntegrityError
+
+        from omnicoreagent.core.runs import RunStateConflict
+
+        run_id = record["run_id"]
+        version = (expected_version or 0) + 1
+        data = json.dumps({**record, "version": version}, default=str)
+
+        def _save() -> int:
+            session = self._get_session()
+            try:
+                if expected_version is None:
+                    session.add(
+                        StorageRunState(
+                            run_id=run_id,
+                            session_id=record.get("session_id"),
+                            status=record.get("status", "running"),
+                            version=version,
+                            created_at=record.get("created_at"),
+                            data=data,
+                        )
+                    )
+                    try:
+                        session.commit()
+                    except IntegrityError:
+                        session.rollback()
+                        raise RunStateConflict(f"Run {run_id} already exists") from None
+                    return version
+                # Compare and swap on the version.
+                result = session.execute(
+                    update(StorageRunState)
+                    .where(
+                        StorageRunState.run_id == run_id,
+                        StorageRunState.version == expected_version,
+                    )
+                    .values(
+                        status=record.get("status", "running"),
+                        version=version,
+                        data=data,
+                    )
+                )
+                session.commit()
+                if result.rowcount != 1:
+                    raise RunStateConflict(
+                        f"Run {run_id} changed since version {expected_version}"
+                    )
+                return version
+            finally:
+                self._release_session(session)
+
+        return await asyncio.to_thread(_save)
+
+    async def get_run_state(self, run_id: str) -> dict | None:
+        def _get():
+            session = self._get_session()
+            try:
+                row = session.get(StorageRunState, run_id)
+                return json.loads(row.data) if row is not None else None
+            finally:
+                self._release_session(session)
+
+        return await asyncio.to_thread(_get)
+
+    async def list_run_states(
+        self, session_id: str | None = None, status: str | None = None, limit: int = 100
+    ) -> list[dict]:
+        def _list():
+            session = self._get_session()
+            try:
+                query = session.query(StorageRunState)
+                if session_id is not None:
+                    query = query.filter(StorageRunState.session_id == session_id)
+                if status is not None:
+                    query = query.filter(StorageRunState.status == status)
+                rows = query.order_by(StorageRunState.created_at).limit(limit).all()
+                return [json.loads(row.data) for row in rows]
+            finally:
+                self._release_session(session)
+
+        return await asyncio.to_thread(_list)

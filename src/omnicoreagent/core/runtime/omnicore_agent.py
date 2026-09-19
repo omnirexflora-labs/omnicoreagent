@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import uuid
 
+from omnicoreagent.core.runs import RunStateUnsupported, RunTracker, supports_run_state
 from omnicoreagent.core.runtime import (
     builder,
     construction,
@@ -629,6 +630,7 @@ class OmniCoreAgent:
 
         run_id = run_id or self.generate_run_id()
         trace_context = None
+        run_tracker = None
         # Set once this run starts finalizing its own trace. A telemetry
         # failure after that point has already restored the parent context,
         # so the error handlers below must not record anything more.
@@ -664,6 +666,16 @@ class OmniCoreAgent:
             if not self._initialized:
                 await self.initialize()
 
+            # The run's durable record lives in the chosen memory store.
+            run_tracker = RunTracker(
+                self.memory_router,
+                run_id=run_id,
+                session_id=session_id,
+                agent_name=self.name,
+                agent_version=self.agent_config.get("agent_version"),
+            )
+            await run_tracker.start(trace_context.trace_id)
+
             blocked_response = await execution.blocked_guardrail_response(
                 guardrail=self.guardrail,
                 query=query,
@@ -693,6 +705,7 @@ class OmniCoreAgent:
                         "run_summary": run_summary["run_summary"],
                     },
                 )
+                await run_tracker.finish("blocked")
                 blocked_response["trace_id"] = trace_context.trace_id
                 blocked_response["run_id"] = run_id
                 return self.privacy_filter.redact(
@@ -712,23 +725,24 @@ class OmniCoreAgent:
                     trace_id=trace_context.trace_id,
                 )
 
-            response = await self.agent.run(
-                **({"on_event": emit_delta} if delivery is not None else {}),
-                system_prompt=runtime_prompt,
-                query=query,
-                llm_connection=self.llm_connection,
-                add_message_to_history=self._store_message_with_telemetry,
-                message_history=self._get_messages_with_telemetry,
-                debug=self.debug,
-                telemetry_recorder=self.telemetry_recorder,
-                telemetry_run_header=self._telemetry_run_header(),
-                **execution.build_agent_run_kwargs(
-                    mcp_client=self.mcp_client,
-                    local_tools=self.local_tools,
-                    session_id=session_id,
-                    sub_agents=self.sub_agents,
-                ),
-            )
+            async with run_tracker.active():
+                response = await self.agent.run(
+                    **({"on_event": emit_delta} if delivery is not None else {}),
+                    system_prompt=runtime_prompt,
+                    query=query,
+                    llm_connection=self.llm_connection,
+                    add_message_to_history=self._store_message_with_telemetry,
+                    message_history=self._get_messages_with_telemetry,
+                    debug=self.debug,
+                    telemetry_recorder=self.telemetry_recorder,
+                    telemetry_run_header=self._telemetry_run_header(),
+                    **execution.build_agent_run_kwargs(
+                        mcp_client=self.mcp_client,
+                        local_tools=self.local_tools,
+                        session_id=session_id,
+                        sub_agents=self.sub_agents,
+                    ),
+                )
 
             formatted_response = execution.format_run_response(
                 response=response,
@@ -743,6 +757,10 @@ class OmniCoreAgent:
                     if formatted_response.get("status", "success") == "success"
                     else TraceStatus.FAILED.value,
                 )
+            )
+            await run_tracker.finish(
+                "completed" if trace_status == TraceStatus.COMPLETED else "failed",
+                usage=formatted_response.get("metric"),
             )
             run_summary = await self._run_summary(trace_context.trace_id)
             await self.telemetry_recorder.emit_event(
@@ -769,6 +787,7 @@ class OmniCoreAgent:
             formatted_response["run_id"] = run_id
             return self.privacy_filter.redact(formatted_response, boundary="public")
         except asyncio.CancelledError as exc:
+            await self._finish_run_record(run_tracker, "cancelled", exc)
             if trace_context is not None and not trace_finalizing:
                 stopped_status = (
                     TraceStatus.TIMEOUT
@@ -791,6 +810,7 @@ class OmniCoreAgent:
                     )
             raise
         except Exception as exc:
+            await self._finish_run_record(run_tracker, "failed", exc)
             if trace_context is not None and not trace_finalizing:
                 await self._end_trace_after_failure(
                     trace_context, exc, status=TraceStatus.FAILED
@@ -860,6 +880,51 @@ class OmniCoreAgent:
                 f"{summary['payloads_removed']} payload(s)"
             )
         return summary
+
+    async def _finish_run_record(
+        self, run_tracker: Any, status: str, exc: BaseException
+    ) -> None:
+        """Record how a run ended; it must not replace the original error."""
+        if run_tracker is None or run_tracker.record["status"] != "running":
+            return
+        try:
+            await complete_despite_cancellation(run_tracker.finish(status, error=exc))
+        except Exception as record_exc:
+            runtime_logger().warning(
+                f"Could not record run {run_tracker.run_id} as {status}: "
+                f"{record_exc.__class__.__name__}"
+            )
+
+    async def get_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """A run's durable record, or None if it has none.
+
+        The record is kept in the agent's memory store: status, step, usage,
+        trace IDs, and each tool call's state (arguments as a digest).
+        """
+        if not self._initialized:
+            await self.initialize()
+        if not supports_run_state(self.memory_router):
+            return None
+        try:
+            return await self.memory_router.get_run_state(run_id)
+        except RunStateUnsupported:
+            return None
+
+    async def list_runs(
+        self,
+        session_id: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Run records, oldest first, optionally for one session or status."""
+        if not self._initialized:
+            await self.initialize()
+        if not supports_run_state(self.memory_router):
+            return []
+        try:
+            return await self.memory_router.list_run_states(session_id, status, limit)
+        except RunStateUnsupported:
+            return []
 
     async def _end_trace_after_failure(
         self,

@@ -11,6 +11,7 @@ from typing import Any
 from omnicoreagent.core.agents.loop_detection import ToolInteraction
 from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.runtime.deadline import stop_after
+from omnicoreagent.core.runs import current_run
 from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
 from omnicoreagent.governance.errors import PolicyDeniedError
 from omnicoreagent.core.tools.mcp_tool_handler import MCPToolHandler
@@ -100,6 +101,7 @@ async def execute_native_turn(
         resolved = None
         outcome: dict = {}
         signature_args = deepcopy(decoded_arguments.get(request.id, request.arguments))
+        run_call_started = False
         try:
             resolution = resolutions[request.id]
             if isinstance(resolution, ValueError):
@@ -191,6 +193,18 @@ async def execute_native_turn(
                 binding.provider if binding.provider != "subagent" else "local",
                 binding.server,
             )
+            # Recorded as started before it runs (write-ahead): if the run
+            # stops now, its record shows this call may have had an effect.
+            # If the record cannot be saved, the call does not run.
+            run = current_run()
+            if run is not None:
+                await run.tool_started(
+                    tool_call_id=request.id,
+                    tool_name=binding.name,
+                    provider=binding.provider,
+                    arguments=arguments,
+                )
+                run_call_started = True
             # The deadline records why it stopped the call, so the tool record
             # reports a timeout distinctly from a cancelled run.
             async with stop_after(agent.tool_call_timeout):
@@ -233,6 +247,8 @@ async def execute_native_turn(
                 "data": None,
                 "message": str(exc),
             }
+        if run_call_started:
+            await _record_tool_outcome(request.id, result)
         # Loop signatures use normalized, guarded contents before artifact IDs
         # and governed-history redaction can change their representation.
         signature_result = {
@@ -528,3 +544,16 @@ def _is_governed(child: Any) -> bool:
         return True
     config = (getattr(child, "agent_config", None) or {}).get("governance_config") or {}
     return bool(config.get("enabled"))
+
+
+async def _record_tool_outcome(tool_call_id: str, result: dict) -> None:
+    """Mark a call finished; a cancelled or timed-out call's effect is unknown."""
+    run = current_run()
+    if run is None:
+        return
+    error_type = result.get("error_type")
+    if error_type in {"cancelled", "timeout"}:
+        await run.tool_finished(tool_call_id=tool_call_id, outcome=error_type, state="interrupted")
+        return
+    outcome = "success" if result.get("status", "success") == "success" else "error"
+    await run.tool_finished(tool_call_id=tool_call_id, outcome=outcome)

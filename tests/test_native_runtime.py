@@ -96,9 +96,9 @@ async def test_plain_xml_answer_is_content_and_never_executes():
 @pytest.fixture(params=["in_memory", "sql"])
 def native_memory(request, monkeypatch, tmp_path):
     if request.param == "sql":
-        from omnicoreagent.core.memory_store.sql_db_memory import get_sql_manager
+        from omnicoreagent.core.memory_store.sql_db_memory import close_all_sql_managers
 
-        get_sql_manager().close_all()
+        close_all_sql_managers()
         monkeypatch.setenv(
             "DATABASE_URL", f"sqlite:///{tmp_path / 'native-history.db'}"
         )
@@ -106,7 +106,7 @@ def native_memory(request, monkeypatch, tmp_path):
         yield MemoryRouter(request.param)
     finally:
         if request.param == "sql":
-            get_sql_manager().close_all()
+            close_all_sql_managers()
 
 
 @pytest.mark.asyncio

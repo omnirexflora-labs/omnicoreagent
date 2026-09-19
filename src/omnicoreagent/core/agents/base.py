@@ -19,6 +19,7 @@ from omnicoreagent.core.types import (
 )
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.governed_tool_runner import GovernedToolRunner
+from omnicoreagent.core.runs import current_run
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.logging import logger
@@ -408,6 +409,9 @@ class BaseReactAgent:
                 and current_steps < self.max_steps
             ):
                 current_steps += 1
+                run = current_run()
+                if run is not None:
+                    await run.step(current_steps)
                 step_span = None
                 if telemetry_recorder is not None:
                     step_span = await telemetry_recorder.start_span(

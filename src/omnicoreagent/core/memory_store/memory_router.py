@@ -38,7 +38,7 @@ class MemoryRouter:
         elif self.memory_store_type == "sql":
             db_url = os.environ.get("DATABASE_URL")
             if db_url is None:
-                logger.info("SQL memory not configured, using in_memory")
+                logger.warning("SQL memory selected but DATABASE_URL is not set; using in_memory (nothing survives a restart)")
                 self.memory_store = InMemoryStore()
             else:
                 DatabaseMessageStore = load_optional(
@@ -53,7 +53,7 @@ class MemoryRouter:
         elif self.memory_store_type == "redis":
             redis_url = os.environ.get("REDIS_URL")
             if redis_url is None:
-                logger.info("Redis not configured, using in_memory")
+                logger.warning("Redis memory selected but REDIS_URL is not set; using in_memory (nothing survives a restart)")
                 self.memory_store = InMemoryStore()
             else:
                 RedisMemoryStore = load_optional(
@@ -68,7 +68,7 @@ class MemoryRouter:
         elif self.memory_store_type == "mongodb":
             uri = os.environ.get("MONGODB_URI")
             if uri is None:
-                logger.info("MongoDB not configured, using in_memory")
+                logger.warning("MongoDB memory selected but MONGODB_URI is not set; using in_memory (nothing survives a restart)")
                 self.memory_store = InMemoryStore()
             else:
                 db_name = os.environ.get("MONGODB_DB_NAME", "omnicoreagent")
@@ -126,6 +126,17 @@ class MemoryRouter:
         self, session_id: str = None, agent_name: str = None
     ) -> None:
         await self.memory_store.clear_memory(session_id, agent_name)
+
+    async def save_run_state(self, record: dict, expected_version: int | None) -> int:
+        return await self.memory_store.save_run_state(record, expected_version)
+
+    async def get_run_state(self, run_id: str) -> dict | None:
+        return await self.memory_store.get_run_state(run_id)
+
+    async def list_run_states(
+        self, session_id: str | None = None, status: str | None = None, limit: int = 100
+    ) -> list[dict]:
+        return await self.memory_store.list_run_states(session_id, status, limit)
 
     def get_memory_store_info(self) -> dict[str, Any]:
         """Get information about the current memory store."""

@@ -472,9 +472,9 @@ def _configure_memory_backend_or_skip(memory_backend: str, tmp_path: Path, monke
         return
     if memory_backend == "sql":
         monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'memory.db'}")
-        from omnicoreagent.core.memory_store.sql_db_memory import get_sql_manager
+        from omnicoreagent.core.memory_store.sql_db_memory import close_all_sql_managers
 
-        get_sql_manager().close_all()
+        close_all_sql_managers()
         return
     if memory_backend == "redis":
         url = os.getenv("OMNICOREAGENT_TEST_REDIS_URL") or os.getenv("REDIS_URL")

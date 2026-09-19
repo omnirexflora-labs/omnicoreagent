@@ -57,9 +57,9 @@ def _tools() -> ToolRegistry:
 
 def _memory(kind: str, tmp_path, monkeypatch):
     if kind == "sql":
-        from omnicoreagent.core.memory_store.sql_db_memory import get_sql_manager
+        from omnicoreagent.core.memory_store.sql_db_memory import close_all_sql_managers
 
-        get_sql_manager().close_all()
+        close_all_sql_managers()
         monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'memory.db'}")
         return MemoryRouter("sql")
     return MemoryRouter("in_memory")
