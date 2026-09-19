@@ -186,6 +186,27 @@ def create_react_agent(
     )
 
 
+def _refuse_policy_in_workspace(policy: Any, agent_config: dict[str, Any]) -> None:
+    """An agent must not be able to edit its own policy through its workspace."""
+    from pathlib import Path
+
+    from omnicoreagent.core.workspace.config import resolve_workspace_config
+    from omnicoreagent.governance import PolicyLoadError
+
+    source = getattr(policy.provenance, "source_ref", None)
+    if not source:
+        return
+    workspace = resolve_workspace_config(agent_config.get("workspace_config"))
+    if workspace.workspace_backend != "local" or workspace.workspace_dir is None:
+        return
+    root = Path(workspace.workspace_dir).resolve()
+    if Path(source).resolve().is_relative_to(root):
+        raise PolicyLoadError(
+            f"Policy file {source} is inside the agent's workspace directory {root}, "
+            "where the agent can write; keep the policy outside it"
+        )
+
+
 def build_governance_engine(agent_config: dict[str, Any], telemetry_recorder: Any = None) -> Any:
     governance_config = agent_config.get("governance_config") or {}
     if not governance_config.get("enabled", False):
@@ -199,6 +220,7 @@ def build_governance_engine(agent_config: dict[str, Any], telemetry_recorder: An
         project_root=governance_config.get("project_root"),
         profile=governance_config.get("profile", "interactive-dev"),
     )
+    _refuse_policy_in_workspace(policy, agent_config)
     sandbox_runtime = governance_config.get("sandbox_runtime")
     if sandbox_runtime is None and governance_config.get("sandbox_config") is not None:
         from omnicoreagent.sandbox import build_sandbox_runtime

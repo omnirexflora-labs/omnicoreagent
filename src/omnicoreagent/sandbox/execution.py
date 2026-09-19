@@ -88,6 +88,7 @@ class SandboxExecutionService:
             manifest = SandboxManifest(**manifest)
         manifest = manifest or SandboxManifest()
         runtime = self._runtime()
+        self._refuse_mount_over_policy(manifest)
         requests = _manifest_authority_requests(manifest, SandboxCommandSpec(command=["session"]))
         if requests:
             await self.governance_engine.authorize_all(requests)
@@ -141,6 +142,7 @@ class SandboxExecutionService:
         runtime = self._runtime()
         authority_request = _sandbox_authority_request(spec)
         manifest = spec.manifest or SandboxManifest()
+        self._refuse_mount_over_policy(manifest)
         manifest_requests = _manifest_authority_requests(manifest, spec)
         if manifest_requests:
             await self.governance_engine.authorize_all(manifest_requests)
@@ -187,6 +189,22 @@ class SandboxExecutionService:
             "authority": authority.to_metadata(),
         }
         return result
+
+    def _refuse_mount_over_policy(self, manifest: SandboxManifest) -> None:
+        """A sandbox must not be able to write the policy that governs it."""
+        mount = manifest.workspace_mount
+        policy = getattr(self.governance_engine, "policy", None)
+        source = getattr(getattr(policy, "provenance", None), "source_ref", None)
+        if mount is None or mount.mode != WorkspaceMountMode.READ_WRITE or not source:
+            return
+        import os
+
+        root = os.path.realpath(mount.source)
+        if os.path.realpath(source).startswith(root.rstrip("/") + "/"):
+            raise SandboxUnsupportedError(
+                f"{mount.source} contains the governance policy file and cannot be "
+                "mounted read-write; mount it read-only or keep the policy elsewhere"
+            )
 
     async def _run_recorded(
         self,
