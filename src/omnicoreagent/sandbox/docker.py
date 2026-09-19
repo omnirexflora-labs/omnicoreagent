@@ -1,11 +1,20 @@
 """Docker sandbox backend (the open-source default).
 
 Each session is one long-lived container; commands run in it with
-``docker exec``. The container has no network unless the manifest allows it, a
-read-only root filesystem, a writable working directory (an anonymous volume
-removed with the container) and ``/tmp``, all Linux capabilities dropped, no
-privilege escalation, and memory, CPU, and process limits. Only the manifest's
-environment reaches it; the host environment never does.
+``docker exec``. The container runs as an unprivileged user (``65534``,
+"nobody") unless another numeric user is configured, has no network unless the
+manifest allows it, a read-only root filesystem, a size-limited writable
+working directory and ``/tmp`` (both in memory, removed with the container),
+all Linux capabilities dropped, no privilege escalation, and memory, CPU, and
+process limits. Only the manifest's environment reaches it; the host
+environment never does. gVisor can be used as the container runtime
+(``runtime="runsc"``) for a boundary that does not share the host kernel's
+system call surface.
+
+Host paths that would hand over the host are never mounted, whatever the
+policy says: the container engine's socket, the root and system directories,
+and credential directories in the user's home (or any directory containing
+them), after resolving links.
 
 All Docker SDK calls run in a worker thread so the event loop never blocks.
 Requires the Docker SDK: ``pip install omnicoreagent[docker]``.
@@ -15,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
 import posixpath
 import tarfile
 from typing import Any
@@ -35,6 +45,8 @@ from omnicoreagent.sandbox.models import (
 DEFAULT_IMAGE = "python:3.12-slim"
 DEFAULT_MAX_OUTPUT_BYTES = 1_000_000
 DEFAULT_PIDS_LIMIT = 256
+DEFAULT_USER = "65534:65534"
+DEFAULT_WORKDIR_SIZE = "1g"
 LABEL = "omnicoreagent.sandbox"
 # Extra time the host waits beyond a command's own limit before giving up on it.
 HOST_TIMEOUT_GRACE_SECONDS = 10
@@ -52,7 +64,11 @@ class DockerSandboxRuntime(SandboxRuntime):
         self.max_output_bytes = int(options.pop("max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES))
         self.pids_limit = int(options.pop("pids_limit", DEFAULT_PIDS_LIMIT))
         self.pull = options.pop("pull", "if_missing")
-        self.user = options.pop("user", None)
+        self.user = str(options.pop("user", DEFAULT_USER))
+        self.uid, self.gid = _numeric_user(self.user)
+        self.workdir_size = str(options.pop("workdir_size", DEFAULT_WORKDIR_SIZE))
+        _bytes(self.workdir_size)
+        self.container_runtime = options.pop("runtime", None)
         if options:
             raise ValueError(f"Unknown docker sandbox option(s): {', '.join(sorted(options))}")
         if self.pull not in {"if_missing", "never"}:
@@ -73,8 +89,28 @@ class DockerSandboxRuntime(SandboxRuntime):
         await asyncio.to_thread(self._ensure_image, client, image)
         from docker.types import Mount
 
-        mounts = [Mount(target=manifest.working_dir, source=None, type="volume")]
+        from docker.types import DriverConfig
+
+        # The working directory is an anonymous volume kept in memory, owned
+        # by the sandbox user, and removed with the container. (A plain tmpfs
+        # mount would not accept file copies.)
+        mounts = [
+            Mount(
+                target=manifest.working_dir,
+                source=None,
+                type="volume",
+                driver_config=DriverConfig(
+                    "local",
+                    options={
+                        "type": "tmpfs",
+                        "device": "tmpfs",
+                        "o": f"size={self.workdir_size},uid={self.uid},gid={self.gid},mode=0700",
+                    },
+                ),
+            )
+        ]
         if manifest.workspace_mount is not None:
+            _refuse_sensitive_mount(manifest.workspace_mount.source)
             mounts.append(
                 Mount(
                     target=manifest.workspace_mount.target,
@@ -94,14 +130,15 @@ class DockerSandboxRuntime(SandboxRuntime):
             "read_only": True,
             "tmpfs": {"/tmp": "rw,size=64m"},
             "mounts": mounts,
-            "environment": dict(manifest.environment.plain),
+            "environment": {"HOME": "/tmp", **dict(manifest.environment.plain)},
+            "user": self.user,
             "labels": {LABEL: "1", "omnicoreagent.session": session_id},
             "cap_drop": ["ALL"],
             "security_opt": ["no-new-privileges"],
             "pids_limit": self.pids_limit,
         }
-        if self.user:
-            run_options["user"] = self.user
+        if self.container_runtime:
+            run_options["runtime"] = self.container_runtime
         if resources.memory:
             run_options["mem_limit"] = _bytes(resources.memory)
         if resources.cpu:
@@ -109,6 +146,15 @@ class DockerSandboxRuntime(SandboxRuntime):
         creating = asyncio.ensure_future(asyncio.to_thread(client.containers.run, **run_options))
         try:
             container = await asyncio.shield(creating)
+        except Exception as exc:
+            from docker.errors import APIError
+
+            if isinstance(exc, APIError) and self.container_runtime and "runtime" in str(exc).lower():
+                raise SandboxUnsupportedError(
+                    f"Container runtime {self.container_runtime!r} is not available to Docker "
+                    "(for gVisor, install runsc and register it with the Docker daemon)"
+                ) from exc
+            raise
         except asyncio.CancelledError:
             # The thread still creates the container; remove it before letting
             # the cancellation through, or it would be orphaned.
@@ -224,6 +270,8 @@ class DockerSandboxRuntime(SandboxRuntime):
         with tarfile.open(fileobj=archive, mode="w") as tar:
             info = tarfile.TarInfo(name=name)
             info.size = len(content)
+            # Owned by the sandbox user, so its commands can change the file.
+            info.uid, info.gid, info.mode = self.uid, self.gid, 0o644
             tar.addfile(info, io.BytesIO(content))
         archive.seek(0)
         if not await asyncio.to_thread(container.put_archive, directory, archive.getvalue()):
@@ -306,6 +354,57 @@ class DockerSandboxRuntime(SandboxRuntime):
         if len(data) <= self.max_output_bytes:
             return data.decode(errors="replace"), False
         return data[: self.max_output_bytes].decode(errors="ignore"), True
+
+
+def _numeric_user(user: str) -> tuple[int, int]:
+    uid, _, gid = user.partition(":")
+    if not uid.isdigit() or (gid and not gid.isdigit()):
+        raise ValueError(
+            "docker sandbox option 'user' must be numeric ('uid' or 'uid:gid') so "
+            "the working directory can belong to it"
+        )
+    return int(uid), int(gid or uid)
+
+
+# Mounting any of these (or a directory containing one) hands over the host.
+_ENGINE_SOCKETS = {"docker.sock", "containerd.sock", "podman.sock", "crio.sock"}
+_SYSTEM_DIRS = (
+    "/etc", "/proc", "/sys", "/dev", "/boot", "/root", "/run", "/var/run",
+    "/var/lib/docker", "/var/lib/containerd", "/usr", "/bin", "/sbin",
+    "/lib", "/lib64", "/snap",
+)
+_CREDENTIAL_NAMES = {
+    ".ssh", ".aws", ".azure", ".docker", ".kube", ".gnupg", ".config",
+    ".netrc", ".git-credentials", ".pypirc", ".npmrc", ".modal.toml",
+}
+
+
+def _refuse_sensitive_mount(source: str) -> None:
+    if "://" in source:
+        raise SandboxUnsupportedError(
+            f"{source} must not be mounted: the Docker sandbox mounts local paths only"
+        )
+    real = os.path.realpath(source)
+    home = os.path.realpath(os.path.expanduser("~"))
+    sensitive = [*_SYSTEM_DIRS, *(os.path.join(home, name) for name in _CREDENTIAL_NAMES)]
+    parts = set(real.split("/"))
+    reason = None
+    if real == "/":
+        reason = "it is the host root"
+    elif os.path.basename(real) in _ENGINE_SOCKETS:
+        reason = "it is a container engine socket"
+    elif parts & _CREDENTIAL_NAMES:
+        reason = "it is or is inside a credential directory"
+    else:
+        for path in sensitive:
+            if real == path or real.startswith(path + "/"):
+                reason = f"it is inside {path}"
+                break
+            if path.startswith(real + "/"):
+                reason = f"it contains {path}"
+                break
+    if reason:
+        raise SandboxUnsupportedError(f"{source} must not be mounted into a sandbox: {reason}")
 
 
 def _network_mode(policy: NetworkPolicy) -> str:

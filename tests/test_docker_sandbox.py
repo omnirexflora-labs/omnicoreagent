@@ -235,3 +235,123 @@ def test_the_docker_provider_is_registered_and_reports_execution():
     assert runtime.supports_execution is True
     assert runtime.supports_required_sandbox is True
     assert os.environ.get("DOCKER_HOST") is None or runtime is not None
+
+
+# --- E5b.2 hardening --------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_commands_run_as_an_unprivileged_user_by_default(session_of):
+    runtime = _runtime()
+    session = await session_of(runtime)
+
+    who = await _run(runtime, session, "id", "-u")
+    wrote = await _run(runtime, session, "sh", "-c", "echo ok > mine.txt && echo t > /tmp/t && cat mine.txt")
+    home = await _run(runtime, session, "sh", "-c", 'echo "$HOME"')
+
+    assert who.stdout.strip() == "65534"
+    assert wrote.exit_code == 0 and wrote.stdout.strip() == "ok"
+    assert home.stdout.strip() == "/tmp"
+
+
+@pytest.mark.asyncio
+async def test_root_is_only_used_when_asked_for(session_of):
+    runtime = _runtime(user="0:0")
+    session = await session_of(runtime)
+
+    who = await _run(runtime, session, "id", "-u")
+    wrote = await _run(runtime, session, "sh", "-c", "echo ok > mine.txt")
+
+    assert who.stdout.strip() == "0" and wrote.exit_code == 0
+
+
+def test_a_user_must_be_numeric_so_the_working_directory_can_belong_to_it():
+    with pytest.raises(ValueError, match="numeric"):
+        _runtime(user="nobody")
+
+
+@pytest.mark.asyncio
+async def test_the_working_directory_is_size_limited(session_of):
+    runtime = _runtime(workdir_size="1m")
+    session = await session_of(runtime)
+
+    result = await _run(runtime, session, "sh", "-c", "head -c 3000000 /dev/zero > big")
+
+    assert result.exit_code != 0
+
+
+@pytest.mark.asyncio
+async def test_gvisor_is_an_option_and_a_missing_runtime_is_a_clear_error(session_of):
+    runtimes = (_client.info().get("Runtimes") or {})
+    runtime = _runtime(runtime="runsc")
+    if "runsc" not in runtimes:
+        with pytest.raises(SandboxUnsupportedError, match="runsc"):
+            await session_of(runtime)
+        assert not _leftovers()
+        return
+    session = await session_of(runtime)
+    kernel = await _run(runtime, session, "dmesg")
+    assert "gVisor" in kernel.stdout
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "source",
+    [
+        "/var/run/docker.sock",
+        "/run/docker.sock",
+        "/",
+        "/etc",
+        "/proc",
+        "/var/lib/docker",
+        "~",
+        "~/.ssh",
+        "~/.aws",
+        "~/.docker",
+        "~/.config",
+    ],
+)
+async def test_sensitive_host_paths_are_never_mounted(source, session_of):
+    from omnicoreagent.sandbox.models import WorkspaceMount
+
+    path = os.path.expanduser(source)
+    runtime = _runtime()
+    manifest = SandboxManifest(workspace_mount=WorkspaceMount(source=path, target="/mnt/host"))
+
+    with pytest.raises(SandboxUnsupportedError, match="not be mounted"):
+        await session_of(runtime, manifest)
+    assert not _leftovers()
+
+
+@pytest.mark.asyncio
+async def test_a_path_that_contains_a_sensitive_one_or_links_to_it_is_refused(session_of, tmp_path):
+    from omnicoreagent.sandbox.models import WorkspaceMount
+
+    link = tmp_path / "innocent"
+    link.symlink_to(os.path.expanduser("~/.ssh"))
+    runtime = _runtime()
+
+    for source in (str(link), os.path.dirname(os.path.expanduser("~"))):
+        manifest = SandboxManifest(workspace_mount=WorkspaceMount(source=source, target="/mnt/host"))
+        with pytest.raises(SandboxUnsupportedError, match="not be mounted"):
+            await session_of(runtime, manifest)
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_project_directory_can_be_mounted_read_only(session_of, tmp_path):
+    from omnicoreagent.sandbox.models import WorkspaceMount
+
+    (tmp_path / "data.txt").write_text("hello")
+    # The sandbox user is not the host user: what it reads must be readable
+    # by others (with all capabilities dropped, not even root can bypass this).
+    tmp_path.chmod(0o755)
+    (tmp_path / "data.txt").chmod(0o644)
+    runtime = _runtime()
+    session = await session_of(
+        runtime, SandboxManifest(workspace_mount=WorkspaceMount(source=str(tmp_path), target="/mnt/data"))
+    )
+
+    read = await _run(runtime, session, "cat", "/mnt/data/data.txt")
+    write = await _run(runtime, session, "sh", "-c", "echo x > /mnt/data/new.txt")
+
+    assert read.stdout == "hello" and write.exit_code != 0
