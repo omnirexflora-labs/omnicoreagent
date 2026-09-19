@@ -55,12 +55,28 @@ class ExecutionScope:
     async def execute(self, command: list[str], **spec: Any) -> SandboxExecResult:
         session = await self.session()
         bridge = self.workspace_bridge
-        if bridge is not None:
-            await bridge.push(self.service, session)
+        copied_in = await bridge.push(self.service, session) if bridge is not None else []
         result = await self.service.execute(SandboxCommandSpec(command=command, **spec), session=session)
         if bridge is not None and not result.metadata.get("session_terminated"):
-            result.metadata["workspace"] = await bridge.pull(self.service, session)
+            sync = await bridge.pull(self.service, session)
+            result.metadata["workspace"] = sync
+            await self._record_sync(session, copied_in, sync)
         return result
+
+    async def _record_sync(self, session: SandboxSession, copied_in: list[str], sync: dict) -> None:
+        # Paths are recorded like the workspace tools' paths: as facts.
+        from omnicoreagent.sandbox.telemetry import emit_sandbox_event
+
+        await emit_sandbox_event(
+            getattr(self.service.governance_engine, "telemetry_recorder", None),
+            "sandbox_workspace_sync",
+            metadata={
+                "sandbox_session_id": session.session_id,
+                "copied_in": copied_in,
+                "written": list(sync["written"]),
+                "skipped": [dict(item) for item in sync["skipped"]],
+            },
+        )
 
     async def upload(self, files: dict[str, bytes]) -> None:
         session = await self.session()

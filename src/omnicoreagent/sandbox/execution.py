@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import posixpath
+import time
 from typing import Any
 from urllib.parse import unquote
+from uuid import uuid4
 
 from omnicoreagent.governance.capabilities import secret_authority_request
 from omnicoreagent.governance.models import AuthorityRequest, AuthorityTarget
@@ -71,6 +73,8 @@ class SandboxExecutionService:
     def __init__(self, governance_engine: Any):
         self.governance_engine = governance_engine
         self._open_sessions: set[str] = set()
+        # Session ID -> (monotonic start, commands run), for the close record.
+        self._session_started: dict[str, tuple[float, int]] = {}
 
     async def open_session(
         self, manifest: SandboxManifest | dict[str, Any] | None = None
@@ -89,13 +93,40 @@ class SandboxExecutionService:
             await self.governance_engine.authorize_all(requests)
         session = await runtime.create(manifest)
         self._open_sessions.add(session.session_id)
+        self._session_started[session.session_id] = (time.monotonic(), 0)
+        await self._emit(
+            "sandbox_session_created",
+            metadata={
+                **_session_facts(session, runtime),
+                "image": session.metadata.get("image") or manifest.image,
+                "network": _value(manifest.network_policy.default),
+                "working_dir": manifest.working_dir,
+            },
+        )
         return session
 
     async def close_session(self, session: SandboxSession) -> None:
         if session.session_id not in self._open_sessions:
             return
         self._open_sessions.discard(session.session_id)
-        await self._runtime().terminate(session.session_id)
+        started, commands = self._session_started.pop(session.session_id, (None, 0))
+        runtime = self._runtime()
+        error: BaseException | None = None
+        try:
+            await runtime.terminate(session.session_id)
+        except Exception as exc:
+            error = exc
+            raise
+        finally:
+            await self._emit(
+                "sandbox_session_closed",
+                metadata={
+                    **_session_facts(session, runtime),
+                    "commands": commands,
+                    "duration_ms": _elapsed_ms(started) if started is not None else None,
+                },
+                error=error,
+            )
 
     async def execute(
         self,
@@ -117,18 +148,7 @@ class SandboxExecutionService:
         authority = SandboxAuthorityContext.from_policy_decision(decision)
         session = await runtime.create(manifest)
         try:
-            result = await runtime.execute(
-                session.session_id,
-                SandboxExecRequest(
-                    command=spec.command,
-                    authority=authority,
-                    cwd=spec.cwd,
-                    stdin=spec.stdin,
-                    timeout_seconds=spec.timeout_seconds,
-                    environment={str(key): str(value) for key, value in spec.environment.items()},
-                    metadata=dict(spec.metadata),
-                ),
-            )
+            result = await self._run_recorded(runtime, session, spec, authority)
         except Exception as exc:
             if _should_cleanup(manifest, None):
                 await _terminate_preserving_original(runtime, session.session_id, exc)
@@ -157,18 +177,9 @@ class SandboxExecutionService:
             _sandbox_authority_request(spec)
         )
         authority = SandboxAuthorityContext.from_policy_decision(decision)
-        result = await runtime.execute(
-            session.session_id,
-            SandboxExecRequest(
-                command=spec.command,
-                authority=authority,
-                cwd=spec.cwd,
-                stdin=spec.stdin,
-                timeout_seconds=spec.timeout_seconds,
-                environment={str(key): str(value) for key, value in spec.environment.items()},
-                metadata=dict(spec.metadata),
-            ),
-        )
+        started, commands = self._session_started.get(session.session_id, (time.monotonic(), 0))
+        self._session_started[session.session_id] = (started, commands + 1)
+        result = await self._run_recorded(runtime, session, spec, authority)
         result.metadata = {
             **dict(result.metadata),
             "sandbox_session_id": session.session_id,
@@ -177,6 +188,79 @@ class SandboxExecutionService:
         }
         return result
 
+    async def _run_recorded(
+        self,
+        runtime: SandboxRuntime,
+        session: SandboxSession,
+        spec: SandboxCommandSpec,
+        authority: SandboxAuthorityContext,
+    ) -> SandboxExecResult:
+        """Run one command, recording its start and its outcome.
+
+        Facts are metadata (kept under every capture policy); the command and
+        its output are payloads (subject to the capture policy).
+        """
+        facts = {
+            **_session_facts(session, runtime),
+            "execution_id": f"exec_{uuid4().hex}",
+            "command_name": spec.command[0],
+            "argc": len(spec.command),
+            "timeout_seconds": spec.timeout_seconds,
+            "purpose": spec.metadata.get("purpose", "command"),
+            "decision_id": authority.decision_id,
+            "matched_rule_ids": list(authority.matched_rule_ids),
+        }
+        await self._emit("sandbox_exec_started", metadata=facts)
+        started = time.monotonic()
+        try:
+            result = await runtime.execute(
+                session.session_id,
+                SandboxExecRequest(
+                    command=spec.command,
+                    authority=authority,
+                    cwd=spec.cwd,
+                    stdin=spec.stdin,
+                    timeout_seconds=spec.timeout_seconds,
+                    environment={str(key): str(value) for key, value in spec.environment.items()},
+                    metadata=dict(spec.metadata),
+                ),
+            )
+        except BaseException as exc:
+            await self._emit(
+                "sandbox_exec_failed",
+                input={"command": list(spec.command)},
+                metadata={**facts, "duration_ms": _elapsed_ms(started)},
+                error=exc,
+                duration_ms=_elapsed_ms(started),
+            )
+            raise
+        await self._emit(
+            "sandbox_exec_completed" if result.ok else "sandbox_exec_failed",
+            input={"command": list(spec.command)},
+            output={"stdout": result.stdout, "stderr": result.stderr},
+            metadata={
+                **facts,
+                "exit_code": result.exit_code,
+                "timed_out": result.timed_out,
+                "duration_ms": _elapsed_ms(started),
+                "stdout_bytes": len(result.stdout.encode("utf-8", errors="replace")),
+                "stderr_bytes": len(result.stderr.encode("utf-8", errors="replace")),
+                "stdout_truncated": bool(result.metadata.get("stdout_truncated")),
+                "stderr_truncated": bool(result.metadata.get("stderr_truncated")),
+                "session_terminated": bool(result.metadata.get("session_terminated")),
+            },
+            duration_ms=_elapsed_ms(started),
+        )
+        return result
+
+    async def _emit(self, event_type: str, **fields: Any) -> None:
+        from omnicoreagent.sandbox.telemetry import emit_sandbox_event
+
+        recorder = getattr(self.governance_engine, "telemetry_recorder", None)
+        if fields.get("duration_ms") is not None:
+            fields["duration_ms"] = int(fields["duration_ms"])
+        await emit_sandbox_event(recorder, event_type, **fields)
+
     def _runtime(self) -> SandboxRuntime:
         runtime = getattr(self.governance_engine, "sandbox_runtime", None)
         if not isinstance(runtime, SandboxRuntime):
@@ -184,6 +268,21 @@ class SandboxExecutionService:
                 "Governed sandbox execution requires a configured SandboxRuntime."
             )
         return runtime
+
+
+def _session_facts(session: SandboxSession, runtime: SandboxRuntime) -> dict[str, Any]:
+    return {
+        "sandbox_session_id": session.session_id,
+        "sandbox_provider": _value(getattr(runtime, "provider", session.provider)),
+    }
+
+
+def _elapsed_ms(started: float) -> float:
+    return round((time.monotonic() - started) * 1000, 3)
+
+
+def _value(value: Any) -> Any:
+    return getattr(value, "value", value)
 
 
 def _default_authority_request(spec: SandboxCommandSpec) -> AuthorityRequest:

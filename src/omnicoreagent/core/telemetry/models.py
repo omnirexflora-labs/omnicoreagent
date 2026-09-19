@@ -187,6 +187,8 @@ FOUNDATION_EVENT_TYPES = frozenset(
         "sandbox_exec_started",
         "sandbox_exec_completed",
         "sandbox_exec_failed",
+        "sandbox_session_closed",
+        "sandbox_workspace_sync",
         "policy_violation",
         "secret_access_denied",
         "secret_access_brokered",

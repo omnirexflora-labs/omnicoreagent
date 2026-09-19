@@ -80,8 +80,11 @@ class WorkspaceBridge:
 
     # --- workspace -> sandbox -------------------------------------------------
 
-    async def push(self, service: "SandboxExecutionService", session: "SandboxSession") -> None:
-        """Copy workspace files that changed since the last copy into the sandbox."""
+    async def push(self, service: "SandboxExecutionService", session: "SandboxSession") -> list[str]:
+        """Copy workspace files that changed since the last copy into the sandbox.
+
+        Returns the paths copied in.
+        """
         entries = await asyncio.to_thread(self._workspace_files)
         uploads: dict[str, bytes] = {}
         total = 0
@@ -105,6 +108,7 @@ class WorkspaceBridge:
             self._in_sandbox[path] = digest
         if uploads:
             await service._runtime().upload_files(session.session_id, uploads)
+        return sorted(uploads)
 
     def _workspace_files(self) -> list[tuple[str, Any]]:
         found: list[tuple[str, Any]] = []
@@ -134,6 +138,7 @@ class WorkspaceBridge:
             SandboxCommandSpec(
                 command=["sh", "-c", _LIST_SCRIPT, str(self.max_file_bytes)],
                 timeout_seconds=LIST_TIMEOUT_SECONDS,
+                metadata={"purpose": "workspace_sync"},
             ),
             session=session,
         )

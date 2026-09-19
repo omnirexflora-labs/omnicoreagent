@@ -98,6 +98,7 @@ def summarize_trace(trace: TelemetryTrace) -> dict[str, Any]:
         "compressions": sum(1 for e in events if e.event_type == "context_compression"),
         "runtime_messages": runtime_messages,
         "subagents": {"count": len(subagent_spans), "child_trace_ids": child_trace_ids},
+        "executions": _executions(events),
         "workspace_changes": _workspace_changes(events),
         "offloaded_results": [
             {
@@ -163,6 +164,20 @@ def tool_outcomes(trace: TelemetryTrace) -> dict[str, str]:
 def _workspace_changes(events) -> list[dict[str, Any]]:
     changes: list[dict[str, Any]] = []
     for event in events:
+        if event.event_type == "sandbox_workspace_sync":
+            # Files a sandboxed command wrote back to the workspace.
+            for path in event.metadata.get("written") or []:
+                changes.append(
+                    {
+                        "tool_call_id": None,
+                        "tool_name": None,
+                        "operation": "write",
+                        "path": path,
+                        "succeeded": True,
+                        "via": "sandbox",
+                    }
+                )
+            continue
         operation = _WORKSPACE_OPERATIONS.get(event.event_type)
         if operation is None or event.metadata.get("phase") != "result":
             continue
@@ -174,6 +189,23 @@ def _workspace_changes(events) -> list[dict[str, Any]]:
                 "operation": operation,
                 "path": arguments.get("path") if isinstance(arguments, dict) else None,
                 "succeeded": event.error is None,
+                "via": "tool",
             }
         )
     return changes
+
+
+def _executions(events) -> dict[str, int]:
+    """Sandboxed commands the agent ran (the bridge's own listings excluded)."""
+    commands = [
+        e
+        for e in events
+        if e.event_type in {"sandbox_exec_completed", "sandbox_exec_failed"}
+        and e.metadata.get("purpose") != "workspace_sync"
+    ]
+    return {
+        "sessions": sum(1 for e in events if e.event_type == "sandbox_session_created"),
+        "commands": len(commands),
+        "failed": sum(1 for e in commands if e.event_type == "sandbox_exec_failed"),
+        "timed_out": sum(1 for e in commands if e.metadata.get("timed_out")),
+    }

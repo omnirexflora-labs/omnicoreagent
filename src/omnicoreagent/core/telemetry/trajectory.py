@@ -22,6 +22,7 @@ from omnicoreagent.core.telemetry.summary import (
 TRAJECTORY_VERSION = "omnicoreagent.trajectory/v1"
 
 _TERMINAL_EVENTS = {"final_answer", "final_state", "runtime_error"}
+_EXECUTION_OUTCOMES = {"sandbox_exec_completed", "sandbox_exec_failed"}
 
 
 def build_trajectory(
@@ -370,9 +371,58 @@ def _tool_call(
             for event in events
             if event.event_type == "mcp_reconnect"
         ],
+        "executions": [
+            _execution(event)
+            for event in events
+            if event.event_type in _EXECUTION_OUTCOMES
+            and event.metadata.get("purpose") != "workspace_sync"
+        ],
+        "workspace_sync": _workspace_sync(events),
         "event_ids": [take(event) for event in events],
     }
     return record
+
+
+def _execution(event: TelemetryEvent) -> dict[str, Any]:
+    """One sandboxed command: facts always, command and output when captured."""
+    facts = event.metadata
+    output = event.output or {}
+    return {
+        "event_id": event.event_id,
+        **{
+            key: facts.get(key)
+            for key in (
+                "execution_id",
+                "sandbox_session_id",
+                "sandbox_provider",
+                "exit_code",
+                "timed_out",
+                "duration_ms",
+                "stdout_bytes",
+                "stderr_bytes",
+                "stdout_truncated",
+                "stderr_truncated",
+                "matched_rule_ids",
+            )
+        },
+        "command": (event.input or {}).get("command"),
+        "stdout": output.get("stdout"),
+        "stderr": output.get("stderr"),
+        "output_capture": _capture(event.output_capture),
+        "error": _error(event),
+    }
+
+
+def _workspace_sync(events: list[TelemetryEvent]) -> dict[str, Any] | None:
+    syncs = [event for event in events if event.event_type == "sandbox_workspace_sync"]
+    if not syncs:
+        return None
+    return {
+        "event_ids": [event.event_id for event in syncs],
+        "copied_in": [path for event in syncs for path in event.metadata.get("copied_in") or []],
+        "written": [path for event in syncs for path in event.metadata.get("written") or []],
+        "skipped": [item for event in syncs for item in event.metadata.get("skipped") or []],
+    }
 
 
 def _context_fields(event: TelemetryEvent) -> dict[str, Any]:

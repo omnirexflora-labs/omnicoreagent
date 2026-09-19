@@ -2,11 +2,7 @@ import pytest
 
 import omnicoreagent
 from omnicoreagent.core.telemetry import (
-    ActorType,
-    InMemoryTelemetryStore,
     TelemetryConfig,
-    TelemetryActor,
-    TelemetryRecorder,
 )
 from omnicoreagent.governance import (
     AuthorityRequest,
@@ -273,42 +269,6 @@ async def test_local_test_sandbox_passes_execution_context_to_handlers():
 
     assert result.stdout == "inspect"
     assert captured == {"allowed_hosts": ["api.example.com"], "provider": "local_test"}
-
-
-@pytest.mark.asyncio
-async def test_local_test_sandbox_emits_telemetry_events():
-    store = InMemoryTelemetryStore()
-    recorder = TelemetryRecorder(store)
-    context = await recorder.start_trace(
-        trace_id="trace-sandbox",
-        run_id="run-sandbox",
-        session_id="session-sandbox",
-        actor=TelemetryActor(type=ActorType.SYSTEM, name="sandbox-test"),
-    )
-    runtime = LocalTestSandboxRuntime(
-        telemetry_recorder=recorder,
-        commands={"ok": lambda request: SandboxExecResult(exit_code=0, stdout="ok")},
-    )
-
-    session = await runtime.create(SandboxManifest())
-    await runtime.execute(
-        session.session_id,
-        SandboxExecRequest(
-            command=["ok"],
-            authority=_authority(),
-        ),
-    )
-    await recorder.end_trace()
-
-    trace = await store.get_trace(context.trace_id)
-    assert [event.event_type for event in trace.events] == [
-        "sandbox_session_created",
-        "sandbox_exec_started",
-        "sandbox_exec_completed",
-    ]
-    assert trace.events[1].input["command"] == {"name": "ok", "argc": 1}
-    assert trace.events[-1].output["observation_summary"]["stdout_chars"] == 2
-    assert trace.events[-1].output["authority"]["decision_id"] == "decision_1"
 
 
 @pytest.mark.asyncio

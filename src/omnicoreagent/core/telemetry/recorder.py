@@ -60,7 +60,11 @@ def _capture_source(kind: str | None) -> str:
     normalized = str(kind or "runtime").lower()
     if normalized in {"model.call", "model_call", "model_response"}:
         return "provider"
-    if normalized.startswith("mcp") or normalized.startswith("tool"):
+    if (
+        normalized.startswith("mcp")
+        or normalized.startswith("tool")
+        or normalized.startswith("sandbox_exec")
+    ):
         return "tool"
     if normalized.startswith("workspace"):
         return "workspace"
@@ -82,6 +86,8 @@ def _capture_role(kind: str | None, direction: str) -> str:
     if normalized == "model_response":
         return "model_response"
     if normalized in {"tool.call", "mcp.tool.call", "tool_call", "mcp_tool_call"}:
+        return "tool_request" if direction == "input" else "tool_result"
+    if normalized in {"sandbox_exec_completed", "sandbox_exec_failed"}:
         return "tool_request" if direction == "input" else "tool_result"
     if normalized in {
         "tool_result",
@@ -808,6 +814,8 @@ class TelemetryRecorder:
                 "workspace_write",
                 "workspace_delete",
                 "observation_pipeline_end",
+                "sandbox_exec_completed",
+                "sandbox_exec_failed",
             }
             and not self.config.record_tool_results
         ):

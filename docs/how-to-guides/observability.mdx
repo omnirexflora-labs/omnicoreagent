@@ -236,6 +236,19 @@ call, an `mcp_reconnect` event records it on that call (outcome `reconnected`
 or `failed`, the reason the session dropped, and any reconnect error); the
 trajectory lists these under the call's `reconnects`.
 
+Sandboxed commands are recorded by the governed execution service, the same
+way for every sandbox provider. A session records `sandbox_session_created`
+and `sandbox_session_closed` (with how many commands it ran and how long it
+lived). Each command records `sandbox_exec_started`, then
+`sandbox_exec_completed` or `sandbox_exec_failed` (a non-zero exit, a timeout,
+or an error from the provider). Facts are metadata and are kept under every
+capture policy: session, provider, exit code, whether it timed out, duration,
+output sizes and truncation, and the policy rules that allowed it. The command
+and its stdout and stderr are payloads and follow `record_tool_results`. When
+workspace files are enabled, `sandbox_workspace_sync` records which files were
+copied in, written back, or skipped and why. In the trajectory, each `execute`
+or skill script call lists its `executions` and its `workspace_sync`.
+
 ### Run totals
 
 Every run ends with a `run_summary`, recorded in the metadata of its terminal
@@ -245,7 +258,9 @@ and failures; `input`, `output`, `total`, `cached_input`, and `reasoning`
 tokens; `estimated_cost_usd` and whether every call's cost was known; model
 latency and retries; tool calls by outcome (`success`, `error`, `rejected`,
 `timeout`, `cancelled`, `denied`); compressions; runtime messages; subagents and
-their child trace IDs; workspace changes; offloaded results; and duration.
+their child trace IDs; sandbox executions (sessions, commands, failed, timed
+out); workspace changes, each marked `via` a workspace tool or the sandbox;
+offloaded results; and duration.
 `including_subagents` adds the child runs' tokens and cost. The `final_answer`
 event also carries `final_model_response_event_id`, the model response that
 produced the answer.

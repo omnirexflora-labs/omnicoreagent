@@ -919,6 +919,15 @@
         "subagents": {
           "type": "object"
         },
+        "executions": {
+          "type": "object",
+          "properties": {
+            "sessions": {"type": "integer", "minimum": 0},
+            "commands": {"type": "integer", "minimum": 0},
+            "failed": {"type": "integer", "minimum": 0},
+            "timed_out": {"type": "integer", "minimum": 0}
+          }
+        },
         "workspace_changes": {
           "type": "array",
           "items": {
