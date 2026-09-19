@@ -18,8 +18,15 @@ def _docker(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
     return DockerSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
 
 
+def _modal(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
+    from omnicoreagent.sandbox.modal_sandbox import ModalSandboxRuntime
+
+    return ModalSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
+
+
 _PROVIDERS: dict[str, SandboxProviderFactory] = {
     "docker": _docker,
+    "modal": _modal,
     SandboxProvider.NONE.value: lambda options, telemetry_recorder: NoneSandboxRuntime(),
     SandboxProvider.LOCAL_TEST.value: lambda options, telemetry_recorder: LocalTestSandboxRuntime(
         telemetry_recorder=telemetry_recorder
