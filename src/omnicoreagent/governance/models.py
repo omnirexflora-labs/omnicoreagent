@@ -121,6 +121,8 @@ class PolicyRuleConditions:
     # The rule does not match requests on these surfaces (for example, an ask
     # rule for process execution that should not apply inside a sandbox).
     exclude_execution_surface: list[str] | None = None
+    # The rule does not match these capabilities (glob patterns).
+    exclude_capability: list[str] | None = None
     mcp_server: str | None = None
     method: str | None = None
     host: str | None = None
@@ -131,6 +133,10 @@ class PolicyRuleConditions:
         if self.exclude_execution_surface is not None:
             self.exclude_execution_surface = _string_list(
                 self.exclude_execution_surface, "exclude_execution_surface"
+            )
+        if self.exclude_capability is not None:
+            self.exclude_capability = _string_list(
+                self.exclude_capability, "exclude_capability"
             )
         if self.data_classes is not None:
             self.data_classes = _string_list(self.data_classes, "data_classes")

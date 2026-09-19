@@ -133,3 +133,11 @@ with them:
 - **Explicit Instructions**: For fixed subagents, briefly describe each subagent's expertise in the parent instruction.
 - **Limit Depth**: While hierarchical agents are powerful, avoid nesting agents too deep (e.g., Parent -> Child -> Grandchild) to prevent excessive latency and token usage.
 - **Keep Workers Focused**: Do not give one worker the whole task. Give it a bounded role and output contract.
+
+## Governance
+
+When the parent agent has governance enabled, each delegation is authorized
+(`subagent.spawn`) and the child must have governance enabled too. A governed
+agent refuses to delegate to an ungoverned one, because the child's tools
+would otherwise run without any policy. The child is governed by its own
+policy, so configure it for the child's tools.

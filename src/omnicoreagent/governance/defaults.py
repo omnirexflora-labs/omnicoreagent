@@ -235,9 +235,12 @@ def _interactive_dev_policy() -> PolicyEnvelope:
                     capability="*",
                     # Contained execution is high risk by design; the sandbox
                     # rules above decide it.
+                    # Skill scripts are decided by allow_skill_scripts (agreed
+                    # 2026-09-19: they keep working on the host, governed).
                     conditions=PolicyRuleConditions(
                         risk_level=["high", "critical"],
                         exclude_execution_surface=["sandbox"],
+                        exclude_capability=["skill.script.run"],
                     ),
                 ),
             ],

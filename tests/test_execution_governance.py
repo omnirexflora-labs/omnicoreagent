@@ -38,8 +38,8 @@ def _effect(profile: str, **request) -> str:
 SANDBOXED = {"capability": "process.exec", "provider": "sandbox", "execution_surface": "sandbox", "risk_level": "high"}
 HOST = {"capability": "process.exec", "provider": "local", "execution_surface": "host", "risk_level": "high"}
 NETWORK_ON = {"capability": "sandbox.network.configure", "execution_surface": "sandbox", "risk_level": "medium"}
-SKILL_HOST = {"capability": "skill.script.run", "provider": "skill", "execution_surface": "host", "risk_level": "medium"}
-EXECUTE_TOOL = {"capability": "sandbox.execute", "provider": "sandbox", "execution_surface": "sandbox"}
+SKILL_HOST = {"capability": "skill.script.run", "provider": "skill", "execution_surface": "host", "risk_level": "high"}
+EXECUTE_TOOL = {"capability": "sandbox.execute", "provider": "sandbox", "execution_surface": "sandbox", "risk_level": "high"}
 IMAGE = {"capability": "sandbox.image.use", "execution_surface": "sandbox"}
 
 

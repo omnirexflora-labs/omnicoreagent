@@ -40,7 +40,7 @@ def tool_capability_descriptor(
     return CapabilityDescriptor(
         capability=capability,
         provider=tool_provider,
-        execution_surface=_execution_surface(tool_provider),
+        execution_surface=_execution_surface(tool_provider, tool_name),
         descriptor_source=(
             "mcp_schema"
             if tool_provider == "mcp"
@@ -546,6 +546,11 @@ def background_run_authority_request(
 
 
 def tool_risk_level(*, tool_name: str, tool_provider: str) -> str:
+    # Running a skill script or a sandboxed command executes arbitrary code.
+    if tool_provider == "skill" and tool_name == "run_skill_script":
+        return "high"
+    if tool_provider == "sandbox":
+        return "high"
     if tool_provider == "workspace":
         if tool_name == "clear_files":
             return "critical"
@@ -684,7 +689,16 @@ def _normalize_secret_ref(secret_ref: str) -> str:
     return normalized
 
 
-def _execution_surface(tool_provider: str) -> str:
+def _execution_surface(tool_provider: str, tool_name: str | None = None) -> str:
+    if tool_provider == "sandbox":
+        return "sandbox"
+    if tool_provider == "skill":
+        if tool_name != "run_skill_script":
+            return "host"
+        # A skill script runs in the run's sandbox when it has one.
+        from omnicoreagent.sandbox.scope import current_execution
+
+        return "sandbox" if current_execution() is not None else "host"
     if tool_provider == "workspace":
         return "workspace"
     if tool_provider == "artifact":

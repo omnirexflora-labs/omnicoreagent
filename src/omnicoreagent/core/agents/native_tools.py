@@ -6,11 +6,13 @@ import asyncio
 import json
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any
 
 from omnicoreagent.core.agents.loop_detection import ToolInteraction
 from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.runtime.deadline import stop_after
 from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
+from omnicoreagent.governance.errors import PolicyDeniedError
 from omnicoreagent.core.tools.mcp_tool_handler import MCPToolHandler
 from omnicoreagent.core.tools.tool_executor import ToolExecutor
 from omnicoreagent.core.types import AgentState, ToolCallResult
@@ -110,6 +112,15 @@ async def execute_native_turn(
                         from omnicoreagent.governance.capabilities import (
                             subagent_spawn_authority_requests,
                         )
+
+                        # A governed agent must not reach tools through a
+                        # child that nothing governs.
+                        if not _is_governed(binding.agent):
+                            raise PolicyDeniedError(
+                                f"Delegation refused: agent '{binding.agent.name}' is not "
+                                "governed. A governed agent can only delegate to agents "
+                                "with governance enabled."
+                            )
 
                         child_tools = getattr(binding.agent, "local_tools", None)
                         await agent.governance_engine.authorize_all(
@@ -508,3 +519,12 @@ async def execute_native_turn(
                 error={"type": type(exc).__name__, "message": str(exc)},
             )
         raise
+
+
+def _is_governed(child: Any) -> bool:
+    """Whether a child agent has, or will have, a governance engine."""
+    inner = getattr(child, "agent", None)
+    if getattr(inner, "governance_engine", None) is not None:
+        return True
+    config = (getattr(child, "agent_config", None) or {}).get("governance_config") or {}
+    return bool(config.get("enabled"))

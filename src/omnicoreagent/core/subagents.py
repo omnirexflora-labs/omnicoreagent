@@ -11,7 +11,7 @@ Subagents inherit:
 
 import asyncio
 from typing import Any, Dict, List, Optional
-from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
+from omnicoreagent.core.tools.local_tools_registry import INTERNAL_TOOL_PROVIDERS, ToolRegistry
 from omnicoreagent.core.logging import logger
 from omnicoreagent.governance.capabilities import subagent_spawn_authority_requests
 from omnicoreagent.governance.snapshots import derive_subagent_policy
@@ -163,8 +163,11 @@ When you have completed the task:
             if tool.name == "spawn_subagents":
                 continue
             registry.register(tool)
+            # Keep every built-in provider label: governance decides a tool by
+            # it (a worker's `execute` must stay `sandbox.execute`, not a
+            # plain local tool call).
             provider = self.local_tools.get_tool_provider(tool.name)
-            if provider in {"workspace", "artifact"}:
+            if provider in INTERNAL_TOOL_PROVIDERS:
                 registry.mark_internal_tool_provider(tool.name, provider)
         return registry
 
