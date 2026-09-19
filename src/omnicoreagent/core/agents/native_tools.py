@@ -241,19 +241,49 @@ async def execute_native_turn(
         return result, resolved
 
     async def _run_code(parent_id, params):
-        """Run a program in Monty; its tool calls are dispatched like model calls."""
+        """Run a program in Monty; its tool calls are dispatched like model calls.
+
+        A call that needs approval pauses the whole program: it is stored,
+        signed, on the run's record and continues from that call on resume.
+        """
+        import base64
+
         from omnicoreagent.core.model_protocol import ToolRequest
-        from omnicoreagent.core.tools.code_mode import callable_name, run_program
+        from omnicoreagent.core.tools.code_mode import (
+            ProgramPaused,
+            _PauseHere,
+            callable_name,
+            run_program,
+            sign_snapshot,
+            verify_snapshot,
+        )
 
         config = agent.code_mode
-        numbers = iter(range(1, 1_000_000))
+        run = current_run()
+        stored = ((run.record.get("code_programs") if run else None) or {}).get(parent_id)
+        resume_from = None
+        first_number = 1
+        if stored:
+            blob = base64.b64decode(stored["snapshot"])
+            if not verify_snapshot(blob, stored.get("signature"), config):
+                return {
+                    "status": "error",
+                    "message": (
+                        "The stored program could not be verified and was not resumed "
+                        "(it was changed, or a different snapshot key is configured)."
+                    ),
+                }
+            resume_from = blob
+            first_number = int(stored["paused_call_number"])
+        numbers = iter(range(first_number, 1_000_000))
 
         def tool_function(binding):
             async def call(kwargs, args):
+                number = next(numbers)
                 if args:
                     names = list((binding.parameters or {}).get("properties") or {})
                     kwargs = {**dict(zip(names, args)), **kwargs}
-                call_id = f"{parent_id}.{next(numbers)}"
+                call_id = f"{parent_id}.{number}"
                 resolved_binding, arguments = catalog.resolve(
                     ToolRequest(call_id, binding.exposed_name, json.dumps(kwargs, default=str)),
                     arguments=kwargs,
@@ -270,6 +300,12 @@ async def execute_native_turn(
                     )
                 except Exception as exc:
                     result = {"status": "error", "message": str(exc)}
+                if _waiting_for_approval(call_id):
+                    # A person has to decide this call: pause the program here.
+                    await current_run().tool_finished(
+                        tool_call_id=call_id, outcome=None, state="awaiting_approval"
+                    )
+                    raise _PauseHere(call_id, number)
                 if started["flag"]:
                     await _record_tool_outcome(call_id, result)
                 if result.get("status", "success") == "success":
@@ -285,7 +321,33 @@ async def execute_native_turn(
             and config.allows(binding.name)
             and callable_name(binding.name)
         }
-        return await run_program(params.get("code", ""), functions=functions, config=config)
+        try:
+            result = await run_program(
+                params.get("code", ""),
+                functions=functions,
+                config=config,
+                resume_from=resume_from,
+            )
+        except ProgramPaused as paused:
+            if run is not None:
+                await run.save_code_program(
+                    parent_id,
+                    {
+                        "snapshot": base64.b64encode(paused.snapshot).decode(),
+                        "signature": sign_snapshot(paused.snapshot, config),
+                        "paused_call_id": paused.call_id,
+                        "paused_call_number": paused.call_number,
+                        "output": paused.output,
+                    },
+                )
+            return {
+                "status": "error",
+                "message": f"The program is waiting for approval of {paused.call_id}.",
+                "data": {"output": paused.output},
+            }
+        if run is not None and stored:
+            await run.save_code_program(parent_id, None)  # finished: drop it
+        return result
 
     async def one(request):
         resolved = None
@@ -650,7 +712,8 @@ async def execute_native_turn(
             [
                 approval
                 for approval in run.record.get("approvals", [])
-                if approval["status"] == "pending" and approval.get("tool_call_id") in awaiting
+                if approval["status"] == "pending"
+                and _belongs_to(approval.get("tool_call_id"), awaiting)
             ]
         )
 
@@ -659,11 +722,22 @@ class _UnknownOutcome(Exception):
     """A recovered call that must not run again (not idempotent)."""
 
 
+def _belongs_to(tool_call_id: str | None, call_ids: set[str]) -> bool:
+    """A call, or a call a program made inside one of them."""
+    call_id = str(tool_call_id or "")
+    return call_id in call_ids or any(call_id.startswith(f"{owner}.") for owner in call_ids)
+
+
 def _waiting_for_approval(tool_call_id: str) -> bool:
-    """Whether governance recorded a pending approval for this call."""
+    """Whether governance recorded a pending approval for this call, or for a
+    call a program made inside it (`run_code`)."""
     run = current_run()
     return run is not None and any(
-        approval.get("tool_call_id") == tool_call_id and approval["status"] == "pending"
+        approval["status"] == "pending"
+        and (
+            approval.get("tool_call_id") == tool_call_id
+            or str(approval.get("tool_call_id") or "").startswith(f"{tool_call_id}.")
+        )
         for approval in run.record.get("approvals", [])
     )
 

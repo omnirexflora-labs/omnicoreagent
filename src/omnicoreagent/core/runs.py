@@ -132,6 +132,8 @@ class RunTracker:
             "interrupt_requested": False,
             # Whether the run opened a sandbox (a resumed run is told it was reset).
             "sandbox_used": False,
+            # Programs (run_code) paused waiting for a person, signed.
+            "code_programs": {},
             "created_at": _now(),
             "updated_at": None,
         }
@@ -270,6 +272,16 @@ class RunTracker:
         async with self._lock:
             if trace_id:
                 self.record["trace_ids"].append(trace_id)
+            await self._save()
+
+    async def save_code_program(self, call_id: str, program: dict[str, Any] | None) -> None:
+        """Keep (or drop) a paused program for a `run_code` call."""
+        async with self._lock:
+            programs = self.record.setdefault("code_programs", {})
+            if program is None:
+                programs.pop(call_id, None)
+            else:
+                programs[call_id] = program
             await self._save()
 
     async def note_sandbox(self) -> None:

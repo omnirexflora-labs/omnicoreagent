@@ -13,6 +13,7 @@ Requires the optional extra: ``pip install "omnicoreagent[codemode]"``.
 
 from __future__ import annotations
 
+import inspect
 import json
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -35,6 +36,11 @@ class CodeModeConfig:
     max_memory_bytes: int = 256 * 1024 * 1024
     max_tool_calls: int = 50
     max_output_bytes: int = 64 * 1024
+    # Signs a paused program stored on a run record. Without one (or
+    # OMNICOREAGENT_CODE_SNAPSHOT_KEY) a random key is used, so a paused
+    # program can only continue in the process that paused it.
+    snapshot_key: str | None = None
+    max_snapshot_bytes: int = 4 * 1024 * 1024
 
     @classmethod
     def from_value(cls, value: "CodeModeConfig | dict[str, Any] | None") -> "CodeModeConfig":
@@ -49,7 +55,15 @@ class CodeModeConfig:
             not isinstance(config.tools, list) or not all(isinstance(t, str) for t in config.tools)
         ):
             raise ValueError("code_mode.tools must be a list of tool names")
-        for name in ("max_duration_seconds", "max_memory_bytes", "max_tool_calls", "max_output_bytes"):
+        if config.snapshot_key is not None and not isinstance(config.snapshot_key, str):
+            raise ValueError("code_mode.snapshot_key must be a string")
+        for name in (
+            "max_duration_seconds",
+            "max_memory_bytes",
+            "max_tool_calls",
+            "max_output_bytes",
+            "max_snapshot_bytes",
+        ):
             number = getattr(config, name)
             if isinstance(number, bool) or not isinstance(number, (int, float)) or number <= 0:
                 raise ValueError(f"code_mode.{name} must be positive")
@@ -115,10 +129,65 @@ class _TooManyCalls(Exception):
     pass
 
 
+class ProgramPaused(Exception):
+    """A tool call inside a program needs a person's decision.
+
+    Carries the paused program, signed, so the run can store it and continue
+    the program later from exactly this call.
+    """
+
+    def __init__(self, *, snapshot: bytes, call_id: str, call_number: int, output: str):
+        super().__init__(f"Program paused at {call_id}")
+        self.snapshot = snapshot
+        self.call_id = call_id
+        self.call_number = call_number
+        self.output = output
+
+
+class _PauseHere(Exception):
+    """Raised by a tool function when its call needs approval."""
+
+    def __init__(self, call_id: str, call_number: int):
+        super().__init__(call_id)
+        self.call_id = call_id
+        self.call_number = call_number
+
+
+def snapshot_key(config: "CodeModeConfig") -> bytes:
+    """The key that signs paused programs."""
+    import os
+
+    key = config.snapshot_key or os.environ.get("OMNICOREAGENT_CODE_SNAPSHOT_KEY")
+    if key:
+        return key.encode("utf-8")
+    return _PROCESS_KEY
+
+
+def sign_snapshot(blob: bytes, config: "CodeModeConfig") -> str:
+    import hashlib
+    import hmac
+
+    return hmac.new(snapshot_key(config), blob, hashlib.sha256).hexdigest()
+
+
+def verify_snapshot(blob: bytes, signature: str, config: "CodeModeConfig") -> bool:
+    import hmac
+
+    return hmac.compare_digest(sign_snapshot(blob, config), signature or "")
+
+
 async def run_program(
-    code: str, *, functions: dict[str, ToolFunction], config: CodeModeConfig
+    code: str,
+    *,
+    functions: dict[str, ToolFunction],
+    config: CodeModeConfig,
+    resume_from: bytes | None = None,
 ) -> dict[str, Any]:
-    """Run ``code`` in Monty; tool calls go to ``functions``."""
+    """Run ``code`` in Monty; tool calls go to ``functions``.
+
+    ``resume_from`` is a paused program (from ``ProgramPaused``): it continues
+    at the call it stopped on instead of running the code again.
+    """
     from omnicoreagent._optional import load_optional
 
     monty = load_optional("code mode", "codemode", lambda: __import__("pydantic_monty"))
@@ -135,12 +204,17 @@ async def run_program(
     try:
         async with monty.AsyncMonty(max_processes=1) as pool:
             async with pool.checkout(limits=limits) as session:
-                snapshot = await session.feed_start(
-                    code,
-                    print_callback=output,
-                    # Names only: calls come back as snapshots, answered below.
-                    external_lookup={name: _placeholder for name in functions},
-                )
+                if resume_from is not None:
+                    snapshot = session.load_snapshot(resume_from)
+                    if inspect.isawaitable(snapshot):
+                        snapshot = await snapshot
+                else:
+                    snapshot = await session.feed_start(
+                        code,
+                        print_callback=output,
+                        # Names only: calls come back as snapshots, answered below.
+                        external_lookup={name: _placeholder for name in functions},
+                    )
                 while not isinstance(snapshot, monty.MontyComplete):
                     if getattr(snapshot, "is_os_function", False):
                         # No filesystem, environment, or clock beyond Monty's own.
@@ -157,6 +231,25 @@ async def run_program(
                         value = await functions[name](
                             dict(snapshot.kwargs or {}), list(snapshot.args or ())
                         )
+                    except _PauseHere as pause:
+                        # Waiting for a person: keep the paused program.
+                        blob = snapshot.dump()
+                        if len(blob) > config.max_snapshot_bytes:
+                            snapshot = await snapshot.resume(
+                                {
+                                    "exception": RuntimeError(
+                                        "This call needs approval, but the program is too "
+                                        "large to pause; call the tool directly instead."
+                                    )
+                                }
+                            )
+                            continue
+                        raise ProgramPaused(
+                            snapshot=blob,
+                            call_id=pause.call_id,
+                            call_number=pause.call_number,
+                            output=output.output,
+                        ) from None
                     except Exception as exc:  # the error goes into the program
                         snapshot = await snapshot.resume({"exception": exc})
                         continue
@@ -174,6 +267,9 @@ async def run_program(
         "status": "success",
         "data": {"result": _plain(result), "output": output.output, "tool_calls": calls},
     }
+
+
+_PROCESS_KEY = __import__("os").urandom(32)
 
 
 def _placeholder(*args: Any, **kwargs: Any) -> None:  # never called: calls are answered manually

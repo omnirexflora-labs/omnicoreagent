@@ -63,3 +63,27 @@ late
 Each tool call a program made is listed under its `run_code` call in the
 trajectory (`code_calls`), with its own policy decision and outcome, and each
 has an ID of the form `<run_code call ID>.<n>`.
+
+## Approval inside a program
+
+If a tool call inside a program needs approval, the program itself pauses: it
+is stored on the run's record, signed, and the run waits like any other
+([Durable Runs](/docs/core-concepts/durable-runs)). After the decision, the
+program continues **from that call** — nothing it already did runs again:
+
+```python
+result = await agent.run("refund the late orders", session_id="s1")
+# result["status"] == "awaiting_approval"; the approval names the call inside the program
+await agent.resolve_approval(run_id, approval_id, decision="approve", approver="alice")
+result = await agent.resume(run_id)
+```
+
+A denied call is raised inside the program with the approver's note, so the
+program can catch it and carry on.
+
+Set `code_mode["snapshot_key"]` (or `OMNICOREAGENT_CODE_SNAPSHOT_KEY`) so a
+paused program can continue in another process, such as after a restart; a
+stored program that does not verify against the key is refused and never runs.
+Without a key, a random one is used per process, so a paused program only
+continues where it paused. A program too large to store (`max_snapshot_bytes`)
+is told so instead of pausing.
