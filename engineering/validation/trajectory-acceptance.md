@@ -20,14 +20,17 @@ PYTHONPATH=src .venv/bin/python engineering/validation/trajectory_acceptance.py 
 `--check-fixture` uses only the standard library and the committed files, so a
 reviewer does not need OmniCoreAgent installed. `--run` runs the scripted
 scenario three ways in a temporary workspace. `tests/test_trajectory_acceptance.py`
-runs both as part of the test suite. `--live` needs `LLM_API_KEY` and
+runs both as part of the test suite. The MCP server runs over stdio, connected on the event loop that uses it
+(direct runs connect before the run; the served run connects in OmniServe's
+startup). `--live` needs `LLM_API_KEY` and
 `OMNICOREAGENT_TEST_MODEL`; it never prints or stores the key.
 
 ## Scenario
 
-The lead agent runs with a scripted model, local tools, a configured subagent,
-context compression (`sliding_window`, `summarize_and_truncate`), and tool
-offloading:
+The lead agent runs with a scripted model, local tools, a real MCP 2 stdio
+server (`fixtures/acceptance_mcp_server.py`, per-call timeout 2 s), a
+configured subagent, context compression (`sliding_window`,
+`summarize_and_truncate`), and tool offloading:
 
 | Step | What happens |
 | --- | --- |
@@ -35,7 +38,8 @@ offloading:
 | 2 | The model returns an empty response; the runtime adds its empty-response retry message. |
 | 3 | The model reads the offloaded artifact by the ID it received in the observation. |
 | 4 | Context compression summarizes older messages (an internal `context_summary` model call); the model delegates to the `researcher` subagent, which makes its own tool call. |
-| 5 | Another compression, then the final answer `ACCEPTANCE_COMPLETE`. |
+| 5 | One parallel batch to the MCP server: `weather` returns structured content, `tool_error` reports a tool failure (`is_error`), `protocol_error` raises a JSON-RPC error (`-32602`), `wait_long` exceeds the per-call timeout (`-32001`), and `weather` with the malformed arguments `{broken` is rejected. |
+| 6 | Another compression, then the final answer `ACCEPTANCE_COMPLETE`. |
 
 It runs directly with full capture, directly with the default privacy-first
 capture, and through OmniServe `/run/sync` with full capture.
@@ -47,14 +51,14 @@ All three runs pass all ten items.
 | # | Item | What is checked |
 | --- | --- | --- |
 | 1 | Request | The query, `trace_id`, `run_id`, `session_id`, and the entry surface (`interactive` directly, `serve` through OmniServe). |
-| 2 | Harness | Model, `max_steps`, the context strategy, the tool catalog (names and count), the system prompt digest, configuration fingerprints, and the agent, prompt, tool schema, and memory configuration versions. |
-| 3 | Steps | Five steps; every agent turn records tokens, finish reason, latency, and attempts; with full capture the request messages, response, and raw tool-call arguments are present; with default capture the response is `not_recorded`. |
-| 4 | Tool calls | Step 1 outcomes are exactly success, error, rejected (`invalid_arguments`, raw text `{broken`), timeout, and success; the failure keeps its error. |
-| 5 | Observations | The second agent turn lists exactly step 1's five observations as newly received; with full capture each observation equals the tool message that call sent to the model. |
+| 2 | Harness | Model, `max_steps`, the context strategy, the tool catalog (names and count, including the MCP tools), the MCP server (connected, reported name and version, protocol version, tool count), the system prompt digest, configuration fingerprints, and the agent, prompt, tool schema, and memory configuration versions. |
+| 3 | Steps | Six steps; every agent turn records tokens, finish reason, latency, and attempts; with full capture the request messages, response, and raw tool-call arguments are present; with default capture the response is `not_recorded`. |
+| 4 | Tool calls | Step 1 outcomes are exactly success, error, rejected (`invalid_arguments`, raw text `{broken`), timeout, and success; the failure keeps its error. The MCP step's outcomes are exactly success, error, error, error, rejected; each names the `mcp` provider and the configured server, the tool error keeps its text, and the protocol error and timeout keep their MCP codes. |
+| 5 | Observations | The second agent turn lists exactly step 1's five observations as newly received, and the final turn exactly the MCP step's five; with full capture each step 1 observation equals the tool message that call sent to the model, and the MCP result reaches the model as its structured content. |
 | 6 | Context management | The current-datetime prefix and the empty-response retry are runtime messages; compressions and `context_summary` calls are recorded; offloaded results carry references; the artifact read succeeds. |
 | 7 | Delegation | The delegation reports the `subagent` provider and succeeds; the child's trajectory is nested under the calling tool with its own steps, tool call, and final answer. |
 | 8 | Final answer | Status `completed`, the answer, and the link to the model response that produced it. |
-| 9 | Totals | 5 steps; 5 agent turns plus the summary calls; tokens equal the sum of the per-call records; cost is known for every call; tool outcomes are 4 success, 1 error, 1 rejected, 1 timeout; subagent-inclusive totals exceed the lead's own. |
+| 9 | Totals | 6 steps; 6 agent turns plus the summary calls; tokens equal the sum of the per-call records; cost is known for every call; tool outcomes are 5 success, 4 error, 2 rejected, 1 timeout; subagent-inclusive totals exceed the lead's own. |
 | 10 | Honesty | Full capture: evidence `complete`, no capture gaps. Default capture: `partial`, with `not_recorded` gaps. In every run the trajectory accounts for every event of the trace. |
 
 ## Committed fixture
@@ -85,7 +89,8 @@ with one local tool, full capture:
 | API key in the trace | No |
 
 The portable evidence document of the live run validates against the
-published schema.
+published schema. (This live run predates the MCP step; the live MCP run is
+part of the MCP v2 completion plan's final unit.)
 
 ## Found during C1
 
@@ -107,5 +112,6 @@ published schema.
 The scripted runs have no provider response IDs, which is why the live run
 exists. The live scenario is deliberately small: a real model cannot be told to
 produce malformed arguments or time out on cue, so those paths are proven by
-the scripted runs. MCP tools are not exercised; the MCP v2 adapter is planned
-separately.
+the scripted runs. MCP is exercised over stdio here; streamable HTTP, SSE,
+OAuth, reconnects, and the official reference server are covered by the MCP
+tests and `mcp_interop.py`.

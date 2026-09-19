@@ -45,6 +45,7 @@ def create_health_router() -> APIRouter:
             agent_name=readiness.agent_name,
             initialized=readiness.initialized,
             mcp_connected=readiness.mcp_connected,
+            mcp_servers=readiness.mcp_servers,
         )
 
     return router

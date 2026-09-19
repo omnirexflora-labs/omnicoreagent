@@ -451,6 +451,7 @@ class OmniCoreAgent:
                 "agent_skills": bool(config.get("enable_agent_skills")),
                 "mcp_servers": len(self.mcp_tools or []),
             },
+            "mcp_servers": self._mcp_server_status(),
             "guardrail": {"mode": metadata.get("guardrail_mode")},
             "governance": {
                 "enabled": engine is not None,
@@ -464,6 +465,19 @@ class OmniCoreAgent:
                 "guardrail": metadata.get("guardrail_config_version"),
             },
         }
+
+    def _mcp_server_status(self) -> list[dict[str, Any]]:
+        """Configured MCP servers with their state at the start of the run."""
+        if self.mcp_client is not None:
+            return self.mcp_client.server_status()
+        return [
+            {
+                "name": server.get("name"),
+                "transport_type": server.get("transport_type", "stdio"),
+                "status": "not_connected",
+            }
+            for server in self.mcp_tools or []
+        ]
 
     def _telemetry_scope(
         self,

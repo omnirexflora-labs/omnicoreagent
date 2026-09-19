@@ -64,10 +64,14 @@ class MCPToolHandler(BaseToolHandler):
         sessions: dict[str, Any],
         server_name: str,
         guardrail: PromptInjectionGuard | None = None,
+        telemetry_recorder: Any = None,
+        tool_call_id: str | None = None,
     ):
         self.sessions = sessions
         self.server_name = server_name
         self.guardrail = guardrail
+        self.telemetry_recorder = telemetry_recorder
+        self.tool_call_id = tool_call_id
 
     async def call(self, tool_name: str, tool_args: dict[str, Any]) -> Any:
         try:
@@ -86,12 +90,44 @@ class MCPToolHandler(BaseToolHandler):
             try:
                 await info["reconnect"]()
             except Exception as reconnect_error:
+                await self._record_reconnect(exc, info, error=reconnect_error)
                 return mcp_error_result(exc, reconnect_error=reconnect_error)
+            await self._record_reconnect(exc, info)
             try:
                 result = await self._call_once(info, tool_name, tool_args)
             except Exception as retry_error:
                 return mcp_error_result(retry_error)
         return self._scrub_mcp_result(tool_name, result)
+
+    async def _record_reconnect(
+        self,
+        cause: BaseException,
+        info: dict[str, Any],
+        *,
+        error: BaseException | None = None,
+    ) -> None:
+        """Record the reconnect on the tool call it happened in."""
+        if self.telemetry_recorder is None:
+            return
+        from omnicoreagent.core.telemetry import ActorType, TelemetryActor
+
+        dropped = mcp_error_result(cause)["data"]["mcp_error"]
+        await self.telemetry_recorder.emit_event(
+            "mcp_reconnect",
+            actor=TelemetryActor(type=ActorType.MCP_SERVER, name=self.server_name),
+            error=(
+                {"type": error.__class__.__name__, "message": str(error)}
+                if error is not None
+                else None
+            ),
+            metadata={
+                "tool_call_id": self.tool_call_id,
+                "mcp_server": self.server_name,
+                "outcome": "failed" if error is not None else "reconnected",
+                "reason": f"MCP error {dropped['code']}: {dropped['message']}",
+                "reconnects": info.get("reconnects", 0),
+            },
+        )
 
     async def _call_once(
         self, info: dict[str, Any], tool_name: str, tool_args: dict[str, Any]

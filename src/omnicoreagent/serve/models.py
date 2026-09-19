@@ -142,6 +142,13 @@ class ReadinessResponse(BaseModel):
             "configured, or when every configured MCP server has a connected session."
         ),
     )
+    mcp_servers: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Each configured MCP server's status (connected, disconnected, failed, "
+            "not_connected) and its last error, so a partial failure is visible."
+        ),
+    )
 
 
 class ToolInfo(BaseModel):

@@ -50,6 +50,16 @@ STEP_ONE_OUTCOMES = [
     ("c_slow", "timeout"),
     ("c_big", "success"),
 ]
+MCP_SERVER = "acceptance_mcp"
+MCP_TOOLS = {"weather", "tool_error", "protocol_error", "wait_long"}
+# One parallel batch to a real MCP server: every outcome an MCP call can have.
+MCP_STEP_OUTCOMES = [
+    ("m_ok", "success"),
+    ("m_tool_error", "error"),
+    ("m_protocol_error", "error"),
+    ("m_call_timeout", "error"),
+    ("m_bad", "rejected"),
+]
 
 
 # --- checks (standard library only) -----------------------------------------
@@ -80,6 +90,14 @@ def trajectory_event_ids(trajectory: dict[str, Any]) -> set[str]:
 
 def _all_calls(trajectory: dict[str, Any]) -> list[dict[str, Any]]:
     return [call for step in trajectory["steps"] for call in step["tool_calls"]]
+
+
+def _mcp_step(trajectory: dict[str, Any]) -> list[dict[str, Any]]:
+    return next(
+        step["tool_calls"]
+        for step in trajectory["steps"]
+        if any(call["tool_call_id"] == "m_ok" for call in step["tool_calls"])
+    )
 
 
 def _agent_turns(trajectory: dict[str, Any]) -> list[dict[str, Any]]:
@@ -122,6 +140,11 @@ def check_trajectory(
         harness["tools"]["names"]
     ), harness["tools"]["names"]
     assert harness["tools"]["count"] == len(harness["tools"]["names"])
+    assert MCP_TOOLS <= set(harness["tools"]["names"]), harness["tools"]["names"]
+    [mcp_server] = harness["mcp_servers"]
+    assert mcp_server["name"] == MCP_SERVER and mcp_server["status"] == "connected", mcp_server
+    assert mcp_server["server_info"] == {"name": "acceptance-mcp", "version": "1.0.0"}, mcp_server
+    assert mcp_server["protocol_version"] and mcp_server["tool_count"] == len(MCP_TOOLS), mcp_server
     assert harness["system_prompt"]["digest"]
     assert harness["fingerprints"]["privacy"] and harness["fingerprints"]["telemetry"]
     for version in ("agent_version", "prompt_version", "tool_schema_version", "memory_config_version"):
@@ -129,7 +152,7 @@ def check_trajectory(
     checked.append("2 harness")
 
     # 3. Steps and model calls
-    assert [step["step"] for step in t["steps"]] == [1, 2, 3, 4, 5], [s["step"] for s in t["steps"]]
+    assert [step["step"] for step in t["steps"]] == [1, 2, 3, 4, 5, 6], [s["step"] for s in t["steps"]]
     for call in _agent_turns(t):
         facts = call["facts"]
         assert facts["tokens"]["total"] > 0, facts
@@ -156,6 +179,20 @@ def check_trajectory(
     failed = next(c for c in step_one if c["tool_call_id"] == "c_err")
     # If this ever fails, say whether the trace lost a write (incomplete).
     assert failed["error"] and failed["error"]["message"], (failed, t["incomplete"])
+    mcp_step = _mcp_step(t)
+    assert [(c["tool_call_id"], c["outcome"]) for c in mcp_step] == MCP_STEP_OUTCOMES, [
+        (c["tool_call_id"], c["outcome"]) for c in mcp_step
+    ]
+    mcp = {c["tool_call_id"]: c for c in mcp_step}
+    for call_id in ("m_ok", "m_tool_error", "m_protocol_error", "m_call_timeout"):
+        assert (mcp[call_id]["provider"], mcp[call_id]["server"]) == ("mcp", MCP_SERVER), mcp[call_id]
+    assert "weather service unavailable" in mcp["m_tool_error"]["error"]["message"], mcp["m_tool_error"]
+    assert "MCP error -32602" in mcp["m_protocol_error"]["error"]["message"], mcp["m_protocol_error"]
+    assert "MCP error -32001" in mcp["m_call_timeout"]["error"]["message"], mcp["m_call_timeout"]
+    assert mcp["m_bad"]["raw_arguments"] == "{broken", mcp["m_bad"]
+    assert mcp["m_bad"]["rejection_reason"] == "invalid_arguments", mcp["m_bad"]
+    if full_capture:
+        assert '"temp": 31' in mcp["m_ok"]["observation"]["content"], mcp["m_ok"]["observation"]
     checked.append("4 tool calls")
 
     # 5. Observations reach the next model call exactly
@@ -173,6 +210,12 @@ def check_trajectory(
         }
         for call in step_one:
             assert sent[call["tool_call_id"]] == call["observation"]["content"], call["tool_call_id"]
+    mcp_observations = [c["observation"]["event_id"] for c in _mcp_step(t)]
+    final_turn = _agent_turns(t)[-1]
+    assert final_turn["new_observation_event_ids"] == mcp_observations, (
+        final_turn["new_observation_event_ids"],
+        mcp_observations,
+    )
     checked.append("5 observations")
 
     # 6. Context management
@@ -214,8 +257,8 @@ def check_trajectory(
 
     # 9. Run totals
     totals = t["totals"]
-    assert totals["steps"] == 5, totals["steps"]
-    assert totals["model_calls"]["agent_turn"] == 5, totals["model_calls"]
+    assert totals["steps"] == 6, totals["steps"]
+    assert totals["model_calls"]["agent_turn"] == 6, totals["model_calls"]
     assert totals["model_calls"]["context_summary"] >= 1, totals["model_calls"]
     assert totals["tokens"]["total"] == sum(
         call["facts"]["tokens"]["total"]
@@ -225,7 +268,8 @@ def check_trajectory(
     ), totals["tokens"]
     assert totals["estimated_cost_usd"] and totals["cost_complete"], totals
     outcomes = totals["tool_calls"]["by_outcome"]
-    assert (outcomes["success"], outcomes["error"], outcomes["rejected"], outcomes["timeout"]) == (4, 1, 1, 1), outcomes
+    # Local and MCP together: step 1, the artifact read, the delegation, and the MCP step.
+    assert (outcomes["success"], outcomes["error"], outcomes["rejected"], outcomes["timeout"]) == (5, 4, 2, 1), outcomes
     assert totals["including_subagents"]["tokens"]["total"] > totals["tokens"]["total"]
     assert totals["duration_ms"] > 0
     checked.append("9 totals")
@@ -278,7 +322,7 @@ def _usage(input_tokens: int, output_tokens: int):
 
 
 class LeadModel:
-    """Scripted lead: parallel batch, empty reply, artifact read, delegation, answer."""
+    """Scripted lead: parallel batch, empty reply, artifact read, delegation, MCP batch, answer."""
 
     def __init__(self) -> None:
         self.turn = 0
@@ -317,6 +361,14 @@ class LeadModel:
             calls = [("c_read", "read_artifact", json.dumps({"artifact_id": match.group(1)}))]
         elif self.turn == 4:
             calls = [("c_child", "delegate_researcher", '{"query": "check key b"}')]
+        elif self.turn == 5:
+            calls = [
+                ("m_ok", "weather", '{"city": "Lagos"}'),
+                ("m_tool_error", "tool_error", "{}"),
+                ("m_protocol_error", "protocol_error", "{}"),
+                ("m_call_timeout", "wait_long", "{}"),
+                ("m_bad", "weather", "{broken"),
+            ]
         else:
             return ModelTurn(content=FINAL_ANSWER, finish_reason="stop", usage=_usage(300, 4))
         return ModelTurn(
@@ -411,6 +463,16 @@ async def build_scripted_agent(*, full_capture: bool):
         system_instruction="You lead the acceptance scenario.",
         model_config=_MODEL,
         local_tools=_tools(),
+        mcp_tools=[
+            {
+                "name": MCP_SERVER,
+                "transport_type": "stdio",
+                "command": sys.executable,
+                "args": [str(ROOT / "engineering" / "validation" / "fixtures" / "acceptance_mcp_server.py")],
+                # Well below the agent's tool limit, so the MCP error is what stops it.
+                "call_timeout": 2,
+            }
+        ],
         sub_agents=[child],
         agent_config=_AGENT_CONFIG,
         telemetry_config=telemetry,
@@ -422,9 +484,14 @@ async def build_scripted_agent(*, full_capture: bool):
 
 async def run_direct(*, full_capture: bool) -> tuple[Any, dict[str, Any], Any]:
     agent = await build_scripted_agent(full_capture=full_capture)
-    result = await agent.run(QUERY, session_id="trajectory-acceptance")
-    trace = await agent.telemetry_store.get_trace(result["trace_id"])
-    return agent, await agent.get_trajectory(result["trace_id"]), trace
+    # MCP connections belong to the event loop that uses them.
+    await agent.connect_mcp_servers()
+    try:
+        result = await agent.run(QUERY, session_id="trajectory-acceptance")
+        trace = await agent.telemetry_store.get_trace(result["trace_id"])
+        return agent, await agent.get_trajectory(result["trace_id"]), trace
+    finally:
+        await agent.cleanup_mcp_servers()
 
 
 def run_served() -> tuple[dict[str, Any], Any]:
@@ -433,10 +500,12 @@ def run_served() -> tuple[dict[str, Any], Any]:
     from omnicoreagent.serve import OmniServe, OmniServeConfig
 
     agent = asyncio.run(build_scripted_agent(full_capture=True))
-    client = TestClient(OmniServe(agent=agent, config=OmniServeConfig(background_enabled=False)).app)
-    response = client.post("/run/sync", json={"query": QUERY, "session_id": "trajectory-served"})
-    assert response.status_code == 200, response.text
-    trajectory = client.get(f"/telemetry/runs/{response.json()['run_id']}/trajectory").json()
+    app = OmniServe(agent=agent, config=OmniServeConfig(background_enabled=False)).app
+    # The app's startup connects the MCP server on the serving loop.
+    with TestClient(app) as client:
+        response = client.post("/run/sync", json={"query": QUERY, "session_id": "trajectory-served"})
+        assert response.status_code == 200, response.text
+        trajectory = client.get(f"/telemetry/runs/{response.json()['run_id']}/trajectory").json()
     trace = asyncio.run(agent.telemetry_store.get_trace(trajectory["trace_id"]))
     return trajectory, trace
 

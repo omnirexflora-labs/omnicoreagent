@@ -168,7 +168,11 @@ async def execute_native_turn(
                 handler = CallbackHandler(discover)
             elif binding.provider == "mcp":
                 handler = MCPToolHandler(
-                    sessions or {}, binding.server, guardrail=agent.guardrail
+                    sessions or {},
+                    binding.server,
+                    guardrail=agent.guardrail,
+                    telemetry_recorder=telemetry_recorder,
+                    tool_call_id=request.id,
                 )
             else:
                 handler = LocalToolHandler(local_tools)

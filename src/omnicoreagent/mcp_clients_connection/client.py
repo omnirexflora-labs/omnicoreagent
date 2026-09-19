@@ -271,6 +271,35 @@ class MCPClient:
         self.state.set_tools(name, exposed["tools"])
         logger.info(f"Reconnected to MCP server {name}")
 
+    def server_status(self) -> list[dict[str, Any]]:
+        """Each configured server's connection state, without its settings.
+
+        Commands, arguments, environment, URLs, and headers can carry
+        credentials, so only identity and state are reported.
+        """
+        statuses = []
+        for server in self.servers:
+            name = server["name"]
+            info = self.sessions.get(name)
+            failure = self.state.failures.get(name)
+            if info is not None:
+                status = "connected" if info.get("connected") else "disconnected"
+            else:
+                status = "failed" if failure else "not_connected"
+            statuses.append(
+                {
+                    "name": name,
+                    "transport_type": server.get("transport_type", "stdio"),
+                    "status": status,
+                    "server_info": info.get("server_info") if info else None,
+                    "protocol_version": info.get("protocol_version") if info else None,
+                    "tool_count": len(self.available_tools.get(name, [])) if info else 0,
+                    "reconnects": info.get("reconnects", 0) if info else 0,
+                    "error": (info or {}).get("last_error") or (failure or {}).get("error"),
+                }
+            )
+        return statuses
+
     async def _authorize_server_connection(self, server: dict[str, Any]) -> None:
         if self.governance_engine is None:
             return

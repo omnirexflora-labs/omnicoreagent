@@ -314,6 +314,10 @@ def _tool_call(
         "tool_name": requested_input.get("tool_name")
         or (outcome_event.metadata.get("tool_name") if outcome_event else None),
         "provider": outcome_event.metadata.get("tool_provider") if outcome_event else None,
+        "server": next(
+            (e.metadata.get("tool_server") for e in events if e.metadata.get("tool_server")),
+            None,
+        ),
         "outcome": outcome,
         "rejection_reason": requested.metadata.get("rejection_reason") if requested else None,
         "raw_arguments": requested_input.get("raw_arguments"),
@@ -355,6 +359,17 @@ def _tool_call(
             if subagent_events
             else None
         ),
+        "reconnects": [
+            {
+                "event_id": event.event_id,
+                "mcp_server": event.metadata.get("mcp_server"),
+                "outcome": event.metadata.get("outcome"),
+                "reason": event.metadata.get("reason"),
+                "error": _error(event),
+            }
+            for event in events
+            if event.event_type == "mcp_reconnect"
+        ],
         "event_ids": [take(event) for event in events],
     }
     return record

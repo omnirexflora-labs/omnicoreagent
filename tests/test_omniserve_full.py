@@ -817,6 +817,7 @@ class TestEndpoints:
             "agent_name": "ReadinessAgent",
             "initialized": True,
             "mcp_connected": True,
+            "mcp_servers": {},
         }
 
     def test_readiness_true_after_successful_lifespan_startup(self):
@@ -838,6 +839,7 @@ class TestEndpoints:
             "agent_name": "ReadyAgent",
             "initialized": True,
             "mcp_connected": True,
+            "mcp_servers": {},
         }
 
     def test_readiness_does_not_require_mcp_when_no_servers_are_configured(self):
@@ -867,6 +869,7 @@ class TestEndpoints:
             "agent_name": "LocalOnlyAgent",
             "initialized": True,
             "mcp_connected": True,
+            "mcp_servers": {},
         }
 
     def test_readiness_reflects_uninitialized_agent(self):

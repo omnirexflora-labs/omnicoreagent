@@ -122,6 +122,7 @@ FOUNDATION_EVENT_TYPES = frozenset(
         "mcp_tool_call",
         "mcp_tool_result",
         "mcp_tool_error",
+        "mcp_reconnect",
         "approval_request",
         "approval_granted",
         "approval_denied",
