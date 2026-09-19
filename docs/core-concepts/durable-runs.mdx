@@ -1,0 +1,70 @@
+---
+title: "Durable Runs"
+description: "Every run's record, and runs that pause for a person's approval and resume"
+---
+
+# Durable Runs
+
+Every `agent.run(...)` keeps a record in the memory store you chose (in
+memory, SQL, Redis, or MongoDB). Nothing else to configure: with a durable
+memory store, the record survives a restart. The in-memory store is for
+development.
+
+## A run's record
+
+```python
+result = await agent.run("tidy the reports folder", session_id="s1")
+run = await agent.get_run(result["run_id"])
+runs = await agent.list_runs(session_id="s1")
+```
+
+A record holds the run's status (`running`, `awaiting_approval`, `completed`,
+`failed`, `blocked`, `cancelled`), step, token usage, trace IDs, approvals,
+and every tool call with its state: `started` before it runs, then
+`completed`, or `interrupted` when it was cancelled or timed out (its effect is
+unknown). Tool arguments are recorded as a digest.
+
+A record belongs to one request. Requests in the same session keep separate
+records, and each run keeps its own working context (the history it started
+from and its own messages), so nothing another request does changes it.
+
+## Approval: pause and resume
+
+With governance enabled, a policy rule can ask for approval. When nothing
+answers in the moment, the run pauses: the other calls in that step finish,
+nothing unapproved runs, and `run()` returns the approvals it waits for.
+
+```python
+result = await agent.run("clean up the old reports", session_id="s1")
+if result["status"] == "awaiting_approval":
+    for approval in result["approvals"]:
+        print(approval["tool_name"], approval["arguments"], approval["reason"])
+```
+
+A person decides each approval, then the run continues:
+
+```python
+await agent.resolve_approval(run_id, approval_id, decision="approve", approver="alice")
+# or deny with a note the model will see:
+await agent.resolve_approval(run_id, approval_id, decision="deny", approver="bob",
+                             note="archive them instead")
+# or approve an edited call instead of the one asked for:
+await agent.resolve_approval(run_id, approval_id, decision="approve", approver="alice",
+                             arguments={"path": "reports/2024/"})
+
+result = await agent.resume(run_id)
+```
+
+- A decision applies to the exact request it was made for (the capability,
+  target, tool, and arguments), once. Approving `delete a.txt` cannot
+  authorize `delete b.txt`.
+- Approvals expire (the policy's `approval_expires_seconds`, or 24 hours).
+- Each pause and resume is its own trace segment, linked by the run ID, with
+  `run_suspended` and `run_resumed` events.
+- To refuse unanswered asks instead of pausing, set
+  `governance_config={"approval_mode": "fail", ...}`. An application
+  `approval_resolver` still answers asks in the moment, as before.
+
+Over OmniServe, the same flow is `POST /run/sync` (or `/run`), then
+`POST /runs/{run_id}/approvals/{approval_id}` and `POST /runs/{run_id}/resume`
+(see [OmniServe](/docs/how-to-guides/omniserve)).

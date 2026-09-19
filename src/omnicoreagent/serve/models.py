@@ -4,7 +4,7 @@ OmniServe Request/Response Models.
 Pydantic models for API request/response schemas.
 """
 
-from typing import Any, Optional
+from typing import Literal, Any, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnicoreagent.background import (
@@ -104,13 +104,19 @@ class RunResponse(BaseModel):
     """Response model for synchronous agent run."""
 
     status: str = Field(
-        "success", description="Runtime outcome: success, error, or cancelled"
+        "success",
+        description="Runtime outcome: success, error, cancelled, or awaiting_approval",
     )
     termination_reason: Optional[str] = Field(
         None, description="Why execution terminated"
     )
     guardrail_result: Optional[dict[str, Any]] = None
-    response: str = Field(..., description="Agent's response")
+    response: Optional[str] = Field(
+        None, description="Agent's response (none while the run awaits approval)"
+    )
+    approvals: Optional[list[dict[str, Any]]] = Field(
+        None, description="Approvals a paused run is waiting for"
+    )
     session_id: str = Field(..., description="Session ID for this conversation")
     agent_name: str = Field(..., description="Name of the agent")
     metric: Optional[dict[str, Any]] = Field(
@@ -118,6 +124,17 @@ class RunResponse(BaseModel):
     )
     trace_id: Optional[str] = Field(None, description="Telemetry trace ID for this run")
     run_id: Optional[str] = Field(None, description="Runtime run ID for this run")
+
+
+class ApprovalDecisionRequest(BaseModel):
+    """A person's decision on an approval a run is waiting for."""
+
+    decision: Literal["approve", "deny"]
+    approver: str = Field(..., min_length=1, description="Who decided")
+    note: Optional[str] = Field(None, description="Reason; a denial's note reaches the model")
+    arguments: Optional[dict[str, Any]] = Field(
+        None, description="Approve this edited call instead of the one asked for"
+    )
 
 
 class HealthResponse(BaseModel):

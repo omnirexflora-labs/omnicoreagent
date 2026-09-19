@@ -13,11 +13,20 @@ from omnicoreagent.core.runtime.deadline import (
 )
 from omnicoreagent.core.telemetry import TraceStatus
 
-from ..models import ErrorResponse, RunRequest, RunResponse
+from ..models import ApprovalDecisionRequest, ErrorResponse, RunRequest, RunResponse
 from ..serialization import normalize_run_result
 from ..sse import run_agent_stream
 from ..state import get_agent, get_agent_name, get_config, resolve_session_id
 from ..telemetry import build_run_kwargs, finish_serve_trace, start_serve_trace
+
+
+def serve_trace_status(run_status: str) -> TraceStatus:
+    """The request trace's status for an agent run outcome."""
+    if run_status == "success":
+        return TraceStatus.COMPLETED
+    if run_status == "awaiting_approval":
+        return TraceStatus.SUSPENDED
+    return TraceStatus.FAILED
 
 
 def create_runs_router() -> APIRouter:
@@ -99,16 +108,17 @@ def create_runs_router() -> APIRouter:
                 privacy_filter=getattr(agent, "privacy_filter", None),
             )
             normalized["run_id"] = normalized.get("run_id") or run_id
-            succeeded = normalized.get("status", "success") == "success"
             # The request trace reports the agent's real outcome.
             await finish_serve_trace(
                 serve_trace,
-                status=TraceStatus.COMPLETED if succeeded else TraceStatus.FAILED,
+                status=serve_trace_status(normalized.get("status", "success")),
                 output={
                     "status": normalized.get("status", "success"),
                     "agent_trace_id": normalized.get("trace_id"),
                 },
             )
+            # Finished: an error below must not try to finish it again.
+            serve_trace = None
             return RunResponse(session_id=session_id, **normalized)
         except asyncio.CancelledError:
             # A dropped or cancelled request must not leave its trace running;
@@ -144,4 +154,100 @@ def create_runs_router() -> APIRouter:
                 message = privacy_filter.redact_text(message, boundary="public")
             raise HTTPException(status_code=500, detail=message)
 
+    @router.get(
+        "/runs/{run_id}",
+        summary="Get a run",
+        description=(
+            "A run's durable record: status, step, usage, trace IDs, tool call "
+            "states, and approvals. Its saved conversation is not returned."
+        ),
+        responses={404: {"model": ErrorResponse}},
+    )
+    async def get_run(request: Request, run_id: str) -> dict:
+        agent = get_agent(request)
+        record = await agent.get_run(run_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"No run {run_id}")
+        return _public_run(agent, record)
+
+    @router.post(
+        "/runs/{run_id}/approvals/{approval_id}",
+        summary="Decide an approval",
+        description="Approve or deny an approval a paused run is waiting for.",
+        responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+    )
+    async def decide_approval(
+        request: Request, run_id: str, approval_id: str, body: ApprovalDecisionRequest
+    ) -> dict:
+        agent = get_agent(request)
+        try:
+            approval = await agent.resolve_approval(
+                run_id,
+                approval_id,
+                decision=body.decision,
+                approver=body.approver,
+                note=body.note,
+                arguments=body.arguments,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        return _public_view(agent, approval)
+
+    @router.post(
+        "/runs/{run_id}/resume",
+        response_model=RunResponse,
+        summary="Resume a paused run",
+        description="Continue a run once every approval it asked for is decided.",
+        responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+    )
+    async def resume_run(request: Request, run_id: str) -> RunResponse:
+        agent = get_agent(request)
+        config = get_config(request)
+        try:
+            result = await run_with_timeout(agent.resume(run_id), config.request_timeout)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=504,
+                detail=f"Request timed out after {config.request_timeout} seconds",
+            ) from None
+        normalized = normalize_run_result(
+            result,
+            agent_name=get_agent_name(agent),
+            privacy_filter=getattr(agent, "privacy_filter", None),
+        )
+        return RunResponse(session_id=result.get("session_id"), **normalized)
+
     return router
+
+
+_PUBLIC_APPROVAL_KEYS = (
+    "approval_id", "status", "tool_call_id", "tool_name", "capability", "target",
+    "risk_level", "reason", "created_at", "expires_at", "approver", "note",
+    "decided_at", "edited_arguments",
+)
+
+
+def _public_view(agent, approval: dict) -> dict:
+    view = {key: approval.get(key) for key in _PUBLIC_APPROVAL_KEYS}
+    privacy_filter = getattr(agent, "privacy_filter", None)
+    return privacy_filter.redact(view, boundary="public") if privacy_filter else view
+
+
+def _public_run(agent, record: dict) -> dict:
+    """A run without its saved conversation, behind the public privacy boundary."""
+    view = {
+        key: record.get(key)
+        for key in (
+            "run_id", "session_id", "agent_name", "agent_version", "status", "step",
+            "trace_ids", "tool_calls", "usage", "error", "created_at", "updated_at",
+        )
+    }
+    view["approvals"] = [_public_view(agent, a) for a in record.get("approvals") or []]
+    privacy_filter = getattr(agent, "privacy_filter", None)
+    return privacy_filter.redact(view, boundary="public") if privacy_filter else view

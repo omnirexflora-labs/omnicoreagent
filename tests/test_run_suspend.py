@@ -28,6 +28,10 @@ class RecordingModel(ScriptedModel):
         self.calls.append([dict(m) if isinstance(m, dict) else m.model_dump() for m in messages])
         return await super().llm_call(messages, tools, **kwargs)
 
+    async def llm_stream(self, messages, tools=None):
+        # Streaming callers (OmniServe SSE) get the same scripted turn.
+        yield {"type": "turn_complete", "turn": await self.llm_call(messages, tools)}
+
 
 def _policy():
     policy = build_default_policy("interactive-dev")

@@ -397,11 +397,11 @@ async def run_agent_stream(
                 }
                 complete_payload["run_id"] = normalized.get("run_id") or run_id
 
+                from .routes.runs import serve_trace_status
+
                 await finish_serve_trace(
                     serve_trace,
-                    status="completed"
-                    if normalized.get("status", "success") == "success"
-                    else "failed",
+                    status=serve_trace_status(normalized.get("status", "success")),
                     output={
                         "status": normalized.get("status"),
                         "agent_trace_id": complete_payload.get("trace_id"),
