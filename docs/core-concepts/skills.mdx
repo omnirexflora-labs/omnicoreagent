@@ -68,6 +68,28 @@ The `run_skill_script` tool supports multiple languages, allowing you to bridge 
 
 The runtime automatically detects the correct interpreter and passes arguments from the agent to your script.
 
+### Where scripts run and what they can see
+
+When the agent has a sandbox (governance enabled with a sandbox that can run
+commands), a script runs in that sandbox: the skill's files are copied in and
+the script cannot see the host. Otherwise it runs on the host, as your
+process's user.
+
+On the host, a script does not inherit the agent's environment. It receives
+only `PATH`, `HOME`, the locale (`LANG`, `LC_*`), `TMPDIR`, and `TERM`, so it
+cannot read `LLM_API_KEY` or any other secret your process holds. Pass a
+variable a skill needs by name:
+
+```python
+agent_config = {
+    "enable_agent_skills": True,
+    "skill_script_env": ["MY_SERVICE_URL"],
+}
+```
+
+Running a script is governed as `skill.script.run`, a high-risk capability on
+the `host` (or `sandbox`) surface, so a policy can allow, ask for, or deny it.
+
 ---
 
 ## Creating Your Own Skills

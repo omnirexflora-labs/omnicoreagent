@@ -50,10 +50,14 @@ def build_tool_registry_artifact_tool(
     return build_artifact_tools(offloader=offloader, registry=registry)
 
 
-def build_skill_tools(*, skill_manager: Any, registry: ToolRegistry):
+def build_skill_tools(
+    *, skill_manager: Any, registry: ToolRegistry, env_passthrough: list[str] | None = None
+):
     from omnicoreagent.core.skills.tools import build_skill_tools as build_tools
 
-    return build_tools(skill_manager=skill_manager, registry=registry)
+    return build_tools(
+        skill_manager=skill_manager, registry=registry, env_passthrough=env_passthrough
+    )
 
 
 class ToolRuntimeRegistry:
@@ -73,6 +77,7 @@ class ToolRuntimeRegistry:
         privacy_filter: PrivacyFilter | None = None,
         sandbox_execution: Any = None,
         tool_call_timeout: int = 60,
+        skill_script_env: list[str] | None = None,
     ):
         self.register_internal_tool = register_internal_tool
         self.tool_offloader = tool_offloader
@@ -86,6 +91,7 @@ class ToolRuntimeRegistry:
         self.privacy_filter = privacy_filter
         self.sandbox_execution = sandbox_execution
         self.tool_call_timeout = tool_call_timeout
+        self.skill_script_env = list(skill_script_env or [])
 
     def _workspace_for_runtime_tools(self) -> Workspace:
         if self.workspace is None:
@@ -132,6 +138,7 @@ class ToolRuntimeRegistry:
             build_skill_tools(
                 skill_manager=self.skill_manager,
                 registry=registry,
+                env_passthrough=self.skill_script_env,
             )
 
         if self.sandbox_execution is not None:

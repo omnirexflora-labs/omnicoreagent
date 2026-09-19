@@ -231,3 +231,64 @@ async def test_a_cancelled_run_leaves_no_container_behind():
         await run
 
     assert _containers() == before
+
+
+@pytest.mark.asyncio
+async def test_a_host_skill_script_gets_a_minimal_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "sk-must-not-leak")
+    monkeypatch.setenv("APP_SERVICE_URL", "https://svc.example")
+    manager = _skill(tmp_path, "env\n")
+
+    result = await _run_skill(manager)
+
+    names = {line.split("=", 1)[0] for line in result["data"]["stdout"].splitlines()}
+    assert "sk-must-not-leak" not in result["data"]["stdout"]
+    assert "APP_SERVICE_URL" not in names
+    assert "PATH" in names
+
+
+@pytest.mark.asyncio
+async def test_a_host_skill_script_gets_the_variables_the_application_passes_through(tmp_path, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "sk-must-not-leak")
+    monkeypatch.setenv("APP_SERVICE_URL", "https://svc.example")
+    manager = _skill(tmp_path, "env\n")
+    registry = build_skill_tools(
+        skill_manager=manager, registry=ToolRegistry(), env_passthrough=["APP_SERVICE_URL"]
+    )
+
+    result = await registry.execute_tool("run_skill_script", {"skill_name": "greeter", "script_name": "hello.sh"})
+
+    assert "APP_SERVICE_URL=https://svc.example" in result["data"]["stdout"]
+    assert "sk-must-not-leak" not in result["data"]["stdout"]
+
+
+def test_the_agent_config_names_the_variables_skill_scripts_receive():
+    from omnicoreagent.core.runtime.config import AgentConfig
+
+    assert AgentConfig(skill_script_env=["APP_SERVICE_URL"]).skill_script_env == ["APP_SERVICE_URL"]
+    with pytest.raises(ValueError, match="skill_script_env"):
+        AgentConfig(skill_script_env="APP_SERVICE_URL")
+
+
+@pytest.mark.asyncio
+async def test_an_agents_skill_scripts_receive_only_the_configured_variables(tmp_path, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "sk-must-not-leak")
+    monkeypatch.setenv("APP_SERVICE_URL", "https://svc.example")
+    monkeypatch.chdir(tmp_path)
+    skill = tmp_path / ".agents" / "skills" / "greeter"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: greeter\ndescription: Says hello.\n---\nRun hello.sh.\n")
+    (skill / "scripts" / "hello.sh").write_text("env\n")
+    model = ScriptedModel(
+        [("c1", "run_skill_script", '{"skill_name": "greeter", "script_name": "hello.sh"}')], "done"
+    )
+    agent = await _agent(
+        model, sandbox=False, enable_agent_skills=True, skill_script_env=["APP_SERVICE_URL"]
+    )
+
+    result = await agent.run("go", session_id="skill-env")
+    trace = await agent.telemetry_store.get_trace(result["trace_id"])
+
+    output = json_dump([e.output for e in trace.events if e.event_type == "tool_result"])
+    assert "APP_SERVICE_URL=https://svc.example" in output
+    assert "sk-must-not-leak" not in output

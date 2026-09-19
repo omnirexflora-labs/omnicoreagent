@@ -53,6 +53,7 @@
                             "docs/core-concepts/skills",
                             "docs/core-concepts/workspace-files",
                             "docs/core-concepts/guardrails",
+                            "docs/core-concepts/security-model",
                             "docs/core-concepts/sub-agents",
                             "docs/core-concepts/background-agents"
                         ]

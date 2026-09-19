@@ -76,6 +76,7 @@ class BaseReactAgent:
         enable_subagents: bool = False,
         enable_workspace_files: bool = False,
         enable_agent_skills: bool = False,
+        skill_script_env: list[str] | None = None,
         context_management_config: dict = None,
         tool_offload_config: dict = None,
         workspace_config: WorkspaceConfig | dict | None = None,
@@ -146,6 +147,7 @@ class BaseReactAgent:
             enable_workspace_files=self.enable_workspace_files,
             enable_agent_skills=self.enable_agent_skills,
             skill_manager=self.skill_manager,
+            skill_script_env=skill_script_env,
             workspace_config=workspace_config,
             privacy_filter=privacy_filter,
         )

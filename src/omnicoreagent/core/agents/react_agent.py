@@ -27,6 +27,7 @@ class ReactAgent(BaseReactAgent):
             enable_subagents=config.enable_subagents,
             enable_workspace_files=config.enable_workspace_files,
             enable_agent_skills=config.enable_agent_skills,
+            skill_script_env=getattr(config, "skill_script_env", None),
             context_management_config=config.context_management,
             tool_offload_config=getattr(config, "tool_offload", None),
             workspace_config=config.workspace_config,

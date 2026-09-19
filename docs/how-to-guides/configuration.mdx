@@ -255,6 +255,7 @@ agent_config = {
     "enable_subagents": True,        # Dynamic focused workers
     "enable_workspace_files": True,  # Default: workspace files for notes/logs/scratchpads
     "enable_agent_skills": True,     # Enable local skill discovery
+    "skill_script_env": [],          # Env vars host skill scripts receive (none beyond PATH/HOME/locale)
     "enable_advanced_tool_use": True, # Enable BM25 tool retrieval
     "context_management": {"enabled": True},
     "tool_offload": {"enabled": True},

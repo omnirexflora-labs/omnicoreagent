@@ -180,6 +180,9 @@ class AgentConfig:
     enable_advanced_tool_use: bool = False
     enable_subagents: bool = False
     enable_agent_skills: bool = False
+    # Environment variables host skill scripts receive beyond the minimal set
+    # (PATH, HOME, locale, TMPDIR, TERM); secrets are not passed by default.
+    skill_script_env: list[str] = field(default_factory=list)
     memory_config: dict[str, Any] = field(default_factory=_default_memory_config)
     enable_workspace_files: bool = True
     guardrail_config: dict[str, Any] = field(default_factory=dict)
@@ -198,6 +201,11 @@ class AgentConfig:
             not isinstance(self.agent_version, str) or not self.agent_version.strip()
         ):
             raise ValueError("agent_version must be a non-empty string or None")
+        if not isinstance(self.skill_script_env, (list, tuple)) or not all(
+            isinstance(name, str) and name for name in self.skill_script_env
+        ):
+            raise ValueError("skill_script_env must be a list of environment variable names")
+        self.skill_script_env = list(self.skill_script_env)
         if not isinstance(self.guardrail_config, dict):
             raise ValueError("guardrail_config must be a dict")
         self.request_limit = 0 if self.request_limit is None else self.request_limit

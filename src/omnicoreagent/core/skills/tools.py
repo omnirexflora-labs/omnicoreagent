@@ -39,12 +39,29 @@ _SANDBOX_INTERPRETERS = {**_INTERPRETERS, ".py": ["python3"], ".sh": ["sh"]}
 _MAX_SKILL_BYTES = 20 * 1024 * 1024
 
 
-async def _run_on_host(command: List[str], cwd, timeout: int) -> Dict[str, Any]:
+# What a host script receives from the agent's environment by default: enough
+# to find programs and handle text, never the agent's credentials.
+_MINIMAL_ENV = ("PATH", "HOME", "LANG", "TMPDIR", "TERM", "SYSTEMROOT", "PATHEXT", "COMSPEC")
+
+
+def _script_environment(passthrough: List[str]) -> Dict[str, str]:
+    names = {*_MINIMAL_ENV, *passthrough}
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key in names or key.startswith("LC_")
+    }
+
+
+async def _run_on_host(
+    command: List[str], cwd, timeout: int, env: Dict[str, str] | None = None
+) -> Dict[str, Any]:
     """Run a skill script on the host without blocking the event loop."""
     try:
         process = await asyncio.create_subprocess_exec(
             *command,
             cwd=str(cwd),
+            env=_script_environment([]) if env is None else env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             # Own process group, so a timeout kills the script's children too
@@ -114,7 +131,9 @@ def _script_result(exit_code, stdout: str, stderr: str, *, surface: str) -> Dict
 
 
 def build_skill_tools(
-    skill_manager: "SkillManager", registry: ToolRegistry
+    skill_manager: "SkillManager",
+    registry: ToolRegistry,
+    env_passthrough: List[str] | None = None,
 ) -> ToolRegistry:
     """
     Register skill tools in a ToolRegistry.
@@ -124,6 +143,8 @@ def build_skill_tools(
     Args:
         skill_manager: SkillManager instance for skill validation.
         registry: ToolRegistry to register tools into.
+        env_passthrough: Environment variables a host script receives beyond
+            the minimal set; nothing else from the agent's environment.
 
     Returns:
         The registry with skill tools added.
@@ -279,7 +300,10 @@ def build_skill_tools(
                 timeout,
             )
         return await _run_on_host(
-            [*_INTERPRETERS.get(suffix, []), str(script_path), *(args or [])], skill_root, timeout
+            [*_INTERPRETERS.get(suffix, []), str(script_path), *(args or [])],
+            skill_root,
+            timeout,
+            env=_script_environment(env_passthrough or []),
         )
 
     # Governed by their own capabilities (skill.files.read, skill.script.run),
