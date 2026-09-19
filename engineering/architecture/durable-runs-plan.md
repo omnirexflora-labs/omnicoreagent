@@ -1,6 +1,6 @@
 # Durable runs plan
 
-Status: proposed 2026-09-19, awaiting the maintainer's approval.
+Status: decisions confirmed by the maintainer 2026-09-19 (all four as recommended).
 
 ## Why
 
@@ -155,14 +155,14 @@ Each unit: failing tests first, full suite, commit and push, log below.
   Redis and MongoDB run stores; a "Durable runs" docs page; end-to-end tests
   across every feature together.
 
-## Decisions to confirm
+## Decisions (confirmed 2026-09-19)
 
-| # | Question | Recommendation |
+| # | Question | Decision |
 | --- | --- | --- |
-| 1 | With governance on and no resolver, should an `ask` suspend the run (new) or fail the call (today)? | Suspend by default; `approval_mode="fail"` keeps today's behaviour. Nothing unapproved runs either way; suspend is what makes `ask` usable. |
+| 1 | With governance on and no resolver, should an `ask` suspend the run (new) or fail the call (today)? | Suspend by default; `approval_mode="fail"` keeps today's behaviour. |
 | 2 | Which durable run store backends first? | In-memory and SQL in D1; Redis and MongoDB in D6. |
-| 3 | A non-idempotent call interrupted by a crash: tell the model the outcome is unknown, or require approval to run it again? | Tell the model; under governance a retry is authorized like any call. |
-| 4 | A waiting run's sandbox: close it (workspace survives) or keep it alive? | Close it. |
+| 3 | A non-idempotent call interrupted by a crash: tell the model the outcome is unknown, or require approval to run it again? | Tell the model; a retry is a new call, authorized like any other. |
+| 4 | A waiting run's sandbox: close it (workspace survives) or keep it alive? | Close it; the model is told on resume. |
 
 ## Execution log
 
