@@ -144,6 +144,11 @@ def _conditions_match(
             return False
     if conditions.provider and request.provider != conditions.provider:
         return False
+    if (
+        conditions.exclude_execution_surface
+        and request.execution_surface in conditions.exclude_execution_surface
+    ):
+        return False
     if conditions.execution_surface and request.execution_surface != conditions.execution_surface:
         return False
     if conditions.mcp_server and request.mcp_server != conditions.mcp_server:

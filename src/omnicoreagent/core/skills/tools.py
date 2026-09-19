@@ -226,4 +226,8 @@ def build_skill_tools(
         except Exception as e:
             return {"status": "error", "message": f"Execution failed: {e}"}
 
+    # Governed by their own capabilities (skill.files.read, skill.script.run),
+    # not as ordinary local tools.
+    for name in ("read_skill_file", "run_skill_script"):
+        registry.mark_internal_tool_provider(name, "skill")
     return registry

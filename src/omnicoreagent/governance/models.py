@@ -118,6 +118,9 @@ class PolicyRuleConditions:
     data_classes: list[str] | None = None
     provider: str | None = None
     execution_surface: str | None = None
+    # The rule does not match requests on these surfaces (for example, an ask
+    # rule for process execution that should not apply inside a sandbox).
+    exclude_execution_surface: list[str] | None = None
     mcp_server: str | None = None
     method: str | None = None
     host: str | None = None
@@ -125,6 +128,10 @@ class PolicyRuleConditions:
     def __post_init__(self) -> None:
         if self.risk_level is not None:
             self.risk_level = _risk_levels(self.risk_level, "risk_level")
+        if self.exclude_execution_surface is not None:
+            self.exclude_execution_surface = _string_list(
+                self.exclude_execution_surface, "exclude_execution_surface"
+            )
         if self.data_classes is not None:
             self.data_classes = _string_list(self.data_classes, "data_classes")
         for name in ("provider", "execution_surface", "mcp_server", "method", "host"):

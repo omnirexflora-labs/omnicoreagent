@@ -206,6 +206,11 @@ def tool_capability_name(*, tool_name: str, tool_provider: str) -> str:
         return "workspace.artifacts.call"
     if tool_provider == "mcp":
         return "tool.mcp.call"
+    if tool_provider == "skill":
+        # Running a skill script executes code; reading its files does not.
+        return "skill.script.run" if tool_name == "run_skill_script" else "skill.files.read"
+    if tool_provider == "sandbox":
+        return "sandbox.execute"
     return "tool.local.call"
 
 

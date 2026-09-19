@@ -5,6 +5,9 @@ from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 from types import UnionType
 
 
+# Built-in tool families governance classifies by their own capabilities.
+INTERNAL_TOOL_PROVIDERS = frozenset({"workspace", "artifact", "skill", "sandbox"})
+
 class Tool:
     def __init__(
         self,
@@ -119,9 +122,10 @@ class ToolRegistry:
         if tool is None:
             raise ValueError(f"Tool '{name}' not found")
         normalized_provider = provider.strip().lower()
-        if normalized_provider not in {"workspace", "artifact"}:
+        if normalized_provider not in INTERNAL_TOOL_PROVIDERS:
             raise ValueError(
-                "internal tool provider must be either 'workspace' or 'artifact'"
+                "internal tool provider must be one of "
+                + ", ".join(repr(p) for p in sorted(INTERNAL_TOOL_PROVIDERS))
             )
         self._internal_tool_providers[name.lower()] = normalized_provider
         tool.provider = normalized_provider
