@@ -118,6 +118,25 @@ ordinary `tool.local.call` although it runs arbitrary scripts on the host.
   capture policy; the trajectory shows each execution with its result;
   run totals count executions.
 
+### E5b. Security hardening
+Added 2026-09-19 at the maintainer's request after reports of agents escaping
+their sandboxes. Governance is a decision layer; it only binds where every
+side-effecting path passes it (complete mediation) and where executed code is
+contained by real isolation.
+- A written threat model, mapped to the failure classes of publicly reported
+  agent sandbox escapes (research recorded with sources).
+- A complete-mediation audit test: fails if any code path runs a process,
+  writes a host file, or opens a connection outside the governed routes.
+- Docker: non-root user by default; gVisor (`runsc`) as an option; no Docker
+  socket or host credentials ever mounted.
+- Refuse a policy file that lives inside a writable workspace or sandbox mount
+  (an agent must not be able to edit its own policy).
+- A warning (recorded in the trace) when execution or host skill scripts are
+  available while governance is off.
+- Documentation of the trust boundaries: the application's own tools run with
+  host privileges; skill scripts without a sandbox are governed but not
+  contained.
+
 ### E6. Code mode (Monty)
 - Optional extra `omnicoreagent[codemode]`, exact pin, behind an interface.
 - `run_code` tool: selected tools exposed as functions; every call through the
