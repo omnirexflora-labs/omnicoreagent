@@ -5,6 +5,7 @@ import re
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from omnicoreagent.governance.hashing import arguments_digest
 from omnicoreagent.core.workspace.paths import (
     WORKSPACE_FILE_PATH_PREFIXES,
     normalize_workspace_path,
@@ -112,6 +113,8 @@ def tool_authority_requests(
                 "tool_server": tool_server,
                 "target_role": role,
                 "tool_call_id": tool_call_id,
+                # Binds an approval to these exact arguments.
+                "arguments_digest": arguments_digest(tool_args),
             },
         )
         for role, target in targets

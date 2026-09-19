@@ -915,6 +915,38 @@ class OmniCoreAgent:
         except RunStateUnsupported:
             return None
 
+    async def resolve_approval(
+        self,
+        run_id: str,
+        approval_id: str,
+        *,
+        decision: str,
+        approver: str,
+        note: Optional[str] = None,
+        arguments: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Decide an approval a run is waiting for.
+
+        ``decision`` is ``"approve"`` or ``"deny"``. A denial's ``note``
+        reaches the model. ``arguments`` approves an edited call instead of
+        the one asked for. The decision applies once, to that exact request.
+        """
+        from omnicoreagent.core.run_approvals import decide
+
+        if not self._initialized:
+            await self.initialize()
+        if not supports_run_state(self.memory_router):
+            raise LookupError(f"No run {run_id}: the memory store keeps no run state")
+        return await decide(
+            self.memory_router,
+            run_id,
+            approval_id,
+            decision=decision,
+            approver=approver,
+            note=note,
+            arguments=arguments,
+        )
+
     async def list_runs(
         self,
         session_id: Optional[str] = None,

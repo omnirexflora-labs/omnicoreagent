@@ -7,6 +7,12 @@ from typing import Any
 from omnicoreagent.governance.models import PolicyEnvelope, to_plain
 
 
+def arguments_digest(arguments: Any) -> str:
+    """A digest of tool arguments, for binding approvals without storing them."""
+    canonical = json.dumps(arguments, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def canonical_policy_payload(policy: PolicyEnvelope) -> dict[str, Any]:
     payload = to_plain(policy)
     payload.pop("policy_id_supplied", None)

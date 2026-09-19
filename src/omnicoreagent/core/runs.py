@@ -14,15 +14,14 @@ advance one run.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import inspect
-import json
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
 
 from omnicoreagent.core.logging import logger
+from omnicoreagent.governance.hashing import arguments_digest
 
 RUN_STATUSES = (
     "running",
@@ -58,10 +57,6 @@ def supports_run_state(store: Any) -> bool:
     )
 
 
-def arguments_digest(arguments: Any) -> str:
-    """A digest of tool arguments; the arguments themselves are not stored."""
-    canonical = json.dumps(arguments, sort_keys=True, default=str, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _now() -> str:
@@ -103,6 +98,8 @@ class RunTracker:
             # summarized by them; this is not. Stored as history stores it
             # (the same privacy redaction).
             "context": {"history": None, "messages": []},
+            # Approvals asked for during this run and what a person decided.
+            "approvals": [],
             "error": None,
             "created_at": _now(),
             "updated_at": None,
@@ -184,6 +181,26 @@ class RunTracker:
             if error is not None:
                 self.record["error"] = {"type": type(error).__name__, "message": str(error)}
             await self._save()
+
+    async def add_approval(self, approval: dict[str, Any]) -> None:
+        async with self._lock:
+            self.record.setdefault("approvals", []).append(dict(approval))
+            await self._save()
+
+    async def update_approval(self, approval_id: str, **fields: Any) -> None:
+        async with self._lock:
+            for approval in self.record.setdefault("approvals", []):
+                if approval["approval_id"] == approval_id:
+                    approval.update(fields)
+            await self._save()
+
+    async def reload(self) -> None:
+        """Take the stored record as current (after someone else changed it)."""
+        async with self._lock:
+            stored = await self.load()
+            if stored is not None:
+                self._version = stored.pop("version")
+                self.record = stored
 
     async def load(self) -> dict[str, Any] | None:
         if not self.enabled:
