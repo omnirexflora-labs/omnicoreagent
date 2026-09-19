@@ -1,8 +1,10 @@
+import hashlib
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Protocol
+from uuid import uuid4
 
 from filelock import FileLock
 
@@ -103,6 +105,23 @@ class LocalWorkspaceStorage:
             )
         return candidate
 
+    def _lock(self, resolved: Path) -> FileLock:
+        """A lock for one path, kept outside the namespace so it is never listed."""
+        key = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:32]
+        lock_dir = self.root.parent / f".{self.root.name}.locks"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        return FileLock(lock_dir / f"{key}.lock")
+
+    @staticmethod
+    def _replace(resolved: Path, content: str) -> None:
+        """Write through a uniquely named temp file, then rename over the target."""
+        tmp_path = resolved.with_name(f".{resolved.name}.{uuid4().hex}.tmp")
+        try:
+            tmp_path.write_text(content, encoding="utf-8")
+            tmp_path.replace(resolved)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
     def describe_root(self) -> str:
         contents = self.list_files()
         if not contents:
@@ -113,7 +132,7 @@ class LocalWorkspaceStorage:
 
     def read_text(self, path: str | Path, *, strip_prefixes: Iterable[str] = ()) -> str:
         resolved = self.resolve(path, strip_prefixes=strip_prefixes)
-        with FileLock(resolved.with_suffix(".lock")):
+        with self._lock(resolved):
             return resolved.read_text(encoding="utf-8")
 
     def exists(self, path: str | Path, *, strip_prefixes: Iterable[str] = ()) -> bool:
@@ -158,10 +177,8 @@ class LocalWorkspaceStorage:
             resolved.write_text(content, encoding="utf-8")
             return resolved
 
-        with FileLock(resolved.with_suffix(".lock")):
-            tmp_path = resolved.with_suffix(".tmp")
-            tmp_path.write_text(content, encoding="utf-8")
-            tmp_path.rename(resolved)
+        with self._lock(resolved):
+            self._replace(resolved, content)
         return resolved
 
     def append_text(
@@ -173,18 +190,16 @@ class LocalWorkspaceStorage:
     ) -> Path:
         resolved = self.resolve(path, strip_prefixes=strip_prefixes)
         resolved.parent.mkdir(parents=True, exist_ok=True)
-        with FileLock(resolved.with_suffix(".lock")):
+        with self._lock(resolved):
             if resolved.exists():
                 existing = resolved.read_text(encoding="utf-8")
                 content = existing.rstrip("\n") + "\n" + content
-            tmp_path = resolved.with_suffix(".tmp")
-            tmp_path.write_text(content, encoding="utf-8")
-            tmp_path.rename(resolved)
+            self._replace(resolved, content)
         return resolved
 
     def delete(self, path: str | Path, *, strip_prefixes: Iterable[str] = ()) -> str:
         resolved = self.resolve(path, strip_prefixes=strip_prefixes)
-        with FileLock(resolved.with_suffix(".lock")):
+        with self._lock(resolved):
             if resolved.is_file():
                 resolved.unlink()
                 return f"File deleted: {resolved}"
@@ -205,16 +220,16 @@ class LocalWorkspaceStorage:
         if not old_resolved.exists():
             raise FileNotFoundError(str(old_path))
 
+        if old_resolved == new_resolved:
+            return old_resolved, new_resolved
         new_resolved.parent.mkdir(parents=True, exist_ok=True)
-        with FileLock(old_resolved.with_suffix(".lock")), FileLock(
-            new_resolved.with_suffix(".lock")
-        ):
+        with self._lock(old_resolved), self._lock(new_resolved):
             old_resolved.rename(new_resolved)
         return old_resolved, new_resolved
 
     def clear(self) -> None:
         self.ensure_root()
-        with FileLock(self.root.with_suffix(".lock")):
+        with self._lock(self.root):
             for item in list(self.root.iterdir()):
                 if item.is_file():
                     item.unlink()

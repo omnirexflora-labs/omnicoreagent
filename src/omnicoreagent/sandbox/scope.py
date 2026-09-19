@@ -3,7 +3,8 @@
 The run opens an `ExecutionScope`; the first command that needs the sandbox
 opens a session through the governed service, later commands in the same run
 reuse it (so files persist between them), and the scope closes it when the run
-ends, whatever the outcome. The scope is a context variable, so concurrent runs
+ends, whatever the outcome. With a workspace bridge, workspace files are copied
+in before each command and its outputs copied back after it. The scope is a context variable, so concurrent runs
 and subagents each have their own.
 """
 
@@ -12,10 +13,13 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from omnicoreagent.sandbox.execution import SandboxCommandSpec, SandboxExecutionService
 from omnicoreagent.sandbox.models import SandboxExecResult, SandboxManifest, SandboxSession
+
+if TYPE_CHECKING:
+    from omnicoreagent.sandbox.workspace_bridge import WorkspaceBridge
 
 _CURRENT: ContextVar["ExecutionScope | None"] = ContextVar("omnicoreagent_execution", default=None)
 
@@ -30,9 +34,12 @@ class ExecutionScope:
         self,
         service: SandboxExecutionService,
         manifest: SandboxManifest | dict[str, Any] | None = None,
+        *,
+        workspace_bridge: "WorkspaceBridge | None" = None,
     ) -> None:
         self.service = service
         self.manifest = manifest
+        self.workspace_bridge = workspace_bridge
         self._session: SandboxSession | None = None
         self._lock = asyncio.Lock()
 
@@ -47,7 +54,13 @@ class ExecutionScope:
 
     async def execute(self, command: list[str], **spec: Any) -> SandboxExecResult:
         session = await self.session()
-        return await self.service.execute(SandboxCommandSpec(command=command, **spec), session=session)
+        bridge = self.workspace_bridge
+        if bridge is not None:
+            await bridge.push(self.service, session)
+        result = await self.service.execute(SandboxCommandSpec(command=command, **spec), session=session)
+        if bridge is not None and not result.metadata.get("session_terminated"):
+            result.metadata["workspace"] = await bridge.pull(self.service, session)
+        return result
 
     async def upload(self, files: dict[str, bytes]) -> None:
         session = await self.session()

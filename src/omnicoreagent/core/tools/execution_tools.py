@@ -25,7 +25,9 @@ def build_execution_tools(registry: ToolRegistry, *, max_timeout_seconds: int) -
             "stdout, and stderr. The sandbox has no network access unless your "
             "policy allows it, cannot see the host's files or credentials, and "
             "keeps files you create in its working directory until the task "
-            "ends. Use it to run code, scripts, and command-line tools."
+            "ends. When workspace files are enabled, they are in the working "
+            "directory and text files the command creates or changes are saved "
+            "back to the workspace. Use it to run code, scripts, and command-line tools."
         ),
         inputSchema={
             "type": "object",
@@ -73,6 +75,9 @@ def execution_result(result: Any, limit: int | None = None) -> dict[str, Any]:
     for key in ("stdout_truncated", "stderr_truncated"):
         if result.metadata.get(key):
             data[key] = True
+    workspace = result.metadata.get("workspace")
+    if workspace and (workspace.get("written") or workspace.get("skipped")):
+        data["workspace_files"] = workspace
     if result.timed_out:
         return {"status": "error", "data": data, "message": f"Command timed out after {limit}s"}
     if result.exit_code != 0:

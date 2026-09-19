@@ -306,8 +306,22 @@ class BaseReactAgent:
             return await self._run(*args, **kwargs)
         from omnicoreagent.sandbox.scope import ExecutionScope
 
-        async with ExecutionScope(self.sandbox_execution).active():
+        scope = ExecutionScope(self.sandbox_execution, workspace_bridge=self._workspace_bridge())
+        async with scope.active():
             return await self._run(*args, **kwargs)
+
+    def _workspace_bridge(self):
+        """Workspace files for the run's sandbox, when workspace files are enabled."""
+        if not self.enable_workspace_files:
+            return None
+        from omnicoreagent.sandbox.workspace_bridge import WorkspaceBridge
+
+        registry = self.tool_runtime_registry
+        return WorkspaceBridge(
+            registry._workspace_for_runtime_tools().files,
+            governance_engine=self.governance_engine,
+            privacy_filter=registry.privacy_filter,
+        )
 
     async def _run(
         self,
