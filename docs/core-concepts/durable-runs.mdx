@@ -129,3 +129,12 @@ result = await agent.resume(run_id)
 ```
 
 Unlike cancelling, an interrupted run keeps everything it has done.
+
+## Sandboxes across a pause
+
+A run that waits for approval, is interrupted, or loses its process does not
+keep its sandbox container. Workspace files are safe (they are copied back to
+the workspace after every command). When the run resumes, it gets a fresh
+sandbox with the workspace files, and the model is told the sandbox was reset:
+files outside the workspace, installed packages, and running processes are
+gone.

@@ -50,6 +50,13 @@ class ExecutionScope:
                 if isinstance(manifest, dict):
                     manifest = SandboxManifest(**manifest)
                 self._session = await self.service.open_session(manifest)
+                from omnicoreagent.core.runs import current_run
+
+                run = current_run()
+                if run is not None:
+                    # If the run pauses or its process stops, this sandbox is
+                    # gone; a resumed run is told so.
+                    await run.note_sandbox()
             return self._session
 
     async def execute(self, command: list[str], **spec: Any) -> SandboxExecResult:

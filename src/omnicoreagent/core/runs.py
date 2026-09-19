@@ -130,6 +130,8 @@ class RunTracker:
             # a request to stop at the next step.
             "inbox": [],
             "interrupt_requested": False,
+            # Whether the run opened a sandbox (a resumed run is told it was reset).
+            "sandbox_used": False,
             "created_at": _now(),
             "updated_at": None,
         }
@@ -269,6 +271,12 @@ class RunTracker:
             if trace_id:
                 self.record["trace_ids"].append(trace_id)
             await self._save()
+
+    async def note_sandbox(self) -> None:
+        async with self._lock:
+            if not self.record.get("sandbox_used"):
+                self.record["sandbox_used"] = True
+                await self._save()
 
     async def heartbeat(self) -> None:
         async with self._lock:

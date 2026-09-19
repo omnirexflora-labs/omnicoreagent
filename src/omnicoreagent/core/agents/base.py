@@ -468,6 +468,14 @@ class BaseReactAgent:
                         telemetry_recorder=telemetry_recorder,
                         resuming=True,
                     )
+            if resume is not None and resume.get("sandbox_used"):
+                # After the paused step's results, never between a tool call
+                # and its result.
+                notice = Message(role="user", content=SANDBOX_RESET_NOTICE)
+                session_state.messages.append(notice)
+                await self._record_runtime_message(
+                    telemetry_recorder, notice, kind="sandbox_reset"
+                )
             while (
                 session_state.state not in [AgentState.FINISHED]
                 and current_steps < self.max_steps
@@ -656,6 +664,14 @@ def _datetime_prefix(message: Any, query: str) -> str:
     """The text the runtime prepended to the user's query."""
     content = str(getattr(message, "content", "") or "")
     return content[: len(content) - len(query)] if content.endswith(query) else content
+
+
+SANDBOX_RESET_NOTICE = (
+    "This run was paused and has now resumed. Its sandbox was reset: files "
+    "outside the workspace (for example in /tmp), installed packages, and "
+    "running processes from before the pause are gone. The workspace files are "
+    "intact."
+)
 
 
 def _pending_calls(record: dict[str, Any], catalog: Any) -> tuple[list, set[str]]:
