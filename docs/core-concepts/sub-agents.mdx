@@ -132,6 +132,7 @@ with them:
 - **Read Before Synthesis**: After workers finish, read every output path before producing the final answer.
 - **Explicit Instructions**: For fixed subagents, briefly describe each subagent's expertise in the parent instruction.
 - **Limit Depth**: While hierarchical agents are powerful, avoid nesting agents too deep (e.g., Parent -> Child -> Grandchild) to prevent excessive latency and token usage.
+- **A delegation is not one tool call**: `tool_call_timeout` does not apply to `spawn_subagents`; a worker is bounded by its own step cap and the run's deadline. Set `subagent_timeout` (seconds) to bound delegations explicitly.
 - **Keep Workers Focused**: Do not give one worker the whole task. Give it a bounded role and output contract.
 
 ## Governance
