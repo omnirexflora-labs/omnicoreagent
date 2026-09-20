@@ -42,6 +42,12 @@ def test_a_paused_run_is_approved_and_resumed_over_http(tmp_path):
         body = run.json()
         assert body["status"] == "awaiting_approval" and "context" not in body
         assert [a["approval_id"] for a in body["approvals"]] == [approval["approval_id"]]
+        # A person deciding over HTTP sees the call as the model made it —
+        # found by the steward's P3: an approver could not see which branch
+        # or files a GitHub write was for.
+        (shown,) = body["approvals"]
+        assert shown["status"] == "pending"
+        assert shown["arguments"] == {"path": "old.txt"}
 
         decided = client.post(
             f"/runs/{paused['run_id']}/approvals/{approval['approval_id']}",

@@ -306,8 +306,15 @@ _PUBLIC_APPROVAL_KEYS = (
 )
 
 
-def _public_view(agent, approval: dict) -> dict:
+def _public_view(agent, approval: dict, record: dict | None = None) -> dict:
+    """An approval as a person needs it: its state and, given the run's
+    record, the call as the model made it (the arguments come from the saved
+    conversation, which is itself never returned)."""
+    from omnicoreagent.core.runtime.omnicore_agent import _public_approval
+
     view = {key: approval.get(key) for key in _PUBLIC_APPROVAL_KEYS}
+    if record is not None:
+        view["arguments"] = _public_approval(approval, record).get("arguments")
     privacy_filter = getattr(agent, "privacy_filter", None)
     return privacy_filter.redact(view, boundary="public") if privacy_filter else view
 
@@ -321,7 +328,7 @@ def _public_run(agent, record: dict) -> dict:
             "trace_ids", "tool_calls", "usage", "error", "created_at", "updated_at",
         )
     }
-    view["approvals"] = [_public_view(agent, a) for a in record.get("approvals") or []]
+    view["approvals"] = [_public_view(agent, a, record) for a in record.get("approvals") or []]
     view["budget_requests"] = list(record.get("budget_requests") or [])
     privacy_filter = getattr(agent, "privacy_filter", None)
     return privacy_filter.redact(view, boundary="public") if privacy_filter else view
