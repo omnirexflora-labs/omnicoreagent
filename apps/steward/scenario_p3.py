@@ -61,13 +61,20 @@ def ensure_task() -> None:
     existing = api("GET", "/background/tasks")
     tasks = existing.get("tasks", existing) if isinstance(existing, dict) else existing
     if any(task.get("task_id") == TASK_ID for task in tasks):
+        stale = latest_run()
+        if stale.get("status") in {"queued", "claimed", "running", "retrying", "awaiting_approval"}:
+            try:
+                api("POST", f"/background/runs/{stale['run_id']}/cancel")
+            except SystemExit:
+                pass
         api("DELETE", f"/background/tasks/{TASK_ID}")
     api("POST", "/background/tasks", {
         "task_id": TASK_ID,
         "agent_id": "steward",
         "query": QUERY,
         "schedule": {"type": "manual"},
-        "timeout_seconds": 900,
+        # A fix is clone, install, change, test, and again; then three pauses.
+        "timeout_seconds": 2400,
     })
 
 
