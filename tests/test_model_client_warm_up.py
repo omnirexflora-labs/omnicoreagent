@@ -88,4 +88,7 @@ def test_serving_an_agent_warms_the_model_client_at_startup(tmp_path, monkeypatc
     with TestClient(server.app):
         pass
 
-    assert warmed == ["LLMConnection"]
+    # The server warms it as it starts and the background worker warms the
+    # agents it serves; the same agent may be both. warm_up() itself absorbs
+    # the repeat (tested above); this stand-in does not, so it counts each.
+    assert warmed and warmed[0] == "LLMConnection"

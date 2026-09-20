@@ -294,6 +294,12 @@ class BackgroundAgentManager:
         if self._running:
             return
         await self.initialize()
+        # Background runs pay the provider client's import too; the worker
+        # loads it once as it starts rather than inside its first task.
+        for agent in list(self._agents.values()):
+            warm_up = getattr(getattr(agent, "llm_connection", None), "warm_up", None)
+            if warm_up is not None:
+                await warm_up()
         self._stop_event.clear()
         self._running = True
         self._worker_task = asyncio.create_task(self._worker_loop())

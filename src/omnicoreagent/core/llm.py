@@ -176,6 +176,7 @@ class LLMConnection:
 
     def __init__(self, model_config: dict[str, Any], api_key: str | None = None):
         self.model_config = dict(model_config or {})
+        self._warmed = False
         self.llm_api_key = api_key or self.model_config.get("api_key")
         self.llm_config = self._build_llm_config()
         self._set_llm_environment_variables()
@@ -362,6 +363,24 @@ class LLMConnection:
                     result = close()
                     if inspect.isawaitable(result):
                         await result
+
+    async def warm_up(self) -> None:
+        """Load the provider client now, off the event loop, so no request has to.
+
+        ``import litellm`` costs seconds of CPU. It is imported lazily so that
+        building an agent stays light, which means the first request of a
+        process would otherwise pay for it. A server calls this while it
+        starts. A failure is left for the request that needs the client, which
+        reports it properly; this only tries early.
+        """
+        if self._warmed:
+            return
+        self._warmed = True
+        try:
+            await asyncio.to_thread(_get_litellm)
+        except Exception as exc:
+            self._warmed = False
+            logger.debug(f"The model client could not be loaded early: {exc}")
 
     def request_settings(self) -> dict[str, Any]:
         """The model and generation settings sent with every request."""

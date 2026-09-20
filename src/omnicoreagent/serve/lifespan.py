@@ -22,6 +22,13 @@ else:
     AgentType = Any
 
 
+async def _warm_model_client(agent: Any) -> None:
+    connection = getattr(agent, "llm_connection", None)
+    warm_up = getattr(connection, "warm_up", None)
+    if warm_up is not None:
+        await warm_up()
+
+
 @asynccontextmanager
 async def agent_lifespan(app: FastAPI):
     """
@@ -51,6 +58,9 @@ async def agent_lifespan(app: FastAPI):
     try:
         if hasattr(agent, "connect_mcp_servers"):
             await agent.connect_mcp_servers()
+        # The provider client costs seconds to import; the server pays that
+        # now, in a thread, rather than whichever request arrives first.
+        await _warm_model_client(agent)
 
         if background_manager is not None:
             await background_manager.initialize()
