@@ -237,7 +237,13 @@ async def execute_native_turn(
                 **({"parent_tool_call_id": parent} if parent else {}),
             },
             telemetry_outcome=outcome,
-            deadline_seconds=agent.tool_call_timeout,
+            deadline_seconds=(
+                # A worker is bounded by its own limits and the run's deadline,
+                # not by the time allowed for one tool call.
+                getattr(agent, "subagent_timeout", None)
+                if binding.name == "spawn_subagents"
+                else agent.tool_call_timeout
+            ),
         )
         return result, resolved
 

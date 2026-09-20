@@ -183,6 +183,10 @@ class AgentConfig:
     total_tokens_limit: int = 0
     max_steps: int = 50
     tool_call_timeout: int = 180
+    # Seconds a delegation (spawn_subagents) may take. None: a worker is
+    # bounded by its own step cap and the run's deadline, not by the timeout
+    # for one tool call.
+    subagent_timeout: int | None = None
     mcp_enabled: bool = False
     enable_advanced_tool_use: bool = False
     enable_subagents: bool = False
@@ -277,6 +281,10 @@ class AgentConfig:
         _validate_range(
             "tool_call_timeout", self.tool_call_timeout, minimum=2, maximum=1000
         )
+        if self.subagent_timeout is not None:
+            _validate_range(
+                "subagent_timeout", self.subagent_timeout, minimum=2, maximum=86400
+            )
         _validate_context_management(self.context_management)
         _validate_tool_offload(self.tool_offload)
         _validate_governance_config(self.governance_config)

@@ -21,6 +21,7 @@ class ReactAgent(BaseReactAgent):
             agent_name=config.agent_name,
             max_steps=config.max_steps,
             tool_call_timeout=config.tool_call_timeout,
+            subagent_timeout=getattr(config, "subagent_timeout", None),
             request_limit=config.request_limit,
             total_tokens_limit=config.total_tokens_limit,
             enable_advanced_tool_use=config.enable_advanced_tool_use,

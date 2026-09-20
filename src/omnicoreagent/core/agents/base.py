@@ -73,6 +73,7 @@ class BaseReactAgent:
         agent_name: str,
         max_steps: int,
         tool_call_timeout: int,
+        subagent_timeout: int | None = None,
         request_limit: int = 0,
         total_tokens_limit: int = 0,
         enable_advanced_tool_use: bool = False,
@@ -94,6 +95,8 @@ class BaseReactAgent:
             raise ValueError("max_steps must be positive")
         self.max_steps = max_steps
         self.tool_call_timeout = tool_call_timeout
+        # A delegation's bound, or None: a worker is not one tool call.
+        self.subagent_timeout = subagent_timeout
 
         self.request_limit = request_limit
         self.total_tokens_limit = total_tokens_limit
