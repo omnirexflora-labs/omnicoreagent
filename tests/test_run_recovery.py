@@ -139,8 +139,13 @@ async def test_running_again_with_the_same_run_id_recovers_instead_of_starting_o
     ledger = tmp_path / "ledger"
     model = RecordingModel(*TURNS, "recovered")
     agent = await _agent(model, _tools(ledger))
-    await _crash(agent)
+    crashed = await _crash(agent)
     await asyncio.sleep(1.2)
+    # A dead run writes nothing: its last heartbeat is the one it had when it
+    # died. (Seen failing once in a full suite with "heartbeat is current";
+    # this names the writer if it happens again.)
+    after = await agent.get_run("run_crash")
+    assert after["heartbeat_at"] == crashed["heartbeat_at"], (after, crashed)
 
     # Background recovery calls run() again with the same run ID.
     result = await agent.run("do it", session_id="crash", run_id="run_crash")
