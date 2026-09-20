@@ -623,8 +623,16 @@ current lease token. A worker that loses its lease must stop writing and fail
 closed. This fencing rule reduces duplicate side effects during multi-day runs.
 
 Expired-lease recovery steals the lease with a new token before changing run or
-attempt state. The abandoned attempt is closed as `failed` with reason
-`lease_expired` before the recovered run is requeued or marked terminal.
+attempt state. It then asks the agent for the run's own durable record (the
+checkpoint `agent.run(run_id=...)` continues from). If that record is
+resumable, the abandoned attempt is closed as `interrupted` with reason
+`lease_expired`, the run is requeued with one more attempt allowed, and the
+next attempt — reason `recovery` — continues the run from its checkpoint; no
+retry is spent, because nothing failed. If the record's heartbeat is still
+current, the run may be alive in another process: recovery holds it under the
+stolen lease and decides again when that expires. Without a resumable record,
+the abandoned attempt is closed as `failed` with reason `lease_expired` and the
+retry policy decides, counting the attempts that actually failed or timed out.
 
 Recovery policy must distinguish:
 

@@ -2215,33 +2215,9 @@ def _public_approval(approval: dict[str, Any], record: dict[str, Any]) -> dict[s
 
 def _not_resumable(record: dict[str, Any], run_id: str) -> Optional[str]:
     """Why a run cannot be continued now, or None if it can."""
-    from omnicoreagent.core.runs import lease_expired
+    from omnicoreagent.core.runs import not_resumable
 
-    status = record["status"]
-    if status == "awaiting_approval":
-        pending = [a["approval_id"] for a in record.get("approvals", []) if a["status"] == "pending"]
-        if pending:
-            return f"Run {run_id} is still waiting for approval: {', '.join(pending)}"
-        return None
-    if status == "awaiting_budget":
-        pending = [
-            request["request_id"]
-            for request in record.get("budget_requests", [])
-            if request["status"] == "pending"
-        ]
-        if pending:
-            return (
-                f"Run {run_id} is still waiting for a budget decision: "
-                f"{', '.join(pending)}"
-            )
-        return None
-    if status == "interrupted":
-        return None
-    if status == "running":
-        if lease_expired(record):
-            return None
-        return f"Run {run_id} is running in another process (its heartbeat is current)"
-    return f"Run {run_id} is {status}; only a waiting or stopped run can resume"
+    return not_resumable(record, run_id)
 
 
 def _add_totals(total: Any, segment: Any) -> Any:

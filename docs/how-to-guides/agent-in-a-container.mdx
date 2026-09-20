@@ -66,4 +66,6 @@ docker run --rm \
   capabilities, and memory and process limits, as above.
 - **Scale by running more containers**, not more agents per container: each
   run belongs to one process at a time, and a run whose process dies is picked
-  up by another once its lease expires.
+  up by another once its lease expires — continuing from its checkpoint when
+  the agent keeps run state, so a restart mid-run costs the step in flight,
+  not the run.

@@ -459,6 +459,40 @@ def lease_expired(record: dict[str, Any], now: datetime | None = None) -> bool:
     return age > lease
 
 
+def not_resumable(record: dict[str, Any], run_id: str) -> str | None:
+    """Why a run cannot be continued now, or None if it can.
+
+    A run continues from its record when it is waiting on nothing (an
+    approval or budget decision already made), was interrupted, or is
+    "running" in a process that stopped refreshing its heartbeat.
+    """
+    status = record["status"]
+    if status == "awaiting_approval":
+        pending = [a["approval_id"] for a in record.get("approvals", []) if a["status"] == "pending"]
+        if pending:
+            return f"Run {run_id} is still waiting for approval: {', '.join(pending)}"
+        return None
+    if status == "awaiting_budget":
+        pending = [
+            request["request_id"]
+            for request in record.get("budget_requests", [])
+            if request["status"] == "pending"
+        ]
+        if pending:
+            return (
+                f"Run {run_id} is still waiting for a budget decision: "
+                f"{', '.join(pending)}"
+            )
+        return None
+    if status == "interrupted":
+        return None
+    if status == "running":
+        if lease_expired(record):
+            return None
+        return f"Run {run_id} is running in another process (its heartbeat is current)"
+    return f"Run {run_id} is {status}; only a waiting or stopped run can resume"
+
+
 def _usage_dict(usage: Any) -> dict[str, Any]:
     if isinstance(usage, dict):
         return dict(usage)

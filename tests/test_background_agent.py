@@ -2644,6 +2644,150 @@ async def test_recover_expired_running_run_requeues_when_retry_available():
     assert recovered.lease_token is None
 
 
+class CheckpointedAgent(FakeAgent):
+    """An agent whose run kept a durable record: recovery asks it whether the
+    run can continue from its checkpoint before treating the lost attempt as
+    a failure."""
+
+    def __init__(self, record=None, **kwargs):
+        super().__init__(**kwargs)
+        self.record = record
+
+    async def get_run(self, run_id: str):
+        return self.record
+
+
+async def _lose_running_attempt(manager, store, run):
+    """Claim and start ``run`` on a worker that then vanishes: the run is
+    RUNNING, its attempt is RUNNING, and its lease expired a second ago."""
+    claimed = await store.claim_run(run.run_id, "lost_worker", lease_seconds=30)
+    running = await store.transition_run(
+        claimed.run_id,
+        {RunStatus.CLAIMED},
+        RunStatus.RUNNING,
+        {"attempt": 1},
+        "lost_worker",
+        claimed.lease_token,
+    )
+    await store.create_attempt(
+        BackgroundAttempt(
+            run_id=running.run_id,
+            attempt_number=1,
+            worker_id="lost_worker",
+            lease_token=running.lease_token,
+        )
+    )
+    async with store._lock:
+        store._runs[run.run_id] = running.model_copy(
+            update={
+                "lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)
+            }
+        )
+
+
+def _checkpoint(status="running", heartbeat_age_seconds=600):
+    heartbeat = datetime.now(timezone.utc) - timedelta(seconds=heartbeat_age_seconds)
+    return {"status": status, "heartbeat_at": heartbeat.isoformat(), "lease_seconds": 60, "step": 3}
+
+
+@pytest.mark.asyncio
+async def test_recovery_resumes_a_checkpointed_run_without_spending_a_retry():
+    """The process died mid-run, but the agent's durable record is resumable:
+    the run goes back to the queue even with no retries left, the lost attempt
+    is recorded as interrupted rather than failed, and the next attempt hands
+    the agent the same run ID so it continues from its checkpoint."""
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store, worker_id="recovery")
+    agent = CheckpointedAgent(record=_checkpoint())
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=0, initial_delay_seconds=0),
+    )
+    run = await manager.run_now("task", wait=False)
+    await _lose_running_attempt(manager, store, run)
+
+    await manager.recover_expired_runs()
+
+    recovered = await manager.get_run(run.run_id)
+    assert recovered.status == RunStatus.QUEUED
+    assert recovered.lease_token is None
+    assert recovered.error is None
+    attempts = await store.list_attempts(run.run_id)
+    assert [a.status for a in attempts] == [AttemptStatus.INTERRUPTED]
+    assert attempts[0].reason == AttemptReason.LEASE_EXPIRED
+
+    assert await manager._execute_one()
+    finished = await manager.get_run(run.run_id)
+    assert finished.status == RunStatus.COMPLETED
+    assert [(call["session_id"], call["run_id"]) for call in agent.calls] == [
+        (run.session_id, run.run_id)
+    ]
+    assert finished.max_attempts == 2
+    attempts = await store.list_attempts(run.run_id)
+    assert [(a.attempt_number, a.reason, a.status) for a in attempts] == [
+        (1, AttemptReason.LEASE_EXPIRED, AttemptStatus.INTERRUPTED),
+        (2, AttemptReason.RECOVERY, AttemptStatus.COMPLETED),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_recovery_waits_while_the_checkpoint_heartbeat_is_current():
+    """The background lease expired but the agent's own heartbeat is still
+    fresh: the run may be alive in another process, so recovery neither fails
+    nor requeues it — it holds the run under its lease and looks again."""
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store, worker_id="recovery")
+    await manager.register_agent("agent", CheckpointedAgent(record=_checkpoint(heartbeat_age_seconds=1)))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=0, initial_delay_seconds=0),
+    )
+    run = await manager.run_now("task", wait=False)
+    await _lose_running_attempt(manager, store, run)
+
+    await manager.recover_expired_runs()
+
+    held = await manager.get_run(run.run_id)
+    assert held.status == RunStatus.RUNNING
+    assert held.lease_expires_at > datetime.now(timezone.utc)
+    attempts = await store.list_attempts(run.run_id)
+    assert [a.status for a in attempts] == [AttemptStatus.RUNNING]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("record", [None, _checkpoint(status="completed"), _checkpoint(status="failed")])
+async def test_recovery_without_a_resumable_checkpoint_keeps_retry_accounting(record):
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store, worker_id="recovery")
+    await manager.register_agent("agent", CheckpointedAgent(record=record))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=0, initial_delay_seconds=0),
+    )
+    run = await manager.run_now("task", wait=False)
+    await _lose_running_attempt(manager, store, run)
+
+    await manager.recover_expired_runs()
+
+    failed = await manager.get_run(run.run_id)
+    assert failed.status == RunStatus.FAILED
+    assert failed.error == "lease expired"
+    attempts = await store.list_attempts(run.run_id)
+    assert [(a.status, a.reason) for a in attempts] == [
+        (AttemptStatus.FAILED, AttemptReason.LEASE_EXPIRED)
+    ]
+
+
 @pytest.mark.asyncio
 async def test_recovery_service_requeues_expired_running_run_directly():
     store = InMemoryTaskStore()

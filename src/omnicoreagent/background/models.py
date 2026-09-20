@@ -139,6 +139,9 @@ class AttemptStatus(str, Enum):
     FAILED = "failed"
     TIMEOUT = "timeout"
     CANCELLED = "cancelled"
+    # The worker vanished mid-attempt and the run continues from the agent's
+    # checkpoint in a later attempt: not a failure, and not a retry spent.
+    INTERRUPTED = "interrupted"
 
 
 class AttemptReason(str, Enum):

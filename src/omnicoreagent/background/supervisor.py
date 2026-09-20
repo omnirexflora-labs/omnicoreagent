@@ -29,6 +29,7 @@ from omnicoreagent.background.run_helpers import (
     is_run_due,
     release_lease_patch,
     result_preview,
+    retries_spent,
     retry_delay_seconds,
     run_until_terminal_sleep_seconds,
 )
@@ -100,6 +101,7 @@ class BackgroundSupervisor:
             worker_id=lambda: self.worker_id,
             lease_seconds=lambda: self.lease_seconds,
             emit_run=self.emit_run,
+            checkpoint=self.checkpoint_of,
         )
         self.inline_execution_tasks: dict[str, asyncio.Task] = {}
         self.active_agent_tasks: dict[str, asyncio.Task] = {}
@@ -271,6 +273,29 @@ class BackgroundSupervisor:
     async def recover_expired_runs(self) -> None:
         await self.recovery.recover_expired_runs()
 
+    async def checkpoint_of(self, run: BackgroundRun) -> dict[str, Any] | None:
+        """The agent's durable record of ``run`` — what ``agent.run(run_id=)``
+        would continue from — or None when the agent keeps none."""
+        agent = await resolve_agent(
+            agent_id=run.agent_id,
+            agents=self.agents,
+            task_store=self.task_store,
+            memory_router=self.memory_router,
+            telemetry_store=self.telemetry_store,
+        )
+        get_run = getattr(agent, "get_run", None)
+        if get_run is None:
+            return None
+        try:
+            record = await get_run(run.run_id)
+        except Exception as exc:
+            logger.warning(
+                f"Could not read the checkpoint of run {run.run_id}: "
+                f"{exc.__class__.__name__}: {exc}"
+            )
+            return None
+        return record if isinstance(record, dict) else None
+
     async def recover_expired_run(self, run: BackgroundRun) -> None:
         await self.recovery.recover_expired_run(run)
 
@@ -439,6 +464,17 @@ class BackgroundSupervisor:
             return
         return task, agent
 
+    async def attempt_reason(self, run_id: str, attempt_number: int) -> AttemptReason:
+        """Why this attempt starts: the first one, a retry after a failure, or
+        the continuation of an attempt a lost worker left behind."""
+        if attempt_number == 1:
+            return AttemptReason.INITIAL
+        attempts = await self.task_store.list_attempts(run_id)
+        previous = max(attempts, key=lambda item: item.attempt_number, default=None)
+        if previous is not None and previous.status == AttemptStatus.INTERRUPTED:
+            return AttemptReason.RECOVERY
+        return AttemptReason.RETRY
+
     async def start_claimed_attempt(
         self, claimed: BackgroundRun, task: BackgroundTaskSpec, agent: Any
     ) -> _RunningAttempt | None:
@@ -463,9 +499,7 @@ class BackgroundSupervisor:
         attempt = BackgroundAttempt(
             run_id=run.run_id,
             attempt_number=attempt_number,
-            reason=AttemptReason.INITIAL
-            if attempt_number == 1
-            else AttemptReason.RETRY,
+            reason=await self.attempt_reason(run.run_id, attempt_number),
             worker_id=self.worker_id,
             lease_token=run.lease_token,
         )
@@ -686,12 +720,13 @@ class BackgroundSupervisor:
         )
         if await self.cancel_if_requested(run, attempt):
             return
+        spent = retries_spent(await self.task_store.list_attempts(run.run_id))
         can_retry = (
             reason in task.retry_policy.retry_on
-            and run.attempt <= task.retry_policy.max_retries
+            and spent <= task.retry_policy.max_retries
         )
         if can_retry:
-            retry_delay = retry_delay_seconds(task, run.attempt)
+            retry_delay = retry_delay_seconds(task, spent)
             if run.lease_token is not None:
                 if not await self.refresh_run_lease(run.run_id, run.lease_token):
                     return

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
 from omnicoreagent.background.models import (
+    AttemptStatus,
+    BackgroundAttempt,
     BackgroundRun,
     BackgroundTaskSpec,
     BackoffPolicy,
@@ -77,6 +80,17 @@ def run_until_terminal_sleep_seconds(
         remaining = deadline - asyncio.get_running_loop().time()
         interval = min(interval, max(remaining, 0))
     return max(interval, 0.001)
+
+
+def retries_spent(attempts: Iterable[BackgroundAttempt]) -> int:
+    """How many of a run's attempts count against its retry policy: the ones
+    that failed or timed out. An attempt interrupted by a lost worker and
+    continued from the agent's checkpoint is neither."""
+    return sum(
+        1
+        for attempt in attempts
+        if attempt.status in {AttemptStatus.FAILED, AttemptStatus.TIMEOUT}
+    )
 
 
 def retry_delay_seconds(task: BackgroundTaskSpec, attempt_number: int) -> int:

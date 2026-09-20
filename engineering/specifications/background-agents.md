@@ -498,7 +498,7 @@ Fields:
 | `run_id` | `str` | Parent run |
 | `attempt_number` | `int` | Attempt index starting at 1 |
 | `reason` | `str` | initial, retry, recovery, lease_expired |
-| `status` | `str` | running, completed, failed, timeout, cancelled |
+| `status` | `str` | running, completed, failed, timeout, cancelled, interrupted |
 | `worker_id` | `str` | Worker executing attempt |
 | `lease_token` | `str` | Lease token held by the worker |
 | `started_at` | `datetime` | Attempt start |
@@ -890,15 +890,25 @@ For each expired run:
 - if terminal, ignore.
 - steal the expired lease with `steal_expired_run()` to get a new
   `lease_token`.
-- close the abandoned running attempt as `failed` with reason
-  `lease_expired`.
 - if cancellation requested, mark cancelled with the new lease token.
+- read the agent's checkpoint of the run (`agent.get_run(run_id)`), when the
+  agent keeps one. If its status is `running` and its heartbeat is current,
+  stop here: the run is held under the stolen lease and looked at again when
+  that lease expires.
+- close the abandoned running attempt: as `interrupted` with reason
+  `lease_expired` when the checkpoint is resumable, as `failed` with reason
+  `lease_expired` otherwise.
 - if the run expired after claim but before start, requeue it for the normal
   claim path with the new lease token released; emit `background_run_recovered`.
-- if attempts remain and retry policy allows recovery, mark retrying and then
-  queued for the normal claim path with the new lease token; emit
-  `background_run_recovered`.
-- if attempts are exhausted, mark failed with the new lease token.
+- if the checkpoint is resumable, mark retrying and then queued with
+  `max_attempts` raised by one; emit `background_run_recovered` with
+  `resumed: true`. The next attempt carries reason `recovery` and calls the
+  agent with the same `run_id`, which continues from the checkpoint. No retry
+  is spent.
+- otherwise, if the attempts that failed or timed out do not exceed the retry
+  policy, mark retrying and then queued for the normal claim path with the new
+  lease token; emit `background_run_recovered`.
+- if retries are exhausted, mark failed with the new lease token.
 - recovery paths that end in a terminal state emit the corresponding terminal
   event instead of `background_run_recovered`.
 
