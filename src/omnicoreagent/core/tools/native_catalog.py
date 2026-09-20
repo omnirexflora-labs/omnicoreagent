@@ -51,12 +51,19 @@ class ToolBinding:
     idempotent: bool = False
 
     def definition(self) -> dict[str, Any]:
+        """The tool as the model sees it.
+
+        ``parameters`` is the catalog's own copy of the schema, made once when
+        the catalog was built, and is handed out to be read, not changed: the
+        model provider and the run record only read it, and copying it again
+        for every step was a fifth of a request's serialization work.
+        """
         return {
             "type": "function",
             "function": {
                 "name": self.exposed_name,
                 "description": self.description,
-                "parameters": deepcopy(self.parameters),
+                "parameters": self.parameters,
             },
         }
 

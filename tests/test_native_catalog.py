@@ -199,3 +199,62 @@ def test_discovery_binding_cannot_hijack_an_application_tool_with_same_name():
     bindings = list(advanced.bindings.values())
     assert {binding.provider for binding in bindings} == {"local", "discovery"}
     assert len({binding.exposed_name for binding in bindings}) == 2
+
+
+# --- audit A10: a tool's schema is copied once, when the catalog is built -------
+
+
+def test_asking_for_the_definitions_again_copies_nothing():
+    """Measured: every step deep-copied every tool's schema again (20 deep
+    copies per request), for consumers that only read them. The catalog owns
+    a private copy of each schema from the moment it is built; the
+    definitions it hands out are built around that copy, not copies of it."""
+    import copy
+
+    catalog = NativeToolCatalog(
+        mcp_tools={
+            "srv": [
+                {
+                    "name": f"tool_{i}",
+                    "description": "d",
+                    "inputSchema": {"type": "object", "properties": {"a": {"type": "string"}}},
+                }
+                for i in range(5)
+            ]
+        }
+    )
+    first = catalog.definitions()
+    copies = 0
+    original = copy.deepcopy
+
+    def counted(value, memo=None):
+        nonlocal copies
+        copies += 1
+        return original(value, memo)
+
+    copy.deepcopy = counted
+    try:
+        for _ in range(20):
+            again = catalog.definitions()
+    finally:
+        copy.deepcopy = original
+
+    assert copies == 0, f"asking for the definitions again deep-copied {copies} schemas"
+    assert again == first
+
+
+def test_the_outer_shape_of_a_definition_is_the_callers_own():
+    """A consumer may rename or drop keys on what it was handed without
+    changing what the next consumer gets."""
+    catalog = NativeToolCatalog(
+        mcp_tools={
+            "srv": [{"name": "tool_a", "description": "d", "inputSchema": {"type": "object", "properties": {}}}]
+        }
+    )
+
+    [handed] = catalog.definitions()
+    handed["function"]["name"] = "renamed"
+    handed["type"] = "changed"
+
+    [fresh] = catalog.definitions()
+    assert fresh["function"]["name"] == "tool_a" and fresh["type"] == "function"
