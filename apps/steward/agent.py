@@ -16,9 +16,14 @@ See ``engineering/architecture/production-proving-plan.md``.
 
 from __future__ import annotations
 
+import json
 import os
+import re
+import urllib.error
+import urllib.request
 
 from omnicoreagent import MemoryRouter, OmniCoreAgent
+from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 
 REPOSITORY = os.environ.get("STEWARD_REPOSITORY", "omnirexflora-labs/omnicoreagent")
 MODEL = os.environ.get("STEWARD_MODEL", "gpt-5.6-terra")
@@ -166,7 +171,148 @@ How to fix something (after it is reproduced):
 - If you are told a call's outcome is unknown (the process stopped while it
   ran), check first — list_branches, get_file_contents on the branch,
   list_pull_requests — and never push the same commit twice.
+
+How to find work (triage):
+- Your own failed runs are work: list_failed_runs. The repository's open
+  issues and its failing tests are work: list_issues, search_issues.
+- Cluster what you find by cause, not by occurrence: three runs that failed
+  the same way are one item. Read list_work_items first; an item that exists
+  is not scheduled again.
+- schedule_work_item once per cause, with a query a future run of yours can
+  act on alone (what to reproduce, where, what counts as done). Report the
+  items you scheduled and the ones that already existed.
 """
+
+# --- the steward's own tools: its telemetry as a source of work -----------------
+
+WORK_ITEM_PREFIX = "steward-work-"
+OWN_API = os.environ.get("STEWARD_OWN_API", "http://127.0.0.1:8000")
+
+tools = ToolRegistry()
+
+
+def _own_api(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
+    """The steward's own OmniServe, on loopback, with its own token."""
+    token = os.environ.get("OMNICOREAGENT_SERVE_AUTH_TOKEN", "")
+    request = urllib.request.Request(
+        f"{OWN_API}{path}",
+        data=json.dumps(body).encode() if body is not None else None,
+        method=method,
+        headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {token}"} if token else {})},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.status, json.loads(response.read() or b"{}")
+    except urllib.error.HTTPError as error:
+        try:
+            return error.code, json.loads(error.read() or b"{}")
+        except ValueError:
+            return error.code, {}
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:60]
+
+
+@tools.register_tool(
+    name="list_failed_runs",
+    description=(
+        "The steward's own runs that failed, timed out, or were stopped by a guard, "
+        "newest first, with the first error each recorded. Use it to find work: a "
+        "failed run is a defect of the runtime or of the steward's instructions."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 30, "default": 15}},
+        "additionalProperties": False,
+    },
+    idempotent=True,
+)
+async def list_failed_runs(limit: int = 15) -> dict:
+    from omnicoreagent.core.telemetry.models import TraceFilter, TraceStatus
+
+    store = agent.telemetry_store
+    if store is None:
+        return {"status": "error", "message": "The steward keeps no telemetry."}
+    failed: list[dict] = []
+    for status in (TraceStatus.FAILED, TraceStatus.TIMEOUT, TraceStatus.ABORTED_SAFETY_GUARD,
+                   TraceStatus.ABORTED_RESOURCE_GUARD):
+        for trace in await store.list_traces(TraceFilter(status=status)):
+            error = next(
+                (
+                    f"{e.event_type}: {(e.error or {}).get('message') if isinstance(e.error, dict) else getattr(e.error, 'message', None) or ''}"
+                    for e in trace.events
+                    if e.error is not None
+                ),
+                None,
+            )
+            failed.append({
+                "run_id": trace.run_id,
+                "trace_id": trace.trace_id,
+                "status": getattr(trace.status, "value", trace.status),
+                "started_at": trace.started_at.isoformat(),
+                "first_error": (error or "")[:300],
+            })
+    failed.sort(key=lambda item: item["started_at"], reverse=True)
+    return {"failed_runs": failed[:limit], "total": len(failed)}
+
+
+@tools.register_tool(
+    name="list_work_items",
+    description="The work items the steward has already scheduled (one background task each). Read this before scheduling anything, so one cause gets one item.",
+    inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    idempotent=True,
+)
+async def list_work_items() -> dict:
+    status, body = _own_api("GET", "/background/tasks")
+    tasks = body.get("tasks", body) if isinstance(body, dict) else body
+    items = [
+        {"item_id": t["task_id"][len(WORK_ITEM_PREFIX):], "cause": (t.get("metadata") or {}).get("cause"),
+         "title": (t.get("metadata") or {}).get("title"), "enabled": t.get("enabled")}
+        for t in (tasks or [])
+        if str(t.get("task_id", "")).startswith(WORK_ITEM_PREFIX)
+    ]
+    return {"work_items": items}
+
+
+@tools.register_tool(
+    name="schedule_work_item",
+    description=(
+        "Schedule one piece of work as a background task of the steward's, identified by its "
+        "cause. The id is derived from the cause, so the same cause scheduled twice is one item: "
+        "the second call reports it already exists and schedules nothing."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "cause": {"type": "string", "description": "What is wrong, in one short line (the item's identity)."},
+            "title": {"type": "string", "description": "A short title for a person."},
+            "query": {"type": "string", "description": "The instruction the steward will run for this item."},
+        },
+        "required": ["cause", "title", "query"],
+        "additionalProperties": False,
+    },
+)
+async def schedule_work_item(cause: str, title: str, query: str) -> dict:
+    item_id = _slug(cause)
+    if not item_id:
+        return {"status": "error", "message": "The cause must name something."}
+    task_id = WORK_ITEM_PREFIX + item_id
+    status, existing = _own_api("GET", f"/background/tasks/{task_id}")
+    if status == 200:
+        return {"status": "success", "data": {"item_id": item_id, "already_scheduled": True}}
+    status, body = _own_api("POST", "/background/tasks", {
+        "task_id": task_id,
+        "agent_id": "steward",
+        "query": query,
+        "schedule": {"type": "manual"},
+        "timeout_seconds": 2400,
+        "metadata": {"cause": cause, "title": title, "scheduled_by": "triage"},
+    })
+    if status >= 300:
+        return {"status": "error", "message": f"Could not schedule: HTTP {status} {json.dumps(body)[:200]}"}
+    return {"status": "success", "data": {"item_id": item_id, "already_scheduled": False}}
+
 
 agent = OmniCoreAgent(
     name="steward",
@@ -192,6 +338,7 @@ agent = OmniCoreAgent(
     # Memory, run state and budgets live in Postgres (DATABASE_URL); the task
     # store is Redis, set on the server (see compose.yml).
     memory_router=MemoryRouter("sql"),
+    local_tools=tools,
     agent_config={
         "max_steps": 40,
         "tool_call_timeout": 300,

@@ -18,6 +18,9 @@ The plan, the units, and what each must survive:
 | `compose.yml` | The deployment: OmniServe + Postgres + Redis, bound to loopback. |
 | `scenario_p1.py` | The first proof: deploy, do one piece of work end to end, survive a restart mid-run. |
 | `scenario_p2.py` | The second: reproduce a real failing test in an E2B sandbox through a delegated worker; survive the sandbox being killed mid-run. |
+| `scenario_p3.py` | The third: fix that test behind a person's approval of each GitHub write, real branch and PR; with `--kill`, the server dies after the push and before the PR, and the push is never repeated. |
+| `scenario_p4.py` | The fourth: a run stops at its dollar cap and waits, a top-up over HTTP lets it finish, the ledger matches the traces; `--two-workers` proves the compare-and-swap across processes on Postgres. |
+| `scenario_p5.py` | The fifth: triage reads the steward's own failed runs and the issues, schedules one work item per cause, and a second triage schedules nothing new. |
 
 ## Running it on a server
 
@@ -52,6 +55,18 @@ STEWARD_TOKEN=<the bearer token> python apps/steward/scenario_p1.py            #
 STEWARD_TOKEN=<the bearer token> python apps/steward/scenario_p1.py --restart  # kill it mid-run
 STEWARD_TOKEN=<the bearer token> python apps/steward/scenario_p2.py            # reproduce a failing test in a sandbox
 STEWARD_TOKEN=<the bearer token> python apps/steward/scenario_p2.py --lose     # kill the sandbox mid-run
+STEWARD_TOKEN=<the bearer token> python apps/steward/scenario_p3.py            # fix, approve each write, PR
+STEWARD_TOKEN=<the bearer token> python apps/steward/scenario_p3.py --kill     # die after the push, before the PR
+STEWARD_TOKEN=<the bearer token> python apps/steward/scenario_p4.py            # cap, top-up, bill (STEWARD_REQUEST_USD=0.08)
+STEWARD_TOKEN=<the bearer token> python apps/steward/scenario_p4.py --two-workers
+STEWARD_TOKEN=<the bearer token> python apps/steward/scenario_p5.py            # triage, twice
+```
+
+Long scenarios are best started detached on the server, so a dropped SSH
+session does not kill them:
+
+```
+nohup setsid python3 -u apps/steward/scenario_p3.py > /opt/steward/logs/p3.log 2>&1 < /dev/null &
 ```
 
 On the server itself, set `STEWARD_SSH=` (empty) so the scenarios use Docker
