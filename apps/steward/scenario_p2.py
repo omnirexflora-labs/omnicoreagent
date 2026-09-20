@@ -64,11 +64,14 @@ def events(traces: list[dict], *types: str) -> list[dict]:
 
 
 def output_md(run_id: str) -> str:
-    """The steward's report, from the server's workspace volume."""
+    """The steward's report, from the server's workspace volume: the run's
+    own output.md, or the newest one if it wrote elsewhere."""
     try:
         return ssh(
             "docker exec steward-serve sh -c "
-            f"\"find /app/workspace -path '*{run_id}*' -name output.md -exec cat {{}} + 2>/dev/null | head -60\""
+            f"\"f=\$(find /app/workspace/files -path '*{run_id}*' -name output.md | head -1); "
+            "[ -n \\\"\$f\\\" ] || f=\$(ls -t \$(find /app/workspace/files -name output.md) 2>/dev/null | head -1); "
+            "echo \\\"[\$f]\\\"; head -60 \\\"\$f\\\"\""
         )
     except Exception as error:  # noqa: BLE001 - the report is a bonus, not an assertion
         return f"(could not read output.md: {error})"
@@ -130,8 +133,8 @@ def part_one() -> None:
     run = api("POST", f"/background/tasks/{TASK_ID}/run", {"wait": True}, timeout=960)
     print(f"       run {run.get('run_id')} finished in {time.time() - started:.0f}s")
     traces = assert_reproduced(run["run_id"], run)
-    summary = next((t.get("summary") for t in traces if t.get("summary")), {}) or {}
-    print("       cost:", json.dumps((summary.get("model_calls") or {}).get("cost_usd") or summary.get("cost_usd")))
+    record = api("GET", f"/runs/{run['run_id']}")
+    print("       usage:", json.dumps(record.get("usage")), "step", record.get("step"))
     print("       output.md:\n" + "\n".join("         " + line for line in output_md(run["run_id"]).splitlines()[:30]))
 
 
