@@ -15,7 +15,7 @@ import pytest
 from omnicoreagent.core.budgets import BudgetLedger, BudgetScope, budget_key
 from omnicoreagent.core.model_protocol import ModelTurn, ToolRequest
 from omnicoreagent.governance.hashing import policy_hash
-from test_budget_enforcement import CALL_COST, PricedModel, _agent, _events, _usage
+from test_budget_enforcement import CALL_COST, PricedModel, _agent, _events
 
 
 def _two_turns(runs: int = 1) -> PricedModel:
@@ -74,8 +74,9 @@ async def test_a_top_up_lets_the_run_finish_from_where_it_stopped():
     assert granted["amount"] == 2 and granted["approver"] == "ops@example.com"
     assert finished["status"] == "success"
     assert model.calls > calls_before, "the run carried on rather than starting again"
-    spent = await _usage(agent, BudgetScope.REQUEST, waiting["run_id"])
-    assert spent["model_calls"] == 2
+    # The finished run's own counter is settled onto its record (audit A8).
+    record = await agent.get_run(waiting["run_id"])
+    assert record["budgets"]["request"]["model_calls"] == 2
 
 
 @pytest.mark.asyncio

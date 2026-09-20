@@ -250,6 +250,9 @@ class InMemoryStore(AbstractMemoryStore):
             ]
         return sorted(records, key=lambda r: r.get("created_at") or "")[:limit]
 
+    async def delete_budget_state(self, key: str) -> None:
+        self.budget_states.pop(key, None)
+
     async def get_budget_state(self, key: str) -> dict | None:
         with self._lock:
             state = self.budget_states.get(key)

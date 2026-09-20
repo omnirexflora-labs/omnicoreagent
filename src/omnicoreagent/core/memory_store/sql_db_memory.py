@@ -653,6 +653,19 @@ class DatabaseMessageStore(AbstractMemoryStore):
 
     # --- budgets -----------------------------------------------------------
 
+    async def delete_budget_state(self, key: str) -> None:
+        def _delete():
+            session = self._get_session()
+            try:
+                row = session.get(StorageBudgetState, key)
+                if row is not None:
+                    session.delete(row)
+                    session.commit()
+            finally:
+                self._release_session(session)
+
+        await asyncio.to_thread(_delete)
+
     async def get_budget_state(self, key: str) -> dict | None:
         def _get():
             session = self._get_session()

@@ -103,6 +103,13 @@ async def _usage(agent, scope, identity, window="total") -> dict:
     return await ledger.usage(budget_key(scope, identity, window))
 
 
+async def _request_spent(agent, run_id) -> dict:
+    """What a finished run spent on its own budget: kept on its record, since
+    the request's own counter is removed when the run ends (audit A8)."""
+    record = await agent.get_run(run_id)
+    return dict((record.get("budgets") or {}).get("request") or {})
+
+
 def _events(trace, event_type):
     return [event for event in trace.events if event.event_type == event_type]
 
@@ -127,16 +134,17 @@ async def test_a_model_call_is_counted_against_the_budgets_that_cover_it():
 
     result = await agent.run("go", session_id="budget-1")
 
-    spent = await _usage(agent, BudgetScope.REQUEST, result["run_id"])
+    spent = await _request_spent(agent, result["run_id"])
     assert spent["model_cost_usd"] == pytest.approx(CALL_COST)
     # Only what is budgeted is counted: a meter nobody limits costs no writes.
     assert spent["model_calls"] == 1 and spent["model_tokens"] == 150
     # Every level that covers the call is charged, not only the nearest one.
     daily = await _usage(agent, BudgetScope.APPLICATION, "acme", "day")
     assert daily["model_cost_usd"] == pytest.approx(CALL_COST)
-    # Nothing is left held once the call is priced.
+    # Nothing is left held once the call is priced, and the shared counter
+    # holds nothing either.
     ledger = BudgetLedger(agent.memory_router)
-    assert await ledger.reserved(budget_key(BudgetScope.REQUEST, result["run_id"], "total")) == {}
+    assert await ledger.reserved(budget_key(BudgetScope.APPLICATION, "acme", "day")) == {}
 
 
 @pytest.mark.asyncio
@@ -148,7 +156,7 @@ async def test_a_tool_call_is_counted_as_it_is_authorized():
 
     result = await agent.run("go", session_id="budget-2")
 
-    spent = await _usage(agent, BudgetScope.REQUEST, result["run_id"])
+    spent = await _request_spent(agent, result["run_id"])
     assert spent["tool_calls"] == 1
 
 
@@ -158,6 +166,7 @@ async def test_nothing_is_counted_when_nothing_is_budgeted():
 
     result = await agent.run("go", session_id="budget-3")
 
+    assert await _request_spent(agent, result["run_id"]) == {}
     assert await _usage(agent, BudgetScope.REQUEST, result["run_id"]) == {}
 
 
@@ -261,7 +270,7 @@ async def test_a_model_with_no_price_counts_tokens_and_says_the_cost_is_incomple
     result = await agent.run("go", session_id="budget-9")
     trace = await agent.telemetry_store.get_trace(result["trace_id"])
 
-    spent = await _usage(agent, BudgetScope.REQUEST, result["run_id"])
+    spent = await _request_spent(agent, result["run_id"])
     # The call is not refused for having no price: tokens govern it instead.
     assert spent["model_tokens"] == 150 and spent.get("model_cost_usd", 0) == 0
     [incomplete] = _events(trace, "budget_cost_incomplete")
@@ -424,4 +433,52 @@ async def test_a_request_with_two_budgeted_meters_makes_few_store_round_trips():
     # Two model calls (hold + settle each) and one tool call: five writes at
     # most, and no read that is not the read before a write.
     assert counts["save"] <= 5, f"{counts['save']} budget writes for one request"
-    assert counts["get"] <= counts["save"], f"{counts['get']} reads for {counts['save']} writes"
+    # One read per write, plus the read that settles the request's counter
+    # onto its record when the run ends.
+    assert counts["get"] <= counts["save"] + 1, f"{counts['get']} reads for {counts['save']} writes"
+
+
+# --- audit A8: a request's budget counter does not outlive the request ---------
+
+
+@pytest.mark.asyncio
+async def test_a_finished_run_leaves_no_budget_counter_behind_and_keeps_its_spend():
+    """Measured over 400 requests: every request left its own budget key
+    (``request:<run_id>:total``) in the store forever. On a durable store that
+    is one key per request, never expired. When the run ends, what it spent is
+    written on its record and the counter is removed. Session, agent and
+    application counters are shared and stay."""
+    agent = await _agent(
+        PricedModel(),
+        budgets={
+            "application_id": "acme",
+            "request": [{"meter": "model_cost_usd", "limit": 10}],
+            "application": [{"meter": "model_cost_usd", "limit": 1000, "window": "day"}],
+        },
+    )
+
+    result = await agent.run("go", session_id="leaves-nothing")
+
+    request_key = budget_key(BudgetScope.REQUEST, result["run_id"], "total")
+    ledger = BudgetLedger(agent.memory_router)
+    assert await agent.memory_router.get_budget_state(request_key) is None
+    record = await agent.get_run(result["run_id"])
+    assert record["budgets"]["request"]["model_cost_usd"] == pytest.approx(CALL_COST)
+    # The shared counters are still there, still counting.
+    assert (await _usage(agent, BudgetScope.APPLICATION, "acme", "day"))["model_cost_usd"] == pytest.approx(CALL_COST)
+    assert await ledger.usage(request_key) == {}
+
+
+@pytest.mark.asyncio
+async def test_a_waiting_run_keeps_its_budget_counter_until_it_ends():
+    """A run paused for a top-up must keep its counter: the grant lands on it."""
+    from omnicoreagent.core.model_protocol import ModelTurn, ToolRequest
+
+    asking = ModelTurn(tool_calls=(ToolRequest("call_1", "lookup", '{"key": "a"}'),))
+    agent = await _agent(PricedModel(asking), budgets={"request": [{"meter": "model_calls", "limit": 1}]})
+
+    waiting = await agent.run("go", session_id="keeps-counter")
+
+    assert waiting["status"] == "awaiting_budget"
+    request_key = budget_key(BudgetScope.REQUEST, waiting["run_id"], "total")
+    assert await agent.memory_router.get_budget_state(request_key) is not None

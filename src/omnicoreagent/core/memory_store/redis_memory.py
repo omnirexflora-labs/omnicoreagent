@@ -566,6 +566,10 @@ class RedisMemoryStore(AbstractMemoryStore):
     return 1
     """
 
+    async def delete_budget_state(self, key: str) -> None:
+        client = await self._get_client()
+        await client.delete(f"omnicoreagent_budget:{key}")
+
     async def get_budget_state(self, key: str) -> dict | None:
         client = await self._get_client()
         data = await client.hget(f"omnicoreagent_budget:{key}", "data")

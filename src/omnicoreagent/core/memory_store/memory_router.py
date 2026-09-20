@@ -138,6 +138,9 @@ class MemoryRouter:
     ) -> list[dict]:
         return await self.memory_store.list_run_states(session_id, status, limit)
 
+    async def delete_budget_state(self, key: str) -> None:
+        return await self.memory_store.delete_budget_state(key)
+
     async def get_budget_state(self, key: str) -> dict | None:
         return await self.memory_store.get_budget_state(key)
 

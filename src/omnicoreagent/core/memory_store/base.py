@@ -75,6 +75,12 @@ class AbstractMemoryStore(ABC):
 
     # --- budgets ---------------------------------------------------------
 
+    async def delete_budget_state(self, key: str) -> None:
+        """Remove one budget counter (a finished request's own)."""
+        from omnicoreagent.core.runs import RunStateUnsupported
+
+        raise RunStateUnsupported("This memory store keeps no budgets")
+
     async def get_budget_state(self, key: str) -> dict | None:
         from omnicoreagent.core.runs import RunStateUnsupported
 

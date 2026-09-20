@@ -361,7 +361,12 @@ class RunTracker:
             await self._save()
 
     async def finish(
-        self, status: str, *, usage: Any = None, error: BaseException | None = None
+        self,
+        status: str,
+        *,
+        usage: Any = None,
+        error: BaseException | None = None,
+        budgets: dict[str, Any] | None = None,
     ) -> None:
         async with self._lock:
             self.record["status"] = status
@@ -370,6 +375,9 @@ class RunTracker:
                 self.record["usage"] = _add_usage(self.record.get("usage") or {}, _usage_dict(usage))
             if error is not None:
                 self.record["error"] = {"type": type(error).__name__, "message": str(error)}
+            if budgets:
+                # What the run spent, per scope, kept once its own counter is gone.
+                self.record["budgets"] = budgets
             await self._save()
 
     async def add_approval(self, approval: dict[str, Any]) -> None:

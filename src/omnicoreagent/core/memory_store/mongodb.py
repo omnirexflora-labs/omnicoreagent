@@ -290,6 +290,10 @@ class MongoDb(AbstractMemoryStore):
 
     # --- budgets -----------------------------------------------------------
 
+    async def delete_budget_state(self, key: str) -> None:
+        await self._ensure_connected()
+        await self.budget_states.delete_one({"_id": key})
+
     async def get_budget_state(self, key: str) -> dict | None:
         await self._ensure_connected()
         document = await self.budget_states.find_one({"_id": key})

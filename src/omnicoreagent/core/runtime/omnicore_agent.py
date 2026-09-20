@@ -647,6 +647,7 @@ class OmniCoreAgent:
         trace_context = None
         run_tracker = None
         keep_alive = None
+        run_budgets = None
         retry_of = None
         if _resume is None and supports_run_state(self.memory_router):
             # A known run ID: recover a run whose process died, refuse one that
@@ -851,9 +852,13 @@ class OmniCoreAgent:
                     else TraceStatus.FAILED.value,
                 )
             )
+            # The run is over: its spend goes on its record and its own budget
+            # counter is removed, so a request leaves nothing behind.
+            budgets_spent = await run_budgets.settle() if run_budgets is not None else None
             await run_tracker.finish(
                 "completed" if trace_status == TraceStatus.COMPLETED else "failed",
                 usage=formatted_response.get("metric"),
+                budgets=budgets_spent,
             )
             run_summary = await self._run_summary(trace_context.trace_id)
             await self.telemetry_recorder.emit_event(
@@ -962,7 +967,7 @@ class OmniCoreAgent:
                 boundary="public",
             )
         except asyncio.CancelledError as exc:
-            await self._finish_run_record(run_tracker, "cancelled", exc)
+            await self._finish_run_record(run_tracker, "cancelled", exc, budgets=run_budgets)
             if trace_context is not None and not trace_finalizing:
                 stopped_status = (
                     TraceStatus.TIMEOUT
@@ -985,7 +990,7 @@ class OmniCoreAgent:
                     )
             raise
         except Exception as exc:
-            await self._finish_run_record(run_tracker, "failed", exc)
+            await self._finish_run_record(run_tracker, "failed", exc, budgets=run_budgets)
             if trace_context is not None and not trace_finalizing:
                 await self._end_trace_after_failure(
                     trace_context, exc, status=TraceStatus.FAILED
@@ -1059,13 +1064,23 @@ class OmniCoreAgent:
         return summary
 
     async def _finish_run_record(
-        self, run_tracker: Any, status: str, exc: BaseException
+        self,
+        run_tracker: Any,
+        status: str,
+        exc: BaseException,
+        *,
+        budgets: Any = None,
     ) -> None:
         """Record how a run ended; it must not replace the original error."""
         if run_tracker is None or run_tracker.record["status"] != "running":
             return
         try:
-            await complete_despite_cancellation(run_tracker.finish(status, error=exc))
+            budgets_spent = None
+            if budgets is not None:
+                budgets_spent = await complete_despite_cancellation(budgets.settle())
+            await complete_despite_cancellation(
+                run_tracker.finish(status, error=exc, budgets=budgets_spent)
+            )
         except Exception as record_exc:
             runtime_logger().warning(
                 f"Could not record run {run_tracker.run_id} as {status}: "

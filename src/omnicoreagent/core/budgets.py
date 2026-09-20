@@ -331,6 +331,17 @@ class BudgetLedger:
 
         return await self._apply(key, change)
 
+    async def delete(self, key: str) -> None:
+        """Remove one counter: a finished request's own, once its spend is on
+        the run's record. A store that keeps no budgets has nothing to remove."""
+        if not self.enabled:
+            return
+        try:
+            await self.store.delete_budget_state(key)
+        except Exception as exc:
+            if not self._is_unsupported(exc):
+                raise
+
     async def release_for_runs(self, key: str, *, run_ids: list[str]) -> int:
         """Release what runs that are no longer alive were holding."""
         if not self.enabled:
@@ -672,6 +683,25 @@ class RunBudgets:
     async def release(self, held: list[Reservation]) -> None:
         for reservation in held:
             await self.ledger.release(reservation)
+
+    async def settle(self) -> dict[str, dict[str, float]]:
+        """The run is over: return what it spent per scope, and remove its own
+        counters.
+
+        Measured over 400 requests, every request left its request-scope key in
+        the store for good — one key per request on a durable store, never
+        expired. The request's spend goes on its record; session, agent and
+        application counters are shared and stay. A run that is only paused
+        must not settle: a top-up lands on its counter.
+        """
+        spent = await self.spent()
+        seen: set[str] = set()
+        for meter in METERS:
+            for scope, key, _ in self.limits(meter):
+                if scope is BudgetScope.REQUEST and key not in seen:
+                    seen.add(key)
+                    await self.ledger.delete(key)
+        return spent
 
     async def spent(self) -> dict[str, dict[str, float]]:
         """What this run has spent, per scope, for the run's totals."""
