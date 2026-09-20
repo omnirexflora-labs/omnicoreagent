@@ -28,7 +28,7 @@ class MongoDbTaskStore(SerializedTaskStore):
         collection_prefix: str | None = None,
         connect_timeout: float | None = None,
         lock_timeout: float = 30.0,
-        lock_lease_seconds: float = 300.0,
+        lock_lease_seconds: float = 30.0,
     ) -> None:
         super().__init__()
         self.uri = uri
@@ -180,9 +180,15 @@ class MongoDbTaskStore(SerializedTaskStore):
         if stale_generation and stale_generation not in {previous_generation, generation}:
             await self._delete_generation(stale_generation)
 
+    @property
+    def lock_wait_seconds(self) -> float:
+        """At least a full lease, so a lock left by a dead process lapses."""
+        return max(self.lock_timeout, self.lock_lease_seconds) + 1.0
+
     async def _acquire_lock(self) -> str:
         token = uuid4().hex
-        deadline = time.monotonic() + self.lock_timeout
+        wait = self.lock_wait_seconds
+        deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
             now = utc_now()
             expires_at = now + timedelta(seconds=self.lock_lease_seconds)
@@ -207,7 +213,16 @@ class MongoDbTaskStore(SerializedTaskStore):
             if result.matched_count:
                 return token
             await asyncio.sleep(0.05)
-        raise TaskStoreError("Timed out acquiring MongoDB task-store lock")
+        holder = await self._lock_collection.find_one({"_id": "task_store"})
+        expires_at = (holder or {}).get("expires_at")
+        held = ""
+        if expires_at is not None:
+            remaining = (expires_at - utc_now()).total_seconds()
+            if remaining > 0:
+                held = f": held by another process for another {remaining:.1f}s"
+        raise TaskStoreError(
+            f"Timed out acquiring MongoDB task-store lock after {wait:.1f}s{held}"
+        )
 
     async def _refresh_lock(self, token: str) -> None:
         result = await self._lock_collection.update_one(

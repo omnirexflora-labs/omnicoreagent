@@ -26,12 +26,16 @@ class RedisTaskStore(SerializedTaskStore):
         prefix: str | None = None,
         connect_timeout: float | None = None,
         lock_timeout: float = 30.0,
-        lock_lease_seconds: float = 300.0,
+        lock_lease_seconds: float = 30.0,
     ) -> None:
         super().__init__()
         self.url = url
         self.prefix = (prefix or "omnicoreagent:background").rstrip(":")
         self.connect_timeout = connect_timeout
+        # An operation holds the store's lock for milliseconds (a long write
+        # refreshes it), so its lease is short: a process that dies holding
+        # it delays the next one by at most the lease. Acquisition always
+        # waits out a full lease, so a dead holder can never stop a restart.
         self.lock_timeout = lock_timeout
         self.lock_lease_seconds = lock_lease_seconds
         self._client = None
@@ -136,10 +140,17 @@ class RedisTaskStore(SerializedTaskStore):
         if stale_generation and stale_generation not in {previous_generation, generation}:
             await self._delete_generation(stale_generation)
 
+    @property
+    def lock_wait_seconds(self) -> float:
+        """How long acquisition waits: at least a full lease, so a lock left
+        by a dead process lapses while we wait."""
+        return max(self.lock_timeout, self.lock_lease_seconds) + 1.0
+
     async def _acquire_lock(self) -> str:
         client = self._require_client()
         token = uuid4().hex
-        deadline = time.monotonic() + self.lock_timeout
+        wait = self.lock_wait_seconds
+        deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
             acquired = await client.set(
                 self._lock_key,
@@ -150,7 +161,15 @@ class RedisTaskStore(SerializedTaskStore):
             if acquired:
                 return token
             await asyncio.sleep(0.05)
-        raise TaskStoreError("Timed out acquiring Redis task-store lock")
+        remaining_ms = await client.pttl(self._lock_key)
+        held = (
+            f": held by another process for another {remaining_ms / 1000:.1f}s"
+            if isinstance(remaining_ms, int) and remaining_ms > 0
+            else ""
+        )
+        raise TaskStoreError(
+            f"Timed out acquiring Redis task-store lock after {wait:.1f}s{held}"
+        )
 
     async def _refresh_lock(self, token: str) -> None:
         client = self._require_client()
