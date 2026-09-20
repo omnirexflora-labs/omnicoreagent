@@ -40,6 +40,12 @@ def ensure_task() -> None:
     existing = api("GET", "/background/tasks")
     tasks = existing.get("tasks", existing) if isinstance(existing, dict) else existing
     if any(task.get("task_id") == TASK_ID for task in tasks):
+        stale = latest_run()
+        if stale.get("status") in {"queued", "claimed", "running", "retrying", "awaiting_approval", "awaiting_budget"}:
+            try:
+                api("POST", f"/background/runs/{stale['run_id']}/cancel")
+            except SystemExit:
+                pass
         api("DELETE", f"/background/tasks/{TASK_ID}")
     api("POST", "/background/tasks", {
         "task_id": TASK_ID,
@@ -112,8 +118,11 @@ def part_one() -> None:
     check(len(pending) == 1 and pending[0].get("meter") == "model_cost_usd",
           f"it asks for {pending[0].get('scope') if pending else '?'} model_cost_usd, {pending[0].get('shortfall') if pending else '?'} more")
     at_cap = budget(run_id, "request")
-    check(at_cap.get("spent", 0) <= EXPECTED_REQUEST_USD + 1e-9 and at_cap.get("remaining", 1) < 0.02,
-          f"the request budget is spent to its cap: {at_cap.get('spent')} of {at_cap.get('limit')}")
+    # It stops when the next call's worst case no longer fits, never after
+    # overspending: what is left can be as much as one call could cost.
+    check(at_cap.get("spent", 0) <= EXPECTED_REQUEST_USD + 1e-9 and float(pending[0].get("shortfall") or 0) > 0,
+          f"never overspent: ${at_cap.get('spent'):.4f} of ${at_cap.get('limit')}, "
+          f"${at_cap.get('remaining'):.4f} left is less than the next call's worst case")
 
     api("POST", f"/runs/{run_id}/budget", {"decision": "grant", "amount": 0.60, "approver": "scenario_p4",
                                             "note": "finish this one"})
