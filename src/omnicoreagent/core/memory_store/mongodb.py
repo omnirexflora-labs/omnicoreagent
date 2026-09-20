@@ -53,6 +53,7 @@ class MongoDb(AbstractMemoryStore):
             ]
             await self.collection.create_indexes(message_indexes)
             self.run_states = self.db[f"{collection_name}_run_states"]
+            self.budget_states = self.db[f"{collection_name}_budget_states"]
             await self.run_states.create_indexes(
                 [IndexModel([("session_id", 1)]), IndexModel([("status", 1)])]
             )
@@ -286,3 +287,33 @@ class MongoDb(AbstractMemoryStore):
             document.pop("_id", None)
             records.append(document)
         return records
+
+    # --- budgets -----------------------------------------------------------
+
+    async def get_budget_state(self, key: str) -> dict | None:
+        await self._ensure_connected()
+        document = await self.budget_states.find_one({"_id": key})
+        if document is None:
+            return None
+        document.pop("_id", None)
+        return document
+
+    async def save_budget_state(self, state: dict, expected_version: int | None) -> int:
+        from omnicoreagent.core.runs import RunStateConflict
+
+        await self._ensure_connected()
+        key = state["key"]
+        version = (expected_version or 0) + 1
+        document = {**state, "version": version}
+        if expected_version is None:
+            try:
+                await self.budget_states.insert_one({"_id": key, **document})
+            except errors.DuplicateKeyError:
+                raise RunStateConflict(f"Budget {key} already exists") from None
+            return version
+        result = await self.budget_states.replace_one(
+            {"_id": key, "version": expected_version}, {"_id": key, **document}
+        )
+        if result.matched_count != 1:
+            raise RunStateConflict(f"Budget {key} changed since version {expected_version}")
+        return version

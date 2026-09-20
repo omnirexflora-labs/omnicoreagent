@@ -550,3 +550,42 @@ class RedisMemoryStore(AbstractMemoryStore):
             if record is not None and (status is None or record.get("status") == status):
                 records.append(record)
         return sorted(records, key=lambda r: r.get("created_at") or "")[:limit]
+
+    # --- budgets -----------------------------------------------------------
+    # One hash per budget (version, data); saves are compare-and-swap in Lua,
+    # so concurrent workers cannot both spend the last of a budget.
+
+    _SAVE_BUDGET = """
+    local current = redis.call('HGET', KEYS[1], 'version')
+    if ARGV[1] == '' then
+        if current then return 0 end
+    elseif current ~= ARGV[1] then
+        return 0
+    end
+    redis.call('HSET', KEYS[1], 'version', ARGV[2], 'data', ARGV[3])
+    return 1
+    """
+
+    async def get_budget_state(self, key: str) -> dict | None:
+        client = await self._get_client()
+        data = await client.hget(f"omnicoreagent_budget:{key}", "data")
+        return json.loads(data) if data else None
+
+    async def save_budget_state(self, state: dict, expected_version: int | None) -> int:
+        from omnicoreagent.core.runs import RunStateConflict
+
+        client = await self._get_client()
+        key = state["key"]
+        version = (expected_version or 0) + 1
+        saved = await client.eval(
+            self._SAVE_BUDGET,
+            1,
+            f"omnicoreagent_budget:{key}",
+            "" if expected_version is None else str(expected_version),
+            str(version),
+            json.dumps({**state, "version": version}, default=str),
+        )
+        if not saved:
+            raise RunStateConflict(f"Budget {key} changed since version {expected_version}")
+        return version
+

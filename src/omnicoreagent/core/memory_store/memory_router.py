@@ -138,6 +138,12 @@ class MemoryRouter:
     ) -> list[dict]:
         return await self.memory_store.list_run_states(session_id, status, limit)
 
+    async def get_budget_state(self, key: str) -> dict | None:
+        return await self.memory_store.get_budget_state(key)
+
+    async def save_budget_state(self, state: dict, expected_version: int | None) -> int:
+        return await self.memory_store.save_budget_state(state, expected_version)
+
     def get_memory_store_info(self) -> dict[str, Any]:
         """Get information about the current memory store."""
         return {

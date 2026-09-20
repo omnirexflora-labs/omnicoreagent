@@ -72,3 +72,18 @@ class AbstractMemoryStore(ABC):
         from omnicoreagent.core.runs import RunStateUnsupported
 
         raise RunStateUnsupported(type(self).__name__)
+
+    # --- budgets ---------------------------------------------------------
+
+    async def get_budget_state(self, key: str) -> dict | None:
+        from omnicoreagent.core.runs import RunStateUnsupported
+
+        raise RunStateUnsupported(type(self).__name__)
+
+    async def save_budget_state(self, state: dict, expected_version: int | None) -> int:
+        """Create or update a budget counter; the same versioned contract as
+        run state (``RunStateConflict`` when another writer got there first)."""
+        from omnicoreagent.core.runs import RunStateUnsupported
+
+        raise RunStateUnsupported(type(self).__name__)
+

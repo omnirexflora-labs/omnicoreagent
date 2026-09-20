@@ -25,6 +25,7 @@ class InMemoryStore(AbstractMemoryStore):
         self.summarize_fn: Callable | None = None
         self._lock = threading.RLock()
         self.run_states: dict[str, dict[str, Any]] = {}
+        self.budget_states: dict[str, dict[str, Any]] = {}
 
     def set_memory_config(
         self,
@@ -248,3 +249,23 @@ class InMemoryStore(AbstractMemoryStore):
                 and (status is None or r.get("status") == status)
             ]
         return sorted(records, key=lambda r: r.get("created_at") or "")[:limit]
+
+    async def get_budget_state(self, key: str) -> dict | None:
+        with self._lock:
+            state = self.budget_states.get(key)
+            return copy.deepcopy(state) if state is not None else None
+
+    async def save_budget_state(self, state: dict, expected_version: int | None) -> int:
+        from omnicoreagent.core.runs import RunStateConflict
+
+        with self._lock:
+            key = state["key"]
+            current = self.budget_states.get(key)
+            if expected_version is None:
+                if current is not None:
+                    raise RunStateConflict(f"Budget {key} already exists")
+            elif current is None or current["version"] != expected_version:
+                raise RunStateConflict(f"Budget {key} changed since version {expected_version}")
+            version = (expected_version or 0) + 1
+            self.budget_states[key] = {**copy.deepcopy(state), "version": version}
+            return version

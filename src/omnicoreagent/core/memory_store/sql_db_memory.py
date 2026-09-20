@@ -215,6 +215,15 @@ class StorageRunState(Base):
     data: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class StorageBudgetState(Base):
+    """One budget counter; ``data`` holds its meters and reservations."""
+
+    __tablename__ = "budget_states"
+    key: Mapped[str] = mapped_column(String(DEFAULT_MAX_KEY_LENGTH), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    data: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class DatabaseMessageStore(AbstractMemoryStore):
     """
     Database-backed message store for storing, retrieving, and clearing messages by session.
@@ -641,3 +650,55 @@ class DatabaseMessageStore(AbstractMemoryStore):
                 self._release_session(session)
 
         return await asyncio.to_thread(_list)
+
+    # --- budgets -----------------------------------------------------------
+
+    async def get_budget_state(self, key: str) -> dict | None:
+        def _get():
+            session = self._get_session()
+            try:
+                row = session.get(StorageBudgetState, key)
+                return json.loads(row.data) if row is not None else None
+            finally:
+                self._release_session(session)
+
+        return await asyncio.to_thread(_get)
+
+    async def save_budget_state(self, state: dict, expected_version: int | None) -> int:
+        from sqlalchemy.exc import IntegrityError
+
+        from omnicoreagent.core.runs import RunStateConflict
+
+        key = state["key"]
+        version = (expected_version or 0) + 1
+        data = json.dumps({**state, "version": version}, default=str)
+
+        def _save() -> int:
+            session = self._get_session()
+            try:
+                if expected_version is None:
+                    session.add(StorageBudgetState(key=key, version=version, data=data))
+                    try:
+                        session.commit()
+                    except IntegrityError:
+                        session.rollback()
+                        raise RunStateConflict(f"Budget {key} already exists") from None
+                    return version
+                result = session.execute(
+                    update(StorageBudgetState)
+                    .where(
+                        StorageBudgetState.key == key,
+                        StorageBudgetState.version == expected_version,
+                    )
+                    .values(version=version, data=data)
+                )
+                session.commit()
+                if result.rowcount != 1:
+                    raise RunStateConflict(
+                        f"Budget {key} changed since version {expected_version}"
+                    )
+                return version
+            finally:
+                self._release_session(session)
+
+        return await asyncio.to_thread(_save)
