@@ -21,6 +21,7 @@ from omnicoreagent.core.telemetry import (
 from omnicoreagent.core.system_prompts import FAST_CONVERSATION_SUMMARY_PROMPT
 from omnicoreagent.core.budgets import (
     BudgetExhaustedForRun,
+    RunAwaitingBudget,
     current_budgets,
     estimate_model_call,
 )
@@ -261,9 +262,9 @@ class AgentLlmStepRunner:
                 model_response_event_id=model_response_event_id,
             )
 
-        except BudgetExhaustedForRun:
+        except (BudgetExhaustedForRun, RunAwaitingBudget):
             # Not a provider failure: the run's own budget is spent, and the
-            # run decides what to do about it.
+            # run decides what to do about it — end, or wait for a top-up.
             raise
 
         except UsageLimitExceeded as e:

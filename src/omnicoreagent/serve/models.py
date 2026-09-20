@@ -105,7 +105,10 @@ class RunResponse(BaseModel):
 
     status: str = Field(
         "success",
-        description="Runtime outcome: success, error, cancelled, or awaiting_approval",
+        description=(
+            "Runtime outcome: success, error, cancelled, awaiting_approval, or "
+            "awaiting_budget"
+        ),
     )
     termination_reason: Optional[str] = Field(
         None, description="Why execution terminated"
@@ -116,6 +119,9 @@ class RunResponse(BaseModel):
     )
     approvals: Optional[list[dict[str, Any]]] = Field(
         None, description="Approvals a paused run is waiting for"
+    )
+    budget_request: Optional[dict[str, Any]] = Field(
+        None, description="The budget a waiting run ran out of, and what it needs"
     )
     session_id: str = Field(..., description="Session ID for this conversation")
     agent_name: str = Field(..., description="Name of the agent")
@@ -135,6 +141,19 @@ class ApprovalDecisionRequest(BaseModel):
     arguments: Optional[dict[str, Any]] = Field(
         None, description="Approve this edited call instead of the one asked for"
     )
+
+
+class BudgetDecisionRequest(BaseModel):
+    """A person's decision on the budget a waiting run ran out of."""
+
+    decision: Literal["grant", "deny"]
+    approver: str = Field(..., min_length=1, description="Who decided")
+    amount: Optional[float] = Field(
+        None,
+        gt=0,
+        description="How much to add; the run's shortfall when left out",
+    )
+    note: Optional[str] = Field(None, description="Why")
 
 
 class SteerRequest(BaseModel):

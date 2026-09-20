@@ -50,7 +50,13 @@ def normalize_run_result(
             "run_id": result.get("run_id"),
             **{
                 key: result[key]
-                for key in ("status", "termination_reason", "guardrail_result", "approvals")
+                for key in (
+                    "status",
+                    "termination_reason",
+                    "guardrail_result",
+                    "approvals",
+                    "budget_request",
+                )
                 if key in result
             },
         }

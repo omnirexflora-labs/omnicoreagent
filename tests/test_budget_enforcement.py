@@ -354,7 +354,11 @@ async def test_a_delegation_is_charged_to_the_run_that_asked_for_it():
     ledger = BudgetLedger(InMemoryStore())
     budgets = RunBudgets(
         ledger,
-        PolicyBudgets(request=[{"meter": "subagent_runs", "limit": 2}]),
+        PolicyBudgets(
+            request=[
+                {"meter": "subagent_runs", "limit": 2, "on_exhausted": "terminate"}
+            ]
+        ),
         run_id="run_delegating",
     )
     factory = SubagentFactory(

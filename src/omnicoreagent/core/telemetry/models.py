@@ -193,6 +193,8 @@ FOUNDATION_EVENT_TYPES = frozenset(
         "sandbox_session_closed",
         "sandbox_workspace_sync",
         "budget_warning",
+        "budget_granted",
+        "budget_denied",
         "budget_exhausted",
         "budget_cost_incomplete",
         "run_suspended",

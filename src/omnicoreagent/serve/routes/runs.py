@@ -15,6 +15,7 @@ from omnicoreagent.core.telemetry import TraceStatus
 
 from ..models import (
     ApprovalDecisionRequest,
+    BudgetDecisionRequest,
     ErrorResponse,
     RunRequest,
     RunResponse,
@@ -202,6 +203,35 @@ def create_runs_router() -> APIRouter:
         return _public_view(agent, approval)
 
     @router.post(
+        "/runs/{run_id}/budget",
+        summary="Decide a budget",
+        description=(
+            "Grant or refuse the budget a waiting run ran out of. A grant is a "
+            "recorded exception to that one budget, with the name of whoever "
+            "made it; the policy is unchanged. Resume the run afterwards."
+        ),
+        responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+    )
+    async def decide_budget(
+        request: Request, run_id: str, body: BudgetDecisionRequest
+    ) -> dict:
+        agent = get_agent(request)
+        try:
+            if body.decision == "grant":
+                decided = await agent.grant_budget(
+                    run_id, amount=body.amount, approver=body.approver, note=body.note
+                )
+            else:
+                decided = await agent.deny_budget(
+                    run_id, approver=body.approver, note=body.note
+                )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        return decided
+
+    @router.post(
         "/runs/{run_id}/steer",
         summary="Steer a run",
         description=(
@@ -292,5 +322,6 @@ def _public_run(agent, record: dict) -> dict:
         )
     }
     view["approvals"] = [_public_view(agent, a) for a in record.get("approvals") or []]
+    view["budget_requests"] = list(record.get("budget_requests") or [])
     privacy_filter = getattr(agent, "privacy_filter", None)
     return privacy_filter.redact(view, boundary="public") if privacy_filter else view

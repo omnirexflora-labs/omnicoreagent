@@ -384,6 +384,11 @@ class RunTracker:
                     approval.update(fields)
             await self._save()
 
+    async def add_budget_request(self, request: dict[str, Any]) -> None:
+        async with self._lock:
+            self.record.setdefault("budget_requests", []).append(dict(request))
+            await self._save()
+
     async def reload(self) -> None:
         """Take the stored record as current (after someone else changed it)."""
         async with self._lock:

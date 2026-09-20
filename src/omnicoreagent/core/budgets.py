@@ -43,6 +43,8 @@ WINDOWS = ("total", "day", "month")
 # What a call could return when the model config sets no ceiling of its own.
 DEFAULT_ASSUMED_OUTPUT_TOKENS = 4096
 _RETRIES = 8
+# Grants kept on the counter itself; the trace holds the full story.
+_GRANT_HISTORY_KEPT = 20
 
 
 class BudgetScope(str, Enum):
@@ -214,6 +216,52 @@ class BudgetLedger:
 
         await self._apply(reservation.key, change)
 
+    async def granted(self, key: str) -> dict[str, float]:
+        """What a person has added to this budget beyond its policy limit."""
+        state = await self._state(key)
+        return dict(state.get("grants") or {})
+
+    async def grant_history(self, key: str) -> list[dict[str, Any]]:
+        """Who granted what, and when."""
+        state = await self._state(key)
+        return list(state.get("grant_history") or [])
+
+    async def grant(
+        self,
+        key: str,
+        meter: str,
+        amount: float,
+        *,
+        approver: str,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """Add to one budget, once, on a person's authority.
+
+        The policy is not changed: its limit still says what it said. This is
+        a recorded exception to one counter, with the name of whoever made it,
+        so the run can finish the work it has already partly done.
+        """
+        if not self.enabled:
+            return {}
+        entry = {
+            "meter": meter,
+            "amount": float(amount),
+            "approver": approver,
+            "note": note,
+            "granted_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        def change(state: dict[str, Any]) -> dict[str, Any]:
+            grants = state.setdefault("grants", {})
+            grants[meter] = float(grants.get(meter, 0.0)) + float(amount)
+            history = state.setdefault("grant_history", [])
+            history.append(entry)
+            # Keep the record bounded; the trace holds the full story.
+            del history[:-_GRANT_HISTORY_KEPT]
+            return entry
+
+        return await self._apply(key, change)
+
     async def release_for_runs(self, key: str, *, run_ids: list[str]) -> int:
         """Release what runs that are no longer alive were holding."""
         if not self.enabled:
@@ -356,6 +404,22 @@ class BudgetExhaustedForRun(Exception):
         return self.exhausted.scope
 
 
+class RunAwaitingBudget(Exception):
+    """The run cannot afford its next step and is waiting for a person.
+
+    It carries what a person needs in order to decide: which budget ran out,
+    by how much, and the identifier to answer with.
+    """
+
+    def __init__(self, request: dict[str, Any]) -> None:
+        super().__init__(
+            f"The {request['scope']} budget for {request['meter']} is exhausted: "
+            f"{request['shortfall']:g} more is needed to continue"
+        )
+        self.request = request
+        self.usage: Any = None
+
+
 class RunBudgets:
     """Charges what a run spends to every budget that covers it.
 
@@ -373,6 +437,7 @@ class RunBudgets:
         session_id: str | None = None,
         agent_name: str | None = None,
         telemetry_recorder: Any = None,
+        refused: set[tuple[str, str]] | None = None,
     ) -> None:
         self.ledger = ledger
         self.budgets = budgets
@@ -384,6 +449,9 @@ class RunBudgets:
             BudgetScope.APPLICATION: getattr(budgets, "application_id", None),
         }
         self.run_id = run_id
+        # Budgets a person has already refused for this run: asking again
+        # would be asking the same person the same question.
+        self.refused = refused or set()
         self._warned: set[tuple[str, str]] = set()
 
     @property
@@ -411,8 +479,7 @@ class RunBudgets:
             try:
                 spent = await self.ledger.charge(key, meter, amount, limit=limit.limit)
             except BudgetExhausted as exhausted:
-                await self._record_exhausted(scope, limit, exhausted)
-                raise BudgetExhaustedForRun(exhausted, limit.on_exhausted) from None
+                raise await self._stop(scope, key, limit, exhausted) from None
             await self._warn_if_near(scope, limit, key, spent)
 
     async def reserve(self, meter: str, amount: float) -> list[Reservation]:
@@ -427,8 +494,7 @@ class RunBudgets:
                 )
             except BudgetExhausted as exhausted:
                 await self.release(held)  # hold nothing when the call cannot run
-                await self._record_exhausted(scope, limit, exhausted)
-                raise BudgetExhaustedForRun(exhausted, limit.on_exhausted) from None
+                raise await self._stop(scope, key, limit, exhausted) from None
         return held
 
     async def commit(self, held: list[Reservation], *, actual: float) -> None:
@@ -474,6 +540,33 @@ class RunBudgets:
                 "window": limit.window,
             },
         )
+
+    async def _stop(
+        self, scope: BudgetScope, key: str, limit: Any, exhausted: BudgetExhausted
+    ) -> Exception:
+        """What to raise when a budget runs out: wait for a person, or end."""
+        await self._record_exhausted(scope, limit, exhausted)
+        if limit.on_exhausted != "pause" or (key, limit.meter) in self.refused:
+            return BudgetExhaustedForRun(exhausted, limit.on_exhausted)
+        request = {
+            "request_id": f"budgetreq_{uuid4().hex}",
+            "key": key,
+            "scope": scope.value,
+            "meter": limit.meter,
+            "window": limit.window,
+            "limit": limit.limit,
+            "used": exhausted.used + exhausted.reserved,
+            "needed": exhausted.requested,
+            "shortfall": exhausted.shortfall,
+            "status": "pending",
+            "asked_at": datetime.now(timezone.utc).isoformat(),
+        }
+        from omnicoreagent.core.runs import current_run
+
+        run = current_run()
+        if run is not None:
+            await run.add_budget_request(request)
+        return RunAwaitingBudget(request)
 
     async def _record_exhausted(
         self, scope: BudgetScope, limit: Any, exhausted: BudgetExhausted
@@ -535,6 +628,8 @@ def _check(
         return
     used = float((state.get("meters") or {}).get(meter, 0.0))
     held = _reserved_totals(state).get(meter, 0.0)
+    # What a person has added to this budget counts as part of it.
+    limit = float(limit) + float((state.get("grants") or {}).get(meter, 0.0))
     if used + held + float(amount) > float(limit):
         raise BudgetExhausted(
             key=key, meter=meter, limit=float(limit), used=used, reserved=held, requested=float(amount)

@@ -6,7 +6,12 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import uuid
 
-from omnicoreagent.core.budgets import BudgetLedger, RunBudgets, active_budgets
+from omnicoreagent.core.budgets import (
+    BudgetLedger,
+    RunAwaitingBudget,
+    RunBudgets,
+    active_budgets,
+)
 from omnicoreagent.core.runs import (
     RunInterrupted,
     RunStateUnsupported,
@@ -656,7 +661,7 @@ class OmniCoreAgent:
                 problem = _not_resumable(existing, run_id)
                 if problem is None:
                     _resume = existing
-                elif existing["status"] in {"running", "awaiting_approval"}:
+                elif existing["status"] in {"running", "awaiting_approval", "awaiting_budget"}:
                     raise ValueError(problem)
                 else:
                     retry_of = existing
@@ -706,8 +711,33 @@ class OmniCoreAgent:
                             }
                             for approval in _resume.get("approvals") or []
                         ],
+                        "budget_requests": [
+                            {
+                                key: request.get(key)
+                                for key in (
+                                    "request_id", "status", "approver", "note",
+                                    "meter", "scope", "amount",
+                                )
+                            }
+                            for request in _resume.get("budget_requests") or []
+                        ],
                     },
                 )
+                for request in _resume.get("budget_requests") or []:
+                    if request.get("status") in {"granted", "denied"}:
+                        await self.telemetry_recorder.emit_event(
+                            "budget_granted"
+                            if request["status"] == "granted"
+                            else "budget_denied",
+                            actor=self._telemetry_actor(),
+                            metadata={
+                                key: request.get(key)
+                                for key in (
+                                    "request_id", "scope", "meter", "amount",
+                                    "approver", "note",
+                                )
+                            },
+                        )
 
             if not self._initialized:
                 await self.initialize()
@@ -784,7 +814,9 @@ class OmniCoreAgent:
                     trace_id=trace_context.trace_id,
                 )
 
-            run_budgets = self._build_run_budgets(run_id=run_id, session_id=session_id)
+            run_budgets = self._build_run_budgets(
+                run_id=run_id, session_id=session_id, resumed=_resume
+            )
             async with run_tracker.active(), active_budgets(run_budgets):
                 response = await self.agent.run(
                     **({"on_event": emit_delta} if delivery is not None else {}),
@@ -861,6 +893,35 @@ class OmniCoreAgent:
                 {
                     "response": None,
                     "status": "interrupted",
+                    "session_id": session_id,
+                    "agent_name": self.name,
+                    "run_id": run_id,
+                    "trace_id": trace_context.trace_id,
+                },
+                boundary="public",
+            )
+        except RunAwaitingBudget as waiting:
+            # The run cannot afford its next step. It keeps what it has done
+            # and waits: grant_budget() and resume() carry it on, deny_budget()
+            # ends it.
+            await run_tracker.finish(
+                "awaiting_budget", usage=getattr(waiting, "usage", None)
+            )
+            await self.telemetry_recorder.emit_event(
+                "run_suspended",
+                actor=self._telemetry_actor(),
+                metadata={"budget_request": waiting.request},
+            )
+            trace_finalizing = True
+            await self.telemetry_recorder.end_trace(
+                status=TraceStatus.SUSPENDED,
+                output={"status": "awaiting_budget", "budget": waiting.request["meter"]},
+            )
+            return self.privacy_filter.redact(
+                {
+                    "response": None,
+                    "status": "awaiting_budget",
+                    "budget_request": waiting.request,
                     "session_id": session_id,
                     "agent_name": self.name,
                     "run_id": run_id,
@@ -1129,6 +1190,110 @@ class OmniCoreAgent:
             arguments=arguments,
         )
 
+    async def grant_budget(
+        self,
+        run_id: str,
+        *,
+        amount: Optional[float] = None,
+        approver: str,
+        note: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Add to the budget a waiting run ran out of, so it can carry on.
+
+        The policy is not changed: this is a recorded exception to one budget,
+        with the name of whoever made it. ``amount`` defaults to what the run
+        said it was short of. ``resume(run_id)`` then continues the work.
+        """
+        return await self._decide_budget(
+            run_id,
+            request_id=request_id,
+            granted=True,
+            amount=amount,
+            approver=approver,
+            note=note,
+        )
+
+    async def deny_budget(
+        self,
+        run_id: str,
+        *,
+        approver: str,
+        note: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Refuse a waiting run's budget: ``resume(run_id)`` ends it cleanly."""
+        return await self._decide_budget(
+            run_id,
+            request_id=request_id,
+            granted=False,
+            amount=None,
+            approver=approver,
+            note=note,
+        )
+
+    async def _decide_budget(
+        self,
+        run_id: str,
+        *,
+        request_id: Optional[str],
+        granted: bool,
+        amount: Optional[float],
+        approver: str,
+        note: Optional[str],
+    ) -> Dict[str, Any]:
+        from omnicoreagent.core.runs import update_from_outside
+
+        if not self._initialized:
+            await self.initialize()
+        if not supports_run_state(self.memory_router):
+            raise LookupError(f"No run {run_id}: the memory store keeps no run state")
+        record = await self.get_run(run_id)
+        if record is None:
+            raise LookupError(f"No run {run_id}")
+        pending = [
+            request
+            for request in record.get("budget_requests", [])
+            if request["status"] == "pending"
+            and (request_id is None or request["request_id"] == request_id)
+        ]
+        if not pending:
+            raise LookupError(f"Run {run_id} is not waiting for a budget decision")
+        request = pending[-1]
+        given = float(request["shortfall"] if amount is None else amount)
+        if granted:
+            await BudgetLedger(self.memory_router).grant(
+                request["key"],
+                request["meter"],
+                given,
+                approver=approver,
+                note=note,
+            )
+
+        def decide(stored: dict[str, Any]) -> None:
+            for item in stored.get("budget_requests", []):
+                if item["request_id"] == request["request_id"]:
+                    item.update(
+                        status="granted" if granted else "denied",
+                        approver=approver,
+                        note=note,
+                        amount=given if granted else 0.0,
+                    )
+
+        # The decision is recorded on the run; the run's own trace records it
+        # when it continues, as an approval's decision is.
+        await update_from_outside(self.memory_router, run_id, decide)
+        return {
+            "run_id": run_id,
+            "request_id": request["request_id"],
+            "status": "granted" if granted else "denied",
+            "meter": request["meter"],
+            "scope": request["scope"],
+            "amount": given if granted else 0.0,
+            "approver": approver,
+            "note": note,
+        }
+
     async def list_runs(
         self,
         session_id: Optional[str] = None,
@@ -1193,13 +1358,20 @@ class OmniCoreAgent:
                 output={"run_summary": run_summary["run_summary"]},
             )
 
-    def _build_run_budgets(self, *, run_id: str, session_id: str | None):
+    def _build_run_budgets(
+        self, *, run_id: str, session_id: str | None, resumed: dict | None = None
+    ):
         """The budgets covering this run, or nothing when none are set."""
         engine = getattr(getattr(self, "agent", None), "governance_engine", None)
         policy = getattr(engine, "policy", None)
         budgets = getattr(policy, "budgets", None)
         if budgets is None:
             return None
+        refused = {
+            (request["key"], request["meter"])
+            for request in (resumed or {}).get("budget_requests", [])
+            if request.get("status") == "denied"
+        }
         return RunBudgets(
             BudgetLedger(self.memory_router),
             budgets,
@@ -1207,6 +1379,7 @@ class OmniCoreAgent:
             session_id=session_id,
             agent_name=self.name,
             telemetry_recorder=self.telemetry_recorder,
+            refused=refused,
         )
 
     async def _run_summary(self, trace_id: str) -> Dict[str, Any]:
@@ -2033,6 +2206,18 @@ def _not_resumable(record: dict[str, Any], run_id: str) -> Optional[str]:
         pending = [a["approval_id"] for a in record.get("approvals", []) if a["status"] == "pending"]
         if pending:
             return f"Run {run_id} is still waiting for approval: {', '.join(pending)}"
+        return None
+    if status == "awaiting_budget":
+        pending = [
+            request["request_id"]
+            for request in record.get("budget_requests", [])
+            if request["status"] == "pending"
+        ]
+        if pending:
+            return (
+                f"Run {run_id} is still waiting for a budget decision: "
+                f"{', '.join(pending)}"
+            )
         return None
     if status == "interrupted":
         return None

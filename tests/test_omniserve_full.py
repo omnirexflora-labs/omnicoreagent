@@ -1902,6 +1902,7 @@ class TestEndpoints:
             "trace_id": None,
             "run_id": data["run_id"],
             "approvals": None,
+            "budget_request": None,
         }
 
     def test_sync_run_ignores_non_telemetry_business_store(self):

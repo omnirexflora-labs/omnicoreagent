@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from omnicoreagent.core.agents.loop_detection import ToolInteraction
+from omnicoreagent.core.budgets import BudgetExhaustedForRun, RunAwaitingBudget
 from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.runs import RunSuspended, current_run
 from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
@@ -368,6 +369,10 @@ async def execute_native_turn(
                 )
             finally:
                 run_call_started = call_started["flag"]
+        except (BudgetExhaustedForRun, RunAwaitingBudget):
+            # A call the run cannot afford is not a failed call: the run ends
+            # or waits for a person, and nothing is recorded against the tool.
+            raise
         except _UnknownOutcome:
             result = {
                 "tool_name": request.name,
