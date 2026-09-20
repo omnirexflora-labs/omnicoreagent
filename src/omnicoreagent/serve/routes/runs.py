@@ -202,6 +202,24 @@ def create_runs_router() -> APIRouter:
             raise HTTPException(status_code=409, detail=str(exc)) from None
         return _public_view(agent, approval)
 
+    @router.get(
+        "/runs/{run_id}/budget",
+        summary="Read a run's budgets",
+        description=(
+            "Every budget covering the run — its own, its session's, its agent's, "
+            "the application's — with the limit, what is spent and reserved, and "
+            "the ledger key. Empty when nothing is budgeted."
+        ),
+        responses={404: {"model": ErrorResponse}},
+    )
+    async def read_budgets(request: Request, run_id: str) -> dict:
+        agent = get_agent(request)
+        try:
+            entries = await agent.budget_status(run_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        return {"run_id": run_id, "budgets": entries}
+
     @router.post(
         "/runs/{run_id}/budget",
         summary="Decide a budget",

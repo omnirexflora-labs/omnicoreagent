@@ -1087,6 +1087,44 @@ class OmniCoreAgent:
                 f"{record_exc.__class__.__name__}"
             )
 
+    async def budget_status(self, run_id: str) -> List[Dict[str, Any]]:
+        """Every budget covering a run, with its limit and what it has spent.
+
+        The application's, session's and agent's counters are read from the
+        ledger (they are shared, and live on); a finished run's own counter is
+        the one settled on its record. Empty when nothing is budgeted.
+        """
+        from omnicoreagent.core.budgets import METERS, BudgetScope
+
+        record = await self.get_run(run_id)
+        if record is None:
+            raise LookupError(f"No run {run_id}")
+        budgets = self._build_run_budgets(run_id=run_id, session_id=record.get("session_id"))
+        if budgets is None or not budgets.enabled:
+            return []
+        settled = record.get("budgets") or {}
+        entries: List[Dict[str, Any]] = []
+        for meter in METERS:
+            for scope, key, limit in budgets.limits(meter):
+                usage = await budgets.ledger.usage(key)
+                reserved = await budgets.ledger.reserved(key)
+                spent = usage.get(meter, 0.0)
+                if scope == BudgetScope.REQUEST and record.get("status") not in {"running"}:
+                    spent = (settled.get(scope.value) or {}).get(meter, spent)
+                entries.append(
+                    {
+                        "scope": scope.value,
+                        "meter": meter,
+                        "window": limit.window,
+                        "key": key,
+                        "limit": limit.limit,
+                        "spent": spent,
+                        "reserved": reserved.get(meter, 0.0),
+                        "remaining": max(0.0, limit.limit - spent - reserved.get(meter, 0.0)),
+                    }
+                )
+        return entries
+
     async def get_run(self, run_id: str) -> Optional[Dict[str, Any]]:
         """A run's durable record, or None if it has none.
 
