@@ -207,6 +207,30 @@ def _refuse_policy_in_workspace(policy: Any, agent_config: dict[str, Any]) -> No
         )
 
 
+def _apply_configured_budgets(policy: Any, budgets: Any) -> None:
+    """Budgets set in ``governance_config``, for applications with no policy file.
+
+    The budget becomes part of the policy and is hashed with it, so it cannot
+    be widened at runtime without changing the policy's identity. A policy that
+    already sets budgets keeps them: two sources would leave it unclear which
+    one governs.
+    """
+    if budgets is None:
+        return
+    from omnicoreagent.governance import PolicyBudgets
+    from omnicoreagent.governance.hashing import attach_policy_hash
+
+    if policy.budgets is not None:
+        raise ValueError(
+            "governance_config.budgets cannot be set when the policy already has "
+            "budgets; keep them in one place"
+        )
+    policy.budgets = (
+        budgets if isinstance(budgets, PolicyBudgets) else PolicyBudgets(**budgets)
+    )
+    attach_policy_hash(policy)
+
+
 def build_governance_engine(agent_config: dict[str, Any], telemetry_recorder: Any = None) -> Any:
     governance_config = agent_config.get("governance_config") or {}
     if not governance_config.get("enabled", False):
@@ -221,6 +245,7 @@ def build_governance_engine(agent_config: dict[str, Any], telemetry_recorder: An
         profile=governance_config.get("profile", "interactive-dev"),
     )
     _refuse_policy_in_workspace(policy, agent_config)
+    _apply_configured_budgets(policy, governance_config.get("budgets"))
     sandbox_runtime = governance_config.get("sandbox_runtime")
     if sandbox_runtime is None and governance_config.get("sandbox_config") is not None:
         from omnicoreagent.sandbox import build_sandbox_runtime

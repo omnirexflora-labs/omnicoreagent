@@ -17,6 +17,11 @@ def governance_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex}"
 
 
+# Budgets are read here; what they count lives in ``core.budgets``.
+BUDGET_SCOPES = ("request", "session", "agent", "application")
+BUDGET_EXHAUSTED_ACTIONS = frozenset({"pause", "terminate"})
+
+
 class PolicyEffect(str, Enum):
     ALLOW = "allow"
     DENY = "deny"
@@ -256,6 +261,97 @@ class PolicyBudget:
 
 
 @dataclass
+class BudgetLimit:
+    """What one meter may reach in one scope, and what happens at the wall.
+
+    ``warn_at`` is the fraction of the limit that records a warning before the
+    work stops. ``on_exhausted`` is ``pause`` (wait for a person to top it up,
+    like an approval) or ``terminate`` (end the run), for unattended jobs.
+    """
+
+    meter: str
+    limit: float
+    window: str = "total"
+    warn_at: float = 0.8
+    on_exhausted: str = "pause"
+
+    def __post_init__(self) -> None:
+        from omnicoreagent.core.budgets import METERS, WINDOWS
+
+        self.meter = _non_empty_string(self.meter, "meter")
+        if self.meter not in METERS:
+            raise ValueError(
+                f"budget meter must be one of: {', '.join(METERS)}; got {self.meter!r}"
+            )
+        self.window = _non_empty_string(self.window, "window")
+        if self.window not in WINDOWS:
+            raise ValueError(
+                f"budget window must be one of: {', '.join(WINDOWS)}; got {self.window!r}"
+            )
+        self.limit = _finite_non_negative(self.limit, "limit")
+        if self.limit <= 0:
+            raise ValueError("budget limit must be greater than zero")
+        self.warn_at = _finite_non_negative(self.warn_at, "warn_at")
+        if not 0 < self.warn_at <= 1:
+            raise ValueError("budget warn_at must be a fraction above 0 and at most 1")
+        if self.on_exhausted not in BUDGET_EXHAUSTED_ACTIONS:
+            raise ValueError(
+                "budget on_exhausted must be one of: "
+                f"{', '.join(sorted(BUDGET_EXHAUSTED_ACTIONS))}; got {self.on_exhausted!r}"
+            )
+
+
+@dataclass
+class PolicyBudgets:
+    """The budgets of a policy, by scope.
+
+    A request, a session, and an agent are identified by the run itself; an
+    application is whatever the deployment calls itself, so its budgets need
+    an ``application_id`` and nothing is assumed.
+    """
+
+    request: list[BudgetLimit] = field(default_factory=list)
+    session: list[BudgetLimit] = field(default_factory=list)
+    agent: list[BudgetLimit] = field(default_factory=list)
+    application: list[BudgetLimit] = field(default_factory=list)
+    application_id: str | None = None
+
+    def __post_init__(self) -> None:
+        for scope in BUDGET_SCOPES:
+            limits = getattr(self, scope)
+            if isinstance(limits, BudgetLimit):
+                limits = [limits]
+            if not isinstance(limits, (list, tuple)):
+                raise ValueError(f"budgets.{scope} must be a list of budget limits")
+            read = [
+                item if isinstance(item, BudgetLimit) else BudgetLimit(**item)
+                for item in limits
+            ]
+            metered = [item.meter for item in read]
+            repeated = {meter for meter in metered if metered.count(meter) > 1}
+            if repeated:
+                raise ValueError(
+                    f"budgets.{scope} sets {', '.join(sorted(repeated))} more than once"
+                )
+            setattr(self, scope, read)
+        if self.application_id is not None:
+            self.application_id = _non_empty_string(self.application_id, "application_id")
+        if self.application and self.application_id is None:
+            raise ValueError(
+                "budgets.application_id is required to budget an application: it names "
+                "the deployment or tenant the budget belongs to"
+            )
+
+    def limits_for(self, scope: str) -> list[BudgetLimit]:
+        if scope not in BUDGET_SCOPES:
+            raise ValueError(f"budget scope must be one of: {', '.join(BUDGET_SCOPES)}")
+        return list(getattr(self, scope))
+
+    def is_empty(self) -> bool:
+        return not any(getattr(self, scope) for scope in BUDGET_SCOPES)
+
+
+@dataclass
 class PolicyEnvelope:
     version: str = "1"
     name: str = "default-policy"
@@ -265,6 +361,7 @@ class PolicyEnvelope:
     profile: PolicyProfile | str | None = None
     provenance: PolicyProvenance | dict[str, Any] = field(default_factory=PolicyProvenance)
     budget: PolicyBudget | dict[str, Any] | None = None
+    budgets: PolicyBudgets | dict[str, Any] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     policy_id_supplied: bool = False
 
@@ -286,12 +383,48 @@ class PolicyEnvelope:
             self.budget = PolicyBudget(**self.budget)
         elif self.budget is not None and not isinstance(self.budget, PolicyBudget):
             raise ValueError("budget must be a PolicyBudget or dict")
+        if isinstance(self.budgets, dict):
+            self.budgets = PolicyBudgets(**self.budgets)
+        elif self.budgets is not None and not isinstance(self.budgets, PolicyBudgets):
+            raise ValueError("budgets must be a PolicyBudgets or dict")
+        if self.budgets is not None and self.budgets.is_empty():
+            self.budgets = None
+        self._carry_over_the_old_budget()
         self.policy_id = _non_empty_string(self.policy_id, "policy_id")
         self.policy_id_supplied = _strict_bool(
             self.policy_id_supplied, "policy_id_supplied"
         )
         if not isinstance(self.metadata, dict):
             raise ValueError("policy metadata must be a dict")
+
+    def _carry_over_the_old_budget(self) -> None:
+        """Express ``policy.budget`` in the shape budgets are enforced in.
+
+        The old field counted authority requests and a cost nothing ever set,
+        in one process. Its limits are read as the agent's own budget, so a
+        policy written before budgets existed still means what it said. A
+        limit written in the new shape wins.
+        """
+        if self.budget is None:
+            return
+        # A zero limit is how a subagent policy is narrowed today: it stays on
+        # the old field, which refuses the request, rather than becoming a
+        # budget that says a run may spend nothing.
+        carried = []
+        if self.budget.max_requests:
+            carried.append(BudgetLimit(meter="tool_calls", limit=self.budget.max_requests))
+        if self.budget.max_cost:
+            carried.append(
+                BudgetLimit(meter="model_cost_usd", limit=self.budget.max_cost)
+            )
+        if not carried:
+            return
+        budgets = self.budgets or PolicyBudgets()
+        already = {limit.meter for limit in budgets.agent}
+        budgets.agent = budgets.agent + [
+            limit for limit in carried if limit.meter not in already
+        ]
+        self.budgets = budgets
 
 
 @dataclass

@@ -141,6 +141,8 @@ def _default_governance_config() -> dict[str, Any]:
         "profile": "interactive-dev",
         "policy": None,
         "policy_path": None,
+        # What a request, session, agent, or application may spend.
+        "budgets": None,
         "project_root": None,
         "approval_resolver": None,
         # With no resolver: "suspend" pauses the run until a person decides,
@@ -552,6 +554,13 @@ def _validate_governance_config(value: dict[str, Any]):
         raise ValueError("governance_config.approval_mode must be 'suspend' or 'fail'")
     if not isinstance(value.get("allow_test_sandbox_runtime", False), bool):
         raise ValueError("governance_config.allow_test_sandbox_runtime must be a boolean")
+    budgets = value.get("budgets")
+    if budgets is not None:
+        if not isinstance(budgets, dict):
+            raise ValueError("governance_config.budgets must be a dict")
+        from omnicoreagent.governance import PolicyBudgets
+
+        PolicyBudgets(**budgets)  # read now, so a bad budget fails at startup
     sandbox_config = value.get("sandbox_config")
     if sandbox_config is not None:
         if value.get("sandbox_runtime") is not None:
