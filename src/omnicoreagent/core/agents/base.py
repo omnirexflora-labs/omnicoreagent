@@ -80,6 +80,7 @@ class BaseReactAgent:
         enable_agent_skills: bool = False,
         skill_script_env: list[str] | None = None,
         code_mode: dict[str, Any] | None = None,
+        agents_md: dict[str, Any] | None = None,
         context_management_config: dict = None,
         tool_offload_config: dict = None,
         workspace_config: WorkspaceConfig | dict | None = None,
@@ -104,6 +105,10 @@ class BaseReactAgent:
         from omnicoreagent.core.tools.code_mode import CodeModeConfig
 
         self.code_mode = CodeModeConfig.from_value(code_mode)
+        from omnicoreagent.core.project_instructions import ProjectInstructionsConfig
+
+        self.agents_md = ProjectInstructionsConfig.from_value(agents_md)
+        self.workspace_config = workspace_config
         self.usage_limits = UsageLimits(
             request_limit=self.request_limit, total_tokens_limit=self.total_tokens_limit
         )
@@ -332,6 +337,22 @@ class BaseReactAgent:
             privacy_filter=registry.privacy_filter,
         )
 
+    def _project_instructions(self):
+        """The project's instructions for this run (AGENTS.md), if configured."""
+        from omnicoreagent.core.project_instructions import load_project_instructions
+        from omnicoreagent.core.workspace.config import resolve_workspace_config
+
+        if not self.agents_md.enabled:
+            from omnicoreagent.core.project_instructions import ProjectInstructions
+
+            return ProjectInstructions()
+        workspace = resolve_workspace_config(self.workspace_config)
+        return load_project_instructions(
+            self.agents_md,
+            workspace_dir=workspace.workspace_dir if workspace.workspace_backend == "local" else None,
+            guardrail=self.guardrail,
+        )
+
     async def _deliver_steering(
         self,
         message: dict[str, Any],
@@ -409,14 +430,22 @@ class BaseReactAgent:
             async def message_history(**_):
                 return [dict(message) for message in saved_messages]
 
+        # A project's own instructions, read fresh for this run.
+        project_instructions = self._project_instructions()
         await self.initial_message_preparer.prepare(
             system_prompt=system_prompt,
             session_state=session_state,
             message_history=message_history,
             catalog=catalog,
             session_id=session_id,
+            project_instructions=project_instructions.text,
         )
         if telemetry_recorder is not None:
+            if project_instructions.files or project_instructions.skipped:
+                telemetry_run_header = {
+                    **(telemetry_run_header or {}),
+                    "project_instructions": project_instructions.header(),
+                }
             await self._record_run_configuration(
                 telemetry_recorder,
                 header=telemetry_run_header,

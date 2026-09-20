@@ -191,6 +191,8 @@ class AgentConfig:
     run_lease_seconds: int = 60
     # Code mode: a run_code tool that runs Python in Monty (omnicoreagent[codemode]).
     code_mode: dict[str, Any] = field(default_factory=dict)
+    # A project's own instructions for the agent (AGENTS.md), by path.
+    agents_md: dict[str, Any] = field(default_factory=dict)
     memory_config: dict[str, Any] = field(default_factory=_default_memory_config)
     enable_workspace_files: bool = True
     guardrail_config: dict[str, Any] = field(default_factory=dict)
@@ -209,6 +211,10 @@ class AgentConfig:
             not isinstance(self.agent_version, str) or not self.agent_version.strip()
         ):
             raise ValueError("agent_version must be a non-empty string or None")
+        if self.agents_md:
+            from omnicoreagent.core.project_instructions import ProjectInstructionsConfig
+
+            ProjectInstructionsConfig.from_value(self.agents_md)  # validates
         if self.code_mode:
             from omnicoreagent.core.tools.code_mode import CodeModeConfig
 

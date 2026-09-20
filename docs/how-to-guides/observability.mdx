@@ -171,6 +171,10 @@ reconnects, and last error (never its command, URL, environment, or headers). Th
 only with `capture: "full"`. The header lives in the event metadata, so it is
 recorded under every capture policy.
 
+When a project's `AGENTS.md` instructions are configured, the header also
+records `project_instructions`: each file used (path, size, digest) and each
+one skipped, with the reason.
+
 The header also lists `security_warnings`, each with a `code` and a message,
 for configurations where code runs with less protection than a reader might
 assume: `ungoverned_host_scripts` (skill scripts on the host with governance

@@ -57,6 +57,7 @@ install gVisor and set `"options": {"runtime": "runsc"}` in `sandbox_config`.
 | Skill scripts, without a sandbox | Yes | **No**, on your host as your user | No (minimal environment; see [Skills](/docs/core-concepts/skills)) |
 | Your own tools (`local_tools`) | Yes | **No**, in your process | Yes |
 | MCP tools | Yes | Depends on the MCP server | Depends on the server |
+| `AGENTS.md` instructions | n/a: they are text, not actions | n/a | No |
 
 Governance decides whether a tool runs; it cannot limit what your own tool
 code does once it runs. Treat your tools as trusted code with your process's
@@ -65,6 +66,10 @@ privileges.
 ## Built-in protections
 
 - A governed agent only delegates to governed subagents.
+- A project's `AGENTS.md` instructions are guidance only: they cannot grant a
+  permission or change the policy, and one inside the agent's workspace, over
+  the size limit, or refused by the injection guardrail is not used
+  ([AGENTS.md](/docs/core-concepts/agents-md)).
 - A policy file inside the agent's workspace, or inside a directory mounted
   read-write into the sandbox, is refused, so the agent cannot edit its own
   policy.

@@ -28,6 +28,7 @@ class AgentInitialMessagePreparer:
         session_id: str,
         message_history,
         catalog,
+        project_instructions: str | None = None,
     ) -> None:
         # A storage failure must not silently start a fresh conversation.
         await asyncio.wait_for(
@@ -53,6 +54,7 @@ class AgentInitialMessagePreparer:
             sub_agents=[
                 binding.agent for binding in bindings if binding.agent is not None
             ],
+            project_instructions=project_instructions,
         )
         session_state.messages.insert(
             0, Message(role="system", content=updated_system_prompt)

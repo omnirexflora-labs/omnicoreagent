@@ -55,6 +55,7 @@ class AgentPromptContextBuilder:
         available_tools: set[str],
         tool_aliases: dict[str, str] | None = None,
         sub_agents: list[Any] | None = None,
+        project_instructions: str | None = None,
     ) -> str:
         sections = [base_system_prompt]
 
@@ -104,7 +105,12 @@ class AgentPromptContextBuilder:
                 extensions = re.sub(
                     r"(?<![\w-])" + re.escape(name) + r"(?![\w-])", exposed, extensions
                 )
-        return "\n".join([sections[0], extensions]).strip()
+        prompt = "\n".join([sections[0], extensions]).strip()
+        if project_instructions:
+            # Project text, like the operator's instruction: never rewritten by
+            # tool alias mapping, and clearly marked as guidance.
+            prompt = f"{prompt}\n\n{project_instructions.strip()}"
+        return prompt
 
     def inject_current_datetime(self, messages: list[Message]) -> None:
         for index in range(len(messages) - 1, -1, -1):
