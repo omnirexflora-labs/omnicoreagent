@@ -161,12 +161,26 @@ class PatternManager:
                     (r"(?:\\x[0-9a-f]{2,}|%[0-9a-f]{2}|&#x?[0-9a-f]+;)", False),
                     (r"\\u[0-9a-f]{4,}", False),
                     (
-                        r"\b(?:base64|rot13|rot-?13|hex|unicode|url|binary)\s*(?:encode|decode|decrypt|encrypt)\s*[:=\(]",
+                        # The engine folds digits to letters before matching
+                        # (4→a, 3→e, 1→l), so "base64" arrives as "base6a".
+                        r"\b(?:base6[4a]|rot-?(?:13|le)|hex|unicode|url|binary)\s*(?:encode|decode|decrypt|encrypt)\s*[:=\(]",
                         False,
                     ),
-                    (r"[0-9a-f]{8,}", False),
+                    # A bare hexadecimal or base64-shaped token is not evidence of
+                    # an encoded payload: run ids, trace ids, commit SHAs and
+                    # UUIDs look exactly like that, and the runtime's own
+                    # background preamble carries one on every line. Evidence is
+                    # an escape sequence (above) or a stated intent to decode.
+                ],
+            },
+            # A stated intent to decode *with* the thing to decode is the
+            # strongest form of the same evidence, and stands on its own.
+            "payload_decode_intent": {
+                "weight": 25,
+                "requires_target": False,
+                "patterns": [
                     (
-                        r"(?:[A-Za-z0-9+/]{4}){4,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?",
+                        r"\b(?:base6[4a]|rot-?(?:13|le)|hex|unicode|url|binary)\s*(?:encode|decode|decrypt|encrypt)\s*[:=\(]\s*[A-Za-z0-9+/=\\x]{8,}",
                         False,
                     ),
                 ],
