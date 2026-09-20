@@ -155,6 +155,11 @@ Redis requirements:
   by a backend lock before the state snapshot is read, mutated, and persisted.
   The lock release must be token-checked so one worker cannot release another
   worker's lock.
+- the backend lock carries a short lease (30 s by default; a long write
+  refreshes it) and acquisition waits out at least one full lease, so a lock
+  left by a process that died holding it delays the next process by at most
+  the lease and can never stop a restart. A lock still held after that names
+  how long its holder has left. The same holds for the MongoDB lock.
 
 SQL requirements:
 
