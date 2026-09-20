@@ -144,7 +144,8 @@ class RedisTaskStore(SerializedTaskStore):
     def lock_wait_seconds(self) -> float:
         """How long acquisition waits: at least a full lease, so a lock left
         by a dead process lapses while we wait."""
-        return max(self.lock_timeout, self.lock_lease_seconds) + 1.0
+        # One more attempt after the lease has lapsed (attempts are 50 ms apart).
+        return max(self.lock_timeout, self.lock_lease_seconds) + 0.1
 
     async def _acquire_lock(self) -> str:
         client = self._require_client()
@@ -161,7 +162,8 @@ class RedisTaskStore(SerializedTaskStore):
             if acquired:
                 return token
             await asyncio.sleep(0.05)
-        remaining_ms = await client.pttl(self._lock_key)
+        pttl = getattr(client, "pttl", None)
+        remaining_ms = await pttl(self._lock_key) if pttl is not None else -1
         held = (
             f": held by another process for another {remaining_ms / 1000:.1f}s"
             if isinstance(remaining_ms, int) and remaining_ms > 0

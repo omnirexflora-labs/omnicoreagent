@@ -183,7 +183,7 @@ class MongoDbTaskStore(SerializedTaskStore):
     @property
     def lock_wait_seconds(self) -> float:
         """At least a full lease, so a lock left by a dead process lapses."""
-        return max(self.lock_timeout, self.lock_lease_seconds) + 1.0
+        return max(self.lock_timeout, self.lock_lease_seconds) + 0.1
 
     async def _acquire_lock(self) -> str:
         token = uuid4().hex

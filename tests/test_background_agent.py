@@ -3263,7 +3263,7 @@ async def test_redis_task_store_cleans_previous_generation_after_commit():
 async def test_redis_task_store_reads_use_backend_lock():
     client = FakeRedisClient()
     store = RedisTaskStore(
-        url="redis://localhost:6379", prefix="test", lock_timeout=0.01
+        url="redis://localhost:6379", prefix="test", lock_timeout=0.01, lock_lease_seconds=0.01
     )
     store._client = client
     client.values[store._lock_key] = "other-worker"
