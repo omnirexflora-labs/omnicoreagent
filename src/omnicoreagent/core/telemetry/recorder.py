@@ -439,6 +439,15 @@ class TelemetryRecorder:
             self._release_trace(context.trace_id)
             set_telemetry_context(parent_context)
 
+    async def peek_trace(self, trace_id: str) -> TelemetryTrace | None:
+        """The stored trace, uncopied, for a caller that only reads it."""
+        try:
+            return await self._bounded(
+                self.store.peek_trace(trace_id), self.config.persistence_timeout_seconds
+            )
+        except Exception:
+            return None
+
     async def read_trace(self, trace_id: str) -> TelemetryTrace | None:
         """Read a stored trace within the persistence bound; ``None`` on failure."""
         try:

@@ -212,6 +212,9 @@ FOUNDATION_EVENT_TYPES = frozenset(
 )
 
 
+_PLAIN_LEAVES = frozenset({str, int, float, bool})
+
+
 def to_plain(value: Any) -> Any:
     """Turn a record into plain data, walking it once.
 
@@ -220,6 +223,11 @@ def to_plain(value: Any) -> Any:
     walk the result again. Everything a record holds is rebuilt on the way
     through, so what is recorded never changes underneath the recorder.
     """
+    # Most nodes are leaves of these types; they are answered before any of
+    # the checks below run. (bool and int are checked by identity of type so
+    # that an Enum that is also an int or str still takes the Enum path.)
+    if value is None or type(value) in _PLAIN_LEAVES:
+        return value
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, datetime):

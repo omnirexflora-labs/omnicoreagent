@@ -1385,7 +1385,8 @@ class OmniCoreAgent:
     async def _run_summary(self, trace_id: str) -> Dict[str, Any]:
         """Totals for the run so far, with its subagents' tokens and cost added."""
         recorder = self.telemetry_recorder
-        trace = await recorder.read_trace(trace_id)
+        # Totals only read the trace; a copy of it would be most of the work.
+        trace = await recorder.peek_trace(trace_id)
         if trace is None:
             return {"run_summary": None, "final_model_response_event_id": None}
         summary = summarize_trace(trace)
@@ -1393,7 +1394,7 @@ class OmniCoreAgent:
         combined_cost = summary["estimated_cost_usd"] or 0.0
         cost_complete = summary["cost_complete"] or summary["model_calls"]["total"] == 0
         for child_id in summary["subagents"]["child_trace_ids"]:
-            child = await recorder.read_trace(child_id)
+            child = await recorder.peek_trace(child_id)
             if child is None:
                 cost_complete = False
                 continue
