@@ -22,6 +22,9 @@ import re
 import urllib.error
 import urllib.request
 
+from fastapi import APIRouter
+from fastapi.responses import HTMLResponse
+
 from omnicoreagent import MemoryRouter, OmniCoreAgent
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 
@@ -368,3 +371,18 @@ agent = OmniCoreAgent(
     # Every model prompt and response is kept: the trace is the proof.
     telemetry_config={"capture": "full"},
 )
+
+
+# --- the page: what the steward is doing, for anyone with the token --------------
+# Served by OmniServe beside the API (same origin, same tunnel); the page itself
+# needs no token, everything it reads does.
+
+router = APIRouter()
+public_paths = ["/steward/"]
+_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "page.html")
+
+
+@router.get("/steward/", response_class=HTMLResponse, include_in_schema=False)
+async def steward_page() -> str:
+    with open(_PAGE, encoding="utf-8") as page:
+        return page.read()
