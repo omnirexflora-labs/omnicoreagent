@@ -16,6 +16,7 @@ See ``engineering/architecture/production-proving-plan.md``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -194,8 +195,17 @@ OWN_API = os.environ.get("STEWARD_OWN_API", "http://127.0.0.1:8000")
 tools = ToolRegistry()
 
 
-def _own_api(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
-    """The steward's own OmniServe, on loopback, with its own token."""
+async def _own_api(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
+    """The steward's own OmniServe, on loopback, with its own token.
+
+    In a thread: the server that answers runs on this event loop, so a call
+    that blocked the loop while waiting would wait for itself — and stall
+    every heartbeat with it, until the run's lease expired (P5 found this).
+    """
+    return await asyncio.to_thread(_own_api_blocking, method, path, body)
+
+
+def _own_api_blocking(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
     token = os.environ.get("OMNICOREAGENT_SERVE_AUTH_TOKEN", "")
     request = urllib.request.Request(
         f"{OWN_API}{path}",
@@ -267,7 +277,7 @@ async def list_failed_runs(limit: int = 15) -> dict:
     idempotent=True,
 )
 async def list_work_items() -> dict:
-    status, body = _own_api("GET", "/background/tasks")
+    status, body = await _own_api("GET", "/background/tasks")
     tasks = body.get("tasks", body) if isinstance(body, dict) else body
     items = [
         {"item_id": t["task_id"][len(WORK_ITEM_PREFIX):], "cause": (t.get("metadata") or {}).get("cause"),
@@ -301,10 +311,10 @@ async def schedule_work_item(cause: str, title: str, query: str) -> dict:
     if not item_id:
         return {"status": "error", "message": "The cause must name something."}
     task_id = WORK_ITEM_PREFIX + item_id
-    status, existing = _own_api("GET", f"/background/tasks/{task_id}")
+    status, existing = await _own_api("GET", f"/background/tasks/{task_id}")
     if status == 200:
         return {"status": "success", "data": {"item_id": item_id, "already_scheduled": True}}
-    status, body = _own_api("POST", "/background/tasks", {
+    status, body = await _own_api("POST", "/background/tasks", {
         "task_id": task_id,
         "agent_id": "steward",
         "query": query,
