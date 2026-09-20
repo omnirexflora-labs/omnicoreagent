@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import re
+from functools import lru_cache
 from typing import Any
 
 from omnicoreagent.core.telemetry.payloads import TelemetryPayloadStore
@@ -202,7 +203,9 @@ def redact_sensitive_text(value: str, config: TelemetryConfig) -> str:
     return _INLINE_ASSIGNMENT.sub(replace, text)
 
 
-def _redact(value: Any, redact_keys: set[str]) -> Any:
+def _redact(value: Any, redact_keys: set[str] | tuple[str, ...]) -> Any:
+    if not isinstance(redact_keys, tuple):
+        redact_keys = tuple(sorted(redact_keys))
     if isinstance(value, dict):
         return {
             key: REDACTION_MARKER
@@ -238,18 +241,29 @@ _NON_SECRET_LAST_WORDS = frozenset(
 )
 
 
-def _key_words(key: str) -> list[str]:
-    snake = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key)
-    return [word for word in re.split(r"[^a-z0-9]+", snake.lower()) if word]
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_NOT_A_WORD = re.compile(r"[^a-z0-9]+")
 
 
-def _should_redact_key(key: str, redact_keys: set[str]) -> bool:
+def _split_key_words(key: str) -> tuple[str, ...]:
+    snake = _CAMEL_BOUNDARY.sub("_", key)
+    return tuple(word for word in _NOT_A_WORD.split(snake.lower()) if word)
+
+
+@lru_cache(maxsize=4096)
+def _key_words(key: str) -> tuple[str, ...]:
+    """The words of a key, split once: keys repeat thousands of times a run."""
+    return _split_key_words(key)
+
+
+@lru_cache(maxsize=8192)
+def _decide_key(key: str, patterns: tuple[str, ...]) -> bool:
     words = _key_words(key)
     if not words or words[-1] in _NON_SECRET_LAST_WORDS:
         return False
     joined = f"_{'_'.join(words)}_"
     compact = "".join(words)
-    for pattern in redact_keys:
+    for pattern in patterns:
         pattern_words = _key_words(pattern)
         if not pattern_words:
             continue
@@ -260,6 +274,17 @@ def _should_redact_key(key: str, redact_keys: set[str]) -> bool:
         ):
             return True
     return False
+
+
+def _should_redact_key(key: str, redact_keys: set[str] | tuple[str, ...]) -> bool:
+    """Whether a key names a secret, under these patterns.
+
+    The decision for a key does not change while the patterns do not, and a
+    request asks it thousands of times for a few dozen distinct keys, so it is
+    made once per (key, patterns) and remembered.
+    """
+    patterns = redact_keys if isinstance(redact_keys, tuple) else tuple(sorted(redact_keys))
+    return _decide_key(key, patterns)
 
 
 def _truncate_or_reference(
