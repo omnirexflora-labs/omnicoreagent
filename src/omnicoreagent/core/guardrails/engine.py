@@ -81,7 +81,7 @@ class DetectionEngine:
                 # A trusted pattern may bypass ordinary false positives, but
                 # it cannot authorize a known instruction override, extraction,
                 # jailbreak, or context-manipulation pattern.
-                _, allowlist_flags = self._pattern_matching(normalized)
+                _, allowlist_flags = self._pattern_matching(normalized, user_input)
                 if not self._has_high_risk_pattern(allowlist_flags):
                     return self._create_safe_result(
                         input_hash, len(user_input), start_time
@@ -90,7 +90,7 @@ class DetectionEngine:
             flags = []
             total_score = 0
 
-            pattern_score, pattern_flags = self._pattern_matching(normalized)
+            pattern_score, pattern_flags = self._pattern_matching(normalized, user_input)
             total_score += pattern_score
             flags.extend(pattern_flags)
 
@@ -184,9 +184,7 @@ class DetectionEngine:
         }
         def normalize_leet_token(match: re.Match[str]) -> str:
             token = match.group(0)
-            has_alpha = any(char.isalpha() for char in token)
-            has_digit = any(char.isdigit() for char in token)
-            if not (has_alpha and has_digit):
+            if not _could_be_leet(token):
                 return token
             for leet, normal in leet_map.items():
                 token = token.replace(leet, normal)
@@ -204,7 +202,9 @@ class DetectionEngine:
 
         return normalized.strip().lower()
 
-    def _pattern_matching(self, normalized: str) -> tuple[int, list[str]]:
+    def _pattern_matching(
+        self, normalized: str, original: str | None = None
+    ) -> tuple[int, list[str]]:
         """Pattern matching analysis"""
         score = 0
         flags = []
@@ -212,15 +212,20 @@ class DetectionEngine:
 
         for group_name, config in patterns.items():
             group_score = 0
+            # A group may ask for the text as written, when folding it
+            # (leetspeak, separators) would create what the group looks for.
+            text = normalized
+            if config.get("match") == "original" and original is not None:
+                text = original.lower()
             for pattern, is_strict in config["patterns"]:
                 try:
-                    matches = list(pattern.finditer(normalized))
+                    matches = list(pattern.finditer(text))
                     for match in matches:
                         matched_text = match.group().strip()
                         if len(matched_text) < 4:
                             continue
 
-                        if is_strict and not self._validate_context(normalized, match):
+                        if is_strict and not self._validate_context(text, match):
                             continue
 
                         group_score += 1
@@ -323,6 +328,17 @@ class DetectionEngine:
             score += 8
         elif risk_count >= 3:
             score += 5
+
+        # Words written with digits for letters ("s3cr3t1nject"): folding
+        # them for matching erases the evidence, so it is counted here. Three
+        # substitutions in one word is a choice; one or two ("h4ck3r", "b64")
+        # are not.
+        heavy_leet = [
+            token for token in re.findall(r"[A-Za-z0-9]+", original) if _is_heavy_leet(token)
+        ]
+        if heavy_leet:
+            flags.append(f"heavy_leet_speak: {heavy_leet[0][:30]}")
+            score += min(18, 6 * len(heavy_leet))
 
         if self.config.enable_encoding_detection:
             encoding_patterns = len(
@@ -620,3 +636,32 @@ class DetectionEngine:
                 f"Input analyzed: {result.threat_level.value} "
                 f"(score: {result.threat_score})"
             )
+
+
+_LEET_DIGITS = frozenset("0134578")
+_HEX = re.compile(r"[0-9a-f]+", re.IGNORECASE)
+
+
+def _could_be_leet(token: str) -> bool:
+    """Whether folding digits to letters could reveal a word in ``token``.
+
+    A hexadecimal identifier (a run id, a commit SHA, a trace id) has digits
+    among letters but is never a word: folding it invents letter runs and
+    "words" that were never written. An identifier with underscores is code.
+    """
+    has_alpha = any(char.isalpha() for char in token)
+    has_digit = any(char.isdigit() for char in token)
+    if not (has_alpha and has_digit):
+        return False
+    if "_" in token:
+        return False
+    return _HEX.fullmatch(token) is None
+
+
+def _is_heavy_leet(token: str) -> bool:
+    """A word with three or more digits standing for letters."""
+    if len(token) < 5 or not _could_be_leet(token):
+        return False
+    substitutions = sum(1 for char in token if char in _LEET_DIGITS)
+    letters = sum(1 for char in token if char.isalpha())
+    return substitutions >= 3 and letters >= 2 and substitutions + letters == len(token)

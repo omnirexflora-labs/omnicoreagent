@@ -275,7 +275,7 @@ class TestPatternManagerRegex:
         """Pattern 3: JSON structural sequences should not match."""
         pm = PatternManager()
         obf = pm.patterns["obfuscation_techniques"]
-        density_pattern = obf["patterns"][2][0]
+        density_pattern = obf["patterns"][1][0]
 
         json_sequences = [
             ':[{"',
@@ -298,7 +298,7 @@ class TestPatternManagerRegex:
         """Pattern 3: Obfuscation symbol sequences should still match."""
         pm = PatternManager()
         obf = pm.patterns["obfuscation_techniques"]
-        density_pattern = obf["patterns"][2][0]
+        density_pattern = obf["patterns"][1][0]
 
         obfuscation_sequences = [">>>>", "<<<<", "####", "!!!!", "~~~~", "%^&*"]
         for seq in obfuscation_sequences:
@@ -311,12 +311,11 @@ class TestPatternManagerRegex:
     def test_repetition_pattern_excludes_structural_chars(self):
         """Pattern 2: Repeated structural brackets should not match."""
         pm = PatternManager()
-        obf = pm.patterns["obfuscation_techniques"]
-        repetition_pattern = obf["patterns"][1][0]
+        padding = pm.patterns["obfuscation_padding"]["patterns"]
 
-        structural_sequences = ["}}}}", "]]]]", "((((", '""""', ",,,,", "::::"]
+        structural_sequences = ["}}}}", "]]]]", "((((", '""""', ",,,,", "::::", "----", "====", "####"]
         for seq in structural_sequences:
-            matches = list(repetition_pattern.finditer(seq))
+            matches = [m for pattern, _ in padding for m in pattern.finditer(seq)]
             significant = [m for m in matches if len(m.group().strip()) >= 4]
             assert len(significant) == 0, (
                 f"Structural repetition '{seq}' matched: {[m.group() for m in significant]}"
@@ -325,46 +324,30 @@ class TestPatternManagerRegex:
     def test_repetition_pattern_catches_letter_and_symbol_repetition(self):
         """Pattern 2: Letter/symbol repetition should still match."""
         pm = PatternManager()
-        obf = pm.patterns["obfuscation_techniques"]
-        repetition_pattern = obf["patterns"][1][0]
+        padding = pm.patterns["obfuscation_padding"]["patterns"]
 
-        obfuscation_sequences = ["aaaa", "!!!!", ">>>>", "<<<<", "####", "~~~~"]
+        obfuscation_sequences = ["aaaa", "!!!!", ">>>>", "<<<<", "~~~~"]
         for seq in obfuscation_sequences:
-            matches = list(repetition_pattern.finditer(seq))
+            matches = [m for pattern, _ in padding for m in pattern.finditer(seq)]
             significant = [m for m in matches if len(m.group().strip()) >= 4]
             assert len(significant) > 0, (
                 f"Obfuscation repetition '{seq}' no longer matched"
             )
 
-    def test_variable_pattern_ignores_normal_identifiers(self):
-        """Pattern 4: Common identifiers should not match."""
-        pm = PatternManager()
-        obf = pm.patterns["obfuscation_techniques"]
-        variable_pattern = obf["patterns"][3][0]
+    def test_normal_identifiers_are_not_heavy_leet_speak(self):
+        """Identifiers, light leet and hexadecimal ids are not obfuscation."""
+        from omnicoreagent.core.guardrails.engine import _is_heavy_leet
 
         normal_identifiers = [
-            "item_2",
-            "user_id",
-            "v2_enabled",
-            "retry_count_3",
-            "test_data",
-            "h4ck3r",
+            "item_2", "user_id", "v2_enabled", "retry_count_3", "test_data", "h4ck3r",
+            "sha256", "utf8", "b64", "cd834e3f6cdd40eaab5d851dc29e8545", "run_dfd0c2f7",
         ]
         for ident in normal_identifiers:
-            matches = list(variable_pattern.finditer(ident))
-            significant = [m for m in matches if len(m.group().strip()) >= 4]
-            assert len(significant) == 0, (
-                f"Normal identifier '{ident}' matched as leet-speak: {[m.group() for m in significant]}"
-            )
+            assert not _is_heavy_leet(ident), f"'{ident}' taken for heavy leet-speak"
 
-    def test_variable_pattern_catches_heavy_leet_speak(self):
-        """Pattern 4: Heavy leet-speak (3+ substitutions) should match."""
-        pm = PatternManager()
-        obf = pm.patterns["obfuscation_techniques"]
-        variable_pattern = obf["patterns"][3][0]
+    def test_heavy_leet_speak_is_recognized(self):
+        """Three or more digits standing for letters in one word."""
+        from omnicoreagent.core.guardrails.engine import _is_heavy_leet
 
-        leet_words = ["s3cr3t1nject", "r3v3al1t", "pr0t3ct1on"]
-        for word in leet_words:
-            matches = list(variable_pattern.finditer(word))
-            significant = [m for m in matches if len(m.group().strip()) >= 4]
-            assert len(significant) > 0, f"Leet-speak '{word}' not detected"
+        for word in ["s3cr3t1nject", "r3v3al1t", "pr0t3ct1on"]:
+            assert _is_heavy_leet(word), f"Leet-speak '{word}' not detected"

@@ -189,16 +189,33 @@ class PatternManager:
                 "weight": 6,
                 "requires_target": False,
                 "patterns": [
+                    # Letters spaced out to slip past a word match. The plain
+                    # words — "override the default", "the secret is in
+                    # .env", "dependency injection", an identifier ending in
+                    # _override — are not that.
                     (
-                        r"\b(?:s\s*e\s*c\s*r\s*e\s*t|i\s*n\s*j\s*e\s*c\s*t|o\s*v\s*e\s*r\s*r\s*i\s*d\s*e)",
+                        r"\b(?:s\s*e\s*c\s*r\s*e\s*t(?<!secret)"
+                        r"|i\s*n\s*j\s*e\s*c\s*t(?<!inject)"
+                        r"|o\s*v\s*e\s*r\s*r\s*i\s*d\s*e(?<!override))\b",
                         False,
                     ),
-                    (r"([^\[\]{}()\"',:\n])\1{3,}", False),
                     (r"[^\w\s{}\[\]():,\"'.=/\\-]{4,}", False),
-                    (
-                        r"\b[a-zA-Z]*\d[a-zA-Z]+\d[a-zA-Z]*\d[a-zA-Z]*\b",
-                        False,
-                    ),
+                    # Letters with digits in them ("l33t") are folded to plain
+                    # words by normalization before matching; what still has
+                    # digits after that is an identifier, not an obfuscation.
+                ],
+            },
+            # Padding: one character repeated to bury or pad an instruction.
+            # Matched against the text as written, not the leetspeak-folded
+            # copy: folding turns a hexadecimal identifier (a run id, a commit
+            # SHA) into runs of letters that were never there.
+            "obfuscation_padding": {
+                "weight": 6,
+                "requires_target": False,
+                "match": "original",
+                "patterns": [
+                    (r"([^\W\d_])\1{3,}", False),
+                    (r"([!?*~^%&+|<>])\1{3,}", False),
                 ],
             },
         }
