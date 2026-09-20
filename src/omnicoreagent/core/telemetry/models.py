@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
 import json
@@ -213,12 +213,21 @@ FOUNDATION_EVENT_TYPES = frozenset(
 
 
 def to_plain(value: Any) -> Any:
+    """Turn a record into plain data, walking it once.
+
+    Not ``dataclasses.asdict``: that walks the whole object and deep-copies
+    its leaves before anything here has looked at them, and then this would
+    walk the result again. Everything a record holds is rebuilt on the way
+    through, so what is recorded never changes underneath the recorder.
+    """
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, datetime):
         return value.astimezone(timezone.utc).isoformat()
-    if is_dataclass(value):
-        return {key: to_plain(item) for key, item in asdict(value).items()}
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            item.name: to_plain(getattr(value, item.name)) for item in fields(value)
+        }
     if isinstance(value, dict):
         return {key: to_plain(item) for key, item in value.items()}
     if isinstance(value, list):
