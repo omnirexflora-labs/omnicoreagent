@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 import time
 import urllib.error
@@ -66,13 +67,13 @@ def events(traces: list[dict], *types: str) -> list[dict]:
 def output_md(run_id: str) -> str:
     """The steward's report, from the server's workspace volume: the run's
     own output.md, or the newest one if it wrote elsewhere."""
+    script = (
+        f"f=$(find /app/workspace/files -path '*{run_id}*' -name output.md | head -1); "
+        '[ -n "$f" ] || f=$(ls -t $(find /app/workspace/files -name output.md) 2>/dev/null | head -1); '
+        'echo "[$f]"; head -60 "$f"'
+    )
     try:
-        return ssh(
-            "docker exec steward-serve sh -c "
-            f"\"f=\$(find /app/workspace/files -path '*{run_id}*' -name output.md | head -1); "
-            "[ -n \\\"\$f\\\" ] || f=\$(ls -t \$(find /app/workspace/files -name output.md) 2>/dev/null | head -1); "
-            "echo \\\"[\$f]\\\"; head -60 \\\"\$f\\\"\""
-        )
+        return ssh("docker exec steward-serve sh -c " + shlex.quote(script))
     except Exception as error:  # noqa: BLE001 - the report is a bonus, not an assertion
         return f"(could not read output.md: {error})"
 
