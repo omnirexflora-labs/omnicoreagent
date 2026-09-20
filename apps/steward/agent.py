@@ -64,9 +64,11 @@ POLICY = {
     "mode": "strict",
     "rules": {
         "allow": [
-            # Reaching the GitHub MCP server at all is a capability of its own.
+            # Reaching the GitHub MCP server at all is a capability of its own,
+            # and so is running as a background task.
             {"rule_id": "github_connect", "capability": "mcp.server.connect",
              "target": {"mcp_server": "github"}},
+            {"rule_id": "background", "capability": "background.run"},
             *[_rule(f"github_read_{tool}", tool) for tool in GITHUB_READS],
             {"rule_id": "sandbox", "capability": "sandbox.execute"},
             {"rule_id": "sandbox_process", "capability": "process.exec",
