@@ -320,9 +320,20 @@ class RunTracker:
             await self._save()
 
     async def add_message(self, message: dict[str, Any]) -> None:
+        """Keep a message on the record.
+
+        A tool's result is written at once: the record keeps a completed
+        call's state, not its result, so this message is the only place a
+        resumed run can get it from. Every other message is followed by a
+        save the contract names — the write-ahead before a tool, the next
+        step, the finish — before anything can go wrong, and rides on it
+        rather than rewriting the whole record on its own. (Decided with the
+        maintainer: 11 saves per tool call became 8.)
+        """
         async with self._lock:
             self.record["context"]["messages"].append(dict(message))
-            await self._save()
+            if message.get("role") == "tool":
+                await self._save()
 
     async def tool_started(
         self,
