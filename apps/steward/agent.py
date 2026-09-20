@@ -135,8 +135,8 @@ agent = OmniCoreAgent(
         "provider": "openai",
         "model": MODEL,
         "api_key": os.environ.get("LLM_API_KEY"),
+        # No temperature: a reasoning model rejects any value but its own.
         "max_tokens": 4000,
-        "temperature": 0.2,
     },
     mcp_tools=[
         {

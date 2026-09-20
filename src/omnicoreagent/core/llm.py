@@ -4,6 +4,7 @@ import inspect
 from copy import deepcopy
 import os
 import random
+import re
 import time
 import warnings
 from collections.abc import Callable
@@ -40,6 +41,24 @@ def _get_litellm():
         _LITELLM_CONFIGURED = True
 
     return litellm
+
+
+# "<model> doesn't support temperature=0.2 while reasoning is active"
+_REFUSED_PARAMETER = re.compile(r"doesn't support ([a-z_]+)=")
+
+
+def _notify_unsupported(name: str, error: Exception) -> None:
+    observer = MODEL_RETRY_OBSERVER.get()
+    logger.warning(f"The model refused {name}; retrying the call without it: {error}")
+    if observer is not None:
+        observer(
+            {
+                "attempt": 1,
+                "reason": "unsupported_parameter",
+                "dropped": [name],
+                "error": str(error)[:300],
+            }
+        )
 
 
 # Receives one record per retried provider failure, so telemetry can show
@@ -177,6 +196,8 @@ class LLMConnection:
     def __init__(self, model_config: dict[str, Any], api_key: str | None = None):
         self.model_config = dict(model_config or {})
         self._warmed = False
+        # Parameters this model has refused by name; not sent again.
+        self._unsupported_params: set[str] = set()
         self.llm_api_key = api_key or self.model_config.get("api_key")
         self.llm_config = self._build_llm_config()
         self._set_llm_environment_variables()
@@ -308,13 +329,38 @@ class LLMConnection:
             params = self._completion_params(messages, tools)
             litellm = _get_litellm()
             params.update(api_key=self.llm_api_key, drop_params=False, num_retries=0)
-            return await litellm.acompletion(**params)
+            try:
+                return await litellm.acompletion(**params)
+            except Exception as refused:
+                dropped = self._refused_parameter(refused, params)
+                if dropped is None:
+                    raise
+                # The provider named the parameter it refuses. Parameters are
+                # sent as given on purpose (a silent drop hides a mistake), so
+                # the retry is recorded with the name, and not sent again.
+                _notify_unsupported(dropped, refused)
+                return await litellm.acompletion(**params)
         except Exception as e:
             error_message = (
                 f"Error calling LLM with model {self.llm_config.get('model')}: {e}"
             )
             logger.error(error_message)
             raise
+
+    def _refused_parameter(self, error: Exception, params: dict[str, Any]) -> str | None:
+        """The parameter a provider's refusal names, removed from ``params`` and
+        remembered, or None when the error is not that kind."""
+        if type(error).__name__ != "UnsupportedParamsError":
+            return None
+        match = _REFUSED_PARAMETER.search(str(error))
+        if match is None:
+            return None
+        name = match.group(1)
+        if name not in params:
+            return None
+        params.pop(name, None)
+        self._unsupported_params.add(name)
+        return name
 
     @retry_with_backoff(max_retries=3, base_delay=1, max_delay=30)
     def llm_call_sync(
@@ -423,7 +469,7 @@ class LLMConnection:
         }
 
         for key in ("temperature", "max_tokens", "top_p", "reasoning_effort"):
-            if self.llm_config.get(key) is not None:
+            if self.llm_config.get(key) is not None and key not in self._unsupported_params:
                 params[key] = self.llm_config[key]
 
         if tools:
