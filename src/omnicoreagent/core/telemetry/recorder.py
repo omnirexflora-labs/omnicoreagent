@@ -361,7 +361,7 @@ class TelemetryRecorder:
                     if root_context is not None
                     else context.child(span.span_id)
                 )
-                await self.end_span(
+                written = await self.end_span(
                     span.span_id,
                     status=(
                         terminal_span_status
@@ -371,12 +371,15 @@ class TelemetryRecorder:
                     output=output if span.span_id == trace.root_span_id else None,
                     error=error if span.span_id == trace.root_span_id else None,
                 )
+                # Applied to the trace in hand: reading it back would copy it.
+                span.status = SpanStatus(written["status"])
+                span.ended_at = written["ended_at"]
+                span.output = written["output"]
+                span.output_capture = written["output_capture"]
+                span.error = written["error"]
             # Capture gaps are computed on the final records: the root span's
             # output descriptor only exists after it has been ended above.
-            final_trace = await self._read(
-                self.store.get_trace(context.trace_id),
-                trace_id=context.trace_id,
-            )
+            final_trace = trace
             incomplete = context.trace_id in self._incomplete_trace_ids
             await self._write(
                 self.store.update_trace(
@@ -452,12 +455,12 @@ class TelemetryRecorder:
         catalog and system prompt versions. ``tags`` are appended.
         """
         context = self._require_context()
-        trace = await self._read(
-            self.store.get_trace(context.trace_id), trace_id=context.trace_id
-        )
-        if trace is None:
+        template = self._trace_templates.get(context.trace_id)
+        if template is None:
             return
-        merged = trace.metadata.model_dump()
+        # The recorder started this trace and holds what it wrote; merging
+        # into that costs nothing, where reading the trace back copies it.
+        merged = template.metadata.model_dump()
         for key, value in values.items():
             if key == "tags":
                 merged["tags"] = list(dict.fromkeys([*merged.get("tags", []), *value]))
@@ -465,11 +468,10 @@ class TelemetryRecorder:
                 merged["extra"] = {**merged.get("extra", {}), **value}
             else:
                 merged[key] = value
+        recorded = self._record_metadata(merged)
+        template.metadata = type(template.metadata).from_dict(recorded)
         await self._write(
-            self.store.update_trace(
-                context.trace_id,
-                {"metadata": self._record_metadata(merged)},
-            ),
+            self.store.update_trace(context.trace_id, {"metadata": recorded}),
             trace_id=context.trace_id,
         )
 
@@ -572,7 +574,9 @@ class TelemetryRecorder:
         error: TelemetryError | dict[str, Any] | None = None,
         token_usage: dict[str, Any] | None = None,
         estimated_cost_usd: float | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
+        """End a span; returns the patch written, so a caller holding the
+        trace can apply it without reading the trace back."""
         context = self._require_context()
         target_span_id = span_id or context.span_id
         if target_span_id is None:
@@ -603,6 +607,7 @@ class TelemetryRecorder:
         span_ids = self._trace_span_ids.get(context.trace_id)
         if span_ids is not None:
             span_ids.discard(target_span_id)
+        return patch
 
     @asynccontextmanager
     async def span(

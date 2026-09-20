@@ -3,10 +3,11 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import asyncio
 import bisect
+import copy
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import AsyncIterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 import os
 from pathlib import Path
 import json
@@ -130,6 +131,7 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
         self._event_index: list[tuple[int, TelemetryEvent]] = []
         self._event_cursors: dict[str, int] = {}
         self._indexed_cursors: set[int] = set()
+        self._unsorted: set[str] = set()
         self._subscribers: dict[
             int,
             tuple[
@@ -154,7 +156,7 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
                 span = _find_span(trace, event.span_id)
                 if span and event.event_id not in span.event_ids:
                     span.event_ids.append(event.event_id)
-            self._index_event_unlocked(event, trace, notify=True)
+            self._index_event_unlocked(trace_event, trace, notify=True)
 
     async def start_span(self, trace_id: str, span: TelemetrySpan) -> None:
         if span.trace_id != trace_id:
@@ -213,6 +215,15 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
         async with self._lock:
             trace = self._traces.get(trace_id)
             return _copy_trace(trace) if trace is not None else None
+
+    async def trace_ids_ended_before(self, cutoff: datetime) -> set[str]:
+        """The finished traces older than ``cutoff``, without copying any."""
+        async with self._lock:
+            return {
+                trace.trace_id
+                for trace in self._traces.values()
+                if trace.ended_at is not None and trace.ended_at < cutoff
+            }
 
     async def list_traces(self, filter: TraceFilter | None = None) -> list[TelemetryTrace]:
         async with self._lock:
@@ -281,12 +292,28 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
         self,
         trace: TelemetryTrace,
         cursors: dict[str, int] | None = None,
+        *,
+        adopt: bool = False,
     ) -> None:
+        """Put back a trace read from durable storage.
+
+        ``adopt`` keeps the object given instead of copying it: right for a
+        trace the caller has just parsed and holds no other reference to,
+        which is what replaying a store does for every trace it holds.
+        """
         _validate_trace_identity(trace)
         async with self._lock:
-            self._merge_trace_unlocked(trace, cursors=cursors, notify=False)
+            self._merge_trace_unlocked(trace, cursors=cursors, notify=False, adopt=adopt)
 
-    async def restore_event(self, event: TelemetryEvent, cursor: int | None) -> None:
+    async def restore_event(
+        self, event: TelemetryEvent, cursor: int | None, *, sort: bool = True
+    ) -> None:
+        """Put back an event read from durable storage.
+
+        Replaying a whole store passes ``sort=False`` and calls
+        ``finish_restore`` at the end, so a trace is sorted once rather than
+        after every one of its events.
+        """
         async with self._lock:
             trace = self._require_trace_unlocked(event.trace_id)
             if event.event_id in self._event_cursors:
@@ -297,14 +324,24 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
             trace_event = _copy_event(event)
             trace_event.stream_cursor = None
             trace.events.append(trace_event)
-            trace.events.sort(
-                key=lambda item: (item.sequence_number, item.timestamp, item.event_id)
-            )
+            if sort:
+                _sort_events(trace)
+            else:
+                self._unsorted.add(event.trace_id)
             if event.span_id:
                 span = _find_span(trace, event.span_id)
                 if span and event.event_id not in span.event_ids:
                     span.event_ids.append(event.event_id)
-            self._index_event_unlocked(event, trace, notify=False, cursor=cursor)
+            self._index_event_unlocked(trace_event, trace, notify=False, cursor=cursor)
+
+    async def finish_restore(self) -> None:
+        """Sort what was restored unsorted: once per trace, after replay."""
+        async with self._lock:
+            for trace_id in self._unsorted:
+                trace = self._traces.get(trace_id)
+                if trace is not None:
+                    _sort_events(trace)
+            self._unsorted.clear()
 
     async def event_cursors(self, trace_id: str) -> dict[str, int]:
         """Return the stream cursor of every indexed event in one trace."""
@@ -383,11 +420,12 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
         *,
         cursors: dict[str, int] | None = None,
         notify: bool = True,
+        adopt: bool = False,
     ) -> None:
         trace_id = incoming.trace_id
         existing = self._traces.get(trace_id)
         if existing is None:
-            self._traces[trace_id] = _copy_trace(incoming)
+            self._traces[trace_id] = incoming if adopt else _copy_trace(incoming)
         else:
             _merge_trace(existing, incoming)
         self._rebuild_trace_event_index_unlocked(
@@ -430,7 +468,7 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
         if cursor is None or cursor <= 0 or cursor in self._indexed_cursors:
             cursor = self._event_cursor + 1
         self._event_cursor = max(self._event_cursor, cursor)
-        stored_event = _copy_event(event)
+        stored_event = copy.copy(event)  # the caller's copy was already isolated
         stored_event.stream_cursor = str(cursor)
         self._event_cursors[event.event_id] = cursor
         self._indexed_cursors.add(cursor)
@@ -497,13 +535,13 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             await self._inner.append_event(trace_id, event)
             payload = event.model_dump()
             payload["stream_cursor"] = str(self._inner._event_cursors[event.event_id])
-            await self._append_record_unlocked("event", payload)
+            await self._append_record_unlocked("event", payload, plain=True)
 
     async def start_span(self, trace_id: str, span: TelemetrySpan) -> None:
         async with self._lock:
             await self._load_unlocked()
             await self._inner.start_span(trace_id, span)
-            await self._append_record_unlocked("span_start", span.model_dump())
+            await self._append_record_unlocked("span_start", span.model_dump(), plain=True)
 
     async def end_span(self, trace_id: str, span_id: str, patch: dict[str, Any]) -> None:
         async with self._lock:
@@ -527,6 +565,7 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
                     for event in trace.events
                     if event.event_id in cursors
                 },
+                plain=True,
             )
 
     async def update_trace(self, trace_id: str, patch: dict[str, Any]) -> None:
@@ -602,6 +641,7 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
                         "evidence_status": TraceEvidenceStatus.PARTIAL.value,
                     },
                 )
+        await self._inner.finish_restore()
         self._loaded = True
         if self.retention_days is not None:
             await self._prune_expired_unlocked(self.retention_days, trigger="load")
@@ -638,15 +678,11 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         if retention_days < 0:
             raise ValueError("retention_days must be non-negative or None")
         cutoff = utc_now() - timedelta(days=retention_days)
-        traces = await self._inner.list_traces()
-        expired = {
-            trace.trace_id
-            for trace in traces
-            if trace.ended_at is not None and trace.ended_at < cutoff
-        }
+        expired = await self._inner.trace_ids_ended_before(cutoff)
         if expired:
             await self._inner.remove_traces(expired)
-            survivors = [trace for trace in traces if trace.trace_id not in expired]
+            # Only now, with something to remove, is the store read in full.
+            survivors = await self._inner.list_traces()
             await self._rewrite_records_unlocked(survivors)
         self.last_prune = {
             "at": utc_now().isoformat(),
@@ -674,6 +710,7 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
                     str(event_id): int(cursor)
                     for event_id, cursor in (record.get("stream_cursors") or {}).items()
                 },
+                adopt=True,
             )
         elif record_type == "trace_update":
             await self._inner.update_trace(payload["trace_id"], payload["patch"])
@@ -690,7 +727,7 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             cursor = payload.get("stream_cursor")
             event = TelemetryEvent.from_dict(payload)
             await self._inner.restore_event(
-                event, int(cursor) if cursor not in (None, "") else None
+                event, int(cursor) if cursor not in (None, "") else None, sort=False
             )
 
     def _record_line(
@@ -699,6 +736,7 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         payload: dict[str, Any],
         *,
         stream_cursors: dict[str, int] | None = None,
+        plain: bool = False,
     ) -> str:
         # ``trace_id`` leads the line so a record truncated by a crash can
         # still be attributed to its trace; ``payload`` is written last.
@@ -710,7 +748,10 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         }
         if stream_cursors:
             record["stream_cursors"] = stream_cursors
-        record["payload"] = to_plain(payload)
+        # A payload that is a record's own dump is plain already; walking it
+        # again would be the same walk twice. A patch may hold enums and
+        # datetimes and is walked.
+        record["payload"] = payload if plain else to_plain(payload)
         return json.dumps(record)
 
     async def _append_record_unlocked(
@@ -719,9 +760,12 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         payload: dict[str, Any],
         *,
         stream_cursors: dict[str, int] | None = None,
+        plain: bool = False,
     ) -> None:
         line = (
-            self._record_line(record_type, payload, stream_cursors=stream_cursors)
+            self._record_line(
+                record_type, payload, stream_cursors=stream_cursors, plain=plain
+            )
             + "\n"
         )
         await self._run_writer(_append_text, self.path, line)
@@ -820,6 +864,10 @@ def _parse_stream_cursor(cursor: str | None) -> int:
 
 def _copy_event(event: TelemetryEvent) -> TelemetryEvent:
     return TelemetryEvent.from_dict(event.model_dump())
+
+
+def _sort_events(trace: TelemetryTrace) -> None:
+    trace.events.sort(key=lambda item: (item.sequence_number, item.timestamp, item.event_id))
 
 
 def _copy_span(span: TelemetrySpan) -> TelemetrySpan:
