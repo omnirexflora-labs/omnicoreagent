@@ -116,7 +116,63 @@ async def main():
         "passed": not detector.is_looping(),
         "note": "Five distinct server identities; transport-independent detector probe.",
     }
+    findings.update(execution_boundaries())
     print(json.dumps(findings, indent=2))
+
+
+def execution_boundaries() -> dict:
+    """The execution lanes: what each is governed as, and what runs code."""
+    from omnicoreagent.core.tools.code_mode import CodeModeConfig
+    from omnicoreagent.governance.capabilities import tool_authority_requests
+    from omnicoreagent.sandbox import build_sandbox_runtime, registered_sandbox_providers
+
+    findings: dict = {}
+    expected = {
+        ("execute", "sandbox"): ("sandbox.execute", "sandbox", "high"),
+        ("run_code", "code"): ("code.run", "code", "medium"),
+        ("run_skill_script", "skill"): ("skill.script.run", "host", "high"),
+        ("write_file", "workspace"): ("workspace.files.write", "workspace", "medium"),
+        ("some_tool", "mcp"): ("tool.mcp.call", "mcp", "low"),
+        ("my_tool", "local"): ("tool.local.call", "tool", "low"),
+    }
+    labels = {}
+    for (tool_name, provider), wanted in expected.items():
+        (request,) = tool_authority_requests(
+            tool_name=tool_name, tool_args={"path": "x"}, tool_provider=provider
+        )
+        actual = (request.capability, request.execution_surface, request.risk_level)
+        labels[f"{provider}:{tool_name}"] = {"expected": list(wanted), "actual": list(actual)}
+    findings["execution_capability_labels"] = {
+        "passed": all(item["expected"] == item["actual"] for item in labels.values()),
+        "labels": labels,
+    }
+
+    providers = {}
+    for name in sorted(registered_sandbox_providers()):
+        options = {"base_url": "https://example.invalid"} if name == "http" else {}
+        try:
+            runtime = build_sandbox_runtime({"provider": name, "options": options})
+            providers[name] = {
+                "supports_execution": bool(runtime.supports_execution),
+                "supports_required_sandbox": bool(runtime.supports_required_sandbox),
+            }
+        except Exception as exc:  # an optional extra is not installed here
+            providers[name] = {"unavailable": type(exc).__name__}
+    findings["sandbox_providers"] = {
+        "passed": providers.get("none", {}).get("supports_execution") is False
+        and all(
+            item.get("supports_execution", True)
+            for name, item in providers.items()
+            if name != "none" and "unavailable" not in item
+        ),
+        "providers": providers,
+    }
+
+    findings["code_mode_defaults_off_and_bounded"] = {
+        "passed": CodeModeConfig.from_value(None).enabled is False
+        and CodeModeConfig.from_value({"enabled": True}).max_tool_calls > 0,
+    }
+    return findings
 
 
 if __name__ == "__main__":

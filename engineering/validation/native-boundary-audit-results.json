@@ -45,5 +45,122 @@
   "same_name_servers_have_distinct_loop_identity": {
     "passed": true,
     "note": "Five distinct server identities; transport-independent detector probe."
+  },
+  "execution_capability_labels": {
+    "passed": true,
+    "labels": {
+      "sandbox:execute": {
+        "expected": [
+          "sandbox.execute",
+          "sandbox",
+          "high"
+        ],
+        "actual": [
+          "sandbox.execute",
+          "sandbox",
+          "high"
+        ]
+      },
+      "code:run_code": {
+        "expected": [
+          "code.run",
+          "code",
+          "medium"
+        ],
+        "actual": [
+          "code.run",
+          "code",
+          "medium"
+        ]
+      },
+      "skill:run_skill_script": {
+        "expected": [
+          "skill.script.run",
+          "host",
+          "high"
+        ],
+        "actual": [
+          "skill.script.run",
+          "host",
+          "high"
+        ]
+      },
+      "workspace:write_file": {
+        "expected": [
+          "workspace.files.write",
+          "workspace",
+          "medium"
+        ],
+        "actual": [
+          "workspace.files.write",
+          "workspace",
+          "medium"
+        ]
+      },
+      "mcp:some_tool": {
+        "expected": [
+          "tool.mcp.call",
+          "mcp",
+          "low"
+        ],
+        "actual": [
+          "tool.mcp.call",
+          "mcp",
+          "low"
+        ]
+      },
+      "local:my_tool": {
+        "expected": [
+          "tool.local.call",
+          "tool",
+          "low"
+        ],
+        "actual": [
+          "tool.local.call",
+          "tool",
+          "low"
+        ]
+      }
+    }
+  },
+  "sandbox_providers": {
+    "passed": true,
+    "providers": {
+      "daytona": {
+        "supports_execution": true,
+        "supports_required_sandbox": true
+      },
+      "docker": {
+        "supports_execution": true,
+        "supports_required_sandbox": true
+      },
+      "e2b": {
+        "supports_execution": true,
+        "supports_required_sandbox": true
+      },
+      "http": {
+        "supports_execution": true,
+        "supports_required_sandbox": true
+      },
+      "local_test": {
+        "supports_execution": true,
+        "supports_required_sandbox": true
+      },
+      "modal": {
+        "supports_execution": true,
+        "supports_required_sandbox": true
+      },
+      "none": {
+        "supports_execution": false,
+        "supports_required_sandbox": false
+      },
+      "vercel": {
+        "supports_execution": true,
+        "supports_required_sandbox": true
+      }
+    }
+  },
+  "code_mode_defaults_off_and_bounded": {
+    "passed": true
   }
 }
