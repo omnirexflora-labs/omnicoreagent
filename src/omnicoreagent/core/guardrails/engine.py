@@ -318,7 +318,8 @@ class DetectionEngine:
             "hidden",
             "unrestricted",
         ]
-        risk_count = sum(normalized.count(w) for w in risk_words)
+        # Whole words: "dan" is not in "pydantic", "root" is not in "/root".
+        risk_count = sum(_word_count(normalized, w) for w in risk_words)
 
         if risk_count >= 5:
             flags.append("very_dense_attack_keywords")
@@ -364,7 +365,7 @@ class DetectionEngine:
             "system",
         ]
         repeat_count = sum(
-            1 for word in instruction_words if normalized.count(word) >= 2
+            1 for word in instruction_words if _word_count(normalized, word) >= 2
         )
         if repeat_count >= 3:
             flags.append("repetitive_injection_pattern")
@@ -665,3 +666,7 @@ def _is_heavy_leet(token: str) -> bool:
     substitutions = sum(1 for char in token if char in _LEET_DIGITS)
     letters = sum(1 for char in token if char.isalpha())
     return substitutions >= 3 and letters >= 2 and substitutions + letters == len(token)
+
+
+def _word_count(text: str, word: str) -> int:
+    return len(re.findall(rf"\b{re.escape(word)}\b", text))
