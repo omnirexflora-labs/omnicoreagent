@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any
 
+from omnicoreagent.core.budgets import current_budgets
 from omnicoreagent.core.runtime.deadline import current_stop_reason, stop_after
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.types import (
@@ -47,6 +48,9 @@ class GovernedToolRunner:
         outcome = telemetry_outcome if telemetry_outcome is not None else {}
         if telemetry_recorder is None:
             async with stop_after(deadline_seconds):
+                budgets = current_budgets()
+                if budgets is not None and budgets.enabled:
+                    await budgets.charge("tool_calls", 1)
                 governance_error = await self._authorize_single_tool(single_tool)
                 if governance_error is not None:
                     return self._governance_error_result(
@@ -101,6 +105,10 @@ class GovernedToolRunner:
         # recorded as a timeout rather than left unfinished.
         async with stop_after(deadline_seconds):
             try:
+                # A call that the run cannot afford is not made.
+                budgets = current_budgets()
+                if budgets is not None and budgets.enabled:
+                    await budgets.charge("tool_calls", 1)
                 governance_error = await self._authorize_single_tool(single_tool)
                 if governance_error is not None:
                     result = self._governance_error_result(

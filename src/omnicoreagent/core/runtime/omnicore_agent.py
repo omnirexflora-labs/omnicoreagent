@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import uuid
 
+from omnicoreagent.core.budgets import BudgetLedger, RunBudgets, active_budgets
 from omnicoreagent.core.runs import (
     RunInterrupted,
     RunStateUnsupported,
@@ -783,7 +784,8 @@ class OmniCoreAgent:
                     trace_id=trace_context.trace_id,
                 )
 
-            async with run_tracker.active():
+            run_budgets = self._build_run_budgets(run_id=run_id, session_id=session_id)
+            async with run_tracker.active(), active_budgets(run_budgets):
                 response = await self.agent.run(
                     **({"on_event": emit_delta} if delivery is not None else {}),
                     system_prompt=runtime_prompt,
@@ -1190,6 +1192,22 @@ class OmniCoreAgent:
                 error=error,
                 output={"run_summary": run_summary["run_summary"]},
             )
+
+    def _build_run_budgets(self, *, run_id: str, session_id: str | None):
+        """The budgets covering this run, or nothing when none are set."""
+        engine = getattr(getattr(self, "agent", None), "governance_engine", None)
+        policy = getattr(engine, "policy", None)
+        budgets = getattr(policy, "budgets", None)
+        if budgets is None:
+            return None
+        return RunBudgets(
+            BudgetLedger(self.memory_router),
+            budgets,
+            run_id=run_id,
+            session_id=session_id,
+            agent_name=self.name,
+            telemetry_recorder=self.telemetry_recorder,
+        )
 
     async def _run_summary(self, trace_id: str) -> Dict[str, Any]:
         """Totals for the run so far, with its subagents' tokens and cost added."""

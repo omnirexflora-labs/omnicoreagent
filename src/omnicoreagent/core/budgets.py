@@ -19,11 +19,14 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import uuid4
+
+from contextvars import ContextVar
 
 from omnicoreagent.core.logging import logger
 
@@ -37,6 +40,8 @@ METERS = (
     "subagent_runs",
 )
 WINDOWS = ("total", "day", "month")
+# What a call could return when the model config sets no ceiling of its own.
+DEFAULT_ASSUMED_OUTPUT_TOKENS = 4096
 _RETRIES = 8
 
 
@@ -275,6 +280,244 @@ class BudgetLedger:
                     await asyncio.sleep(0.005)
             logger.warning(f"Budget {key} is changing too fast to record")
             raise RuntimeError(f"Could not record the budget change for {key}")
+
+
+# --- what a model call could cost, before it is made -------------------------
+
+
+@dataclass(frozen=True)
+class ModelCallEstimate:
+    """The most one model call could cost, priced before it is made.
+
+    The input is counted from the messages that were just assembled, so it is
+    exact. The output is not known, but it cannot exceed ``max_tokens``, so
+    that is what is priced: a hold is never an under-count. ``cost_usd`` is
+    ``None`` when the model has no published price, and then tokens and calls
+    are what govern the run.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float | None
+
+
+def estimate_model_call(
+    llm_connection: Any, messages: Any, *, max_output_tokens: int | None
+) -> ModelCallEstimate:
+    # Imported here: building an agent should not load the tokenizer or the
+    # usage types when nothing is budgeted.
+    from omnicoreagent.core.summarizer.tokenizer import count_tokens
+    from omnicoreagent.core.token_usage import Usage
+
+    input_tokens = 0
+    for message in messages or ():
+        try:
+            input_tokens += count_tokens(_render_for_counting(message))
+        except Exception:  # a message shape the counter cannot render
+            continue
+    output_tokens = int(max_output_tokens or DEFAULT_ASSUMED_OUTPUT_TOKENS)
+    estimate = getattr(llm_connection, "estimate_cost", None)
+    cost = None
+    if callable(estimate):
+        try:
+            cost = estimate(
+                Usage(
+                    requests=1,
+                    request_tokens=input_tokens,
+                    response_tokens=output_tokens,
+                    total_tokens=input_tokens + output_tokens,
+                )
+            )
+        except Exception:
+            cost = None
+    return ModelCallEstimate(input_tokens, output_tokens, cost)
+
+
+def _render_for_counting(message: Any) -> str:
+    content = message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
+    if isinstance(content, str):
+        return content
+    return str(content or "")
+
+
+# --- the budgets covering one run --------------------------------------------
+
+
+class BudgetExhaustedForRun(Exception):
+    """A budget covering this run is spent; the run stops."""
+
+    def __init__(self, exhausted: BudgetExhausted, action: str) -> None:
+        super().__init__(str(exhausted))
+        self.exhausted = exhausted
+        self.action = action
+
+    @property
+    def scope(self) -> str:
+        return self.exhausted.scope
+
+
+class RunBudgets:
+    """Charges what a run spends to every budget that covers it.
+
+    A request charges its own budget, its session's, its agent's, and the
+    application's; any exhausted level stops the work, and the run says which
+    one. With nothing budgeted this costs nothing: no key is read or written.
+    """
+
+    def __init__(
+        self,
+        ledger: BudgetLedger,
+        budgets: Any,
+        *,
+        run_id: str,
+        session_id: str | None = None,
+        agent_name: str | None = None,
+        telemetry_recorder: Any = None,
+    ) -> None:
+        self.ledger = ledger
+        self.budgets = budgets
+        self.telemetry_recorder = telemetry_recorder
+        self.identities = {
+            BudgetScope.REQUEST: run_id,
+            BudgetScope.SESSION: session_id,
+            BudgetScope.AGENT: agent_name,
+            BudgetScope.APPLICATION: getattr(budgets, "application_id", None),
+        }
+        self.run_id = run_id
+        self._warned: set[tuple[str, str]] = set()
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.budgets) and self.ledger.enabled
+
+    def limits(self, meter: str) -> list[tuple[BudgetScope, str, Any]]:
+        """Every (scope, key, limit) that governs this meter for this run."""
+        if not self.enabled:
+            return []
+        governing = []
+        for scope in BudgetScope:
+            identity = self.identities.get(scope)
+            if not identity:
+                continue
+            for limit in self.budgets.limits_for(scope.value):
+                if limit.meter != meter:
+                    continue
+                governing.append((scope, budget_key(scope, identity, limit.window), limit))
+        return governing
+
+    async def charge(self, meter: str, amount: float) -> None:
+        """Spend against every budget that covers this run."""
+        for scope, key, limit in self.limits(meter):
+            try:
+                spent = await self.ledger.charge(key, meter, amount, limit=limit.limit)
+            except BudgetExhausted as exhausted:
+                await self._record_exhausted(scope, limit, exhausted)
+                raise BudgetExhaustedForRun(exhausted, limit.on_exhausted) from None
+            await self._warn_if_near(scope, limit, key, spent)
+
+    async def reserve(self, meter: str, amount: float) -> list[Reservation]:
+        """Hold what a spend could cost, on every budget that covers the run."""
+        held: list[Reservation] = []
+        for scope, key, limit in self.limits(meter):
+            try:
+                held.append(
+                    await self.ledger.reserve(
+                        key, meter, amount, limit=limit.limit, run_id=self.run_id
+                    )
+                )
+            except BudgetExhausted as exhausted:
+                await self.release(held)  # hold nothing when the call cannot run
+                await self._record_exhausted(scope, limit, exhausted)
+                raise BudgetExhaustedForRun(exhausted, limit.on_exhausted) from None
+        return held
+
+    async def commit(self, held: list[Reservation], *, actual: float) -> None:
+        for reservation in held:
+            await self.ledger.commit(reservation, actual=actual)
+        for scope, key, limit in self.limits(held[0].meter if held else ""):
+            spent = (await self.ledger.usage(key)).get(limit.meter)
+            if spent is not None:
+                await self._warn_if_near(scope, limit, key, spent)
+
+    async def release(self, held: list[Reservation]) -> None:
+        for reservation in held:
+            await self.ledger.release(reservation)
+
+    async def spent(self) -> dict[str, dict[str, float]]:
+        """What this run has spent, per scope, for the run's totals."""
+        totals: dict[str, dict[str, float]] = {}
+        seen: set[str] = set()
+        for meter in METERS:
+            for scope, key, _ in self.limits(meter):
+                if key in seen:
+                    continue
+                seen.add(key)
+                usage = await self.ledger.usage(key)
+                if usage:
+                    totals[scope.value] = usage
+        return totals
+
+    async def _warn_if_near(self, scope: BudgetScope, limit: Any, key: str, spent: Any) -> None:
+        if spent is None or float(spent) < limit.warn_at * limit.limit:
+            return
+        if (key, limit.meter) in self._warned:
+            return
+        self._warned.add((key, limit.meter))
+        await self._emit(
+            "budget_warning",
+            {
+                "scope": scope.value,
+                "meter": limit.meter,
+                "limit": limit.limit,
+                "used": float(spent),
+                "remaining": max(0.0, limit.limit - float(spent)),
+                "window": limit.window,
+            },
+        )
+
+    async def _record_exhausted(
+        self, scope: BudgetScope, limit: Any, exhausted: BudgetExhausted
+    ) -> None:
+        await self._emit(
+            "budget_exhausted",
+            {
+                "scope": scope.value,
+                "meter": limit.meter,
+                "limit": limit.limit,
+                "used": exhausted.used + exhausted.reserved,
+                "needed": exhausted.requested,
+                "shortfall": exhausted.shortfall,
+                "window": limit.window,
+                "on_exhausted": limit.on_exhausted,
+            },
+        )
+
+    async def _emit(self, event: str, metadata: dict[str, Any]) -> None:
+        if self.telemetry_recorder is None:
+            return
+        try:
+            await self.telemetry_recorder.emit_event(event, metadata=metadata)
+        except Exception:  # a budget is not worth failing a run over telemetry
+            logger.debug(f"Could not record {event}")
+
+
+_CURRENT_BUDGETS: ContextVar[RunBudgets | None] = ContextVar(
+    "omnicoreagent_run_budgets", default=None
+)
+
+
+def current_budgets() -> RunBudgets | None:
+    """The budgets covering the run this code is part of, if any."""
+    return _CURRENT_BUDGETS.get()
+
+
+@asynccontextmanager
+async def active_budgets(budgets: RunBudgets | None):
+    token = _CURRENT_BUDGETS.set(budgets)
+    try:
+        yield budgets
+    finally:
+        _CURRENT_BUDGETS.reset(token)
 
 
 def _reserved_totals(state: dict[str, Any]) -> dict[str, float]:

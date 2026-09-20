@@ -13,6 +13,7 @@ import asyncio
 from typing import Any, Dict, List, Optional
 from omnicoreagent.core.tools.local_tools_registry import INTERNAL_TOOL_PROVIDERS, ToolRegistry
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.budgets import current_budgets
 from omnicoreagent.governance.capabilities import subagent_spawn_authority_requests
 from omnicoreagent.governance.snapshots import derive_subagent_policy
 from omnicoreagent.core.workspace.paths import WORKSPACE_FILE_PATH_PREFIXES
@@ -569,6 +570,11 @@ When you have completed the task:
     async def _authorize_subagent_spawns(
         self, subagent_specs: list[dict[str, Any]]
     ) -> None:
+        # Delegation is spend like any other: a run that has used its workers
+        # cannot hand out more, and the children spend the parent's budgets.
+        budgets = current_budgets()
+        if budgets is not None and budgets.enabled:
+            await budgets.charge("subagent_runs", len(subagent_specs))
         if self.governance_engine is None:
             return
         requests = subagent_spawn_authority_requests(

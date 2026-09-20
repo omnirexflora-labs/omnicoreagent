@@ -75,6 +75,27 @@ class SandboxExecutionService:
         self._open_sessions: set[str] = set()
         # Session ID -> (monotonic start, commands run), for the close record.
         self._session_started: dict[str, tuple[float, int]] = {}
+        self._sandbox_seconds_charged: dict[str, float] = {}
+
+    async def _charge_sandbox_time(self, session_id: str, started: float | None) -> None:
+        """Charge the seconds this session has run that are not charged yet.
+
+        Providers bill for a session's lifetime, so time is charged as it
+        passes and again when the session closes, rather than only at the end
+        where a long session could overrun its budget unnoticed.
+        """
+        from omnicoreagent.core.budgets import current_budgets
+
+        budgets = current_budgets()
+        if budgets is None or not budgets.enabled or started is None:
+            return
+        already = self._sandbox_seconds_charged.get(session_id, 0.0)
+        elapsed = max(0.0, time.monotonic() - started)
+        owed = elapsed - already
+        if owed <= 0:
+            return
+        self._sandbox_seconds_charged[session_id] = elapsed
+        await budgets.charge("sandbox_seconds", owed)
 
     async def open_session(
         self, manifest: SandboxManifest | dict[str, Any] | None = None
@@ -111,6 +132,8 @@ class SandboxExecutionService:
             return
         self._open_sessions.discard(session.session_id)
         started, commands = self._session_started.pop(session.session_id, (None, 0))
+        await self._charge_sandbox_time(session.session_id, started)
+        self._sandbox_seconds_charged.pop(session.session_id, None)
         runtime = self._runtime()
         error: BaseException | None = None
         try:
@@ -181,6 +204,9 @@ class SandboxExecutionService:
         authority = SandboxAuthorityContext.from_policy_decision(decision)
         started, commands = self._session_started.get(session.session_id, (time.monotonic(), 0))
         self._session_started[session.session_id] = (started, commands + 1)
+        # Time already spent is charged before the next command runs, so a long
+        # session cannot overrun its budget between its start and its close.
+        await self._charge_sandbox_time(session.session_id, started)
         result = await self._run_recorded(runtime, session, spec, authority)
         result.metadata = {
             **dict(result.metadata),

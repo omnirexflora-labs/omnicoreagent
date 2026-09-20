@@ -19,6 +19,7 @@ from omnicoreagent.core.types import (
 )
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.governed_tool_runner import GovernedToolRunner
+from omnicoreagent.core.budgets import BudgetExhaustedForRun
 from omnicoreagent.core.runs import RunInterrupted, RunSuspended, current_run
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
@@ -661,6 +662,25 @@ class BaseReactAgent:
                             status=SpanStatus.OK,
                             output={"returned": False},
                         )
+                except BudgetExhaustedForRun as spent:
+                    # A budget covering this run is gone. The work already done
+                    # stands; the run stops and says which budget ran out.
+                    if telemetry_recorder is not None and step_span is not None:
+                        await telemetry_recorder.end_span(
+                            step_span.span_id,
+                            status=SpanStatus.OK,
+                            output={"budget_exhausted": spent.scope},
+                        )
+                    run_usage.total_time = time.perf_counter() - start_time
+                    return {
+                        "answer": (
+                            f"This run stopped because the {spent.scope} budget is "
+                            f"exhausted: {spent}"
+                        ),
+                        "usage": run_usage,
+                        "status": "error",
+                        "termination_reason": "budget_exhausted",
+                    }
                 except RunSuspended as suspended:
                     # Waiting for a person is not a failure of the step.
                     suspended.usage = run_usage

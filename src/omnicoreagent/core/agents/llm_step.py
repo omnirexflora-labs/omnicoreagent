@@ -19,6 +19,11 @@ from omnicoreagent.core.telemetry import (
     TraceStatus,
 )
 from omnicoreagent.core.system_prompts import FAST_CONVERSATION_SUMMARY_PROMPT
+from omnicoreagent.core.budgets import (
+    BudgetExhaustedForRun,
+    current_budgets,
+    estimate_model_call,
+)
 from omnicoreagent.core.token_usage import (
     Usage,
     UsageLimitExceeded,
@@ -256,6 +261,11 @@ class AgentLlmStepRunner:
                 model_response_event_id=model_response_event_id,
             )
 
+        except BudgetExhaustedForRun:
+            # Not a provider failure: the run's own budget is spent, and the
+            # run decides what to do about it.
+            raise
+
         except UsageLimitExceeded as e:
             error_message = f"Usage limit error: {e}"
             logger.error(error_message)
@@ -392,11 +402,28 @@ class AgentLlmStepRunner:
                     "new_observation_event_ids": list(new_observation_event_ids or []),
                 },
             )
+            # Budgets: the call is charged before it is made, and its cost is
+            # held at the most it could be until the real figure arrives.
+            budgets = current_budgets()
+            held = []
+            if budgets is not None and budgets.enabled:
+                await budgets.charge("model_calls", 1)
+                estimate = estimate_model_call(
+                    llm_connection,
+                    messages,
+                    max_output_tokens=_max_output_tokens(llm_connection),
+                )
+                if estimate.cost_usd is not None:
+                    held = await budgets.reserve("model_cost_usd", estimate.cost_usd)
             retries: list[dict[str, Any]] = []
             retry_token = MODEL_RETRY_OBSERVER.set(retries.append)
             timing["started"] = time.perf_counter()
             try:
                 response = await request()
+            except BaseException:
+                if held:
+                    await budgets.release(held)  # nothing was spent
+                raise
             finally:
                 MODEL_RETRY_OBSERVER.reset(retry_token)
             normalized = normalize_model_turn(response)
@@ -425,6 +452,14 @@ class AgentLlmStepRunner:
                 "usage": self._usage_payload(extract_response_usage(response)),
                 "stream_stats": stream_stats,
             }
+            if budgets is not None and budgets.enabled:
+                await self._charge_what_the_call_cost(
+                    budgets,
+                    held,
+                    model_facts=model_facts,
+                    llm_connection=llm_connection,
+                    telemetry_recorder=telemetry_recorder,
+                )
             standard_usage = _standard_token_usage(model_facts["tokens"])
             response_event = await telemetry_recorder.emit_event(
                 "model_response",
@@ -503,6 +538,44 @@ class AgentLlmStepRunner:
                 error={"type": exc.__class__.__name__, "message": str(exc)},
             )
             raise
+
+    @staticmethod
+    async def _charge_what_the_call_cost(
+        budgets: Any,
+        held: list,
+        *,
+        model_facts: dict[str, Any],
+        llm_connection: Any,
+        telemetry_recorder: Any,
+    ) -> None:
+        """Replace the hold with what the call really cost, and count tokens.
+
+        A model with no published price is not refused: its tokens and calls
+        still govern the run, and the run is marked so nobody reads its cost
+        as complete.
+        """
+        tokens = model_facts.get("tokens") or {}
+        cost = model_facts.get("estimated_cost_usd")
+        if cost is None:
+            await budgets.release(held)
+            if telemetry_recorder is not None:
+                await telemetry_recorder.emit_event(
+                    "budget_cost_incomplete",
+                    metadata={
+                        "model": (llm_connection.llm_config or {}).get("model")
+                        if hasattr(llm_connection, "llm_config")
+                        else None,
+                        "reason": "the model has no published price",
+                        "tokens": tokens.get("total"),
+                    },
+                )
+        elif held:
+            await budgets.commit(held, actual=float(cost))
+        else:
+            await budgets.charge("model_cost_usd", float(cost))
+        total_tokens = tokens.get("total")
+        if total_tokens:
+            await budgets.charge("model_tokens", int(total_tokens))
 
     @staticmethod
     def _model_call_facts(
@@ -740,3 +813,12 @@ def _context_observation_ids(session_state: SessionState) -> list[str]:
         if event_id is not None and event_id not in ids:
             ids.append(event_id)
     return ids
+
+
+def _max_output_tokens(llm_connection: Any) -> int | None:
+    """The ceiling the provider will honour for one response, if one is set."""
+    config = getattr(llm_connection, "llm_config", None) or {}
+    try:
+        return int(config.get("max_tokens")) if config.get("max_tokens") else None
+    except (TypeError, ValueError):
+        return None
