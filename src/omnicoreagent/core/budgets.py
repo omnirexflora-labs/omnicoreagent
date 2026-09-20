@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import random
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -42,7 +43,13 @@ METERS = (
 WINDOWS = ("total", "day", "month")
 # What a call could return when the model config sets no ceiling of its own.
 DEFAULT_ASSUMED_OUTPUT_TOKENS = 4096
-_RETRIES = 8
+# A change that loses the race to another worker is tried again, backing off
+# a little more each time (with jitter, so two workers do not keep
+# colliding): a charge is a tiny read-modify-write, and a run whose charge
+# cannot be recorded cannot go on, so it waits rather than gives up early.
+_RETRIES = 60
+_BACKOFF_SECONDS = 0.005
+_BACKOFF_CAP_SECONDS = 0.05
 # Grants kept on the counter itself; the trace holds the full story.
 _GRANT_HISTORY_KEPT = 20
 
@@ -388,7 +395,7 @@ class BudgetLedger:
         if not self.enabled:
             return None
         async with self._lock:  # one in-flight change per ledger object
-            for _ in range(_RETRIES):
+            for attempt in range(_RETRIES):
                 try:
                     state = await self.store.get_budget_state(key) or {"key": key}
                 except Exception as exc:
@@ -405,7 +412,8 @@ class BudgetLedger:
                         return None
                     if type(exc).__name__ != "RunStateConflict":
                         raise
-                    await asyncio.sleep(0.005)
+                    pause = min(_BACKOFF_SECONDS * (1.5 ** attempt), _BACKOFF_CAP_SECONDS)
+                    await asyncio.sleep(pause * (0.5 + random.random()))
             logger.warning(f"Budget {key} is changing too fast to record")
             raise RuntimeError(f"Could not record the budget change for {key}")
 

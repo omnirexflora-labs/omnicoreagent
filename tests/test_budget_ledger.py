@@ -189,3 +189,47 @@ async def test_a_store_without_budget_support_leaves_budgets_off():
 
     assert ledger.enabled is False, "budgets stay off instead of failing the run"
     assert await ledger.usage("application:acme:total") == {}
+
+
+# --- contention: another worker keeps getting there first ------------------------
+
+
+class _Contended(InMemoryStore):
+    """A store where the first ``conflicts`` saves lose the race, as they would
+    with another process charging the same key at the same moment."""
+
+    def __init__(self, conflicts: int):
+        super().__init__()
+        self.conflicts = conflicts
+        self.lost = 0
+
+    async def save_budget_state(self, state, expected_version):
+        from omnicoreagent.core.runs import RunStateConflict
+
+        if self.lost < self.conflicts:
+            self.lost += 1
+            raise RunStateConflict("another worker wrote the budget first")
+        return await super().save_budget_state(state, expected_version)
+
+
+@pytest.mark.asyncio
+async def test_a_charge_outlasts_a_burst_of_conflicts():
+    """Found by P4 of the proving plan, two processes on one Postgres key:
+    a charge that lost the race eight times in a row was given up on, and
+    a run's model call fails when its charge does. A charge waits out the
+    burst instead."""
+    store = _Contended(conflicts=20)  # more than the eight tries it used to get
+    ledger = _ledger(store)
+
+    await ledger.charge("application:acme:total", "model_calls", 1, limit=None)
+
+    assert store.lost == 20
+    assert (await ledger.usage("application:acme:total"))["model_calls"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_key_that_never_settles_is_still_reported():
+    store = _Contended(conflicts=10_000)
+    ledger = _ledger(store)
+    with pytest.raises(RuntimeError, match="Could not record the budget change"):
+        await ledger.charge("application:acme:total", "model_calls", 1, limit=None)
