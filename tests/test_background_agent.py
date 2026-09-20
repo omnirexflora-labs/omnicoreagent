@@ -3586,3 +3586,47 @@ async def test_terminal_run_events_include_the_terminal_event_being_recorded():
     await recorder
 
     assert events[-1]["event"] == "background_run_completed"
+
+
+# --- audit A6: what one background run asks of the task store ------------------
+
+
+@pytest.mark.asyncio
+async def test_a_background_run_reads_its_task_and_run_a_few_times_not_per_event():
+    """Counted before this guard: 36 task-store calls per background run, of
+    which 10 were re-reads of the task and 10 of the run — every event written
+    to the workspace fetched both again to check a policy that does not change
+    during a run, and to find a run object the caller already held. On a
+    Redis or SQL task store each is a round trip."""
+    from omnicoreagent.background.store.in_memory import InMemoryTaskStore
+
+    counts = {"get_task": 0, "get_run": 0}
+    originals = {name: getattr(InMemoryTaskStore, name) for name in counts}
+
+    def counted(name):
+        async def wrapper(self, *args, **kwargs):
+            counts[name] += 1
+            return await originals[name](self, *args, **kwargs)
+
+        return wrapper
+
+    for name in counts:
+        setattr(InMemoryTaskStore, name, counted(name))
+    try:
+        manager = BackgroundAgentManager(task_store="in_memory")
+        agent = FakeAgent(response="complete")
+        await manager.register_agent("agent", agent)
+        await manager.register_task(
+            task_id="task", agent_id="agent", query="do work", schedule={"type": "manual"}
+        )
+        await manager.run_now("task", wait=True)  # warm: the first run registers things
+        counts["get_task"] = counts["get_run"] = 0
+        run = await manager.run_now("task", wait=True)
+    finally:
+        for name, original in originals.items():
+            setattr(InMemoryTaskStore, name, original)
+
+    assert run.status == RunStatus.COMPLETED
+    assert counts["get_task"] <= 3, f"one background run read its task {counts['get_task']} times"
+    # The waiter polls the run every 50 ms; a run this short is polled a few times.
+    assert counts["get_run"] <= 6, f"one background run read its run {counts['get_run']} times"

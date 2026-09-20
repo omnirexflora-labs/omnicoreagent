@@ -54,10 +54,17 @@ class BackgroundEventLog:
         # Background traces that lost an event (failed or timed-out write);
         # the next successful write marks them incomplete.
         self._lost_event_trace_ids: set[str] = set()
+        # Per run: the run object the caller holds, and its task's workspace
+        # policy, so writing an event does not read both back from the store.
+        self._known_runs: dict[str, BackgroundRun] = {}
+        self._workspace_policies: dict[str, Any] = {}
 
     async def emit_run(
         self, event_name: str, run: BackgroundRun, **extra_payload: Any
     ) -> None:
+        # The run in hand is what the workspace writes describe; remembering
+        # it saves reading it back from the store for every event.
+        self._known_runs[run.run_id] = run
         snapshot_written_before_terminal = False
         if event_name in TERMINAL_EVENT_NAMES:
             try:
@@ -95,6 +102,9 @@ class BackgroundEventLog:
                 await self.write_run_snapshot(run)
             except Exception:
                 pass
+        if event_name in TERMINAL_EVENT_NAMES:
+            self._known_runs.pop(run.run_id, None)
+            self._workspace_policies.pop(run.run_id, None)
 
     async def emit(self, event_name: str, **payload: Any) -> None:
         run_id = payload.get("run_id")
@@ -226,7 +236,7 @@ class BackgroundEventLog:
             self.event_sequences[run_id] = 1
             return 1
 
-        run = await self.task_store.get_run(run_id)
+        run = self._known_runs.get(run_id) or await self.task_store.get_run(run_id)
         if run:
             sequences.extend(
                 int(event["sequence"])
@@ -237,9 +247,21 @@ class BackgroundEventLog:
         self.event_sequences[run_id] = next_sequence
         return next_sequence
 
+    async def _workspace_policy(self, run_id: str, task_id: str | None):
+        """The task's workspace policy, read once per run: it does not change
+        while the run is going, and every event used to read it again."""
+        if not task_id:
+            return None
+        if run_id not in self._workspace_policies:
+            task = await self.task_store.get_task(task_id)
+            self._workspace_policies[run_id] = (
+                task.workspace_policy if task is not None else None
+            )
+        return self._workspace_policies[run_id]
+
     async def write_run_snapshot(self, run: BackgroundRun) -> None:
-        task = await self.task_store.get_task(run.task_id)
-        if task and not task.workspace_policy.write_run_json:
+        policy = await self._workspace_policy(run.run_id, run.task_id)
+        if policy is not None and not policy.write_run_json:
             return
         self.workspace_io.write_run_snapshot(run)
         await self.append_workspace_telemetry_event(
@@ -251,13 +273,15 @@ class BackgroundEventLog:
 
     async def write_run_event(self, event: dict[str, Any]) -> None:
         task_id = event.get("task_id")
-        if task_id:
-            task = await self.task_store.get_task(task_id)
-            if task and not task.workspace_policy.write_events_jsonl:
+        run_id = event.get("run_id")
+        if task_id and run_id:
+            policy = await self._workspace_policy(run_id, task_id)
+            if policy is not None and not policy.write_events_jsonl:
                 return
         self.workspace_io.append_event(event)
-        run_id = event.get("run_id")
-        run = await self.task_store.get_run(run_id) if run_id else None
+        run = self._known_runs.get(run_id) if run_id else None
+        if run is None and run_id:
+            run = await self.task_store.get_run(run_id)
         if run is not None:
             await self.append_workspace_telemetry_event(
                 run=run,
