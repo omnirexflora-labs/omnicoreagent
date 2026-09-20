@@ -27,7 +27,18 @@ def public_paths(config: OmniServeConfig) -> set[str]:
     paths.update(api_public)
     if prefixed:
         paths.update(f"{prefixed}{path}" for path in api_public)
+    paths.update(path for path in config.public_paths if path)
     return paths
+
+
+def is_public(path: str, public: set[str]) -> bool:
+    """An exact public path, or one under a public directory ("/pages/*")."""
+    if path in public:
+        return True
+    return any(
+        entry.endswith("/*") and (path == entry[:-2] or path.startswith(entry[:-1]))
+        for entry in public
+    )
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -39,7 +50,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self.public_paths = public_paths
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        if request.url.path in self.public_paths:
+        if is_public(request.url.path, self.public_paths):
             return await call_next(request)
 
         auth_header = request.headers.get("Authorization", "")

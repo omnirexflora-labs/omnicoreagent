@@ -5,6 +5,7 @@ The primary entry point for turning an OmniCoreAgent into a production-ready
 FastAPI server.
 """
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Optional
 
 from fastapi import FastAPI
@@ -60,6 +61,8 @@ class OmniServe:
         title: Optional[str] = None,
         description: Optional[str] = None,
         background_manager: Any | None = None,
+        routers: Sequence[Any] | None = None,
+        public_paths: Sequence[str] | None = None,
     ):
         """
         Initialize OmniServe.
@@ -78,7 +81,10 @@ class OmniServe:
             f"OmniServe API for {get_agent_name(agent)}. Powered by OmniCoreAgent."
         )
         self.background_manager = background_manager
-
+        # The application's own routes and the paths it serves without a token.
+        self.routers = list(routers or [])
+        if public_paths:
+            self.config.public_paths = [*self.config.public_paths, *public_paths]
         self.app = self._create_app()
 
     def _create_app(self) -> FastAPI:
@@ -94,6 +100,7 @@ class OmniServe:
             title=self.title,
             description=self.description,
             background_manager=self.background_manager,
+            routers=self.routers,
         )
 
     def start(

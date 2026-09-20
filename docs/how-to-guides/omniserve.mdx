@@ -46,6 +46,27 @@ def create_agent():
 
 <Info>
 OmniServe looks for `agent` variable first, then `create_agent()` function. Your file must export one of these.
+
+The file may also define its own routes — an application's pages, its own
+endpoints — mounted beside the agent's API on the same origin, behind the same
+middleware:
+
+```python
+from fastapi import APIRouter
+from fastapi.responses import HTMLResponse
+
+router = APIRouter()            # or routers = [...]
+
+@router.get("/steward/", response_class=HTMLResponse)
+async def page() -> str:
+    return open("page.html").read()
+
+public_paths = ["/steward/"]    # served without a token; "/steward/*" for a directory
+```
+
+Everything else the router serves still needs the bearer token when auth is
+on. In code, the same are `OmniServe(agent, config, routers=[...],
+public_paths=[...])`.
 </Info>
 
 ---

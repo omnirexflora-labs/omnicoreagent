@@ -10,9 +10,10 @@ Usage:
 import sys
 import importlib.util
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import click
 
@@ -24,9 +25,42 @@ def _package_version() -> str:
         return "0+unknown"
 
 
+@dataclass
+class LoadedAgentFile:
+    """What an agent file defines: the agent, and optionally its own routes
+    (``router`` or ``routers``) and the paths they serve without a token
+    (``public_paths``)."""
+
+    agent: Any
+    routers: list[Any] = field(default_factory=list)
+    public_paths: list[str] = field(default_factory=list)
+
+
+def load_agent_file(path: str) -> LoadedAgentFile:
+    module = _load_module(path)
+    if hasattr(module, "agent"):
+        agent = module.agent
+    elif hasattr(module, "create_agent"):
+        agent = module.create_agent()
+    else:
+        raise click.ClickException(
+            "Agent file must define an 'agent' variable or 'create_agent()' function"
+        )
+    routers = list(getattr(module, "routers", None) or [])
+    if getattr(module, "router", None) is not None:
+        routers.insert(0, module.router)
+    public_paths = [str(path) for path in (getattr(module, "public_paths", None) or [])]
+    return LoadedAgentFile(agent=agent, routers=routers, public_paths=public_paths)
+
+
 def _load_agent_from_file(path: str):
+    """Load an agent from a Python file (the agent alone)."""
+    return load_agent_file(path).agent
+
+
+def _load_module(path: str):
     """
-    Load an agent from a Python file.
+    Load an agent module from a Python file.
 
     The file should define an `agent` variable or an `create_agent()` function.
     """
@@ -49,16 +83,7 @@ def _load_agent_from_file(path: str):
         spec.loader.exec_module(module)
     except Exception as e:
         raise click.ClickException(f"Error loading agent file: {e}")
-
-    # Look for agent variable or create_agent function
-    if hasattr(module, "agent"):
-        return module.agent
-    elif hasattr(module, "create_agent"):
-        return module.create_agent()
-    else:
-        raise click.ClickException(
-            "Agent file must define an 'agent' variable or 'create_agent()' function"
-        )
+    return module
 
 
 @click.group()
@@ -135,8 +160,14 @@ def run(
 
     # Load the agent after config validation so invalid serving config fails first.
     click.echo(f"📦 Loading agent from: {agent}")
-    loaded_agent = _load_agent_from_file(agent)
+    loaded = load_agent_file(agent)
+    loaded_agent = loaded.agent
     click.echo(f"✅ Loaded agent: {loaded_agent.name}")
+    if loaded.routers:
+        click.echo(
+            f"   with {len(loaded.routers)} router(s) of its own; "
+            f"public: {', '.join(loaded.public_paths) or 'none'}"
+        )
 
     # Start server
     click.echo("")
@@ -170,7 +201,9 @@ def run(
     click.echo("=" * 50)
     click.echo("")
 
-    server = OmniServe(loaded_agent, config=config)
+    server = OmniServe(
+        loaded_agent, config=config, routers=loaded.routers, public_paths=loaded.public_paths
+    )
     server.start()
 
 
