@@ -17,6 +17,7 @@ The plan, the units, and what each must survive:
 | `Dockerfile` | The image: the runtime with the `serve`, `postgres`, `redis`, `e2b` extras, and this directory. No secrets. |
 | `compose.yml` | The deployment: OmniServe + Postgres + Redis, bound to loopback. |
 | `scenario_p1.py` | The first proof: deploy, do one piece of work end to end, survive a restart mid-run. |
+| `scenario_p2.py` | The second: reproduce a real failing test in an E2B sandbox through a delegated worker; survive the sandbox being killed mid-run. |
 
 ## Running it on a server
 
@@ -49,6 +50,16 @@ From the machine with the tunnel:
 ```
 STEWARD_TOKEN=<the bearer token> python apps/steward/scenario_p1.py            # one run, end to end
 STEWARD_TOKEN=<the bearer token> python apps/steward/scenario_p1.py --restart  # kill it mid-run
+STEWARD_TOKEN=<the bearer token> python apps/steward/scenario_p2.py            # reproduce a failing test in a sandbox
+STEWARD_TOKEN=<the bearer token> python apps/steward/scenario_p2.py --lose     # kill the sandbox mid-run
+```
+
+On the server itself, set `STEWARD_SSH=` (empty) so the scenarios use Docker
+directly instead of SSH, and read the token from the env file:
+
+```
+set -a; . /opt/steward/.env; set +a
+STEWARD_SSH= STEWARD_TOKEN=$OMNICOREAGENT_SERVE_AUTH_TOKEN python3 apps/steward/scenario_p2.py
 ```
 
 Each line the scenario prints is something a person would check by hand; a
@@ -58,8 +69,10 @@ links the run that produced it.
 
 ## Budgets
 
-Deliberately low while proving, so the cap is hit early and seen: $1.00 a day
-for the whole steward and $0.20 per piece of work (`STEWARD_DAILY_USD`,
-`STEWARD_REQUEST_USD`). A run that runs out pauses and waits for a top-up:
+Deliberately low while proving, so the cap is hit early and seen: by default
+$1.00 a day for the whole steward and $0.20 per piece of work
+(`STEWARD_DAILY_USD`, `STEWARD_REQUEST_USD` in the env file; the P1 runs cost
+about $0.18 each, so from P2 on the proving deployment sets $5.00 and $1.00).
+A run that runs out pauses and waits for a top-up:
 `POST /runs/{run_id}/budget` with `{"decision": "grant", "amount": ..., "approver": ...}`,
 then `POST /runs/{run_id}/resume`.

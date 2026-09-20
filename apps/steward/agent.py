@@ -80,6 +80,10 @@ POLICY = {
             {"rule_id": "sandbox", "capability": "sandbox.execute"},
             {"rule_id": "sandbox_process", "capability": "process.exec",
              "constraints": {"sandbox_required": True}},
+            # The sandbox clones the repository and installs it, so it has the
+            # network. Nothing secret is in it: the steward's tokens stay in
+            # this process.
+            {"rule_id": "sandbox_network", "capability": "sandbox.network.configure"},
             {"rule_id": "workspace_read", "capability": "workspace.files.read"},
             {"rule_id": "workspace_write", "capability": "workspace.files.write"},
             {"rule_id": "local_tools", "capability": "tool.local.call"},
@@ -111,6 +115,10 @@ BUDGETS = {
     ],
 }
 
+SANDBOX_HOME = "/home/user"
+SANDBOX_WORKDIR = f"{SANDBOX_HOME}/workspace"
+REPO_CHECKOUT = f"{SANDBOX_HOME}/repo"
+
 SYSTEM = f"""You are the repository steward for {REPOSITORY}.
 
 Your job, each time you are run: find one piece of work worth doing — a failing
@@ -126,6 +134,22 @@ Rules you work under (the policy enforces them; this is so you plan for them):
 - Say what you did and what you did not do, plainly, in the pull request body,
   and link the run that produced it.
 - You have a small budget. Prefer one thing done well to many things started.
+
+How to reproduce something (the `execute` tool runs commands in a sandbox):
+- The sandbox has the network and no credentials. The repository is public:
+  `git clone -b <branch> --depth 1 https://github.com/{REPOSITORY}.git {REPO_CHECKOUT}`
+  then `cd {REPO_CHECKOUT} && pip install -q uv && uv sync`.
+- Clone into {REPO_CHECKOUT}, never into {SANDBOX_WORKDIR}: everything under
+  {SANDBOX_WORKDIR} is copied back to your workspace after each command.
+- Run one test as `uv run pytest <path::name> -q -p no:cacheprovider`, then its
+  file the same way, and keep the exact failing lines: the assertion or
+  exception and the test's name. Do not paraphrase them.
+- If the sandbox is lost mid-command, the next command gets a fresh one: clone
+  and install again, then continue.
+- Delegate the reproduction to one worker (spawn_subagents, name it
+  `reproduce`) and give it an output path under this run's workspace; read
+  that output before you write your own report to output.md in the run's
+  workspace, quoting the failing lines and saying what you did not do.
 """
 
 agent = OmniCoreAgent(
@@ -157,6 +181,8 @@ agent = OmniCoreAgent(
         "tool_call_timeout": 300,
         "request_limit": 60,
         "enable_workspace_files": True,
+        # Work is delegated to workers under the same policy and budgets.
+        "enable_subagents": True,
         "guardrail_mode": "full",
         "governance_config": {
             "enabled": True,
@@ -164,6 +190,12 @@ agent = OmniCoreAgent(
             "budgets": BUDGETS,
             "approval_mode": "suspend",
             "sandbox_config": {"provider": "e2b", "options": {"timeout_seconds": 1200}},
+            # What the sandbox is: on the network (the policy allows it), with
+            # the workspace bridged into a directory the sandbox user owns.
+            "sandbox_manifest": {
+                "network_policy": {"default": "allow"},
+                "working_dir": SANDBOX_WORKDIR,
+            },
         },
     },
     # Every model prompt and response is kept: the trace is the proof.
