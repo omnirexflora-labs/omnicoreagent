@@ -97,6 +97,11 @@ class SubagentFactory:
         config["tool_offload"] = tool_offload
         if self.governance_engine is not None:
             governance_config = dict(config.get("governance_config") or {})
+            # The child's policy is derived from the parent's, which already
+            # carries what the parent's config said: its budgets, its policy
+            # file, its profile. Saying them again would be refused.
+            for key in ("budgets", "policy_path", "project_root", "profile"):
+                governance_config.pop(key, None)
             governance_config.update(
                 {
                     "enabled": True,

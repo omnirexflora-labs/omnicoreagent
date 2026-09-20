@@ -778,3 +778,30 @@ class TestOmniCoreAgentSubagents:
 
         assert not hasattr(omnicoreagent, removed_export)
         assert removed_export not in omnicoreagent.__all__
+
+
+def test_a_worker_inherits_budgets_through_the_policy_not_the_config(model_config):
+    """Found by P2 of the proving plan: the steward sets budgets in
+    governance_config; the parent's policy carries them once built, and a
+    worker built from the parent's config *and* the parent's policy was
+    refused ("budgets cannot be set when the policy already has budgets")."""
+    from omnicoreagent.core.runtime.construction import build_governance_engine
+
+    agent_config = {
+        "governance_config": {
+            "enabled": True,
+            "profile": "permissive-dev",
+            "budgets": {"application_id": "app", "request": [{"meter": "tool_calls", "limit": 5}]},
+        },
+    }
+    engine = build_governance_engine(agent_config)
+    factory = SubagentFactory(
+        base_model_config=model_config, agent_config=agent_config, governance_engine=engine
+    )
+
+    child = factory.create_subagent(name="w", role="worker", task="t", output_path="/workspace/w/out.md")
+
+    governance = child.agent_config["governance_config"]
+    assert governance.get("budgets") is None, "the config does not say them twice"
+    assert governance["policy"].budgets is not None
+    assert governance["policy"].budgets.application_id == "app"
