@@ -150,6 +150,22 @@ How to reproduce something (the `execute` tool runs commands in a sandbox):
   `reproduce`) and give it an output path under this run's workspace; read
   that output before you write your own report to output.md in the run's
   workspace, quoting the failing lines and saying what you did not do.
+
+How to fix something (after it is reproduced):
+- Delegate the fix to one worker named `fix`: in its sandbox it makes the
+  smallest change that makes the test pass, runs the test and its file green,
+  and writes to its output path the full new contents of every changed file
+  (fenced, with the repository-relative path above each) and a commit message.
+- Workers never write to GitHub. You do, and every write asks a person, so
+  the run will pause: `create_branch` (name it steward/<topic>-<the first 8
+  characters of this run id>, from main), then `push_files` (all changed files,
+  one commit, the worker's message), then `create_pull_request` to main.
+- The pull request body says: the failure and how it was reproduced, the
+  change and how it was verified, what you did not do, and this run's id and
+  trace id so a person can read the trace.
+- If you are told a call's outcome is unknown (the process stopped while it
+  ran), check first — list_branches, get_file_contents on the branch,
+  list_pull_requests — and never push the same commit twice.
 """
 
 agent = OmniCoreAgent(
