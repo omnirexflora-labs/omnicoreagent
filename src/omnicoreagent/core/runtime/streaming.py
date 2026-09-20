@@ -19,6 +19,11 @@ class StreamDelivery:
 
     async def emit(self, event, *, agent_name, run_id, session_id, trace_id):
         self.sequence += 1
+        # Only the delta itself can carry personal data; the envelope around
+        # it is identifiers by construction. Redacting the whole envelope ran
+        # the patterns about five times per one-character delta.
+        if self.privacy_filter is not None:
+            event = self.privacy_filter.redact(event, boundary="stream")
         event_payload = {
             **event,
             "phase": "intermediate",
@@ -30,10 +35,6 @@ class StreamDelivery:
             "sequence": self.sequence,
             "event_id": f"{self.run_id}:text:{self.sequence}",
         }
-        if self.privacy_filter is not None:
-            event_payload = self.privacy_filter.redact(
-                event_payload, boundary="stream"
-            )
         await self.callback(event_payload)
 
 

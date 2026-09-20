@@ -85,6 +85,9 @@ class PrivacyFilter:
     # make traces, stream cursors, or artifact references impossible to follow.
     _IDENTIFIER_KEYS = frozenset(
         {
+            "type",
+            "phase",
+            "actor_run_id",
             "trace_id",
             "run_id",
             "session_id",
