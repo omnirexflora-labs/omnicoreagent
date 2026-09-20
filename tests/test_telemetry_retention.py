@@ -161,6 +161,7 @@ async def test_retention_runs_automatically_once_and_is_observable(tmp_path):
     path = tmp_path / "traces.jsonl"
     seed = JsonlTelemetryStore(path)
     await seed.upsert_trace(_trace("trace-expired", ended_days_ago=30))
+    await seed.flush()  # written in batches: on disk before the agent's store reads it
 
     agent = await _offloading_agent(tmp_path, retention_days=7)
     await agent.run("first", session_id="auto-session")

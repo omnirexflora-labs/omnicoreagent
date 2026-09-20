@@ -69,6 +69,7 @@ async def test_jsonl_reload_restores_persisted_stream_cursors(tmp_path):
         ))
     before = await _cursor_map(first)
 
+    await first.flush()  # written in batches: on disk before the file is read
     reloaded = JsonlTelemetryStore(path)
 
     assert await _cursor_map(reloaded) == before
@@ -87,6 +88,7 @@ async def test_jsonl_corrupt_line_does_not_shift_later_cursors(tmp_path):
         await first.append_event("trace-a", event)
     before = await _cursor_map(first)
 
+    await first.flush()  # written in batches: on disk before the file is read
     lines = path.read_text().splitlines()
     corrupt_index = next(
         index
@@ -131,6 +133,7 @@ async def test_jsonl_reload_keeps_cursors_for_events_embedded_in_upserts(tmp_pat
 
     # Dropping the first line changes the replay counter for any cursor that
     # is re-derived rather than restored.
+    await first.flush()  # written in batches: on disk before the file is read
     lines = path.read_text().splitlines()
     path.write_text("\n".join(lines[1:]) + "\n")
     reloaded = JsonlTelemetryStore(path)
@@ -222,9 +225,14 @@ async def test_jsonl_timed_out_write_does_not_interleave_with_next_write(
     first = _event("trace-a", 0)
     second = _event("trace-a", 1)
 
+    # Records queue and go to the writer thread in batches; a caller that
+    # gives up waiting for the file (flush times out) must not let a later
+    # record overtake the one still being written.
+    await store.append_event("trace-a", first)
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(store.append_event("trace-a", first), timeout=0.05)
-    second_write = asyncio.ensure_future(store.append_event("trace-a", second))
+        await asyncio.wait_for(store.flush(), timeout=0.05)
+    await store.append_event("trace-a", second)
+    second_write = asyncio.ensure_future(store.flush())
     await asyncio.sleep(0.05)
     release_first.set()
     await asyncio.wait_for(second_write, timeout=5)

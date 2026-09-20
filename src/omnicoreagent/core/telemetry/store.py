@@ -559,6 +559,11 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         self._loop_locks = _LoopLocks()
         self._writer: ThreadPoolExecutor | None = None
         self._handle: Any = None  # the open file, owned by the writer thread
+        # Records wait here for the next turn of the loop and go to the writer
+        # thread together: one hop per turn, not one per record. Measured, the
+        # per-record hop was most of what a request cost.
+        self._pending: list[str] = []
+        self._drain: asyncio.Task | None = None
 
     async def append_event(self, trace_id: str, event: TelemetryEvent) -> None:
         async with self._lock:
@@ -808,7 +813,34 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             )
             + "\n"
         )
-        await self._run_writer(self._append_line, line)
+        self._pending.append(line)
+        if self._drain is None or self._drain.done():
+            self._drain = asyncio.get_running_loop().create_task(self._drain_pending())
+
+    async def _drain_pending(self) -> None:
+        """Send everything waiting to the writer thread, in order, in one hop.
+
+        Started when a record arrives and runs on the next turn of the loop,
+        so records written in the same turn travel together. It keeps going
+        while more arrive, so there is only ever one drain, and the order on
+        disk is the order recorded.
+        """
+        await asyncio.sleep(0)  # let the rest of this turn's records queue up
+        while self._pending:
+            lines, self._pending = self._pending, []
+            await self._run_writer(self._append_lines, lines)
+
+    async def flush(self) -> None:
+        """Wait until every record given so far is written to the file."""
+        while self._pending or (self._drain is not None and not self._drain.done()):
+            if self._drain is None or self._drain.done():
+                self._drain = asyncio.get_running_loop().create_task(self._drain_pending())
+            await asyncio.shield(self._drain)
+
+    def _append_lines(self, lines: list[str]) -> None:
+        """Runs on the writer thread: one batch, one flush."""
+        for line in lines:
+            self._append_line(line)
 
     def _append_line(self, line: str) -> None:
         """Runs on the writer thread: the file is opened once and kept open.
@@ -841,11 +873,13 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
                 )
             )
         content = "" if not records else "\n".join(records) + "\n"
+        await self.flush()
         await self._run_writer(self._close_handle)
         await self._run_writer(_replace_text, self.path, content)
 
     async def close(self) -> None:
         """Close the file and stop the writer thread; the store stays readable."""
+        await self.flush()
         if self._writer is None:
             return
         await self._run_writer(self._close_handle)

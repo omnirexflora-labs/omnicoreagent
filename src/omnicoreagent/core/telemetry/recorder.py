@@ -397,6 +397,10 @@ class TelemetryRecorder:
                 ),
                 trace_id=context.trace_id,
             )
+            # A finished trace is fully on disk before its run returns.
+            flush = getattr(self.store, "flush", None)
+            if flush is not None:
+                await self._write(flush(), trace_id=context.trace_id)
             if self.exporters:
                 trace = await self._read(
                     self.store.get_trace(context.trace_id),

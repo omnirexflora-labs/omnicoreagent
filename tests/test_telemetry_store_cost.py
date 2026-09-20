@@ -102,6 +102,7 @@ async def _stored(tmp_path, traces: int, events_each: int) -> JsonlTelemetryStor
         await store.upsert_trace(trace)
         for event in events:
             await store.append_event(trace.trace_id, event)
+    await store.flush()  # on disk, for whoever opens the file next
     return store
 
 
@@ -109,8 +110,8 @@ async def _stored(tmp_path, traces: int, events_each: int) -> JsonlTelemetryStor
 
 
 @pytest.mark.asyncio
-async def test_recording_one_event_walks_it_at_most_twice(tmp_path):
-    """Once for the line on disk, once to keep a copy in memory: not three."""
+async def test_recording_one_event_walks_it_once(tmp_path):
+    """One dump: written to disk as the line, and rebuilt in memory as the copy."""
     store = JsonlTelemetryStore(tmp_path / "telemetry.jsonl")
     trace, [event] = _trace("t", 1)
     await store.upsert_trace(trace)
@@ -120,21 +121,10 @@ async def test_recording_one_event_walks_it_at_most_twice(tmp_path):
     with _Count(telemetry_models, "to_plain") as walks:
         await store.append_event(trace.trace_id, event)
 
-    assert walks.calls <= 2 * one_walk.calls, (
+    # One dump serves both the line on disk and the copy in memory.
+    assert walks.calls <= one_walk.calls, (
         f"recording one event walked {walks.calls} nodes; one walk is {one_walk.calls}"
     )
-
-
-@pytest.mark.asyncio
-async def test_one_request_reads_its_finished_trace_back_at_most_twice():
-    """Once to close it, once to total it: not four deep copies."""
-    agent = await _agent(PricedModel(), budgets=None)
-    await agent.run("warm", session_id="reads-warm")
-
-    with _Count(InMemoryTelemetryStore, "get_trace") as reads:
-        await agent.run("go", session_id="reads-1")
-
-    assert reads.calls <= 2, f"one request read its trace back {reads.calls} times"
 
 
 # --- first use of a durable store ---------------------------------------------
@@ -188,6 +178,7 @@ async def test_what_is_stored_is_unchanged_by_the_cheaper_path(tmp_path):
     await store.upsert_trace(trace)
     for event in events:
         await store.append_event(trace.trace_id, event)
+    await store.flush()
 
     lines = [json.loads(line) for line in (tmp_path / "telemetry.jsonl").read_text().splitlines()]
 
@@ -234,19 +225,90 @@ async def test_recording_many_events_opens_the_file_once(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_record_is_on_disk_before_the_call_returns(tmp_path):
-    """Write-ahead means written: another reader sees it at once."""
+async def test_a_record_is_on_disk_once_flushed(tmp_path):
+    """Records go to the writer thread in batches; ``flush`` waits for them."""
     path = tmp_path / "telemetry.jsonl"
     store = JsonlTelemetryStore(path)
     trace, [event] = _trace("t", 1)
     await store.upsert_trace(trace)
 
     await store.append_event(trace.trace_id, event)
+    await store.flush()
 
     lines = path.read_text().splitlines()
     assert len(lines) == 2 and json.loads(lines[1])["record_type"] == "event"
     other = await JsonlTelemetryStore(path).get_trace("t")
     assert other is not None and len(other.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_record_reaches_disk_on_its_own_once_the_loop_yields(tmp_path):
+    """Nobody has to flush for a record to land: the batch drains by itself
+    as soon as the event loop gets a turn."""
+    import asyncio
+
+    path = tmp_path / "telemetry.jsonl"
+    store = JsonlTelemetryStore(path)
+    trace, [event] = _trace("t", 1)
+    await store.upsert_trace(trace)
+
+    await store.append_event(trace.trace_id, event)
+    for _ in range(50):  # a few turns of the loop, no explicit flush
+        await asyncio.sleep(0.01)
+        if len(path.read_text().splitlines()) == 2:
+            break
+
+    assert json.loads(path.read_text().splitlines()[1])["record_type"] == "event"
+
+
+@pytest.mark.asyncio
+async def test_a_request_hops_to_the_writer_thread_a_few_times_not_once_per_record(tmp_path):
+    """Measured: the per-record hop to the writer thread was ~60 ms of a
+    ~99 ms request. Records written in one turn of the loop go in one hop."""
+    store = JsonlTelemetryStore(tmp_path / "telemetry.jsonl")
+    trace, events = _trace("t", 20)
+    await store.upsert_trace(trace)
+    await store.flush()
+
+    with _Count(JsonlTelemetryStore, "_run_writer") as hops:
+        for event in events:
+            await store.append_event(trace.trace_id, event)
+        await store.flush()
+
+    assert hops.calls <= 3, f"20 records took {hops.calls} hops to the writer thread"
+
+
+@pytest.mark.asyncio
+async def test_records_land_in_the_order_they_were_recorded(tmp_path):
+    path = tmp_path / "telemetry.jsonl"
+    store = JsonlTelemetryStore(path)
+    trace, events = _trace("t", 30)
+    await store.upsert_trace(trace)
+    for event in events:
+        await store.append_event(trace.trace_id, event)
+    await store.flush()
+
+    on_disk = [
+        json.loads(line)["payload"]["metadata"]["n"]
+        for line in path.read_text().splitlines()[1:]
+    ]
+    assert on_disk == list(range(30))
+
+
+@pytest.mark.asyncio
+async def test_a_finished_run_is_fully_on_disk_when_run_returns():
+    """The one guarantee kept absolute: ending a trace waits for its records."""
+    agent = await _agent(PricedModel(), budgets=None)
+    result = await agent.run("go", session_id="flush-at-end")
+
+    path = agent.telemetry_store.path
+    on_disk = JsonlTelemetryStore(path)  # a second reader of the same file
+    stored = await on_disk.get_trace(result["trace_id"])
+    live = await agent.telemetry_store.get_trace(result["trace_id"])
+
+    assert stored is not None
+    assert [event.event_id for event in stored.events] == [event.event_id for event in live.events]
+    assert stored.status == live.status and stored.ended_at is not None
 
 
 @pytest.mark.asyncio
@@ -272,9 +334,61 @@ async def test_compaction_and_later_records_survive_a_reopen(tmp_path):
     await store.upsert_trace(later)
     for event in later_events:
         await store.append_event("later", event)
+    await store.flush()
 
     assert removed == 1
     reopened = JsonlTelemetryStore(path)
     assert await reopened.get_trace("old") is None
     assert len((await reopened.get_trace("kept")).events) == 2
     assert len((await reopened.get_trace("later")).events) == 2
+
+
+# --- totalling a run reads it; it does not copy it -----------------------------
+
+
+@pytest.mark.asyncio
+async def test_totalling_a_finished_run_does_not_copy_its_trace():
+    """Half of a no-op request's serialization was two deep copies of its own
+    trace at the end: one to close it and one to total it. Totalling only
+    reads, so it looks at the stored trace instead of a copy of it."""
+    agent = await _agent(PricedModel(), budgets=None)
+    await agent.run("warm", session_id="copies-warm")
+
+    # Reading the finished trace back is the copy that costs: it is the
+    # whole run. (The store also copies the near-empty trace it is handed at
+    # the start, to keep the recorder's object out of the store; that is 88
+    # nodes and stays.)
+    with _Count(InMemoryTelemetryStore, "get_trace") as reads:
+        await agent.run("go", session_id="copies-1")
+
+    assert reads.calls <= 1, f"one request read its finished trace back {reads.calls} times"
+
+
+@pytest.mark.asyncio
+async def test_totalling_leaves_the_stored_trace_as_it_was():
+    """What reads without copying must not change what it reads."""
+    from omnicoreagent.core.telemetry.summary import summarize_trace
+
+    agent = await _agent(PricedModel(), budgets=None)
+    result = await agent.run("go", session_id="peek-1")
+    before = (await agent.telemetry_store.get_trace(result["trace_id"])).model_dump()
+
+    stored = await agent.telemetry_store.peek_trace(result["trace_id"])
+    summarize_trace(stored)
+    after = (await agent.telemetry_store.get_trace(result["trace_id"])).model_dump()
+
+    assert after == before
+
+
+@pytest.mark.asyncio
+async def test_a_peeked_trace_is_the_stored_one_and_a_read_one_is_a_copy(tmp_path):
+    store = InMemoryTelemetryStore()
+    trace, _ = _trace("t", 0)
+    await store.upsert_trace(trace)
+
+    peeked = await store.peek_trace("t")
+    read = await store.get_trace("t")
+
+    assert peeked is await store.peek_trace("t")
+    assert read is not peeked and read.model_dump() == peeked.model_dump()
+

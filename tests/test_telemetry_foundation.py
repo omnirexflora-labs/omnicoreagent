@@ -414,6 +414,7 @@ async def test_jsonl_store_prunes_old_ended_traces_and_keeps_active_traces(tmp_p
     await writer.upsert_trace(old)
     await writer.upsert_trace(recent)
     await writer.upsert_trace(active)
+    await writer.flush()  # written in batches: on disk before another store reads it
 
     reloaded = JsonlTelemetryStore(path)
     removed = await reloaded.prune(retention_days=1)
