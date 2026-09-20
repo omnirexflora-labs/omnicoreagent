@@ -58,10 +58,17 @@ and a file the policy protects is not copied in or out
 
 ## In the trace
 
-Each run records its sandbox session, every command (exit code, duration,
-output size, the rule that allowed it), every file copy, and every tool call a
-program made, nested under its `run_code` call. Run totals count the sandbox
-commands. See [Observability](/docs/how-to-guides/observability).
+Each run records its sandbox session (with the provider's own name for it,
+`sandbox_ref`), every command (exit code, duration, output size, the rule
+that allowed it), every file copy, and every tool call a program made, nested
+under its `run_code` call. Run totals count the sandbox commands. See
+[Observability](/docs/how-to-guides/observability).
+
+A sandbox that dies mid-run — the provider stopped it, its lifetime ran out,
+someone killed it — is not a slow command: the model is told the sandbox was
+lost and that the next command runs in a fresh one (with the workspace files
+copied in again, and whatever else was in the old sandbox gone), and the
+trace records the session closed with `lost: true`.
 
 A run that pauses for approval mid-execution, or whose process dies, continues
 where it stopped: [Durable Runs](/docs/core-concepts/durable-runs).

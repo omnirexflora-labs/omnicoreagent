@@ -31,6 +31,15 @@ Each hosted provider needs its own credentials in the environment (for
 example `modal token new`, `E2B_API_KEY`, `DAYTONA_API_KEY`, `VERCEL_TOKEN`).
 Those credentials stay in your process: they are never put inside a sandbox.
 
+## A sandbox that dies is reported, not retried blindly
+
+Every provider can lose a sandbox under a run — E2B reports one that died
+mid-command as a timeout, and a sandbox's lifetime (`timeout_seconds`) ends
+whatever it is doing. The adapter tells a lost sandbox from a slow command,
+the run drops that session, the model is told what happened, and the next
+command opens a fresh sandbox. The trace records the session closed as
+`lost`; the [Execution](/docs/core-concepts/execution) page has the details.
+
 ## A sandbox with no network is checked, not trusted
 
 A sandbox that must have no network is checked from the inside, once, when it

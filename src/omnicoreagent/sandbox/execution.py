@@ -133,7 +133,8 @@ class SandboxExecutionService:
         )
         return session
 
-    async def close_session(self, session: SandboxSession) -> None:
+    async def close_session(self, session: SandboxSession, *, lost: bool = False) -> None:
+        """Close a session; ``lost`` records that the sandbox died on its own."""
         if session.session_id not in self._open_sessions:
             return
         self._open_sessions.discard(session.session_id)
@@ -154,6 +155,7 @@ class SandboxExecutionService:
                     **_session_facts(session, runtime),
                     "commands": commands,
                     "duration_ms": _elapsed_ms(started) if started is not None else None,
+                    "lost": lost,
                 },
                 error=error,
             )
@@ -321,9 +323,12 @@ class SandboxExecutionService:
 
 
 def _session_facts(session: SandboxSession, runtime: SandboxRuntime) -> dict[str, Any]:
+    metadata = session.metadata or {}
     return {
         "sandbox_session_id": session.session_id,
         "sandbox_provider": _value(getattr(runtime, "provider", session.provider)),
+        # The provider's own name for the sandbox, so a person can find it.
+        "sandbox_ref": metadata.get("sandbox_id") or metadata.get("container_id"),
     }
 
 

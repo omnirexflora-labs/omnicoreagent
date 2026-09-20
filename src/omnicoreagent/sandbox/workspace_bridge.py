@@ -78,6 +78,11 @@ class WorkspaceBridge:
         self._in_sandbox: dict[str, str] = {}
         self._copied_in_at: dict[str, Any] = {}
 
+    def forget(self) -> None:
+        """The sandbox is gone: nothing the bridge copied is in the next one."""
+        self._in_sandbox.clear()
+        self._copied_in_at.clear()
+
     # --- workspace -> sandbox -------------------------------------------------
 
     async def push(self, service: "SandboxExecutionService", session: "SandboxSession") -> list[str]:

@@ -68,11 +68,24 @@ class ExecutionScope:
         bridge = self.workspace_bridge
         copied_in = await bridge.push(self.service, session) if bridge is not None else []
         result = await self.service.execute(SandboxCommandSpec(command=command, **spec), session=session)
-        if bridge is not None and not result.metadata.get("session_terminated"):
+        if result.metadata.get("session_terminated"):
+            # The sandbox is gone (it died, or was stopped for ignoring its
+            # limit): forget it, so the next command opens a fresh one.
+            await self._drop(session, lost=bool(result.metadata.get("session_lost")))
+            return result
+        if bridge is not None:
             sync = await bridge.pull(self.service, session)
             result.metadata["workspace"] = sync
             await self._record_sync(session, copied_in, sync)
         return result
+
+    async def _drop(self, session: SandboxSession, *, lost: bool) -> None:
+        async with self._lock:
+            if self._session is session:
+                self._session = None
+        if self.workspace_bridge is not None:
+            self.workspace_bridge.forget()
+        await self.service.close_session(session, lost=lost)
 
     async def _record_sync(self, session: SandboxSession, copied_in: list[str], sync: dict) -> None:
         # Paths are recorded like the workspace tools' paths: as facts.

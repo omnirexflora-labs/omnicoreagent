@@ -78,6 +78,18 @@ def execution_result(result: Any, limit: int | None = None) -> dict[str, Any]:
     workspace = result.metadata.get("workspace")
     if workspace and (workspace.get("written") or workspace.get("skipped")):
         data["workspace_files"] = workspace
+    if result.metadata.get("session_terminated"):
+        data["sandbox_lost"] = True
+        why = result.stderr.strip() or "it stopped"
+        return {
+            "status": "error",
+            "data": data,
+            "message": (
+                f"The sandbox was lost during this command ({why}). Files created "
+                "in it are gone; the next command runs in a fresh sandbox with the "
+                "workspace files copied in again."
+            ),
+        }
     if result.timed_out:
         return {"status": "error", "data": data, "message": f"Command timed out after {limit}s"}
     if result.exit_code != 0:

@@ -95,8 +95,14 @@ class E2BSandboxRuntime(SandboxRuntime):
     async def terminate(self, session_id: str) -> None:
         self._sessions.pop(session_id, None)
         sandbox = self._sandboxes.pop(session_id, None)
-        if sandbox is not None:
+        if sandbox is None:
+            return
+        try:
             await sandbox.kill()
+        except Exception as exc:
+            # A sandbox that is already gone needs no killing.
+            if not _is_gone(exc):
+                raise
 
     async def execute(self, session_id: str, request: SandboxExecRequest) -> SandboxExecResult:
         sandbox = self._sandbox(session_id)
@@ -120,6 +126,10 @@ class E2BSandboxRuntime(SandboxRuntime):
             failure = getattr(exc, "result", None)
             if failure is None and not _is_timeout(exc):
                 raise
+            if failure is None and await self._lost(sandbox, exc):
+                # E2B reports a sandbox that died mid-command as a timeout;
+                # asking the sandbox itself tells the two apart.
+                return self._lost_result(session_id, sandbox, exc)
             timed_out = _is_timeout(exc)
             exit_code = getattr(failure, "exit_code", 124 if timed_out else 1)
             stdout = getattr(failure, "stdout", "")
@@ -187,6 +197,28 @@ class E2BSandboxRuntime(SandboxRuntime):
         refuse_open_sandbox(self.provider, verdict)
         return "checked"
 
+    async def _lost(self, sandbox: Any, exc: Exception) -> bool:
+        """Whether the sandbox is gone, as opposed to a command that ran long."""
+        if _is_gone(exc):
+            return True
+        is_running = getattr(sandbox, "is_running", None)
+        if is_running is None:
+            return False
+        try:
+            return not await is_running()
+        except Exception as probe:
+            return _is_gone(probe)
+
+    def _lost_result(self, session_id: str, sandbox: Any, exc: Exception) -> SandboxExecResult:
+        self._sessions.pop(session_id, None)
+        self._sandboxes.pop(session_id, None)
+        ref = getattr(sandbox, "sandbox_id", None) or session_id
+        return SandboxExecResult(
+            exit_code=137,
+            stderr=f"The sandbox {ref} no longer exists; the command did not finish ({exc})",
+            metadata={"session_terminated": True, "session_lost": True},
+        )
+
     def _sandbox(self, session_id: str):
         sandbox = self._sandboxes.get(session_id)
         if sandbox is None:
@@ -216,6 +248,16 @@ def _e2b():
 
 def _is_timeout(exc: Exception) -> bool:
     return "timeout" in type(exc).__name__.lower() or "timed out" in str(exc).lower()
+
+
+def _is_gone(exc: Exception) -> bool:
+    """E2B's words for a sandbox that no longer exists."""
+    text = str(exc).lower()
+    return (
+        "notfound" in type(exc).__name__.lower()
+        or "not found" in text
+        or "ended before the stream completed" in text
+    )
 
 
 def _internet_allowed(policy: NetworkPolicy) -> bool:
