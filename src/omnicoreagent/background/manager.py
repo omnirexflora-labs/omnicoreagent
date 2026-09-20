@@ -23,6 +23,7 @@ from omnicoreagent.background.models import (
     BackgroundTaskSpec,
     OverlapPolicy,
     RunStatus,
+    WAITING_RUN_STATUSES,
     ScheduleSpec,
     TriggerType,
     coerce_model,
@@ -492,9 +493,10 @@ class BackgroundAgentManager:
         run = await self.task_store.get_run(run_id)
         if run is None:
             raise RunNotFoundError(f"Run not found: {run_id}")
-        if run.status != RunStatus.AWAITING_APPROVAL:
+        if run.status not in WAITING_RUN_STATUSES:
             raise ValueError(
-                f"Run {run_id} is {run.status.value}; only a run in awaiting_approval can be resumed"
+                f"Run {run_id} is {run.status.value}; only a run in awaiting_approval "
+                "or awaiting_budget can be resumed"
             )
         if self.governance_engine is not None:
             require_current_policy_snapshot(
@@ -507,7 +509,7 @@ class BackgroundAgentManager:
                 background_run_authority_request(action="start", run=run)
             )
         queued = await self.task_store.transition_run(
-            run_id, {RunStatus.AWAITING_APPROVAL}, RunStatus.QUEUED, {}, None, None
+            run_id, set(WAITING_RUN_STATUSES), RunStatus.QUEUED, {}, None, None
         )
         await self._emit_run("background_run_queued", queued)
         return queued

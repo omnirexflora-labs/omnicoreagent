@@ -96,6 +96,12 @@ class RunStatus(str, Enum):
     SKIPPED = "skipped"
     # The agent paused for a person's approval; resume_run queues it again.
     AWAITING_APPROVAL = "awaiting_approval"
+    # The agent paused because a budget ran out; a top-up, then resume_run.
+    AWAITING_BUDGET = "awaiting_budget"
+
+
+# A run parked until a person acts: it holds its task's slot and no lease.
+WAITING_RUN_STATUSES = {RunStatus.AWAITING_APPROVAL, RunStatus.AWAITING_BUDGET}
 
 
 TERMINAL_RUN_STATUSES = {
@@ -127,10 +133,11 @@ ACTIVE_RUN_STATUSES = {
     RunStatus.RETRYING,
     # Still the task's run: it holds the task's slot while it waits.
     RunStatus.AWAITING_APPROVAL,
+    RunStatus.AWAITING_BUDGET,
 }
 
 # A run that will not move until something outside the worker acts on it.
-SETTLED_RUN_STATUSES = {*TERMINAL_RUN_STATUSES, RunStatus.AWAITING_APPROVAL}
+SETTLED_RUN_STATUSES = {*TERMINAL_RUN_STATUSES, *WAITING_RUN_STATUSES}
 
 
 class AttemptStatus(str, Enum):

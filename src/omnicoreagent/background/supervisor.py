@@ -21,6 +21,7 @@ from omnicoreagent.background.models import (
     BackgroundRun,
     BackgroundTaskSpec,
     RunStatus,
+    WAITING_RUN_STATUSES,
     utc_now,
 )
 from omnicoreagent.background.recovery import BackgroundRunRecovery
@@ -257,7 +258,7 @@ class BackgroundSupervisor:
         latest = await self.task_store.get_run(run_id)
         if not latest:
             return
-        if latest.status in {RunStatus.QUEUED, RunStatus.AWAITING_APPROVAL}:
+        if latest.status in {RunStatus.QUEUED, *WAITING_RUN_STATUSES}:
             await self.mark_terminal(latest, RunStatus.CANCELLED, "cancelled")
         elif (
             latest.status == RunStatus.CLAIMED and latest.lease_owner == self.worker_id
@@ -345,8 +346,10 @@ class BackgroundSupervisor:
             result = await self.execute_agent_attempt(running)
             if (
                 isinstance(result, dict)
-                # Waiting for approval is not a failure: the run is parked.
-                and result.get("status", "success") not in {"success", "awaiting_approval"}
+                # Waiting for a person (an approval, a top-up) is not a
+                # failure: the run is parked.
+                and result.get("status", "success")
+                not in {"success", "awaiting_approval", "awaiting_budget"}
             ):
                 raise RuntimeError(
                     f"Agent execution failed ({result.get('termination_reason', result['status'])}): "
@@ -545,6 +548,9 @@ class BackgroundSupervisor:
         if isinstance(result, dict) and result.get("status") == "awaiting_approval":
             await self.park_for_approval(running, result)
             return
+        if isinstance(result, dict) and result.get("status") == "awaiting_budget":
+            await self.park_for_budget(running, result)
+            return
         preview = result_preview(result)
         if await self.cancel_if_requested(running.run, running.attempt):
             return
@@ -573,6 +579,34 @@ class BackgroundSupervisor:
     async def park_for_approval(self, running: _RunningAttempt, result: dict) -> None:
         """The agent paused for approval: the attempt is done, the run waits
         (without a lease) until resume_run queues it again."""
+        tools = ", ".join(
+            sorted({a.get("tool_name") or "?" for a in result.get("approvals") or []})
+        )
+        await self.park(
+            running,
+            status=RunStatus.AWAITING_APPROVAL,
+            preview=f"Waiting for approval: {tools}",
+            event_name="background_run_awaiting_approval",
+        )
+
+    async def park_for_budget(self, running: _RunningAttempt, result: dict) -> None:
+        """The agent paused because a budget ran out: the run waits for a
+        top-up (agent.grant_budget) and resume_run, or a denial."""
+        request = result.get("budget_request") or {}
+        needs = (
+            f"{request.get('scope')} {request.get('meter')} "
+            f"(needs {request.get('shortfall')} more)"
+        )
+        await self.park(
+            running,
+            status=RunStatus.AWAITING_BUDGET,
+            preview=f"Waiting for budget: {needs}",
+            event_name="background_run_awaiting_budget",
+        )
+
+    async def park(
+        self, running: _RunningAttempt, *, status: RunStatus, preview: str, event_name: str
+    ) -> None:
         if await self.cancel_if_requested(running.run, running.attempt):
             return
         await self.task_store.update_attempt(
@@ -581,21 +615,15 @@ class BackgroundSupervisor:
             self.worker_id,
             running.run.lease_token,
         )
-        tools = ", ".join(
-            sorted({a.get("tool_name") or "?" for a in result.get("approvals") or []})
-        )
         waiting = await self.transition_or_cancel(
             run=running.run,
             attempt=running.attempt,
             expected={RunStatus.RUNNING},
-            next_status=RunStatus.AWAITING_APPROVAL,
-            patch={
-                **release_lease_patch(),
-                "result_preview": f"Waiting for approval: {tools}",
-            },
+            next_status=status,
+            patch={**release_lease_patch(), "result_preview": preview},
         )
         if waiting is not None:
-            await self.emit_run("background_run_awaiting_approval", waiting)
+            await self.emit_run(event_name, waiting)
 
     async def transition_or_cancel(
         self,

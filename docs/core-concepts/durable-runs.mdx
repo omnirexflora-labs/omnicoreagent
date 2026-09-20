@@ -155,6 +155,11 @@ await agent.resolve_approval(run.run_id, approval_id, decision="approve", approv
 await manager.resume_run(run.run_id)
 ```
 
+A background run whose agent pauses because a budget ran out goes to
+`awaiting_budget` the same way (`background_run_awaiting_budget`); after a
+top-up (`agent.grant_budget`, or `POST /runs/{run_id}/budget`), queue it
+again with `resume_run` or `POST /background/runs/{run_id}/resume`.
+
 Over OmniServe: `POST /background/runs/{run_id}/resume`. Cancelling a waiting
 background run works as for a queued one.
 

@@ -43,6 +43,7 @@ _ALLOWED_TRANSITIONS: dict[RunStatus, set[RunStatus]] = {
     RunStatus.RUNNING: {
         RunStatus.RETRYING,
         RunStatus.AWAITING_APPROVAL,
+        RunStatus.AWAITING_BUDGET,
         RunStatus.COMPLETED,
         RunStatus.FAILED,
         RunStatus.TIMEOUT,
@@ -50,6 +51,7 @@ _ALLOWED_TRANSITIONS: dict[RunStatus, set[RunStatus]] = {
     },
     RunStatus.RETRYING: {RunStatus.QUEUED, RunStatus.CANCELLED},
     RunStatus.AWAITING_APPROVAL: {RunStatus.QUEUED, RunStatus.CANCELLED},
+    RunStatus.AWAITING_BUDGET: {RunStatus.QUEUED, RunStatus.CANCELLED},
     RunStatus.COMPLETED: set(),
     RunStatus.FAILED: set(),
     RunStatus.CANCELLED: set(),

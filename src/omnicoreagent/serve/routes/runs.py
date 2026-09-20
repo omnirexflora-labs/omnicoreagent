@@ -31,7 +31,7 @@ def serve_trace_status(run_status: str) -> TraceStatus:
     """The request trace's status for an agent run outcome."""
     if run_status == "success":
         return TraceStatus.COMPLETED
-    if run_status == "awaiting_approval":
+    if run_status in {"awaiting_approval", "awaiting_budget"}:
         return TraceStatus.SUSPENDED
     return TraceStatus.FAILED
 
