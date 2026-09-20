@@ -36,7 +36,10 @@ def mask_opaque(value: Any) -> Any:
     and digests of masked data stay stable.
     """
     if isinstance(value, dict):
-        if value.get("type") in OPAQUE_BLOCK_TYPES:
+        # A block type is a string; a JSON-schema "type" may be a list or a
+        # dict, and either would make this membership test raise.
+        kind = value.get("type")
+        if isinstance(kind, str) and kind in OPAQUE_BLOCK_TYPES:
             return {
                 key: item if key in {"type", "index", "format", "id"} else opaque_marker(item)
                 for key, item in value.items()

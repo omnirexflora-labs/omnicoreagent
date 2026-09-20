@@ -154,7 +154,8 @@ class PrivacyFilter:
         if not self.config.enabled or not self._enabled_for(boundary):
             return value
         if isinstance(value, dict):
-            if value.get("type") in self._OPAQUE_BLOCK_TYPES:
+            kind = value.get("type")  # a JSON-schema "type" may be a list or dict
+            if isinstance(kind, str) and kind in self._OPAQUE_BLOCK_TYPES:
                 return value
             return {
                 key: item
