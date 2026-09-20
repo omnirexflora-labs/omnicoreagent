@@ -124,6 +124,34 @@ async def test_tool_timeout_is_recorded_as_timeout_not_cancel():
 
 
 @pytest.mark.asyncio
+async def test_a_deadline_that_expires_while_the_call_is_being_recorded_is_still_a_timeout():
+    """The deadline covers the call, not the recording of it.
+
+    Opening the tool's span is an await like any other. When the deadline
+    expired there, the call stopped before its record was opened: the span was
+    left unfinished and reported later as a plain error, so a timeout looked
+    like a tool failure. The clock starts once the call is recorded.
+    """
+    agent = await _agent(ScriptedModel(("call_slow", "slow_lookup", '{"key": "a"}')))
+    agent.agent.tool_call_timeout = 0.05
+    recorder = agent.telemetry_recorder
+    opening_a_span = recorder.start_span
+
+    async def slow_to_record(**kwargs):
+        if kwargs.get("kind") == "tool.call":
+            await asyncio.sleep(0.2)  # longer than the call's deadline
+        return await opening_a_span(**kwargs)
+
+    recorder.start_span = slow_to_record
+    trace = await _trace(agent)
+
+    [span] = [s for s in trace.spans if s.kind == "tool.call"]
+    assert span.status == SpanStatus.TIMEOUT
+    [error] = _events(trace, "tool_error")
+    assert error.metadata["phase"] == "timeout"
+
+
+@pytest.mark.asyncio
 async def test_cancelled_tool_stays_cancelled():
     agent = await _agent(ScriptedModel(("call_slow", "slow_lookup", '{"key": "a"}')))
     run = asyncio.create_task(agent.run("go", session_id="tool-cancel"))

@@ -1,7 +1,7 @@
 import asyncio
 from typing import Any
 
-from omnicoreagent.core.runtime.deadline import current_stop_reason
+from omnicoreagent.core.runtime.deadline import current_stop_reason, stop_after
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.types import (
     ToolCallResult,
@@ -33,6 +33,7 @@ class GovernedToolRunner:
         result_guardrail: Any = None,
         telemetry_links: dict[str, Any] | None = None,
         telemetry_outcome: dict[str, Any] | None = None,
+        deadline_seconds: float | None = None,
     ) -> dict[str, Any]:
         """Authorize and execute one call.
 
@@ -45,22 +46,23 @@ class GovernedToolRunner:
         """
         outcome = telemetry_outcome if telemetry_outcome is not None else {}
         if telemetry_recorder is None:
-            governance_error = await self._authorize_single_tool(single_tool)
-            if governance_error is not None:
-                return self._governance_error_result(
-                    single_tool=single_tool,
-                    governance_error=governance_error,
+            async with stop_after(deadline_seconds):
+                governance_error = await self._authorize_single_tool(single_tool)
+                if governance_error is not None:
+                    return self._governance_error_result(
+                        single_tool=single_tool,
+                        governance_error=governance_error,
+                    )
+                result = await single_tool.tool_executor.execute(
+                    tool_args=single_tool.tool_args,
+                    tool_name=single_tool.tool_name,
                 )
-            result = await single_tool.tool_executor.execute(
-                tool_args=single_tool.tool_args,
-                tool_name=single_tool.tool_name,
-            )
-            if result_guardrail is not None:
-                result = scrub_tool_results([result], result_guardrail)[0]
-            result.pop("_guardrail_telemetry", None)
-            if self.governance_engine is not None:
-                return _redact_tool_result_args(result)
-            return result
+                if result_guardrail is not None:
+                    result = scrub_tool_results([result], result_guardrail)[0]
+                result.pop("_guardrail_telemetry", None)
+                if self.governance_engine is not None:
+                    return _redact_tool_result_args(result)
+                return result
 
         links = dict(telemetry_links or {})
         reported_provider = links.pop("tool_provider", None) or single_tool.tool_provider
@@ -94,158 +96,162 @@ class GovernedToolRunner:
             "tool_provider": reported_provider,
             "tool_server": single_tool.tool_server,
         }
-        try:
-            governance_error = await self._authorize_single_tool(single_tool)
-            if governance_error is not None:
-                result = self._governance_error_result(
-                    single_tool=single_tool,
-                    governance_error=governance_error,
+        # The deadline covers the call, not the recording of it: it starts
+        # once the span is open, so a call stopped by its deadline is always
+        # recorded as a timeout rather than left unfinished.
+        async with stop_after(deadline_seconds):
+            try:
+                governance_error = await self._authorize_single_tool(single_tool)
+                if governance_error is not None:
+                    result = self._governance_error_result(
+                        single_tool=single_tool,
+                        governance_error=governance_error,
+                    )
+                    denied_event = await telemetry_recorder.emit_event(
+                        telemetry_shape["error_event"],
+                        actor=telemetry_shape["actor"],
+                        input=telemetry_input if telemetry_shape["single_event"] else None,
+                        output=result,
+                        error={
+                            "type": governance_error.__class__.__name__,
+                            "message": str(governance_error),
+                        },
+                        metadata={**relationship_metadata, "phase": "authorization"},
+                    )
+                    outcome["tool_result_event_id"] = denied_event.event_id
+                    await telemetry_recorder.end_span(
+                        span.span_id,
+                        status=SpanStatus.ERROR,
+                        output=result,
+                        error={
+                            "type": governance_error.__class__.__name__,
+                            "message": str(governance_error),
+                        },
+                    )
+                    return result
+                if not telemetry_shape["single_event"]:
+                    await telemetry_recorder.emit_event(
+                        telemetry_shape["call_event"],
+                        actor=telemetry_shape["actor"],
+                        input=telemetry_input,
+                        metadata={**relationship_metadata, "phase": "execution"},
+                    )
+                result = await single_tool.tool_executor.execute(
+                    tool_args=single_tool.tool_args,
+                    tool_name=single_tool.tool_name,
                 )
-                denied_event = await telemetry_recorder.emit_event(
-                    telemetry_shape["error_event"],
-                    actor=telemetry_shape["actor"],
-                    input=telemetry_input if telemetry_shape["single_event"] else None,
-                    output=result,
-                    error={
-                        "type": governance_error.__class__.__name__,
-                        "message": str(governance_error),
-                    },
-                    metadata={**relationship_metadata, "phase": "authorization"},
-                )
-                outcome["tool_result_event_id"] = denied_event.event_id
-                await telemetry_recorder.end_span(
-                    span.span_id,
-                    status=SpanStatus.ERROR,
-                    output=result,
-                    error={
-                        "type": governance_error.__class__.__name__,
-                        "message": str(governance_error),
-                    },
-                )
+                if result_guardrail is not None:
+                    result = scrub_tool_results([result], result_guardrail)[0]
+                guardrail_signal = result.pop("_guardrail_telemetry", None)
+                if guardrail_signal is not None:
+                    await telemetry_recorder.emit_event(
+                        "guardrail_violation"
+                        if guardrail_signal.get("action") == "blocked"
+                        else "guardrail_check",
+                        actor=TelemetryActor(type=ActorType.GUARDRAIL),
+                        input={
+                            "target": "tool_output",
+                            "tool_name": single_tool.tool_name,
+                            "tool_call_id": single_tool.tool_call_id,
+                            "tool_provider": single_tool.tool_provider,
+                            "tool_server": single_tool.tool_server,
+                        },
+                        output=guardrail_signal,
+                        metadata={**relationship_metadata, "phase": "output_guardrail"},
+                    )
+                if self.governance_engine is not None:
+                    result = _redact_tool_result_args(result)
+                telemetry_result = result
+                if result.get("status") == "error":
+                    event_kwargs = {
+                        "actor": telemetry_shape["actor"],
+                        "output": telemetry_result,
+                        "error": {
+                            "type": "ToolError",
+                            "message": result.get("message") or "Tool returned error",
+                        },
+                    }
+                    if telemetry_shape["single_event"]:
+                        event_kwargs["input"] = telemetry_input
+                    error_event = await telemetry_recorder.emit_event(
+                        telemetry_shape["error_event"],
+                        **event_kwargs,
+                        metadata={**relationship_metadata, "phase": "result"},
+                    )
+                    outcome["tool_result_event_id"] = error_event.event_id
+                    await telemetry_recorder.end_span(
+                        span.span_id,
+                        status=SpanStatus.ERROR,
+                        output=telemetry_result,
+                        error={
+                            "type": "ToolError",
+                            "message": result.get("message") or "Tool returned error",
+                        },
+                    )
+                else:
+                    event_kwargs = {
+                        "actor": telemetry_shape["actor"],
+                        "output": telemetry_result,
+                    }
+                    if telemetry_shape["single_event"]:
+                        event_kwargs["input"] = telemetry_input
+                    result_event = await telemetry_recorder.emit_event(
+                        telemetry_shape["result_event"],
+                        **event_kwargs,
+                        metadata={**relationship_metadata, "phase": "result"},
+                    )
+                    outcome["tool_result_event_id"] = result_event.event_id
+                    await telemetry_recorder.end_span(
+                        span.span_id,
+                        status=SpanStatus.OK,
+                        output=telemetry_result,
+                    )
                 return result
-            if not telemetry_shape["single_event"]:
-                await telemetry_recorder.emit_event(
-                    telemetry_shape["call_event"],
-                    actor=telemetry_shape["actor"],
-                    input=telemetry_input,
-                    metadata={**relationship_metadata, "phase": "execution"},
-                )
-            result = await single_tool.tool_executor.execute(
-                tool_args=single_tool.tool_args,
-                tool_name=single_tool.tool_name,
-            )
-            if result_guardrail is not None:
-                result = scrub_tool_results([result], result_guardrail)[0]
-            guardrail_signal = result.pop("_guardrail_telemetry", None)
-            if guardrail_signal is not None:
-                await telemetry_recorder.emit_event(
-                    "guardrail_violation"
-                    if guardrail_signal.get("action") == "blocked"
-                    else "guardrail_check",
-                    actor=TelemetryActor(type=ActorType.GUARDRAIL),
-                    input={
-                        "target": "tool_output",
-                        "tool_name": single_tool.tool_name,
-                        "tool_call_id": single_tool.tool_call_id,
-                        "tool_provider": single_tool.tool_provider,
-                        "tool_server": single_tool.tool_server,
-                    },
-                    output=guardrail_signal,
-                    metadata={**relationship_metadata, "phase": "output_guardrail"},
-                )
-            if self.governance_engine is not None:
-                result = _redact_tool_result_args(result)
-            telemetry_result = result
-            if result.get("status") == "error":
-                event_kwargs = {
-                    "actor": telemetry_shape["actor"],
-                    "output": telemetry_result,
-                    "error": {
-                        "type": "ToolError",
-                        "message": result.get("message") or "Tool returned error",
-                    },
-                }
+            except asyncio.CancelledError:
+                if current_stop_reason() == "timeout":
+                    timeout_error = {
+                        "type": "TimeoutError",
+                        "message": "Tool execution exceeded its time limit",
+                    }
+                    timeout_event = await telemetry_recorder.emit_event(
+                        telemetry_shape["error_event"],
+                        actor=telemetry_shape["actor"],
+                        input=telemetry_input if telemetry_shape["single_event"] else None,
+                        error=timeout_error,
+                        metadata={**relationship_metadata, "phase": "timeout"},
+                    )
+                    outcome["tool_result_event_id"] = timeout_event.event_id
+                    await telemetry_recorder.end_span(
+                        span.span_id, status=SpanStatus.TIMEOUT, error=timeout_error
+                    )
+                else:
+                    await telemetry_recorder.end_span(
+                        span.span_id, status=SpanStatus.CANCELLED
+                    )
+                raise
+            except Exception as exc:
                 if telemetry_shape["single_event"]:
-                    event_kwargs["input"] = telemetry_input
-                error_event = await telemetry_recorder.emit_event(
-                    telemetry_shape["error_event"],
-                    **event_kwargs,
-                    metadata={**relationship_metadata, "phase": "result"},
-                )
-                outcome["tool_result_event_id"] = error_event.event_id
+                    exception_event = await telemetry_recorder.emit_event(
+                        telemetry_shape["error_event"],
+                        actor=telemetry_shape["actor"],
+                        input=telemetry_input,
+                        error={"type": exc.__class__.__name__, "message": str(exc)},
+                        metadata={**relationship_metadata, "phase": "exception"},
+                    )
+                else:
+                    exception_event = await telemetry_recorder.record_exception(
+                        exc,
+                        event_type=telemetry_shape["error_event"],
+                        actor=telemetry_shape["actor"],
+                        metadata={**relationship_metadata, "phase": "exception"},
+                    )
+                outcome["tool_result_event_id"] = exception_event.event_id
                 await telemetry_recorder.end_span(
                     span.span_id,
                     status=SpanStatus.ERROR,
-                    output=telemetry_result,
-                    error={
-                        "type": "ToolError",
-                        "message": result.get("message") or "Tool returned error",
-                    },
-                )
-            else:
-                event_kwargs = {
-                    "actor": telemetry_shape["actor"],
-                    "output": telemetry_result,
-                }
-                if telemetry_shape["single_event"]:
-                    event_kwargs["input"] = telemetry_input
-                result_event = await telemetry_recorder.emit_event(
-                    telemetry_shape["result_event"],
-                    **event_kwargs,
-                    metadata={**relationship_metadata, "phase": "result"},
-                )
-                outcome["tool_result_event_id"] = result_event.event_id
-                await telemetry_recorder.end_span(
-                    span.span_id,
-                    status=SpanStatus.OK,
-                    output=telemetry_result,
-                )
-            return result
-        except asyncio.CancelledError:
-            if current_stop_reason() == "timeout":
-                timeout_error = {
-                    "type": "TimeoutError",
-                    "message": "Tool execution exceeded its time limit",
-                }
-                timeout_event = await telemetry_recorder.emit_event(
-                    telemetry_shape["error_event"],
-                    actor=telemetry_shape["actor"],
-                    input=telemetry_input if telemetry_shape["single_event"] else None,
-                    error=timeout_error,
-                    metadata={**relationship_metadata, "phase": "timeout"},
-                )
-                outcome["tool_result_event_id"] = timeout_event.event_id
-                await telemetry_recorder.end_span(
-                    span.span_id, status=SpanStatus.TIMEOUT, error=timeout_error
-                )
-            else:
-                await telemetry_recorder.end_span(
-                    span.span_id, status=SpanStatus.CANCELLED
-                )
-            raise
-        except Exception as exc:
-            if telemetry_shape["single_event"]:
-                exception_event = await telemetry_recorder.emit_event(
-                    telemetry_shape["error_event"],
-                    actor=telemetry_shape["actor"],
-                    input=telemetry_input,
                     error={"type": exc.__class__.__name__, "message": str(exc)},
-                    metadata={**relationship_metadata, "phase": "exception"},
                 )
-            else:
-                exception_event = await telemetry_recorder.record_exception(
-                    exc,
-                    event_type=telemetry_shape["error_event"],
-                    actor=telemetry_shape["actor"],
-                    metadata={**relationship_metadata, "phase": "exception"},
-                )
-            outcome["tool_result_event_id"] = exception_event.event_id
-            await telemetry_recorder.end_span(
-                span.span_id,
-                status=SpanStatus.ERROR,
-                error={"type": exc.__class__.__name__, "message": str(exc)},
-            )
-            raise
+                raise
 
     async def _authorize_single_tool(
         self,

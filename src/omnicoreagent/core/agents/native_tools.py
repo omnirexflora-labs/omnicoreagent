@@ -10,7 +10,6 @@ from typing import Any
 
 from omnicoreagent.core.agents.loop_detection import ToolInteraction
 from omnicoreagent.core.model_protocol import ModelTurn
-from omnicoreagent.core.runtime.deadline import stop_after
 from omnicoreagent.core.runs import RunSuspended, current_run
 from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
 from omnicoreagent.governance.errors import PolicyDeniedError
@@ -221,23 +220,24 @@ async def execute_native_turn(
                 parent_tool_call_id=parent,
             )
             started["flag"] = True
-        # The deadline records why it stopped the call, so the tool record
+        # The runner holds the deadline, starting it once the call is
+        # recorded, and records why it stopped the call, so the tool record
         # reports a timeout distinctly from a cancelled run.
-        async with stop_after(agent.tool_call_timeout):
-            result = await agent.governed_tool_runner.execute(
-                single_tool=resolved,
-                telemetry_recorder=telemetry_recorder,
-                result_guardrail=agent.guardrail,
-                telemetry_links={
-                    "batch_id": batch_id,
-                    "model_call_event_id": model_call_event_id,
-                    "model_response_event_id": model_response_event_id,
-                    **call_links.get(call_id, {}),
-                    "tool_provider": binding.provider,
-                    **({"parent_tool_call_id": parent} if parent else {}),
-                },
-                telemetry_outcome=outcome,
-            )
+        result = await agent.governed_tool_runner.execute(
+            single_tool=resolved,
+            telemetry_recorder=telemetry_recorder,
+            result_guardrail=agent.guardrail,
+            telemetry_links={
+                "batch_id": batch_id,
+                "model_call_event_id": model_call_event_id,
+                "model_response_event_id": model_response_event_id,
+                **call_links.get(call_id, {}),
+                "tool_provider": binding.provider,
+                **({"parent_tool_call_id": parent} if parent else {}),
+            },
+            telemetry_outcome=outcome,
+            deadline_seconds=agent.tool_call_timeout,
+        )
         return result, resolved
 
     async def _run_code(parent_id, params):
