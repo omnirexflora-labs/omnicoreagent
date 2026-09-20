@@ -3,9 +3,12 @@
 finish, the bill matches the ledger, and two processes cannot overspend.
 
 Run on the server with the proving deployment's request budget lowered so
-that one ordinary piece of work runs out mid-way:
+that one ordinary piece of work runs out: a run's model calls cost a few
+cents each, but each call is held at its worst case first (max_tokens at
+the output price, about five cents here), so a cap of three cents stops a run
+before its first or second call.
 
-    STEWARD_REQUEST_USD=0.08  in /opt/steward/.env, then redeploy, then
+    STEWARD_REQUEST_USD=0.03  in /opt/steward/.env, then redeploy, then
     /opt/steward/run_scenario.sh scenario_p4.py                 # pause, top up, finish, bill
     /opt/steward/run_scenario.sh scenario_p4.py --two-workers   # compare-and-swap across processes
 
@@ -33,7 +36,7 @@ import urllib.error
 from scenario_p1 import QUERY as READ_THE_REPO, api, check, ssh
 
 TASK_ID = "p4-budget-pause"
-EXPECTED_REQUEST_USD = 0.08
+EXPECTED_REQUEST_USD = 0.03
 
 
 def ensure_task() -> None:
