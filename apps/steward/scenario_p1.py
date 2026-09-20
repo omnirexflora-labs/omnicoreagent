@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """P1: the steward is deployed, does one piece of work, and survives a restart.
 
-Run from a machine with an SSH tunnel to the server (see README.md):
+Run on the server itself (STEWARD_SSH="" makes the restart step use docker
+directly), or from a machine with an SSH tunnel to it (see README.md):
 
-    STEWARD_TOKEN=... python apps/steward/scenario_p1.py            # one run, end to end
-    STEWARD_TOKEN=... python apps/steward/scenario_p1.py --restart  # kill it mid-run
+    STEWARD_SSH= STEWARD_TOKEN=... python3 apps/steward/scenario_p1.py            # one run, end to end
+    STEWARD_SSH= STEWARD_TOKEN=... python3 apps/steward/scenario_p1.py --restart  # kill it mid-run
 
 What it asserts, in order:
   1. the server is healthy and the background worker is up;
@@ -68,10 +69,12 @@ def check(condition: bool, what: str) -> None:
 
 
 def ssh(command: str) -> str:
-    return subprocess.run(
-        ["ssh", "-i", SSH_KEY, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", SERVER, command],
-        check=True, capture_output=True, text=True, timeout=300,
-    ).stdout
+    """Run a command on the server — over SSH, or directly when this script
+    already runs there (STEWARD_SSH empty)."""
+    argv = ["sh", "-c", command] if not SERVER else [
+        "ssh", "-i", SSH_KEY, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", SERVER, command,
+    ]
+    return subprocess.run(argv, check=True, capture_output=True, text=True, timeout=300).stdout
 
 
 def ensure_task() -> None:
