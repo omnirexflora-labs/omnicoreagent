@@ -223,3 +223,30 @@ async def test_a_paused_and_resumed_run_reads_as_one_trajectory(tmp_path):
     assert story["approvals"][0]["approver"] == "alice"
     assert "context" not in story
     assert await agent.get_run_trajectory("run_nope") is None
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_call_answers_the_assistant_turn_that_made_it(tmp_path):
+    """Found by the steward's P3 with a real reasoning model: the paused
+    assistant turn (its call still unanswered) was discarded as incomplete
+    history on resume, so the approved call's result answered nothing —
+    OpenAI: "No tool call found for function call output with call_id ...".
+    A resumed run keeps that turn; its results follow it, in order."""
+    model = RecordingModel(WRITE_AND_DELETE, DELETE, "cleaned up")
+    agent = await _agent(tmp_path, model)
+    paused = await agent.run("tidy up", session_id="s-order")
+    (approval,) = paused["approvals"]
+    await agent.resolve_approval(paused["run_id"], approval["approval_id"], decision="approve", approver="a")
+
+    await agent.resume(paused["run_id"])
+
+    resumed_call = model.calls[-1]
+    turns = [
+        (m.get("role"), [c.get("id") for c in (m.get("tool_calls") or [])] or m.get("tool_call_id"))
+        for m in resumed_call
+        if m.get("role") in {"assistant", "tool"}
+    ]
+    assistant_index = next(i for i, (role, ids) in enumerate(turns) if role == "assistant" and ids and "d1" in ids)
+    result_index = next(i for i, (role, ids) in enumerate(turns) if role == "tool" and ids == "d1")
+    assert assistant_index < result_index, turns
+    assert all(role == "tool" for role, _ in turns[assistant_index + 1 : result_index + 1]), turns

@@ -40,7 +40,16 @@ class AgentMessageHistoryLoader:
         message_history: Callable[..., Any],
         session_id: str,
         session_state: SessionState,
+        keep_pending_tool_calls: bool = False,
     ) -> None:
+        """Rebuild the context from stored messages.
+
+        A trailing assistant turn whose tool calls have no results is dropped:
+        it is the debris of a request that never finished. Except when a run
+        resumes — then those calls are about to be answered (an approved call
+        runs, a recovered one is re-run), and the turn must stay, so that the
+        results that follow answer a call the provider can see.
+        """
         stored_messages = await message_history(
             agent_name=self.agent_name, session_id=session_id
         )
@@ -49,6 +58,17 @@ class AgentMessageHistoryLoader:
 
         for message in self._validated_messages(stored_messages):
             self._apply_message(message=message, session_state=session_state)
+        if keep_pending_tool_calls:
+            self.keep_pending(session_state=session_state)
+
+    def keep_pending(self, session_state: SessionState) -> None:
+        """Append the trailing assistant turn and whatever results it has."""
+        if not session_state.assistant_with_tool_calls:
+            return
+        session_state.messages.append(session_state.assistant_with_tool_calls)
+        session_state.messages.extend(session_state.pending_tool_responses)
+        session_state.assistant_with_tool_calls = None
+        session_state.pending_tool_responses = []
 
     def _validated_messages(self, stored_messages: list[Any]) -> list[Message]:
         return [

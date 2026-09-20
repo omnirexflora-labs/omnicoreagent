@@ -29,6 +29,7 @@ class AgentInitialMessagePreparer:
         message_history,
         catalog,
         project_instructions: str | None = None,
+        keep_pending_tool_calls: bool = False,
     ) -> None:
         # A storage failure must not silently start a fresh conversation.
         await asyncio.wait_for(
@@ -36,6 +37,7 @@ class AgentInitialMessagePreparer:
                 message_history=message_history,
                 session_id=session_id,
                 session_state=session_state,
+                keep_pending_tool_calls=keep_pending_tool_calls,
             ),
             timeout=self.timeout_seconds,
         )

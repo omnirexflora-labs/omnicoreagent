@@ -447,6 +447,8 @@ class BaseReactAgent:
             catalog=catalog,
             session_id=session_id,
             project_instructions=project_instructions.text,
+            # A resumed run answers the calls its paused turn made.
+            keep_pending_tool_calls=resume is not None,
         )
         if telemetry_recorder is not None:
             if project_instructions.files or project_instructions.skipped:
