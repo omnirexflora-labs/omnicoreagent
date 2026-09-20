@@ -138,6 +138,8 @@ Common background lifecycle names include:
 | `background_run_heartbeat` | Active worker refreshed the run lease. |
 | `background_run_retrying` | Failed attempt entered retry state. |
 | `background_run_recovered` | Expired lease was recovered and requeued; `resumed: true` when the next attempt continues the run from its checkpoint instead of starting over. |
+| `background_run_awaiting_approval` | The agent paused for a person's approval; the run waits, holding its task's slot, until it is resumed. |
+| `background_run_awaiting_budget` | The agent paused because a budget ran out; the run waits for a top-up, then a resume. |
 | `background_run_completed` | Run completed successfully. |
 | `background_run_failed` | Run failed terminally. |
 | `background_run_timeout` | Run exceeded its timeout. |
