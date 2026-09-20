@@ -207,16 +207,18 @@ async def test_jsonl_timed_out_write_does_not_interleave_with_next_write(
     await store.upsert_trace(_trace("trace-a"))
 
     release_first = threading.Event()
-    original_append = store_module._append_text
+    original_append = store_module.JsonlTelemetryStore._append_line
     calls = {"count": 0}
 
-    def slow_first_append(target, text):
+    # The store keeps its file open and appends on one writer thread; the
+    # first append is held back to see that the second still lands after it.
+    def slow_first_append(self, line):
         calls["count"] += 1
         if calls["count"] == 1:
             release_first.wait(timeout=5)
-        original_append(target, text)
+        original_append(self, line)
 
-    monkeypatch.setattr(store_module, "_append_text", slow_first_append)
+    monkeypatch.setattr(store_module.JsonlTelemetryStore, "_append_line", slow_first_append)
     first = _event("trace-a", 0)
     second = _event("trace-a", 1)
 

@@ -87,6 +87,16 @@ class AbstractTelemetryStore(ABC):
     async def get_trace(self, trace_id: str) -> TelemetryTrace | None:
         raise NotImplementedError
 
+    async def peek_trace(self, trace_id: str) -> TelemetryTrace | None:
+        """The stored trace itself, for a caller that will only read it.
+
+        ``get_trace`` hands back a copy, so what a caller does to it cannot
+        reach the store; the copy is a full walk of the trace. A reader that
+        totals a finished run and changes nothing does not need one. A store
+        that cannot share its object simply returns a copy.
+        """
+        return await self.get_trace(trace_id)
+
     @abstractmethod
     async def list_traces(self, filter: TraceFilter | None = None) -> list[TelemetryTrace]:
         raise NotImplementedError
@@ -142,14 +152,26 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
         self._next_subscriber_id = 0
         self._loop_locks = _LoopLocks()
 
-    async def append_event(self, trace_id: str, event: TelemetryEvent) -> None:
+    async def append_event(
+        self, trace_id: str, event: TelemetryEvent, *, plain: dict[str, Any] | None = None
+    ) -> None:
+        """Keep a copy of the event.
+
+        ``plain`` is the event's own dump when the caller has one already (the
+        durable store writes it to disk); the copy is rebuilt from it rather
+        than from a second walk of the event.
+        """
         if event.trace_id != trace_id:
             raise ValueError("Telemetry event trace_id does not match store trace_id")
         async with self._lock:
             trace = self._require_trace_unlocked(trace_id)
             self._trace_sequences[trace_id] += 1
             event.sequence_number = self._trace_sequences[trace_id]
-            trace_event = _copy_event(event)
+            if plain is not None:
+                plain["sequence_number"] = event.sequence_number
+            trace_event = (
+                TelemetryEvent.from_dict(plain) if plain is not None else _copy_event(event)
+            )
             trace_event.stream_cursor = None
             trace.events.append(trace_event)
             if event.span_id:
@@ -158,7 +180,9 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
                     span.event_ids.append(event.event_id)
             self._index_event_unlocked(trace_event, trace, notify=True)
 
-    async def start_span(self, trace_id: str, span: TelemetrySpan) -> None:
+    async def start_span(
+        self, trace_id: str, span: TelemetrySpan, *, plain: dict[str, Any] | None = None
+    ) -> None:
         if span.trace_id != trace_id:
             raise ValueError("Telemetry span trace_id does not match store trace_id")
         async with self._lock:
@@ -167,7 +191,9 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
                 raise ValueError(f"Span already exists: {span.span_id}")
             if span.parent_span_id and not _find_span(trace, span.parent_span_id):
                 raise ValueError(f"Unknown parent span: {span.parent_span_id}")
-            trace.spans.append(_copy_span(span))
+            trace.spans.append(
+                TelemetrySpan.from_dict(plain) if plain is not None else _copy_span(span)
+            )
             if trace.root_span_id == "":
                 trace.root_span_id = span.span_id
 
@@ -215,6 +241,10 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
         async with self._lock:
             trace = self._traces.get(trace_id)
             return _copy_trace(trace) if trace is not None else None
+
+    async def peek_trace(self, trace_id: str) -> TelemetryTrace | None:
+        async with self._lock:
+            return self._traces.get(trace_id)
 
     async def trace_ids_ended_before(self, cutoff: datetime) -> set[str]:
         """The finished traces older than ``cutoff``, without copying any."""
@@ -528,20 +558,25 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         self._loaded = False
         self._loop_locks = _LoopLocks()
         self._writer: ThreadPoolExecutor | None = None
+        self._handle: Any = None  # the open file, owned by the writer thread
 
     async def append_event(self, trace_id: str, event: TelemetryEvent) -> None:
         async with self._lock:
             await self._load_unlocked()
-            await self._inner.append_event(trace_id, event)
+            # One walk of the event: the same dump is rebuilt as the in-memory
+            # copy and written as the line on disk.
             payload = event.model_dump()
+            await self._inner.append_event(trace_id, event, plain=dict(payload))
+            payload["sequence_number"] = event.sequence_number
             payload["stream_cursor"] = str(self._inner._event_cursors[event.event_id])
             await self._append_record_unlocked("event", payload, plain=True)
 
     async def start_span(self, trace_id: str, span: TelemetrySpan) -> None:
         async with self._lock:
             await self._load_unlocked()
-            await self._inner.start_span(trace_id, span)
-            await self._append_record_unlocked("span_start", span.model_dump(), plain=True)
+            payload = span.model_dump()
+            await self._inner.start_span(trace_id, span, plain=dict(payload))
+            await self._append_record_unlocked("span_start", payload, plain=True)
 
     async def end_span(self, trace_id: str, span_id: str, patch: dict[str, Any]) -> None:
         async with self._lock:
@@ -581,6 +616,11 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         async with self._lock:
             await self._load_unlocked()
         return await self._inner.get_trace(trace_id)
+
+    async def peek_trace(self, trace_id: str) -> TelemetryTrace | None:
+        async with self._lock:
+            await self._load_unlocked()
+        return await self._inner.peek_trace(trace_id)
 
     async def list_traces(self, filter: TraceFilter | None = None) -> list[TelemetryTrace]:
         async with self._lock:
@@ -768,7 +808,26 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             )
             + "\n"
         )
-        await self._run_writer(_append_text, self.path, line)
+        await self._run_writer(self._append_line, line)
+
+    def _append_line(self, line: str) -> None:
+        """Runs on the writer thread: the file is opened once and kept open.
+
+        Each record is flushed to the operating system as it is written, which
+        is what closing the file after every record did for durability; nothing
+        called fsync then, and nothing does now.
+        """
+        if self._handle is None:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._handle = self.path.open("a", encoding="utf-8")
+        self._handle.write(line)
+        self._handle.flush()
+
+    def _close_handle(self) -> None:
+        """Runs on the writer thread, before the file is replaced underneath it."""
+        if self._handle is not None:
+            self._handle.close()
+            self._handle = None
 
     async def _rewrite_records_unlocked(self, traces: list[TelemetryTrace]) -> None:
         records = []
@@ -782,7 +841,16 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
                 )
             )
         content = "" if not records else "\n".join(records) + "\n"
+        await self._run_writer(self._close_handle)
         await self._run_writer(_replace_text, self.path, content)
+
+    async def close(self) -> None:
+        """Close the file and stop the writer thread; the store stays readable."""
+        if self._writer is None:
+            return
+        await self._run_writer(self._close_handle)
+        writer, self._writer = self._writer, None
+        writer.shutdown(wait=True)
 
     async def _run_writer(self, function, *args) -> None:
         if self._writer is None:
@@ -828,12 +896,6 @@ def shared_jsonl_telemetry_store(
             retention_days,
         )
     return store
-
-
-def _append_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(text)
 
 
 def _write_text(path: Path, text: str) -> None:
