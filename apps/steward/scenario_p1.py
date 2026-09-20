@@ -78,10 +78,14 @@ def ssh(command: str) -> str:
 
 
 def ensure_task() -> None:
+    """The scenario's task, registered fresh under the policy the server runs
+    now: a task is bound to the policy snapshot it was created under, and the
+    runtime refuses to run it under a different one (that is a feature; it
+    surfaced the first time the steward's policy changed between deploys)."""
     existing = api("GET", "/background/tasks")
     tasks = existing.get("tasks", existing) if isinstance(existing, dict) else existing
     if any(task.get("task_id") == TASK_ID for task in tasks):
-        return
+        api("DELETE", f"/background/tasks/{TASK_ID}")
     api("POST", "/background/tasks", {
         "task_id": TASK_ID,
         "agent_id": "steward",
