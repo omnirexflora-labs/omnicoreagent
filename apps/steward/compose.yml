@@ -1,0 +1,90 @@
+# The repository steward on a server: OmniServe + Postgres + Redis.
+#
+#   docker compose -p steward -f apps/steward/compose.yml --env-file /opt/steward/.env up -d --build
+#
+# Everything binds to loopback. Reach it over an SSH tunnel until a reverse
+# proxy with TLS is in front:
+#   ssh -N -L 8800:127.0.0.1:8800 root@<server>
+#
+# The env file holds the secrets (LLM_API_KEY, GITHUB_PERSONAL_ACCESS_TOKEN,
+# E2B_API_KEY, OMNICOREAGENT_SERVE_AUTH_TOKEN) and is never in the image.
+
+name: steward
+
+services:
+  serve:
+    build:
+      context: ../..
+      dockerfile: apps/steward/Dockerfile
+    container_name: steward-serve
+    ports:
+      - "127.0.0.1:${STEWARD_PORT:-8800}:8000"
+    env_file:
+      - ${STEWARD_ENV_FILE:-/opt/steward/.env}
+    environment:
+      # memory, run state and budgets
+      - DATABASE_URL=postgresql+psycopg2://steward:steward@postgres:5432/steward
+      # background tasks and their leases
+      - OMNICOREAGENT_BACKGROUND_ENABLED=true
+      - OMNICOREAGENT_BACKGROUND_AGENT_ID=steward
+      - OMNICOREAGENT_BACKGROUND_TASK_STORE=redis
+      - OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=redis://redis:6379/0
+      - OMNICOREAGENT_BACKGROUND_START_WORKER=true
+      # durable telemetry under the workspace
+      - OMNICOREAGENT_WORKSPACE_BACKEND=local
+      - OMNICOREAGENT_WORKSPACE_DIR=/app/workspace
+      # the API: a token is required, and only loopback can reach it anyway
+      - OMNICOREAGENT_SERVE_AUTH_ENABLED=true
+      - OMNICOREAGENT_SERVE_ENABLE_DOCS=true
+      - OMNICOREAGENT_SERVE_REQUEST_TIMEOUT=900
+      - OMNICOREAGENT_SERVE_LOG_LEVEL=INFO
+      - STEWARD_REPOSITORY=${STEWARD_REPOSITORY:-omnirexflora-labs/omnicoreagent}
+      - STEWARD_MODEL=${STEWARD_MODEL:-gpt-5.6-terra}
+      - STEWARD_DAILY_USD=${STEWARD_DAILY_USD:-1.00}
+      - STEWARD_REQUEST_USD=${STEWARD_REQUEST_USD:-0.20}
+    volumes:
+      - steward-workspace:/app/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: steward-postgres
+    environment:
+      - POSTGRES_USER=steward
+      - POSTGRES_PASSWORD=steward
+      - POSTGRES_DB=steward
+    ports:
+      - "127.0.0.1:${STEWARD_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - steward-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U steward -d steward"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: steward-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${STEWARD_REDIS_PORT:-6380}:6379"
+    volumes:
+      - steward-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  steward-workspace:
+  steward-postgres:
+  steward-redis:

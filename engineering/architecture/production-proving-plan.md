@@ -115,3 +115,5 @@ with tests, as always.
 
 | Unit | Status | Commit | Notes |
 | --- | --- | --- | --- |
+| P1 | In progress | — | `apps/steward/`: the agent (26 allow, 10 ask, 9 deny rules over the hosted GitHub MCP server's 45 tools; $1.00/day and $0.20/request budgets, pausing when spent; E2B sandboxes; Postgres memory), its image, its compose project, and `scenario_p1.py`. Found while writing it: the SQL background task store is SQLite-only (`sqlite3` directly) while SQL memory supports Postgres through SQLAlchemy — so the steward's task store is Redis; a Postgres task store is a runtime gap to record, not a steward concern. Also: the container guide forbids mounting the Docker socket, so the server's sandbox provider is E2B from the start. |
+
