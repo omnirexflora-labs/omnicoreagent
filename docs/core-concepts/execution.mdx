@@ -30,7 +30,10 @@ agent_config = {
 
 The `execute` tool appears only when governance is on **and** the configured
 sandbox can run commands, so an agent never has a way to run code that policy
-has not seen.
+has not seen. What the sandbox is — network, image, working directory — is
+`sandbox_manifest`, next to `sandbox_config`
+([Sandbox providers](/docs/how-to-guides/sandbox-providers)); what it asks
+for is authorized when the run's session opens.
 
 ## What each one is governed as
 

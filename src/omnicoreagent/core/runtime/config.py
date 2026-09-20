@@ -150,6 +150,8 @@ def _default_governance_config() -> dict[str, Any]:
         "approval_mode": "suspend",
         "sandbox_runtime": None,
         "sandbox_config": None,
+        # What each run's sandbox is (network, image, working directory).
+        "sandbox_manifest": None,
         "allow_test_sandbox_runtime": False,
         "allow_static_high_risk_approvals": False,
     }
@@ -594,6 +596,10 @@ def _validate_governance_config(value: dict[str, Any]):
                 "governance_config.sandbox_config.provider must be a registered "
                 f"sandbox provider: {', '.join(registered_sandbox_providers())}"
             )
+    if value.get("sandbox_manifest") is not None:
+        from omnicoreagent.sandbox.factory import sandbox_manifest_from_config
+
+        sandbox_manifest_from_config(value["sandbox_manifest"])
     profile = value.get("profile", "interactive-dev")
     if profile not in {"permissive-dev", "interactive-dev", "strict-production"}:
         raise ValueError(

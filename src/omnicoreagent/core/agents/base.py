@@ -321,7 +321,11 @@ class BaseReactAgent:
             return await self._run(*args, **kwargs)
         from omnicoreagent.sandbox.scope import ExecutionScope
 
-        scope = ExecutionScope(self.sandbox_execution, workspace_bridge=self._workspace_bridge())
+        scope = ExecutionScope(
+            self.sandbox_execution,
+            getattr(self.governance_engine, "sandbox_manifest", None),
+            workspace_bridge=self._workspace_bridge(),
+        )
         async with scope.active():
             return await self._run(*args, **kwargs)
 

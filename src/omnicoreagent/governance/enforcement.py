@@ -47,6 +47,7 @@ class GovernanceEngine:
         approval_resolver: ApprovalResolver | None = None,
         telemetry_recorder: TelemetryRecorder | None = None,
         sandbox_runtime=None,
+        sandbox_manifest=None,
         allow_test_sandbox_runtime: bool = False,
         allow_static_high_risk_approvals: bool = False,
     ) -> None:
@@ -57,6 +58,8 @@ class GovernanceEngine:
         self.approval_resolver = approval_resolver
         self.telemetry_recorder = telemetry_recorder
         self.sandbox_runtime = sandbox_runtime
+        # What each run's sandbox is; None means the runtime's default.
+        self.sandbox_manifest = sandbox_manifest
         self.allow_test_sandbox_runtime = allow_test_sandbox_runtime
         self.allow_static_high_risk_approvals = allow_static_high_risk_approvals
         self._budget_lock = asyncio.Lock()

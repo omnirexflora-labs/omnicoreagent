@@ -6,7 +6,7 @@ from typing import Any
 
 from omnicoreagent.sandbox.base import SandboxRuntime
 from omnicoreagent.sandbox.local import LocalTestSandboxRuntime
-from omnicoreagent.sandbox.models import SandboxProvider, sandbox_provider_name
+from omnicoreagent.sandbox.models import SandboxManifest, SandboxProvider, sandbox_provider_name
 from omnicoreagent.sandbox.none import NoneSandboxRuntime
 
 # Builds a backend from its options: factory(options, telemetry_recorder).
@@ -95,6 +95,35 @@ class SandboxRuntimeConfig:
     @property
     def provider_name(self) -> str:
         return str(getattr(self.provider, "value", self.provider))
+
+
+def sandbox_manifest_from_config(value: Any) -> SandboxManifest | None:
+    """The manifest an application gives each run's sandbox, read at startup.
+
+    It names what the sandbox is — its network, image, working directory,
+    resources, environment — not which provider runs it or which session it
+    is; those are the runtime's. What it asks for is still authorized by the
+    policy when a session opens.
+    """
+    if value is None:
+        return None
+    if isinstance(value, SandboxManifest):
+        return value
+    if not isinstance(value, dict):
+        raise ValueError("governance_config.sandbox_manifest must be a dict")
+    for key in ("provider", "sandbox_id"):
+        if key in value:
+            raise ValueError(
+                f"governance_config.sandbox_manifest cannot set {key}: the provider "
+                "is sandbox_config's and each run's session is the runtime's"
+            )
+    try:
+        return SandboxManifest(**value)
+    except TypeError as exc:
+        # An unknown field, named by the dataclass constructor.
+        raise ValueError(f"governance_config.sandbox_manifest: {exc}") from None
+    except ValueError as exc:
+        raise ValueError(f"governance_config.sandbox_manifest: {exc}") from None
 
 
 def build_sandbox_runtime(

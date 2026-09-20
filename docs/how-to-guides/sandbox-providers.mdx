@@ -59,6 +59,35 @@ Common options: `image`, `max_output_bytes`, and `timeout_seconds`. Docker
 adds `user`, `workdir_size`, `pids_limit`, `runtime` (`"runsc"` for gVisor)
 and `pull`; see [Security Model](/docs/core-concepts/security-model).
 
+## What each run's sandbox is
+
+`sandbox_config` says which provider runs the sandbox; `sandbox_manifest`
+says what the sandbox is — its network, image, working directory, resources
+and plain environment. Without one, a run's sandbox has no network, the
+provider's default image, and `/workspace` as its working directory.
+
+```python
+agent_config = {
+    "governance_config": {
+        "enabled": True,
+        "sandbox_config": {"provider": "e2b"},
+        "sandbox_manifest": {
+            "network_policy": {"default": "allow"},   # the agent may clone and install
+            "working_dir": "/home/user/work",
+        },
+    },
+}
+```
+
+The manifest asks; the policy decides. Turning the network on is
+`sandbox.network.configure`, an image is `sandbox.image.use`, a plain
+environment is `sandbox.environment.set`: the development profiles ask a
+person before the network goes on (the run pauses on that approval like any
+other, see [Durable Runs](/docs/core-concepts/durable-runs)), and
+`strict-production` allows none of them without a rule. A manifest that
+cannot be read — an unknown field, a provider or session of its own — is
+refused when the agent is built.
+
 ## Your own sandbox service (`http`)
 
 For anything without a native adapter — a Cloudflare Worker using

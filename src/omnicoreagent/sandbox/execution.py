@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import unquote
 from uuid import uuid4
 
+from omnicoreagent.governance.calls import tool_call_metadata
 from omnicoreagent.governance.capabilities import secret_authority_request
 from omnicoreagent.governance.models import AuthorityRequest, AuthorityTarget
 from omnicoreagent.sandbox.base import SandboxRuntime
@@ -25,7 +26,12 @@ from omnicoreagent.sandbox.models import (
 )
 
 _ALLOWED_AUTHORITY_METADATA_KEYS = frozenset(
-    {"request_id", "operation", "purpose", "caller", "trace_id", "run_id"}
+    {
+        "request_id", "operation", "purpose", "caller", "trace_id", "run_id",
+        # The tool call that needs the authority: an "ask" is recorded
+        # against it, so the run can pause there and continue later.
+        "tool_call_id", "tool_name", "tool_provider",
+    }
 )
 
 
@@ -339,6 +345,7 @@ def _default_authority_request(spec: SandboxCommandSpec) -> AuthorityRequest:
         risk_level="high",
         metadata={
             "command": {"name": command_name, "argc": len(spec.command)},
+            **tool_call_metadata(),
             **_safe_metadata(spec.metadata),
         },
     )
@@ -559,7 +566,7 @@ def _sandbox_scope_request(
         target=AuthorityTarget(path=path, resource=resource, host=host),
         risk_level=risk_level,
         host=host,
-        metadata=metadata or {},
+        metadata={**tool_call_metadata(), **(metadata or {})},
     )
 
 

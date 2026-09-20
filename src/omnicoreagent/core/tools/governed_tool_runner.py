@@ -8,6 +8,8 @@ from omnicoreagent.core.types import (
     ToolCallResult,
 )
 from omnicoreagent.core.tools.tool_observation_guardrail import scrub_tool_results
+from omnicoreagent.governance.calls import on_behalf_of
+from omnicoreagent.governance.calls import on_behalf_of
 from omnicoreagent.governance.capabilities import tool_authority_requests
 from omnicoreagent.governance.errors import (
     GovernanceError,
@@ -57,10 +59,13 @@ class GovernedToolRunner:
                         single_tool=single_tool,
                         governance_error=governance_error,
                     )
-                result = await single_tool.tool_executor.execute(
-                    tool_args=single_tool.tool_args,
-                    tool_name=single_tool.tool_name,
-                )
+                # Authority the tool asks for while it runs (a sandbox's
+                # network, each command in it) is recorded against this call.
+                with on_behalf_of(single_tool.tool_call_id, single_tool.tool_name, single_tool.tool_provider):
+                    result = await single_tool.tool_executor.execute(
+                        tool_args=single_tool.tool_args,
+                        tool_name=single_tool.tool_name,
+                    )
                 if result_guardrail is not None:
                     result = scrub_tool_results([result], result_guardrail)[0]
                 result.pop("_guardrail_telemetry", None)
@@ -144,10 +149,13 @@ class GovernedToolRunner:
                         input=telemetry_input,
                         metadata={**relationship_metadata, "phase": "execution"},
                     )
-                result = await single_tool.tool_executor.execute(
-                    tool_args=single_tool.tool_args,
-                    tool_name=single_tool.tool_name,
-                )
+                # Authority the tool asks for while it runs (a sandbox's
+                # network, each command in it) is recorded against this call.
+                with on_behalf_of(single_tool.tool_call_id, single_tool.tool_name, single_tool.tool_provider):
+                    result = await single_tool.tool_executor.execute(
+                        tool_args=single_tool.tool_args,
+                        tool_name=single_tool.tool_name,
+                    )
                 if result_guardrail is not None:
                     result = scrub_tool_results([result], result_guardrail)[0]
                 guardrail_signal = result.pop("_guardrail_telemetry", None)

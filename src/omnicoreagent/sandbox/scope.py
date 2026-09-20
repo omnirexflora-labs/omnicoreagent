@@ -11,6 +11,7 @@ and subagents each have their own.
 from __future__ import annotations
 
 import asyncio
+import copy
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
@@ -49,6 +50,9 @@ class ExecutionScope:
                 manifest = self.manifest
                 if isinstance(manifest, dict):
                     manifest = SandboxManifest(**manifest)
+                elif manifest is not None:
+                    # Adapters write onto the manifest they are given.
+                    manifest = copy.deepcopy(manifest)
                 self._session = await self.service.open_session(manifest)
                 from omnicoreagent.core.runs import current_run
 

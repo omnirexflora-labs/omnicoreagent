@@ -254,6 +254,9 @@ def build_governance_engine(agent_config: dict[str, Any], telemetry_recorder: An
             governance_config.get("sandbox_config"),
             telemetry_recorder=telemetry_recorder,
         )
+    from omnicoreagent.sandbox.factory import sandbox_manifest_from_config
+
+    sandbox_manifest = sandbox_manifest_from_config(governance_config.get("sandbox_manifest"))
     approval_resolver = governance_config.get("approval_resolver")
     if approval_resolver is None and governance_config.get("approval_mode", "suspend") == "suspend":
         from omnicoreagent.core.run_approvals import RunApprovalResolver
@@ -265,6 +268,7 @@ def build_governance_engine(agent_config: dict[str, Any], telemetry_recorder: An
         approval_resolver=approval_resolver,
         telemetry_recorder=telemetry_recorder,
         sandbox_runtime=sandbox_runtime,
+        sandbox_manifest=sandbox_manifest,
         allow_test_sandbox_runtime=governance_config.get(
             "allow_test_sandbox_runtime", False
         ),

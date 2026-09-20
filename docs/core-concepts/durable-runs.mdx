@@ -41,6 +41,10 @@ if result["status"] == "awaiting_approval":
         print(approval["tool_name"], approval["arguments"], approval["reason"])
 ```
 
+An ask can also come from inside a tool call — the sandbox's network when a
+run's session opens, a command inside it — and pauses the run the same way,
+recorded against the `execute` call that needed it.
+
 A person decides each approval, then the run continues:
 
 ```python
