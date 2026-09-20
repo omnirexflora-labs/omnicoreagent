@@ -68,7 +68,10 @@ POLICY = {
             # and so is running as a background task.
             {"rule_id": "github_connect", "capability": "mcp.server.connect",
              "target": {"mcp_server": "github"}},
-            {"rule_id": "background_run", "capability": "background.run"},
+            *[
+                {"rule_id": f"background_run_{action}", "capability": f"background.run.{action}"}
+                for action in ("start", "cancel")
+            ],
             *[
                 {"rule_id": f"background_task_{action}", "capability": f"background.task.{action}"}
                 for action in ("create", "update", "pause", "resume", "delete")
