@@ -64,6 +64,20 @@ work**, and the run says which one. Each scope has a window: `total`,
 - **Warn before the wall.** Crossing `warn_at` (80% by default) records a
   `budget_warning` in the trace with the meter, the scope and what is left.
 
+### A crash between spending and counting
+
+A process can die after the money is spent and before the counter is written.
+The two orders fail differently: charging first loses budget that was never
+used, spending first loses the record of money that was. Neither is free, so
+the choice is which way to be wrong.
+
+Budgets err towards **over-counting, never under-counting**: an estimate is
+reserved before a model call and corrected to the real cost after it, so a
+crash in between leaves the reservation standing rather than losing the spend.
+Reservations belong to a run, and the ones left by a run whose process died
+are released when its lease expires, reusing the lease from durable runs (D3).
+A reservation is therefore a temporary over-count, never a silent under-count.
+
 ### Where the numbers live
 
 In the memory store the application already chose, beside run state, with
@@ -76,9 +90,12 @@ accepts budgets as a convenience for applications that use no policy file.
 
 ## Units
 
-- **B1. Meters and the ledger.** A `BudgetLedger` on the memory store: atomic
-  add-and-read per scope key and window, for all four backends, with a
-  concurrency test that two workers cannot both spend the last dollar.
+- **B1. Meters and the ledger.** A `BudgetLedger` on the memory store:
+  reserve, commit, release, and direct charges, per scope key and window, on
+  all four backends through versioned compare-and-swap (as run state does), so
+  two workers cannot both spend the last dollar; stale reservations released
+  by run lease; a store without the methods leaves budgets off rather than
+  failing.
 - **B2. Policy and configuration.** Budgets in the policy envelope (covered by
   its hash) with per-scope meters and windows; validation; nothing budgeted by
   default; the old `policy.budget` keeps working and is expressed in the new
@@ -104,6 +121,7 @@ accepts budgets as a convenience for applications that use no policy file.
 | 2 | Where do budgets live? | In the policy, so they are hashed and cannot be widened at runtime; `governance_config` is a convenience. |
 | 3 | A model whose price is unknown (no cost from the provider) | Charge tokens, count the cost as zero, and flag the run `cost_incomplete`, rather than refusing the call. Refusing would break local and new models. |
 | 4 | How are sandbox seconds counted? | A session's lifetime (what providers bill), charged as it runs, not only at the end, so a long session cannot overrun the budget. |
+| 5 | A crash between spending and counting | Reserve an estimate, then correct it: over-count rather than under-count, with stale reservations released by the run's lease. |
 
 ## Execution log
 
