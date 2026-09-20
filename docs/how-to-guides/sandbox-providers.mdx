@@ -31,6 +31,30 @@ Each hosted provider needs its own credentials in the environment (for
 example `modal token new`, `E2B_API_KEY`, `DAYTONA_API_KEY`, `VERCEL_TOKEN`).
 Those credentials stay in your process: they are never put inside a sandbox.
 
+## A sandbox with no network is checked, not trusted
+
+A sandbox that must have no network is checked from the inside, once, when it
+is created: it tries one outbound connection, and a sandbox that reaches the
+internet is destroyed and refused with an error. This is not hypothetical —
+E2B and Daytona both accept "no internet", report it back, and on the accounts
+this was tested against still hand back a sandbox that reaches the internet. A
+promise of isolation the provider does not keep is worse than no sandbox,
+because a policy may be allowing the work only because it is isolated.
+
+The check needs `python` in the image; an image without one is refused for the
+same reason (it cannot be shown to be isolated). If you know your provider and
+accept the risk, turn the check off per provider:
+
+```python
+"sandbox_config": {
+    "provider": "e2b",
+    "options": {"verify_network_isolation": False},
+}
+```
+
+The session then records `network_isolation: "unchecked"` instead of
+`"checked"`, and a manifest that allows the network records `"not required"`.
+
 Common options: `image`, `max_output_bytes`, and `timeout_seconds`. Docker
 adds `user`, `workdir_size`, `pids_limit`, `runtime` (`"runsc"` for gVisor)
 and `pull`; see [Security Model](/docs/core-concepts/security-model).

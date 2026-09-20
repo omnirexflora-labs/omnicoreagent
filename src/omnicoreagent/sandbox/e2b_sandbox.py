@@ -22,6 +22,12 @@ from uuid import uuid4
 
 from omnicoreagent.sandbox.base import SandboxRuntime
 from omnicoreagent.sandbox.errors import SandboxUnsupportedError
+from omnicoreagent.sandbox.network_check import (
+    CHECK_TIMEOUT_SECONDS,
+    NETWORK_CHECK_COMMAND,
+    isolation_verdict,
+    refuse_open_sandbox,
+)
 from omnicoreagent.sandbox.models import (
     NetworkPolicy,
     SandboxExecRequest,
@@ -47,6 +53,7 @@ class E2BSandboxRuntime(SandboxRuntime):
         self.api_key = options.pop("api_key", None)
         self.timeout_seconds = int(options.pop("timeout_seconds", DEFAULT_TIMEOUT_SECONDS))
         self.max_output_bytes = int(options.pop("max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES))
+        self.verify_network_isolation = bool(options.pop("verify_network_isolation", True))
         if options:
             raise ValueError(f"Unknown e2b sandbox option(s): {', '.join(sorted(options))}")
         self.telemetry_recorder = telemetry_recorder
@@ -70,11 +77,16 @@ class E2BSandboxRuntime(SandboxRuntime):
         sandbox = await e2b.AsyncSandbox.create(**options)
         # E2B sandboxes start in the user's home; the working directory is ours.
         await sandbox.files.make_dir(manifest.working_dir)
+        isolation = await self._check_isolation(sandbox, manifest)
         session = SandboxSession(
             session_id=session_id,
             provider=self.provider,
             manifest=manifest,
-            metadata={"sandbox_id": getattr(sandbox, "sandbox_id", None), "template": template},
+            metadata={
+                "sandbox_id": getattr(sandbox, "sandbox_id", None),
+                "template": template,
+                "network_isolation": isolation,
+            },
         )
         self._sessions[session_id] = session
         self._sandboxes[session_id] = sandbox
@@ -152,6 +164,28 @@ class E2BSandboxRuntime(SandboxRuntime):
             session_id=session_id,
             metadata={"provider": self.provider},
         )
+
+    async def _check_isolation(self, sandbox: Any, manifest: SandboxManifest) -> str:
+        """Refuse a sandbox that was asked to have no network and still has one."""
+        if _internet_allowed(manifest.network_policy):
+            return "not required"
+        if not self.verify_network_isolation:
+            return "unchecked"
+        try:
+            result = await sandbox.commands.run(
+                NETWORK_CHECK_COMMAND, timeout=CHECK_TIMEOUT_SECONDS
+            )
+            exit_code = result.exit_code
+        except Exception as exc:  # E2B raises for a non-zero exit
+            failure = getattr(exc, "result", None)
+            if failure is None and not _is_timeout(exc):
+                raise
+            exit_code = getattr(failure, "exit_code", 124 if _is_timeout(exc) else 1)
+        verdict = isolation_verdict(exit_code)
+        if verdict != "isolated":
+            await sandbox.kill()
+        refuse_open_sandbox(self.provider, verdict)
+        return "checked"
 
     def _sandbox(self, session_id: str):
         sandbox = self._sandboxes.get(session_id)

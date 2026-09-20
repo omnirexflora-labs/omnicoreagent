@@ -36,6 +36,14 @@ def pytest_configure(config):
         os.environ.setdefault("MONGODB_DB_NAME", mongodb_database)
         os.environ.setdefault("OMNICOREAGENT_TEST_MONGODB_DATABASE", mongodb_database)
 
+    # Hosted sandbox providers read their own credentials from the environment.
+    # A provider's live test is skipped when its key is absent; the value is
+    # never printed, recorded, or passed to a sandbox.
+    for key in ("E2B_API_KEY", "DAYTONA_API_KEY", "DAYTONA_API_URL", "DAYTONA_TARGET"):
+        value = env_values.get(key)
+        if value:
+            os.environ.setdefault(key, value)
+
 
 @pytest.fixture(autouse=True)
 def _isolated_default_workspace(monkeypatch, tmp_path_factory):

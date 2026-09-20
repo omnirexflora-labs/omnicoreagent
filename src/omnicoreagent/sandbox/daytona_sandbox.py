@@ -22,6 +22,12 @@ from uuid import uuid4
 
 from omnicoreagent.sandbox.base import SandboxRuntime
 from omnicoreagent.sandbox.errors import SandboxUnsupportedError
+from omnicoreagent.sandbox.network_check import (
+    CHECK_TIMEOUT_SECONDS,
+    NETWORK_CHECK_COMMAND,
+    isolation_verdict,
+    refuse_open_sandbox,
+)
 from omnicoreagent.sandbox.models import (
     NetworkPolicy,
     SandboxExecRequest,
@@ -48,6 +54,7 @@ class DaytonaSandboxRuntime(SandboxRuntime):
         self.api_url = options.pop("api_url", None)
         self.target = options.pop("target", None)
         self.max_output_bytes = int(options.pop("max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES))
+        self.verify_network_isolation = bool(options.pop("verify_network_isolation", True))
         if options:
             raise ValueError(f"Unknown daytona sandbox option(s): {', '.join(sorted(options))}")
         self.telemetry_recorder = telemetry_recorder
@@ -72,11 +79,15 @@ class DaytonaSandboxRuntime(SandboxRuntime):
             parameters["resources"] = resources
         sandbox = await client.create(daytona.CreateSandboxFromImageParams(**parameters))
         await sandbox.fs.create_folder(manifest.working_dir, "755")
+        isolation = await self._check_isolation(client, sandbox, manifest)
         session = SandboxSession(
             session_id=session_id,
             provider=self.provider,
             manifest=manifest,
-            metadata={"sandbox_id": getattr(sandbox, "id", None)},
+            metadata={
+                "sandbox_id": getattr(sandbox, "id", None),
+                "network_isolation": isolation,
+            },
         )
         self._sessions[session_id] = session
         self._sandboxes[session_id] = sandbox
@@ -87,6 +98,7 @@ class DaytonaSandboxRuntime(SandboxRuntime):
         sandbox = self._sandboxes.pop(session_id, None)
         if sandbox is not None and self._client is not None:
             await self._client.delete(sandbox)
+        await self._close_client_if_idle()
 
     async def execute(self, session_id: str, request: SandboxExecRequest) -> SandboxExecResult:
         sandbox = self._sandbox(session_id)
@@ -167,6 +179,34 @@ class DaytonaSandboxRuntime(SandboxRuntime):
             )
         return self._client
 
+    async def _check_isolation(
+        self, client: Any, sandbox: Any, manifest: SandboxManifest
+    ) -> str:
+        """Refuse a sandbox that was asked to have no network and still has one."""
+        if not _restricts_traffic(manifest.network_policy):
+            return "not required"
+        if not self.verify_network_isolation:
+            return "unchecked"
+        response = await sandbox.process.exec(
+            NETWORK_CHECK_COMMAND, timeout=CHECK_TIMEOUT_SECONDS
+        )
+        verdict = isolation_verdict(response.exit_code)
+        if verdict != "isolated":
+            await client.delete(sandbox)
+            await self._close_client_if_idle()
+        refuse_open_sandbox(self.provider, verdict)
+        return "checked"
+
+    async def _close_client_if_idle(self) -> None:
+        """The client holds an HTTP session; with no sandbox left to talk to, it
+        is closed rather than left open for the life of the process."""
+        if self._sandboxes or self._client is None:
+            return
+        close = getattr(self._client, "close", None)
+        if close is not None:
+            await close()
+        self._client = None
+
     def _sandbox(self, session_id: str):
         sandbox = self._sandboxes.get(session_id)
         if sandbox is None:
@@ -192,6 +232,12 @@ def _daytona():
     from omnicoreagent._optional import load_optional
 
     return load_optional("the Daytona sandbox", "daytona", lambda: __import__("daytona"))
+
+
+def _restricts_traffic(policy: NetworkPolicy) -> bool:
+    """Whether the manifest asks for anything less than the open internet."""
+    default = getattr(policy.default, "value", policy.default)
+    return bool(policy.allowed_hosts) or default != SandboxNetworkDefault.ALLOW.value
 
 
 def _network_parameters(policy: NetworkPolicy) -> dict[str, Any]:
