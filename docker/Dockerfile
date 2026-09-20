@@ -26,6 +26,10 @@ COPY LICENSE .
 COPY src/ src/
 
 # Install dependencies
+# The package version comes from git tags (uv-dynamic-versioning); there is
+# no git history in an image, so the version is given here instead.
+ARG PACKAGE_VERSION=0.0.0+docker
+ENV UV_DYNAMIC_VERSIONING_BYPASS=$PACKAGE_VERSION
 RUN uv pip install --system --no-cache ".[serve]"
 
 # ======================================================================
