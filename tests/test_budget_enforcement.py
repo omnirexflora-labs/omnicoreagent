@@ -380,3 +380,48 @@ async def test_a_delegation_is_charged_to_the_run_that_asked_for_it():
     spent = await ledger.usage(budget_key(BudgetScope.REQUEST, "run_delegating", "total"))
     assert spent["subagent_runs"] == 1, "the refused delegation costs nothing"
 
+
+
+# --- what budgets ask of the store ------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_request_with_two_budgeted_meters_makes_few_store_round_trips():
+    """Counted before this guard: 5 saves and 7 reads of the budget key for one
+    request with two budgeted meters — every meter its own read-modify-write,
+    and a warning check reading back what the write had just returned. On a
+    remote store each is a round trip. Charges that happen together go in one."""
+    from omnicoreagent.core.memory_store.in_memory import InMemoryStore
+
+    counts = {"get": 0, "save": 0}
+    original_get, original_save = InMemoryStore.get_budget_state, InMemoryStore.save_budget_state
+
+    async def counted_get(self, *args, **kwargs):
+        counts["get"] += 1
+        return await original_get(self, *args, **kwargs)
+
+    async def counted_save(self, *args, **kwargs):
+        counts["save"] += 1
+        return await original_save(self, *args, **kwargs)
+
+    InMemoryStore.get_budget_state, InMemoryStore.save_budget_state = counted_get, counted_save
+    try:
+        agent = await _agent(
+            PricedModel(ModelTurn(tool_calls=(ToolRequest("c1", "lookup", '{"key": "a"}'),))),
+            budgets={
+                "request": [
+                    {"meter": "model_cost_usd", "limit": 10},
+                    {"meter": "model_calls", "limit": 10},
+                    {"meter": "tool_calls", "limit": 10},
+                ]
+            },
+        )
+        counts["get"] = counts["save"] = 0
+        await agent.run("go", session_id="round-trips")
+    finally:
+        InMemoryStore.get_budget_state, InMemoryStore.save_budget_state = original_get, original_save
+
+    # Two model calls (hold + settle each) and one tool call: five writes at
+    # most, and no read that is not the read before a write.
+    assert counts["save"] <= 5, f"{counts['save']} budget writes for one request"
+    assert counts["get"] <= counts["save"], f"{counts['get']} reads for {counts['save']} writes"

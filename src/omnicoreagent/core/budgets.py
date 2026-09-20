@@ -154,14 +154,35 @@ class BudgetLedger:
         """Spend now. Raises ``BudgetExhausted`` and spends nothing if it does not fit."""
         if not self.enabled or amount == 0:
             return 0.0
+        totals = await self.charge_many(key, [(meter, amount, limit)])
+        return totals.get(meter, 0.0)
 
-        def change(state: dict[str, Any]) -> float:
-            _check(state, key, meter, amount, limit)
+    async def charge_many(
+        self, key: str, charges: list[tuple[str, float, float | None]]
+    ) -> dict[str, float]:
+        """Spend on several meters of one key in one read-modify-write.
+
+        Every charge is checked before any is applied, so a refusal spends
+        nothing on any meter. Returns each charged meter's new total. On a
+        remote store this is one round trip where one per meter was.
+        """
+        if not self.enabled:
+            return {}
+        wanted = [(meter, float(amount), limit) for meter, amount, limit in charges if amount]
+        if not wanted:
+            return {}
+
+        def change(state: dict[str, Any]) -> dict[str, float]:
+            for meter, amount, limit in wanted:
+                _check(state, key, meter, amount, limit)
             meters = state.setdefault("meters", {})
-            meters[meter] = float(meters.get(meter, 0.0)) + float(amount)
-            return meters[meter]
+            totals: dict[str, float] = {}
+            for meter, amount, _ in wanted:
+                meters[meter] = float(meters.get(meter, 0.0)) + amount
+                totals[meter] = meters[meter]
+            return totals
 
-        return await self._apply(key, change)
+        return await self._apply(key, change) or {}
 
     async def reserve(
         self,
@@ -173,38 +194,86 @@ class BudgetLedger:
         run_id: str | None = None,
     ) -> Reservation:
         """Hold budget for a spend whose real cost is known only afterwards."""
-        reservation = Reservation(key, meter, float(amount), f"hold_{uuid4().hex}", run_id)
-        if not self.enabled or amount == 0:
-            return reservation
-
-        def change(state: dict[str, Any]) -> None:
-            _check(state, key, meter, amount, limit)
-            state.setdefault("reservations", {})[reservation.reservation_id] = {
-                "meter": meter,
-                "amount": float(amount),
-                "run_id": run_id,
-                "held_at": datetime.now(timezone.utc).isoformat(),
-            }
-
-        await self._apply(key, change)
+        reservation, _ = await self.reserve_and_charge(
+            key, meter, amount, limit=limit, run_id=run_id
+        )
         return reservation
 
-    async def commit(self, reservation: Reservation, *, actual: float | None = None) -> float:
-        """Spend the reservation, at its real cost when that is known."""
-        if not self.enabled:
-            return 0.0
-        spend = float(reservation.amount if actual is None else actual)
+    async def reserve_and_charge(
+        self,
+        key: str,
+        meter: str,
+        amount: float,
+        *,
+        limit: float | None,
+        run_id: str | None = None,
+        also: list[tuple[str, float, float | None]] | None = None,
+    ) -> tuple[Reservation, dict[str, float]]:
+        """Hold budget for one meter and charge others, in one write.
 
-        def change(state: dict[str, Any]) -> float:
-            held = state.setdefault("reservations", {}).pop(reservation.reservation_id, None)
-            if held is None and actual is None:
-                # Already released (a lease swept it); do not spend twice.
-                return float((state.get("meters") or {}).get(reservation.meter, 0.0))
+        A model call holds its cost and counts itself at once. Returns the
+        reservation and the new totals of what ``also`` charged.
+        """
+        reservation = Reservation(key, meter, float(amount), f"hold_{uuid4().hex}", run_id)
+        extra = [(m, float(a), lim) for m, a, lim in (also or []) if a]
+        if not self.enabled or (amount == 0 and not extra):
+            return reservation, {}
+
+        def change(state: dict[str, Any]) -> dict[str, float]:
+            if amount:
+                _check(state, key, meter, amount, limit)
+            for other, other_amount, other_limit in extra:
+                _check(state, key, other, other_amount, other_limit)
+            if amount:
+                state.setdefault("reservations", {})[reservation.reservation_id] = {
+                    "meter": meter,
+                    "amount": float(amount),
+                    "run_id": run_id,
+                    "held_at": datetime.now(timezone.utc).isoformat(),
+                }
             meters = state.setdefault("meters", {})
-            meters[reservation.meter] = float(meters.get(reservation.meter, 0.0)) + spend
-            return meters[reservation.meter]
+            totals: dict[str, float] = {}
+            for other, other_amount, _ in extra:
+                meters[other] = float(meters.get(other, 0.0)) + other_amount
+                totals[other] = meters[other]
+            return totals
 
-        return await self._apply(reservation.key, change)
+        totals = await self._apply(key, change) or {}
+        return reservation, totals
+
+    async def commit(
+        self,
+        reservation: Reservation,
+        *,
+        actual: float | None = None,
+        also: list[tuple[str, float, float | None]] | None = None,
+    ) -> dict[str, float]:
+        """Spend the reservation, at its real cost when that is known.
+
+        ``also`` charges other meters of the same key in the same write (the
+        tokens a call used are counted as its cost is settled). Returns the
+        new totals of the settled meter and of what ``also`` charged.
+        """
+        if not self.enabled:
+            return {}
+        spend = float(reservation.amount if actual is None else actual)
+        extra = [(m, float(a), lim) for m, a, lim in (also or []) if a]
+
+        def change(state: dict[str, Any]) -> dict[str, float]:
+            for other, other_amount, other_limit in extra:
+                _check(state, reservation.key, other, other_amount, other_limit)
+            meters = state.setdefault("meters", {})
+            held = state.setdefault("reservations", {}).pop(reservation.reservation_id, None)
+            if not (held is None and actual is None):
+                # Not already released by a lease sweep: spend it.
+                meters[reservation.meter] = float(meters.get(reservation.meter, 0.0)) + spend
+            totals = {reservation.meter: float(meters.get(reservation.meter, 0.0))}
+            for other, other_amount, _ in extra:
+                meters[other] = float(meters.get(other, 0.0)) + other_amount
+                totals[other] = meters[other]
+            return totals
+
+        return await self._apply(reservation.key, change) or {}
 
     async def release(self, reservation: Reservation) -> None:
         """Give the held budget back; nothing is spent."""
@@ -475,35 +544,130 @@ class RunBudgets:
 
     async def charge(self, meter: str, amount: float) -> None:
         """Spend against every budget that covers this run."""
-        for scope, key, limit in self.limits(meter):
-            try:
-                spent = await self.ledger.charge(key, meter, amount, limit=limit.limit)
-            except BudgetExhausted as exhausted:
-                raise await self._stop(scope, key, limit, exhausted) from None
-            await self._warn_if_near(scope, limit, key, spent)
+        await self.charge_many([(meter, amount)])
 
-    async def reserve(self, meter: str, amount: float) -> list[Reservation]:
-        """Hold what a spend could cost, on every budget that covers the run."""
-        held: list[Reservation] = []
-        for scope, key, limit in self.limits(meter):
+    async def charge_many(self, charges: list[tuple[str, float]]) -> None:
+        """Spend several meters at once: one write per budget key they share."""
+        by_key: dict[str, list[tuple[BudgetScope, Any, float]]] = {}
+        for meter, amount in charges:
+            for scope, key, limit in self.limits(meter):
+                by_key.setdefault(key, []).append((scope, limit, float(amount)))
+        for key, entries in by_key.items():
             try:
-                held.append(
-                    await self.ledger.reserve(
-                        key, meter, amount, limit=limit.limit, run_id=self.run_id
-                    )
+                totals = await self.ledger.charge_many(
+                    key, [(limit.meter, amount, limit.limit) for _, limit, amount in entries]
+                )
+            except BudgetExhausted as exhausted:
+                scope, limit = next(
+                    (scope, limit) for scope, limit, _ in entries if limit.meter == exhausted.meter
+                )
+                raise await self._stop(scope, key, limit, exhausted) from None
+            for scope, limit, _ in entries:
+                await self._warn_if_near(scope, limit, key, totals.get(limit.meter))
+
+    async def reserve(
+        self, meter: str, amount: float, *, also: list[tuple[str, float]] | None = None
+    ) -> list[Reservation]:
+        """Hold what a spend could cost, on every budget that covers the run.
+
+        ``also`` charges other meters in the same writes (a model call holds
+        its cost and counts itself at once).
+        """
+        held: list[Reservation] = []
+        extra_by_key: dict[str, list[tuple[BudgetScope, Any, float]]] = {}
+        for other, other_amount in also or []:
+            for scope, key, limit in self.limits(other):
+                extra_by_key.setdefault(key, []).append((scope, limit, float(other_amount)))
+        governing = self.limits(meter)
+        keys_with_hold = {key for _, key, _ in governing}
+        for scope, key, limit in governing:
+            extra = extra_by_key.pop(key, [])
+            try:
+                reservation, totals = await self.ledger.reserve_and_charge(
+                    key,
+                    meter,
+                    amount,
+                    limit=limit.limit,
+                    run_id=self.run_id,
+                    also=[(lim.meter, a, lim.limit) for _, lim, a in extra],
                 )
             except BudgetExhausted as exhausted:
                 await self.release(held)  # hold nothing when the call cannot run
+                if exhausted.meter != meter:
+                    scope, limit = next(
+                        (s, lim) for s, lim, _ in extra if lim.meter == exhausted.meter
+                    )
                 raise await self._stop(scope, key, limit, exhausted) from None
+            held.append(reservation)
+            for other_scope, other_limit, _ in extra:
+                await self._warn_if_near(
+                    other_scope, other_limit, key, totals.get(other_limit.meter)
+                )
+        # Meters in ``also`` whose keys hold nothing are charged on their own.
+        for key, entries in extra_by_key.items():
+            if key in keys_with_hold:
+                continue
+            try:
+                totals = await self.ledger.charge_many(
+                    key, [(lim.meter, a, lim.limit) for _, lim, a in entries]
+                )
+            except BudgetExhausted as exhausted:
+                await self.release(held)
+                scope, limit = next(
+                    (s, lim) for s, lim, _ in entries if lim.meter == exhausted.meter
+                )
+                raise await self._stop(scope, key, limit, exhausted) from None
+            for other_scope, other_limit, _ in entries:
+                await self._warn_if_near(
+                    other_scope, other_limit, key, totals.get(other_limit.meter)
+                )
         return held
 
-    async def commit(self, held: list[Reservation], *, actual: float) -> None:
+    async def commit(
+        self,
+        held: list[Reservation],
+        *,
+        actual: float,
+        also: list[tuple[str, float]] | None = None,
+    ) -> None:
+        """Settle each hold at its real cost; ``also`` counts other meters in
+        the same writes. The totals the writes return are what is checked for
+        warnings, rather than reading the key back."""
+        extra_by_key: dict[str, list[tuple[BudgetScope, Any, float]]] = {}
+        for other, other_amount in also or []:
+            for scope, key, limit in self.limits(other):
+                extra_by_key.setdefault(key, []).append((scope, limit, float(other_amount)))
+        governing = {key: (scope, limit) for scope, key, limit in self.limits(held[0].meter)} if held else {}
         for reservation in held:
-            await self.ledger.commit(reservation, actual=actual)
-        for scope, key, limit in self.limits(held[0].meter if held else ""):
-            spent = (await self.ledger.usage(key)).get(limit.meter)
-            if spent is not None:
-                await self._warn_if_near(scope, limit, key, spent)
+            extra = extra_by_key.pop(reservation.key, [])
+            try:
+                totals = await self.ledger.commit(
+                    reservation,
+                    actual=actual,
+                    also=[(lim.meter, a, lim.limit) for _, lim, a in extra],
+                )
+            except BudgetExhausted as exhausted:
+                scope, limit = next((s, lim) for s, lim, _ in extra if lim.meter == exhausted.meter)
+                raise await self._stop(scope, reservation.key, limit, exhausted) from None
+            if reservation.key in governing:
+                scope, limit = governing[reservation.key]
+                await self._warn_if_near(scope, limit, reservation.key, totals.get(limit.meter))
+            for other_scope, other_limit, _ in extra:
+                await self._warn_if_near(
+                    other_scope, other_limit, reservation.key, totals.get(other_limit.meter)
+                )
+        for key, entries in extra_by_key.items():
+            try:
+                totals = await self.ledger.charge_many(
+                    key, [(lim.meter, a, lim.limit) for _, lim, a in entries]
+                )
+            except BudgetExhausted as exhausted:
+                scope, limit = next((s, lim) for s, lim, _ in entries if lim.meter == exhausted.meter)
+                raise await self._stop(scope, key, limit, exhausted) from None
+            for other_scope, other_limit, _ in entries:
+                await self._warn_if_near(
+                    other_scope, other_limit, key, totals.get(other_limit.meter)
+                )
 
     async def release(self, held: list[Reservation]) -> None:
         for reservation in held:

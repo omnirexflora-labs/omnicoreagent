@@ -408,14 +408,18 @@ class AgentLlmStepRunner:
             budgets = current_budgets()
             held = []
             if budgets is not None and budgets.enabled:
-                await budgets.charge("model_calls", 1)
                 estimate = estimate_model_call(
                     llm_connection,
                     messages,
                     max_output_tokens=_max_output_tokens(llm_connection),
                 )
                 if estimate.cost_usd is not None:
-                    held = await budgets.reserve("model_cost_usd", estimate.cost_usd)
+                    # The hold and the call count go to the store together.
+                    held = await budgets.reserve(
+                        "model_cost_usd", estimate.cost_usd, also=[("model_calls", 1)]
+                    )
+                else:
+                    await budgets.charge("model_calls", 1)
             retries: list[dict[str, Any]] = []
             retry_token = MODEL_RETRY_OBSERVER.set(retries.append)
             timing["started"] = time.perf_counter()
@@ -570,13 +574,16 @@ class AgentLlmStepRunner:
                         "tokens": tokens.get("total"),
                     },
                 )
+        total_tokens = int(tokens.get("total") or 0)
+        counted = [("model_tokens", total_tokens)] if total_tokens else []
+        if cost is None:
+            if counted:
+                await budgets.charge_many(counted)
         elif held:
-            await budgets.commit(held, actual=float(cost))
+            # Settling the hold and counting the tokens go to the store together.
+            await budgets.commit(held, actual=float(cost), also=counted)
         else:
-            await budgets.charge("model_cost_usd", float(cost))
-        total_tokens = tokens.get("total")
-        if total_tokens:
-            await budgets.charge("model_tokens", int(total_tokens))
+            await budgets.charge_many([("model_cost_usd", float(cost)), *counted])
 
     @staticmethod
     def _model_call_facts(
