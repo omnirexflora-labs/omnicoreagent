@@ -271,12 +271,10 @@ class BackgroundAgentManager:
     async def delete_task(self, task_id: str, delete_runs: bool = False) -> None:
         existing = await self.task_store.get_task(task_id)
         if self.governance_engine is not None and existing is not None:
-            require_current_policy_snapshot(
-                existing.metadata,
-                self.governance_engine,
-                surface=f"background task {existing.task_id}",
-                required=True,
-            )
+            # Removing a task is authorized by the policy in force now, and
+            # does not require the task's own policy snapshot to match: a task
+            # from an old policy must be removable, or a policy change would
+            # orphan it with no way out. Running it is another matter.
             await self.governance_engine.authorize(
                 background_task_authority_request(task=existing, action="delete")
             )
@@ -330,12 +328,8 @@ class BackgroundAgentManager:
     async def pause_task(self, task_id: str) -> None:
         task = await self.task_store.get_task(task_id)
         if self.governance_engine is not None and task is not None:
-            require_current_policy_snapshot(
-                task.metadata,
-                self.governance_engine,
-                surface=f"background task {task.task_id}",
-                required=True,
-            )
+            # Pausing, like deleting, is the safe direction under a newer
+            # policy and needs no snapshot match; see delete_task.
             await self.governance_engine.authorize(
                 background_task_authority_request(task=task, action="pause")
             )

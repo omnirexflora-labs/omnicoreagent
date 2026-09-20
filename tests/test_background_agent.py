@@ -3630,3 +3630,40 @@ async def test_a_background_run_reads_its_task_and_run_a_few_times_not_per_event
     assert counts["get_task"] <= 3, f"one background run read its task {counts['get_task']} times"
     # The waiter polls the run every 50 ms; a run this short is polled a few times.
     assert counts["get_run"] <= 6, f"one background run read its run {counts['get_run']} times"
+
+
+# --- a task from an old policy can be paused or deleted under the new one ------
+
+
+@pytest.mark.asyncio
+async def test_a_task_from_an_old_policy_can_be_paused_and_deleted_but_not_run():
+    """Found deploying the steward: after its policy changed, its task could
+    not be run under the new policy (right) — and could not be deleted or
+    paused either, so it was orphaned with no way out through the API. Running
+    work under a changed policy is refused; stopping or removing it under the
+    newer policy is the safe direction and is allowed, authorized by the
+    policy in force now."""
+    first = GovernanceEngine(_background_governance_policy(name="first-policy"))
+    manager = BackgroundAgentManager(task_store="in_memory", governance_engine=first)
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="stuck", agent_id="agent", query="do work", schedule={"type": "manual"}
+    )
+    await manager.register_task(
+        task_id="stuck-too", agent_id="agent", query="do work", schedule={"type": "manual"}
+    )
+
+    manager.governance_engine = GovernanceEngine(
+        _background_governance_policy(name="changed-policy")
+    )
+
+    with pytest.raises(PolicyDeniedError, match="different policy snapshot"):
+        await manager.run_now("stuck")
+    await manager.pause_task("stuck")
+    status = await manager.get_task_status("stuck")
+    schedule_state = getattr(status, "schedule_state", None) or (status.get("schedule_state") if isinstance(status, dict) else None)
+    assert getattr(schedule_state, "paused", None) is True or (isinstance(schedule_state, dict) and schedule_state.get("paused") is True)
+    await manager.delete_task("stuck")
+    await manager.delete_task("stuck-too", delete_runs=True)
+    assert await manager.get_task("stuck") is None
+    assert await manager.get_task("stuck-too") is None
