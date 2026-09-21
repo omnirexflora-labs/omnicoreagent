@@ -15,7 +15,7 @@ name = "omnicoreagent"
 dynamic = ["version"]
 description = "Open Python agent harness for production AI apps: tools, MCP, memory, workspace, telemetry, subagents, background tasks, and OmniServe APIs."
 readme = { file = "README.md", content-type = "text/markdown" }
-authors = [{ name = "Abiola Adeshina", email = "abiolaadedayo1993@gmail.com" }]
+authors = [{ name = "Abiola Adeshina", email = "[REDACTED_EMAIL]" }]
 requires-python = ">=3.12,<3.15"
 
 keywords = [
@@ -123,7 +123,7 @@ Repository = "https://github.com/omnirexflora-labs/omnicoreagent"
 Issues = "https://github.com/omnirexflora-labs/omnicoreagent/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/omnicoreagent"]
+packages = ["src/omnicoreagent", "cookbook"]
 
 [tool.hatch.build.targets.sdist]
 include = [
