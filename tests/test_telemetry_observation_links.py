@@ -135,7 +135,9 @@ def _message_digest_in_next_context(trace, runtime_event):
         for e in _events(trace, "context_assembly")
         if e.sequence_number > runtime_event.sequence_number
     ]
-    return runtime_event.metadata["message_digest"] in later[0].output["message_digests"]
+    from omnicoreagent.core.telemetry.context_record import context_assembly_digests
+
+    return runtime_event.metadata["message_digest"] in context_assembly_digests(trace)[later[0].event_id]
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from omnicoreagent.core.telemetry.context_record import expand_model_contexts
 from omnicoreagent.core.telemetry.models import TelemetryEvent, TelemetryTrace
 from omnicoreagent.core.telemetry.recorder import _capture_gaps
 from omnicoreagent.core.telemetry.summary import (
@@ -37,6 +38,7 @@ def build_trajectory(
     """
     children = children or {}
     spans = {span.span_id: span for span in trace.spans}
+    contexts = expand_model_contexts(trace)
     placed: set[str] = set()
 
     def take(event: TelemetryEvent) -> str:
@@ -176,7 +178,7 @@ def build_trajectory(
             )
         elif kind == "model_call":
             response = responses.get(event.event_id)
-            model_request, model_request_capture = _model_request(event, spans)
+            model_request, model_request_capture = _model_request(event, spans, contexts)
             entry = {
                 "model_call_event_id": take(event),
                 "model_span_id": event.metadata.get("model_span_id"),
@@ -443,12 +445,21 @@ def _workspace_sync(events: list[TelemetryEvent]) -> dict[str, Any] | None:
     }
 
 
-def _model_request(event: TelemetryEvent, spans: dict[str, Any]) -> tuple[Any, Any]:
+def _model_request(
+    event: TelemetryEvent, spans: dict[str, Any], contexts: dict[str, Any]
+) -> tuple[Any, Any]:
     """A model call's request: the event's facts, with the messages and tools
-    from its span, where they are recorded once."""
+    it was sent, rebuilt from where they are recorded once."""
     request = event.input
     capture = _capture(event.input_capture)
-    span = spans.get(event.metadata.get("model_span_id"))
+    span_id = event.metadata.get("model_span_id")
+    span = spans.get(span_id)
+    whole = contexts.get(span_id)
+    if isinstance(request, dict) and whole is not None and "messages" not in request:
+        request = {**request, "messages": whole["messages"], "tools": whole["tools"]}
+        if whole["complete"]:
+            return request, _capture(span.input_capture) if span is not None else capture
+        return request, {"state": "truncated", "reason": "a message of this request was cut or is missing", "reference": None}
     span_input = getattr(span, "input", None)
     if isinstance(request, dict) and isinstance(span_input, dict) and "messages" not in request:
         carried = {key: span_input[key] for key in ("messages", "tools") if key in span_input}

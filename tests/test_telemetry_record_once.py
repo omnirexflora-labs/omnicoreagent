@@ -31,12 +31,9 @@ async def test_each_model_call_records_its_messages_once():
 
     model_spans = [s for s in trace.spans if s.kind == "model.call"]
     assert len(model_spans) == 4
-    assert all(_has_messages(s.input) for s in model_spans)
-    copies = [
-        record
-        for record in [*trace.spans, *trace.events]
-        if record not in model_spans and _has_messages(record.input)
-    ]
+    # Since T2 no record carries a conversation: each message is its own
+    # context_message event, once.
+    copies = [record for record in [*trace.spans, *trace.events] if _has_messages(record.input)]
     assert copies == [], [getattr(r, "kind", None) or r.event_type for r in copies]
 
 
@@ -46,11 +43,10 @@ async def test_the_trajectory_still_shows_each_calls_full_request():
     trace = await _trace(agent)
     trajectory = await agent.get_trajectory(trace.trace_id)
 
-    spans = {s.span_id: s for s in trace.spans}
     calls = [c for step in trajectory["steps"] for c in step["model_calls"]]
     assert len(calls) == 4
-    for call in calls:
-        recorded = spans[call["model_span_id"]].input
-        assert call["request"]["messages"] == recorded["messages"], call["model_span_id"]
-        assert call["request"]["tools"] == recorded["tools"]
+    for number, call in enumerate(calls):
+        assert len(call["request"]["messages"]) == 2 + 2 * number, call["model_span_id"]
+        assert [t["function"]["name"] for t in call["request"]["tools"]].count("lookup") == 1
+        assert call["request_capture"]["state"] == "available"
     assert "lookup" in json.dumps(calls[-1]["request"]["messages"])

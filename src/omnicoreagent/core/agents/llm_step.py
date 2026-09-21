@@ -35,6 +35,7 @@ from omnicoreagent.core.token_usage import (
 from omnicoreagent.core.types import SessionState
 from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.telemetry.context_record import CONTEXT_REFERENCE_KEYS, digest_reference
 from omnicoreagent.core.interaction_history import context_evidence, message_record
 from omnicoreagent.core.llm import MODEL_RETRY_OBSERVER
 
@@ -177,7 +178,11 @@ class AgentLlmStepRunner:
                 tools,
                 canonicalizer=digest_canonicalizer,
             )
-            context_input = dict(context_summary)
+            # Recorded without the digest list; the event's output carries it
+            # once, as the previous assembly it extends and what it appends.
+            context_input = {
+                key: value for key, value in context_summary.items() if key != "message_digests"
+            }
             observation_ids = _context_observation_ids(session_state)
             new_observation_ids = [
                 event_id
@@ -194,16 +199,21 @@ class AgentLlmStepRunner:
                     input=context_input,
                     attributes={
                         "context_digest": context_summary["context_digest"],
-                        "message_digests": context_summary["message_digests"],
                         "tool_names": context_summary["tool_names"],
                     },
                 )
                 try:
-                    await telemetry_recorder.emit_event(
+                    assembly = telemetry_recorder.context_recording()
+                    assembly_event = await telemetry_recorder.emit_event(
                         "context_assembly",
                         actor=TelemetryActor(type=ActorType.SYSTEM),
                         input=context_input,
-                        output=context_summary,
+                        output={
+                            **context_input,
+                            **digest_reference(
+                                assembly.last_assembly, context_summary["message_digests"]
+                            ),
+                        },
                         metadata={
                             "context_span_id": context_span.span_id,
                             "context_digest": context_summary["context_digest"],
@@ -219,10 +229,14 @@ class AgentLlmStepRunner:
                     )
                     raise
                 else:
+                    assembly.last_assembly = (
+                        assembly_event.event_id,
+                        context_summary["message_digests"],
+                    )
                     await telemetry_recorder.end_span(
                         context_span.span_id,
                         status=SpanStatus.OK,
-                        output=context_summary,
+                        output=context_input,
                     )
 
             (
@@ -361,9 +375,15 @@ class AgentLlmStepRunner:
             "context_digest": (context_evidence or {}).get("context_digest"),
             "streaming": stream_stats["streaming"],
         }
+        commit_context = None
         if telemetry_recorder.config.record_model_prompts:
-            model_input["messages"] = [message_record(message) for message in messages]
-            model_input["tools"] = tools or []
+            # Each message once per trace; the call records which it was sent.
+            from omnicoreagent.core.telemetry.context_record import record_model_context
+
+            reference, commit_context = await record_model_context(
+                telemetry_recorder, messages, tools, purpose=purpose
+            )
+            model_input.update(reference)
 
         span_context = await telemetry_recorder.start_span(
             name="model.call",
@@ -380,8 +400,12 @@ class AgentLlmStepRunner:
         try:
             # The span holds the messages and tools (exporters read them
             # there); the event points to it rather than copying them.
+            if commit_context is not None:
+                commit_context(span_context.span_id)
             event_input = {
-                key: value for key, value in model_input.items() if key not in {"messages", "tools"}
+                key: value
+                for key, value in model_input.items()
+                if key not in {"messages", "tools", *CONTEXT_REFERENCE_KEYS}
             }
             model_call_event = await telemetry_recorder.emit_event(
                 "model_call",

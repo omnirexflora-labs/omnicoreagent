@@ -197,16 +197,20 @@ async def test_llm_step_context_capture_respects_prompt_policy(monkeypatch):
 
     trace = await store.get_trace(context.trace_id)
     assert result.response.text == "done"
-    # The prompt is recorded once, on the model call; the context assembly
-    # records its digests (telemetry storage plan, T1).
+    # Each message and the tool catalog are recorded once per trace; the
+    # model call records which it was sent (telemetry storage plan, T1-T2).
+    (message,) = [e for e in trace.events if e.event_type == "context_message"]
+    assert message.input["message"]["content"] == "hello"
+    assert message.input_capture.state == CaptureState.AVAILABLE
+    (catalog,) = [e for e in trace.events if e.event_type == "context_tools"]
+    assert catalog.input["tools"][0]["function"]["name"] == "lookup"
     model_call = next(span for span in trace.spans if span.kind == "model.call")
-    assert model_call.input["messages"][0]["content"] == "hello"
-    assert model_call.input["tools"][0]["function"]["name"] == "lookup"
-    assert model_call.input_capture.state == CaptureState.AVAILABLE
+    assert model_call.input["message_digests"] == [message.metadata["message_digest"]]
     assembly = next(
         event for event in trace.events if event.event_type == "context_assembly"
     )
-    assert "messages" not in assembly.input and assembly.input["message_digests"]
+    assert "messages" not in assembly.input and "message_digests" not in assembly.input
+    assert assembly.output["message_digests"] == [message.metadata["message_digest"]]
 
 
 @pytest.mark.asyncio

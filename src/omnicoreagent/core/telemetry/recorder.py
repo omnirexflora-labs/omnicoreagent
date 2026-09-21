@@ -58,7 +58,7 @@ def _span_status_for_trace_status(status: TraceStatus) -> SpanStatus:
 
 def _capture_source(kind: str | None) -> str:
     normalized = str(kind or "runtime").lower()
-    if normalized in {"model.call", "model_call", "model_response"}:
+    if normalized in {"model.call", "model_call", "model_response", "context_message", "context_tools"}:
         return "provider"
     if (
         normalized.startswith("mcp")
@@ -81,7 +81,7 @@ def _capture_role(kind: str | None, direction: str) -> str:
     normalized = str(kind or "runtime").lower()
     if normalized in {"agent.run", "request", "user_message"}:
         return "request" if direction == "input" else "final_output"
-    if normalized in {"model.call", "model_call"}:
+    if normalized in {"model.call", "model_call", "context_message", "context_tools"}:
         return "model_request" if direction == "input" else "model_response"
     if normalized == "model_response":
         return "model_response"
@@ -205,6 +205,8 @@ class TelemetryRecorder:
         self._trace_templates: dict[str, TelemetryTrace] = {}
         self._trace_span_ids: dict[str, set[str]] = {}
         self._payload_trace_hint: str | None = None
+        # Per trace: which messages and tool catalogs are already recorded.
+        self._context_recordings: dict[str, Any] = {}
 
     def redacts_governed_arguments(self, governed: bool) -> bool:
         """Whether a governed agent's tool and delegation arguments are
@@ -224,6 +226,14 @@ class TelemetryRecorder:
 
     def current_context(self) -> TelemetryContext | None:
         return current_telemetry_context()
+
+    def context_recording(self) -> Any:
+        """What the current trace has recorded of its model contexts."""
+        from omnicoreagent.core.telemetry.context_record import ContextRecording
+
+        context = self.current_context()
+        key = context.trace_id if context is not None else ""
+        return self._context_recordings.setdefault(key, ContextRecording())
 
     def canonicalize_for_digest(self, value: Any) -> Any:
         """Return the representation used for privacy-safe context hashes."""
@@ -435,8 +445,14 @@ class TelemetryRecorder:
                     if root_context is not None:
                         set_telemetry_context(root_context)
                     try:
+                        from omnicoreagent.core.telemetry.context_record import (
+                            with_expanded_model_inputs,
+                        )
+
                         results = await export_trace_to_many(
-                            trace,
+                            # An exporter takes a span as it is: give it each
+                            # model call's whole request.
+                            with_expanded_model_inputs(trace),
                             self.exporters,
                             strict=self.config.strict,
                             timeout=self.config.export_timeout_seconds,
@@ -553,6 +569,7 @@ class TelemetryRecorder:
         """Drop per-trace recorder state once a trace has been finalized."""
 
         self._trace_templates.pop(trace_id, None)
+        self._context_recordings.pop(trace_id, None)
         self._incomplete_trace_ids.discard(trace_id)
         for span_id in self._trace_span_ids.pop(trace_id, set()):
             self._span_parent_contexts.pop(span_id, None)
@@ -803,7 +820,7 @@ class TelemetryRecorder:
                 reason="capture disabled by telemetry policy",
             )
         if (
-            source in {"model.call", "model_call", "run_configuration"}
+            source in {"model.call", "model_call", "run_configuration", "context_message", "context_tools"}
             and not self.config.record_model_prompts
         ):
             return None, TelemetryCapture(

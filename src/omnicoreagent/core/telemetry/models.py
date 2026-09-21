@@ -133,6 +133,9 @@ FOUNDATION_EVENT_TYPES = frozenset(
         "memory_update",
         "memory_eviction",
         "context_assembly",
+        # Each message a model is sent, and each tool catalog, once per trace.
+        "context_message",
+        "context_tools",
         "run_configuration",
         "runtime_message",
         "context_compression",
