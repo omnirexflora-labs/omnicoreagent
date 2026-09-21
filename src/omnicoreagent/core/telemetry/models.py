@@ -397,8 +397,16 @@ class TelemetryError(SerializableTelemetryRecord):
     stack: str | None = None
 
     @classmethod
-    def from_exception(cls, exc: BaseException) -> TelemetryError:
-        return cls(type=exc.__class__.__name__, message=str(exc))
+    def from_exception(cls, exc: BaseException, *, stack: bool = False) -> TelemetryError:
+        """The error's type and message; with ``stack``, its traceback too
+        (a payload: only under a capture policy that keeps payloads)."""
+        import traceback
+
+        return cls(
+            type=exc.__class__.__name__,
+            message=str(exc),
+            stack="".join(traceback.format_exception(exc)) if stack else None,
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> TelemetryError | None:

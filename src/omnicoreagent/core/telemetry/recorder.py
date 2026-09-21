@@ -725,7 +725,8 @@ class TelemetryRecorder:
         return await self.emit_event(
             event_type,
             actor=actor,
-            error=TelemetryError.from_exception(exc),
+            # The traceback is a payload: kept only at full capture.
+            error=TelemetryError.from_exception(exc, stack=self.config.capture == "full"),
             metadata=metadata,
         )
 
