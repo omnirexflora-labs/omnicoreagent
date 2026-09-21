@@ -123,7 +123,7 @@ Repository = "https://github.com/omnirexflora-labs/omnicoreagent"
 Issues = "https://github.com/omnirexflora-labs/omnicoreagent/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/omnicoreagent"]
+packages = ["src/omnicoreagent", "cookbook"]
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -131,6 +131,7 @@ include = [
     "/README.md",
     "/pyproject.toml",
     "/src/omnicoreagent/**/*.py",
+    "/cookbook/**/*.py",
 ]
 
 [tool.pytest.ini_options]
