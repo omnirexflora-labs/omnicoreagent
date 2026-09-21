@@ -112,9 +112,11 @@ async def test_oauth_flow_authorizes_and_the_tool_call_succeeds(any_oauth_server
             last = now
 
     beat = asyncio.create_task(heartbeat())
+    started = time.monotonic()
     try:
         await asyncio.wait_for(client.connect_to_servers(), 60)
     finally:
+        connect_seconds = time.monotonic() - started
         beat.cancel()
     try:
         assert client.state.failures == {}
@@ -126,8 +128,11 @@ async def test_oauth_flow_authorizes_and_the_tool_call_succeeds(any_oauth_server
 
     assert result["data"] == "authorized"
     assert len(approving_browser) == 1
-    # Waiting for the person must not block the event loop.
-    assert max(gaps) < 0.5, max(gaps)
+    # Waiting for the person must not block the event loop. A connect too
+    # quick for the heartbeat to beat (CI's was) blocked nothing that long;
+    # a longer one must have let it beat, with no gap over half a second.
+    if connect_seconds > 0.5:
+        assert gaps and max(gaps) < 0.5, (connect_seconds, gaps[-5:])
 
 
 
