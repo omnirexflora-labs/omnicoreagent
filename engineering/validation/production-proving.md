@@ -1,9 +1,11 @@
 # Proving the runtime in production: what the steward broke, and what was fixed
 
-Status: in progress (2026-09-21). P1, P2, P4, P5 and P6 of the
+Status: in progress (2026-09-21). P1–P6 of the
 [production proving plan](../architecture/production-proving-plan.md) are
-done; P3's first two pull requests (#250, #251) were corrupted by the privacy filter
-(findings 27 and 33); #250 is closed. P7 (a week unattended) is running.
+done. P3's first two pull requests (#250, #251) were corrupted by the privacy
+filter (findings 27 and 33); the third, #252, opened after the server was
+killed between the push and the pull request, is clean. P7 (a week
+unattended) is running.
 This page is the write-up the plan promised: what broke, what was fixed,
 what it cost, with the traces. It will be finished when P7 ends.
 
