@@ -131,6 +131,7 @@ include = [
     "/README.md",
     "/pyproject.toml",
     "/src/omnicoreagent/**/*.py",
+    "/cookbook/**/*.py",
 ]
 
 [tool.pytest.ini_options]
