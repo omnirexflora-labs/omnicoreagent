@@ -18,9 +18,7 @@ What it asserts, in order:
 from __future__ import annotations
 
 import argparse
-import json
 import time
-import urllib.error
 
 from scenario_p1 import api, check
 

@@ -16,7 +16,6 @@ What it asserts, in order:
 
 from __future__ import annotations
 
-import json
 import urllib.error
 import urllib.request
 
@@ -69,7 +68,7 @@ def main() -> None:
     check(len(events) > 0, f"its trace: {len(events)} events")
     head = stream_head(f"/telemetry/events/stream?session_id={finished['session_id']}&run_id={run_id}")
     check("data:" in head, f"the event stream replays it: {head.count('data:')} events in the first chunk")
-    print(f"       open the page: ssh -N -L 8800:127.0.0.1:8800 <server>  then  http://127.0.0.1:8800/steward/")
+    print("       open the page: ssh -N -L 8800:127.0.0.1:8800 <server>  then  http://127.0.0.1:8800/steward/")
 
 
 if __name__ == "__main__":

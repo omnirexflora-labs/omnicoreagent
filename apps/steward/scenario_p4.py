@@ -27,9 +27,7 @@ What it asserts, in order:
 from __future__ import annotations
 
 import argparse
-import json
 import shlex
-import sys
 import time
 import urllib.error
 

@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 from collections import Counter
 
 from scenario_p1 import QUERY as READ_THE_REPO, api, check
@@ -72,8 +71,9 @@ def status() -> None:
     try:
         lines = open(CSV).read().strip().splitlines()
     except OSError:
-        print("       no measurements yet"); return
-    header, rows = lines[0].split(","), [l.split(",") for l in lines[1:]]
+        print("       no measurements yet")
+        return
+    header, rows = lines[0].split(","), [line.split(",") for line in lines[1:]]
     print(f"       {len(rows)} hourly measurements; columns: {', '.join(header)}")
     if rows:
         first, last = dict(zip(header, rows[0])), dict(zip(header, rows[-1]))

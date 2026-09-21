@@ -25,7 +25,6 @@ from __future__ import annotations
 import argparse
 import json
 import shlex
-import sys
 import time
 import urllib.error
 
@@ -133,7 +132,7 @@ def part_one() -> None:
     started = time.time()
     run = api("POST", f"/background/tasks/{TASK_ID}/run", {"wait": True}, timeout=960)
     print(f"       run {run.get('run_id')} finished in {time.time() - started:.0f}s")
-    traces = assert_reproduced(run["run_id"], run)
+    assert_reproduced(run["run_id"], run)
     record = api("GET", f"/runs/{run['run_id']}")
     print("       usage:", json.dumps(record.get("usage")), "step", record.get("step"))
     print("       output.md:\n" + "\n".join("         " + line for line in output_md(run["run_id"]).splitlines()[:30]))

@@ -18,7 +18,6 @@ import pytest
 
 from omnicoreagent.core.guardrails import (
     DetectionConfig,
-    PatternManager,
     PromptInjectionGuard,
     ThreatLevel,
 )
