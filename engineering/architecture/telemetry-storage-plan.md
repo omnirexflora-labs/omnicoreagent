@@ -120,3 +120,4 @@ change where it is kept. JSONL stays available for local development.
 
 | Unit | Status | Commit | Notes |
 | --- | --- | --- | --- |
+| T1 | Done | `abd3dc8` | The model call span keeps the one copy of the context (exporters read it there); the context assembly span and event record digests; the model call event points to its span; the trajectory reader resolves the request from the span, capture state included. The scripted acceptance run: 89 KB to 58 KB per model call (-35%), evidence still complete. On the steward, where the four copies were 63% of the file, the expected cut is close to half; P7 measures it. |
