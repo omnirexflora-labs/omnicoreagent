@@ -26,6 +26,7 @@ from omnicoreagent.core.agents.subagent_helpers import (
     new_child_run_id,
 )
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
+from omnicoreagent.core.telemetry.recorder import redacts_governed_arguments
 
 
 class SubagentFactory:
@@ -524,7 +525,11 @@ When you have completed the task:
         spawn_input = {
             "agent_name": delegation["agent_name"],
             "role": role,
-            "task": "[REDACTED]" if self.governance_engine is not None else task,
+            "task": (
+                "[REDACTED]"
+                if redacts_governed_arguments(recorder, self.governance_engine is not None)
+                else task
+            ),
             "output_path": output_path,
         }
         span = await recorder.start_span(

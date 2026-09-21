@@ -38,6 +38,10 @@ def _tools() -> ToolRegistry:
     def lookup(key: str) -> dict:
         return {"key": key, "value": 1}
 
+    @tools.register_tool("authenticated_lookup", description="Look up a value with a key.")
+    def authenticated_lookup(key: str, api_key: str) -> dict:
+        return {"key": key, "value": 1}
+
     @tools.register_tool("slow_lookup", description="Look up slowly.")
     async def slow_lookup(key: str) -> dict:
         await asyncio.sleep(5)
@@ -293,3 +297,57 @@ async def test_delegation_parameters_are_redacted_under_governance():
     assert delegation.input["parameters"] == {"query": "[REDACTED]", "session_id": "[REDACTED]"} or (
         delegation.input["parameters"] == {"query": "[REDACTED]"}
     )
+
+
+_DELEGATION_POLICY = {
+    "enabled": True,
+    "policy": {
+        "name": "delegation-policy",
+        "mode": "strict",
+        "rules": {
+            "allow": [
+                {"rule_id": "allow_local", "capability": "tool.local.call"},
+                {"rule_id": "allow_spawn", "capability": "subagent.spawn"},
+                {"rule_id": "allow_tools", "capability": "tool.*"},
+            ]
+        },
+    },
+}
+
+
+@pytest.mark.asyncio
+async def test_a_governed_agent_at_full_capture_records_what_its_tools_were_called_with():
+    """Found by the repository steward: a governed agent recording at
+    ``capture: "full"`` could not show which branch it pushed or which file
+    it wrote — every argument was ``[REDACTED]`` — while the same arguments
+    sat in the recorded model response and the next model call's input.
+    Full capture records them, through the same privacy filter and secret
+    keys as everything else; the default capture still redacts them."""
+    agent = await _agent(
+        ScriptedModel(("call_1", "authenticated_lookup", '{"key": "branch steward/fix-cookbook", "api_key": "sk-hidden"}')),
+        governance_config=_governance(),
+        telemetry_config={"capture": "full"},
+    )
+    trace = await _trace(agent)
+
+    [span] = [s for s in trace.spans if s.kind == "tool.call"]
+    assert span.input["tool_args"] == {"key": "branch steward/fix-cookbook", "api_key": "[REDACTED]"}
+    [batch] = [s for s in trace.spans if s.kind == "tool.batch"]
+    assert batch.input["tool_batch_args"] == [{"key": "branch steward/fix-cookbook", "api_key": "[REDACTED]"}]
+    [requested] = _events(trace, "tool_requested")
+    assert requested.input["arguments"]["key"] == "branch steward/fix-cookbook"
+    assert "sk-hidden" not in json.dumps(trace.model_dump(), default=str)
+
+
+@pytest.mark.asyncio
+async def test_a_governed_delegation_at_full_capture_records_its_parameters():
+    agent = await _agent(
+        ScriptedModel(("call_child", "delegate_researcher", '{"query": "find the failing test"}')),
+        sub_agents=[_child_agent()],
+        governance_config=_DELEGATION_POLICY,
+        telemetry_config={"capture": "full"},
+    )
+    trace = await _trace(agent)
+
+    [delegation] = [s for s in trace.spans if s.kind == "subagent.run"]
+    assert delegation.input["parameters"]["query"] == "find the failing test"

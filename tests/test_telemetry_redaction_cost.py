@@ -112,3 +112,42 @@ def test_changing_the_patterns_changes_the_decision():
     assert _should_redact_key("greeting", {"api_key"}) is False
     assert _should_redact_key("greeting", {"greeting"}) is True
     assert _should_redact_key("greeting", {"api_key"}) is False
+
+
+def test_a_secret_inside_encoded_tool_arguments_is_redacted():
+    """A model's tool call carries its arguments as JSON text, so key-based
+    redaction never saw a secret inside them: at ``capture: "full"`` an
+    ``api_key`` a model passed to a tool was recorded as written in every
+    later model input. Found while making a governed agent's full capture
+    record its arguments."""
+    config = TelemetryConfig()
+    payload = {
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {
+                            "name": "authenticated_lookup",
+                            "arguments": '{"key": "branch", "api_key": "sk-hidden", "nested": {"password": "p4ss"}}',
+                        },
+                    }
+                ],
+            }
+        ],
+        "raw_arguments": '{"token":"tok-123"}',
+    }
+
+    redacted = redact_payload(payload, config)
+    text = str(redacted)
+
+    assert "sk-hidden" not in text and "p4ss" not in text and "tok-123" not in text
+    arguments = redacted["messages"][0]["tool_calls"][0]["function"]["arguments"]
+    assert '"key": "branch"' in arguments, arguments
+
+
+def test_ordinary_text_that_looks_structured_is_left_alone():
+    config = TelemetryConfig()
+    for text in ('{"max_tokens": 4000, "prompt": "say hi"}', "[1, 2, 3]", "{not json at all", "the {token} placeholder"):
+        assert redact_payload({"text": text}, config) == {"text": text}, text

@@ -4,11 +4,11 @@ from typing import Any
 from omnicoreagent.core.budgets import current_budgets
 from omnicoreagent.core.runtime.deadline import current_stop_reason, stop_after
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
+from omnicoreagent.core.telemetry.recorder import redacts_governed_arguments
 from omnicoreagent.core.types import (
     ToolCallResult,
 )
 from omnicoreagent.core.tools.tool_observation_guardrail import scrub_tool_results
-from omnicoreagent.governance.calls import on_behalf_of
 from omnicoreagent.governance.calls import on_behalf_of
 from omnicoreagent.governance.capabilities import tool_authority_requests
 from omnicoreagent.governance.errors import (
@@ -85,7 +85,9 @@ class GovernedToolRunner:
             # the record still shows which arguments the call used.
             "tool_args": (
                 {key: "[REDACTED]" for key in single_tool.tool_args}
-                if self.governance_engine is not None
+                if redacts_governed_arguments(
+                    telemetry_recorder, self.governance_engine is not None
+                )
                 and isinstance(single_tool.tool_args, dict)
                 else single_tool.tool_args
             ),

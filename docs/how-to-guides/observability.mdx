@@ -235,9 +235,13 @@ the others through event metadata, which is kept under every capture policy:
 - Every `model_call` records its `purpose`: `agent_turn`, or `context_summary`
   for internal summarization.
 
-Under governance, tool arguments and delegation parameters are recorded
-redacted, and policy decisions carry the `tool_call_id` they authorized (and
-the `mcp_server` for MCP calls).
+Under governance, at the default capture, tool arguments and delegation
+parameters are recorded redacted: the record shows which arguments a call
+used, not their values. At `capture: "full"`, which already records the
+model's calls, they are recorded as written, through the privacy filter and
+the secret keys like every other payload (a secret inside a model's
+JSON-encoded arguments is redacted too). Policy decisions carry the
+`tool_call_id` they authorized (and the `mcp_server` for MCP calls).
 
 MCP tool calls are recorded like local ones, as `mcp.tool.call` spans and
 `mcp_tool_call` / `mcp_tool_result` / `mcp_tool_error` events. In the

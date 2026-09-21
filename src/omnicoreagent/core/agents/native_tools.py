@@ -19,6 +19,7 @@ from omnicoreagent.core.tools.tool_executor import ToolExecutor
 from omnicoreagent.core.types import AgentState, ToolCallResult
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
+from omnicoreagent.core.telemetry.recorder import redacts_governed_arguments
 
 
 @dataclass
@@ -159,7 +160,9 @@ async def execute_native_turn(
                     [binding.agent],
                     session_id,
                     telemetry_recorder=telemetry_recorder,
-                    redact_parameters=agent.governance_engine is not None,
+                    redact_parameters=redacts_governed_arguments(
+                        telemetry_recorder, agent.governance_engine is not None
+                    ),
                 )
                 if isinstance(result, BaseException):
                     raise result
@@ -538,6 +541,9 @@ async def execute_native_turn(
     batch_span = None
     batch_id = None
     if telemetry_recorder is not None:
+        redact_arguments = redacts_governed_arguments(
+            telemetry_recorder, agent.governance_engine is not None
+        )
         batch_args = []
         for request in turn.tool_calls:
             arguments = decoded_arguments.get(request.id)
@@ -545,7 +551,7 @@ async def execute_native_turn(
                 {"invalid_arguments": True}
                 if arguments is None
                 else {key: "[REDACTED]" for key in arguments}
-                if agent.governance_engine
+                if redact_arguments
                 else arguments
             )
         payload = {"tool_count": len(turn.tool_calls), "tool_batch_args": batch_args}
@@ -576,13 +582,13 @@ async def execute_native_turn(
                 "tool_name": request.name,
                 "arguments": (
                     {key: "[REDACTED]" for key in arguments}
-                    if arguments is not None and agent.governance_engine
+                    if arguments is not None and redact_arguments
                     else arguments
                 ),
                 # The exact argument text the model produced, including text
                 # that is not valid JSON; redacted whole under governance.
                 "raw_arguments": (
-                    "[REDACTED]" if agent.governance_engine else request.arguments
+                    "[REDACTED]" if redact_arguments else request.arguments
                 ),
             }
             resolution = resolutions[request.id]

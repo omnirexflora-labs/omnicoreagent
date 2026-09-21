@@ -176,6 +176,15 @@ def _capture_gaps(trace: TelemetryTrace) -> list[dict[str, str]]:
     return gaps
 
 
+def redacts_governed_arguments(recorder: Any, governed: bool) -> bool:
+    """``recorder.redacts_governed_arguments``, redacting for a recorder that
+    does not say (a stand-in, or none)."""
+    decide = getattr(recorder, "redacts_governed_arguments", None)
+    if not callable(decide):
+        return governed
+    return bool(decide(governed))
+
+
 class TelemetryRecorder:
     def __init__(
         self,
@@ -196,6 +205,22 @@ class TelemetryRecorder:
         self._trace_templates: dict[str, TelemetryTrace] = {}
         self._trace_span_ids: dict[str, set[str]] = {}
         self._payload_trace_hint: str | None = None
+
+    def redacts_governed_arguments(self, governed: bool) -> bool:
+        """Whether a governed agent's tool and delegation arguments are
+        recorded as ``[REDACTED]``.
+
+        Under the default capture they are: the record shows which arguments
+        a call used, not their values. A capture that records model prompts
+        or responses already holds those values (the model's call, and the
+        next call's input), so redacting them again only loses evidence; the
+        repository steward could not show which branch it pushed. There,
+        arguments are recorded through the same privacy filter and secret
+        keys as every other payload.
+        """
+        if not governed:
+            return False
+        return not (self.config.record_model_prompts or self.config.record_model_responses)
 
     def current_context(self) -> TelemetryContext | None:
         return current_telemetry_context()

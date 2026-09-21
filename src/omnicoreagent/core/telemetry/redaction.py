@@ -217,7 +217,32 @@ def _redact(value: Any, redact_keys: set[str] | tuple[str, ...]) -> Any:
         return [_redact(item, redact_keys) for item in value]
     if isinstance(value, tuple):
         return [_redact(item, redact_keys) for item in value]
+    if isinstance(value, str):
+        return _redact_encoded(value, redact_keys)
     return value
+
+
+def _redact_encoded(value: str, redact_keys: tuple[str, ...]) -> str:
+    """Redact inside a string that is itself JSON: a model's tool call
+    carries its arguments that way, and key-based redaction never saw a
+    secret in them. Text that is not JSON, or holds no redacted key, is
+    returned as written."""
+    stripped = value.strip()
+    if len(stripped) < 2 or (stripped[0], stripped[-1]) not in (("{", "}"), ("[", "]")):
+        return value
+    lowered = stripped.lower()
+    if not any(key in lowered for key in redact_keys):
+        return value
+    try:
+        decoded = json.loads(stripped)
+    except ValueError:
+        return value
+    if not isinstance(decoded, (dict, list)):
+        return value
+    redacted = _redact(decoded, redact_keys)
+    if redacted == decoded:
+        return value
+    return json.dumps(redacted, ensure_ascii=False)
 
 
 # A key whose last word is one of these names a quantity, unit, or category,
