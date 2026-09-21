@@ -163,12 +163,27 @@ async def test_changes_on_either_side_reach_the_other_between_commands(tmp_path)
     assert storage.read_text("a.txt") == "v3\n"
 
 
-async def test_outputs_pass_the_workspace_privacy_filter(tmp_path):
+async def test_outputs_come_back_as_written(tmp_path):
+    """A file the sandbox produced is the agent's work: a pyproject.toml
+    whose author email came back as "[REDACTED_EMAIL]" was what the
+    repository steward once pushed."""
     from omnicoreagent.core.privacy import PrivacyFilter
 
     storage = LocalWorkspaceStorage(tmp_path / "files")
 
     async with _scope(storage, privacy_filter=PrivacyFilter()).active() as scope:
+        await _sh(scope, "printf 'authors = [{ email = \"alice@example.com\" }]\\n' > pyproject.toml")
+
+    assert "alice@example.com" in storage.read_text("pyproject.toml")
+
+
+async def test_outputs_pass_the_workspace_privacy_filter_when_asked(tmp_path):
+    from omnicoreagent.core.privacy import PrivacyConfig, PrivacyFilter
+
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+    privacy = PrivacyFilter(PrivacyConfig(redact_workspace=True))
+
+    async with _scope(storage, privacy_filter=privacy).active() as scope:
         await _sh(scope, "echo 'mail me at someone@example.com' > note.txt")
 
     assert "someone@example.com" not in storage.read_text("note.txt")

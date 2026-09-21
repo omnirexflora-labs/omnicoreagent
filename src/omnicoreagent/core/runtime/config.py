@@ -162,7 +162,8 @@ def _default_privacy_config() -> dict[str, Any]:
         "enabled": True,
         "redact_telemetry": True,
         "redact_memory": True,
-        "redact_workspace": True,
+        # The agent's files are its work; see PrivacyConfig.
+        "redact_workspace": False,
         "redact_stream": True,
         "redact_public": True,
         "redact_model_io": False,

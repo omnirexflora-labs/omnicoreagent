@@ -94,9 +94,13 @@ knows still cannot make the agent do what the policy does not allow.
 The runtime has a separate privacy policy for data that is persisted or exposed
 outside the model context. It redacts email addresses, phone numbers, Social
 Security numbers, and valid payment card numbers from telemetry, conversation
-memory, workspace writes and offloaded artifacts, stream events, and public
-results by default. The model keeps the original task content unless
-`redact_model_io` is enabled.
+memory, stream events, and public results by default. The model keeps the
+original task content unless `redact_model_io` is enabled, and so do the files
+in the workspace — what the agent writes, edits, and copies back from a
+sandbox are its work, kept as written; `redact_workspace` turns redaction on
+for a workspace that must hold no PII at rest. (The repository steward once
+pushed a `pyproject.toml` whose author email had become `[REDACTED_EMAIL]`
+on its way through the workspace: a redacted file is a corrupted one.)
 
 Configure it through `agent_config["privacy_config"]`:
 
@@ -105,7 +109,7 @@ agent_config = {
     "privacy_config": {
         "enabled": True,
         "redact_memory": True,
-        "redact_workspace": True,
+        "redact_workspace": False,
         "redact_telemetry": True,
         "redact_stream": True,
         "redact_public": True,

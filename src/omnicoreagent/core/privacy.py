@@ -28,7 +28,12 @@ class PrivacyConfig:
     enabled: bool = True
     redact_telemetry: bool = True
     redact_memory: bool = True
-    redact_workspace: bool = True
+    # Files in the workspace — what the agent writes, edits, and copies back
+    # from a sandbox — are its work, kept as written: a redacted
+    # pyproject.toml is a corrupted one (the repository steward pushed one,
+    # its author's email replaced by "[REDACTED_EMAIL]"). Turn this on for
+    # a workspace that must hold no PII at rest.
+    redact_workspace: bool = False
     redact_stream: bool = True
     redact_public: bool = True
     redact_model_io: bool = False

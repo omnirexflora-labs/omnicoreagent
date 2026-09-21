@@ -128,11 +128,28 @@ async def test_memory_persistence_redacts_content_and_metadata(tmp_path: Path):
     assert "[REDACTED_EMAIL]" in str(messages[0])
 
 
-def test_workspace_writes_redact_pii(tmp_path: Path):
+def test_workspace_writes_keep_the_agents_work_as_written(tmp_path: Path):
+    """Found by the repository steward: it pushed a pyproject.toml whose
+    author email had become "[REDACTED_EMAIL]" — the file had passed
+    through the workspace. Files are the agent's work, not a boundary."""
     backend = WorkspaceFilesBackend(LocalWorkspaceStorage(tmp_path / "files"))
     tool = WorkspaceFilesTool(
         workspace_files_backend=backend,
         privacy_filter=PrivacyFilter(),
+    )
+    pyproject = 'authors = [{ name = "Alice", email = "alice@example.com" }]\n'
+
+    tool.write("pyproject.toml", pyproject)
+
+    stored = backend.read("pyproject.toml")
+    assert "alice@example.com" in stored and "[REDACTED_EMAIL]" not in stored
+
+
+def test_workspace_writes_redact_pii_when_asked(tmp_path: Path):
+    backend = WorkspaceFilesBackend(LocalWorkspaceStorage(tmp_path / "files"))
+    tool = WorkspaceFilesTool(
+        workspace_files_backend=backend,
+        privacy_filter=PrivacyFilter(PrivacyConfig(redact_workspace=True)),
     )
 
     tool.write("notes.txt", SENSITIVE_TEXT)
@@ -157,7 +174,7 @@ def test_react_runtime_wires_privacy_filter_into_workspace_offloader():
 def test_offloaded_workspace_artifact_redacts_full_payload_and_preview(tmp_path: Path):
     offloader = ToolResponseOffloader(
         base_dir=str(tmp_path),
-        privacy_filter=PrivacyFilter(),
+        privacy_filter=PrivacyFilter(PrivacyConfig(redact_workspace=True)),
     )
 
     result = offloader.offload("search", SENSITIVE_TEXT)
