@@ -5,9 +5,7 @@ import logging
 import re
 import sys
 import unicodedata
-from collections import Counter
 from datetime import datetime
-from math import log2
 
 from omnicoreagent.core.guardrails.models import DetectionConfig, DetectionResult, ThreatLevel
 from omnicoreagent.core.guardrails.patterns import PatternManager
@@ -146,9 +144,9 @@ class DetectionEngine:
                 weak.add(group)
         return strong, weak
 
-    @staticmethod
-    def _has_high_risk_pattern(flags: list[str]) -> bool:
-        strong, _ = PromptInjectionEngine._kinds(flags)
+    @classmethod
+    def _has_high_risk_pattern(cls, flags: list[str]) -> bool:
+        strong, _ = cls._kinds(flags)
         return bool(strong)
 
     @staticmethod
