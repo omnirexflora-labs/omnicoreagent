@@ -230,6 +230,40 @@ workers write outputs that the lead agent reads back.
 
 ---
 
+## Next: Govern It, Give It A Sandbox
+
+Once an agent can do real things — call a write tool, run code, spend money —
+turn governance on. A policy decides every capability; `ask` pauses the run
+for a person; commands run in a sandbox, never on your machine; the run has a
+record it can resume from; and every run has a trace.
+
+```python
+agent = OmniCoreAgent(
+    name="builder",
+    system_instruction="Fix the failing test in the sandbox; ask before pushing.",
+    model_config={"provider": "openai", "model": "gpt-4o"},
+    agent_config={
+        "governance_config": {
+            "enabled": True,
+            "profile": "interactive-dev",              # asks before risky things; strict-production allows nothing without a rule
+            "sandbox_config": {"provider": "docker"},  # adds the execute tool
+            "budgets": {"request": [{"meter": "model_cost_usd", "limit": 0.50}]},
+        },
+    },
+    telemetry_config={"capture": "full"},
+)
+
+result = await agent.run("Run the tests and report", session_id="s1")
+if result["status"] == "awaiting_approval":            # a person decides, then the run resumes
+    ...
+```
+
+Read [Security model](/docs/core-concepts/security-model),
+[Execution](/docs/core-concepts/execution), and
+[Durable runs](/docs/core-concepts/durable-runs) before the first deployment.
+
+---
+
 ## Next Steps
 
 <CardGroup cols={3}>
