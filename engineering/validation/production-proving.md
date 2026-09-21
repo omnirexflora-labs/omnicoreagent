@@ -3,8 +3,9 @@
 Status: in progress (2026-09-21). P1–P6 of the
 [production proving plan](../architecture/production-proving-plan.md) are
 done. P3's first two pull requests (#250, #251) were corrupted by the privacy
-filter (findings 27 and 33); the third, #252, opened after the server was
-killed between the push and the pull request, is clean. P7 (a week
+filter (findings 27 and 33). The third, #252, opened after the server was
+killed between the push and the pull request, is clean. The maintainer
+merged #251 and #252, and the corrupted author email was restored by hand. P7 (a week
 unattended) is running.
 This page is the write-up the plan promised: what broke, what was fixed,
 what it cost, with the traces. It will be finished when P7 ends.
