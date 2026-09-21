@@ -56,7 +56,10 @@ class SandboxCommandSpec:
         self.command = list(self.command)
         if any(not item.strip() for item in self.command):
             raise ValueError("sandbox command argv items must be non-empty")
-        if any(_has_control_character(item) for item in self.command):
+        # The program is a name; its arguments may be a script.
+        if _has_control_character(self.command[0]) or any(
+            _has_control_character(item, allow_whitespace=True) for item in self.command[1:]
+        ):
             raise ValueError("sandbox command argv items must not contain control characters")
         if self.cwd is not None:
             self.cwd = _normalize_sandbox_path(self.cwd)
@@ -588,8 +591,19 @@ def _safe_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     return safe
 
 
-def _has_control_character(value: str) -> bool:
-    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+# Newlines and tabs are what shell scripts are made of: the execute tool runs
+# ``sh -c <command>``, and a heredoc was refused (the steward's worker ran
+# out of steps finding a one-line way to edit a file). Every adapter passes
+# argv as a list or quotes each item, so they cannot split a command.
+_SCRIPT_WHITESPACE = frozenset("\t\n\r")
+
+
+def _has_control_character(value: str, *, allow_whitespace: bool = False) -> bool:
+    return any(
+        (ord(char) < 32 or ord(char) == 127)
+        and not (allow_whitespace and char in _SCRIPT_WHITESPACE)
+        for char in value
+    )
 
 
 def _normalize_sandbox_path(path: str) -> str:
