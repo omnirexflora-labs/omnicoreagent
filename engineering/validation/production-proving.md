@@ -27,9 +27,10 @@ to hurt the runtime from the outside — kill the server mid-run, take the
 sandbox away, run out of money, put two workers on one budget, flood it with
 duplicates — and every unit ends with a scripted scenario that either passes
 on the server or names what broke. Between 2026-09-20 and 2026-09-21 it
-found **seventeen runtime defects** and one missing capability, every one
-of them fixed with a test that fails without the fix; the runtime's test
-suite went from 1,756 to 1,792 tests. None of these were visible to the
+found **twenty-two things wrong** — seventeen of them runtime defects,
+three deployment lessons, two missing capabilities — every defect fixed with
+a test that fails without the fix; the runtime's test suite went from 1,756
+to 1,796 tests. None of these were visible to the
 suite before, because the suite's models are scripted and its stores are in
 memory. The steward's are not.
 
