@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional
 from omnicoreagent.core.tools.local_tools_registry import INTERNAL_TOOL_PROVIDERS, ToolRegistry
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.budgets import current_budgets
+from omnicoreagent.core.runs import current_run
+from omnicoreagent.governance.calls import current_tool_call, tool_call_metadata
 from omnicoreagent.governance.capabilities import subagent_spawn_authority_requests
 from omnicoreagent.governance.snapshots import derive_subagent_policy
 from omnicoreagent.core.workspace.paths import WORKSPACE_FILE_PATH_PREFIXES
@@ -250,7 +252,10 @@ When you have completed the task:
             task=task,
             output_path=output_path,
         )
-        child_run_id = new_child_run_id() if accepts_run_id(agent) else None
+        # A worker parked on an approval the lead has since decided resumes
+        # from where it stopped instead of starting over.
+        parked_run_id = self._parked_worker(name)
+        child_run_id = parked_run_id or (new_child_run_id() if accepts_run_id(agent) else None)
         delegation = await self._start_delegation(
             agent=agent,
             name=name,
@@ -265,14 +270,25 @@ When you have completed the task:
             if self.mcp_tools:
                 await agent.connect_mcp_servers()
 
-            result = await agent.run(
-                str(task), **({"run_id": child_run_id} if child_run_id else {})
-            )
+            if parked_run_id and hasattr(agent, "resume"):
+                result = await agent.resume(parked_run_id)
+            else:
+                result = await agent.run(
+                    str(task), **({"run_id": child_run_id} if child_run_id else {})
+                )
             child_trace_id = result.get("trace_id")
             child_run_id = result.get("run_id") or child_run_id
             response = result.get("response", str(result)) or ""
             if not isinstance(response, str):
                 response = str(response)
+
+            if result.get("status") in {"awaiting_approval", "awaiting_budget"}:
+                # The worker is waiting for a person. Its asks become the
+                # lead's, on the lead's run, so the lead pauses too.
+                return await self._park_delegation(
+                    delegation, name=name, output_path=output_path, result=result,
+                    child_run_id=child_run_id, child_trace_id=child_trace_id,
+                )
 
             is_error = result.get("status", "success") != "success"
 
@@ -398,6 +414,88 @@ When you have completed the task:
             await agent.cleanup()
             if name in self._active_subagents:
                 del self._active_subagents[name]
+
+    def _parked_worker(self, name: str) -> str | None:
+        """The run of a worker of this name whose asks the lead has decided."""
+        run = current_run()
+        if run is None or not getattr(run, "enabled", False):
+            return None
+        for approval in reversed(run.record.get("approvals") or []):
+            if (
+                approval.get("delegated_name") == name
+                and approval.get("delegated_run_id")
+                and approval.get("status") in {"approved", "denied", "used"}
+            ):
+                return approval["delegated_run_id"]
+        return None
+
+    async def _park_delegation(
+        self,
+        delegation: Dict[str, Any],
+        *,
+        name: str,
+        output_path: str,
+        result: Dict[str, Any],
+        child_run_id: str | None,
+        child_trace_id: str | None,
+    ) -> Dict[str, Any]:
+        """Mirror the worker's pending asks onto the lead's run and report."""
+        status = result["status"]
+        run = current_run()
+        call = current_tool_call()
+        mirrored = 0
+        child_record = None
+        if run is not None and getattr(run, "enabled", False) and child_run_id and self.memory_router is not None:
+            try:
+                child_record = await self.memory_router.get_run_state(child_run_id)
+            except Exception:  # noqa: BLE001 - a store without run state
+                child_record = None
+        if status == "awaiting_approval" and child_record is not None and run is not None:
+            already = {
+                a.get("delegated_approval_id") for a in run.record.get("approvals") or []
+            }
+            public = {a.get("approval_id"): a for a in result.get("approvals") or []}
+            for entry in child_record.get("approvals") or []:
+                if entry.get("status") != "pending" or entry["approval_id"] in already:
+                    continue
+                shown = public.get(entry["approval_id"]) or {}
+                await run.add_approval(
+                    {
+                        **entry,
+                        "approval_id": f"approval_{__import__('uuid').uuid4().hex}",
+                        "tool_call_id": call.tool_call_id if call is not None else None,
+                        "arguments": shown.get("arguments"),
+                        "delegated_run_id": child_run_id,
+                        "delegated_approval_id": entry["approval_id"],
+                        "delegated_name": name,
+                    }
+                )
+                mirrored += 1
+        await self._finish_delegation(
+            delegation,
+            child_run_id=child_run_id,
+            child_trace_id=child_trace_id,
+            status=SpanStatus.OK,
+        )
+        waiting = (
+            f"{mirrored} approval(s)" if status == "awaiting_approval" else "a budget top-up"
+        )
+        return {
+            "status": status,
+            "data": {
+                "subagent_name": name,
+                "output_path": output_path,
+                "trace_id": child_trace_id,
+                "run_id": child_run_id,
+                "approvals": result.get("approvals"),
+                "budget_request": result.get("budget_request"),
+                "governance": self._governance_reference(),
+            },
+            "message": (
+                f"Worker '{name}' is waiting for {waiting}. This run pauses with it; "
+                "when a person decides, resume this run and the worker continues."
+            ),
+        }
 
     async def _start_delegation(
         self,
@@ -539,6 +637,7 @@ When you have completed the task:
         processed_results = []
         successful = 0
         failed = 0
+        waiting: list[str] = []
 
         for i, result in enumerate(results):
             if isinstance(result, Exception):
@@ -554,11 +653,15 @@ When you have completed the task:
                 processed_results.append(result.get("data", {}))
                 if result.get("status") == "success":
                     successful += 1
+                elif result.get("status") in {"awaiting_approval", "awaiting_budget"}:
+                    waiting.append(result["status"])
                 else:
                     failed += 1
 
         return {
-            "status": "success"
+            "status": waiting[0]
+            if waiting
+            else "success"
             if failed == 0
             else "partial"
             if successful > 0
@@ -589,6 +692,10 @@ When you have completed the task:
             memory_scope=str(self.agent_config.get("memory_config") or ""),
             budget=self._governance_budget_snapshot(),
         )
+        # An ask on delegation is recorded against the spawn call, so the
+        # run pauses on it and continues the call after a decision.
+        for request in requests:
+            request.metadata = {**tool_call_metadata(), **(request.metadata or {})}
         await self.governance_engine.authorize_all(requests)
 
     def _local_tool_names(self) -> list[str]:

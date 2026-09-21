@@ -320,7 +320,7 @@ def create_runs_router() -> APIRouter:
 _PUBLIC_APPROVAL_KEYS = (
     "approval_id", "status", "tool_call_id", "tool_name", "capability", "target",
     "risk_level", "reason", "created_at", "expires_at", "approver", "note",
-    "decided_at", "edited_arguments",
+    "decided_at", "edited_arguments", "delegated_run_id", "delegated_name",
 )
 
 

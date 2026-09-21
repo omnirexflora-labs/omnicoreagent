@@ -1233,7 +1233,7 @@ class OmniCoreAgent:
             await self.initialize()
         if not supports_run_state(self.memory_router):
             raise LookupError(f"No run {run_id}: the memory store keeps no run state")
-        return await decide(
+        decided = await decide(
             self.memory_router,
             run_id,
             approval_id,
@@ -1242,6 +1242,18 @@ class OmniCoreAgent:
             note=note,
             arguments=arguments,
         )
+        if decided.get("delegated_run_id"):
+            # The ask was a worker's, mirrored here: the decision is theirs too.
+            await decide(
+                self.memory_router,
+                decided["delegated_run_id"],
+                decided["delegated_approval_id"],
+                decision=decision,
+                approver=approver,
+                note=note,
+                arguments=arguments,
+            )
+        return decided
 
     async def grant_budget(
         self,
@@ -2226,8 +2238,9 @@ async def _keep_run_history(messages: list[dict[str, Any]]) -> None:
 
 def _public_approval(approval: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
     """What an approver needs to decide: the call as the model made it."""
-    arguments = None
-    for message in reversed(record.get("context", {}).get("messages", [])):
+    # A worker's ask mirrored onto its lead's run carries the worker's call.
+    arguments = approval.get("arguments")
+    for message in reversed(record.get("context", {}).get("messages", [])) if arguments is None else ():
         for call in (message.get("metadata") or {}).get("tool_calls") or []:
             if call.get("id") == approval.get("tool_call_id"):
                 raw = (call.get("function") or {}).get("arguments")
@@ -2248,6 +2261,8 @@ def _public_approval(approval: dict[str, Any], record: dict[str, Any]) -> dict[s
         "risk_level": approval.get("risk_level"),
         "reason": approval.get("reason"),
         "expires_at": approval.get("expires_at"),
+        "delegated_run_id": approval.get("delegated_run_id"),
+        "delegated_name": approval.get("delegated_name"),
     }
 
 

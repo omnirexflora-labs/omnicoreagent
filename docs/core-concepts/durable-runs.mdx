@@ -42,8 +42,10 @@ if result["status"] == "awaiting_approval":
 ```
 
 An ask can also come from inside a tool call — the sandbox's network when a
-run's session opens, a command inside it — and pauses the run the same way,
-recorded against the `execute` call that needed it.
+run's session opens, a command inside it, a delegation, a worker's own ask —
+and pauses the run the same way, recorded against the call that needed it
+([sub-agents](/docs/core-concepts/sub-agents) for how a worker's asks reach
+its lead).
 
 A person decides each approval, then the run continues:
 

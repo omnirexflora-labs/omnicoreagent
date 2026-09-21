@@ -142,3 +142,13 @@ When the parent agent has governance enabled, each delegation is authorized
 agent refuses to delegate to an ungoverned one, because the child's tools
 would otherwise run without any policy. The child is governed by its own
 policy, so configure it for the child's tools.
+
+A worker's `ask` pauses its lead. The worker's pending approvals appear on
+the lead's run — each naming the worker's call, its arguments, and the
+worker's run (`delegated_run_id`) — and the lead's run goes to
+`awaiting_approval` with them. A decision on the lead's approval
+(`resolve_approval`, or `POST /runs/{run_id}/approvals/{approval_id}`) is
+forwarded to the worker's, and when the lead resumes, its delegation resumes
+the worker's run from where it stopped rather than starting a new worker.
+An `ask` on delegation itself (`subagent.spawn`, which the development
+profiles ask for) pauses the lead the same way, before any worker runs.
