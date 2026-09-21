@@ -51,7 +51,11 @@ def test_detection_config_rejects_removed_ml_fallback_option():
 
 
 def test_suspicious_output_policy_defaults_to_block_and_accepts_flag():
-    assert DetectionConfig().suspicious_output_action == "block"
+    # Suspicious tool output is recorded and passed through by default: an
+    # agent working on a code repository meets "system", "override" and
+    # "instruction" in ordinary test output. Dangerous and critical output
+    # is blocked whatever this says.
+    assert DetectionConfig().suspicious_output_action == "flag"
     assert DetectionConfig(suspicious_output_action=" FLAG ").suspicious_output_action == "flag"
 
     with pytest.raises(ValueError, match="suspicious_output_action"):

@@ -63,7 +63,7 @@ positive input length, booleans, logging level, and compilable regular expressio
 | `enable_entropy_analysis` | `bool` | `True` | Detects high-entropy payloads common in injections. |
 | `allowlist_patterns` | `list` | `[]` | List of regex patterns that bypass ordinary false positives; high-risk injection matches still go through detection. |
 | `blocklist_patterns` | `list` | `[]` | Custom regex patterns that always block; they take precedence over allowlists. |
-| `suspicious_output_action` | `"block"` or `"flag"` | `"block"` | Whether suspicious local tool output is blocked before it enters model context or only recorded and passed through. Dangerous and critical output is always blocked. |
+| `suspicious_output_action` | `"flag"` or `"block"` | `"flag"` | Whether suspicious tool output is recorded and passed through (`flag`) or replaced before it enters model context (`block`). Dangerous and critical output is always blocked. The default is `flag`: code, test names and documentation are full of the words the score counts, and a blocked tool result stops ordinary work. |
 
 <Warning>
 Always enable guardrails in user-facing applications to prevent prompt injection attacks and ensure agent reliability.

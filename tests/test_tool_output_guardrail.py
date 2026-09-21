@@ -190,7 +190,7 @@ class TestScrubToolResultsSuspiciousContent:
         assert scrubbed[0]["status"] == "success"
         assert scrubbed[0]["_guardrail_telemetry"]["action"] == "flagged"
 
-    def test_suspicious_content_is_blocked_by_default(self):
+    def test_suspicious_content_is_blocked_when_configured(self):
         guardrail = MagicMock(spec=PromptInjectionGuard)
         guardrail.suspicious_output_action = "block"
         guardrail.check.return_value = _make_detection_result(

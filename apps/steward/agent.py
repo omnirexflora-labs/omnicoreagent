@@ -360,10 +360,6 @@ agent = OmniCoreAgent(
         # Work is delegated to workers under the same policy and budgets.
         "enable_subagents": True,
         "guardrail_mode": "full",
-        # Tool output from a code repository — test names, docstrings, pip
-        # and pytest chatter — scores "suspicious" easily; it is recorded and
-        # passed through, and dangerous or critical output is still blocked.
-        "guardrail_config": {"suspicious_output_action": "flag"},
         "governance_config": {
             "enabled": True,
             "policy": POLICY,

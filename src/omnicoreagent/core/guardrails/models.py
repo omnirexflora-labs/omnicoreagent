@@ -37,7 +37,13 @@ class DetectionConfig:
     log_level: str = "INFO"
     allowlist_patterns: list[str] = field(default_factory=list)
     blocklist_patterns: list[str] = field(default_factory=list)
-    suspicious_output_action: str = "block"
+    # What to do with tool output that scores "suspicious" (dangerous and
+    # critical output is always blocked): "flag" records it and passes it
+    # through; "block" replaces it. Flag is the default — code, test names
+    # and documentation are full of the words the score counts, and a
+    # blocked tool result stops ordinary work; found by the repository
+    # steward running pytest.
+    suspicious_output_action: str = "flag"
 
     def __post_init__(self) -> None:
         """Validate the policy before an engine can consume it.

@@ -15,7 +15,7 @@ def _suspicious_output_action(guardrail: Any) -> str:
         return action
     config = getattr(guardrail, "config", None)
     action = getattr(config, "suspicious_output_action", None)
-    return action if action in {"block", "flag"} else "block"
+    return action if action in {"block", "flag"} else "flag"
 
 
 def scrub_tool_results(
