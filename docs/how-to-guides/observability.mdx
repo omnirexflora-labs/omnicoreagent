@@ -273,7 +273,8 @@ and timed-out runs) and in the root span output: steps; model calls by purpose
 and failures; `input`, `output`, `total`, `cached_input`, and `reasoning`
 tokens; `estimated_cost_usd` and whether every call's cost was known; model
 latency and retries; tool calls by outcome (`success`, `error`, `rejected`,
-`timeout`, `cancelled`, `denied`); compressions; runtime messages; subagents and
+`timeout`, `cancelled`, `denied`, `awaiting_approval` for a call paused for a
+person); compressions; runtime messages; subagents and
 their child trace IDs; sandbox executions (sessions, commands, failed, timed
 out); workspace changes, each marked `via` a workspace tool or the sandbox;
 offloaded results; and duration.

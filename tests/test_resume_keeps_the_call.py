@@ -53,3 +53,26 @@ async def test_an_approved_call_runs_with_the_arguments_it_was_approved_with(tmp
     assert [a["status"] for a in record["approvals"]] == ["used"], "one approval, used once"
     assert _file(tmp_path, "pyproject.toml").read_text() == CONTENT
 
+
+@pytest.mark.asyncio
+async def test_a_call_waiting_for_a_person_is_not_recorded_as_denied(tmp_path, monkeypatch):
+    """The steward's trace listed every write it asked a person about as
+    `denied`, with "Governance denied tool execution" as the result, though
+    each was approved and ran. A pause is not a refusal."""
+    import test_run_suspend
+
+    monkeypatch.setattr(test_run_suspend, "_policy", _asking_policy)
+    model = RecordingModel(
+        [("w1", "write_file", json.dumps({"path": "notes.txt", "content": "hello"}))],
+        "written",
+    )
+    agent = await _agent(tmp_path, model)
+
+    paused = await agent.run("write a note", session_id="pause-label")
+    trajectory = await agent.get_trajectory(paused["trace_id"])
+    (call,) = [c for s in trajectory["steps"] for c in s["tool_calls"]]
+
+    assert call["outcome"] == "awaiting_approval", call
+    assert "denied" not in json.dumps(call).lower(), call
+    assert trajectory["totals"]["tool_calls"]["by_outcome"]["awaiting_approval"] == 1
+    assert trajectory["totals"]["tool_calls"]["by_outcome"]["denied"] == 0

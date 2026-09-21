@@ -11,7 +11,15 @@ from typing import Any
 
 from omnicoreagent.core.telemetry.models import SpanStatus, TelemetryTrace, utc_now
 
-TOOL_OUTCOMES = ("success", "error", "rejected", "timeout", "cancelled", "denied")
+TOOL_OUTCOMES = (
+    "success",
+    "error",
+    "rejected",
+    "timeout",
+    "cancelled",
+    "denied",
+    "awaiting_approval",
+)
 _WORKSPACE_OPERATIONS = {
     "workspace_write": "write",
     "workspace_delete": "delete",
@@ -148,6 +156,8 @@ def tool_outcomes(trace: TelemetryTrace) -> dict[str, str]:
         phase = event.metadata.get("phase")
         if phase == "authorization":
             outcomes[call_id] = "denied"
+        elif phase == "approval":
+            outcomes[call_id] = "awaiting_approval"
         elif phase == "timeout":
             outcomes[call_id] = "timeout"
         elif phase in {"result", "exception"}:

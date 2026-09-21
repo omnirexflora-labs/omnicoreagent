@@ -115,6 +115,7 @@ async def test_run_summary_totals_a_successful_run():
         "timeout": 0,
         "cancelled": 0,
         "denied": 0,
+        "awaiting_approval": 0,
     }
     assert summary["model_retries"] == 0
     assert summary["compressions"] == 0

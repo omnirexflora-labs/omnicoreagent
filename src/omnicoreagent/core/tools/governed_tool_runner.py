@@ -12,6 +12,7 @@ from omnicoreagent.core.tools.tool_observation_guardrail import scrub_tool_resul
 from omnicoreagent.governance.calls import on_behalf_of
 from omnicoreagent.governance.capabilities import tool_authority_requests
 from omnicoreagent.governance.errors import (
+    ApprovalRequiredError,
     GovernanceError,
     PolicyDeniedError,
 )
@@ -122,6 +123,9 @@ class GovernedToolRunner:
                         single_tool=single_tool,
                         governance_error=governance_error,
                     )
+                    # An ask waits for a person; it is not a refusal, and
+                    # the trace says which it was.
+                    waiting = isinstance(governance_error, ApprovalRequiredError)
                     denied_event = await telemetry_recorder.emit_event(
                         telemetry_shape["error_event"],
                         actor=telemetry_shape["actor"],
@@ -131,12 +135,15 @@ class GovernedToolRunner:
                             "type": governance_error.__class__.__name__,
                             "message": str(governance_error),
                         },
-                        metadata={**relationship_metadata, "phase": "authorization"},
+                        metadata={
+                            **relationship_metadata,
+                            "phase": "approval" if waiting else "authorization",
+                        },
                     )
                     outcome["tool_result_event_id"] = denied_event.event_id
                     await telemetry_recorder.end_span(
                         span.span_id,
-                        status=SpanStatus.ERROR,
+                        status=SpanStatus.SKIPPED if waiting else SpanStatus.ERROR,
                         output=result,
                         error={
                             "type": governance_error.__class__.__name__,
@@ -310,7 +317,11 @@ class GovernedToolRunner:
             "args": {},
             "status": "error",
             "data": None,
-            "message": f"Governance denied tool execution: {governance_error}",
+            "message": (
+                f"Waiting for a person's approval: {governance_error}"
+                if isinstance(governance_error, ApprovalRequiredError)
+                else f"Governance denied tool execution: {governance_error}"
+            ),
             "governance_error_code": getattr(
                 governance_error, "code", type(governance_error).__name__
             ),

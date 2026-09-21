@@ -307,13 +307,15 @@ def _tool_call(
     execution = [
         event
         for event in events
-        if event.metadata.get("phase") in {"execution", "result", "exception", "timeout", "authorization"}
+        if event.metadata.get("phase")
+        in {"execution", "result", "exception", "timeout", "authorization", "approval"}
     ]
     outcome_event = next(
         (
             event
             for event in reversed(execution)
-            if event.metadata.get("phase") in {"result", "exception", "timeout", "authorization"}
+            if event.metadata.get("phase")
+            in {"result", "exception", "timeout", "authorization", "approval"}
         ),
         None,
     )
