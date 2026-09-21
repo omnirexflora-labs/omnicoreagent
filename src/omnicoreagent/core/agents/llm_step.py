@@ -185,11 +185,8 @@ class AgentLlmStepRunner:
                 if event_id not in session_state.delivered_observation_event_ids
             ]
             if telemetry_recorder is not None:
-                if telemetry_recorder.config.record_model_prompts:
-                    context_input["messages"] = [
-                        message_record(message) for message in session_state.messages
-                    ]
-                    context_input["tools"] = tools or []
+                # The messages themselves are recorded once, on the model call
+                # this context is sent to; here, their digests.
                 context_span = await telemetry_recorder.start_span(
                     name="context.assembly",
                     kind="context.assembly",
@@ -381,11 +378,16 @@ class AgentLlmStepRunner:
             },
         )
         try:
+            # The span holds the messages and tools (exporters read them
+            # there); the event points to it rather than copying them.
+            event_input = {
+                key: value for key, value in model_input.items() if key not in {"messages", "tools"}
+            }
             model_call_event = await telemetry_recorder.emit_event(
                 "model_call",
                 actor=TelemetryActor(type=ActorType.MODEL),
                 input={
-                    **model_input,
+                    **event_input,
                     "tool_count": len(tools or []),
                     "tool_names": tool_names,
                     "model_span_id": span_context.span_id,

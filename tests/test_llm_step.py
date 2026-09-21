@@ -197,12 +197,16 @@ async def test_llm_step_context_capture_respects_prompt_policy(monkeypatch):
 
     trace = await store.get_trace(context.trace_id)
     assert result.response.text == "done"
+    # The prompt is recorded once, on the model call; the context assembly
+    # records its digests (telemetry storage plan, T1).
+    model_call = next(span for span in trace.spans if span.kind == "model.call")
+    assert model_call.input["messages"][0]["content"] == "hello"
+    assert model_call.input["tools"][0]["function"]["name"] == "lookup"
+    assert model_call.input_capture.state == CaptureState.AVAILABLE
     assembly = next(
         event for event in trace.events if event.event_type == "context_assembly"
     )
-    assert assembly.input["messages"][0]["content"] == "hello"
-    assert assembly.input["tools"][0]["function"]["name"] == "lookup"
-    assert assembly.input_capture.state == CaptureState.AVAILABLE
+    assert "messages" not in assembly.input and assembly.input["message_digests"]
 
 
 @pytest.mark.asyncio

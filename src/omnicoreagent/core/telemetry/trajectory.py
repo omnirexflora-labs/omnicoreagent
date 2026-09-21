@@ -176,6 +176,7 @@ def build_trajectory(
             )
         elif kind == "model_call":
             response = responses.get(event.event_id)
+            model_request, model_request_capture = _model_request(event, spans)
             entry = {
                 "model_call_event_id": take(event),
                 "model_span_id": event.metadata.get("model_span_id"),
@@ -184,8 +185,8 @@ def build_trajectory(
                 "new_observation_event_ids": event.metadata.get(
                     "new_observation_event_ids", []
                 ),
-                "request": event.input,
-                "request_capture": _capture(event.input_capture),
+                "request": model_request,
+                "request_capture": model_request_capture,
             }
             if response is not None:
                 entry.update(
@@ -440,6 +441,23 @@ def _workspace_sync(events: list[TelemetryEvent]) -> dict[str, Any] | None:
         "written": [path for event in syncs for path in event.metadata.get("written") or []],
         "skipped": [item for event in syncs for item in event.metadata.get("skipped") or []],
     }
+
+
+def _model_request(event: TelemetryEvent, spans: dict[str, Any]) -> tuple[Any, Any]:
+    """A model call's request: the event's facts, with the messages and tools
+    from its span, where they are recorded once."""
+    request = event.input
+    capture = _capture(event.input_capture)
+    span = spans.get(event.metadata.get("model_span_id"))
+    span_input = getattr(span, "input", None)
+    if isinstance(request, dict) and isinstance(span_input, dict) and "messages" not in request:
+        carried = {key: span_input[key] for key in ("messages", "tools") if key in span_input}
+        if carried:
+            request = {**request, **carried}
+            capture = _capture(span.input_capture)
+        elif span_input.get("truncated") or span_input.get("offloaded"):
+            capture = _capture(span.input_capture)
+    return request, capture
 
 
 def _context_fields(event: TelemetryEvent) -> dict[str, Any]:
