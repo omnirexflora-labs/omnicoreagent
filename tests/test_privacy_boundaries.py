@@ -106,13 +106,34 @@ async def test_telemetry_redacts_pii_before_trace_storage():
 
 
 @pytest.mark.asyncio
-async def test_memory_persistence_redacts_content_and_metadata(tmp_path: Path):
+async def test_memory_keeps_the_conversation_as_written(tmp_path: Path):
+    """The conversation is the agent's working state; see
+    test_resume_keeps_the_call.py for what redacting it did."""
     memory = MemoryRouter("in_memory")
     agent = OmniCoreAgent(
         name="privacy-agent",
         system_instruction="Test",
         model_config={"provider": "openai", "model": "test", "api_key": "test"},
         memory_router=memory,
+    )
+
+    await agent._store_message_with_telemetry(
+        "user", SENSITIVE_TEXT, metadata={"agent_name": agent.name}, session_id="session-kept"
+    )
+    messages = await memory.get_messages("session-kept", agent.name)
+
+    assert "alice@example.com" in str(messages[0])
+
+
+@pytest.mark.asyncio
+async def test_memory_persistence_redacts_content_and_metadata_when_asked(tmp_path: Path):
+    memory = MemoryRouter("in_memory")
+    agent = OmniCoreAgent(
+        name="privacy-agent",
+        system_instruction="Test",
+        model_config={"provider": "openai", "model": "test", "api_key": "test"},
+        memory_router=memory,
+        agent_config={"privacy_config": {"redact_memory": True}},
     )
 
     await agent._store_message_with_telemetry(

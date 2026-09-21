@@ -407,10 +407,12 @@ async def test_other_requests_and_summarization_cannot_change_a_runs_context():
 
 @pytest.mark.asyncio
 async def test_a_runs_context_is_stored_as_redacted_as_the_history():
-    from omnicoreagent.core.privacy import PrivacyFilter
+    """When memory must hold no PII at rest, the run's context is redacted
+    the same way (and a resumed run sees the redacted text)."""
+    from omnicoreagent.core.privacy import PrivacyConfig, PrivacyFilter
 
     agent = await _agent(ScriptedModel("noted"), ToolRegistry())
-    agent.privacy_filter = PrivacyFilter()
+    agent.privacy_filter = PrivacyFilter(PrivacyConfig(redact_memory=True))
 
     result = await agent.run("email me at someone@example.com", session_id="private")
     record = await agent.get_run(result["run_id"])

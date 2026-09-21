@@ -20,7 +20,7 @@ from continuation_providers import ANSWER, ContinuationProviders  # noqa: E402
 
 from omnicoreagent.core.memory_store.memory_router import MemoryRouter  # noqa: E402
 from omnicoreagent.core.model_protocol import ModelTurn, ToolRequest  # noqa: E402
-from omnicoreagent.core.privacy import PrivacyFilter  # noqa: E402
+from omnicoreagent.core.privacy import PrivacyConfig, PrivacyFilter  # noqa: E402
 from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent  # noqa: E402
 from omnicoreagent.core.token_usage import Usage  # noqa: E402
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry  # noqa: E402
@@ -133,7 +133,8 @@ def test_thinking_that_privacy_must_change_is_not_stored_corrupted():
             "model_message": {"role": "assistant", "content": None, "thinking_blocks": blocks},
         }
         return _without_changed_continuation(
-            metadata, PrivacyFilter().redact(metadata, boundary="memory")
+            metadata,
+            PrivacyFilter(PrivacyConfig(redact_memory=True)).redact(metadata, boundary="memory"),
         )
 
     changed = stored(thinking)

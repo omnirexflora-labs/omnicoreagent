@@ -27,7 +27,14 @@ class PrivacyConfig:
 
     enabled: bool = True
     redact_telemetry: bool = True
-    redact_memory: bool = True
+    # The conversation is the agent's working state: later steps, later
+    # turns and a resumed run continue from it. Redacted, it corrupted the
+    # agent's work — a resumed run rebuilt an approved call from redacted
+    # history, asked again, and pushed "[REDACTED_EMAIL]" into a file (the
+    # repository steward's PR #251). Kept as written, like the workspace;
+    # turn this on for memory that must hold no PII at rest, knowing that a
+    # resumed run or a later turn will see the redacted text.
+    redact_memory: bool = False
     # Files in the workspace — what the agent writes, edits, and copies back
     # from a sandbox — are its work, kept as written: a redacted
     # pyproject.toml is a corrupted one (the repository steward pushed one,
