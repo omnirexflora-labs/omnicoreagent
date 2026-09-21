@@ -256,6 +256,16 @@ Each line names the commit; the plan's execution log has the detail.
     otherwise; a strict refusal names the capability; the steward allows
     it. (`969e7fc`, `bfb4907`)
 
+### While P7 ran
+
+38. **A policy change stopped every schedule, silently.** One rule added to
+    the steward's policy, and at their next due time both P7 tasks were
+    paused: they were bound to the earlier policy, which is right to refuse.
+    But nothing said so. No run, no event, no reason, and the worker loop
+    swallowed the error without a log line. Six hours of scheduled work went
+    missing before anyone looked. The schedule now records why it was
+    paused, and the scheduler and the worker loop log it. (`153b91c`)
+
 ## What it cost
 
 A read-the-repository run costs about two to eight cents on `gpt-5.6-terra`
