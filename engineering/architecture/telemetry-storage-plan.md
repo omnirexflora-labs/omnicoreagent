@@ -54,11 +54,11 @@ Behind the existing `AbstractTelemetryStore` interface, so callers,
 OmniServe routes, the trajectory reader and the evidence adapter do not
 change:
 
-- **Record each thing once.** A model call's context is recorded once (on
-  its context assembly; the model call refers to it. Each message is stored
-  once per trace, by the digest the trace already computes; a context is a
-  list of digests. No truncation is then needed for the context: a
-  100-message run stores 100 messages, not 100 conversations. An
+- **Record each thing once.** Each message is stored once per trace, by the
+  digest the trace already computes, and so is each tool catalog. A model
+  call records which messages it was sent: the previous call's list it
+  extends and what it appends. No truncation is then needed for the
+  context: a 100-message run stores 100 messages, not 100 conversations. An
   authorization records its request once and the decision by reference.
 - **An index in a database the application already runs.** One row per
   trace: trace id, run id, parent trace, session, agent, status, evidence
