@@ -10,6 +10,8 @@ Subagents inherit:
 """
 
 import asyncio
+import hashlib
+import posixpath
 from typing import Any, Dict, List, Optional
 from omnicoreagent.core.tools.local_tools_registry import INTERNAL_TOOL_PROVIDERS, ToolRegistry
 from omnicoreagent.core.logging import logger
@@ -266,6 +268,9 @@ When you have completed the task:
             child_run_id=child_run_id,
         )
         child_trace_id = None
+        output_before = None
+        if not parked_run_id:
+            output_before = await self._output_fingerprint(agent, output_path)
 
         try:
             if self.mcp_tools:
@@ -295,6 +300,9 @@ When you have completed the task:
 
             if is_error:
                 logger.warning(f"Subagent '{name}' returned an error response")
+                stale = await self._stale_output_note(agent, output_path, output_before)
+                if stale:
+                    response = f"{response} {stale}".strip()
                 await self._finish_delegation(
                     delegation,
                     child_run_id=child_run_id,
@@ -316,6 +324,8 @@ When you have completed the task:
                 }
 
             output_error = self._workspace_output_error(agent, output_path)
+            if output_error is None:
+                output_error = await self._stale_output_note(agent, output_path, output_before)
             workspace_output = {
                 "path": output_path,
                 "verified": output_error is None,
@@ -581,6 +591,44 @@ When you have completed the task:
         )
 
     @staticmethod
+    async def _output_fingerprint(agent: Any, output_path: str) -> tuple | None:
+        """What is at a worker's output path now: its content digest and
+        modification time, or None when nothing is (or it cannot be read)."""
+        files = await _workspace_files(agent)
+        if files is None or not isinstance(output_path, str) or not output_path.strip():
+            return None
+        try:
+            if files.exists(output_path, strip_prefixes=WORKSPACE_FILE_PATH_PREFIXES) is not True:
+                return None
+            content = files.read_text(output_path, strip_prefixes=WORKSPACE_FILE_PATH_PREFIXES)
+            if not isinstance(content, str):
+                return None
+            modified = None
+            parent, name = posixpath.split(output_path.rstrip("/"))
+            for entry in files.list_files(parent or None, strip_prefixes=WORKSPACE_FILE_PATH_PREFIXES):
+                if getattr(entry, "name", None) == name:
+                    modified = getattr(entry, "modified_at", None)
+                    break
+            digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        except Exception:  # noqa: BLE001 - a file that cannot be read is not compared.
+            return None
+        return (digest, str(modified))
+
+    async def _stale_output_note(
+        self, agent: Any, output_path: str, before: tuple | None
+    ) -> str | None:
+        """A note when the file at the output path is the one that was there
+        before the worker started: an earlier run's, not this worker's."""
+        if before is None:
+            return None
+        if await self._output_fingerprint(agent, output_path) != before:
+            return None
+        return (
+            f"The worker did not write its output: the file at '{output_path}' is "
+            "unchanged from before it started, an earlier run's, not this worker's."
+        )
+
+    @staticmethod
     def _workspace_output_error(agent: Any, output_path: str) -> str | None:
         """Return a diagnostic when a child did not create its declared output."""
         if not isinstance(output_path, str) or not output_path.strip():
@@ -806,3 +854,27 @@ def build_subagent_tools(
                 "message": "subagents must be an array",
             }
         return await factory.run_parallel_subagents(subagents)
+
+
+async def _workspace_files(agent: Any) -> Any:
+    """The worker's workspace files, initializing the worker if it has not been."""
+    initialize = getattr(agent, "initialize", None)
+    if getattr(agent, "_initialized", True) is False and callable(initialize):
+        try:
+            await initialize()
+        except Exception:  # noqa: BLE001 - run() reports a worker that cannot start.
+            return None
+    runtime_agent = getattr(agent, "agent", None)
+    registry = getattr(runtime_agent, "tool_runtime_registry", None)
+    workspace = getattr(registry, "workspace", None)
+    create = getattr(registry, "_workspace_for_runtime_tools", None)
+    if workspace is None and callable(create):
+        # Made when the worker's tools are prepared; the same one, earlier.
+        try:
+            workspace = create()
+        except Exception:  # noqa: BLE001 - a workspace that cannot be made is not compared.
+            return None
+    files = getattr(workspace, "files", None)
+    if files is None or not hasattr(files, "read_text"):
+        return None
+    return files

@@ -381,7 +381,8 @@ class TestSubagentFactory:
         child = MagicMock()
         child.run = AsyncMock(return_value={"status": "success", "response": "done"})
         child.cleanup = AsyncMock()
-        child.agent.tool_runtime_registry.workspace.files.exists.return_value = True
+        # Nothing at the path before the worker ran; its output after.
+        child.agent.tool_runtime_registry.workspace.files.exists.side_effect = [False, True]
         factory.create_subagent = MagicMock(return_value=child)
 
         result = await factory.run_subagent(
@@ -393,7 +394,7 @@ class TestSubagentFactory:
 
         assert result["status"] == "success"
         assert result["data"]["output_path"] == "/workspace/reports/review.md"
-        child.agent.tool_runtime_registry.workspace.files.exists.assert_called_once()
+        assert child.agent.tool_runtime_registry.workspace.files.exists.call_count == 2
 
     @pytest.mark.asyncio
     async def test_run_parallel_subagents_applies_defaults_for_sparse_specs(
