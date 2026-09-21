@@ -21,11 +21,11 @@ class PatternManager:
                 "requires_target": True,
                 "patterns": [
                     (
-                        r"\b(?:ignore|disregard|forget|override|bypass|skip|cancel|break)\s+(?:all|any|previous|prior|above|earlier|your|the|existing|current)\s+(?:instructions?|rules?|prompts?|commands?|directives?|guidelines?|constraints?|safeguards?)",
+                        r"\b(?:ignore|disregard|forget|override|bypass|skip|cancel|break)\s+(?:(?:all|any|previous|prior|above|earlier|your|the|my|existing|current|original)\s+){1,3}(?:instructions?|rules?|prompts?|commands?|directives?|guidelines?|constraints?|safeguards?)",
                         True,
                     ),
                     (
-                        r"\b(?:new|updated|revised|latest|current|different|alternate|secret|hidden)\s+(?:instructions?|commands?|directives?|rules?|prompt|system)\s*[:=]\s*(?=\w)",
+                        r"\b(?:new|updated|revised|latest|current|different|alternate|secret|hidden)\s+(?:instructions?|commands?|directives?|rules?|prompt|system)(?:\s+for\s+(?:the\s+)?(?:assistant|model|ai|agent|you))?\s*[:=]\s*(?=\w)",
                         True,
                     ),
                     (
@@ -55,7 +55,9 @@ class PatternManager:
                         True,
                     ),
                     (
-                        r"(?:print|dump|export|output|write)\s+(?:your\s+|the\s+)?(?:system\s+)?(?:prompt|instructions?|config|settings|file)",
+                        # "your prompt", "the system prompt" — never "write file"
+                        # or "print the config", which developers say all day.
+                        r"(?:print|dump|export|output|write|reveal)\s+(?:your\s+(?:system\s+|hidden\s+|initial\s+)?(?:prompt|instructions?)|the\s+(?:system|hidden|initial|secret)\s+(?:prompt|instructions?))",
                         True,
                     ),
                     (
@@ -81,11 +83,13 @@ class PatternManager:
                         True,
                     ),
                     (
-                        r"\byou\s+(?:are\s+now|have\s+become|will\s+be|must\s+be)\s+(?:DAN|STAN|MONG|EVIE|UCAR)\b",
+                        r"\byou\s+(?:are(?:\s+now)?|have\s+become|will\s+be|must\s+be)\s+(?:DAN|STAN|MONG|EVIE|UCAR)\b",
                         False,
                     ),
                     (
-                        r"\b(?:jailbreak|break\s+free|escape|become\s+(?:unfiltered|unrestricted|uncensored|unlimited|free)|remove\s+(?:all\s+)?restrictions)",
+                        # "jailbreak mode", "jailbroken", "break free from your rules";
+                        # never the word "escape", which code is full of.
+                        r"\b(?:jailbreak\s+(?:mode|prompt|the)|jailbroken|break\s+free\s+(?:of|from)\s+(?:your|the|all)|become\s+(?:unfiltered|unrestricted|uncensored|unlimited|free)|remove\s+(?:all\s+)?(?:your\s+)?restrictions)",
                         True,
                     ),
                     (
@@ -111,7 +115,9 @@ class PatternManager:
                         False,
                     ),
                     (
-                        r"\[\s*[/\s]*(?:system|instruction|prompt|admin|root|command)[^\]]*\]",
+                        # "[SYSTEM]", "[/system]": a framing tag, not "[system
+                        # context: ...]", which the runtime itself writes.
+                        r"\[\s*/?\s*(?:system|instruction|prompt|admin|root|command)\s*\]",
                         False,
                     ),
                     (
@@ -158,8 +164,8 @@ class PatternManager:
                 "weight": 7,
                 "requires_target": False,
                 "patterns": [
-                    (r"(?:\\x[0-9a-f]{2,}|%[0-9a-f]{2}|&#x?[0-9a-f]+;)", False),
-                    (r"\\u[0-9a-f]{4,}", False),
+                    # Escape sequences are counted by the engine (three or
+                    # more); one "%20" in a URL is not hidden content.
                     (
                         # The engine folds digits to letters before matching
                         # (4→a, 3→e, 1→l), so "base64" arrives as "base6a".
@@ -188,6 +194,9 @@ class PatternManager:
             "obfuscation_techniques": {
                 "weight": 6,
                 "requires_target": False,
+                # Matched against the text as written: normalization joins
+                # spaced-out letters so the intent behind them is seen too.
+                "match": "original",
                 "patterns": [
                     # Letters spaced out to slip past a word match. The plain
                     # words — "override the default", "the secret is in
@@ -199,23 +208,6 @@ class PatternManager:
                         r"|o\s*v\s*e\s*r\s*r\s*i\s*d\s*e(?<!override))\b",
                         False,
                     ),
-                    (r"[^\w\s{}\[\]():,\"'.=/\\-]{4,}", False),
-                    # Letters with digits in them ("l33t") are folded to plain
-                    # words by normalization before matching; what still has
-                    # digits after that is an identifier, not an obfuscation.
-                ],
-            },
-            # Padding: one character repeated to bury or pad an instruction.
-            # Matched against the text as written, not the leetspeak-folded
-            # copy: folding turns a hexadecimal identifier (a run id, a commit
-            # SHA) into runs of letters that were never there.
-            "obfuscation_padding": {
-                "weight": 6,
-                "requires_target": False,
-                "match": "original",
-                "patterns": [
-                    (r"([^\W\d_])\1{3,}", False),
-                    (r"([!?*~^%&+|<>])\1{3,}", False),
                 ],
             },
         }

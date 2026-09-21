@@ -87,39 +87,17 @@ class DetectionEngine:
                         input_hash, len(user_input), start_time
                     )
 
-            flags = []
-            total_score = 0
-
-            pattern_score, pattern_flags = self._pattern_matching(normalized, user_input)
-            total_score += pattern_score
-            flags.extend(pattern_flags)
-
-            if self.config.enable_heuristic_analysis:
-                heuristic_score, heuristic_flags = self._heuristic_analysis(
-                    user_input, normalized
-                )
-                total_score += heuristic_score
-                flags.extend(heuristic_flags)
-
-            if self.config.enable_sequential_analysis:
-                seq_score, seq_flags = self._sequential_analysis(user_input)
-                total_score += seq_score
-                flags.extend(seq_flags)
-
-            if self.config.enable_entropy_analysis:
-                entropy_score, entropy_flags = self._entropy_analysis(user_input)
-                total_score += entropy_score
-                flags.extend(entropy_flags)
-
-            total_score = int(total_score * self.config.sensitivity)
-
-            # Sensitivity may tune ordinary heuristics, but it must not turn a
-            # recognized instruction override, prompt extraction, or jailbreak
-            # into a safe request. Preserve the suspicious floor for these
-            # high-confidence pattern groups.
-            if self._has_high_risk_pattern(flags):
-                suspicious_floor = 10 if self.config.strict_mode else 15
-                total_score = max(total_score, suspicious_floor)
+            # Evidence is intent addressed to the model, or content hidden
+            # from a reader. Structure, vocabulary, length and entropy are
+            # not evidence: a diff, a docstring, a markdown rule, an
+            # identifier, the words "system" and "override" all belong to
+            # ordinary developer text, and a screen that scores them cannot
+            # be trusted. The verdict comes from the kinds of evidence found,
+            # never from adding up weak signals.
+            pattern_score, flags = self._pattern_matching(normalized, user_input)
+            if self.config.enable_encoding_detection:
+                flags.extend(self._encoding_flags(user_input))
+            total_score = int(pattern_score * self.config.sensitivity)
 
             result = self._calculate_threat(
                 total_score, flags, user_input, input_hash, start_time
@@ -141,17 +119,45 @@ class DetectionEngine:
                 start_time=start_time,
             )
 
-    @staticmethod
-    def _has_high_risk_pattern(flags: list[str]) -> bool:
-        high_risk_groups = {
+    # Evidence that the text tries to redirect the model, or to reach its
+    # instructions: one of these is enough to block.
+    STRONG_KINDS = frozenset(
+        {
             "instruction_override",
             "prompt_extraction",
             "jailbreak_roleplay",
             "context_manipulation",
+            "payload_decode_intent",
+            "custom",
         }
-        return any(
-            flag.split(":", 1)[0] in high_risk_groups for flag in flags
+    )
+    # Evidence that something is being hidden or framed: recorded, and
+    # blocking only beside strong evidence (or in strict mode).
+    WEAK_KINDS = frozenset({"delimiter_injection", "obfuscation_techniques", "payload_encoding"})
+
+    @classmethod
+    def _kinds(cls, flags: list[str]) -> tuple[set[str], set[str]]:
+        strong, weak = set(), set()
+        for flag in flags:
+            group = flag.split(":", 1)[0]
+            if group in cls.STRONG_KINDS or group.startswith("custom"):
+                strong.add(group)
+            elif group in cls.WEAK_KINDS:
+                weak.add(group)
+        return strong, weak
+
+    @staticmethod
+    def _has_high_risk_pattern(flags: list[str]) -> bool:
+        strong, _ = PromptInjectionEngine._kinds(flags)
+        return bool(strong)
+
+    @staticmethod
+    def _encoding_flags(original: str) -> list[str]:
+        """Escape sequences that hide text from a reader (three or more)."""
+        escapes = len(
+            re.findall(r"(?:\\x[0-9a-f]{2}|\\u[0-9a-f]{4}|&#\d+;|%[0-9a-f]{2})", original, re.IGNORECASE)
         )
+        return [f"payload_encoding: {escapes} escape sequences"] if escapes >= 3 else []
 
     def _normalize_input(self, text: str) -> str:
         """Advanced normalization with obfuscation detection"""
@@ -191,6 +197,14 @@ class DetectionEngine:
             return token
 
         normalized = re.sub(r"[\w@$!|€©®£¥¢µ°]+", normalize_leet_token, normalized)
+
+        # Letters spaced out to slip past a word match ("o v e r r i d e")
+        # are joined, so the intent behind them is matched as written.
+        normalized = re.sub(
+            r"\b((?:[A-Za-z] ){3,}[A-Za-z])\b",
+            lambda match: match.group(1).replace(" ", ""),
+            normalized,
+        )
 
         normalized = re.sub(
             r"([a-z])[\.\-_,;:\/\\]+([a-z])", r"\1 \2", normalized, flags=re.IGNORECASE
@@ -263,198 +277,6 @@ class DetectionEngine:
 
         return True
 
-    def _heuristic_analysis(
-        self, original: str, normalized: str
-    ) -> tuple[int, list[str]]:
-        """Advanced heuristic analysis"""
-        score = 0
-        flags = []
-        n = len(original)
-
-        if n == 0:
-            return score, flags
-
-        special_chars = re.findall(r"[<>{}[\]\\|`~!@#$%^&*()+=]", original)
-        special_density = len(special_chars) / n
-        if special_density > 0.2:
-            flags.append("very_high_delimiter_density")
-            score += 8
-        elif special_density > 0.15:
-            flags.append("high_delimiter_density")
-            score += 5
-        elif special_density > 0.1:
-            score += 3
-
-        boundaries = len(
-            re.findall(
-                r"(?:---|===|```|\*\*\*|\[system\]|<system>|</?prompt>)",
-                original,
-                re.IGNORECASE,
-            )
-        )
-        if boundaries >= 4:
-            flags.append("multiple_context_boundaries")
-            score += 10
-        elif boundaries >= 3:
-            flags.append("context_boundary_markers")
-            score += 7
-        elif boundaries >= 2:
-            score += 4
-
-        risk_words = [
-            "ignore",
-            "disregard",
-            "system",
-            "prompt",
-            "reveal",
-            "instruction",
-            "override",
-            "bypass",
-            "admin",
-            "root",
-            "jailbreak",
-            "dan",
-            "secret",
-            "hidden",
-            "unrestricted",
-        ]
-        # Whole words: "dan" is not in "pydantic", "root" is not in "/root".
-        risk_count = sum(_word_count(normalized, w) for w in risk_words)
-
-        if risk_count >= 5:
-            flags.append("very_dense_attack_keywords")
-            score += 12
-        elif risk_count >= 4:
-            flags.append("dense_attack_keywords")
-            score += 8
-        elif risk_count >= 3:
-            score += 5
-
-        # Words written with digits for letters ("s3cr3t1nject"): folding
-        # them for matching erases the evidence, so it is counted here. Three
-        # substitutions in one word is a choice; one or two ("h4ck3r", "b64")
-        # are not.
-        heavy_leet = [
-            token for token in re.findall(r"[A-Za-z0-9]+", original) if _is_heavy_leet(token)
-        ]
-        if heavy_leet:
-            flags.append(f"heavy_leet_speak: {heavy_leet[0][:30]}")
-            score += min(18, 6 * len(heavy_leet))
-
-        if self.config.enable_encoding_detection:
-            encoding_patterns = len(
-                re.findall(
-                    r"(?:\\x[0-9a-f]{2}|\\u[0-9a-f]{4}|&#\d+;|%[0-9a-f]{2})",
-                    original,
-                    re.IGNORECASE,
-                )
-            )
-            if encoding_patterns >= 5:
-                flags.append("multiple_encoding_attempts")
-                score += 8
-            elif encoding_patterns >= 3:
-                flags.append("encoding_detected")
-                score += 5
-
-        instruction_words = [
-            "ignore",
-            "disregard",
-            "override",
-            "reveal",
-            "show",
-            "system",
-        ]
-        repeat_count = sum(
-            1 for word in instruction_words if _word_count(normalized, word) >= 2
-        )
-        if repeat_count >= 3:
-            flags.append("repetitive_injection_pattern")
-            score += 6
-        elif repeat_count >= 2:
-            score += 3
-
-        role_pattern = r"you\s+(?:are|become|act\s+as)\s+(?:an?\s+)?(?!.*(?:teacher|tutor|helper|assistant|guide|expert))"
-        if re.search(role_pattern, normalized, re.IGNORECASE):
-            flags.append("role_manipulation_attempt")
-            score += 7
-
-        if n > 5000:
-            flags.append("potential_context_stuffing")
-            score += 6
-
-        if re.search(r'["\'`]{3,}', original):
-            flags.append("quote_manipulation")
-            score += 4
-
-        return score, flags
-
-    def _sequential_analysis(self, text: str) -> tuple[int, list[str]]:
-        """Analyze sequence and structure"""
-        score = 0
-        flags = []
-
-        lines = text.split("\n")
-        instruction_lines = []
-
-        for i, line in enumerate(lines):
-            line_lower = line.lower()
-            if any(
-                keyword in line_lower
-                for keyword in ["ignore", "disregard", "override", "system:", "prompt:"]
-            ):
-                instruction_lines.append((i, line_lower))
-
-        if len(instruction_lines) >= 3:
-            flags.append("multiple_instruction_lines")
-            score += 8
-
-        if len(lines) >= 3:
-            middle_index = len(lines) // 2
-            middle_line = lines[middle_index].lower()
-            if any(
-                keyword in middle_line
-                for keyword in ["ignore", "disregard", "override"]
-            ):
-                if (
-                    len(lines[middle_index - 1].split()) > 3
-                    and len(lines[middle_index + 1].split()) > 3
-                ):
-                    flags.append("sandwiched_injection_attempt")
-                    score += 6
-
-        return score, flags
-
-    def _entropy_analysis(self, text: str) -> tuple[int, list[str]]:
-        """Analyze entropy and randomness"""
-        score = 0
-        flags = []
-
-        if len(text) < 20:
-            return score, flags
-
-        freq = Counter(text)
-        entropy = -sum(
-            (count / len(text)) * log2(count / len(text))
-            for count in freq.values()
-        )
-
-        if entropy > 5.5:
-            flags.append(f"high_entropy_{entropy:.2f}")
-            score += 4
-
-        random_patterns = [
-            r"[a-z]{2}\d{2}[a-z]{2}\d{2}",
-            r"\b\w{8,12}\b.*\b\w{8,12}\b.*\b\w{8,12}\b",
-        ]
-
-        for pattern in random_patterns:
-            if re.search(pattern, text):
-                flags.append("random_like_pattern")
-                score += 3
-                break
-
-        return score, flags
-
     def _calculate_threat(
         self,
         score: int,
@@ -463,42 +285,35 @@ class DetectionEngine:
         input_hash: str,
         start_time: datetime,
     ) -> DetectionResult:
-        """Calculate final threat level"""
-        if self.config.strict_mode:
-            thresholds = {
-                "critical": 25,
-                "dangerous": 18,
-                "suspicious": 10,
-                "low_risk": 5,
-            }
-        else:
-            thresholds = {
-                "critical": 35,
-                "dangerous": 25,
-                "suspicious": 15,
-                "low_risk": 8,
-            }
+        """The verdict, from the kinds of evidence found.
 
-        if score >= thresholds["critical"]:
+        Two kinds of strong evidence, or strong evidence beside hidden
+        content, is critical; one kind of strong evidence is dangerous;
+        hidden content or framing alone is suspicious (dangerous in strict
+        mode); nothing found is safe. The score is kept for callers that
+        read it, but it does not decide.
+        """
+        strong, weak = self._kinds(flags)
+        if len(strong) >= 2 or (strong and weak):
             threat_level = ThreatLevel.CRITICAL
             message = "CRITICAL: High-confidence injection - BLOCK"
-            confidence = min(0.95, 0.8 + (score - thresholds["critical"]) / 50.0)
-        elif score >= thresholds["dangerous"]:
+            confidence = 0.95
+        elif strong:
             threat_level = ThreatLevel.DANGEROUS
             message = "DANGEROUS: Likely injection attempt - BLOCK"
-            confidence = min(0.8, 0.6 + (score - thresholds["dangerous"]) / 40.0)
-        elif score >= thresholds["suspicious"]:
+            confidence = 0.85
+        elif weak and self.config.strict_mode:
+            threat_level = ThreatLevel.DANGEROUS
+            message = "DANGEROUS: Hidden or framed content (strict mode) - BLOCK"
+            confidence = 0.6
+        elif weak:
             threat_level = ThreatLevel.SUSPICIOUS
-            message = "SUSPICIOUS: Potential injection - REVIEW"
-            confidence = min(0.6, 0.4 + (score - thresholds["suspicious"]) / 30.0)
-        elif score >= thresholds["low_risk"]:
-            threat_level = ThreatLevel.LOW_RISK
-            message = "LOW RISK: Some concerning patterns"
-            confidence = min(0.4, 0.2 + (score - thresholds["low_risk"]) / 20.0)
+            message = "SUSPICIOUS: Hidden or framed content - REVIEW"
+            confidence = 0.5
         else:
             threat_level = ThreatLevel.SAFE
             message = "SAFE: No significant threats detected"
-            confidence = max(0.1, 1.0 - score / 10.0)
+            confidence = 1.0
 
         recommendations = self._generate_recommendations(threat_level, flags, score)
 
@@ -639,7 +454,11 @@ class DetectionEngine:
             )
 
 
-_LEET_DIGITS = frozenset("0134578")
+
+def _word_count(text: str, word: str) -> int:
+    return len(re.findall(rf"\b{re.escape(word)}\b", text))
+
+
 _HEX = re.compile(r"[0-9a-f]+", re.IGNORECASE)
 
 
@@ -657,16 +476,3 @@ def _could_be_leet(token: str) -> bool:
     if "_" in token:
         return False
     return _HEX.fullmatch(token) is None
-
-
-def _is_heavy_leet(token: str) -> bool:
-    """A word with three or more digits standing for letters."""
-    if len(token) < 5 or not _could_be_leet(token):
-        return False
-    substitutions = sum(1 for char in token if char in _LEET_DIGITS)
-    letters = sum(1 for char in token if char.isalpha())
-    return substitutions >= 3 and letters >= 2 and substitutions + letters == len(token)
-
-
-def _word_count(text: str, word: str) -> int:
-    return len(re.findall(rf"\b{re.escape(word)}\b", text))
