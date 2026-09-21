@@ -56,8 +56,12 @@ enabled explicitly through `agent_config` or installable extras.
 | **Context management** | Checks message history before each model call and automatically truncates or summarizes when the configured budget threshold is crossed. |
 | **Memory** | Stores and retrieves session history through the configured memory router. |
 | **Workspace** | Provides agent-accessible files for notes, scratchpads, artifacts, subagent output, and tool offloads. |
-| **Telemetry and Traces** | Emits typed events, stores traces, streams progress, and exports traces through OTLP-compatible adapters. |
-| **Serving** | Runs the agent through OmniServe when you need REST/SSE endpoints. |
+| **Governance** | Decides every capability the agent uses — each tool, MCP server, command, network, delegation, background run — by a policy of allow, ask, and deny; an `ask` pauses the run for a person ([security model](/docs/core-concepts/security-model)). |
+| **Execution** | Runs the agent's commands in a sandbox (Docker, E2B, Modal, Daytona, Vercel, or yours), never on the host, with the workspace bridged in and out ([execution](/docs/core-concepts/execution)). |
+| **Durable runs** | Keeps a record of every run — step, tool calls, approvals, budgets — so a run pauses and resumes, continues after a crash, and never repeats an interrupted call silently ([durable runs](/docs/core-concepts/durable-runs)). |
+| **Budgets** | Holds each model call at its worst case before it is made and charges the real figure after, per request, session, agent, and application; a run that runs out waits for a person. |
+| **Telemetry and Traces** | Emits typed events, stores one trace per run, streams progress, and exports traces through OTLP-compatible adapters. |
+| **Serving** | Runs the agent through OmniServe when you need REST/SSE endpoints, with your own pages beside the API. |
 
 ---
 
@@ -77,6 +81,10 @@ the tool surface or require external services remain configurable.
 | BM25 tool retrieval | Off | `agent_config={"enable_advanced_tool_use": True}` |
 | Dynamic subagents | Off | `agent_config={"enable_subagents": True}` |
 | Agent skills | Off | `agent_config={"enable_agent_skills": True}` |
+| Governance | Off | `agent_config={"governance_config": {"enabled": True, "profile": "interactive-dev"}}`, or your own policy; `strict-production` allows nothing without a rule. |
+| Sandboxed execution | Off | `governance_config["sandbox_config"] = {"provider": "docker"}` (or e2b, modal, daytona, vercel, http) adds the `execute` tool; `sandbox_manifest` says what the sandbox is. |
+| Budgets | Off | `governance_config["budgets"]`, or budgets in the policy. |
+| Durable run state | On | Kept in the memory store that keeps session history; in-memory by default, so choose Redis, Postgres/SQL, or MongoDB for anything that must survive a restart. |
 | Redis/Postgres/MongoDB/S3/R2 | Installable extras | Install the matching package extra and configure the backend. |
 
 <Tip>
