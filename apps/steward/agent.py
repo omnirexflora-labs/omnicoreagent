@@ -95,6 +95,9 @@ POLICY = {
             {"rule_id": "sandbox_network", "capability": "sandbox.network.configure"},
             {"rule_id": "workspace_read", "capability": "workspace.files.read"},
             {"rule_id": "workspace_write", "capability": "workspace.files.write"},
+            # A large tool result is moved to the workspace and read back
+            # with read_artifact; without this the P3 rehearsal lost one.
+            {"rule_id": "artifacts_read", "capability": "workspace.artifacts.read"},
             {"rule_id": "local_tools", "capability": "tool.local.call"},
             {"rule_id": "delegate", "capability": "subagent.spawn"},
         ],
