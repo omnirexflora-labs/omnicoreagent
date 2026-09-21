@@ -2,7 +2,7 @@
 
 Status: in progress (2026-09-21). P1, P2, P4, P5 and P6 of the
 [production proving plan](../architecture/production-proving-plan.md) are
-done; P3 waits on a token permission; P7 (a week unattended) is running.
+done; P3's first real pull request is open (#250); P7 (a week unattended) is running.
 This page is the write-up the plan promised: what broke, what was fixed,
 what it cost, with the traces. It will be finished when P7 ends.
 
@@ -27,8 +27,8 @@ to hurt the runtime from the outside — kill the server mid-run, take the
 sandbox away, run out of money, put two workers on one budget, flood it with
 duplicates — and every unit ends with a scripted scenario that either passes
 on the server or names what broke. Between 2026-09-20 and 2026-09-21 it
-found **twenty-six things wrong** — twenty of them runtime defects,
-one default that was wrong for real work,
+found **twenty-seven things wrong** — twenty of them runtime defects,
+two defaults that were wrong for real work,
 three deployment lessons, two missing capabilities — every defect fixed with
 a test that fails without the fix; the runtime's test suite went from 1,756
 to 1,796 tests. None of these were visible to the
@@ -96,7 +96,7 @@ Each line names the commit; the plan's execution log has the detail.
     crash-looped until the lease lapsed. Thirty-second lease, acquisition
     outlasts it, a live holder is named. (`50f9342`)
 
-### Fixing behind an approval (P3, in progress)
+### Fixing behind an approval (P3)
 
 15. An approver over HTTP could not see what they approved: the run view
     listed an approval's state and tool but not the call's arguments.
@@ -169,6 +169,13 @@ Each line names the commit; the plan's execution log has the detail.
     verdict comes from the kinds of evidence, and a frozen corpus holds it
     to that — 0 of 216 ordinary chunks even suspicious, all attacks blocked.
     (`632c371`)
+27. **The privacy filter corrupted the steward's first pull request.** PR
+    #250's `pyproject.toml` carried `email = "[REDACTED_EMAIL]"`: the
+    worker's edited file came back from the sandbox through the workspace
+    bridge, and workspace writes were redacted by default. Files are the
+    agent's work, not a boundary; they are kept as written now, and
+    `redact_workspace` turns redaction on for a workspace that must hold no
+    PII at rest. (`051a587`)
 
 ## What it cost
 
@@ -183,9 +190,6 @@ rather than a defect.
 
 ## What is still open
 
-- P3's push waits on the steward's GitHub token: a fine-grained token whose
-  *Contents* permission is read-only cannot create a branch (403). Not a
-  runtime finding.
 - The sandbox bridge copies the whole agent workspace — every earlier run's
   files — into every sandbox and hashes all of it after each command. P7
   measures it.
