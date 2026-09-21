@@ -57,7 +57,14 @@ def github(path: str) -> dict | list:
         return json.loads(response.read())
 
 
-def ensure_task() -> None:
+REHEARSAL = (
+    " A pull request for this fix may already be open from an earlier rehearsal; this run is its "
+    "own rehearsal and must still create its own branch, push its own commit, and open its own "
+    "pull request rather than pointing at the existing one."
+)
+
+
+def ensure_task(*, rehearsal: bool = False) -> None:
     existing = api("GET", "/background/tasks")
     tasks = existing.get("tasks", existing) if isinstance(existing, dict) else existing
     if any(task.get("task_id") == TASK_ID for task in tasks):
@@ -71,7 +78,7 @@ def ensure_task() -> None:
     api("POST", "/background/tasks", {
         "task_id": TASK_ID,
         "agent_id": "steward",
-        "query": QUERY,
+        "query": QUERY + (REHEARSAL if rehearsal else ""),
         "schedule": {"type": "manual"},
         # A fix is clone, install, change, test, and again; then three pauses.
         "timeout_seconds": 2400,
@@ -153,7 +160,7 @@ def assert_one_push_one_pr(branch: str, run_id: str) -> None:
 
 def run_scenario(*, kill: bool) -> None:
     print("P3.2 killed after the push, before the pull request" if kill else "P3.1 a fix behind approvals")
-    ensure_task()
+    ensure_task(rehearsal=kill)
     run = api("POST", f"/background/tasks/{TASK_ID}/run", {"wait": False})
     run_id = run["run_id"]
     print(f"       run {run_id} queued")
