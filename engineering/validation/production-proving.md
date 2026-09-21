@@ -27,7 +27,8 @@ to hurt the runtime from the outside — kill the server mid-run, take the
 sandbox away, run out of money, put two workers on one budget, flood it with
 duplicates — and every unit ends with a scripted scenario that either passes
 on the server or names what broke. Between 2026-09-20 and 2026-09-21 it
-found **twenty-four things wrong** — nineteen of them runtime defects,
+found **twenty-five things wrong** — nineteen of them runtime defects,
+one default that was wrong for real work,
 three deployment lessons, two missing capabilities — every defect fixed with
 a test that fails without the fix; the runtime's test suite went from 1,756
 to 1,796 tests. None of these were visible to the
@@ -150,6 +151,11 @@ Each line names the commit; the plan's execution log has the detail.
     it could not pause the lead either; it does now. (`3f54ff2`)
 24. `runtime_error` events carried no traceback at any capture level; at
     `capture: "full"` they do now. (`29393b3`)
+25. A *suspicious* tool output was blocked by default: code, test names and
+    documentation are full of the words the score counts, and a blocked tool
+    result stops ordinary work. The default is now `flag` — recorded and
+    passed through; dangerous and critical output is still blocked. Decided
+    by the maintainer. (`2d2046c`)
 
 ## What it cost
 
@@ -171,9 +177,6 @@ rather than a defect.
   files — into every sandbox and hashes all of it after each command. P7
   measures it.
 - The SQL task store is SQLite-only; the steward's task store is Redis.
-- With `guardrail_mode: full`, a *suspicious* tool output is blocked by
-  default; for an agent working on a code repository that default blocks
-  ordinary work. The steward sets `suspicious_output_action: flag`.
 
 ## The traces
 
