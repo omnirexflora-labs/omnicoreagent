@@ -2,8 +2,8 @@
 
 Status: in progress (2026-09-21). P1, P2, P4, P5 and P6 of the
 [production proving plan](../architecture/production-proving-plan.md) are
-done; P3's first real pull request (#250) was closed because the privacy filter had
-corrupted it (finding 27); P7 (a week unattended) is running.
+done; P3's first two pull requests (#250, #251) were corrupted by the privacy filter
+(findings 27 and 33); #250 is closed. P7 (a week unattended) is running.
 This page is the write-up the plan promised: what broke, what was fixed,
 what it cost, with the traces. It will be finished when P7 ends.
 
@@ -12,7 +12,7 @@ what it cost, with the traces. It will be finished when P7 ends.
 A **repository steward** for `omnirexflora-labs/omnicoreagent` itself — a
 background agent on this runtime, deployed on a Hetzner server as a compose
 project (OmniServe, Postgres, Redis; E2B sandboxes; the hosted GitHub MCP
-server), governed by a strict policy of 35 allow, 10 ask and 9 deny rules,
+server), governed by a strict policy of 36 allow, 10 ask and 9 deny rules,
 budgeted in dollars ($5.00 a day, $1.00 a piece of work), with every run
 recorded in full. Its code is `apps/steward/`. It finds work — a failing
 test, an open issue, a failed run of its own — reproduces it in a sandbox,
@@ -31,9 +31,10 @@ on the server or names what broke. Between 2026-09-20 and 2026-09-21 it
 found **twenty-seven things wrong** — twenty of them runtime defects,
 two defaults that were wrong for real work,
 three deployment lessons, two missing capabilities — and fixing them
-surfaced two more in the suite's own acceptance check. Every defect is fixed
-with a test that fails without the fix; the runtime's test suite went from
-1,756 to 1,862 tests. None of the steward's twenty-seven were visible to the
+surfaced two more in the suite's own acceptance check. Rerunning P3 cleanly
+found eight more: seven runtime defects and one mistake of the model's. Every
+defect is fixed with a test that fails without the fix; the runtime's test
+suite went from 1,756 to 1,881 tests. None of the steward's twenty-seven were visible to the
 suite before, because the suite's models are scripted and its stores are in
 memory. The steward's are not.
 
@@ -196,6 +197,62 @@ Each line names the commit; the plan's execution log has the detail.
     the acceptance alone under pytest. The transport now hands the server the
     real stderr when there is one, else nothing. (`efc59f8`)
 
+### Rerunning P3 cleanly
+
+30. **A governed agent's full trace could not say what it did.** Under
+    governance every tool argument and delegation parameter was recorded as
+    `[REDACTED]` at every capture level, so the steward's trace, recorded at
+    `capture: "full"`, could not show which pull request it read or what it
+    pushed, while the same values sat in the recorded model calls. The
+    default capture still redacts them; a capture that records model calls
+    records them, through the privacy filter and the secret keys.
+    (`20f9cfb`)
+31. **A secret in a tool call's arguments was recorded as written.** A
+    model's tool call carries its arguments as JSON text, and key-based
+    redaction looked only at mapping keys, so an `api_key` passed to a tool
+    was recorded in every later model input at full capture, governed or
+    not. A string that is JSON is redacted inside now. Found by the test for
+    30. (`20f9cfb`)
+32. **The steward believed its memory over the tool.** The first clean rerun
+    ran in the task's session, which held the earlier P3 runs. The steward
+    read PR #250, the tool said `"state": "closed"`, and it answered that the
+    fix "remains open for review", did nothing and completed. A model error;
+    its instructions now say a fix has landed only if its pull request is
+    open or merged, as the tool reports it. (`c8a7e55`)
+33. **A resumed run ran a call nobody made.** The second rerun opened PR
+    #251 with the same `email = "[REDACTED_EMAIL]"` as #250. The run's
+    working context, and the session memory it is rebuilt from, were
+    privacy-redacted by default. On resume the approved `push_files` was
+    rebuilt from that context, its arguments no longer matched the
+    approval, governance asked again (correctly), and the person approved
+    the corrupted call. The model then continued from redacted history and
+    pushed the same text to a second branch. The conversation is the agent's
+    working state, like its files: kept as written, with `redact_memory`
+    opt-in. Visible only because of 30. (`9e3f37e`)
+34. **A pause was recorded as a refusal.** Every write the steward asked a
+    person about was listed in its trace as `denied`, with "Governance
+    denied tool execution" as the result, though each was approved and ran.
+    It is `awaiting_approval` now. (`2a86e03`)
+35. **A worker's output was an earlier run's.** In the kill rehearsal the
+    fix worker ran out of steps without writing its output, the previous
+    run's file was still at the same path, and the steward read it and
+    reported the fix as verified. A worker that finished without writing was
+    also "verified" whenever any file was at its path. The delegation now
+    compares the file with what was there before the worker started.
+    (`b8e72bb`)
+36. **A multi-line command was refused.** The sandbox refused any argument
+    containing a newline, so the worker's `python - <<'PY'` was "control
+    characters", and it spent its last steps on one-line workarounds.
+    Arguments may be scripts now; the program name, NUL and escape sequences
+    are still refused. (`f0ff523`)
+37. **A result was moved where the agent could not read it.** A large file
+    read was offloaded to the workspace and the model told to use
+    `read_artifact`; the steward's strict policy had no rule for it, and the
+    refusal said only "Unknown capability". The runtime now offloads only
+    where the policy lets the agent read the result back, and warns
+    otherwise; a strict refusal names the capability; the steward allows
+    it. (`969e7fc`, `bfb4907`)
+
 ## What it cost
 
 A read-the-repository run costs about two to eight cents on `gpt-5.6-terra`
@@ -213,6 +270,13 @@ rather than a defect.
   files — into every sandbox and hashes all of it after each command. P7
   measures it.
 - The SQL task store is SQLite-only; the steward's task store is Redis.
+- At `capture: "full"` the steward's model inputs (a hundred messages, about
+  170 KB) are recorded truncated at 64 KB, so its traces are *partial*.
+  Offloading large payloads is off by default; turning it on stores every
+  call's whole context, which grows with the conversation.
+- The JSONL trace store loads the whole file into memory: the server's
+  trace file was 173 MiB after a day and a half, and OmniServe's memory at
+  rest went from 586 to 755 MiB. P7 measures whether it keeps growing.
 
 ## The traces
 
