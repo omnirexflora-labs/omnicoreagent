@@ -103,7 +103,7 @@ class PolicyEvaluator:
             request,
             PolicyEffect.DENY,
             ReasonCode.UNKNOWN_CAPABILITY,
-            "Unknown capability denied by strict policy.",
+            f"Unknown capability denied by strict policy: no rule covers {request.capability}.",
         )
 
 

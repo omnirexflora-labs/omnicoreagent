@@ -140,6 +140,15 @@ class BaseReactAgent:
         )
         self.guardrail = guardrail
         self.governance_engine = governance_engine
+        # A result moved to the workspace is read back with read_artifact; a
+        # policy that refuses that would take the result from the model. Keep
+        # it inline instead (the context manager still bounds the context).
+        self.tool_offload_refused_by_policy = bool(
+            self.tool_offloader.config.enabled
+            and _artifact_reads_refused(governance_engine, self.agent_name)
+        )
+        if self.tool_offload_refused_by_policy:
+            self.tool_offloader.config.enabled = False
         self.tool_result_offloader = ToolResultOffloader(self.tool_offloader)
         self.message_history_loader = AgentMessageHistoryLoader(
             agent_name=self.agent_name
@@ -795,3 +804,23 @@ def _pending_calls(record: dict[str, Any], catalog: Any) -> tuple[list, set[str]
             if binding is None or not binding.idempotent:
                 unknown.add(call["id"])
     return pending, unknown
+
+
+def _artifact_reads_refused(engine: Any, actor: str) -> bool:
+    """Whether governance would refuse the tool an offloaded result is read with."""
+    if engine is None:
+        return False
+    from omnicoreagent.governance.capabilities import tool_authority_requests
+    from omnicoreagent.governance.models import PolicyEffect
+
+    requests = tool_authority_requests(
+        tool_name="read_artifact",
+        tool_args={"artifact_id": "offloaded"},
+        tool_provider="artifact",
+        actor=actor,
+    )
+    try:
+        decisions = [engine.evaluator.evaluate(engine.policy, request) for request in requests]
+    except Exception:  # noqa: BLE001 - a policy that cannot say is treated as refusing.
+        return True
+    return any(decision.effect == PolicyEffect.DENY for decision in decisions)

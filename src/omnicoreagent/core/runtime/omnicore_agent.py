@@ -546,6 +546,15 @@ class OmniCoreAgent:
                     "not contained by a sandbox.",
                 }
             )
+        if getattr(getattr(self, "agent", None), "tool_offload_refused_by_policy", False):
+            warnings.append(
+                {
+                    "code": "tool_offload_refused_by_policy",
+                    "message": "Tool offload is on, but the policy refuses "
+                    "workspace.artifacts.read, so large results stay in context "
+                    "instead of being offloaded; allow it to offload them.",
+                }
+            )
         return warnings
 
     @property

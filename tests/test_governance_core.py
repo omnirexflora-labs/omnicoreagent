@@ -538,7 +538,7 @@ async def test_governance_engine_denies_unknown_capability_with_stable_error():
         await engine.authorize(AuthorityRequest(capability="unknown.call"))
 
     assert exc.value.code == "unknown_capability"
-    assert exc.value.message == "Unknown capability denied by strict policy."
+    assert exc.value.message == "Unknown capability denied by strict policy: no rule covers unknown.call."
     assert exc.value.metadata["reason_code"] == "unknown_capability"
 
 
