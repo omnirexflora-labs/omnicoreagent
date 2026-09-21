@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -33,6 +32,9 @@ import urllib.request
 from scenario_p1 import api, check, ssh
 
 TASK_ID = "p3-fix-behind-approval"
+# The kill variant is its own task, so its own session: a rehearsal starts
+# from nothing an earlier run left in memory.
+REHEARSAL_TASK_ID = "p3-kill-rehearsal"
 REPOSITORY = "omnirexflora-labs/omnicoreagent"
 BRANCH = "refactor/native-tool-runtime"
 TEST = "tests/test_llm.py::test_cookbook_luna_default_and_explicit_reasoning_override"
@@ -156,9 +158,19 @@ def assert_one_push_one_pr(branch: str, run_id: str) -> None:
     check(len(pulls) == 1, f"{len(pulls)} pull request(s) for {branch}")
     pull = pulls[0]
     check(run_id in (pull.get("body") or ""), f"PR #{pull.get('number')} links the run: {pull.get('html_url')}")
+    # What a person reviewing it would see first: the change is the change,
+    # not the privacy filter's markers (PRs #250 and #251 carried an author
+    # email of "[REDACTED_EMAIL]").
+    for changed in github(f"/repos/{REPOSITORY}/pulls/{pull['number']}/files"):
+        patch = changed.get("patch") or ""
+        added = "\n".join(line for line in patch.splitlines() if line.startswith("+"))
+        check("[REDACTED" not in added, f"{changed['filename']} adds no redaction marker")
 
 
 def run_scenario(*, kill: bool) -> None:
+    global TASK_ID
+    if kill:
+        TASK_ID = REHEARSAL_TASK_ID
     print("P3.2 killed after the push, before the pull request" if kill else "P3.1 a fix behind approvals")
     ensure_task(rehearsal=kill)
     run = api("POST", f"/background/tasks/{TASK_ID}/run", {"wait": False})
