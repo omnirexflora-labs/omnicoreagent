@@ -27,7 +27,7 @@ to hurt the runtime from the outside — kill the server mid-run, take the
 sandbox away, run out of money, put two workers on one budget, flood it with
 duplicates — and every unit ends with a scripted scenario that either passes
 on the server or names what broke. Between 2026-09-20 and 2026-09-21 it
-found **twenty-two things wrong** — seventeen of them runtime defects,
+found **twenty-four things wrong** — nineteen of them runtime defects,
 three deployment lessons, two missing capabilities — every defect fixed with
 a test that fails without the fix; the runtime's test suite went from 1,756
 to 1,796 tests. None of these were visible to the
@@ -138,6 +138,19 @@ Each line names the commit; the plan's execution log has the detail.
     `router` and `public_paths`; OmniServe mounts them beside the API.
     (`161861e`)
 
+### Found by design, fixed while P7 ran
+
+23. **A worker's ask was an error to its lead.** A governed worker that hit
+    an `ask` returned `awaiting_approval`, which `spawn_subagents` reported as
+    "Subagent encountered an error", leaving the worker's run parked with
+    nobody to resume it — which is why the steward kept every GitHub write
+    with the lead. A worker's asks now appear on the lead's run and pause it;
+    a decision there is forwarded to the worker; the lead's resume resumes the
+    worker. And an ask on delegation itself was recorded against no call, so
+    it could not pause the lead either; it does now. (`3f54ff2`)
+24. `runtime_error` events carried no traceback at any capture level; at
+    `capture: "full"` they do now. (`29393b3`)
+
 ## What it cost
 
 A read-the-repository run costs about two to eight cents on `gpt-5.6-terra`
@@ -154,13 +167,9 @@ rather than a defect.
 - P3's push waits on the steward's GitHub token: a fine-grained token whose
   *Contents* permission is read-only cannot create a branch (403). Not a
   runtime finding.
-- A worker's own `ask` is reported to its lead as an error; the worker's run
-  stays parked with nobody to resume it. The steward keeps every GitHub write
-  with the lead. A worker's approval should pause the lead's run.
 - The sandbox bridge copies the whole agent workspace — every earlier run's
   files — into every sandbox and hashes all of it after each command. P7
   measures it.
-- `runtime_error` events carry no traceback, even at `capture="full"`.
 - The SQL task store is SQLite-only; the steward's task store is Redis.
 - With `guardrail_mode: full`, a *suspicious* tool output is blocked by
   default; for an agent working on a code repository that default blocks
