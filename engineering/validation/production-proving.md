@@ -2,7 +2,8 @@
 
 Status: in progress (2026-09-21). P1, P2, P4, P5 and P6 of the
 [production proving plan](../architecture/production-proving-plan.md) are
-done; P3's first real pull request is open (#250); P7 (a week unattended) is running.
+done; P3's first real pull request (#250) was closed because the privacy filter had
+corrupted it (finding 27); P7 (a week unattended) is running.
 This page is the write-up the plan promised: what broke, what was fixed,
 what it cost, with the traces. It will be finished when P7 ends.
 
@@ -29,9 +30,10 @@ duplicates — and every unit ends with a scripted scenario that either passes
 on the server or names what broke. Between 2026-09-20 and 2026-09-21 it
 found **twenty-seven things wrong** — twenty of them runtime defects,
 two defaults that were wrong for real work,
-three deployment lessons, two missing capabilities — every defect fixed with
-a test that fails without the fix; the runtime's test suite went from 1,756
-to 1,796 tests. None of these were visible to the
+three deployment lessons, two missing capabilities — and fixing them
+surfaced two more in the suite's own acceptance check. Every defect is fixed
+with a test that fails without the fix; the runtime's test suite went from
+1,756 to 1,862 tests. None of the steward's twenty-seven were visible to the
 suite before, because the suite's models are scripted and its stores are in
 memory. The steward's are not.
 
@@ -176,6 +178,23 @@ Each line names the commit; the plan's execution log has the detail.
     agent's work, not a boundary; they are kept as written now, and
     `redact_workspace` turns redaction on for a workspace that must hold no
     PII at rest. (`051a587`)
+### Found by the suite's own acceptance, after the changes above
+
+28. **A measurement was a phone number, or a card.** The trajectory
+    acceptance, the suite's own check that a trace at `capture: "full"` is
+    complete, began failing now and then: a sub-agent's usage summary
+    (`total_time=0.0123456789`) reached the lead as a tool result, and the
+    privacy filter took the digits for a phone number, or, when the fraction
+    happened to pass the card checksum, for a card. Every payload carrying it
+    was recorded as *redacted* and the run's evidence as *partial*. Digits on
+    either side of a decimal point, and bare runs longer than twelve digits,
+    are measurements now. (`efc59f8`)
+29. **A stdio MCP server could not start when stderr was not a file.** The
+    MCP client binds `sys.stderr` as the server's error log when it is
+    imported; in a notebook, or a test that captures output, that object has
+    no descriptor and every stdio server failed with `fileno`. Found running
+    the acceptance alone under pytest. The transport now hands the server the
+    real stderr when there is one, else nothing. (`efc59f8`)
 
 ## What it cost
 
