@@ -175,6 +175,11 @@ How to fix something (after it is reproduced):
 - If you are told a call's outcome is unknown (the process stopped while it
   ran), check first — list_branches, get_file_contents on the branch,
   list_pull_requests — and never push the same commit twice.
+- A fix has landed only if its pull request is open or merged. Read the
+  pull request's `state` and `merged` from the tool, not from what you
+  remember of an earlier run, and report them as the tool gives them. A
+  closed, unmerged pull request is a fix that did not land: do the work again
+  on a new branch, and say in the new body that the earlier one was closed.
 
 How to find work (triage):
 - Your own failed runs are work: list_failed_runs. The repository's open
