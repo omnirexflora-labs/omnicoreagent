@@ -620,7 +620,12 @@ the recovery policy.
 Every claim creates a `lease_token` and increments `lease_generation`. Heartbeat,
 attempt update, terminal status, and workspace metadata writes must carry the
 current lease token. A worker that loses its lease must stop writing and fail
-closed. This fencing rule reduces duplicate side effects during multi-day runs.
+closed — and stop the agent it was running: the heartbeat that finds the
+lease gone cancels the run's agent task, and the attempt ends as a lease
+failure for that worker alone, never as the worker's own cancellation. This
+fencing rule reduces duplicate side effects during multi-day runs; without
+the stop, an agent whose worker had lost the lease ran on to completion,
+unrecorded, beside whoever had taken the run over.
 
 Expired-lease recovery steals the lease with a new token before changing run or
 attempt state. It then asks the agent for the run's own durable record (the

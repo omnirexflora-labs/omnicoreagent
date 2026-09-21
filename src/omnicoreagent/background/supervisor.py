@@ -12,6 +12,7 @@ from typing import Any
 
 from omnicoreagent.background.agent_specs import resolve_agent
 from omnicoreagent.background.errors import RunLeaseError, RunNotFoundError
+from omnicoreagent.core.logging import logger
 from omnicoreagent.background.event_log import BackgroundEventLog
 from omnicoreagent.background.models import (
     SETTLED_RUN_STATUSES,
@@ -106,6 +107,8 @@ class BackgroundSupervisor:
         )
         self.inline_execution_tasks: dict[str, asyncio.Task] = {}
         self.active_agent_tasks: dict[str, asyncio.Task] = {}
+        # Runs this worker stopped because it lost their lease.
+        self.fenced_runs: set[str] = set()
 
     async def emit_run(
         self, event_name: str, run: BackgroundRun, **extra_payload: Any
@@ -540,7 +543,15 @@ class BackgroundSupervisor:
             )
         )
         self.track_active_agent_task(running.run.run_id, agent_task)
-        return await agent_task
+        try:
+            return await agent_task
+        except asyncio.CancelledError:
+            if running.run.run_id in self.fenced_runs:
+                # Stopped by this worker, not by whoever cancelled the worker:
+                # the attempt failed for want of its lease, the worker goes on.
+                self.fenced_runs.discard(running.run.run_id)
+                raise RunLeaseError(f"Lost the lease of run {running.run.run_id}")
+            raise
 
     async def complete_successful_attempt(
         self, running: _RunningAttempt, result: Any
@@ -810,10 +821,12 @@ class BackgroundSupervisor:
             return
         interval = max(0.01, self.lease_seconds / 4)
         if not await self.refresh_run_lease(run_id, lease_token):
+            self.fence_lost_run(run_id)
             return
         while True:
             await asyncio.sleep(interval)
             if not await self.refresh_run_lease(run_id, lease_token):
+                self.fence_lost_run(run_id)
                 return
             try:
                 latest = await self.task_store.get_run(run_id)
@@ -824,6 +837,16 @@ class BackgroundSupervisor:
 
     async def refresh_run_lease(self, run_id: str, lease_token: str) -> bool:
         return await self.transitions.refresh_run_lease(run_id, lease_token)
+
+    def fence_lost_run(self, run_id: str) -> None:
+        """This worker no longer owns the run: stop its agent now. Another
+        worker may already have taken the run over from its checkpoint; work
+        done past this point would be unrecorded and unfenced."""
+        task = self.active_agent_tasks.get(run_id)
+        if task is not None and not task.done():
+            logger.warning(f"Lost the lease of run {run_id}; stopping its agent")
+            self.fenced_runs.add(run_id)
+            task.cancel()
 
     async def drain_cancelled_task(self, task: asyncio.Task) -> None:
         try:

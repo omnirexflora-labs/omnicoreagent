@@ -2483,6 +2483,58 @@ async def test_long_running_attempt_refreshes_lease():
     assert store.refresh_count >= 1
 
 
+class SlowAgent(FakeAgent):
+    """Runs until cancelled, and remembers whether it was."""
+
+    def __init__(self):
+        super().__init__()
+        self.cancelled = False
+        self.started = asyncio.Event()
+
+    async def run(self, query: str, session_id: str, run_id: str | None = None):
+        self.calls.append({"query": query, "session_id": session_id, "run_id": run_id})
+        self.started.set()
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        return {"response": "too late", "session_id": session_id}
+
+
+@pytest.mark.asyncio
+async def test_a_run_whose_lease_is_lost_is_stopped_not_left_running():
+    """Found by P5 of the proving plan: a tool stalled the event loop, the
+    worker's heartbeats stopped, the lease expired — and the attempt was
+    recorded as failed while the agent ran on, unfenced, to completion. A
+    worker that has lost a run's lease stops the run: another worker may
+    already own it."""
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store, worker_id="w1", lease_seconds=0.4)
+    agent = SlowAgent()
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task", agent_id="agent", query="do work", schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=0),
+    )
+    run = await manager.run_now("task", wait=False)
+    attempt = asyncio.create_task(manager._execute_one())
+    await asyncio.wait_for(agent.started.wait(), 5)
+
+    # Another worker takes the run over (its lease has lapsed from their view).
+    async with store._lock:
+        current = store._runs[run.run_id]
+        store._runs[run.run_id] = current.model_copy(
+            update={"lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)}
+        )
+    await store.steal_expired_run(run.run_id, "w2", 30)
+
+    await asyncio.wait_for(attempt, 5)
+
+    assert agent.cancelled, "the fenced-out worker stopped its agent"
+    assert manager._supervisor.active_agent_tasks == {}
+
+
 @pytest.mark.asyncio
 async def test_expired_lease_cannot_be_refreshed_by_stale_owner():
     store = InMemoryTaskStore()
