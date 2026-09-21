@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import io
 import os
+import subprocess
+import sys
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -136,9 +139,26 @@ async def _open_stdio_transport(
     server: dict[str, Any],
 ) -> tuple[Any, Any, str]:
     read_stream, write_stream = await stack.enter_async_context(
-        stdio_client(stdio_server_parameters(server))
+        stdio_client(stdio_server_parameters(server), errlog=server_errlog())
     )
     return read_stream, write_stream, "stdio"
+
+
+def server_errlog() -> Any:
+    """Where a stdio server's stderr goes: this process's stderr when the
+    server can inherit it, else nowhere.
+
+    The MCP client binds ``sys.stderr`` when it is imported; in a notebook,
+    or a test that captures output, that object has no file descriptor and
+    every server failed to start with ``io.UnsupportedOperation: fileno``.
+    """
+    for candidate in (sys.stderr, sys.__stderr__):
+        try:
+            if candidate is not None and candidate.fileno() >= 0:
+                return candidate
+        except (OSError, ValueError, AttributeError, io.UnsupportedOperation):
+            continue
+    return subprocess.DEVNULL
 
 
 def stdio_server_parameters(server: dict[str, Any]) -> StdioServerParameters:

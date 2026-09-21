@@ -135,6 +135,15 @@ class PrivacyFilter:
         r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
     )
     _ISO_DATE = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
+    # A decimal (``total_time=0.0123456789``) has the digit shape of a phone
+    # number and is a measurement; rewriting one marked a complete trace as
+    # redacted. A phone number has at most fifteen digits (E.164), and one
+    # written as bare digits, with no ``+`` and no grouping, at most twelve:
+    # a longer run is a timestamp in milliseconds or nanoseconds, or a count.
+    _DECIMAL = re.compile(r"\d+\.\d+")
+    _BARE_DIGITS = re.compile(r"\d+")
+    _MAX_PHONE_DIGITS = 15
+    _MAX_BARE_PHONE_DIGITS = 12
 
     _MARKERS = {
         "email": "[REDACTED_EMAIL]",
@@ -208,8 +217,19 @@ class PrivacyFilter:
             for uuid in self._UUID.finditer(match.string)
         )
 
+    @staticmethod
+    def _part_of_decimal(match: re.Match[str]) -> bool:
+        """The digits are one side of a decimal number (``0.4111…``): a
+        measurement, however its digits happen to add up."""
+        text, start, end = match.string, match.start(), match.end()
+        before = text[max(0, start - 2):start]
+        after = text[end:end + 2]
+        return (len(before) == 2 and before[1] == "." and before[0].isdigit()) or (
+            len(after) == 2 and after[0] == "." and after[1].isdigit()
+        )
+
     def _replace_card(self, match: re.Match[str]) -> str:
-        if self._inside_uuid(match):
+        if self._inside_uuid(match) or self._part_of_decimal(match):
             return match.group()
         digits = re.sub(r"\D", "", match.group())
         return self._MARKERS["credit_card"] if self._luhn_valid(digits) else match.group()
@@ -220,8 +240,13 @@ class PrivacyFilter:
         # number; rewriting them corrupted recorded evidence.
         if self._ISO_DATE.search(text) or self._inside_uuid(match):
             return text
+        if self._DECIMAL.fullmatch(text) or self._part_of_decimal(match):
+            return text
         digits = re.sub(r"\D", "", text)
-        return self._MARKERS["phone"] if len(digits) >= 10 else text
+        limit = self._MAX_BARE_PHONE_DIGITS if self._BARE_DIGITS.fullmatch(text) else self._MAX_PHONE_DIGITS
+        if not 10 <= len(digits) <= limit:
+            return text
+        return self._MARKERS["phone"]
 
     @staticmethod
     def _luhn_valid(digits: str) -> bool:

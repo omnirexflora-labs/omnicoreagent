@@ -305,3 +305,27 @@ def test_privacy_filter_never_alters_hyphenated_identifiers():
 
     altered = [s for s in samples if privacy.redact_text(s, boundary="telemetry") != s]
     assert altered == []
+
+
+def test_privacy_filter_keeps_numbers_intact():
+    """Found by the trajectory acceptance: a sub-agent's usage summary carried
+    ``total_time=0.0123456789``, the phone matcher took the digit run for a
+    number to call, and a trace recorded at ``capture: "full"`` came back
+    "redacted" — evidence corrupted by a measurement. A decimal, a
+    timestamp in milliseconds or nanoseconds, a large count: these have
+    the digit shape of a phone number and are not one."""
+    privacy = PrivacyFilter()
+
+    for text in (
+        "total_time=0.0123456789, details={}",
+        "elapsed 12345.6789012 seconds",
+        "cost_usd: 0.000001234567",
+        "timestamp_ms=1758440123456",
+        "started_ns=1758440123456789012",
+        "bytes=12345678901234",
+        # A fraction whose digits pass the card checksum: seen in the suite.
+        "total_time=0.4111111111111111, details={}",
+        "ratio 4111111111111111.25",
+    ):
+        assert privacy.redact_text(text, boundary="telemetry") == text, text
+        assert privacy.redact_text(text, boundary="memory") == text, text
