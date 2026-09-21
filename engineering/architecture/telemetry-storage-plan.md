@@ -54,7 +54,7 @@ Behind the existing `AbstractTelemetryStore` interface, so callers,
 OmniServe routes, the trajectory reader and the evidence adapter do not
 change:
 
-- **Record each thing once.** A model call's context is recorded once, on
+- **Record each thing once.** A model call's context is recorded once (on
   its context assembly; the model call refers to it. Each message is stored
   once per trace, by the digest the trace already computes; a context is a
   list of digests. No truncation is then needed for the context: a
@@ -121,3 +121,4 @@ change where it is kept. JSONL stays available for local development.
 | Unit | Status | Commit | Notes |
 | --- | --- | --- | --- |
 | T1 | Done | `abd3dc8` | The model call span keeps the one copy of the context (exporters read it there); the context assembly span and event record digests; the model call event points to its span; the trajectory reader resolves the request from the span, capture state included. The scripted acceptance run: 89 KB to 58 KB per model call (-35%), evidence still complete. On the steward, where the four copies were 63% of the file, the expected cut is close to half; P7 measures it. |
+| T2 | Done | `b5ef5fc` | Each message a `context_message` event once per trace, digest in metadata; the tool catalog a `context_tools` event once; a model call records the previous call's list it extends and what it appends; the context assembly keeps its digest list at every capture level, once and compact (it was written five times per call). The trajectory reader and exporters rebuild each whole request, in any span order. A 48-step run with 3 KB tool results: 13.8 MB and *partial* before T1, 2.4 MB and complete now; 6x the steps is 5.6x the size. |
