@@ -480,6 +480,9 @@ class BackgroundScheduleState(StrictModel):
     last_due_at: datetime | None = None
     last_dispatched_at: datetime | None = None
     paused: bool = False
+    # Why the schedule stopped, when the runtime stopped it (a policy that
+    # no longer covers the task); cleared when it is resumed.
+    paused_reason: str | None = None
     schedule_revision: int = 1
     misfire_cursor: str | None = None
     updated_at: datetime = Field(default_factory=utc_now)

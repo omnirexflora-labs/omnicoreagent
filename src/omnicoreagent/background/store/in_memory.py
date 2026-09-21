@@ -162,12 +162,16 @@ class InMemoryTaskStore(AbstractTaskStore):
             self._schedule_states[state.task_id] = _copy_model(state)
 
     async def set_schedule_paused(
-        self, task_id: str, paused: bool
+        self, task_id: str, paused: bool, *, reason: str | None = None
     ) -> BackgroundScheduleState:
         async with self._lock:
             state = self._require_schedule_state(task_id)
             updated = state.model_copy(
-                update={"paused": paused, "updated_at": _now()},
+                update={
+                    "paused": paused,
+                    "paused_reason": reason if paused else None,
+                    "updated_at": _now(),
+                },
                 deep=True,
             )
             self._schedule_states[task_id] = updated

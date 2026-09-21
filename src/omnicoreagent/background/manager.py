@@ -6,6 +6,8 @@ import asyncio
 from typing import Any
 from uuid import uuid4
 
+from omnicoreagent.core.logging import logger
+
 from omnicoreagent.background.agent_specs import resolve_agent, spec_from_agent
 from omnicoreagent.background.errors import (
     AgentAlreadyRegisteredError,
@@ -602,7 +604,9 @@ class BackgroundAgentManager:
                 did_work = await self._execute_one()
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                # The loop goes on; what stopped this turn is said, not lost.
+                logger.warning(f"Background worker loop: {type(exc).__name__}: {exc}")
                 dispatched = False
                 did_work = False
             if not dispatched and not did_work:

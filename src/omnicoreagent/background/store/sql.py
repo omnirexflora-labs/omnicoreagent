@@ -77,10 +77,10 @@ class SqlTaskStore(InMemoryTaskStore):
         await self._mutate(lambda: InMemoryTaskStore.save_schedule_state(self, state))
 
     async def set_schedule_paused(
-        self, task_id: str, paused: bool
+        self, task_id: str, paused: bool, *, reason: str | None = None
     ) -> BackgroundScheduleState:
         return await self._mutate(
-            lambda: InMemoryTaskStore.set_schedule_paused(self, task_id, paused)
+            lambda: InMemoryTaskStore.set_schedule_paused(self, task_id, paused, reason=reason)
         )
 
     async def get_schedule_state(
