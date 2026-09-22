@@ -2,6 +2,7 @@
 
 import time
 from importlib.metadata import PackageNotFoundError, version
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
@@ -29,8 +30,14 @@ def create_omniserve_app(
     title: str,
     description: str,
     background_manager: Any | None = None,
+    routers: Sequence[Any] | None = None,
 ) -> FastAPI:
-    """Create and configure the FastAPI application for one agent."""
+    """Create and configure the FastAPI application for one agent.
+
+    ``routers`` are the application's own (its pages, its own endpoints),
+    mounted beside the agent's API on the same origin, behind the same
+    middleware; paths named in ``config.public_paths`` need no token.
+    """
     app = FastAPI(
         title=title,
         description=description,
@@ -54,6 +61,8 @@ def create_omniserve_app(
     setup_metrics(app, config)
 
     app.include_router(create_agent_router(config), prefix=config.api_prefix)
+    for router in routers or ():
+        app.include_router(router)
 
     logger.info(f"OmniServe: Created FastAPI app for agent '{get_agent_name(agent)}'")
     return app

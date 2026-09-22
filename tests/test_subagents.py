@@ -2,7 +2,7 @@
 Tests for OmniCoreAgent dynamic subagent harness support.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -16,6 +16,7 @@ from omnicoreagent.core.workspace.tools import (
 )
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.runtime.config import normalize_agent_config
+from omnicoreagent.core.telemetry import InMemoryTelemetryStore, TelemetryRecorder
 
 
 @pytest.fixture
@@ -50,7 +51,7 @@ class TestSubagentFactory:
 
         config = factory._build_subagent_config()
 
-        assert config["max_steps"] == 15
+        assert config["max_steps"] == 50
         assert config["enable_subagents"] is False
         assert config["enable_workspace_files"] is True
         assert config["context_management"] == {"enabled": True}
@@ -77,6 +78,24 @@ class TestSubagentFactory:
         assert "Test task" in agent.system_instruction
         assert agent.agent_config["enable_workspace_files"] is True
         assert agent.agent_config["enable_subagents"] is False
+
+    def test_create_subagent_shares_built_in_telemetry_components(self, model_config):
+        store = InMemoryTelemetryStore()
+        recorder = TelemetryRecorder(store)
+        factory = SubagentFactory(
+            base_model_config=model_config,
+            telemetry_recorder=recorder,
+        )
+
+        child = factory.create_subagent(
+            name="traced",
+            role="Test role",
+            task="Test task",
+            output_path="/workspace/test/output.md",
+        )
+
+        assert child.telemetry_store is store
+        assert child.telemetry_recorder is recorder
 
     def test_create_subagent_uses_custom_prompt_builder(self, model_config):
         factory = SubagentFactory(
@@ -129,7 +148,10 @@ class TestSubagentFactory:
 
     @pytest.mark.asyncio
     async def test_run_subagent(self, factory):
-        with patch.object(OmniCoreAgent, "run", new_callable=AsyncMock) as mock_run:
+        with (
+            patch.object(factory, "_workspace_output_error", return_value=None),
+            patch.object(OmniCoreAgent, "run", new_callable=AsyncMock) as mock_run,
+        ):
             mock_run.return_value = {"response": "Output saved"}
 
             result = await factory.run_subagent(
@@ -150,6 +172,7 @@ class TestSubagentFactory:
         )
 
         with (
+            patch.object(factory, "_workspace_output_error", return_value=None),
             patch.object(
                 OmniCoreAgent,
                 "connect_mcp_servers",
@@ -168,7 +191,7 @@ class TestSubagentFactory:
 
         assert result["status"] == "success"
         mock_connect.assert_awaited_once()
-        mock_run.assert_awaited_once_with("Research topic X")
+        mock_run.assert_awaited_once_with("Research topic X", run_id=ANY)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -181,9 +204,15 @@ class TestSubagentFactory:
             "Failed to write the output.",
         ],
     )
-    async def test_run_subagent_detects_error_responses(self, factory, response):
-        with patch.object(OmniCoreAgent, "run", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = {"response": response}
+    @pytest.mark.parametrize("status", ["success", "error"])
+    async def test_run_subagent_uses_status_not_response_text(
+        self, factory, response, status
+    ):
+        with (
+            patch.object(factory, "_workspace_output_error", return_value=None),
+            patch.object(OmniCoreAgent, "run", new_callable=AsyncMock) as mock_run,
+        ):
+            mock_run.return_value = {"response": response, "status": status}
 
             result = await factory.run_subagent(
                 name="researcher",
@@ -192,12 +221,15 @@ class TestSubagentFactory:
                 output_path="/workspace/tasks/test/output.md",
             )
 
-        assert result["status"] == "error"
+        assert result["status"] == status
         assert result["data"]["subagent_name"] == "researcher"
 
     @pytest.mark.asyncio
     async def test_run_subagent_handles_non_string_response(self, factory):
-        with patch.object(OmniCoreAgent, "run", new_callable=AsyncMock) as mock_run:
+        with (
+            patch.object(factory, "_workspace_output_error", return_value=None),
+            patch.object(OmniCoreAgent, "run", new_callable=AsyncMock) as mock_run,
+        ):
             mock_run.return_value = {
                 "response": {"saved": True, "path": "/workspace/x"}
             }
@@ -324,6 +356,47 @@ class TestSubagentFactory:
         assert result["data"]["results"][0]["error"] == "worker crashed"
 
     @pytest.mark.asyncio
+    async def test_run_subagent_requires_declared_workspace_output(self, factory):
+        child = MagicMock()
+        child.run = AsyncMock(return_value={"status": "success", "response": "done"})
+        child.cleanup = AsyncMock()
+        child.agent.tool_runtime_registry.workspace.files.exists.return_value = False
+        factory.create_subagent = MagicMock(return_value=child)
+
+        result = await factory.run_subagent(
+            name="missing-output",
+            role="Reviewer",
+            task="Review the project",
+            output_path="/workspace/reports/review.md",
+        )
+
+        assert result["status"] == "error"
+        assert result["data"]["output_path"] == "/workspace/reports/review.md"
+        assert result["data"]["termination_reason"] == "missing_output"
+        assert "without creating" in result["data"]["error"]
+        child.cleanup.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_run_subagent_accepts_verified_workspace_output(self, factory):
+        child = MagicMock()
+        child.run = AsyncMock(return_value={"status": "success", "response": "done"})
+        child.cleanup = AsyncMock()
+        # Nothing at the path before the worker ran; its output after.
+        child.agent.tool_runtime_registry.workspace.files.exists.side_effect = [False, True]
+        factory.create_subagent = MagicMock(return_value=child)
+
+        result = await factory.run_subagent(
+            name="verified-output",
+            role="Reviewer",
+            task="Review the project",
+            output_path="/workspace/reports/review.md",
+        )
+
+        assert result["status"] == "success"
+        assert result["data"]["output_path"] == "/workspace/reports/review.md"
+        assert child.agent.tool_runtime_registry.workspace.files.exists.call_count == 2
+
+    @pytest.mark.asyncio
     async def test_run_parallel_subagents_applies_defaults_for_sparse_specs(
         self, factory
     ):
@@ -368,28 +441,27 @@ class TestSubagentFactory:
         factory.run_parallel_subagents = AsyncMock(return_value={"status": "success"})
 
         input_list = [{"name": "test", "role": "r", "task": "t", "output_path": "p"}]
-        await spawn_tool.execute({"subagents_json": input_list})
+        await spawn_tool.execute({"subagents": input_list})
 
         factory.run_parallel_subagents.assert_called_once_with(input_list)
 
     @pytest.mark.asyncio
-    async def test_tool_wrapper_handles_json_string_input(self, factory):
+    async def test_tool_wrapper_rejects_json_string_input(self, factory):
         registry = ToolRegistry()
         build_subagent_tools(factory, registry)
         spawn_tool = registry.get_tool("spawn_subagents")
         factory.run_parallel_subagents = AsyncMock(return_value={"status": "success"})
 
-        await spawn_tool.execute(
+        result = await spawn_tool.execute(
             {
-                "subagents_json": (
+                "subagents": (
                     '[{"name": "test", "role": "r", "task": "t", "output_path": "p"}]'
                 )
             }
         )
 
-        factory.run_parallel_subagents.assert_called_once_with(
-            [{"name": "test", "role": "r", "task": "t", "output_path": "p"}]
-        )
+        assert result["status"] == "error"
+        factory.run_parallel_subagents.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_tool_wrapper_rejects_invalid_json(self, factory):
@@ -397,10 +469,10 @@ class TestSubagentFactory:
         build_subagent_tools(factory, registry)
         spawn_tool = registry.get_tool("spawn_subagents")
 
-        result = await spawn_tool.execute({"subagents_json": "{not json"})
+        result = await spawn_tool.execute({"subagents": "{not json"})
 
         assert result["status"] == "error"
-        assert "Invalid JSON" in result["message"]
+        assert result["message"] == "subagents must be an array"
 
     @pytest.mark.asyncio
     async def test_tool_wrapper_rejects_non_array_json(self, factory):
@@ -408,10 +480,10 @@ class TestSubagentFactory:
         build_subagent_tools(factory, registry)
         spawn_tool = registry.get_tool("spawn_subagents")
 
-        result = await spawn_tool.execute({"subagents_json": '{"name": "single"}'})
+        result = await spawn_tool.execute({"subagents": '{"name": "single"}'})
 
         assert result["status"] == "error"
-        assert result["message"] == "subagents_json must be a JSON array"
+        assert result["message"] == "subagents must be an array"
 
     @pytest.mark.asyncio
     async def test_spawn_tool_schema_requires_array_parameter(self, factory):
@@ -419,7 +491,7 @@ class TestSubagentFactory:
         build_subagent_tools(factory, registry)
         spawn_tool = registry.get_tool("spawn_subagents")
 
-        assert spawn_tool.inputSchema["required"] == ["subagents_json"]
+        assert spawn_tool.inputSchema["required"] == ["subagents"]
         assert spawn_tool.inputSchema["additionalProperties"] is False
 
     def test_created_subagent_does_not_inherit_spawn_tool(self, model_config):
@@ -483,6 +555,48 @@ class TestOmniCoreAgentSubagents:
 
         assert config["enable_subagents"] is True
         assert config["enable_workspace_files"] is True
+
+    def test_enable_subagents_forces_context_management(self):
+        config = normalize_agent_config(
+            "Harness",
+            {
+                "enable_subagents": True,
+                "context_management": {
+                    "enabled": False,
+                    "value": 50000,
+                    "preserve_recent": 8,
+                },
+                "tool_offload": {"enabled": False},
+            },
+        )
+
+        assert config["context_management"] == {
+            "enabled": True,
+            "mode": "token_budget",
+            "value": 50000,
+            "threshold_percent": 75,
+            "strategy": "truncate",
+            "preserve_recent": 8,
+        }
+        assert config["tool_offload"]["enabled"] is True
+
+    def test_harness_defaults_bound_context_and_tool_results(self):
+        config = normalize_agent_config("Harness", None)
+
+        assert config["max_steps"] == 50
+        assert config["tool_call_timeout"] == 180
+        assert config["enable_workspace_files"] is True
+        assert config["context_management"]["enabled"] is True
+        assert config["tool_offload"]["enabled"] is True
+
+    def test_harness_defaults_preserve_explicit_lower_limits(self):
+        config = normalize_agent_config(
+            "Harness",
+            {"max_steps": 7, "tool_call_timeout": 5},
+        )
+
+        assert config["max_steps"] == 7
+        assert config["tool_call_timeout"] == 5
 
     @pytest.mark.asyncio
     async def test_enable_subagents_registers_core_spawn_tool(self, model_config):
@@ -587,24 +701,24 @@ class TestOmniCoreAgentSubagents:
         async def message_history(agent_name, session_id):
             return []
 
-        await agent.agent.prepare_initial_messages(
+        from omnicoreagent.core.tools.native_catalog import NativeToolCatalog
+
+        await agent.agent.initial_message_preparer.prepare(
             session_state=session_state,
             system_prompt="base system",
             session_id="prompt-session",
             message_history=message_history,
-            mcp_tools={},
-            local_tools=runtime_tools,
-            sub_agents=None,
+            catalog=NativeToolCatalog(local_tools=runtime_tools),
         )
 
         prompt = session_state.messages[0].content
-        assert '<extension name="subagents_harness">' in prompt
-        assert "<dynamic_spawn>" in prompt
-        assert "<subagents_json>" in prompt
-        assert '<extension name="workspace_files">' in prompt
-        assert "spawn_subagents:" in prompt
-        assert "read_file:" in prompt
-        assert "write_file:" in prompt
+        assert "ad hoc workers" in prompt
+        assert "unique output path" in prompt
+        assert "subagents as an array" in prompt
+        assert "Use workspace tools" in prompt
+        assert "spawn_subagents" in prompt
+        assert "read_file" in prompt
+        assert "write_file" in prompt
 
         await agent.cleanup()
 
@@ -665,3 +779,30 @@ class TestOmniCoreAgentSubagents:
 
         assert not hasattr(omnicoreagent, removed_export)
         assert removed_export not in omnicoreagent.__all__
+
+
+def test_a_worker_inherits_budgets_through_the_policy_not_the_config(model_config):
+    """Found by P2 of the proving plan: the steward sets budgets in
+    governance_config; the parent's policy carries them once built, and a
+    worker built from the parent's config *and* the parent's policy was
+    refused ("budgets cannot be set when the policy already has budgets")."""
+    from omnicoreagent.core.runtime.construction import build_governance_engine
+
+    agent_config = {
+        "governance_config": {
+            "enabled": True,
+            "profile": "permissive-dev",
+            "budgets": {"application_id": "app", "request": [{"meter": "tool_calls", "limit": 5}]},
+        },
+    }
+    engine = build_governance_engine(agent_config)
+    factory = SubagentFactory(
+        base_model_config=model_config, agent_config=agent_config, governance_engine=engine
+    )
+
+    child = factory.create_subagent(name="w", role="worker", task="t", output_path="/workspace/w/out.md")
+
+    governance = child.agent_config["governance_config"]
+    assert governance.get("budgets") is None, "the config does not say them twice"
+    assert governance["policy"].budgets is not None
+    assert governance["policy"].budgets.application_id == "app"

@@ -1,10 +1,8 @@
 from __future__ import annotations
-
+from omnicoreagent.core.model_protocol import ModelTurn, ToolRequest
 import re
 from pathlib import Path
-
 import pytest
-
 from omnicoreagent.core.agents.base import BaseReactAgent
 from omnicoreagent.core.telemetry import (
     ActorType,
@@ -37,9 +35,7 @@ class HarnessHistory:
         )
 
     async def message_history(
-        self,
-        session_id: str,
-        agent_name: str | None = None,
+        self, session_id: str, agent_name: str | None = None
     ) -> list[dict]:
         return [
             item
@@ -71,7 +67,6 @@ async def run_scripted_agent(
     telemetry_store = InMemoryTelemetryStore()
     recorder = TelemetryRecorder(telemetry_store)
     history = HarnessHistory()
-
     agent = BaseReactAgent(
         agent_name=agent_name,
         max_steps=max_steps,
@@ -88,7 +83,6 @@ async def run_scripted_agent(
         session_id=f"session-{agent_name}",
         run_id=f"run-{agent_name}",
     )
-
     result = await agent.run(
         system_prompt=f"You are {agent_name}.",
         query="Run the real application task.",
@@ -103,7 +97,7 @@ async def run_scripted_agent(
     )
     await recorder.end_trace(output={"answer": result["answer"]})
     assert context.trace_id
-    return result, history, telemetry_store, workspace_dir
+    return (result, history, telemetry_store, workspace_dir)
 
 
 class DueDiligenceLlm:
@@ -111,55 +105,76 @@ class DueDiligenceLlm:
         self.calls = 0
         self.artifact_id: str | None = None
 
-    async def llm_call(self, messages):
+    async def llm_call(self, messages, tools=None):
         self.calls += 1
         transcript = "\n".join(
-            getattr(message, "content", str(message)) for message in messages
+            (getattr(message, "content", str(message)) for message in messages)
         )
         if self.calls == 1:
-            return """
-<tool_calls>
-  <tool_call>
-    <tool_name>tools_retriever</tool_name>
-    <parameters>{"query": "company market risk evidence workspace report artifact"}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>company_profile</tool_name>
-    <parameters>{"company": "OmniRetail AI"}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>market_signals</tool_name>
-    <parameters>{"company": "OmniRetail AI"}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>risk_register</tool_name>
-    <parameters>{"company": "OmniRetail AI"}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>evidence_pack</tool_name>
-    <parameters>{"company": "OmniRetail AI"}</parameters>
-  </tool_call>
-</tool_calls>
-"""
+            return ModelTurn(
+                tool_calls=(
+                    ToolRequest(
+                        f"call_{self.calls}_0",
+                        "tools_retriever",
+                        '{"query": "company market risk evidence workspace report artifact"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            )
         if self.calls == 2:
-            match = re.search(r"read_artifact\('([^']+)'\)", transcript)
+            return ModelTurn(
+                tool_calls=(
+                    ToolRequest(
+                        f"call_{self.calls}_1",
+                        "company_profile",
+                        '{"company": "OmniRetail AI"}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_2",
+                        "market_signals",
+                        '{"company": "OmniRetail AI"}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_3",
+                        "risk_register",
+                        '{"company": "OmniRetail AI"}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_4",
+                        "evidence_pack",
+                        '{"company": "OmniRetail AI"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            )
+        if self.calls == 3:
+            match = re.search("Artifact ID: (evidence_pack_[\\w]+)", transcript)
             assert match, transcript
             self.artifact_id = match.group(1)
-            return f"""
-<tool_calls>
-  <tool_call>
-    <tool_name>read_artifact</tool_name>
-    <parameters>{{"artifact_id": "{self.artifact_id}"}}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>write_file</tool_name>
-    <parameters>{{"path": "reports/omniretail-diligence.md", "content": "# OmniRetail AI\\n\\nInvestment view: proceed with focused risk review.", "mode": "create"}}</parameters>
-  </tool_call>
-</tool_calls>
-"""
-        return """
-<final_answer>Due diligence complete with profile, market signals, risks, evidence artifact, and workspace memo.</final_answer>
-"""
+            return ModelTurn(
+                tool_calls=(
+                    ToolRequest(
+                        f"call_{self.calls}_0",
+                        "read_artifact",
+                        f'{{"artifact_id": "{self.artifact_id}"}}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_1",
+                        "write_file",
+                        '{"path": "reports/omniretail-diligence.md", "content": "# OmniRetail AI\\n\\nInvestment view: proceed with focused risk review.", "mode": "create"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            )
+        return "Due diligence complete with profile, market signals, risks, evidence artifact, and workspace memo."
+
+    async def llm_stream(self, messages, tools=None):
+        from omnicoreagent.core.agents.llm_response import normalize_model_turn
+
+        turn = normalize_model_turn(await self.llm_call(messages, tools=tools))
+        if turn.text:
+            yield {"type": "text_delta", "text": turn.text}
+        yield {"type": "turn_complete", "turn": turn}
 
 
 def build_due_diligence_tools() -> ToolRegistry:
@@ -188,7 +203,7 @@ def build_due_diligence_tools() -> ToolRegistry:
         return {
             "company": company,
             "evidence": "\n".join(
-                f"{company} diligence evidence line {i}" for i in range(160)
+                (f"{company} diligence evidence line {i}" for i in range(160))
             ),
         }
 
@@ -214,7 +229,6 @@ async def test_due_diligence_real_application_uses_parallel_tools_artifacts_work
         },
         max_steps=8,
     )
-
     assert "Due diligence complete" in result["answer"]
     assert llm.artifact_id is not None
     assert history.called_tools() >= {
@@ -227,8 +241,7 @@ async def test_due_diligence_real_application_uses_parallel_tools_artifacts_work
         "write_file",
     }
     assert (workspace_dir / "files" / "reports" / "omniretail-diligence.md").exists()
-    assert list((workspace_dir / "artifacts").glob("evidence_pack_*.txt"))
-
+    assert list((workspace_dir / "artifacts").glob("evidence_pack_*.json"))
     traces = await telemetry_store.list_traces()
     assert len(traces) == 1
     event_types = {event.event_type for event in traces[0].events}
@@ -244,41 +257,54 @@ class SupportOperationsLlm:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def llm_call(self, messages):
+    async def llm_call(self, messages, tools=None):
         self.calls += 1
         if self.calls == 1:
-            return """
-<tool_calls>
-  <tool_call>
-    <tool_name>lookup_customer</tool_name>
-    <parameters>{"customer_id": "cust-001"}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>recent_orders</tool_name>
-    <parameters>{"customer_id": "cust-001"}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>support_policy_search</tool_name>
-    <parameters>{"query": "enterprise delayed shipment escalation"}</parameters>
-  </tool_call>
-</tool_calls>
-"""
+            return ModelTurn(
+                tool_calls=(
+                    ToolRequest(
+                        f"call_{self.calls}_0",
+                        "lookup_customer",
+                        '{"customer_id": "cust-001"}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_1",
+                        "recent_orders",
+                        '{"customer_id": "cust-001"}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_2",
+                        "support_policy_search",
+                        '{"query": "enterprise delayed shipment escalation"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            )
         if self.calls == 2:
-            return """
-<tool_calls>
-  <tool_call>
-    <tool_name>create_escalation</tool_name>
-    <parameters>{"ticket_id": "tck-1042", "severity": "medium", "summary": "Delayed enterprise shipment needs timeline and goodwill review."}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>write_file</tool_name>
-    <parameters>{"path": "tickets/tck-1042.md", "content": "# tck-1042\\n\\nEscalated delayed shipment for Ada Ventures.", "mode": "create"}</parameters>
-  </tool_call>
-</tool_calls>
-"""
-        return """
-<final_answer>Support plan ready: explain the delay, share timeline, and route the medium escalation.</final_answer>
-"""
+            return ModelTurn(
+                tool_calls=(
+                    ToolRequest(
+                        f"call_{self.calls}_0",
+                        "create_escalation",
+                        '{"ticket_id": "tck-1042", "severity": "medium", "summary": "Delayed enterprise shipment needs timeline and goodwill review."}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_1",
+                        "write_file",
+                        '{"path": "tickets/tck-1042.md", "content": "# tck-1042\\n\\nEscalated delayed shipment for Ada Ventures.", "mode": "create"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            )
+        return "Support plan ready: explain the delay, share timeline, and route the medium escalation."
+
+    async def llm_stream(self, messages, tools=None):
+        from omnicoreagent.core.agents.llm_response import normalize_model_turn
+
+        turn = normalize_model_turn(await self.llm_call(messages, tools=tools))
+        if turn.text:
+            yield {"type": "text_delta", "text": turn.text}
+        yield {"type": "turn_complete", "turn": turn}
 
 
 def build_support_tools() -> ToolRegistry:
@@ -329,7 +355,6 @@ async def test_support_operations_real_application_tracks_ticket_state_in_worksp
         local_tools=build_support_tools(),
         max_steps=6,
     )
-
     assert "Support plan ready" in result["answer"]
     assert history.called_tools() >= {
         "lookup_customer",
@@ -340,7 +365,6 @@ async def test_support_operations_real_application_tracks_ticket_state_in_worksp
     }
     ticket = workspace_dir / "files" / "tickets" / "tck-1042.md"
     assert ticket.read_text(encoding="utf-8").startswith("# tck-1042")
-
     traces = await telemetry_store.list_traces()
     event_types = {event.event_type for event in traces[0].events}
     assert {"tool_batch_start", "tool_result", "workspace_write"}.issubset(event_types)
@@ -350,50 +374,61 @@ class WorkspaceCodeReviewLlm:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def llm_call(self, messages):
+    async def llm_call(self, messages, tools=None):
         self.calls += 1
         if self.calls == 1:
-            return """
-<tool_calls>
-  <tool_call>
-    <tool_name>ls</tool_name>
-    <parameters>{"path": ""}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>glob</tool_name>
-    <parameters>{"pattern": "**/*.py"}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>grep</tool_name>
-    <parameters>{"pattern": "calculate_total", "include": "*.py"}</parameters>
-  </tool_call>
-</tool_calls>
-"""
+            return ModelTurn(
+                tool_calls=(
+                    ToolRequest(f"call_{self.calls}_0", "ls", '{"path": ""}'),
+                    ToolRequest(
+                        f"call_{self.calls}_1", "glob", '{"pattern": "**/*.py"}'
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_2",
+                        "grep",
+                        '{"pattern": "calculate_total", "include": "*.py"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            )
         if self.calls == 2:
-            return """
-<tool_call>
-  <tool_name>read_file</tool_name>
-  <parameters>{"path": "src/billing.py"}</parameters>
-</tool_call>
-"""
+            return ModelTurn(
+                tool_calls=(
+                    ToolRequest(
+                        f"call_{self.calls}_0",
+                        "read_file",
+                        '{"path": "src/billing.py"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            )
         if self.calls == 3:
             old = "def calculate_total(items):\\n    total = 0"
             new = "def calculate_total(items):\\n    if any(item['price'] < 0 for item in items):\\n        raise ValueError('negative prices are not allowed')\\n    total = 0"
-            return f"""
-<tool_calls>
-  <tool_call>
-    <tool_name>edit_file</tool_name>
-    <parameters>{{"path": "src/billing.py", "old_str": "{old}", "new_str": "{new}"}}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>write_file</tool_name>
-    <parameters>{{"path": "reviews/billing-review.md", "content": "# Billing review\\n\\nAdded negative price validation.", "mode": "create"}}</parameters>
-  </tool_call>
-</tool_calls>
-"""
-        return """
-<final_answer>Workspace review complete. Billing validation was added and review notes were written.</final_answer>
-"""
+            return ModelTurn(
+                tool_calls=(
+                    ToolRequest(
+                        f"call_{self.calls}_0",
+                        "edit_file",
+                        f'{{"path": "src/billing.py", "old_str": "{old}", "new_str": "{new}"}}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_1",
+                        "write_file",
+                        '{"path": "reviews/billing-review.md", "content": "# Billing review\\n\\nAdded negative price validation.", "mode": "create"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            )
+        return "Workspace review complete. Billing validation was added and review notes were written."
+
+    async def llm_stream(self, messages, tools=None):
+        from omnicoreagent.core.agents.llm_response import normalize_model_turn
+
+        turn = normalize_model_turn(await self.llm_call(messages, tools=tools))
+        if turn.text:
+            yield {"type": "text_delta", "text": turn.text}
+        yield {"type": "turn_complete", "turn": turn}
 
 
 def seed_workspace(workspace_dir: Path) -> None:
@@ -401,17 +436,11 @@ def seed_workspace(workspace_dir: Path) -> None:
     (files_dir / "src").mkdir(parents=True)
     (files_dir / "tests").mkdir(parents=True)
     (files_dir / "src" / "billing.py").write_text(
-        "def calculate_total(items):\n"
-        "    total = 0\n"
-        "    for item in items:\n"
-        "        total += item['price']\n"
-        "    return total\n",
+        "def calculate_total(items):\n    total = 0\n    for item in items:\n        total += item['price']\n    return total\n",
         encoding="utf-8",
     )
     (files_dir / "tests" / "test_billing.py").write_text(
-        "from src.billing import calculate_total\n\n"
-        "def test_calculate_total():\n"
-        "    assert calculate_total([{'price': 2}]) == 2\n",
+        "from src.billing import calculate_total\n\ndef test_calculate_total():\n    assert calculate_total([{'price': 2}]) == 2\n",
         encoding="utf-8",
     )
 
@@ -422,7 +451,6 @@ async def test_workspace_code_review_real_application_uses_builtin_file_commands
 ):
     workspace_dir = tmp_path / "workspace_code_review_real_app"
     seed_workspace(workspace_dir)
-
     result, history, telemetry_store, _ = await run_scripted_agent(
         tmp_path=tmp_path,
         agent_name="workspace_code_review_real_app",
@@ -430,7 +458,6 @@ async def test_workspace_code_review_real_application_uses_builtin_file_commands
         local_tools=None,
         max_steps=8,
     )
-
     assert "Workspace review complete" in result["answer"]
     assert history.called_tools() >= {
         "ls",
@@ -444,7 +471,6 @@ async def test_workspace_code_review_real_application_uses_builtin_file_commands
     assert "negative prices are not allowed" in billing_file.read_text(encoding="utf-8")
     review_file = workspace_dir / "files" / "reviews" / "billing-review.md"
     assert review_file.read_text(encoding="utf-8").startswith("# Billing review")
-
     traces = await telemetry_store.list_traces()
     event_types = {event.event_type for event in traces[0].events}
     assert {"workspace_read", "workspace_write"}.issubset(event_types)

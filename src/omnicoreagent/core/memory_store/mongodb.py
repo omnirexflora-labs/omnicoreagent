@@ -52,6 +52,11 @@ class MongoDb(AbstractMemoryStore):
                 IndexModel([("status", 1)]),
             ]
             await self.collection.create_indexes(message_indexes)
+            self.run_states = self.db[f"{collection_name}_run_states"]
+            self.budget_states = self.db[f"{collection_name}_budget_states"]
+            await self.run_states.create_indexes(
+                [IndexModel([("session_id", 1)]), IndexModel([("status", 1)])]
+            )
 
             self._initialized = True
             logger.debug("Connected to MongoDB")
@@ -235,3 +240,84 @@ class MongoDb(AbstractMemoryStore):
 
         except Exception as e:
             logger.error(f"Failed to mark messages as summarized: {e}")
+
+    # --- run state ---------------------------------------------------------
+    # One document per run in "<collection>_run_states"; updates match on the
+    # version, so a stale writer changes nothing.
+
+    async def save_run_state(self, record: dict, expected_version: int | None) -> int:
+        from omnicoreagent.core.runs import RunStateConflict
+
+        await self._ensure_connected()
+        run_id = record["run_id"]
+        version = (expected_version or 0) + 1
+        document = {**record, "version": version}
+        if expected_version is None:
+            try:
+                await self.run_states.insert_one({"_id": run_id, **document})
+            except errors.DuplicateKeyError:
+                raise RunStateConflict(f"Run {run_id} already exists") from None
+            return version
+        result = await self.run_states.replace_one(
+            {"_id": run_id, "version": expected_version}, {"_id": run_id, **document}
+        )
+        if result.matched_count != 1:
+            raise RunStateConflict(f"Run {run_id} changed since version {expected_version}")
+        return version
+
+    async def get_run_state(self, run_id: str) -> dict | None:
+        await self._ensure_connected()
+        document = await self.run_states.find_one({"_id": run_id})
+        if document is None:
+            return None
+        document.pop("_id", None)
+        return document
+
+    async def list_run_states(
+        self, session_id: str | None = None, status: str | None = None, limit: int = 100
+    ) -> list[dict]:
+        await self._ensure_connected()
+        query = {}
+        if session_id is not None:
+            query["session_id"] = session_id
+        if status is not None:
+            query["status"] = status
+        records = []
+        async for document in self.run_states.find(query).sort("created_at", 1).limit(limit):
+            document.pop("_id", None)
+            records.append(document)
+        return records
+
+    # --- budgets -----------------------------------------------------------
+
+    async def delete_budget_state(self, key: str) -> None:
+        await self._ensure_connected()
+        await self.budget_states.delete_one({"_id": key})
+
+    async def get_budget_state(self, key: str) -> dict | None:
+        await self._ensure_connected()
+        document = await self.budget_states.find_one({"_id": key})
+        if document is None:
+            return None
+        document.pop("_id", None)
+        return document
+
+    async def save_budget_state(self, state: dict, expected_version: int | None) -> int:
+        from omnicoreagent.core.runs import RunStateConflict
+
+        await self._ensure_connected()
+        key = state["key"]
+        version = (expected_version or 0) + 1
+        document = {**state, "version": version}
+        if expected_version is None:
+            try:
+                await self.budget_states.insert_one({"_id": key, **document})
+            except errors.DuplicateKeyError:
+                raise RunStateConflict(f"Budget {key} already exists") from None
+            return version
+        result = await self.budget_states.replace_one(
+            {"_id": key, "version": expected_version}, {"_id": key, **document}
+        )
+        if result.matched_count != 1:
+            raise RunStateConflict(f"Budget {key} changed since version {expected_version}")
+        return version

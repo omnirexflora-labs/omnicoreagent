@@ -1,6 +1,7 @@
 import asyncio
 import json
 from datetime import timedelta
+import math
 
 import pytest
 
@@ -14,13 +15,16 @@ from omnicoreagent.core.telemetry import (
 from omnicoreagent.core.runtime.config import AgentConfig
 from omnicoreagent import OmniCoreAgent
 from omnicoreagent.governance import (
+    ApprovalInvalidError,
     ApprovalExpiredError,
     ApprovalRequiredError,
     ApprovalResult,
     AuthorityRequest,
+    AuditRequiredError,
     BudgetExceededError,
     GovernanceEngine,
     PolicyConstraints,
+    PolicyBudget,
     PolicyDeniedError,
     PolicyEvaluationError,
     PolicyEffect,
@@ -103,6 +107,15 @@ class RecordingApprovalResolver:
             approved=True,
             approval_id=request.approval_id,
             resolved_by="recording-test",
+        )
+
+
+class MismatchedApprovalResolver:
+    async def resolve(self, request):
+        return ApprovalResult(
+            approved=True,
+            approval_id="approval_for_a_different_request",
+            resolved_by="invalid-test",
         )
 
 
@@ -266,6 +279,63 @@ def test_policy_hash_is_canonical_across_key_order_defaults_and_generated_fields
     assert policy_hash(first) == policy_hash(third)
     assert policy_hash(second) != policy_hash(third)
     assert "loaded_at" not in json.dumps(canonical_policy_payload(first))
+
+
+def test_policy_hash_excludes_mutable_budget_counters():
+    policy = policy_from_mapping(
+        {
+            "name": "budget-hash",
+            "mode": "strict",
+            "budget": {"max_requests": 3, "max_cost": 2.5},
+            "rules": {"allow": [{"rule_id": "allow", "capability": "tool.local.call"}]},
+        }
+    )
+    original = policy_hash(policy)
+    assert "used_requests" not in canonical_policy_payload(policy)["budget"]
+    assert "used_cost" not in canonical_policy_payload(policy)["budget"]
+
+    policy.budget.used_requests = 2
+    policy.budget.used_cost = 1.25
+
+    assert policy_hash(policy) == original
+
+
+def test_policy_rejects_rule_effect_that_conflicts_with_bucket():
+    with pytest.raises(ValueError, match="stored in the allow bucket"):
+        policy_from_mapping(
+            {
+                "mode": "strict",
+                "rules": {
+                    "allow": [
+                        {
+                            "rule_id": "misbucketed",
+                            "effect": "deny",
+                            "capability": "secret.read",
+                        }
+                    ]
+                },
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "factory,match",
+    [
+        (lambda: PolicyBudget(max_requests=True), "max_requests must be an integer"),
+        (lambda: PolicyBudget(max_cost=math.nan), "max_cost must be a finite"),
+        (lambda: PolicyBudget(used_cost=-1), "used_cost must be a finite"),
+        (lambda: AuthorityRequest(capability="tool.local.call", budget_cost=-1), "budget_cost must be a finite"),
+        (lambda: AuthorityRequest(capability="tool.local.call", risk_level="urgent"), "risk_level must be one of"),
+    ],
+)
+def test_governance_numeric_and_risk_inputs_are_validated(factory, match):
+    with pytest.raises(ValueError, match=match):
+        factory()
+
+
+def test_authority_request_normalizes_risk_level_case():
+    request = AuthorityRequest(capability="process.exec", risk_level="HIGH")
+    assert request.risk_level == "high"
 
 
 def test_policy_loading_uses_default_when_no_file_exists(tmp_path):
@@ -468,7 +538,7 @@ async def test_governance_engine_denies_unknown_capability_with_stable_error():
         await engine.authorize(AuthorityRequest(capability="unknown.call"))
 
     assert exc.value.code == "unknown_capability"
-    assert exc.value.message == "Unknown capability denied by strict policy."
+    assert exc.value.message == "Unknown capability denied by strict policy: no rule covers unknown.call."
     assert exc.value.metadata["reason_code"] == "unknown_capability"
 
 
@@ -532,6 +602,72 @@ async def test_governance_engine_uses_approval_resolver_for_ask_decision():
     assert decision.effect == PolicyEffect.ALLOW
     assert decision.approval_id is not None
     assert decision.reason == "approved in test"
+
+
+@pytest.mark.asyncio
+async def test_governance_engine_rejects_mismatched_approval_result():
+    engine = GovernanceEngine(
+        _policy(),
+        approval_resolver=MismatchedApprovalResolver(),
+    )
+
+    with pytest.raises(ApprovalInvalidError, match="does not match") as exc:
+        await engine.authorize(AuthorityRequest(capability="process.exec"))
+
+    assert exc.value.metadata["reason_code"] == "approval_required"
+    assert exc.value.metadata["expected_approval_id"].startswith("approval_")
+
+
+@pytest.mark.asyncio
+async def test_governance_engine_emits_approval_lifecycle_events():
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    context = await recorder.start_trace(
+        trace_id="trace-approval-lifecycle",
+        actor=TelemetryActor(type=ActorType.SYSTEM, name="governance-test"),
+    )
+    engine = GovernanceEngine(
+        _policy(),
+        approval_resolver=RecordingApprovalResolver(),
+        telemetry_recorder=recorder,
+    )
+
+    decision = await engine.authorize(AuthorityRequest(capability="process.exec"))
+    await recorder.end_trace()
+
+    assert decision.effect == PolicyEffect.ALLOW
+    trace = await store.get_trace(context.trace_id)
+    assert trace is not None
+    event_types = [event.event_type for event in trace.events]
+    assert "approval_request_created" in event_types
+    assert "approval_resolved" in event_types
+    resolved = next(
+        event for event in trace.events if event.event_type == "approval_resolved"
+    )
+    assert resolved.output["result"]["approval_id"] == decision.approval_id
+
+
+@pytest.mark.asyncio
+async def test_audit_required_policy_fails_closed_without_recorder():
+    policy = PolicyEnvelope(
+        name="audited",
+        mode=PolicyMode.STRICT,
+        rules=PolicyRuleSet(
+            allow=[
+                PolicyRule(
+                    rule_id="allow_audited_tool",
+                    effect=PolicyEffect.ALLOW,
+                    capability="tool.local.call",
+                    constraints=PolicyConstraints(audit_required=True),
+                )
+            ]
+        ),
+    )
+
+    with pytest.raises(AuditRequiredError, match="active telemetry trace"):
+        await GovernanceEngine(policy).authorize(
+            AuthorityRequest(capability="tool.local.call")
+        )
 
 
 @pytest.mark.asyncio
@@ -1365,8 +1501,8 @@ async def test_omnicoreagent_initializes_governance_engine_from_agent_config():
         ({"policy": "bad"}, "policy must be a dict or PolicyEnvelope"),
         ({"policy_path": 123}, "policy_path must be a string or path-like"),
         (
-            {"sandbox_config": {"provider": "docker"}},
-            "sandbox_config.provider must be one of",
+            {"sandbox_config": {"provider": "no-such-provider"}},
+            "sandbox_config.provider must be a registered sandbox provider",
         ),
         (
             {"sandbox_config": {"provider": "local_test", "extra": True}},

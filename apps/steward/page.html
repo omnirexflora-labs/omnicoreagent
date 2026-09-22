@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repository steward</title>
+<style>
+  :root { --ink: #1c1c1c; --muted: #6b6b6b; --line: #e3e3e3; --ok: #2f7d32; --wait: #b26a00; --bad: #b3261e; --bg: #fff; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ink: #ececec; --muted: #9a9a9a; --line: #333; --bg: #141414; } }
+  body { margin: 0; padding: 16px; font: 15px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); }
+  main { max-width: 1040px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 28px 0 8px; }
+  .muted { color: var(--muted); } code { font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; } th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 14px; }
+  th { color: var(--muted); font-weight: 600; }
+  .s-completed { color: var(--ok); } .s-awaiting_approval, .s-awaiting_budget, .s-running, .s-queued, .s-claimed { color: var(--wait); } .s-failed, .s-timeout, .s-cancelled { color: var(--bad); }
+  input { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; width: 22em; max-width: 100%; }
+  button { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+  details { margin: 4px 0; } summary { cursor: pointer; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: rgba(128,128,128,.08); padding: 8px; border-radius: 6px; max-height: 260px; overflow: auto; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Repository steward</h1>
+  <p class="muted">A background agent on OmniCoreAgent keeping <code id="repo">omnirexflora-labs/omnicoreagent</code>. Everything below is read from its own API: its runs, what each cost, the approvals people gave, and the trace of every run.</p>
+  <div class="row">
+    <input id="token" type="password" placeholder="API bearer token" autocomplete="off">
+    <button id="save">Use token</button>
+    <span id="state" class="muted"></span>
+  </div>
+
+  <h2>Now</h2>
+  <div id="now" class="muted">…</div>
+  <pre id="live" hidden></pre>
+
+  <h2>Runs</h2>
+  <table>
+    <thead><tr><th>Started</th><th>Task</th><th>Status</th><th>Attempts</th><th>Spent</th><th>Approvals</th><th></th></tr></thead>
+    <tbody id="runs"></tbody>
+  </table>
+
+  <h2>Work items</h2>
+  <div id="items" class="muted">…</div>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const store = { get: () => { try { return sessionStorage.getItem("steward_token") || ""; } catch { return ""; } },
+                  set: (v) => { try { sessionStorage.setItem("steward_token", v); } catch {} } };
+  $("token").value = store.get();
+  $("save").onclick = () => { store.set($("token").value.trim()); refresh(); };
+
+  const headers = () => ({ "Authorization": "Bearer " + store.get() });
+  const api = async (path) => {
+    const r = await fetch(path, { headers: headers() });
+    if (!r.ok) throw new Error(r.status + " " + path);
+    return r.json();
+  };
+  const when = (iso) => iso ? new Date(iso).toLocaleString() : "";
+  const usd = (n) => (typeof n === "number" ? "$" + n.toFixed(4) : "—");
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  let streaming = null;
+  async function stream(run) {
+    if (streaming === run.run_id) return;
+    streaming = run.run_id;
+    const box = $("live"); box.hidden = false; box.textContent = "";
+    try {
+      const r = await fetch(`/telemetry/events/stream?session_id=${encodeURIComponent(run.session_id)}&run_id=${encodeURIComponent(run.run_id)}`, { headers: headers() });
+      const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
+      while (streaming === run.run_id) {
+        const { value, done } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n"); buf = lines.pop();
+        for (const line of lines) if (line.startsWith("data:")) {
+          try { const e = JSON.parse(line.slice(5)); const t = e.event_type || e.event || e.type;
+                if (t) { box.textContent += `${(e.timestamp || "").slice(11, 19)} ${t}${e.tool_name ? " " + e.tool_name : ""}\n`; box.scrollTop = box.scrollHeight; } } catch {}
+        }
+      }
+    } catch (err) { box.textContent += `\n(stream ended: ${err.message})`; }
+  }
+
+  async function refresh() {
+    if (!store.get()) { $("state").textContent = "enter the token to read the steward's API"; return; }
+    try {
+      const listing = await api("/background/runs");
+      const runs = (listing.runs || listing).slice().sort((a, b) => (b.created_at || b.started_at || "").localeCompare(a.created_at || a.started_at || ""));
+      $("state").textContent = `${runs.length} runs · ${new Date().toLocaleTimeString()}`;
+      const active = runs.filter((r) => ["running", "queued", "claimed", "retrying", "awaiting_approval", "awaiting_budget"].includes(r.status));
+      $("now").innerHTML = active.length
+        ? active.map((r) => `<div><span class="s-${r.status}">${r.status}</span> — ${esc(r.task_id)} <code>${esc(r.run_id)}</code>${r.result_preview ? " — " + esc(r.result_preview).slice(0, 160) : ""}</div>`).join("")
+        : "idle";
+      const live = active.find((r) => r.status === "running");
+      if (live) stream(live); else { streaming = null; $("live").hidden = true; }
+
+      const rows = [];
+      for (const r of runs.slice(0, 30)) {
+        let spent = "—", approvals = "—", segments = "";
+        try {
+          const budget = await api(`/runs/${r.run_id}/budget`);
+          const own = (budget.budgets || []).find((b) => b.scope === "request" && b.meter === "model_cost_usd");
+          if (own) spent = usd(own.spent);
+        } catch {}
+        try {
+          const rec = await api(`/runs/${r.run_id}`);
+          const list = rec.approvals || [];
+          approvals = list.length ? list.map((a) => `${esc(a.tool_name)}: ${esc(a.status)}${a.approver ? " by " + esc(a.approver) : ""}`).join("<br>") : "none";
+          segments = (rec.trace_ids || []).length ? ` · ${rec.trace_ids.length} trace segment(s)` : "";
+        } catch {}
+        rows.push(`<tr><td>${when(r.started_at || r.created_at)}</td><td>${esc(r.task_id)}</td><td class="s-${r.status}">${r.status}</td><td>${r.attempt ?? ""}/${r.max_attempts ?? ""}</td><td>${spent}</td><td>${approvals}</td>
+          <td><details><summary>more</summary><div class="muted"><code>${esc(r.run_id)}</code>${segments}</div>
+          <div>trace: <a href="/telemetry/runs/${r.run_id}/trace" target="_blank">json</a> · <a href="/telemetry/runs/${r.run_id}/trajectory" target="_blank">trajectory</a> · record: <a href="/runs/${r.run_id}" target="_blank">json</a></div>
+          <pre>${esc(r.result_preview || r.error || "")}</pre></details></td></tr>`);
+      }
+      $("runs").innerHTML = rows.join("");
+
+      const tasks = await api("/background/tasks");
+      const items = (tasks.tasks || tasks).filter((t) => String(t.task_id).startsWith("steward-work-"));
+      $("items").innerHTML = items.length
+        ? items.map((t) => `<div><strong>${esc((t.metadata || {}).title || t.task_id)}</strong> <span class="muted">— ${esc((t.metadata || {}).cause || "")}</span></div>`).join("")
+        : "none scheduled";
+    } catch (err) {
+      $("state").textContent = "cannot read the API: " + err.message;
+    }
+  }
+  refresh(); setInterval(refresh, 8000);
+})();
+</script>
+</body>
+</html>

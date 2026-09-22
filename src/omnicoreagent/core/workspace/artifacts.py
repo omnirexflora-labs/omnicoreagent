@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 
 from omnicoreagent.core.summarizer.tokenizer import count_tokens
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.privacy import PrivacyFilter
 
 if TYPE_CHECKING:
     from omnicoreagent.core.workspace.config import WorkspaceConfig
@@ -106,6 +107,7 @@ class ToolResponseOffloader:
         storage: WorkspaceStorage | None = None,
         workspace: Workspace | None = None,
         workspace_config: WorkspaceConfig | dict | None = None,
+        privacy_filter: PrivacyFilter | None = None,
     ):
         if isinstance(config, dict):
             config = OffloadConfig.from_dict(config)
@@ -114,6 +116,7 @@ class ToolResponseOffloader:
         self._storage = storage
         self._workspace = workspace
         self._workspace_config = workspace_config
+        self._privacy_filter = privacy_filter
 
         self._artifacts: Dict[str, OffloadedResponse] = {}
 
@@ -231,6 +234,9 @@ class ToolResponseOffloader:
         Returns:
             OffloadedResponse with preview and file reference
         """
+        if self._privacy_filter is not None:
+            response = self._privacy_filter.redact(response, boundary="workspace")
+            metadata = self._privacy_filter.redact(metadata, boundary="workspace")
         self._ensure_storage_dir()
         artifact_id = self._generate_artifact_id(tool_name, response)
 

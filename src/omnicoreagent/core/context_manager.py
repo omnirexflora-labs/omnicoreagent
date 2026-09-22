@@ -14,6 +14,7 @@ from enum import Enum
 
 from omnicoreagent.core.summarizer.tokenizer import count_tokens
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.interaction_history import render_message, split_recent
 
 
 class ContextManagementMode(str, Enum):
@@ -88,18 +89,7 @@ class AgentLoopContextManager:
         Returns:
             Total token count across all messages
         """
-        total = 0
-        for msg in messages:
-            if hasattr(msg, "content"):
-                content = msg.content
-            elif isinstance(msg, dict):
-                content = msg.get("content", "")
-            else:
-                content = str(msg)
-
-            total += count_tokens(content)
-
-        return total
+        return sum(count_tokens(render_message(message)) for message in messages)
 
     def get_non_system_message_count(self, messages: List[Any]) -> int:
         """Count messages excluding system prompt."""
@@ -171,8 +161,9 @@ class AgentLoopContextManager:
         if len(other_messages) <= preserve_count:
             return system_messages, [], other_messages
 
-        recent_messages = other_messages[-preserve_count:]
-        middle_messages = other_messages[:-preserve_count]
+        middle_messages, recent_messages = split_recent(
+            other_messages, preserve_count, expand=True
+        )
 
         return system_messages, middle_messages, recent_messages
 

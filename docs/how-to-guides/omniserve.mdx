@@ -46,6 +46,27 @@ def create_agent():
 
 <Info>
 OmniServe looks for `agent` variable first, then `create_agent()` function. Your file must export one of these.
+
+The file may also define its own routes — an application's pages, its own
+endpoints — mounted beside the agent's API on the same origin, behind the same
+middleware:
+
+```python
+from fastapi import APIRouter
+from fastapi.responses import HTMLResponse
+
+router = APIRouter()            # or routers = [...]
+
+@router.get("/steward/", response_class=HTMLResponse)
+async def page() -> str:
+    return open("page.html").read()
+
+public_paths = ["/steward/"]    # served without a token; "/steward/*" for a directory
+```
+
+Everything else the router serves still needs the bearer token when auth is
+on. In code, the same are `OmniServe(agent, config, routers=[...],
+public_paths=[...])`.
 </Info>
 
 ---
@@ -200,6 +221,11 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 |--------|----------|------|-------------|
 | `POST` | `/run` | Yes* | SSE streaming response |
 | `POST` | `/run/sync` | Yes* | JSON response (blocking) |
+| `GET` | `/runs/{run_id}` | Yes* | A run's durable record: status, step, usage, tool call states, approvals (never its saved conversation) |
+| `POST` | `/runs/{run_id}/approvals/{approval_id}` | Yes* | Decide an approval a paused run waits for: `{"decision": "approve" \| "deny", "approver", "note"?, "arguments"?}` |
+| `POST` | `/runs/{run_id}/resume` | Yes* | Continue a paused run once its approvals are decided |
+| `POST` | `/runs/{run_id}/steer` | Yes* | Send a running, waiting, or interrupted run a message for its next step: `{"message", "sender"?}` (422 if the guardrail blocks it) |
+| `POST` | `/runs/{run_id}/interrupt` | Yes* | Stop a running run at its next step boundary; resume continues it |
 | `GET` | `/health` | No | Health check |
 | `GET` | `/ready` | No | Readiness check |
 | `GET` | `/prometheus` | No | Prometheus metrics |
@@ -211,6 +237,7 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 | `GET` | `/telemetry/events` | Yes* | Return stored telemetry events filtered by `trace_id`, `run_id`, `session_id`, `task_id`, or `event_type` |
 | `GET` | `/telemetry/events/stream` | Yes* | Replay and follow telemetry events over SSE for `session_id`; add `run_id` to isolate one run |
 | `GET` | `/telemetry/traces` | Yes* | List traces filtered by trace, run, session, task, agent, workflow, model, or status |
+| `GET` | `/telemetry/traces/{trace_id}/family` | Yes* | Return all traces linked to one execution boundary |
 | `GET` | `/telemetry/traces/{trace_id}` | Yes* | Return one exact trace |
 | `GET` | `/telemetry/runs/{run_id}/trace` | Yes* | Return the latest trace correlated to one run |
 | `GET` | `/telemetry/sessions/{session_id}/trace` | Yes* | Return the latest trace for one session |
@@ -220,7 +247,9 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 `/ready` returns `ready: true` only after the FastAPI lifespan has completed
 startup, the served agent is initialized, and any configured MCP servers are
 connected. Agents without MCP servers do not need an MCP client to pass
-readiness.
+readiness. The response's `mcp_servers` gives each configured server's status
+(`connected`, `disconnected`, `failed`, `not_connected`) and last error, so a
+single failed server among several is visible.
 
 ### Background Task Endpoints
 
@@ -245,6 +274,7 @@ default and can be turned off with `OMNICOREAGENT_BACKGROUND_ENABLED=false` or
 | `POST` | `/background/tasks/{task_id}/resume` | Yes* | Resume scheduled dispatch |
 | `DELETE` | `/background/tasks/{task_id}` | Yes* | Delete a background task |
 | `POST` | `/background/runs/{run_id}/cancel` | Yes* | Cancel a queued or running run |
+| `POST` | `/background/runs/{run_id}/resume` | Yes* | Queue a background run that was waiting for approval, once its approvals are decided |
 | `GET` | `/background/runs` | Yes* | List background runs |
 | `GET` | `/background/runs/{run_id}` | Yes* | Inspect run status |
 | `GET` | `/background/runs/{run_id}/attempts` | Yes* | List run attempts |
@@ -567,3 +597,15 @@ OmniServe is perfect for deploying agents as microservices, webhooks, chatbots, 
 ---
 
 **Learn More**: See [OmniServe Cookbook](https://github.com/omnirexflora-labs/omnicoreagent/tree/main/cookbook/omniserve) for more examples.
+
+
+## Native Text Deltas
+
+The SSE `/run` endpoint emits `text_delta` while the provider response is still in
+progress, in addition to lifecycle events and terminal `complete` results. Each
+delta is intermediate and includes actor identity and a sequence number. Deltas
+are delivered even when raw model-response trace recording is disabled. They are
+live-only; the session event endpoint replays persisted lifecycle/final-answer
+records, subject to recording configuration. A disconnect cancels the active run.
+Check the final payload's `status` and `termination_reason` before treating a run
+as successful. See [basic usage](/how-to-guides/basic-usage) for the Python contract.

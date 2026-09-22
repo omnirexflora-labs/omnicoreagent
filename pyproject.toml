@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling", "uv-dynamic-versioning"]
+requires = ["hatchling>=1.32.0", "uv-dynamic-versioning>=0.14.1"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
@@ -16,7 +16,7 @@ dynamic = ["version"]
 description = "Open Python agent harness for production AI apps: tools, MCP, memory, workspace, telemetry, subagents, background tasks, and OmniServe APIs."
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [{ name = "Abiola Adeshina", email = "abiolaadedayo1993@gmail.com" }]
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.15"
 
 keywords = [
     "agent",
@@ -39,73 +39,80 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "colorlog>=6.10.1",
-    "python-dotenv>=1.2.2",
+    "colorlog>=6.12.0",
+    "python-dotenv>=1.2.3",
     "rich>=15.0.0",
     "httpx>=0.28.1",
     "httpx-sse>=0.4.3",
-    "pydantic[email]>=2.12.5",
-    "mcp[cli]>=1.27.0",
-    "litellm>=1.83.14",
-    "click>=8.1.8",
+    "pydantic[email]>=2.13.5",
+    "mcp[cli]>=2.2.0,<3",
+    "jsonschema>=4.26.0",
+    "litellm>=1.101.0",
+    "click>=8.5.0",
     "docstring_parser>=0.18.0",
-    "packaging>=26.2",
+    "packaging>=26.3",
 ]
 
 [project.optional-dependencies]
-redis = ["redis>=7.4.0"]
-postgres = ["sqlalchemy>=2.0.49", "psycopg2-binary>=2.9.12"]
-mongodb = ["motor>=3.7.1", "pymongo>=4.17.0"]
-s3 = ["boto3>=1.43.4"]
-serve = ["fastapi>=0.136.1", "uvicorn>=0.46.0", "python-multipart>=0.0.27"]
-tokenizer = ["tiktoken>=0.12.0"]
+redis = ["redis>=8.1.0"]
+docker = ["docker>=7.2.0"]
+# Code mode (run_code): an alpha interpreter, so the version is pinned exactly.
+codemode = ["pydantic-monty==0.0.23"]
+modal = ["modal>=1.5.5"]
+e2b = ["e2b>=2.51.0"]
+daytona = ["daytona>=0.214.0"]
+vercel = ["vercel-sandbox>=0.6.0"]
+postgres = ["sqlalchemy>=2.0.54", "psycopg2-binary>=2.9.13"]
+mongodb = ["motor>=3.7.1", "pymongo>=4.18.1"]
+s3 = ["boto3>=1.43.98"]
+serve = ["fastapi>=0.141.1", "uvicorn>=0.53.0", "python-multipart>=0.0.32"]
+tokenizer = ["tiktoken>=0.14.0"]
 otel = [
-    "opentelemetry-api>=1.41.1",
-    "opentelemetry-sdk>=1.41.1",
-    "opentelemetry-exporter-otlp-proto-http>=1.41.1",
+    "opentelemetry-api>=1.44.0",
+    "opentelemetry-sdk>=1.44.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
 ]
 langsmith = [
-    "opentelemetry-api>=1.41.1",
-    "opentelemetry-sdk>=1.41.1",
-    "opentelemetry-exporter-otlp-proto-http>=1.41.1",
+    "opentelemetry-api>=1.44.0",
+    "opentelemetry-sdk>=1.44.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
 ]
 opik = [
-    "opentelemetry-api>=1.41.1",
-    "opentelemetry-sdk>=1.41.1",
-    "opentelemetry-exporter-otlp-proto-http>=1.41.1",
+    "opentelemetry-api>=1.44.0",
+    "opentelemetry-sdk>=1.44.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
 ]
 all = [
-    "redis>=7.4.0",
-    "sqlalchemy>=2.0.49",
-    "psycopg2-binary>=2.9.12",
+    "redis>=8.1.0",
+    "sqlalchemy>=2.0.54",
+    "psycopg2-binary>=2.9.13",
     "motor>=3.7.1",
-    "pymongo>=4.17.0",
-    "boto3>=1.43.4",
-    "fastapi>=0.136.1",
-    "uvicorn>=0.46.0",
-    "python-multipart>=0.0.27",
-    "tiktoken>=0.12.0",
-    "opentelemetry-api>=1.41.1",
-    "opentelemetry-sdk>=1.41.1",
-    "opentelemetry-exporter-otlp-proto-http>=1.41.1",
-    "markdown>=3.10.2",
-    "matplotlib>=3.10.9",
-    "numpy>=2.2.6",
-    "pillow>=12.2.0",
-    "requests>=2.33.1",
+    "pymongo>=4.18.1",
+    "boto3>=1.43.98",
+    "fastapi>=0.141.1",
+    "uvicorn>=0.53.0",
+    "python-multipart>=0.0.32",
+    "tiktoken>=0.14.0",
+    "opentelemetry-api>=1.44.0",
+    "opentelemetry-sdk>=1.44.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
+    "markdown>=3.10.3",
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.3",
+    "pillow>=12.3.0",
+    "requests>=2.34.2",
 ]
 examples = [
-    "markdown>=3.10.2",
-    "matplotlib>=3.10.9",
-    "numpy>=2.2.6",
-    "pillow>=12.2.0",
-    "requests>=2.33.1",
+    "markdown>=3.10.3",
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.3",
+    "pillow>=12.3.0",
+    "requests>=2.34.2",
 ]
 
 [project.scripts]
@@ -116,7 +123,7 @@ Repository = "https://github.com/omnirexflora-labs/omnicoreagent"
 Issues = "https://github.com/omnirexflora-labs/omnicoreagent/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/omnicoreagent"]
+packages = ["src/omnicoreagent", "cookbook"]
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -124,6 +131,7 @@ include = [
     "/README.md",
     "/pyproject.toml",
     "/src/omnicoreagent/**/*.py",
+    "/cookbook/**/*.py",
 ]
 
 [tool.pytest.ini_options]
@@ -141,20 +149,24 @@ omnicoreagent = { workspace = true }
 
 [dependency-groups]
 dev = [
-    "boto3>=1.43.4",
-    "fastapi>=0.136.1",
-    "pre-commit>=4.6.0",
+    "boto3>=1.43.98",
+    "fastapi>=0.141.1",
+    "pre-commit>=4.6.2",
     "motor>=3.7.1",
-    "psycopg2-binary>=2.9.12",
-    "pytest>=9.0.3",
-    "pytest-asyncio>=1.3.0",
-    "python-multipart>=0.0.27",
-    "pymongo>=4.17.0",
-    "redis>=7.4.0",
-    "ruff>=0.15.12",
-    "sqlalchemy>=2.0.49",
-    "tiktoken>=0.12.0",
-    "uvicorn>=0.46.0",
-    "hatch>=1.16.5",
-    "twine>=6.2.0",
+    "psycopg2-binary>=2.9.13",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "python-multipart>=0.0.32",
+    "pymongo>=4.18.1",
+    "redis>=8.1.0",
+    "ruff>=0.16.8",
+    "sqlalchemy>=2.0.54",
+    "tiktoken>=0.14.0",
+    "uvicorn>=0.53.0",
+    "hatch>=1.18.1",
+    "twine>=7.0.0",
 ]
+
+# Keep the existing lint policy explicit across Ruff default-rule changes.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

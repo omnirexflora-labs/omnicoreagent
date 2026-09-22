@@ -1,9 +1,8 @@
 from __future__ import annotations
-
 from types import SimpleNamespace
 
+from mcp import types
 import pytest
-
 from omnicoreagent.core.runtime.harness_tools import (
     available_tools,
     prepare_dynamic_subagents,
@@ -21,6 +20,7 @@ from omnicoreagent.core.tools.local_tools_registry import Tool
 
 
 def test_normalize_local_tools_converts_list_to_registry():
+
     def echo(value: str) -> str:
         return value
 
@@ -34,13 +34,11 @@ def test_normalize_local_tools_converts_list_to_registry():
             )
         ]
     )
-
     assert registry.get_tool("ECHO").name == "echo"
 
 
 def test_normalize_local_tools_keeps_existing_registry():
     registry = SimpleNamespace(get_available_tools=lambda: [])
-
     assert normalize_local_tools(registry) is registry
 
 
@@ -53,10 +51,10 @@ def test_available_tools_combines_mcp_dicts_objects_and_local_tools():
                     "description": "Dict MCP tool",
                     "inputSchema": {"type": "object"},
                 },
-                SimpleNamespace(
+                types.Tool(
                     name="object_tool",
                     description="Object MCP tool",
-                    inputSchema={"type": "object"},
+                    input_schema={"type": "object"},
                 ),
             ]
         }
@@ -71,7 +69,6 @@ def test_available_tools_combines_mcp_dicts_objects_and_local_tools():
             }
         ]
     )
-
     assert available_tools(mcp_client, local_tools) == [
         {
             "name": "dict_tool",
@@ -98,10 +95,7 @@ def test_available_tools_combines_mcp_dicts_objects_and_local_tools():
     ("response", "expected"),
     [
         ("plain text", "plain text"),
-        (
-            {"choices": [{"message": {"content": "dict content"}}]},
-            "dict content",
-        ),
+        ({"choices": [{"message": {"content": "dict content"}}]}, "dict content"),
         (SimpleNamespace(text="text content"), "text content"),
         (SimpleNamespace(content="object content"), "object content"),
     ],
@@ -126,7 +120,6 @@ def test_render_history_uses_defaults_for_partial_messages():
 def test_prepare_dynamic_subagents_skips_when_disabled():
     factory = object()
     local_tools = object()
-
     assert prepare_dynamic_subagents(
         enabled=False,
         existing_factory=factory,
@@ -146,7 +139,7 @@ def test_build_agent_runtime_wires_components(monkeypatch):
 
     def fake_create_llm_runtime(**kwargs):
         calls["llm_runtime"] = kwargs
-        return "mcp-client", "llm-connection"
+        return ("mcp-client", "llm-connection")
 
     def fake_configure_memory_router(**kwargs):
         calls["memory"] = kwargs
@@ -157,15 +150,10 @@ def test_build_agent_runtime_wires_components(monkeypatch):
 
     def fake_prepare_dynamic_subagents(**kwargs):
         calls["subagents"] = kwargs
-        return "subagent-factory", "local-tools"
-
-    def fake_index_tools_for_advanced_use(**kwargs):
-        calls["tool_index"] = kwargs
+        return ("subagent-factory", "local-tools")
 
     monkeypatch.setattr(
-        builder.construction,
-        "create_llm_runtime",
-        fake_create_llm_runtime,
+        builder.construction, "create_llm_runtime", fake_create_llm_runtime
     )
     monkeypatch.setattr(
         builder.construction,
@@ -173,26 +161,16 @@ def test_build_agent_runtime_wires_components(monkeypatch):
         lambda agent_config: "agent-settings",
     )
     monkeypatch.setattr(
-        builder.construction,
-        "configure_memory_router",
-        fake_configure_memory_router,
+        builder.construction, "configure_memory_router", fake_configure_memory_router
     )
     monkeypatch.setattr(
-        builder.construction,
-        "create_react_agent",
-        fake_create_react_agent,
+        builder.construction, "create_react_agent", fake_create_react_agent
     )
     monkeypatch.setattr(
         builder.harness_tools,
         "prepare_dynamic_subagents",
         fake_prepare_dynamic_subagents,
     )
-    monkeypatch.setattr(
-        builder.harness_tools,
-        "index_tools_for_advanced_use",
-        fake_index_tools_for_advanced_use,
-    )
-
     components = builder.build_agent_runtime(
         model_config={"provider": "openai", "model": "gpt-4o"},
         mcp_tools=[{"name": "server"}],
@@ -206,7 +184,6 @@ def test_build_agent_runtime_wires_components(monkeypatch):
         summarize_fn="summarize",
         debug=True,
     )
-
     assert components == builder.AgentRuntimeComponents(
         agent=agent,
         mcp_client="mcp-client",
@@ -217,21 +194,13 @@ def test_build_agent_runtime_wires_components(monkeypatch):
     assert calls["subagents"]["memory_router"] == "memory-router"
     assert calls["memory"]["summarize_fn"] == "summarize"
     assert calls["react_agent"]["guardrail"] == "guardrail"
-    assert calls["tool_index"] == {
-        "enabled": True,
-        "local_tools": "local-tools",
-    }
 
 
 @pytest.mark.asyncio
 async def test_blocked_guardrail_response_returns_none_without_guardrail():
     response = await execution.blocked_guardrail_response(
-        guardrail=None,
-        query="hello",
-        session_id="session",
-        agent_name="agent",
+        guardrail=None, query="hello", session_id="session", agent_name="agent"
     )
-
     assert response is None
 
 
@@ -248,7 +217,6 @@ async def test_blocked_guardrail_response_returns_none_for_safe_input():
         session_id="session",
         actor=TelemetryActor(type=ActorType.AGENT, name="agent"),
     )
-
     response = await execution.blocked_guardrail_response(
         guardrail=guardrail,
         query="hello",
@@ -257,7 +225,6 @@ async def test_blocked_guardrail_response_returns_none_for_safe_input():
         telemetry_recorder=recorder,
     )
     await recorder.end_trace()
-
     trace = await store.get_trace(context.trace_id)
     assert response is None
     assert [event.event_type for event in trace.events] == ["guardrail_check"]
@@ -272,22 +239,16 @@ async def test_blocked_guardrail_response_formats_unsafe_input():
         to_dict=lambda: {"is_safe": False, "message": "unsafe"},
     )
     guardrail = SimpleNamespace(check=lambda query: result)
-
     response = await execution.blocked_guardrail_response(
-        guardrail=guardrail,
-        query="bad",
-        session_id="session",
-        agent_name="agent",
+        guardrail=guardrail, query="bad", session_id="session", agent_name="agent"
     )
-
     assert response == {
-        "response": (
-            "I'm sorry, but I cannot process this request due to safety concerns: "
-            "unsafe"
-        ),
+        "response": "I'm sorry, but I cannot process this request due to safety concerns: unsafe",
         "session_id": "session",
         "agent_name": "agent",
         "guardrail_result": {"is_safe": False, "message": "unsafe"},
+        "status": "error",
+        "termination_reason": "safety_guard",
     }
 
 
@@ -309,10 +270,8 @@ def test_build_agent_run_kwargs_uses_empty_mcp_state_when_disconnected():
 def test_build_agent_run_kwargs_uses_connected_mcp_state():
     worker = object()
     mcp_client = SimpleNamespace(
-        sessions={"server": "session"},
-        available_tools={"server": ["tool"]},
+        sessions={"server": "session"}, available_tools={"server": ["tool"]}
     )
-
     assert execution.build_agent_run_kwargs(
         mcp_client=mcp_client,
         local_tools="local-tools",
@@ -328,6 +287,7 @@ def test_build_agent_run_kwargs_uses_connected_mcp_state():
 
 
 def test_format_run_response_keeps_plain_response_without_usage_allocation():
+
     def fail_usage_getter():
         raise AssertionError("usage getter should not be called")
 
@@ -342,14 +302,12 @@ def test_format_run_response_keeps_plain_response_without_usage_allocation():
 def test_format_run_response_increments_usage_for_metric_response():
     usage = SimpleNamespace()
     cumulative_usage = SimpleNamespace(incr=lambda value: setattr(value, "seen", True))
-
     response = execution.format_run_response(
         response={"answer": "done", "usage": usage},
         session_id="session",
         agent_name="agent",
         usage_getter=lambda: cumulative_usage,
     )
-
     assert response == {
         "response": "done",
         "session_id": "session",
@@ -357,3 +315,25 @@ def test_format_run_response_increments_usage_for_metric_response():
         "metric": usage,
     }
     assert getattr(usage, "seen") is True
+
+
+def test_runtime_outcome_survives_public_and_serving_serialization():
+    from omnicoreagent.core.token_usage import Usage
+    from omnicoreagent.serve.serialization import normalize_run_result
+
+    usage = Usage()
+    response = execution.format_run_response(
+        response={
+            "answer": "budget exhausted",
+            "usage": usage,
+            "status": "error",
+            "termination_reason": "max_steps",
+        },
+        session_id="session",
+        agent_name="agent",
+        usage_getter=lambda: Usage(),
+    )
+    served = normalize_run_result(response, agent_name="agent")
+    assert served["status"] == "error"
+    assert served["termination_reason"] == "max_steps"
+    assert served["response"] == "budget exhausted"

@@ -425,30 +425,19 @@ class TestRedisMemoryStore:
     @pytest_asyncio.fixture
     async def memory(self, mock_redis_client):
         """Create a RedisMemoryStore with mocked client."""
-        import omnicoreagent.core.memory_store.redis_memory as redis_memory_module
-
-        original_manager = redis_memory_module._redis_manager
-        redis_memory_module._redis_manager = None
         with patch(
             "omnicoreagent.core.memory_store.redis_memory.RedisConnectionManager"
         ) as MockManager:
-            try:
-                mock_manager_instance = MagicMock()
-                mock_manager_instance.get_client = AsyncMock(
-                    return_value=mock_redis_client
-                )
-                mock_manager_instance.release_client = MagicMock()
-                MockManager.return_value = mock_manager_instance
+            mock_manager_instance = MagicMock()
+            mock_manager_instance.get_client = AsyncMock(return_value=mock_redis_client)
+            mock_manager_instance.release_client = MagicMock()
+            MockManager.return_value = mock_manager_instance
 
-                from omnicoreagent.core.memory_store.redis_memory import (
-                    RedisMemoryStore,
-                )
+            from omnicoreagent.core.memory_store.redis_memory import RedisMemoryStore
 
-                store = RedisMemoryStore(redis_url="redis://localhost:6379")
-                store._connection_manager = mock_manager_instance
-                yield store
-            finally:
-                redis_memory_module._redis_manager = original_manager
+            store = RedisMemoryStore(redis_url="redis://localhost:6379")
+            store._connection_manager = mock_manager_instance
+            yield store
 
     async def test_set_memory_config(self, memory):
         """Test memory configuration."""
@@ -667,9 +656,9 @@ async def assert_memory_store_contract(memory):
 
 @pytest.mark.asyncio
 async def test_memory_router_uses_sql_backend_name(monkeypatch, tmp_path):
-    from omnicoreagent.core.memory_store.sql_db_memory import get_sql_manager
+    from omnicoreagent.core.memory_store.sql_db_memory import close_all_sql_managers
 
-    get_sql_manager().close_all()
+    close_all_sql_managers()
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'router-memory.db'}")
 
     router = MemoryRouter("sql")
@@ -687,7 +676,7 @@ async def test_memory_router_uses_sql_backend_name(monkeypatch, tmp_path):
     assert messages[0]["content"] == "remember this"
     assert messages[0]["metadata"]["agent_name"] == "router-agent"
 
-    get_sql_manager().close_all()
+    close_all_sql_managers()
 
 
 def test_memory_router_rejects_old_database_backend_name():
@@ -702,12 +691,12 @@ async def test_in_memory_store_contract():
 
 @pytest.mark.asyncio
 async def test_sql_memory_store_contract(tmp_path):
-    from omnicoreagent.core.memory_store.sql_db_memory import get_sql_manager
+    from omnicoreagent.core.memory_store.sql_db_memory import close_all_sql_managers
 
-    get_sql_manager().close_all()
+    close_all_sql_managers()
     memory = DatabaseMessageStore(db_url=f"sqlite:///{tmp_path / 'contract.db'}")
     await assert_memory_store_contract(memory)
-    get_sql_manager().close_all()
+    close_all_sql_managers()
 
 
 async def redis_memory_store_from_env_or_skip():
@@ -737,7 +726,6 @@ async def redis_memory_store_from_env_or_skip():
 
     import omnicoreagent.core.memory_store.redis_memory as redis_memory_module
 
-    redis_memory_module._redis_manager = None
     RedisMemoryStore = redis_memory_module.RedisMemoryStore
 
     return RedisMemoryStore(redis_url=url)

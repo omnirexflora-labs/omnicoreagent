@@ -7,6 +7,7 @@ import pytest
 from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
 from omnicoreagent.core.telemetry import (
     ActorType,
+    CaptureState,
     InMemoryTelemetryExporter,
     InMemoryTelemetryStore,
     LangSmithTelemetryExporter,
@@ -15,6 +16,7 @@ from omnicoreagent.core.telemetry import (
     OpikTelemetryExporter,
     SpanStatus,
     TelemetryActor,
+    TelemetryCapture,
     TelemetryConfig,
     TelemetryExportError,
     TelemetryExporter,
@@ -37,6 +39,12 @@ def _trace() -> TelemetryTrace:
         kind="agent.run",
         actor=actor,
         status=SpanStatus.OK,
+        input_capture=TelemetryCapture(
+            state=CaptureState.NOT_RECORDED,
+            source="user",
+            role="request",
+            reason="policy",
+        ),
         attributes={"custom": {"nested": True}},
     )
     tool = TelemetrySpan(
@@ -83,6 +91,10 @@ def test_otel_mapper_preserves_trace_span_events_and_attributes():
     assert records[1].parent_span_id == "span-root"
     assert records[0].attributes["omnicoreagent.trace_id"] == "trace-export"
     assert records[0].attributes["omnicoreagent.run_id"] == "run-export"
+    assert records[0].attributes["omnicoreagent.schema_version"] == 3
+    assert records[0].attributes["omnicoreagent.span.input.capture_state"] == (
+        "not_recorded"
+    )
     assert records[0].events[0].attributes["omnicoreagent.input"] == (
         '{"message": "hello"}'
     )
@@ -214,8 +226,11 @@ async def test_agent_run_surfaces_non_telemetry_strict_export_error():
     agent.memory_router.store_message = AsyncMock()
     agent.memory_router.get_messages = AsyncMock(return_value=[])
 
-    with pytest.raises(OSError, match="disk full"):
+    with pytest.raises(TelemetryExportError, match="disk full") as raised:
         await agent.run("hello", session_id="session-export-os-error")
+
+    assert isinstance(raised.value.__cause__, OSError)
+    assert raised.value.exporter == "broken"
 
 
 def test_vendor_exporter_presets_build_otlp_headers(monkeypatch):

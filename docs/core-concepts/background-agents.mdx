@@ -187,6 +187,12 @@ curl http://localhost:8000/background/runs/$RUN_ID/workspace
 | `session_policy` | `task`, `run`, or `fixed` memory-session behavior. |
 | `workspace_policy` | Workspace namespace used for run output. |
 
+Under governance a task is bound to the policy it was created under. When the
+policy changes, the task can still be paused or deleted, but not run: at its
+next due time its schedule is paused, the task's status shows
+`schedule_state.paused_reason`, and the log says why. Delete the task and
+create it again under the new policy to schedule it.
+
 ## Persistent State
 
 The task store is the source of truth for:

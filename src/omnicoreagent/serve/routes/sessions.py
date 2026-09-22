@@ -82,10 +82,17 @@ def create_sessions_router() -> APIRouter:
             default=None,
             description="Optional run id to isolate one run inside the session.",
         ),
+        cursor: str | None = Query(
+            default=None,
+            description="Resume after this stream cursor (or send Last-Event-ID).",
+        ),
     ):
         agent = get_agent(request)
+        resume_cursor = cursor or request.headers.get("last-event-id")
         return StreamingResponse(
-            stream_session_events(agent, session_id, run_id=run_id),
+            stream_session_events(
+                agent, session_id, run_id=run_id, cursor=resume_cursor
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",

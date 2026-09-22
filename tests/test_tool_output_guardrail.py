@@ -25,7 +25,9 @@ def _make_agent(guardrail=None):
 
 
 def _scrub(agent, results):
-    return agent.tool_observation_handler.scrub_results(results)
+    from omnicoreagent.core.tools.tool_observation_guardrail import scrub_tool_results
+
+    return scrub_tool_results(results, agent.guardrail)
 
 
 def _make_result(tool_name="search", data="some data", message=None, status="success"):
@@ -122,6 +124,7 @@ class TestScrubToolResultsDangerousContent:
         scrubbed = _scrub(agent, results)
         assert "[Tool output blocked by guardrail" in scrubbed[0]["data"]
         assert scrubbed[0]["status"] == "error"
+        assert scrubbed[0]["_guardrail_telemetry"]["action"] == "blocked"
 
     def test_delimiter_injection_blocked(self):
         guardrail = PromptInjectionGuard(DetectionConfig(strict_mode=True))
@@ -169,10 +172,11 @@ class TestScrubToolResultsDangerousContent:
 
 
 class TestScrubToolResultsSuspiciousContent:
-    """Suspicious content is logged but passed through."""
+    """Suspicious content follows the configured output policy."""
 
     def test_suspicious_content_passes_with_log(self):
         guardrail = MagicMock(spec=PromptInjectionGuard)
+        guardrail.suspicious_output_action = "flag"
         guardrail.check.return_value = _make_detection_result(
             ThreatLevel.SUSPICIOUS,
             score=12,
@@ -184,6 +188,24 @@ class TestScrubToolResultsSuspiciousContent:
         scrubbed = _scrub(agent, results)
         assert scrubbed[0]["data"] == "mildly suspicious content"
         assert scrubbed[0]["status"] == "success"
+        assert scrubbed[0]["_guardrail_telemetry"]["action"] == "flagged"
+
+    def test_suspicious_content_is_blocked_when_configured(self):
+        guardrail = MagicMock(spec=PromptInjectionGuard)
+        guardrail.suspicious_output_action = "block"
+        guardrail.check.return_value = _make_detection_result(
+            ThreatLevel.SUSPICIOUS,
+            score=12,
+            is_safe=False,
+            message="Suspicious pattern",
+        )
+        agent = _make_agent(guardrail=guardrail)
+        scrubbed = _scrub(agent, [_make_result(data="mildly suspicious content")])
+
+        assert "[Tool output blocked by guardrail" in scrubbed[0]["data"]
+        assert scrubbed[0]["status"] == "error"
+        assert scrubbed[0]["_guardrail_telemetry"]["action"] == "blocked"
+        assert scrubbed[0]["_guardrail_telemetry"]["policy"] == "suspicious_output"
 
 
 class TestScrubToolResultsNonStringData:

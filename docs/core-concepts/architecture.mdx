@@ -192,9 +192,11 @@ State is split by responsibility:
 
 | Service | Responsibility |
 |---------|----------------|
-| Memory router | Conversation/session history. |
+| Memory router | Conversation/session history, and every run's durable record (step, tool calls, approvals, budgets) and the budget ledger. |
 | Telemetry stream | Typed run, tool, background, and service events for live streaming and replay. |
 | Workspace storage | Files used by agents, subagents, tools, artifacts, scratchpads, and offloaded payloads. |
+| Governance engine | The policy, its evaluator, the approval resolver, the sandbox runtime and manifest: every capability a run uses passes through it ([security model](/docs/core-concepts/security-model)). |
+| Sandbox execution | One sandbox session per run, opened by the first command and closed with the run; the workspace bridged in before each command and back after ([execution](/docs/core-concepts/execution)). |
 
 Workspace storage is separate from memory storage. Memory stores conversation
 state. Workspace stores files. A project can use Redis for memory and local disk,

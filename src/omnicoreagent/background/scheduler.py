@@ -17,6 +17,7 @@ from omnicoreagent.background.models import (
 from omnicoreagent.background.run_helpers import build_run
 from omnicoreagent.background.store.base import AbstractTaskStore
 from omnicoreagent.governance.capabilities import background_run_authority_request
+from omnicoreagent.core.logging import logger
 from omnicoreagent.governance.errors import GovernanceError
 from omnicoreagent.governance.snapshots import (
     POLICY_SNAPSHOT_METADATA_KEY,
@@ -81,8 +82,12 @@ class BackgroundScheduleDispatcher:
                 )
                 try:
                     task, run = await self._authorize_scheduled_run(task=task, run=run)
-                except GovernanceError:
-                    await self.task_store.set_schedule_paused(task.task_id, True)
+                except GovernanceError as exc:
+                    # Refusing is right; doing it silently was not: the
+                    # steward's schedules stopped for hours with no trace.
+                    reason = f"Paused when due at {due_at.isoformat()}: {exc}"
+                    await self.task_store.set_schedule_paused(task.task_id, True, reason=reason)
+                    logger.warning(f"Background task {task.task_id!r} schedule paused. {reason}")
                     raise
                 existing_run_ids = {
                     item.run_id for item in await self.task_store.list_runs(task.task_id)

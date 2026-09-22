@@ -8,20 +8,22 @@ from omnicoreagent.core.agents import llm_step
 from omnicoreagent.core.agents.llm_step import AgentLlmStepRunner
 from omnicoreagent.core.telemetry import (
     ActorType,
+    CaptureState,
     InMemoryTelemetryStore,
+    TelemetryConfig,
     TelemetryActor,
     TelemetryRecorder,
 )
 from omnicoreagent.core.token_usage import Usage, UsageLimits
 from omnicoreagent.core.types import AgentState, Message, SessionState
-from omnicoreagent.core.agents.loop_detection import RobustLoopDetector
+from omnicoreagent.core.agents.loop_detection import NativeLoopDetector
 
 
 def make_session_state(messages=None):
     return SessionState(
         messages=messages or [Message(role="user", content="hello")],
         state=AgentState.IDLE,
-        loop_detector=RobustLoopDetector(debug=False),
+        loop_detector=NativeLoopDetector(),
         assistant_with_tool_calls=None,
         pending_tool_responses=[],
     )
@@ -62,10 +64,10 @@ async def test_llm_step_calls_model_and_records_usage(monkeypatch):
     monkeypatch.setattr(llm_step, "usage", Usage())
 
     class LlmConnection:
-        async def llm_call(self, messages):
+        async def llm_call(self, messages, tools=None):
             return {
                 "choices": [
-                    {"message": {"content": "<final_answer>done</final_answer>"}}
+                    {"message": {"content": "done"}}
                 ],
                 "usage": {
                     "prompt_tokens": 3,
@@ -82,7 +84,7 @@ async def test_llm_step_calls_model_and_records_usage(monkeypatch):
         session_id="chat1",
     )
 
-    assert result.response == "<final_answer>done</final_answer>"
+    assert result.response.text == "done"
     assert result.error_result is None
     assert run_usage.requests == 1
     assert run_usage.total_tokens == 7
@@ -94,11 +96,11 @@ async def test_llm_step_manages_context_before_model_call(monkeypatch):
     calls = []
 
     class LlmConnection:
-        async def llm_call(self, messages):
+        async def llm_call(self, messages, tools=None):
             calls.append(messages)
             if isinstance(messages[0], dict):
                 return "summary"
-            return "<final_answer>done</final_answer>"
+            return "done"
 
     session_state = make_session_state()
     result = await make_runner(TriggeringContextManager()).run(
@@ -108,7 +110,7 @@ async def test_llm_step_manages_context_before_model_call(monkeypatch):
         session_id="chat1",
     )
 
-    assert result.response == "<final_answer>done</final_answer>"
+    assert result.response.text == "done"
     assert session_state.messages == [Message(role="system", content="summary")]
     assert len(calls) == 2
 
@@ -126,10 +128,10 @@ async def test_llm_step_records_context_compression_telemetry(monkeypatch):
     )
 
     class LlmConnection:
-        async def llm_call(self, messages):
+        async def llm_call(self, messages, tools=None):
             if isinstance(messages[0], dict):
                 return "summary"
-            return "<final_answer>done</final_answer>"
+            return "done"
 
     session_state = make_session_state()
     result = await make_runner(TriggeringContextManager()).run(
@@ -142,7 +144,7 @@ async def test_llm_step_records_context_compression_telemetry(monkeypatch):
     await recorder.end_trace()
 
     trace = await store.get_trace(context.trace_id)
-    assert result.response == "<final_answer>done</final_answer>"
+    assert result.response.text == "done"
     assert session_state.messages == [Message(role="system", content="summary")]
     assert {span.kind for span in trace.spans} >= {
         "context.compression",
@@ -151,9 +153,105 @@ async def test_llm_step_records_context_compression_telemetry(monkeypatch):
     event = next(
         event for event in trace.events if event.event_type == "context_compression"
     )
-    assert event.input == {"message_count": 1}
-    assert event.output["message_count"] == 1
+    assert event.input["message_count"] == 1
+    assert event.input["context_digest"]
+    assert len(event.input["message_digests"]) == 1
+    assert event.output["before"]["message_count"] == 1
+    assert event.output["after"]["message_count"] == 1
+    assert len(event.output["dropped_message_digests"]) == 1
     assert event.output["stats"] == {"compressions": 1}
+    assembly = next(
+        event for event in trace.events if event.event_type == "context_assembly"
+    )
+    assert assembly.output["context_digest"]
+    assert assembly.output["message_count"] == 1
+    assert assembly.output["role_counts"] == {"system": 1}
+    assert sum(event.event_type == "model_call" for event in trace.events) == 2
+
+
+@pytest.mark.asyncio
+async def test_llm_step_context_capture_respects_prompt_policy(monkeypatch):
+    monkeypatch.setattr(llm_step, "usage", Usage())
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store, TelemetryConfig(record_model_prompts=True))
+    context = await recorder.start_trace(trace_id="trace-context-capture")
+
+    class LlmConnection:
+        async def llm_call(self, messages, tools=None):
+            return "done"
+
+    result = await make_runner().run(
+        session_state=make_session_state(),
+        llm_connection=LlmConnection(),
+        run_usage=Usage(),
+        session_id="chat-context",
+        telemetry_recorder=recorder,
+        tools=[
+            {
+                "type": "function",
+                "function": {"name": "lookup", "parameters": {"type": "object"}},
+            }
+        ],
+    )
+    await recorder.end_trace()
+
+    trace = await store.get_trace(context.trace_id)
+    assert result.response.text == "done"
+    # Each message and the tool catalog are recorded once per trace; the
+    # model call records which it was sent (telemetry storage plan, T1-T2).
+    (message,) = [e for e in trace.events if e.event_type == "context_message"]
+    assert message.input["message"]["content"] == "hello"
+    assert message.input_capture.state == CaptureState.AVAILABLE
+    (catalog,) = [e for e in trace.events if e.event_type == "context_tools"]
+    assert catalog.input["tools"][0]["function"]["name"] == "lookup"
+    model_call = next(span for span in trace.spans if span.kind == "model.call")
+    assert model_call.input["message_digests"] == [message.metadata["message_digest"]]
+    assembly = next(
+        event for event in trace.events if event.event_type == "context_assembly"
+    )
+    assert "messages" not in assembly.input and "message_digests" not in assembly.input
+    assert assembly.output["message_digests"] == [message.metadata["message_digest"]]
+
+
+@pytest.mark.asyncio
+async def test_llm_step_records_bounded_provider_stream_statistics(monkeypatch):
+    monkeypatch.setattr(llm_step, "usage", Usage())
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    context = await recorder.start_trace(trace_id="trace-stream-stats")
+    delivered = []
+
+    class LlmConnection:
+        async def llm_stream(self, messages, tools=None):
+            yield {"type": "text_delta", "text": "hello"}
+            yield {"type": "text_delta", "text": " world"}
+            yield {"type": "turn_complete", "turn": "hello world"}
+
+    async def on_event(event):
+        delivered.append(event)
+
+    result = await make_runner().run(
+        session_state=make_session_state(),
+        llm_connection=LlmConnection(),
+        run_usage=Usage(),
+        session_id="chat-stream",
+        telemetry_recorder=recorder,
+        on_event=on_event,
+    )
+    await recorder.end_trace()
+
+    trace = await store.get_trace(context.trace_id)
+    model_span = next(span for span in trace.spans if span.kind == "model.call")
+    model_call = next(event for event in trace.events if event.event_type == "model_call")
+    assert result.response.text == "hello world"
+    assert len(delivered) == 2
+    assert model_call.metadata["streaming"] is True
+    assert model_span.output["stream_stats"] == {
+        "streaming": True,
+        "delta_count": 2,
+        "visible_text_bytes": 11,
+        "event_types": {"text_delta": 2},
+    }
 
 
 @pytest.mark.asyncio
@@ -197,7 +295,9 @@ async def test_llm_step_records_usage_limit_as_resource_guard_halt(monkeypatch):
     assert result.response is None
     assert result.error_result["answer"].startswith("Usage limit error:")
     assert any(span.kind == "runtime.control" for span in trace.spans)
-    event = next(event for event in trace.events if event.event_type == "resource_guard_halt")
+    event = next(
+        event for event in trace.events if event.event_type == "resource_guard_halt"
+    )
     assert event.error.type == "UsageLimitExceeded"
 
 
@@ -206,7 +306,7 @@ async def test_llm_step_returns_model_error(monkeypatch):
     monkeypatch.setattr(llm_step, "usage", Usage())
 
     class LlmConnection:
-        async def llm_call(self, messages):
+        async def llm_call(self, messages, tools=None):
             raise RuntimeError("provider down")
 
     result = await make_runner().run(

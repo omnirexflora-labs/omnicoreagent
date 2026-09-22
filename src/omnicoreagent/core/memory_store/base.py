@@ -44,3 +44,52 @@ class AbstractMemoryStore(ABC):
     ) -> None:
         """Mark messages as summarized (inactive or delete based on policy)."""
         raise NotImplementedError
+
+    # --- run state (durable runs) ---------------------------------------
+    # Not abstract: a custom store without these keeps working, and its runs
+    # are simply not durable.
+
+    async def save_run_state(
+        self, record: dict, expected_version: int | None
+    ) -> int:
+        """Create (``expected_version=None``) or update a run record.
+
+        Returns the new version. Raises ``RunStateConflict`` if the record
+        exists on create, or its version is not ``expected_version`` on update.
+        """
+        from omnicoreagent.core.runs import RunStateUnsupported
+
+        raise RunStateUnsupported(type(self).__name__)
+
+    async def get_run_state(self, run_id: str) -> dict | None:
+        from omnicoreagent.core.runs import RunStateUnsupported
+
+        raise RunStateUnsupported(type(self).__name__)
+
+    async def list_run_states(
+        self, session_id: str | None = None, status: str | None = None, limit: int = 100
+    ) -> list[dict]:
+        from omnicoreagent.core.runs import RunStateUnsupported
+
+        raise RunStateUnsupported(type(self).__name__)
+
+    # --- budgets ---------------------------------------------------------
+
+    async def delete_budget_state(self, key: str) -> None:
+        """Remove one budget counter (a finished request's own)."""
+        from omnicoreagent.core.runs import RunStateUnsupported
+
+        raise RunStateUnsupported("This memory store keeps no budgets")
+
+    async def get_budget_state(self, key: str) -> dict | None:
+        from omnicoreagent.core.runs import RunStateUnsupported
+
+        raise RunStateUnsupported(type(self).__name__)
+
+    async def save_budget_state(self, state: dict, expected_version: int | None) -> int:
+        """Create or update a budget counter; the same versioned contract as
+        run state (``RunStateConflict`` when another writer got there first)."""
+        from omnicoreagent.core.runs import RunStateUnsupported
+
+        raise RunStateUnsupported(type(self).__name__)
+

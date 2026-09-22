@@ -1,116 +1,55 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from collections.abc import Callable
 from typing import Any
 
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
-from omnicoreagent.core.token_usage import Usage, usage
-from omnicoreagent.core.types import Message
-from omnicoreagent.core.agents.display import show_sub_agent_call_result
 from omnicoreagent.core.agents.subagent_helpers import (
+    accepts_run_id,
     build_kwargs,
-    build_sub_agents_observation_xml,
+    finish_delegation,
+    new_child_run_id,
     resolve_agent,
 )
 from omnicoreagent.core.logging import logger
 
 
 class SubAgentCallRunner:
-    """Execute model-requested sub-agent calls and append observations."""
+    """Execute one configured child with cleanup and telemetry."""
 
     def __init__(self, agent_name: str):
         self.agent_name = agent_name
 
-    async def execute(
-        self,
-        response: str,
-        agent_calls: list | str,
-        sub_agents: list,
-        session_id: str,
-        session_state: Any,
-        add_message_to_history: Callable[..., Any],
-        run_usage: Usage,
-        telemetry_recorder: Any = None,
-        debug: bool = False,
-    ):
-        agent_calls = self._normalize_agent_calls(agent_calls)
-        await self._record_assistant_call(
-            response=response,
-            agent_calls=agent_calls,
-            session_id=session_id,
-            session_state=session_state,
-            add_message_to_history=add_message_to_history,
-        )
-
-        logger.info(
-            f"Executing {len(agent_calls)} sub-agents with concurrent MCP connections..."
-        )
-        results = await asyncio.gather(
-            *[
-                self._execute_single_agent(
-                    call,
-                    sub_agents,
-                    session_id,
-                    telemetry_recorder=telemetry_recorder,
-                )
-                for call in agent_calls
-            ],
-            return_exceptions=True,
-        )
-
-        observations = await self._collect_observations(
-            results=results,
-            run_usage=run_usage,
-            session_id=session_id,
-            telemetry_recorder=telemetry_recorder,
-        )
-
-        await self._append_observation_block(
-            observations=observations,
-            agent_calls=agent_calls,
-            session_id=session_id,
-            session_state=session_state,
-            add_message_to_history=add_message_to_history,
-            debug=debug,
-        )
-
-    def _normalize_agent_calls(self, agent_calls: list | str) -> list[dict[str, Any]]:
-        if isinstance(agent_calls, str):
-            return json.loads(agent_calls)
-        return list(agent_calls)
-
-    async def _record_assistant_call(
-        self,
-        response: str,
-        agent_calls: list[dict[str, Any]],
-        session_id: str,
-        session_state: Any,
-        add_message_to_history: Callable[..., Any],
-    ):
-        await add_message_to_history(
-            role="assistant",
-            content=response,
-            metadata={"agent_calls": agent_calls},
-            session_id=session_id,
-        )
-        session_state.messages.append(Message(role="assistant", content=response))
-
-    async def _execute_single_agent(
+    async def run(
         self,
         call: dict[str, Any],
         sub_agents: list,
         session_id: str,
         telemetry_recorder: Any = None,
+        redact_parameters: bool = False,
     ) -> tuple[str, Any]:
         agent_name = call.get("agent")
         if not agent_name:
             raise ValueError("agent_call missing 'agent' field")
+        # Under governance delegation parameters are redacted in telemetry
+        # like any other tool arguments; the child still receives them.
+        recorded_parameters = (
+            {key: "[REDACTED]" for key in call.get("parameters", {})}
+            if redact_parameters
+            else call.get("parameters", {})
+        )
 
         span = None
         agent = None
         cleanup_attempted = False
+        parent_context = (
+            telemetry_recorder.current_context()
+            if telemetry_recorder is not None
+            else None
+        )
+        spawn_event_id = None
+        child_run_id = None
+        child_trace_id = None
         try:
             if telemetry_recorder is not None:
                 span = await telemetry_recorder.start_span(
@@ -120,21 +59,41 @@ class SubAgentCallRunner:
                     input={
                         "agent_name": agent_name,
                         "session_id": session_id,
-                        "parameters": call.get("parameters", {}),
+                        "parameters": recorded_parameters,
                     },
                 )
-                await telemetry_recorder.emit_event(
+            agent = resolve_agent(agent_name, sub_agents)
+            # The child's run id is assigned here so the delegation stays
+            # linked to the child trace on every terminal path.
+            child_run_id = new_child_run_id() if accepts_run_id(agent) else None
+            if telemetry_recorder is not None:
+                spawn_event = await telemetry_recorder.emit_event(
                     "subagent_spawn",
                     actor=TelemetryActor(type=ActorType.AGENT, name=agent_name),
                     input={
                         "agent_name": agent_name,
                         "session_id": session_id,
-                        "parameters": call.get("parameters", {}),
+                        "parameters": recorded_parameters,
+                    },
+                    metadata={
+                        "subagent_span_id": span.span_id,
+                        "parent_trace_id": (
+                            parent_context.trace_id if parent_context else None
+                        ),
+                        "parent_span_id": (
+                            parent_context.span_id if parent_context else None
+                        ),
+                        "child_run_id": child_run_id,
                     },
                 )
-            agent = resolve_agent(agent_name, sub_agents)
+                spawn_event_id = spawn_event.event_id
+                inherit_telemetry = getattr(agent, "_inherit_telemetry", None)
+                if callable(inherit_telemetry):
+                    inherit_telemetry(telemetry_recorder)
             params = dict(call.get("parameters", {}))
             params["session_id"] = session_id
+            if child_run_id is not None:
+                params["run_id"] = child_run_id
             kwargs = build_kwargs(agent, params)
 
             if hasattr(agent, "mcp_tools") and agent.mcp_tools:
@@ -145,19 +104,25 @@ class SubAgentCallRunner:
             result = await agent.run(**kwargs)
             cleanup_attempted = True
             await self._cleanup_agent(agent_name, agent)
-            if telemetry_recorder is not None:
-                await telemetry_recorder.emit_event(
-                    "subagent_result",
-                    actor=TelemetryActor(type=ActorType.AGENT, name=agent_name),
-                    input={"session_id": session_id, "agent_name": agent_name},
-                    output={"result": result},
-                )
-            if telemetry_recorder is not None and span is not None:
-                await telemetry_recorder.end_span(
-                    span.span_id,
-                    status=SpanStatus.OK,
-                    output={"agent_name": agent_name},
-                )
+            succeeded = (
+                not isinstance(result, dict)
+                or result.get("status", "success") == "success"
+            )
+            if isinstance(result, dict):
+                child_trace_id = result.get("trace_id")
+                child_run_id = result.get("run_id") or child_run_id
+            await finish_delegation(
+                telemetry_recorder,
+                span,
+                agent_name=agent_name,
+                session_id=session_id,
+                spawn_event_id=spawn_event_id,
+                parent_context=parent_context,
+                child_run_id=child_run_id,
+                child_trace_id=child_trace_id,
+                status=SpanStatus.OK if succeeded else SpanStatus.ERROR,
+                output={"result": result},
+            )
             return agent_name, result
 
         except asyncio.CancelledError as e:
@@ -170,19 +135,18 @@ class SubAgentCallRunner:
                         f"Failed to cleanup cancelled sub-agent {agent_name}: "
                         f"{cleanup_error}"
                     )
-            if telemetry_recorder is not None:
-                await telemetry_recorder.emit_event(
-                    "subagent_error",
-                    actor=TelemetryActor(type=ActorType.AGENT, name=agent_name),
-                    input={"session_id": session_id, "agent_name": agent_name},
-                    error={"type": e.__class__.__name__, "message": "cancelled"},
-                )
-            if telemetry_recorder is not None and span is not None:
-                await telemetry_recorder.end_span(
-                    span.span_id,
-                    status=SpanStatus.CANCELLED,
-                    error={"type": e.__class__.__name__, "message": "cancelled"},
-                )
+            await finish_delegation(
+                telemetry_recorder,
+                span,
+                agent_name=agent_name,
+                session_id=session_id,
+                spawn_event_id=spawn_event_id,
+                parent_context=parent_context,
+                child_run_id=child_run_id,
+                child_trace_id=child_trace_id,
+                status=SpanStatus.CANCELLED,
+                error={"type": e.__class__.__name__, "message": "cancelled"},
+            )
             raise
 
         except Exception as e:
@@ -195,19 +159,18 @@ class SubAgentCallRunner:
                         f"Failed to cleanup sub-agent {agent_name} after error: "
                         f"{cleanup_error}"
                     )
-            if telemetry_recorder is not None:
-                await telemetry_recorder.emit_event(
-                    "subagent_error",
-                    actor=TelemetryActor(type=ActorType.AGENT, name=agent_name),
-                    input={"session_id": session_id, "agent_name": agent_name},
-                    error={"type": e.__class__.__name__, "message": str(e)},
-                )
-            if telemetry_recorder is not None and span is not None:
-                await telemetry_recorder.end_span(
-                    span.span_id,
-                    status=SpanStatus.ERROR,
-                    error={"type": e.__class__.__name__, "message": str(e)},
-                )
+            await finish_delegation(
+                telemetry_recorder,
+                span,
+                agent_name=agent_name,
+                session_id=session_id,
+                spawn_event_id=spawn_event_id,
+                parent_context=parent_context,
+                child_run_id=child_run_id,
+                child_trace_id=child_trace_id,
+                status=SpanStatus.ERROR,
+                error={"type": e.__class__.__name__, "message": str(e)},
+            )
             return agent_name, e
 
     async def _cleanup_agent(self, agent_name: str, agent: Any) -> None:
@@ -219,118 +182,3 @@ class SubAgentCallRunner:
         except Exception as exc:
             logger.error(f"Failed to cleanup sub-agent {agent_name}: {exc}")
             raise
-
-    async def _collect_observations(
-        self,
-        results: list[Any],
-        run_usage: Usage,
-        session_id: str,
-        telemetry_recorder: Any = None,
-    ) -> list[dict[str, Any]]:
-        observations = []
-        for result in results:
-            if isinstance(result, asyncio.CancelledError):
-                raise result
-            if isinstance(result, BaseException):
-                logger.error(f"Unexpected top-level exception: {result}")
-                observations.append(
-                    {
-                        "agent_name": "unknown",
-                        "status": "error",
-                        "output": str(result),
-                    }
-                )
-                continue
-
-            agent_name, obs_data = result
-            if isinstance(obs_data, Exception):
-                observations.append(
-                    await self._handle_agent_error(
-                        agent_name=agent_name,
-                        error=obs_data,
-                        session_id=session_id,
-                        telemetry_recorder=telemetry_recorder,
-                    )
-                )
-                continue
-
-            observations.append(
-                await self._handle_agent_success(
-                    agent_name=agent_name,
-                    result=obs_data,
-                    session_id=session_id,
-                    run_usage=run_usage,
-                    telemetry_recorder=telemetry_recorder,
-                )
-            )
-        return observations
-
-    async def _handle_agent_error(
-        self,
-        agent_name: str,
-        error: Exception,
-        session_id: str,
-        telemetry_recorder: Any = None,
-    ) -> dict[str, Any]:
-        logger.error(f"Agent {agent_name} execution failed: {error}")
-        return {
-            "agent_name": agent_name,
-            "status": "error",
-            "output": str(error),
-        }
-
-    async def _handle_agent_success(
-        self,
-        agent_name: str,
-        result: Any,
-        session_id: str,
-        run_usage: Usage,
-        telemetry_recorder: Any = None,
-    ) -> dict[str, Any]:
-        output = self._extract_agent_output(result)
-        logger.info(f"Agent {agent_name} completed successfully")
-        if isinstance(result, dict):
-            sub_usage = result.get("metric")
-            if sub_usage and isinstance(sub_usage, Usage):
-                run_usage.incr(sub_usage)
-                usage.incr(sub_usage)
-
-        return {
-            "agent_name": agent_name,
-            "status": "success",
-            "output": output,
-        }
-
-    def _extract_agent_output(self, result: Any) -> str:
-        if isinstance(result, dict):
-            return result.get("response", result.get("output", str(result)))
-        if isinstance(result, str):
-            return result
-        return str(result)
-
-    async def _append_observation_block(
-        self,
-        observations: list[dict[str, Any]],
-        agent_calls: list[dict[str, Any]],
-        session_id: str,
-        session_state: Any,
-        add_message_to_history: Callable[..., Any],
-        debug: bool,
-    ):
-        xml_obs_block = build_sub_agents_observation_xml(observations)
-        agent_call_result = {
-            "agent_name": self.agent_name,
-            "agent_calls": agent_calls,
-            "output": observations,
-        }
-
-        if debug:
-            show_sub_agent_call_result(agent_call_result)
-
-        session_state.messages.append(Message(role="user", content=xml_obs_block))
-        await add_message_to_history(
-            role="user",
-            content=xml_obs_block,
-            session_id=session_id,
-            metadata={"agent_name": self.agent_name, "sub_agent_results": True},
-        )

@@ -1,6 +1,75 @@
 # Changelog
 
+## Unreleased — native tool runtime
+
+- Exclude governance decision IDs and configured-child accounting from loop
+  comparisons while retaining those fields in history. Expand live validation
+  across non-MCP native execution, memory/context, skills and artifact readback.
+
+- Remove executor/governance history callbacks and redundant redaction/JSON
+  round-trips. The native runtime writes each guarded/offloaded result once.
+  Decode native arguments once; preserve ordinary dictionaries with data/message
+  keys instead of guessing they are result envelopes.
+
+- Detect native tool loops across complete rounds with concrete provider/server
+  identities. Ignore execution order and generated IDs, retain changing sibling
+  results as progress, and halt repeated invalid or unavailable calls consistently.
+
+- Remove the unused legacy tool resolver, obsolete control types and unused default
+  config wrapper. Add a concurrency regression test and installed-MCP diagnostic;
+  reopen integration gates for the SDK incompatibilities documented in the audit.
+
+- Breaking: remove Cencori from supported providers and delete its dedicated SDK
+  adapter. Existing Cencori configurations now fail validation; all supported
+  providers use LiteLLM. Remove the unused direct OpenAI SDK dependency.
+
+- Route production OpenAI async, sync and streaming calls through current LiteLLM;
+  remove the temporary direct-SDK workaround and test-only routing shim. Pass API
+  keys per connection and keep retry ownership at the runtime boundary.
+
+- Refresh direct, optional, development and build dependencies to the September 14,
+  2026 stable-release baseline; regenerate the complete dependency lock. OpenAI
+  SDK stays on 2.54.0 because LiteLLM 1.100.1 requires `<3.0.0`.
+- Breaking: require Python 3.12–3.14 to support the new dependency baseline,
+  including NumPy 2.5.3. Development and CI continue to use Python 3.12.
+- Install all project extras and development groups in CI, key environment caches
+  by `uv.lock`, and make the existing Ruff rules explicit across default changes.
+
+- Replace XML control with native function calls, strict JSON argument schemas,
+  stable provider call IDs and correlated JSON tool results. XML task content is
+  ordinary text and is never executable control syntax.
+- Add live provider, Python agent and SSE text streaming using the shared loop;
+  bounded queues, child actor identity and cancellation close upstream streams.
+- Remove the obsolete XML parsers/observation executors, unused summary-memory
+  constructor prompt/export, and global tool index.
+  Discovery now unlocks schemas for the next turn in an isolated per-run catalog.
+- Keep complete tool interactions together through context selection and history;
+  retain historical XML sessions as data. History loading failures now surface.
+- Return explicit success/error termination status through serving and background
+  outcomes. Dynamic spawn accepts a `subagents` array, replacing `subagents_json`.
+- Breaking: removed RouterAgent, ParallelAgent and SequentialAgent APIs, examples
+  and documentation, with no fallback. Normal, deep and background runs remain.
+
+
+
 All notable changes to this project will be documented in this file.
+
+## [Unreleased]
+
+### Fixed
+- Conversation history now accepts tool, summary, delegation, and custom metadata
+  without dropping prior turns. Reconstructed tool batches exclude orphan and
+  duplicate results and retain their call identifiers.
+
+### Changed
+- Agent execution now uses native tool calls and plain final text. XML-looking text
+  is task content. Tool call IDs and typed JSON arguments survive execution/history.
+- Dynamic spawning accepts a `subagents` array, replacing `subagents_json`.
+
+### Removed
+- **Breaking change:** Deleted `RouterAgent`, `ParallelAgent`, and `SequentialAgent`,
+  including their package exports, examples, and documentation. These APIs have no
+  compatibility aliases or fallback implementations.
 
 ## [0.1.18] - 2025-06-19
 

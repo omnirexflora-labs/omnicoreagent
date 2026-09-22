@@ -21,6 +21,7 @@ class ReadinessState:
     agent_name: str
     initialized: bool
     mcp_connected: bool
+    mcp_servers: dict[str, dict[str, Any]]
 
 
 def evaluate_readiness(request: Request) -> ReadinessState:
@@ -37,7 +38,20 @@ def evaluate_readiness(request: Request) -> ReadinessState:
         agent_name=get_agent_name(agent),
         initialized=initialized,
         mcp_connected=mcp_connected,
+        mcp_servers=_mcp_servers(agent),
     )
+
+
+def _mcp_servers(agent: AgentType) -> dict[str, dict[str, Any]]:
+    """Each configured MCP server's status, so a partial failure is visible."""
+    mcp_client = getattr(agent, "mcp_client", None)
+    server_status = getattr(mcp_client, "server_status", None)
+    if not callable(server_status):
+        return {}
+    return {
+        status["name"]: {"status": status["status"], "error": status.get("error")}
+        for status in server_status()
+    }
 
 
 def _agent_initialized(agent: AgentType) -> bool:

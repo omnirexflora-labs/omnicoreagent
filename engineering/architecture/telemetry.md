@@ -15,6 +15,16 @@ Background run lifecycle evidence is the one runtime adapter exception:
 `BackgroundEventLog` writes normalized background events and spans directly to
 `TelemetryStore` because it owns background event ordering and workspace mirrors.
 
+`OmniCoreEvidenceAdapter` is the evaluator-facing import boundary. It consumes
+normalized traces without changing runtime facts. A generic adapter fixture
+proves that an external trajectory can be mapped into the same portable view;
+controlled Harbor integration and evaluation judgments remain separate layers.
+
+Telemetry event copies used for replay and follow may include a store-local
+`stream_cursor`. OmniServe emits that position as the SSE `id` field and accepts
+it through `cursor` or `Last-Event-ID` on reconnect. The cursor is transport
+state; stable evidence references remain `event_id`, `span_id`, and `trace_id`.
+
 ## Purpose
 
 OmniCoreAgent telemetry exists to:
@@ -175,6 +185,14 @@ The foundation phase provides:
 - JSONL telemetry storage
 - `TelemetryStream`
 - deterministic trace normalization
+- versioned capture descriptors, context digests, causal tool/observation links,
+  and portable evidence adapters
+- bounded provider stream statistics on `model.call` spans, including partial
+  stream terminal states without token-by-token payload capture
+- standalone JSON evidence envelope and schema validation independent of
+  internal telemetry model classes
+- bounded persistence and exporter delivery with visible best-effort failures
+  and strict opt-in propagation
 - runtime evidence emission helpers
 
 The runtime facade wiring phase provides:
@@ -253,6 +271,8 @@ Use separate identifiers for separate concerns:
 | `trace_id` | Telemetry execution id. Primary key for one trace. |
 | `span_id` | Timed operation id inside a trace. |
 | `event_id` | Point-in-time evidence id. |
+| `parent_trace_id` | Trace that created this child trace, when applicable. |
+| `parent_span_id` | Span in the parent trace that created this child trace, when applicable. |
 | `run_id` | Runtime/background run id. |
 | `session_id` | Conversation continuity id. |
 | `task_id` | Background/evaluation task id when present. |

@@ -141,6 +141,9 @@ class OmniServeConfig(BaseModel):
     # API settings
     api_prefix: str = Field(default="", description="API path prefix (e.g., '/api/v1')")
     enable_docs: bool = Field(default=True, description="Enable Swagger UI at /docs")
+    # Paths the application serves without a token (its pages): exact paths,
+    # or a directory with a trailing "/*".
+    public_paths: list[str] = Field(default_factory=list, description="Paths that need no token")
     enable_redoc: bool = Field(default=True, description="Enable ReDoc at /redoc")
 
     # CORS settings

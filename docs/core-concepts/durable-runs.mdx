@@ -1,0 +1,180 @@
+---
+title: "Durable Runs"
+description: "Every run's record, and runs that pause for a person's approval and resume"
+---
+
+# Durable Runs
+
+Every `agent.run(...)` keeps a record in the memory store you chose (in
+memory, SQL, Redis, or MongoDB). Nothing else to configure: with a durable
+memory store, the record survives a restart. The in-memory store is for
+development.
+
+## A run's record
+
+```python
+result = await agent.run("tidy the reports folder", session_id="s1")
+run = await agent.get_run(result["run_id"])
+runs = await agent.list_runs(session_id="s1")
+```
+
+A record holds the run's status (`running`, `awaiting_approval`, `completed`,
+`failed`, `blocked`, `cancelled`), step, token usage, trace IDs, approvals,
+and every tool call with its state: `started` before it runs, then
+`completed`, or `interrupted` when it was cancelled or timed out (its effect is
+unknown). Tool arguments are recorded as a digest.
+
+A record belongs to one request. Requests in the same session keep separate
+records, and each run keeps its own working context (the history it started
+from and its own messages), so nothing another request does changes it.
+
+## Approval: pause and resume
+
+With governance enabled, a policy rule can ask for approval. When nothing
+answers in the moment, the run pauses: the other calls in that step finish,
+nothing unapproved runs, and `run()` returns the approvals it waits for.
+
+```python
+result = await agent.run("clean up the old reports", session_id="s1")
+if result["status"] == "awaiting_approval":
+    for approval in result["approvals"]:
+        print(approval["tool_name"], approval["arguments"], approval["reason"])
+```
+
+An ask can also come from inside a tool call — the sandbox's network when a
+run's session opens, a command inside it, a delegation, a worker's own ask —
+and pauses the run the same way, recorded against the call that needed it
+([sub-agents](/docs/core-concepts/sub-agents) for how a worker's asks reach
+its lead).
+
+A person decides each approval, then the run continues:
+
+```python
+await agent.resolve_approval(run_id, approval_id, decision="approve", approver="alice")
+# or deny with a note the model will see:
+await agent.resolve_approval(run_id, approval_id, decision="deny", approver="bob",
+                             note="archive them instead")
+# or approve an edited call instead of the one asked for:
+await agent.resolve_approval(run_id, approval_id, decision="approve", approver="alice",
+                             arguments={"path": "reports/2024/"})
+
+result = await agent.resume(run_id)
+```
+
+- A decision applies to the exact request it was made for (the capability,
+  target, tool, and arguments), once. Approving `delete a.txt` cannot
+  authorize `delete b.txt`.
+- Approvals expire (the policy's `approval_expires_seconds`, or 24 hours).
+- Each pause and resume is its own trace segment, linked by the run ID, with
+  `run_suspended` and `run_resumed` events.
+- To refuse unanswered asks instead of pausing, set
+  `governance_config={"approval_mode": "fail", ...}`. An application
+  `approval_resolver` still answers asks in the moment, as before.
+
+Over OmniServe, the same flow is `POST /run/sync` (or `/run`), then
+`POST /runs/{run_id}/approvals/{approval_id}` and `POST /runs/{run_id}/resume`
+(see [OmniServe](/docs/how-to-guides/omniserve)).
+
+## Recovering a run after a crash
+
+A live run refreshes a heartbeat on its record. If its process dies (a crash,
+a deploy, a killed container), the record stays `running` with an old
+heartbeat. Once the heartbeat is older than `run_lease_seconds` (default 60),
+any process with the same memory store can continue it:
+
+```python
+result = await agent.resume(run_id)
+# or run again with the same run ID, as background recovery does:
+result = await agent.run(query, session_id=session_id, run_id=run_id)
+```
+
+- Completed tool calls never run again; their results are in the run's context.
+- A call that never started runs.
+- A call that started but never finished may or may not have taken effect. It
+  runs again only if its tool is idempotent; otherwise the model is told its
+  outcome is unknown and decides what to do.
+- A run whose heartbeat is current is refused: it is still running elsewhere.
+  Only one process can take a run over (saves are versioned).
+
+Declare a tool idempotent when running it twice with the same arguments has no
+further effect:
+
+```python
+@tools.register_tool("get_invoice", description="Fetch an invoice.", idempotent=True)
+def get_invoice(invoice_id: str) -> dict: ...
+```
+
+Built-in reads (workspace files, artifacts, skill files) are idempotent. An MCP
+tool is idempotent when its server marks it `readOnlyHint` or `idempotentHint`.
+
+Running a finished or failed run ID again starts a new attempt on the same
+record; the record keeps a summary of the earlier attempts. For background
+agents, keep `run_lease_seconds` at or below the background lease so a
+recovered background run is not refused as still running.
+
+## Steering and interrupting a run
+
+Send a running run a message; it arrives as a user message at the run's next
+step boundary (never in the middle of a model or tool call):
+
+```python
+await agent.steer(run_id, "also include the Q3 numbers", sender="alice")
+```
+
+A steering message is user input: the injection guardrail checks it before it
+is queued, and a blocked message never reaches the run. It is recorded in the
+run's history (`kind: "steering"`) and trace (`run_steered`). A message sent to
+a run that is waiting for approval or interrupted is delivered when it resumes.
+Only callers of your application can steer a run; tool output never can.
+
+Stop a run at its next step boundary, and continue it later:
+
+```python
+await agent.interrupt(run_id)       # the run returns status "interrupted"
+result = await agent.resume(run_id)
+```
+
+Unlike cancelling, an interrupted run keeps everything it has done.
+
+## Sandboxes across a pause
+
+A run that waits for approval, is interrupted, or loses its process does not
+keep its sandbox container. Workspace files are safe (they are copied back to
+the workspace after every command). When the run resumes, it gets a fresh
+sandbox with the workspace files, and the model is told the sandbox was reset:
+files outside the workspace, installed packages, and running processes are
+gone.
+
+## Background runs
+
+A background run whose agent pauses for approval goes to `awaiting_approval`
+(not `completed`): it keeps no worker lease and still holds its task's slot.
+After the approvals are decided, queue it again; the next attempt continues
+the same run:
+
+```python
+await agent.resolve_approval(run.run_id, approval_id, decision="approve", approver="alice")
+await manager.resume_run(run.run_id)
+```
+
+A background run whose agent pauses because a budget ran out goes to
+`awaiting_budget` the same way (`background_run_awaiting_budget`); after a
+top-up (`agent.grant_budget`, or `POST /runs/{run_id}/budget`), queue it
+again with `resume_run` or `POST /background/runs/{run_id}/resume`. What
+every budget covering a run has spent — the run's own, its session's, its
+agent's, the application's — is `agent.budget_status(run_id)` or
+`GET /runs/{run_id}/budget`.
+
+Over OmniServe: `POST /background/runs/{run_id}/resume`. Cancelling a waiting
+background run works as for a queued one.
+
+## One story per run
+
+Each pause, resume, recovery, or retry is its own trace segment. Read the whole
+run at once:
+
+```python
+story = await agent.get_run_trajectory(run_id)
+# story["segments"]: each segment's trajectory, in order
+# story["totals"]: summed across segments (each tool call counted once)
+```

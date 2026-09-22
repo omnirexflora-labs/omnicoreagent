@@ -1,0 +1,248 @@
+.github/workflows/python-app.yml:130:    #   Asserts error contains 'Response must use XML format' but actual message
+.github/workflows/python-app.yml:131:    #   was changed to 'PARSE ERROR: Response does not use required XML format...'.
+README.md:377:| XML tool-call contract | `core/agents/xml_parser.py` |
+docs/core-concepts/agent-harness.mdx:64:| **Custom tool-call contract** | XML tool calls, final answers, single tool calls, multi-tool calls, and agent calls are parsed consistently. | `src/omnicoreagent/core/agents/xml_parser.py` |
+docs/core-concepts/agent-harness.mdx:91:5. Parse XML response
+src/omnicoreagent/core/agents/base.py:44:from omnicoreagent.core.agents.xml_parser import (
+src/omnicoreagent/core/agents/base.py:193:        """Parse LLM response to extract a final answer, tool call, or agent call using XML format only."""
+src/omnicoreagent/core/agents/base.py:295:        3. Formats results into proper XML observations
+src/omnicoreagent/core/agents/message_history.py:78:        return stripped.startswith("<observations>") or stripped.startswith(
+src/omnicoreagent/core/agents/subagent_helpers.py:32:def build_sub_agents_observation_xml(observations: list[dict]) -> str:
+src/omnicoreagent/core/agents/subagent_helpers.py:33:    xml_lines = [
+src/omnicoreagent/core/agents/subagent_helpers.py:35:        "<observations>",
+src/omnicoreagent/core/agents/subagent_helpers.py:43:        xml_lines.append("  <observation>")
+src/omnicoreagent/core/agents/subagent_helpers.py:44:        xml_lines.append(f"    <agent_name>{agent_name}</agent_name>")
+src/omnicoreagent/core/agents/subagent_helpers.py:45:        xml_lines.append(f"    <status>{status}</status>")
+src/omnicoreagent/core/agents/subagent_helpers.py:48:            xml_lines.append(f"    <e>{output}</e>")
+src/omnicoreagent/core/agents/subagent_helpers.py:50:            xml_lines.append(f"    <o>{output}</o>")
+src/omnicoreagent/core/agents/subagent_helpers.py:52:        xml_lines.append("  </observation>")
+src/omnicoreagent/core/agents/subagent_helpers.py:54:    xml_lines.append("</observations>")
+src/omnicoreagent/core/agents/subagent_helpers.py:55:    xml_lines.append("END OF OBSERVATIONS")
+src/omnicoreagent/core/agents/subagent_helpers.py:56:    return "\n".join(xml_lines)
+src/omnicoreagent/core/agents/subagent_runner.py:14:    build_sub_agents_observation_xml,
+src/omnicoreagent/core/agents/subagent_runner.py:320:        xml_obs_block = build_sub_agents_observation_xml(observations)
+src/omnicoreagent/core/agents/subagent_runner.py:330:        session_state.messages.append(Message(role="user", content=xml_obs_block))
+src/omnicoreagent/core/agents/subagent_runner.py:333:            content=xml_obs_block,
+src/omnicoreagent/core/agents/xml_parser.py:14:    """Parse the agent XML response into the next runtime action."""
+src/omnicoreagent/core/agents/xml_parser.py:51:            r"<final_answer>(.*?)</final_answer>", response, re.DOTALL
+src/omnicoreagent/core/agents/xml_parser.py:57:            return ParsedResponse(error=_xml_shape_error(response))
+src/omnicoreagent/core/agents/xml_parser.py:59:        return ParsedResponse(error=_missing_xml_error(response))
+src/omnicoreagent/core/agents/xml_parser.py:157:def _xml_shape_error(response: str) -> str:
+src/omnicoreagent/core/agents/xml_parser.py:159:        f"PARSE ERROR: Response contains XML but violates the required format.\n\n"
+src/omnicoreagent/core/agents/xml_parser.py:166:        f"     <final_answer>The finding is...</final_answer>\n\n"
+src/omnicoreagent/core/agents/xml_parser.py:168:        f"     <tool_call>\n"
+src/omnicoreagent/core/agents/xml_parser.py:173:        f"     <tool_calls>\n"
+src/omnicoreagent/core/agents/xml_parser.py:174:        f"       <tool_call>\n"
+src/omnicoreagent/core/agents/xml_parser.py:178:        f"       <tool_call>\n"
+src/omnicoreagent/core/agents/xml_parser.py:186:        f"- Do not use markdown code blocks ```xml ... ``` around the tags."
+src/omnicoreagent/core/agents/xml_parser.py:190:def _missing_xml_error(response: str) -> str:
+src/omnicoreagent/core/agents/xml_parser.py:192:        f"PARSE ERROR: Response does not use required XML format.\n\n"
+src/omnicoreagent/core/agents/xml_parser.py:199:        f"     <final_answer>The finding is...</final_answer>\n\n"
+src/omnicoreagent/core/agents/xml_parser.py:201:        f"     <tool_call>\n"
+src/omnicoreagent/core/agents/xml_parser.py:206:        f"     <tool_calls>\n"
+src/omnicoreagent/core/agents/xml_parser.py:207:        f"       <tool_call>\n"
+src/omnicoreagent/core/agents/xml_parser.py:211:        f"       <tool_call>\n"
+src/omnicoreagent/core/guardrails/engine.py:641:        if any(x in flag_str for x in ["delimiter", "boundary", "xml", "html"]):
+src/omnicoreagent/core/skills/manager.py:8:- Generating XML context for agent prompts
+src/omnicoreagent/core/skills/manager.py:25:        xml_context = manager.get_skills_context_xml()
+src/omnicoreagent/core/skills/manager.py:116:    def get_skills_context_xml(self) -> str:
+src/omnicoreagent/core/skills/manager.py:118:        Generate XML representation of available skills for agent context.
+src/omnicoreagent/core/skills/manager.py:124:            XML string with skill names and descriptions.
+src/omnicoreagent/core/system_prompts/base.py:6:    <critical>Response structure uses XML tags. Content format depends on the tag type.</critical>
+src/omnicoreagent/core/system_prompts/base.py:9:      <rule>Tool calls wrapped in <tool_call> or <tool_calls> tags with structured XML parameters</rule>
+src/omnicoreagent/core/system_prompts/base.py:10:      <rule>Tool outputs appear in <observations> tags as structured XML</rule>
+src/omnicoreagent/core/system_prompts/base.py:11:      <rule>Final response in <final_answer> tags - content in Markdown only</rule>
+src/omnicoreagent/core/system_prompts/base.py:12:      <rule>Every response must use these XML tag structures</rule>
+src/omnicoreagent/core/system_prompts/base.py:16:      <rule><tool_call>, <tool_calls>, and <parameters>: XML structure with proper data types</rule>
+src/omnicoreagent/core/system_prompts/base.py:17:      <rule><final_answer> tag content: Markdown format ONLY - never use XML inside</rule>
+src/omnicoreagent/core/system_prompts/base.py:29:      These appear as additional XML blocks following this prompt.
+src/omnicoreagent/core/system_prompts/base.py:35:      <rule>All extensions must comply with XML format and ReAct pattern</rule>
+src/omnicoreagent/core/system_prompts/base.py:48:      <step>In <final_answer>: never mention memory checks - just use the information</step>
+src/omnicoreagent/core/system_prompts/base.py:61:      <tool_call>Execute tool in XML format</tool_call>
+src/omnicoreagent/core/system_prompts/base.py:63:      <observations>
+src/omnicoreagent/core/system_prompts/base.py:64:        Tool outputs appear here as structured XML.
+src/omnicoreagent/core/system_prompts/base.py:69:    <step5>When sufficient info: output <final_answer></step5>
+src/omnicoreagent/core/system_prompts/base.py:75:    <critical>XML tags are for STRUCTURE only. Parameter VALUES must match the data types specified in AVAILABLE TOOLS REGISTRY.</critical>
+src/omnicoreagent/core/system_prompts/base.py:84:    <rule>NEVER use XML tags inside parameter values - only JSON-compatible types</rule>
+src/omnicoreagent/core/system_prompts/base.py:88:    <tool_call>
+src/omnicoreagent/core/system_prompts/base.py:99:      <rule>Prefer <tool_calls> when you need multiple independent tool results and none of the calls depends on another call's output</rule>
+src/omnicoreagent/core/system_prompts/base.py:104:    <tool_calls>
+src/omnicoreagent/core/system_prompts/base.py:105:      <tool_call>
+src/omnicoreagent/core/system_prompts/base.py:111:      <tool_call>
+src/omnicoreagent/core/system_prompts/base.py:123:    <rule>When independent tools can run without waiting on each other's results, call them together inside <tool_calls></rule>
+src/omnicoreagent/core/system_prompts/base.py:136:    <final_answer>The capital of France is Paris.</final_answer>
+src/omnicoreagent/core/system_prompts/base.py:141:    <tool_call>
+src/omnicoreagent/core/system_prompts/base.py:149:    <final_answer>Your account balance is $1,000.</final_answer>
+src/omnicoreagent/core/system_prompts/base.py:154:    <tool_calls>
+src/omnicoreagent/core/system_prompts/base.py:155:      <tool_call>
+src/omnicoreagent/core/system_prompts/base.py:161:      <tool_call>
+src/omnicoreagent/core/system_prompts/base.py:170:    <final_answer>It's 72°F and sunny in New York - perfect for hiking or a park visit.</final_answer>
+src/omnicoreagent/core/system_prompts/base.py:175:    <tool_call>
+src/omnicoreagent/core/system_prompts/base.py:183:    <final_answer>Successfully processed 2 items.</final_answer>
+src/omnicoreagent/core/system_prompts/base.py:188:    <tool_call>
+src/omnicoreagent/core/system_prompts/base.py:196:    <final_answer>Retrieved contents from both files.</final_answer>
+src/omnicoreagent/core/system_prompts/base.py:213:  <final_answer_section>
+src/omnicoreagent/core/system_prompts/base.py:215:    <format>Markdown content ONLY inside <final_answer> tags - never XML</format>
+src/omnicoreagent/core/system_prompts/base.py:221:      <item>XML tags of any kind</item>
+src/omnicoreagent/core/system_prompts/base.py:228:    <standard>Use XML tags for response structure (thought, tool_call/tool_calls, final_answer)</standard>
+src/omnicoreagent/core/system_prompts/base.py:230:    <standard>Use XML structure for tool_call parameters only</standard>
+src/omnicoreagent/core/system_prompts/builder.py:73:            skills_context = self.skill_manager.get_skills_context_xml()
+src/omnicoreagent/core/system_prompts/extensions.py:56:      <tool_call>
+src/omnicoreagent/core/system_prompts/extensions.py:76:      <rule>Invoke one registered worker with <agent_call>.</rule>
+src/omnicoreagent/core/system_prompts/extensions.py:77:      <rule>Invoke multiple independent registered workers with <agent_calls>.</rule>
+src/omnicoreagent/core/system_prompts/extensions.py:83:      <agent_call>
+src/omnicoreagent/core/system_prompts/extensions.py:237:          <tool_call>
+src/omnicoreagent/core/system_prompts/extensions.py:259:          <tool_call>
+src/omnicoreagent/core/system_prompts/extensions.py:273:          <tool_calls>
+src/omnicoreagent/core/system_prompts/extensions.py:274:            <tool_call>
+src/omnicoreagent/core/system_prompts/extensions.py:280:            <tool_call>
+src/omnicoreagent/core/system_prompts/extensions.py:303:          <tool_call>
+src/omnicoreagent/core/system_prompts/extensions.py:426:        <tool_call>
+src/omnicoreagent/core/system_prompts/extensions.py:437:        <tool_call>
+src/omnicoreagent/core/system_prompts/extensions.py:492:      <tool_call>
+src/omnicoreagent/core/system_prompts/extensions.py:612:      <tool_call>
+src/omnicoreagent/core/system_prompts/extensions.py:624:      <tool_call>
+src/omnicoreagent/core/tools/observations.py:6:def build_xml_observations_block(tools_results):
+src/omnicoreagent/core/tools/observations.py:8:        return "<observations></observations>"
+src/omnicoreagent/core/tools/observations.py:10:    lines = ["<observations>"]
+src/omnicoreagent/core/tools/tool_call_resolver.py:30:                f"   <tool_call><tool_name>{tool_name}</tool_name><parameters>...</parameters></tool_call>\n\n"
+src/omnicoreagent/core/tools/tool_call_resolver.py:32:                f"   <agent_call><agent_name>{tool_name}</agent_name><parameters>...</parameters></agent_call>\n\n"
+src/omnicoreagent/core/tools/tool_call_resolver.py:35:                f"2. Retry using <agent_call> with <agent_name> tags\n"
+src/omnicoreagent/core/tools/tool_failure_handler.py:177:                "3. Use <final_answer>Your response here</final_answer> format\n"
+src/omnicoreagent/core/tools/tool_failure_handler.py:180:                "\nYou MUST respond with <final_answer> tags now.\n"
+src/omnicoreagent/core/tools/tool_observation.py:14:from omnicoreagent.core.tools.observations import build_xml_observations_block
+src/omnicoreagent/core/tools/tool_observation.py:72:        xml_obs_block = build_xml_observations_block(scrubbed_results)
+src/omnicoreagent/core/tools/tool_observation.py:76:                content=xml_obs_block,
+src/omnicoreagent/core/tools/tool_observation.py:81:            content=xml_obs_block,
+src/omnicoreagent/core/tools/tool_observation.py:91:        return xml_obs_block
+src/omnicoreagent/core/workspace/artifacts.py:295:        if content_stripped.startswith("<?xml") or content_stripped.startswith("<"):
+src/omnicoreagent/core/workspace/artifacts.py:296:            return ".xml"
+src/omnicoreagent/core/workspace/artifacts.py:316:        for ext in [".txt", ".json", ".xml"]:
+src/omnicoreagent/workflows/router_agent.py:11:    Routes a task to the most suitable sub-agent using XML-based LLM decisions.
+src/omnicoreagent/workflows/router_agent.py:116:    - Do not include any formatting or XML, just plain text.
+src/omnicoreagent/workflows/router_agent.py:238:        """Use RouterCAgent OmniCoreAgent to pick the agent via XML decision."""
+src/omnicoreagent/workflows/router_agent.py:243:        """Construct XML-based system instruction for routing decisions with agent capabilities."""
+src/omnicoreagent/workflows/router_agent.py:259:    - ALWAYS output valid XML.
+src/omnicoreagent/workflows/router_agent.py:260:    - You MUST use <thought> and <final_answer> tags for all responses.
+src/omnicoreagent/workflows/router_agent.py:262:    - Inside <final_answer>, wrap your decision in <routing>...</routing>.
+src/omnicoreagent/workflows/router_agent.py:263:        - <routing> must contain exactly one <agent> (the name only).
+src/omnicoreagent/workflows/router_agent.py:265:    - Do not include anything outside <thought> and <final_answer>.
+src/omnicoreagent/workflows/router_agent.py:272:    <final_answer>
+src/omnicoreagent/workflows/router_agent.py:273:        <routing>
+tests/test_agent_tool_action.py:87:        response="<tool_call />",
+tests/test_agent_tool_action.py:139:        response="<tool_call />",
+tests/test_base.py:21:    response = "<final_answer>It is sunny today.</final_answer>"
+tests/test_base.py:28:    response = '<tool_call><tool_name>search</tool_name><parameters>{"input": "news"}</parameters></tool_call>'
+tests/test_base.py:43:    assert "<tool_calls>" in result.error
+tests/test_base.py:84:        response="<tool_call><tool_name>search_and_read</tool_name></tool_call>",
+tests/test_base.py:154:        response="<tool_calls>...</tool_calls>",
+tests/test_base.py:235:<tool_call>
+tests/test_base.py:242:            return "<final_answer>done</final_answer>"
+tests/test_llm_step.py:68:                    {"message": {"content": "<final_answer>done</final_answer>"}}
+tests/test_llm_step.py:85:    assert result.response == "<final_answer>done</final_answer>"
+tests/test_llm_step.py:101:            return "<final_answer>done</final_answer>"
+tests/test_llm_step.py:111:    assert result.response == "<final_answer>done</final_answer>"
+tests/test_llm_step.py:132:            return "<final_answer>done</final_answer>"
+tests/test_llm_step.py:145:    assert result.response == "<final_answer>done</final_answer>"
+tests/test_loop_step.py:78:        response="<final_answer>done</final_answer>",
+tests/test_loop_step.py:110:        response="<agent_calls />",
+tests/test_loop_step.py:143:        response="<tool_calls />",
+tests/test_loop_step.py:172:        parsed_response=ParsedResponse(error="Response must use XML format."),
+tests/test_loop_step.py:187:    assert session_state.messages[-1].content == "Response must use XML format."
+tests/test_loop_step.py:199:        response="<tool_calls />",
+tests/test_loop_telemetry_instrumentation.py:61:<tool_calls>
+tests/test_loop_telemetry_instrumentation.py:62:  <tool_call>
+tests/test_loop_telemetry_instrumentation.py:66:  <tool_call>
+tests/test_loop_telemetry_instrumentation.py:72:            return "<final_answer>done</final_answer>"
+tests/test_message_history.py:55:                role="user", content="<observations><tool>old</tool></observations>"
+tests/test_message_history.py:81:                    "<observations><observation>old</observation></observations>\n"
+tests/test_message_history.py:176:            Message(role="assistant", content="<tool_calls />", metadata=tool_metadata),
+tests/test_message_history.py:222:            Message(role="assistant", content="<tool_calls />", metadata=tool_metadata),
+tests/test_message_history.py:261:            Message(role="assistant", content="<tool_calls />", metadata=tool_metadata),
+tests/test_omniserve_production_validation.py:92:<tool_calls>
+tests/test_omniserve_production_validation.py:93:  <tool_call>
+tests/test_omniserve_production_validation.py:97:  <tool_call>
+tests/test_omniserve_production_validation.py:101:  <tool_call>
+tests/test_omniserve_production_validation.py:113:<tool_calls>
+tests/test_omniserve_production_validation.py:114:  <tool_call>
+tests/test_omniserve_production_validation.py:118:  <tool_call>
+tests/test_omniserve_production_validation.py:128:<final_answer>Support plan ready: explain the delay, share timeline, and route the medium escalation.</final_answer>
+tests/test_omniserve_production_validation.py:136:        return "<final_answer>Production validation memory response stored.</final_answer>"
+tests/test_prompt_context.py:10:    def get_skills_context_xml(self):
+tests/test_prompt_context.py:58:    assert "<tool_call_1>" not in prompt
+tests/test_prompt_context.py:95:    assert "<agent_call>" not in prompt
+tests/test_prompt_context.py:143:    assert "<agent_call>" in prompt
+tests/test_real_application_examples.py:121:<tool_calls>
+tests/test_real_application_examples.py:122:  <tool_call>
+tests/test_real_application_examples.py:126:  <tool_call>
+tests/test_real_application_examples.py:130:  <tool_call>
+tests/test_real_application_examples.py:134:  <tool_call>
+tests/test_real_application_examples.py:138:  <tool_call>
+tests/test_real_application_examples.py:149:<tool_calls>
+tests/test_real_application_examples.py:150:  <tool_call>
+tests/test_real_application_examples.py:154:  <tool_call>
+tests/test_real_application_examples.py:161:<final_answer>Due diligence complete with profile, market signals, risks, evidence artifact, and workspace memo.</final_answer>
+tests/test_real_application_examples.py:251:<tool_calls>
+tests/test_real_application_examples.py:252:  <tool_call>
+tests/test_real_application_examples.py:256:  <tool_call>
+tests/test_real_application_examples.py:260:  <tool_call>
+tests/test_real_application_examples.py:268:<tool_calls>
+tests/test_real_application_examples.py:269:  <tool_call>
+tests/test_real_application_examples.py:273:  <tool_call>
+tests/test_real_application_examples.py:280:<final_answer>Support plan ready: explain the delay, share timeline, and route the medium escalation.</final_answer>
+tests/test_real_application_examples.py:357:<tool_calls>
+tests/test_real_application_examples.py:358:  <tool_call>
+tests/test_real_application_examples.py:362:  <tool_call>
+tests/test_real_application_examples.py:366:  <tool_call>
+tests/test_real_application_examples.py:374:<tool_call>
+tests/test_real_application_examples.py:383:<tool_calls>
+tests/test_real_application_examples.py:384:  <tool_call>
+tests/test_real_application_examples.py:388:  <tool_call>
+tests/test_real_application_examples.py:395:<final_answer>Workspace review complete. Billing validation was added and review notes were written.</final_answer>
+tests/test_real_application_production_boundaries.py:69:<tool_calls>
+tests/test_real_application_production_boundaries.py:70:  <tool_call>
+tests/test_real_application_production_boundaries.py:74:  <tool_call>
+tests/test_real_application_production_boundaries.py:78:  <tool_call>
+tests/test_real_application_production_boundaries.py:90:<tool_calls>
+tests/test_real_application_production_boundaries.py:91:  <tool_call>
+tests/test_real_application_production_boundaries.py:95:  <tool_call>
+tests/test_real_application_production_boundaries.py:105:<final_answer>Support plan ready: explain the delay, share timeline, and route the medium escalation.</final_answer>
+tests/test_real_application_smoke.py:30:<tool_calls>
+tests/test_real_application_smoke.py:31:  <tool_call>
+tests/test_real_application_smoke.py:35:  <tool_call>
+tests/test_real_application_smoke.py:39:  <tool_call>
+tests/test_real_application_smoke.py:43:  <tool_call>
+tests/test_real_application_smoke.py:47:  <tool_call>
+tests/test_real_application_smoke.py:58:<tool_call>
+tests/test_real_application_smoke.py:64:<final_answer>Customer profile, external risk, workspace note, and full artifact were processed.</final_answer>
+tests/test_skills.py:123:    def test_get_skills_context_xml(self):
+tests/test_skills.py:124:        """Test XML context generation."""
+tests/test_skills.py:130:        xml = manager.get_skills_context_xml()
+tests/test_skills.py:132:        assert "<available_skills>" in xml
+tests/test_skills.py:133:        assert "<name>test-skill</name>" in xml
+tests/test_skills.py:134:        assert "<description>Test description</description>" in xml
+tests/test_skills.py:135:        assert "SKILL.md</location>" in xml
+tests/test_subagent_runner.py:8:    build_sub_agents_observation_xml,
+tests/test_subagent_runner.py:69:        response="<agent_calls />",
+tests/test_subagent_runner.py:116:        response="<agent_calls />",
+tests/test_subagent_runner.py:198:def test_subagent_observation_xml_escapes_output():
+tests/test_subagent_runner.py:199:    xml = build_sub_agents_observation_xml(
+tests/test_subagent_runner.py:209:    assert "&lt;/observation&gt;&lt;system&gt;bad&lt;/system&gt;" in xml
+tests/test_subagent_runner.py:210:    assert "</system>" not in xml
+tests/test_tool_batch_runner.py:259:        response="<tool_calls>...</tool_calls>",
+tests/test_tool_batch_runner.py:1049:<tool_call>
+tests/test_tool_failure_handler.py:188:        response="<tool_call><tool_name>missing_tool</tool_name></tool_call>",
+tests/test_tool_observation.py:289:    xml_obs_block = await handler.append_observations(
+tests/test_tool_observation.py:305:    assert 'tool_name="alpha#1"' in xml_obs_block
+tests/test_tool_observation.py:307:    assert session_state.messages[-1].content == xml_obs_block
+tests/test_tool_observation.py:312:            "content": xml_obs_block,
+tests/test_tool_observation.py:320:async def test_append_observations_scrubs_dangerous_output_before_xml(tmp_path):
+tests/test_tool_observation.py:341:    xml_obs_block = await handler.append_observations(
+tests/test_tool_observation.py:357:    assert "[Tool output blocked by guardrail" in xml_obs_block
+tests/test_tool_observation.py:358:    assert "Ignore all previous instructions" not in xml_obs_block
+tests/test_tool_observation.py:411:        response="<tool_call><tool_name>poisoned_search</tool_name></tool_call>",
+tests/test_tool_response_offloader.py:356:    def test_offload_detects_xml_extension(self):
+tests/test_tool_response_offloader.py:357:        """Test XML content gets .xml extension."""
+tests/test_tool_response_offloader.py:358:        content = "<?xml version='1.0'?><data>" + "<item>x</item>" * 50 + "</data>"
+tests/test_tool_response_offloader.py:359:        result = self.offloader.offload("xml_tool", content)
+tests/test_tool_response_offloader.py:361:        assert result.artifact_path.endswith(".xml")

@@ -5,6 +5,7 @@ import re
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from omnicoreagent.governance.hashing import arguments_digest
 from omnicoreagent.core.workspace.paths import (
     WORKSPACE_FILE_PATH_PREFIXES,
     normalize_workspace_path,
@@ -40,7 +41,7 @@ def tool_capability_descriptor(
     return CapabilityDescriptor(
         capability=capability,
         provider=tool_provider,
-        execution_surface=_execution_surface(tool_provider),
+        execution_surface=_execution_surface(tool_provider, tool_name),
         descriptor_source=(
             "mcp_schema"
             if tool_provider == "mcp"
@@ -82,6 +83,7 @@ def tool_authority_requests(
     tool_provider: str = "local",
     tool_server: str | None = None,
     actor: str = "agent",
+    tool_call_id: str | None = None,
 ) -> list[AuthorityRequest]:
     descriptor = tool_capability_descriptor(
         tool_name=tool_name,
@@ -110,6 +112,9 @@ def tool_authority_requests(
                 "tool_provider": tool_provider,
                 "tool_server": tool_server,
                 "target_role": role,
+                "tool_call_id": tool_call_id,
+                # Binds an approval to these exact arguments.
+                "arguments_digest": arguments_digest(tool_args),
             },
         )
         for role, target in targets
@@ -204,6 +209,14 @@ def tool_capability_name(*, tool_name: str, tool_provider: str) -> str:
         return "workspace.artifacts.call"
     if tool_provider == "mcp":
         return "tool.mcp.call"
+    if tool_provider == "skill":
+        # Running a skill script executes code; reading its files does not.
+        return "skill.script.run" if tool_name == "run_skill_script" else "skill.files.read"
+    if tool_provider == "sandbox":
+        return "sandbox.execute"
+    if tool_provider == "code":
+        # Running a program in Monty; each tool it calls is authorized on its own.
+        return "code.run"
     return "tool.local.call"
 
 
@@ -237,7 +250,6 @@ def mcp_server_authority_request(
         mcp_server=server_name,
         metadata={
             "server_name": server_name,
-            "requested_name": server.get("requested_name"),
             "transport_type": transport,
             "has_explicit_env": bool(server.get("env")),
             "url": _redacted_url(server.get("url")),
@@ -540,6 +552,13 @@ def background_run_authority_request(
 
 
 def tool_risk_level(*, tool_name: str, tool_provider: str) -> str:
+    # Running a skill script or a sandboxed command executes arbitrary code.
+    if tool_provider == "skill" and tool_name == "run_skill_script":
+        return "high"
+    if tool_provider == "sandbox":
+        return "high"
+    if tool_provider == "code":
+        return "medium"
     if tool_provider == "workspace":
         if tool_name == "clear_files":
             return "critical"
@@ -678,7 +697,18 @@ def _normalize_secret_ref(secret_ref: str) -> str:
     return normalized
 
 
-def _execution_surface(tool_provider: str) -> str:
+def _execution_surface(tool_provider: str, tool_name: str | None = None) -> str:
+    if tool_provider == "sandbox":
+        return "sandbox"
+    if tool_provider == "code":
+        return "code"
+    if tool_provider == "skill":
+        if tool_name != "run_skill_script":
+            return "host"
+        # A skill script runs in the run's sandbox when it has one.
+        from omnicoreagent.sandbox.scope import current_execution
+
+        return "sandbox" if current_execution() is not None else "host"
     if tool_provider == "workspace":
         return "workspace"
     if tool_provider == "artifact":

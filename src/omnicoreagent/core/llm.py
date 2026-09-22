@@ -1,9 +1,14 @@
+import asyncio
 import logging
 import inspect
+from copy import deepcopy
 import os
 import random
+import re
 import time
 import warnings
+from collections.abc import Callable
+from contextvars import ContextVar
 from typing import Any
 
 from omnicoreagent.core.logging import logger
@@ -38,10 +43,46 @@ def _get_litellm():
     return litellm
 
 
-def _get_openai():
-    import openai
+# "<model> doesn't support temperature=0.2 while reasoning is active"
+_REFUSED_PARAMETER = re.compile(r"doesn't support ([a-z_]+)=")
 
-    return openai
+
+def _notify_unsupported(name: str, error: Exception) -> None:
+    observer = MODEL_RETRY_OBSERVER.get()
+    logger.warning(f"The model refused {name}; retrying the call without it: {error}")
+    if observer is not None:
+        observer(
+            {
+                "attempt": 1,
+                "reason": "unsupported_parameter",
+                "dropped": [name],
+                "error": str(error)[:300],
+            }
+        )
+
+
+# Receives one record per retried provider failure, so telemetry can show
+# every attempt of a model call rather than only the final outcome.
+MODEL_RETRY_OBSERVER: ContextVar[Callable[[dict[str, Any]], None] | None] = ContextVar(
+    "omnicoreagent_model_retry_observer", default=None
+)
+
+
+def _notify_retry(attempt: int, error: Exception, delay: float) -> None:
+    observer = MODEL_RETRY_OBSERVER.get()
+    if observer is None:
+        return
+    try:
+        observer(
+            {
+                "attempt": attempt,
+                "error_type": error.__class__.__name__,
+                "message": str(error),
+                "delay_seconds": delay,
+            }
+        )
+    except Exception:
+        logger.debug("Model retry observer failed", exc_info=True)
 
 
 def retry_with_backoff(max_retries=3, base_delay=1, max_delay=60, backoff_factor=2):
@@ -61,9 +102,16 @@ def retry_with_backoff(max_retries=3, base_delay=1, max_delay=60, backoff_factor
                             f"Max retries ({max_retries}) exceeded. Last error: {e}"
                         )
                         break
-                    _sleep_before_retry(
-                        e, attempt, max_retries, base_delay, max_delay, backoff_factor
+                    delay = _retry_delay(
+                        e,
+                        attempt,
+                        max_retries,
+                        base_delay,
+                        max_delay,
+                        backoff_factor,
                     )
+                    _notify_retry(attempt + 1, e, delay)
+                    await asyncio.sleep(delay)
             raise last_exception
 
         def sync_wrapper(*args, **kwargs):
@@ -111,27 +159,45 @@ def _is_retryable(exc: Exception) -> bool:
     )
 
 
-def _sleep_before_retry(
+def _retry_delay(
     exc: Exception,
     attempt: int,
     max_retries: int,
     base_delay: int,
     max_delay: int,
     backoff_factor: int,
-) -> None:
+) -> float:
     delay = min(base_delay * (backoff_factor**attempt), max_delay)
     jitter = random.uniform(0, 0.1 * delay)
     total_delay = delay + jitter
     logger.warning(f"Retryable error on attempt {attempt + 1}/{max_retries + 1}: {exc}")
     logger.info(f"Retrying in {total_delay:.2f} seconds...")
-    time.sleep(total_delay)
+    return total_delay
+
+
+def _sleep_before_retry(*args):
+    time.sleep(_retry_delay(*args))
+
+
+# Continuation data each provider's LiteLLM path reads back from the assistant
+# message. LiteLLM sends unknown fields to OpenAI-compatible providers as they
+# are, so each field goes only to the provider that uses it.
+CONTINUATION_FIELDS_BY_PROVIDER = {
+    "anthropic": frozenset({"thinking_blocks"}),
+    "gemini": frozenset({"provider_specific_fields"}),
+}
+# Providers that read continuation data from each tool call.
+TOOL_CALL_FIELDS_PROVIDERS = frozenset({"gemini"})
 
 
 class LLMConnection:
-    """Direct LiteLLM connection configured from the agent runtime."""
+    """Provider connection through LiteLLM."""
 
     def __init__(self, model_config: dict[str, Any], api_key: str | None = None):
         self.model_config = dict(model_config or {})
+        self._warmed = False
+        # Parameters this model has refused by name; not sent again.
+        self._unsupported_params: set[str] = set()
         self.llm_api_key = api_key or self.model_config.get("api_key")
         self.llm_config = self._build_llm_config()
         self._set_llm_environment_variables()
@@ -154,7 +220,6 @@ class LLMConnection:
             raise ValueError("LLM_API_KEY not found in environment variables")
 
         provider_model_map = {
-            "cencori": model,
             "openai": f"openai/{model}",
             "anthropic": f"anthropic/{model}",
             "groq": f"groq/{model}",
@@ -168,7 +233,9 @@ class LLMConnection:
         }
 
         provider_key = provider.lower() if isinstance(provider, str) else ""
-        full_model = provider_model_map.get(provider_key, model)
+        if provider_key not in provider_model_map:
+            raise ValueError(f"Unsupported provider: {provider}")
+        full_model = provider_model_map[provider_key]
 
         if provider_key in {"azure", "azureopenai"}:
             azure_endpoint = self.model_config.get("azure_endpoint")
@@ -190,6 +257,7 @@ class LLMConnection:
             "temperature": self.model_config.get("temperature"),
             "max_tokens": self.model_config.get("max_tokens"),
             "top_p": self.model_config.get("top_p"),
+            "reasoning_effort": self.model_config.get("reasoning_effort"),
         }
 
     def _set_llm_environment_variables(self):
@@ -204,7 +272,6 @@ class LLMConnection:
             "openrouter": "OPENROUTER_API_KEY",
             "azure": "AZURE_API_KEY",
             "azureopenai": "AZURE_API_KEY",
-            "cencori": "CENCORI_API_KEY",
         }
         env_name = env_names.get(provider)
         if env_name and self.llm_api_key:
@@ -217,16 +284,40 @@ class LLMConnection:
         )
 
     def to_dict(self, msg):
+        """Serialize model-facing fields only; persistence metadata stays internal."""
         if hasattr(msg, "model_dump"):
-            msg_dict = msg.model_dump(exclude_none=True)
-            if "timestamp" in msg_dict and hasattr(msg_dict["timestamp"], "timestamp"):
-                msg_dict["timestamp"] = msg_dict["timestamp"].timestamp()
-            return msg_dict
-        if isinstance(msg, dict):
-            return msg
-        if hasattr(msg, "__dict__"):
-            return {k: v for k, v in msg.__dict__.items() if v is not None}
-        return msg
+            msg = msg.model_dump(exclude_none=True)
+        elif not isinstance(msg, dict) and hasattr(msg, "__dict__"):
+            msg = vars(msg)
+        if not isinstance(msg, dict):
+            raise TypeError("Model messages must be mappings or message records")
+        allowed = {
+            "role",
+            "content",
+            "name",
+            "tool_calls",
+            "tool_call_id",
+            "refusal",
+            "reasoning_content",
+        }
+        provider = str(self.llm_config.get("provider", "")).lower()
+        allowed |= CONTINUATION_FIELDS_BY_PROVIDER.get(provider, frozenset())
+        sent = {key: deepcopy(value) for key, value in msg.items() if key in allowed}
+
+        if provider == "openrouter":
+            # LiteLLM keeps OpenRouter's reasoning details inside
+            # provider_specific_fields but sends them back only from the top level.
+            details = (msg.get("provider_specific_fields") or {}).get("reasoning_details")
+            if details:
+                sent["reasoning_details"] = deepcopy(details)
+        if sent.get("tool_calls") and provider not in TOOL_CALL_FIELDS_PROVIDERS:
+            # Per-call provider fields (Gemini's thought signature) stay with the
+            # provider that issued them.
+            for call in sent["tool_calls"]:
+                call.pop("provider_specific_fields", None)
+                if isinstance(call.get("function"), dict):
+                    call["function"].pop("provider_specific_fields", None)
+        return sent
 
     @retry_with_backoff(max_retries=3, base_delay=1, max_delay=30)
     async def llm_call(
@@ -236,22 +327,40 @@ class LLMConnection:
     ):
         try:
             params = self._completion_params(messages, tools)
-            if self.llm_config["provider"].lower() == "cencori":
-                openai = _get_openai()
-                client = openai.AsyncOpenAI(
-                    base_url="https://api.cencori.com/v1",
-                    api_key=self.llm_api_key,
-                )
-                return await client.chat.completions.create(**params)
             litellm = _get_litellm()
-            litellm.drop_params = True
-            return await litellm.acompletion(**params)
+            params.update(api_key=self.llm_api_key, drop_params=False, num_retries=0)
+            try:
+                return await litellm.acompletion(**params)
+            except Exception as refused:
+                dropped = self._refused_parameter(refused, params)
+                if dropped is None:
+                    raise
+                # The provider named the parameter it refuses. Parameters are
+                # sent as given on purpose (a silent drop hides a mistake), so
+                # the retry is recorded with the name, and not sent again.
+                _notify_unsupported(dropped, refused)
+                return await litellm.acompletion(**params)
         except Exception as e:
             error_message = (
                 f"Error calling LLM with model {self.llm_config.get('model')}: {e}"
             )
             logger.error(error_message)
+            raise
+
+    def _refused_parameter(self, error: Exception, params: dict[str, Any]) -> str | None:
+        """The parameter a provider's refusal names, removed from ``params`` and
+        remembered, or None when the error is not that kind."""
+        if type(error).__name__ != "UnsupportedParamsError":
             return None
+        match = _REFUSED_PARAMETER.search(str(error))
+        if match is None:
+            return None
+        name = match.group(1)
+        if name not in params:
+            return None
+        params.pop(name, None)
+        self._unsupported_params.add(name)
+        return name
 
     @retry_with_backoff(max_retries=3, base_delay=1, max_delay=30)
     def llm_call_sync(
@@ -261,22 +370,95 @@ class LLMConnection:
     ):
         try:
             params = self._completion_params(messages, tools)
-            if self.llm_config["provider"].lower() == "cencori":
-                openai = _get_openai()
-                client = openai.OpenAI(
-                    base_url="https://api.cencori.com/v1",
-                    api_key=self.llm_api_key,
-                )
-                return client.chat.completions.create(**params)
             litellm = _get_litellm()
-            litellm.drop_params = True
+            params.update(api_key=self.llm_api_key, drop_params=False, num_retries=0)
             return litellm.completion(**params)
         except Exception as e:
             error_message = (
                 f"Error calling LLM with model {self.llm_config.get('model')}: {e}"
             )
             logger.error(error_message)
+            raise
+
+    async def llm_stream(self, messages, tools=None):
+        """Yield text deltas followed by one complete normalized turn.
+
+        No automatic retry: replaying a partially observed stream would duplicate
+        output. The caller receives errors and cancellation directly.
+        """
+        from omnicoreagent.core.model_stream import ModelStreamAssembler
+
+        params = self._completion_params(messages, tools)
+        params.update(stream=True, stream_options={"include_usage": True})
+        assembler = ModelStreamAssembler()
+        stream = None
+        try:
+            litellm = _get_litellm()
+            params.update(api_key=self.llm_api_key, drop_params=False, num_retries=0)
+            stream = await litellm.acompletion(**params)
+            async for chunk in stream:
+                for event in assembler.feed(chunk):
+                    yield event
+            yield {"type": "turn_complete", "turn": assembler.finish()}
+        finally:
+            if stream is not None:
+                close = getattr(stream, "aclose", None) or getattr(
+                    stream, "close", None
+                )
+                if close is not None:
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await result
+
+    async def warm_up(self) -> None:
+        """Load the provider client now, off the event loop, so no request has to.
+
+        ``import litellm`` costs seconds of CPU. It is imported lazily so that
+        building an agent stays light, which means the first request of a
+        process would otherwise pay for it. A server calls this while it
+        starts. A failure is left for the request that needs the client, which
+        reports it properly; this only tries early.
+        """
+        if self._warmed:
+            return
+        self._warmed = True
+        try:
+            await asyncio.to_thread(_get_litellm)
+        except Exception as exc:
+            self._warmed = False
+            logger.debug(f"The model client could not be loaded early: {exc}")
+
+    def request_settings(self) -> dict[str, Any]:
+        """The model and generation settings sent with every request."""
+        settings = {"model": self.llm_config["model"]}
+        for key in ("temperature", "max_tokens", "top_p", "reasoning_effort"):
+            if self.llm_config.get(key) is not None:
+                settings[key] = self.llm_config[key]
+        return settings
+
+    def estimate_cost(self, usage: Any) -> float | None:
+        """Price a call's token usage from LiteLLM's model price table.
+
+        Used when the provider response carries no cost (streamed calls).
+        Returns ``None`` when the model has no known price.
+        """
+        prompt_tokens = getattr(usage, "request_tokens", None)
+        completion_tokens = getattr(usage, "response_tokens", None)
+        if prompt_tokens is None or completion_tokens is None:
             return None
+        details = getattr(usage, "details", None) or {}
+        try:
+            # Cached input is billed at a lower rate; ignoring it overstated
+            # the cost of a cached call about twice over.
+            prompt_cost, completion_cost = _get_litellm().cost_per_token(
+                model=self.llm_config["model"],
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cache_read_input_tokens=details.get("cached_input_tokens", 0),
+            )
+        except Exception:
+            return None
+        return float(prompt_cost + completion_cost)
 
     def _completion_params(
         self, messages: list[Any], tools: list[dict[str, Any]] | None = None
@@ -286,15 +468,13 @@ class LLMConnection:
             "messages": [self.to_dict(m) for m in messages],
         }
 
-        for key in ("temperature", "max_tokens", "top_p"):
-            if self.llm_config.get(key) is not None:
+        for key in ("temperature", "max_tokens", "top_p", "reasoning_effort"):
+            if self.llm_config.get(key) is not None and key not in self._unsupported_params:
                 params[key] = self.llm_config[key]
 
         if tools:
             params["tools"] = tools
-            params["tool_choice"] = "auto"
 
-        if self.llm_config["provider"].lower() == "openrouter" and not tools:
-            params["stop"] = ["\n\nObservation:"]
-
+        if self.llm_config["provider"].lower() == "openai" and "max_tokens" in params:
+            params["max_completion_tokens"] = params.pop("max_tokens")
         return params

@@ -13,6 +13,25 @@ class SandboxProvider(str, Enum):
     LOCAL_TEST = "local_test"
 
 
+_PROVIDER_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+
+
+def sandbox_provider_name(value: "SandboxProvider | str") -> "SandboxProvider | str":
+    """A built-in provider as its enum member; any other name as validated text.
+
+    Applications register their own providers by name, so the set is open.
+    """
+    if isinstance(value, SandboxProvider):
+        return value
+    try:
+        return SandboxProvider(value)
+    except ValueError:
+        pass
+    if not isinstance(value, str) or not _PROVIDER_NAME.match(value):
+        raise ValueError(f"Invalid sandbox provider name: {value!r}")
+    return value
+
+
 class SandboxNetworkDefault(str, Enum):
     DENY = "deny"
     ALLOW = "allow"
@@ -125,7 +144,7 @@ class SandboxManifest:
     lifecycle: SandboxLifecycle | dict[str, Any] = field(default_factory=SandboxLifecycle)
 
     def __post_init__(self) -> None:
-        self.provider = SandboxProvider(self.provider)
+        self.provider = sandbox_provider_name(self.provider)
         self.working_dir = _normalize_sandbox_path(self.working_dir)
         if isinstance(self.workspace_mount, dict):
             self.workspace_mount = WorkspaceMount(**self.workspace_mount)
@@ -149,7 +168,7 @@ class SandboxSession:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.provider = SandboxProvider(self.provider)
+        self.provider = sandbox_provider_name(self.provider)
 
 
 @dataclass(slots=True)

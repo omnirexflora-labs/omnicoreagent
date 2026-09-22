@@ -113,3 +113,34 @@ def test_normalize_pure_error_dict_is_error_envelope():
     assert result["status"] == "error"
     assert result["data"] is None
     assert result["message"] == "Inventory service unavailable"
+
+
+def test_falsy_results_are_successful_values():
+    executor = ToolExecutor(None)
+    for value in (False, 0, "", [], {}, None):
+        result = executor._normalize_result("tool", {}, value)
+        assert result["status"] == "success"
+        assert result["data"] == value
+
+
+def test_partial_subagent_envelope_retains_status_and_data():
+    result = ToolExecutor(None)._normalize_result(
+        "spawn_subagents",
+        {},
+        {"status": "partial", "data": {"failed": 1}, "message": "1/2 done"},
+    )
+    assert result["status"] == "partial"
+    assert result["data"] == {"failed": 1}
+
+
+def test_data_and_message_keys_do_not_guess_a_result_envelope():
+    executor = ToolExecutor(None)
+    for payload in (
+        {"data": "value", "unit": "kg"},
+        {"data": 0},
+        {"message": "business text"},
+        {"status": {"nested": "business state"}, "data": 0},
+    ):
+        result = executor._normalize_result("business", {}, payload)
+        assert result["status"] == "success"
+        assert result["data"] == payload

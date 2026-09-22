@@ -6,6 +6,8 @@ import asyncio
 from typing import Any
 from uuid import uuid4
 
+from omnicoreagent.core.logging import logger
+
 from omnicoreagent.background.agent_specs import resolve_agent, spec_from_agent
 from omnicoreagent.background.errors import (
     AgentAlreadyRegisteredError,
@@ -15,6 +17,7 @@ from omnicoreagent.background.errors import (
     TaskNotFoundError,
 )
 from omnicoreagent.background.models import (
+    SETTLED_RUN_STATUSES,
     TERMINAL_RUN_STATUSES,
     BackgroundAgentSpec,
     BackgroundAttempt,
@@ -22,6 +25,7 @@ from omnicoreagent.background.models import (
     BackgroundTaskSpec,
     OverlapPolicy,
     RunStatus,
+    WAITING_RUN_STATUSES,
     ScheduleSpec,
     TriggerType,
     coerce_model,
@@ -36,7 +40,8 @@ from omnicoreagent.background.store.base import AbstractTaskStore
 from omnicoreagent.background.store.router import TaskStoreRouter
 from omnicoreagent.background.supervisor import BackgroundSupervisor
 from omnicoreagent.background.workspace_io import BackgroundWorkspaceIO
-from omnicoreagent.core.telemetry import InMemoryTelemetryStore, TelemetryStream
+from omnicoreagent.core.runtime import construction
+from omnicoreagent.core.telemetry import TelemetryStream
 from omnicoreagent.governance.capabilities import (
     background_run_authority_request,
     background_task_authority_request,
@@ -68,10 +73,12 @@ class BackgroundAgentManager:
     ) -> None:
         self.task_store = TaskStoreRouter.create(task_store)
         self.memory_router = memory_router
+        # With no store supplied the manager uses the same durable default as
+        # agents, so default agents and their manager share one store.
         self.telemetry_store = telemetry_store or (
             telemetry_stream.store
             if telemetry_stream is not None
-            else InMemoryTelemetryStore()
+            else construction.default_telemetry_store()
         )
         self.telemetry_stream = telemetry_stream or TelemetryStream(
             self.telemetry_store
@@ -110,6 +117,7 @@ class BackgroundAgentManager:
             worker_id=self.worker_id,
             lease_seconds=self.lease_seconds,
             memory_router=self.memory_router,
+            telemetry_store=self.telemetry_store,
             governance_engine=self.governance_engine,
             event_log=self._event_log,
             emit_run=self._emit_run,
@@ -128,6 +136,11 @@ class BackgroundAgentManager:
         if existing and not replace:
             raise AgentAlreadyRegisteredError(f"Agent already registered: {agent_id}")
 
+        adopt_telemetry_store = getattr(agent, "_adopt_telemetry_store", None)
+        if callable(adopt_telemetry_store):
+            # Lifecycle, attempt, and agent traces must share one store so a
+            # background run's family can be reconstructed.
+            adopt_telemetry_store(self.telemetry_store)
         spec = spec_from_agent(agent_id, agent)
         self._agents[agent_id] = agent
         await self.task_store.save_agent(spec)
@@ -261,12 +274,10 @@ class BackgroundAgentManager:
     async def delete_task(self, task_id: str, delete_runs: bool = False) -> None:
         existing = await self.task_store.get_task(task_id)
         if self.governance_engine is not None and existing is not None:
-            require_current_policy_snapshot(
-                existing.metadata,
-                self.governance_engine,
-                surface=f"background task {existing.task_id}",
-                required=True,
-            )
+            # Removing a task is authorized by the policy in force now, and
+            # does not require the task's own policy snapshot to match: a task
+            # from an old policy must be removable, or a policy change would
+            # orphan it with no way out. Running it is another matter.
             await self.governance_engine.authorize(
                 background_task_authority_request(task=existing, action="delete")
             )
@@ -284,6 +295,12 @@ class BackgroundAgentManager:
         if self._running:
             return
         await self.initialize()
+        # Background runs pay the provider client's import too; the worker
+        # loads it once as it starts rather than inside its first task.
+        for agent in list(self._agents.values()):
+            warm_up = getattr(getattr(agent, "llm_connection", None), "warm_up", None)
+            if warm_up is not None:
+                await warm_up()
         self._stop_event.clear()
         self._running = True
         self._worker_task = asyncio.create_task(self._worker_loop())
@@ -314,12 +331,8 @@ class BackgroundAgentManager:
     async def pause_task(self, task_id: str) -> None:
         task = await self.task_store.get_task(task_id)
         if self.governance_engine is not None and task is not None:
-            require_current_policy_snapshot(
-                task.metadata,
-                self.governance_engine,
-                surface=f"background task {task.task_id}",
-                required=True,
-            )
+            # Pausing, like deleting, is the safe direction under a newer
+            # policy and needs no snapshot match; see delete_task.
             await self.governance_engine.authorize(
                 background_task_authority_request(task=task, action="pause")
             )
@@ -439,7 +452,7 @@ class BackgroundAgentManager:
             latest = await self.task_store.get_run(run_id)
             if not latest:
                 raise RunNotFoundError(f"Run not found: {run_id}")
-            if latest.status in TERMINAL_RUN_STATUSES:
+            if latest.status in SETTLED_RUN_STATUSES:
                 return latest
             if deadline is not None and asyncio.get_running_loop().time() >= deadline:
                 return latest
@@ -473,6 +486,35 @@ class BackgroundAgentManager:
                     background_run_authority_request(action="cancel", run=run)
                 )
         await self._supervisor.cancel_run(run_id)
+
+    async def resume_run(self, run_id: str) -> BackgroundRun:
+        """Queue a run that was waiting for approval, once the approvals are
+        decided (``agent.resolve_approval``). Its next attempt continues the
+        same durable run instead of starting over."""
+        self._sync_services_config()
+        run = await self.task_store.get_run(run_id)
+        if run is None:
+            raise RunNotFoundError(f"Run not found: {run_id}")
+        if run.status not in WAITING_RUN_STATUSES:
+            raise ValueError(
+                f"Run {run_id} is {run.status.value}; only a run in awaiting_approval "
+                "or awaiting_budget can be resumed"
+            )
+        if self.governance_engine is not None:
+            require_current_policy_snapshot(
+                run.metadata,
+                self.governance_engine,
+                surface=f"background run {run.run_id}",
+                required=True,
+            )
+            await self.governance_engine.authorize(
+                background_run_authority_request(action="start", run=run)
+            )
+        queued = await self.task_store.transition_run(
+            run_id, set(WAITING_RUN_STATUSES), RunStatus.QUEUED, {}, None, None
+        )
+        await self._emit_run("background_run_queued", queued)
+        return queued
 
     async def recover_expired_runs(self) -> None:
         self._sync_services_config()
@@ -562,7 +604,9 @@ class BackgroundAgentManager:
                 did_work = await self._execute_one()
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                # The loop goes on; what stopped this turn is said, not lost.
+                logger.warning(f"Background worker loop: {type(exc).__name__}: {exc}")
                 dispatched = False
                 did_work = False
             if not dispatched and not did_work:
@@ -595,12 +639,14 @@ class BackgroundAgentManager:
         query: str,
         run: BackgroundRun,
         timeout_seconds: int | None,
+        attempt: BackgroundAttempt | None = None,
     ) -> Any:
         return await self._supervisor.run_agent_with_run_context(
             agent=agent,
             query=query,
             run=run,
             timeout_seconds=timeout_seconds,
+            attempt=attempt,
         )
 
     async def _handle_attempt_failure(
@@ -639,6 +685,7 @@ class BackgroundAgentManager:
             agents=self._agents,
             task_store=self.task_store,
             memory_router=self.memory_router,
+            telemetry_store=self.telemetry_store,
         )
 
     async def _emit_run(

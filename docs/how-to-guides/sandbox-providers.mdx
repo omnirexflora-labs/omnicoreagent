@@ -1,0 +1,131 @@
+---
+title: "Sandbox Providers"
+description: "Where an agent's code runs: Docker, Modal, E2B, Daytona, Vercel, or your own service"
+---
+
+# Sandbox Providers
+
+Code the agent runs (`execute`, and skill scripts) runs in a sandbox. The
+provider decides where; everything else — governance, the workspace bridge,
+telemetry, your credentials — stays the same and stays in your process.
+
+```python
+agent_config = {
+    "governance_config": {
+        "enabled": True,
+        "sandbox_config": {"provider": "docker", "options": {"image": "python:3.12-slim"}},
+    },
+}
+```
+
+| Provider | Install | Runs where | Network |
+|---|---|---|---|
+| `docker` | `omnicoreagent[docker]` | Your machine or host | Off, or on; a host allowlist is refused |
+| `modal` | `omnicoreagent[modal]` | Modal | Off, on, or a host allowlist |
+| `e2b` | `omnicoreagent[e2b]` | E2B | Off or on; a host allowlist is refused |
+| `daytona` | `omnicoreagent[daytona]` | Daytona | Off, on, or a host allow list |
+| `vercel` | `omnicoreagent[vercel]` | Vercel Sandbox | Off or on |
+| `http` | built in | A service you run | Whatever your service enforces |
+
+Each hosted provider needs its own credentials in the environment (for
+example `modal token new`, `E2B_API_KEY`, `DAYTONA_API_KEY`, `VERCEL_TOKEN`).
+Those credentials stay in your process: they are never put inside a sandbox.
+
+## A sandbox that dies is reported, not retried blindly
+
+Every provider can lose a sandbox under a run — E2B reports one that died
+mid-command as a timeout, and a sandbox's lifetime (`timeout_seconds`) ends
+whatever it is doing. The adapter tells a lost sandbox from a slow command,
+the run drops that session, the model is told what happened, and the next
+command opens a fresh sandbox. The trace records the session closed as
+`lost`; the [Execution](/docs/core-concepts/execution) page has the details.
+
+## A sandbox with no network is checked, not trusted
+
+A sandbox that must have no network is checked from the inside, once, when it
+is created: it tries one outbound connection, and a sandbox that reaches the
+internet is destroyed and refused with an error. This is not hypothetical —
+E2B and Daytona both accept "no internet", report it back, and on the accounts
+this was tested against still hand back a sandbox that reaches the internet. A
+promise of isolation the provider does not keep is worse than no sandbox,
+because a policy may be allowing the work only because it is isolated.
+
+The check needs `python` in the image; an image without one is refused for the
+same reason (it cannot be shown to be isolated). If you know your provider and
+accept the risk, turn the check off per provider:
+
+```python
+"sandbox_config": {
+    "provider": "e2b",
+    "options": {"verify_network_isolation": False},
+}
+```
+
+The session then records `network_isolation: "unchecked"` instead of
+`"checked"`, and a manifest that allows the network records `"not required"`.
+
+Common options: `image`, `max_output_bytes`, and `timeout_seconds`. Docker
+adds `user`, `workdir_size`, `pids_limit`, `runtime` (`"runsc"` for gVisor)
+and `pull`; see [Security Model](/docs/core-concepts/security-model).
+
+## What each run's sandbox is
+
+`sandbox_config` says which provider runs the sandbox; `sandbox_manifest`
+says what the sandbox is — its network, image, working directory, resources
+and plain environment. Without one, a run's sandbox has no network, the
+provider's default image, and `/workspace` as its working directory.
+
+```python
+agent_config = {
+    "governance_config": {
+        "enabled": True,
+        "sandbox_config": {"provider": "e2b"},
+        "sandbox_manifest": {
+            "network_policy": {"default": "allow"},   # the agent may clone and install
+            "working_dir": "/home/user/work",
+        },
+    },
+}
+```
+
+The manifest asks; the policy decides. Turning the network on is
+`sandbox.network.configure`, an image is `sandbox.image.use`, a plain
+environment is `sandbox.environment.set`: the development profiles ask a
+person before the network goes on (the run pauses on that approval like any
+other, see [Durable Runs](/docs/core-concepts/durable-runs)), and
+`strict-production` allows none of them without a rule. A manifest that
+cannot be read — an unknown field, a provider or session of its own — is
+refused when the agent is built.
+
+## Your own sandbox service (`http`)
+
+For anything without a native adapter — a Cloudflare Worker using
+Cloudflare's Sandbox SDK, a service inside your own network — run a small
+service and point the agent at it:
+
+```python
+"sandbox_config": {
+    "provider": "http",
+    "options": {"base_url": "https://sandboxes.example.com", "token": "..."},
+}
+```
+
+The service answers five requests (each carrying your bearer token):
+
+| Request | Body | Answer |
+|---|---|---|
+| `POST /sessions` | `{"manifest": {image, working_dir, environment, network, resources}}` | `{"session_id": "..."}` |
+| `POST /sessions/{id}/exec` | `{command, cwd, env, timeout_seconds, stdin}` | `{exit_code, stdout, stderr, timed_out}` |
+| `PUT /sessions/{id}/files?path=` | raw bytes | 204 |
+| `GET /sessions/{id}/files?path=` | | raw bytes |
+| `DELETE /sessions/{id}` | | 204 |
+
+Your service is responsible for the isolation it promises: the manifest says
+what network policy the run expects, and a service that cannot honour it
+should refuse the session. Only the plain environment is sent; secret
+references stay in the harness.
+
+## Writing another provider
+
+`register_sandbox_provider("name", factory)` adds a provider of your own; it
+then works anywhere a provider name does (bring your own sandbox).

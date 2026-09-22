@@ -24,6 +24,8 @@ class InMemoryStore(AbstractMemoryStore):
         self.summary_config: SummaryConfig = SummaryConfig()
         self.summarize_fn: Callable | None = None
         self._lock = threading.RLock()
+        self.run_states: dict[str, dict[str, Any]] = {}
+        self.budget_states: dict[str, dict[str, Any]] = {}
 
     def set_memory_config(
         self,
@@ -215,3 +217,58 @@ class InMemoryStore(AbstractMemoryStore):
             f"{'Deleted' if retention_policy == 'delete' else 'Marked inactive'} "
             f"{len(message_ids)} summarized messages"
         )
+
+    async def save_run_state(self, record: dict, expected_version: int | None) -> int:
+        from omnicoreagent.core.runs import RunStateConflict
+
+        with self._lock:
+            run_id = record["run_id"]
+            current = self.run_states.get(run_id)
+            if expected_version is None:
+                if current is not None:
+                    raise RunStateConflict(f"Run {run_id} already exists")
+            elif current is None or current["version"] != expected_version:
+                raise RunStateConflict(f"Run {run_id} changed since version {expected_version}")
+            version = (expected_version or 0) + 1
+            self.run_states[run_id] = {**copy.deepcopy(record), "version": version}
+            return version
+
+    async def get_run_state(self, run_id: str) -> dict | None:
+        with self._lock:
+            record = self.run_states.get(run_id)
+            return copy.deepcopy(record) if record is not None else None
+
+    async def list_run_states(
+        self, session_id: str | None = None, status: str | None = None, limit: int = 100
+    ) -> list[dict]:
+        with self._lock:
+            records = [
+                copy.deepcopy(r)
+                for r in self.run_states.values()
+                if (session_id is None or r.get("session_id") == session_id)
+                and (status is None or r.get("status") == status)
+            ]
+        return sorted(records, key=lambda r: r.get("created_at") or "")[:limit]
+
+    async def delete_budget_state(self, key: str) -> None:
+        self.budget_states.pop(key, None)
+
+    async def get_budget_state(self, key: str) -> dict | None:
+        with self._lock:
+            state = self.budget_states.get(key)
+            return copy.deepcopy(state) if state is not None else None
+
+    async def save_budget_state(self, state: dict, expected_version: int | None) -> int:
+        from omnicoreagent.core.runs import RunStateConflict
+
+        with self._lock:
+            key = state["key"]
+            current = self.budget_states.get(key)
+            if expected_version is None:
+                if current is not None:
+                    raise RunStateConflict(f"Budget {key} already exists")
+            elif current is None or current["version"] != expected_version:
+                raise RunStateConflict(f"Budget {key} changed since version {expected_version}")
+            version = (expected_version or 0) + 1
+            self.budget_states[key] = {**copy.deepcopy(state), "version": version}
+            return version

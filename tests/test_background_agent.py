@@ -45,7 +45,12 @@ from omnicoreagent.background.models import (
 from omnicoreagent.background.event_log import BackgroundEventLog
 from omnicoreagent.background.recovery import BackgroundRunRecovery
 from omnicoreagent.background.transitions import BackgroundRunTransitions
-from omnicoreagent.core.telemetry import TelemetryStreamScope
+from omnicoreagent.core.telemetry import (
+    InMemoryTelemetryStore,
+    TelemetryRecorder,
+    TelemetryStreamScope,
+    current_telemetry_context,
+)
 from omnicoreagent.governance import (
     BudgetExceededError,
     GovernanceEngine,
@@ -1419,6 +1424,60 @@ async def test_background_run_lifecycle_events_emit_to_telemetry():
 
 
 @pytest.mark.asyncio
+async def test_background_agent_trace_is_linked_to_lifecycle_trace():
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+
+    class TelemetryAgent:
+        name = "telemetry-agent"
+        system_instruction = "test"
+        model_config = {"provider": "openai", "model": "gpt-5.4-mini"}
+        agent_config = {}
+        mcp_tools = []
+
+        async def run(self, query, session_id, run_id=None):
+            await recorder.start_trace(
+                name="agent.run",
+                kind="agent.run",
+                run_id=run_id,
+                session_id=session_id,
+                agent_id=self.name,
+            )
+            await recorder.end_trace(output={"response": "complete"})
+            return {"response": "complete"}
+
+    manager = BackgroundAgentManager(
+        task_store="in_memory",
+        telemetry_store=store,
+    )
+    await manager.register_agent("agent", TelemetryAgent())
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    run = await manager.run_now("task", wait=True)
+
+    traces = await store.list_traces()
+    child = next(
+        trace
+        for trace in traces
+        if trace.run_id == run.run_id
+        and trace.trace_id != f"trace_background_{run.run_id}"
+    )
+    assert child.parent_trace_id == f"trace_background_{run.run_id}"
+    assert child.parent_span_id == f"span_background_{run.run_id}"
+    family = await store.list_traces()
+    assert {trace.trace_id for trace in family} >= {
+        f"trace_background_{run.run_id}",
+        child.trace_id,
+    }
+    assert current_telemetry_context() is None
+
+
+@pytest.mark.asyncio
 async def test_background_run_events_replay_from_workspace_when_cache_cleared(tmp_path):
     workspace = Workspace.from_config(workspace_dir=tmp_path).ensure()
     manager = BackgroundAgentManager(task_store="in_memory", workspace=workspace)
@@ -1810,6 +1869,46 @@ async def test_inline_timeout_shutdown_requeues_retryable_run():
 
 
 @pytest.mark.asyncio
+async def test_shutdown_during_attempt_start_records_the_interrupted_run():
+    from omnicoreagent.core.telemetry import InMemoryTelemetryStore
+
+    class SlowTelemetryStore(InMemoryTelemetryStore):
+        """A store whose writes genuinely suspend, like file or network I/O."""
+
+        async def append_event(self, trace_id, event):
+            await asyncio.sleep(0.05)
+            return await super().append_event(trace_id, event)
+
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(
+        task_store=store, telemetry_store=SlowTelemetryStore()
+    )
+    await manager.register_agent("agent", FakeAgent(response="complete", delay=0.2))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+
+    run = await manager.run_now("task", wait=True, timeout_seconds=0.01)
+    await wait_for(lambda: manager.list_attempts(run.run_id), timeout=0.5)
+    await manager.shutdown()
+
+    latest = await store.get_run(run.run_id)
+    attempts = await store.list_attempts(run.run_id)
+    assert latest.status == RunStatus.FAILED
+    assert attempts[0].status == AttemptStatus.FAILED
+    assert attempts[0].error == "worker shutdown"
+    leaked = [
+        task
+        for task in asyncio.all_tasks()
+        if task is not asyncio.current_task() and "heartbeat" in repr(task)
+    ]
+    assert leaked == []
+
+
+@pytest.mark.asyncio
 async def test_manager_run_now_missing_or_disabled_task_raises():
     manager = BackgroundAgentManager(task_store="in_memory")
     await manager.register_agent("agent", FakeAgent())
@@ -2156,12 +2255,21 @@ async def test_cancel_after_failed_attempt_blocks_retry_requeue():
     assert latest.cancel_requested_at is not None
     assert len(attempts) == 1
     assert attempts[-1].status == AttemptStatus.CANCELLED
-    assert [event["event"] for event in events] == [
+    names = [event["event"] for event in events]
+    # A slow attempt (a loaded machine) also heartbeats every lease/4 while
+    # it runs; heartbeats may only fall between start and cancellation.
+    lifecycle = [name for name in names if name != "background_run_heartbeat"]
+    assert lifecycle == [
         "background_run_queued",
         "background_run_claimed",
         "background_run_started",
         "background_run_cancelled",
     ]
+    heartbeats = [i for i, name in enumerate(names) if name == "background_run_heartbeat"]
+    assert all(
+        names.index("background_run_started") < i < names.index("background_run_cancelled")
+        for i in heartbeats
+    )
 
 
 @pytest.mark.asyncio
@@ -2375,6 +2483,58 @@ async def test_long_running_attempt_refreshes_lease():
     assert store.refresh_count >= 1
 
 
+class SlowAgent(FakeAgent):
+    """Runs until cancelled, and remembers whether it was."""
+
+    def __init__(self):
+        super().__init__()
+        self.cancelled = False
+        self.started = asyncio.Event()
+
+    async def run(self, query: str, session_id: str, run_id: str | None = None):
+        self.calls.append({"query": query, "session_id": session_id, "run_id": run_id})
+        self.started.set()
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        return {"response": "too late", "session_id": session_id}
+
+
+@pytest.mark.asyncio
+async def test_a_run_whose_lease_is_lost_is_stopped_not_left_running():
+    """Found by P5 of the proving plan: a tool stalled the event loop, the
+    worker's heartbeats stopped, the lease expired — and the attempt was
+    recorded as failed while the agent ran on, unfenced, to completion. A
+    worker that has lost a run's lease stops the run: another worker may
+    already own it."""
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store, worker_id="w1", lease_seconds=0.4)
+    agent = SlowAgent()
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task", agent_id="agent", query="do work", schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=0),
+    )
+    run = await manager.run_now("task", wait=False)
+    attempt = asyncio.create_task(manager._execute_one())
+    await asyncio.wait_for(agent.started.wait(), 5)
+
+    # Another worker takes the run over (its lease has lapsed from their view).
+    async with store._lock:
+        current = store._runs[run.run_id]
+        store._runs[run.run_id] = current.model_copy(
+            update={"lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)}
+        )
+    await store.steal_expired_run(run.run_id, "w2", 30)
+
+    await asyncio.wait_for(attempt, 5)
+
+    assert agent.cancelled, "the fenced-out worker stopped its agent"
+    assert manager._supervisor.active_agent_tasks == {}
+
+
 @pytest.mark.asyncio
 async def test_expired_lease_cannot_be_refreshed_by_stale_owner():
     store = InMemoryTaskStore()
@@ -2534,6 +2694,150 @@ async def test_recover_expired_running_run_requeues_when_retry_available():
 
     assert recovered.status == RunStatus.QUEUED
     assert recovered.lease_token is None
+
+
+class CheckpointedAgent(FakeAgent):
+    """An agent whose run kept a durable record: recovery asks it whether the
+    run can continue from its checkpoint before treating the lost attempt as
+    a failure."""
+
+    def __init__(self, record=None, **kwargs):
+        super().__init__(**kwargs)
+        self.record = record
+
+    async def get_run(self, run_id: str):
+        return self.record
+
+
+async def _lose_running_attempt(manager, store, run):
+    """Claim and start ``run`` on a worker that then vanishes: the run is
+    RUNNING, its attempt is RUNNING, and its lease expired a second ago."""
+    claimed = await store.claim_run(run.run_id, "lost_worker", lease_seconds=30)
+    running = await store.transition_run(
+        claimed.run_id,
+        {RunStatus.CLAIMED},
+        RunStatus.RUNNING,
+        {"attempt": 1},
+        "lost_worker",
+        claimed.lease_token,
+    )
+    await store.create_attempt(
+        BackgroundAttempt(
+            run_id=running.run_id,
+            attempt_number=1,
+            worker_id="lost_worker",
+            lease_token=running.lease_token,
+        )
+    )
+    async with store._lock:
+        store._runs[run.run_id] = running.model_copy(
+            update={
+                "lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)
+            }
+        )
+
+
+def _checkpoint(status="running", heartbeat_age_seconds=600):
+    heartbeat = datetime.now(timezone.utc) - timedelta(seconds=heartbeat_age_seconds)
+    return {"status": status, "heartbeat_at": heartbeat.isoformat(), "lease_seconds": 60, "step": 3}
+
+
+@pytest.mark.asyncio
+async def test_recovery_resumes_a_checkpointed_run_without_spending_a_retry():
+    """The process died mid-run, but the agent's durable record is resumable:
+    the run goes back to the queue even with no retries left, the lost attempt
+    is recorded as interrupted rather than failed, and the next attempt hands
+    the agent the same run ID so it continues from its checkpoint."""
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store, worker_id="recovery")
+    agent = CheckpointedAgent(record=_checkpoint())
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=0, initial_delay_seconds=0),
+    )
+    run = await manager.run_now("task", wait=False)
+    await _lose_running_attempt(manager, store, run)
+
+    await manager.recover_expired_runs()
+
+    recovered = await manager.get_run(run.run_id)
+    assert recovered.status == RunStatus.QUEUED
+    assert recovered.lease_token is None
+    assert recovered.error is None
+    attempts = await store.list_attempts(run.run_id)
+    assert [a.status for a in attempts] == [AttemptStatus.INTERRUPTED]
+    assert attempts[0].reason == AttemptReason.LEASE_EXPIRED
+
+    assert await manager._execute_one()
+    finished = await manager.get_run(run.run_id)
+    assert finished.status == RunStatus.COMPLETED
+    assert [(call["session_id"], call["run_id"]) for call in agent.calls] == [
+        (run.session_id, run.run_id)
+    ]
+    assert finished.max_attempts == 2
+    attempts = await store.list_attempts(run.run_id)
+    assert [(a.attempt_number, a.reason, a.status) for a in attempts] == [
+        (1, AttemptReason.LEASE_EXPIRED, AttemptStatus.INTERRUPTED),
+        (2, AttemptReason.RECOVERY, AttemptStatus.COMPLETED),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_recovery_waits_while_the_checkpoint_heartbeat_is_current():
+    """The background lease expired but the agent's own heartbeat is still
+    fresh: the run may be alive in another process, so recovery neither fails
+    nor requeues it — it holds the run under its lease and looks again."""
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store, worker_id="recovery")
+    await manager.register_agent("agent", CheckpointedAgent(record=_checkpoint(heartbeat_age_seconds=1)))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=0, initial_delay_seconds=0),
+    )
+    run = await manager.run_now("task", wait=False)
+    await _lose_running_attempt(manager, store, run)
+
+    await manager.recover_expired_runs()
+
+    held = await manager.get_run(run.run_id)
+    assert held.status == RunStatus.RUNNING
+    assert held.lease_expires_at > datetime.now(timezone.utc)
+    attempts = await store.list_attempts(run.run_id)
+    assert [a.status for a in attempts] == [AttemptStatus.RUNNING]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("record", [None, _checkpoint(status="completed"), _checkpoint(status="failed")])
+async def test_recovery_without_a_resumable_checkpoint_keeps_retry_accounting(record):
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store, worker_id="recovery")
+    await manager.register_agent("agent", CheckpointedAgent(record=record))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=0, initial_delay_seconds=0),
+    )
+    run = await manager.run_now("task", wait=False)
+    await _lose_running_attempt(manager, store, run)
+
+    await manager.recover_expired_runs()
+
+    failed = await manager.get_run(run.run_id)
+    assert failed.status == RunStatus.FAILED
+    assert failed.error == "lease expired"
+    attempts = await store.list_attempts(run.run_id)
+    assert [(a.status, a.reason) for a in attempts] == [
+        (AttemptStatus.FAILED, AttemptReason.LEASE_EXPIRED)
+    ]
 
 
 @pytest.mark.asyncio
@@ -3011,7 +3315,7 @@ async def test_redis_task_store_cleans_previous_generation_after_commit():
 async def test_redis_task_store_reads_use_backend_lock():
     client = FakeRedisClient()
     store = RedisTaskStore(
-        url="redis://localhost:6379", prefix="test", lock_timeout=0.01
+        url="redis://localhost:6379", prefix="test", lock_timeout=0.01, lock_lease_seconds=0.01
     )
     store._client = client
     client.values[store._lock_key] = "other-worker"
@@ -3427,3 +3731,135 @@ def test_occurrence_id_scope_includes_task_revision_and_due_time():
     due_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
     occurrence = build_occurrence_id(ScheduleType.ONCE, 3, due_at)
     assert occurrence == "once:3:2026-01-01T00:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_returned_runtime_error_is_a_failed_background_run():
+    class FailedAgent(FakeAgent):
+        async def run(self, query, session_id=None, run_id=None):
+            return {
+                "response": "step budget exhausted",
+                "status": "error",
+                "termination_reason": "max_steps",
+            }
+
+    manager = BackgroundAgentManager(task_store="in_memory")
+    await manager.register_agent("agent", FailedAgent())
+    await manager.register_task(
+        task_id="failed-native",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    result = await manager.run_now("failed-native", wait=True)
+    assert result.status == RunStatus.FAILED
+    events = await manager.get_run_events(result.run_id)
+    assert "background_run_completed" not in {event["event"] for event in events}
+
+
+@pytest.mark.asyncio
+async def test_terminal_run_events_include_the_terminal_event_being_recorded():
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store)
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="do work",
+        schedule={"type": "manual"},
+    )
+    queued = await manager.run_now("task")
+    await manager._event_log.emit_run("background_run_started", queued)
+    completed = queued.model_copy(update={"status": RunStatus.COMPLETED})
+
+    async def record_terminal_event_later():
+        # The terminal status is visible before its event is recorded.
+        await asyncio.sleep(0.1)
+        await manager._event_log.emit_run("background_run_completed", completed)
+
+    recorder = asyncio.create_task(record_terminal_event_later())
+    events = await manager._event_log.get_run_events(completed)
+    await recorder
+
+    assert events[-1]["event"] == "background_run_completed"
+
+
+# --- audit A6: what one background run asks of the task store ------------------
+
+
+@pytest.mark.asyncio
+async def test_a_background_run_reads_its_task_and_run_a_few_times_not_per_event():
+    """Counted before this guard: 36 task-store calls per background run, of
+    which 10 were re-reads of the task and 10 of the run — every event written
+    to the workspace fetched both again to check a policy that does not change
+    during a run, and to find a run object the caller already held. On a
+    Redis or SQL task store each is a round trip."""
+    from omnicoreagent.background.store.in_memory import InMemoryTaskStore
+
+    counts = {"get_task": 0, "get_run": 0}
+    originals = {name: getattr(InMemoryTaskStore, name) for name in counts}
+
+    def counted(name):
+        async def wrapper(self, *args, **kwargs):
+            counts[name] += 1
+            return await originals[name](self, *args, **kwargs)
+
+        return wrapper
+
+    for name in counts:
+        setattr(InMemoryTaskStore, name, counted(name))
+    try:
+        manager = BackgroundAgentManager(task_store="in_memory")
+        agent = FakeAgent(response="complete")
+        await manager.register_agent("agent", agent)
+        await manager.register_task(
+            task_id="task", agent_id="agent", query="do work", schedule={"type": "manual"}
+        )
+        await manager.run_now("task", wait=True)  # warm: the first run registers things
+        counts["get_task"] = counts["get_run"] = 0
+        run = await manager.run_now("task", wait=True)
+    finally:
+        for name, original in originals.items():
+            setattr(InMemoryTaskStore, name, original)
+
+    assert run.status == RunStatus.COMPLETED
+    assert counts["get_task"] <= 3, f"one background run read its task {counts['get_task']} times"
+    # The waiter polls the run every 50 ms; a run this short is polled a few times.
+    assert counts["get_run"] <= 6, f"one background run read its run {counts['get_run']} times"
+
+
+# --- a task from an old policy can be paused or deleted under the new one ------
+
+
+@pytest.mark.asyncio
+async def test_a_task_from_an_old_policy_can_be_paused_and_deleted_but_not_run():
+    """Found deploying the steward: after its policy changed, its task could
+    not be run under the new policy (right) — and could not be deleted or
+    paused either, so it was orphaned with no way out through the API. Running
+    work under a changed policy is refused; stopping or removing it under the
+    newer policy is the safe direction and is allowed, authorized by the
+    policy in force now."""
+    first = GovernanceEngine(_background_governance_policy(name="first-policy"))
+    manager = BackgroundAgentManager(task_store="in_memory", governance_engine=first)
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(
+        task_id="stuck", agent_id="agent", query="do work", schedule={"type": "manual"}
+    )
+    await manager.register_task(
+        task_id="stuck-too", agent_id="agent", query="do work", schedule={"type": "manual"}
+    )
+
+    manager.governance_engine = GovernanceEngine(
+        _background_governance_policy(name="changed-policy")
+    )
+
+    with pytest.raises(PolicyDeniedError, match="different policy snapshot"):
+        await manager.run_now("stuck")
+    await manager.pause_task("stuck")
+    status = await manager.get_task_status("stuck")
+    schedule_state = getattr(status, "schedule_state", None) or (status.get("schedule_state") if isinstance(status, dict) else None)
+    assert getattr(schedule_state, "paused", None) is True or (isinstance(schedule_state, dict) and schedule_state.get("paused") is True)
+    await manager.delete_task("stuck")
+    await manager.delete_task("stuck-too", delete_runs=True)
+    assert await manager.get_task("stuck") is None
+    assert await manager.get_task("stuck-too") is None

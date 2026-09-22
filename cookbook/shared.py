@@ -11,7 +11,7 @@ os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_PROVIDER = "openai"
-DEFAULT_MODEL = "gpt-5.4-mini"
+DEFAULT_MODEL = "gpt-5.6-luna"
 
 
 def load_cookbook_env() -> None:
@@ -38,7 +38,7 @@ def model_config(
     *,
     provider: str | None = None,
     model: str | None = None,
-    temperature: float | None = 0.2,
+    temperature: float | None = None,
     max_tokens: int | None = 1200,
     **overrides,
 ) -> dict:
@@ -48,6 +48,13 @@ def model_config(
         "provider": provider or get_provider(),
         "model": model or get_model(),
     }
+    if config["provider"] == "openai" and config["model"] in {
+        "gpt-5.6-luna",
+        "gpt-5.6-terra",
+    }:
+        # These cookbook runs use Chat Completions, whose function tools require
+        # reasoning disabled for GPT-5.6 Luna. Explicit overrides remain intact.
+        config["reasoning_effort"] = "none"
     if temperature is not None:
         config["temperature"] = temperature
     if max_tokens is not None:

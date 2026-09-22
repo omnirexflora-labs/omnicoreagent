@@ -10,12 +10,25 @@ Subagents inherit:
 """
 
 import asyncio
-import json
+import hashlib
+import posixpath
 from typing import Any, Dict, List, Optional
-from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
+from omnicoreagent.core.tools.local_tools_registry import INTERNAL_TOOL_PROVIDERS, ToolRegistry
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.budgets import current_budgets
+from omnicoreagent.core.runs import current_run
+from omnicoreagent.governance.calls import current_tool_call, tool_call_metadata
 from omnicoreagent.governance.capabilities import subagent_spawn_authority_requests
 from omnicoreagent.governance.snapshots import derive_subagent_policy
+from omnicoreagent.core.workspace.paths import WORKSPACE_FILE_PATH_PREFIXES
+from omnicoreagent.core.agents.subagent_helpers import (
+    accepts_run_id,
+    find_child_trace_id,
+    finish_delegation,
+    new_child_run_id,
+)
+from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
+from omnicoreagent.core.telemetry.recorder import redacts_governed_arguments
 
 
 class SubagentFactory:
@@ -37,6 +50,7 @@ class SubagentFactory:
         prompt_builder: Optional[Any] = None,
         memory_router: Optional[Any] = None,
         governance_engine: Optional[Any] = None,
+        telemetry_recorder: Optional[Any] = None,
         debug: Optional[bool] = False,
     ):
         """
@@ -50,6 +64,7 @@ class SubagentFactory:
             prompt_builder: Optional prompt builder with build_subagent_prompt support
             memory_router: MemoryRouter instance
             governance_engine: Optional governed execution policy engine
+            telemetry_recorder: Parent recorder used for child trace correlation
             debug: Debug mode
         """
         self.base_model_config = base_model_config
@@ -60,24 +75,38 @@ class SubagentFactory:
         self.agent_config = agent_config or {}
         self.prompt_builder = prompt_builder
         self.governance_engine = governance_engine
+        self.telemetry_recorder = telemetry_recorder
         self._active_subagents: Dict[str, Any] = {}
 
-    def _build_subagent_config(self, *, subagent_name: str = "subagent") -> Dict[str, Any]:
+    def _build_subagent_config(
+        self, *, subagent_name: str = "subagent"
+    ) -> Dict[str, Any]:
         """
         Build agent_config for subagents inheriting parent's config.
 
         Subagents get full config but with some adjustments:
-        - Fewer max_steps (focused task)
+        - A bounded 50-step budget for focused tasks
         - Workspace files are always enabled for writing output
         - Dynamic delegation stays on the lead agent only
         """
         config = self.agent_config.copy()
 
-        config["max_steps"] = min(config.get("max_steps", 15), 15)
+        config["max_steps"] = min(config.get("max_steps", 50), 50)
         config["enable_subagents"] = False
         config["enable_workspace_files"] = True
+        context_management = dict(config.get("context_management") or {})
+        context_management["enabled"] = True
+        config["context_management"] = context_management
+        tool_offload = dict(config.get("tool_offload") or {})
+        tool_offload["enabled"] = True
+        config["tool_offload"] = tool_offload
         if self.governance_engine is not None:
             governance_config = dict(config.get("governance_config") or {})
+            # The child's policy is derived from the parent's, which already
+            # carries what the parent's config said: its budgets, its policy
+            # file, its profile. Saying them again would be refused.
+            for key in ("budgets", "policy_path", "project_root", "profile"):
+                governance_config.pop(key, None)
             governance_config.update(
                 {
                     "enabled": True,
@@ -145,8 +174,11 @@ When you have completed the task:
             if tool.name == "spawn_subagents":
                 continue
             registry.register(tool)
+            # Keep every built-in provider label: governance decides a tool by
+            # it (a worker's `execute` must stay `sandbox.execute`, not a
+            # plain local tool call).
             provider = self.local_tools.get_tool_provider(tool.name)
-            if provider in {"workspace", "artifact"}:
+            if provider in INTERNAL_TOOL_PROVIDERS:
                 registry.mark_internal_tool_provider(tool.name, provider)
         return registry
 
@@ -187,6 +219,12 @@ When you have completed the task:
             mcp_tools=self.mcp_tools,
             local_tools=self._build_subagent_local_tools(),
             memory_router=self.memory_router,
+            telemetry_store=(
+                self.telemetry_recorder.store
+                if self.telemetry_recorder is not None
+                else None
+            ),
+            telemetry_recorder=self.telemetry_recorder,
             debug=self.debug,
         )
 
@@ -202,6 +240,12 @@ When you have completed the task:
     ) -> Dict[str, Any]:
         """
         Create and run a subagent, return result.
+
+        The spawn is recorded as a ``subagent.run`` delegation span on the
+        parent trace. The child's run id is assigned before it starts, so the
+        delegation, the child trace, and the returned result stay linked on
+        success, error, and cancellation; the workspace output check is part
+        of the delegation evidence.
         """
         logger.info(f"Spawning subagent '{name}' for task: {task[:50]}...")
 
@@ -211,66 +255,166 @@ When you have completed the task:
             task=task,
             output_path=output_path,
         )
+        # A worker parked on an approval the lead has since decided resumes
+        # from where it stopped instead of starting over.
+        parked_run_id = self._parked_worker(name)
+        child_run_id = parked_run_id or (new_child_run_id() if accepts_run_id(agent) else None)
+        delegation = await self._start_delegation(
+            agent=agent,
+            name=name,
+            role=role,
+            task=task,
+            output_path=output_path,
+            child_run_id=child_run_id,
+        )
+        child_trace_id = None
+        output_before = None
+        if not parked_run_id:
+            output_before = await self._output_fingerprint(agent, output_path)
 
         try:
             if self.mcp_tools:
                 await agent.connect_mcp_servers()
 
-            result = await agent.run(str(task))
+            if parked_run_id and hasattr(agent, "resume"):
+                result = await agent.resume(parked_run_id)
+            else:
+                result = await agent.run(
+                    str(task), **({"run_id": child_run_id} if child_run_id else {})
+                )
+            child_trace_id = result.get("trace_id")
+            child_run_id = result.get("run_id") or child_run_id
             response = result.get("response", str(result)) or ""
             if not isinstance(response, str):
                 response = str(response)
 
-            # Check for error indicators in the response
-            error_indicators = [
-                "model encountered an error",
-                "error occurred",
-                "failed to",
-                "unable to complete",
-                "retry again",
-            ]
-            response_lower = response.lower()
-            is_error = any(
-                indicator in response_lower for indicator in error_indicators
-            )
+            if result.get("status") in {"awaiting_approval", "awaiting_budget"}:
+                # The worker is waiting for a person. Its asks become the
+                # lead's, on the lead's run, so the lead pauses too.
+                return await self._park_delegation(
+                    delegation, name=name, output_path=output_path, result=result,
+                    child_run_id=child_run_id, child_trace_id=child_trace_id,
+                )
 
-            # Also check if response is empty or too short
-            is_error = is_error or len(response.strip()) < 10
+            is_error = result.get("status", "success") != "success"
 
             if is_error:
                 logger.warning(f"Subagent '{name}' returned an error response")
+                stale = await self._stale_output_note(agent, output_path, output_before)
+                if stale:
+                    response = f"{response} {stale}".strip()
+                await self._finish_delegation(
+                    delegation,
+                    child_run_id=child_run_id,
+                    child_trace_id=child_trace_id,
+                    status=SpanStatus.ERROR,
+                    error={"type": "SubagentError", "message": response[:500]},
+                )
                 return {
                     "status": "error",
                     "data": {
                         "subagent_name": name,
                         "output_path": output_path,
+                        "trace_id": child_trace_id,
+                        "run_id": child_run_id,
                         "error": response[:500] if len(response) > 500 else response,
                         "governance": self._governance_reference(),
                     },
                     "message": f"Subagent '{name}' encountered an error: {response[:100]}",
                 }
 
+            output_error = self._workspace_output_error(agent, output_path)
+            if output_error is None:
+                output_error = await self._stale_output_note(agent, output_path, output_before)
+            workspace_output = {
+                "path": output_path,
+                "verified": output_error is None,
+                "error": output_error,
+            }
+            if output_error is not None:
+                logger.warning(
+                    "Subagent '%s' completed without a usable workspace output: %s",
+                    name,
+                    output_error,
+                )
+                await self._finish_delegation(
+                    delegation,
+                    child_run_id=child_run_id,
+                    child_trace_id=child_trace_id,
+                    status=SpanStatus.ERROR,
+                    error={"type": "MissingWorkspaceOutput", "message": output_error},
+                    workspace_output=workspace_output,
+                )
+                return {
+                    "status": "error",
+                    "data": {
+                        "subagent_name": name,
+                        "output_path": output_path,
+                        "trace_id": child_trace_id,
+                        "run_id": child_run_id,
+                        "error": output_error,
+                        "summary": response[:500] if len(response) > 500 else response,
+                        "termination_reason": "missing_output",
+                        "governance": self._governance_reference(),
+                    },
+                    "message": f"Subagent '{name}' did not create the requested output: {output_path}",
+                }
+
             logger.info(f"Subagent '{name}' completed task")
+            await self._finish_delegation(
+                delegation,
+                child_run_id=child_run_id,
+                child_trace_id=child_trace_id,
+                status=SpanStatus.OK,
+                workspace_output=workspace_output,
+            )
 
             return {
                 "status": "success",
                 "data": {
                     "subagent_name": name,
                     "output_path": output_path,
+                    "trace_id": child_trace_id,
+                    "run_id": child_run_id,
                     "summary": response[:500] if len(response) > 500 else response,
                     "governance": self._governance_reference(),
                 },
-                "message": f"Subagent '{name}' completed. Output saved to {output_path}",
+                "message": f"Subagent '{name}' completed. Requested output path: {output_path}",
             }
+
+        except asyncio.CancelledError as e:
+            await self._finish_delegation(
+                delegation,
+                child_run_id=child_run_id,
+                child_trace_id=child_trace_id,
+                status=SpanStatus.CANCELLED,
+                error={"type": e.__class__.__name__, "message": "cancelled"},
+            )
+            raise
 
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Subagent '{name}' failed: {error_msg}")
+            child_trace_id = child_trace_id or await find_child_trace_id(
+                self.telemetry_recorder,
+                run_id=child_run_id,
+                parent_trace_id=delegation["parent_trace_id"],
+            )
+            await self._finish_delegation(
+                delegation,
+                child_run_id=child_run_id,
+                child_trace_id=child_trace_id,
+                status=SpanStatus.ERROR,
+                error={"type": e.__class__.__name__, "message": error_msg},
+            )
 
             return {
                 "status": "error",
                 "data": {
                     "subagent_name": name,
+                    "output_path": output_path,
+                    "trace_id": child_trace_id,
+                    "run_id": child_run_id,
                     "error": error_msg,
                     "governance": self._governance_reference(),
                 },
@@ -281,6 +425,236 @@ When you have completed the task:
             await agent.cleanup()
             if name in self._active_subagents:
                 del self._active_subagents[name]
+
+    def _parked_worker(self, name: str) -> str | None:
+        """The run of a worker of this name whose asks the lead has decided."""
+        run = current_run()
+        if run is None or not getattr(run, "enabled", False):
+            return None
+        for approval in reversed(run.record.get("approvals") or []):
+            if (
+                approval.get("delegated_name") == name
+                and approval.get("delegated_run_id")
+                and approval.get("status") in {"approved", "denied", "used"}
+            ):
+                return approval["delegated_run_id"]
+        return None
+
+    async def _park_delegation(
+        self,
+        delegation: Dict[str, Any],
+        *,
+        name: str,
+        output_path: str,
+        result: Dict[str, Any],
+        child_run_id: str | None,
+        child_trace_id: str | None,
+    ) -> Dict[str, Any]:
+        """Mirror the worker's pending asks onto the lead's run and report."""
+        status = result["status"]
+        run = current_run()
+        call = current_tool_call()
+        mirrored = 0
+        child_record = None
+        if run is not None and getattr(run, "enabled", False) and child_run_id and self.memory_router is not None:
+            try:
+                child_record = await self.memory_router.get_run_state(child_run_id)
+            except Exception:  # noqa: BLE001 - a store without run state
+                child_record = None
+        if status == "awaiting_approval" and child_record is not None and run is not None:
+            already = {
+                a.get("delegated_approval_id") for a in run.record.get("approvals") or []
+            }
+            public = {a.get("approval_id"): a for a in result.get("approvals") or []}
+            for entry in child_record.get("approvals") or []:
+                if entry.get("status") != "pending" or entry["approval_id"] in already:
+                    continue
+                shown = public.get(entry["approval_id"]) or {}
+                await run.add_approval(
+                    {
+                        **entry,
+                        "approval_id": f"approval_{__import__('uuid').uuid4().hex}",
+                        "tool_call_id": call.tool_call_id if call is not None else None,
+                        "arguments": shown.get("arguments"),
+                        "delegated_run_id": child_run_id,
+                        "delegated_approval_id": entry["approval_id"],
+                        "delegated_name": name,
+                    }
+                )
+                mirrored += 1
+        await self._finish_delegation(
+            delegation,
+            child_run_id=child_run_id,
+            child_trace_id=child_trace_id,
+            status=SpanStatus.OK,
+        )
+        waiting = (
+            f"{mirrored} approval(s)" if status == "awaiting_approval" else "a budget top-up"
+        )
+        return {
+            "status": status,
+            "data": {
+                "subagent_name": name,
+                "output_path": output_path,
+                "trace_id": child_trace_id,
+                "run_id": child_run_id,
+                "approvals": result.get("approvals"),
+                "budget_request": result.get("budget_request"),
+                "governance": self._governance_reference(),
+            },
+            "message": (
+                f"Worker '{name}' is waiting for {waiting}. This run pauses with it; "
+                "when a person decides, resume this run and the worker continues."
+            ),
+        }
+
+    async def _start_delegation(
+        self,
+        *,
+        agent: Any,
+        name: str,
+        role: str,
+        task: str,
+        output_path: str,
+        child_run_id: str | None,
+    ) -> Dict[str, Any]:
+        recorder = self.telemetry_recorder
+        parent_context = recorder.current_context() if recorder is not None else None
+        delegation: Dict[str, Any] = {
+            "agent_name": getattr(agent, "name", name),
+            "span": None,
+            "spawn_event_id": None,
+            "parent_context": parent_context,
+            "parent_trace_id": parent_context.trace_id if parent_context else None,
+        }
+        if parent_context is None:
+            return delegation
+        actor = TelemetryActor(type=ActorType.AGENT, name=delegation["agent_name"])
+        # Under governance the delegated task text is redacted like tool
+        # arguments; the child still receives it.
+        spawn_input = {
+            "agent_name": delegation["agent_name"],
+            "role": role,
+            "task": (
+                "[REDACTED]"
+                if redacts_governed_arguments(recorder, self.governance_engine is not None)
+                else task
+            ),
+            "output_path": output_path,
+        }
+        span = await recorder.start_span(
+            name=f"subagent:{delegation['agent_name']}",
+            kind="subagent.run",
+            actor=actor,
+            input=spawn_input,
+        )
+        spawn_event = await recorder.emit_event(
+            "subagent_spawn",
+            actor=actor,
+            input=spawn_input,
+            metadata={
+                "subagent_span_id": span.span_id,
+                "parent_trace_id": parent_context.trace_id,
+                "parent_span_id": parent_context.span_id,
+                "child_run_id": child_run_id,
+                "dynamic": True,
+            },
+        )
+        delegation["span"] = span
+        delegation["spawn_event_id"] = spawn_event.event_id
+        return delegation
+
+    async def _finish_delegation(
+        self,
+        delegation: Dict[str, Any],
+        *,
+        child_run_id: str | None,
+        child_trace_id: str | None,
+        status: SpanStatus,
+        error: Dict[str, Any] | None = None,
+        workspace_output: Dict[str, Any] | None = None,
+    ) -> None:
+        if delegation["span"] is None:
+            return
+        await finish_delegation(
+            self.telemetry_recorder,
+            delegation["span"],
+            agent_name=delegation["agent_name"],
+            session_id=None,
+            spawn_event_id=delegation["spawn_event_id"],
+            parent_context=delegation["parent_context"],
+            child_run_id=child_run_id,
+            child_trace_id=child_trace_id,
+            status=status,
+            error=error,
+            workspace_output=workspace_output,
+        )
+
+    @staticmethod
+    async def _output_fingerprint(agent: Any, output_path: str) -> tuple | None:
+        """What is at a worker's output path now: its content digest and
+        modification time, or None when nothing is (or it cannot be read)."""
+        files = await _workspace_files(agent)
+        if files is None or not isinstance(output_path, str) or not output_path.strip():
+            return None
+        try:
+            if files.exists(output_path, strip_prefixes=WORKSPACE_FILE_PATH_PREFIXES) is not True:
+                return None
+            content = files.read_text(output_path, strip_prefixes=WORKSPACE_FILE_PATH_PREFIXES)
+            if not isinstance(content, str):
+                return None
+            modified = None
+            parent, name = posixpath.split(output_path.rstrip("/"))
+            for entry in files.list_files(parent or None, strip_prefixes=WORKSPACE_FILE_PATH_PREFIXES):
+                if getattr(entry, "name", None) == name:
+                    modified = getattr(entry, "modified_at", None)
+                    break
+            digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        except Exception:  # noqa: BLE001 - a file that cannot be read is not compared.
+            return None
+        return (digest, str(modified))
+
+    async def _stale_output_note(
+        self, agent: Any, output_path: str, before: tuple | None
+    ) -> str | None:
+        """A note when the file at the output path is the one that was there
+        before the worker started: an earlier run's, not this worker's."""
+        if before is None:
+            return None
+        if await self._output_fingerprint(agent, output_path) != before:
+            return None
+        return (
+            f"The worker did not write its output: the file at '{output_path}' is "
+            "unchanged from before it started, an earlier run's, not this worker's."
+        )
+
+    @staticmethod
+    def _workspace_output_error(agent: Any, output_path: str) -> str | None:
+        """Return a diagnostic when a child did not create its declared output."""
+        if not isinstance(output_path, str) or not output_path.strip():
+            return "A non-empty workspace output path is required."
+
+        runtime_agent = getattr(agent, "agent", None)
+        tool_runtime_registry = getattr(runtime_agent, "tool_runtime_registry", None)
+        workspace = getattr(tool_runtime_registry, "workspace", None)
+        files = getattr(workspace, "files", None)
+        if files is None or not hasattr(files, "exists"):
+            return "The worker workspace was not initialized, so its output could not be verified."
+
+        try:
+            exists = files.exists(
+                output_path,
+                strip_prefixes=WORKSPACE_FILE_PATH_PREFIXES,
+            )
+        except Exception as exc:
+            return f"The worker output could not be verified: {exc}"
+
+        if not exists:
+            return (
+                "The worker completed without creating the requested workspace "
+                f"output at '{output_path}'."
+            )
+        return None
 
     async def run_parallel_subagents(
         self,
@@ -316,6 +690,7 @@ When you have completed the task:
         processed_results = []
         successful = 0
         failed = 0
+        waiting: list[str] = []
 
         for i, result in enumerate(results):
             if isinstance(result, Exception):
@@ -331,11 +706,15 @@ When you have completed the task:
                 processed_results.append(result.get("data", {}))
                 if result.get("status") == "success":
                     successful += 1
+                elif result.get("status") in {"awaiting_approval", "awaiting_budget"}:
+                    waiting.append(result["status"])
                 else:
                     failed += 1
 
         return {
-            "status": "success"
+            "status": waiting[0]
+            if waiting
+            else "success"
             if failed == 0
             else "partial"
             if successful > 0
@@ -352,6 +731,11 @@ When you have completed the task:
     async def _authorize_subagent_spawns(
         self, subagent_specs: list[dict[str, Any]]
     ) -> None:
+        # Delegation is spend like any other: a run that has used its workers
+        # cannot hand out more, and the children spend the parent's budgets.
+        budgets = current_budgets()
+        if budgets is not None and budgets.enabled:
+            await budgets.charge("subagent_runs", len(subagent_specs))
         if self.governance_engine is None:
             return
         requests = subagent_spawn_authority_requests(
@@ -361,6 +745,10 @@ When you have completed the task:
             memory_scope=str(self.agent_config.get("memory_config") or ""),
             budget=self._governance_budget_snapshot(),
         )
+        # An ask on delegation is recorded against the spawn call, so the
+        # run pauses on it and continues the call after a decision.
+        for request in requests:
+            request.metadata = {**tool_call_metadata(), **(request.metadata or {})}
         await self.governance_engine.authorize_all(requests)
 
     def _local_tool_names(self) -> list[str]:
@@ -372,7 +760,10 @@ When you have completed the task:
         return [str(server.get("name") or "") for server in self.mcp_tools or []]
 
     def _governance_budget_snapshot(self) -> dict[str, Any]:
-        if self.governance_engine is None or self.governance_engine.policy.budget is None:
+        if (
+            self.governance_engine is None
+            or self.governance_engine.policy.budget is None
+        ):
             return {}
         budget = self.governance_engine.policy.budget
         return {
@@ -433,65 +824,57 @@ def build_subagent_tools(
         inputSchema={
             "type": "object",
             "properties": {
-                "subagents_json": {
-                    "type": "string",
-                    "description": """
-    JSON array string of subagent specifications. Each spec needs:
-    - name: Unique identifier (e.g., "aws_analyst")
-    - role: Worker role or expertise description (e.g., "API reviewer")
-    - task: Specific task to complete
-    - output_path: Workspace file path for output
-
-    Example:
-    '[
-        {"name": "api", "role": "API reviewer", "task": "Review API error handling and write concrete risks", "output_path": "/workspace/audit/api.md"},
-        {"name": "tests", "role": "Test reviewer", "task": "Review test coverage gaps and write recommended cases", "output_path": "/workspace/audit/tests.md"}
-    ]'
-                    """,
+                "subagents": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 15,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "role": {"type": "string"},
+                            "task": {"type": "string"},
+                            "output_path": {"type": "string"},
+                        },
+                        "required": ["name", "role", "task", "output_path"],
+                        "additionalProperties": False,
+                    },
                 },
             },
-            "required": ["subagents_json"],
+            "required": ["subagents"],
             "additionalProperties": False,
         },
     )
-    async def spawn_subagents(
-        subagents_json: str,
-    ) -> Dict[str, Any]:
-        """
-        Spawn one or more subagents.
-
-        Parameters
-        ----------
-        subagents_json : str
-            JSON array of subagent specs with name, role, task, output_path
-
-        Returns
-        -------
-        dict
-            {
-                "status": "success" | "partial" | "error",
-                "data": {"total", "successful", "failed", "results"},
-                "message": Completion summary
-            }
-        """
-
-        try:
-            if isinstance(subagents_json, list):
-                subagent_specs = subagents_json
-            else:
-                subagent_specs = json.loads(subagents_json)
-
-            if not isinstance(subagent_specs, list):
-                return {
-                    "status": "error",
-                    "data": None,
-                    "message": "subagents_json must be a JSON array",
-                }
-        except json.JSONDecodeError as e:
+    async def spawn_subagents(subagents: list[dict[str, Any]]) -> Dict[str, Any]:
+        """Run a typed array of focused worker specifications."""
+        if not isinstance(subagents, list):
             return {
                 "status": "error",
                 "data": None,
-                "message": f"Invalid JSON: {str(e)}",
+                "message": "subagents must be an array",
             }
+        return await factory.run_parallel_subagents(subagents)
 
-        return await factory.run_parallel_subagents(subagent_specs)
+
+async def _workspace_files(agent: Any) -> Any:
+    """The worker's workspace files, initializing the worker if it has not been."""
+    initialize = getattr(agent, "initialize", None)
+    if getattr(agent, "_initialized", True) is False and callable(initialize):
+        try:
+            await initialize()
+        except Exception:  # noqa: BLE001 - run() reports a worker that cannot start.
+            return None
+    runtime_agent = getattr(agent, "agent", None)
+    registry = getattr(runtime_agent, "tool_runtime_registry", None)
+    workspace = getattr(registry, "workspace", None)
+    create = getattr(registry, "_workspace_for_runtime_tools", None)
+    if workspace is None and callable(create):
+        # Made when the worker's tools are prepared; the same one, earlier.
+        try:
+            workspace = create()
+        except Exception:  # noqa: BLE001 - a workspace that cannot be made is not compared.
+            return None
+    files = getattr(workspace, "files", None)
+    if files is None or not hasattr(files, "read_text"):
+        return None
+    return files

@@ -4,8 +4,13 @@ from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from enum import Enum
 from os import PathLike
 from typing import Any
-import uuid
+import hashlib
+import json
+from pathlib import Path
+import re
+from urllib.parse import urlparse
 
+from omnicoreagent.core.privacy import PrivacyConfig
 from omnicoreagent.core.workspace.config import (
     WorkspaceConfig,
     resolve_workspace_config,
@@ -22,8 +27,23 @@ SUPPORTED_MODELS_PROVIDERS = {
     "deepseek": "deepseek",
     "mistral": "mistral",
     "openrouter": "openrouter",
-    "cencori": "cencori",
 }
+
+
+GUARDRAIL_MODES = frozenset({"off", "input_only", "full"})
+
+
+def normalize_guardrail_mode(value: Any) -> str:
+    """Normalize and validate the guardrail enforcement boundary."""
+    if not isinstance(value, str):
+        raise ValueError(
+            "guardrail_mode must be one of: off, input_only, full"
+        )
+    mode = value.strip().lower()
+    if mode not in GUARDRAIL_MODES:
+        allowed = ", ".join(sorted(GUARDRAIL_MODES))
+        raise ValueError(f"guardrail_mode must be one of: {allowed}; got '{value}'")
+    return mode
 
 
 class TransportType(str, Enum):
@@ -36,10 +56,11 @@ class TransportType(str, Enum):
 class ModelConfig:
     provider: str
     model: str
-    temperature: float | None = 0.5
+    temperature: float | None = None
     max_tokens: int | None = 5000
     max_context_length: int | None = 100000
-    top_p: float | None = 0.7
+    top_p: float | None = None
+    reasoning_effort: str | None = None
     top_k: int | str | None = "N/A"
     api_key: str | None = None
     azure_endpoint: str | None = None
@@ -55,17 +76,34 @@ class MCPToolConfig:
     url: str | None = None
     command: str | None = None
     args: list[str] | None = None
+    cwd: str | None = None
     headers: dict[str, str] | None = None
     env: dict[str, str] | None = None
-    timeout: int | None = 60
-    sse_read_timeout: int | None = 120
+    # HTTP transports only; the transports default them to 60 s and 120 s.
+    timeout: float | None = None
+    sse_read_timeout: float | None = None
     auth: dict[str, Any] | None = None
+    # Transport, handshake, and tool listing must finish within this.
+    connect_timeout: float | None = 30.0
+    # Per tool call; None leaves only the agent's tool timeout.
+    call_timeout: float | None = None
 
     def __post_init__(self):
-        self.transport_type = TransportType(self.transport_type)
+        self.transport_type = _transport_type(self.transport_type, self.name)
         if not self.name:
-            base = self.command or self.url or "mcp_tool"
-            self.name = f"{base}_{uuid.uuid4().hex[:6]}"
+            self.name = _default_mcp_server_name(self)
+
+
+def _default_mcp_server_name(tool: MCPToolConfig) -> str:
+    """A stable name from what identifies the server, so an unnamed server
+    keeps the same identity in governance and telemetry across runs."""
+    source = Path(tool.command).name if tool.command else urlparse(tool.url or "").hostname
+    base = re.sub(r"[^a-z0-9]+", "_", (source or "mcp").lower())
+    identity = json.dumps(
+        [tool.transport_type.value, tool.command, tool.args, tool.url], sort_keys=True
+    )
+    digest = hashlib.sha256(identity.encode()).hexdigest()[:6]
+    return f"{base.strip('_') or 'mcp'}_{digest}"
 
 
 def _default_memory_config() -> dict[str, Any]:
@@ -78,7 +116,7 @@ def _default_memory_config() -> dict[str, Any]:
 
 def _default_context_management() -> dict[str, Any]:
     return {
-        "enabled": False,
+        "enabled": True,
         "mode": "token_budget",
         "value": 100000,
         "threshold_percent": 75,
@@ -89,7 +127,7 @@ def _default_context_management() -> dict[str, Any]:
 
 def _default_tool_offload() -> dict[str, Any]:
     return {
-        "enabled": False,
+        "enabled": True,
         "threshold_tokens": 500,
         "threshold_bytes": 2000,
         "max_preview_tokens": 150,
@@ -103,12 +141,33 @@ def _default_governance_config() -> dict[str, Any]:
         "profile": "interactive-dev",
         "policy": None,
         "policy_path": None,
+        # What a request, session, agent, or application may spend.
+        "budgets": None,
         "project_root": None,
         "approval_resolver": None,
+        # With no resolver: "suspend" pauses the run until a person decides,
+        # "fail" refuses the call (the behaviour before durable runs).
+        "approval_mode": "suspend",
         "sandbox_runtime": None,
         "sandbox_config": None,
+        # What each run's sandbox is (network, image, working directory).
+        "sandbox_manifest": None,
         "allow_test_sandbox_runtime": False,
         "allow_static_high_risk_approvals": False,
+    }
+
+
+def _default_privacy_config() -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "redact_telemetry": True,
+        # The agent's conversation and files are its work; see PrivacyConfig.
+        "redact_memory": False,
+        "redact_workspace": False,
+        "redact_stream": True,
+        "redact_public": True,
+        "redact_model_io": False,
+        "categories": ["credit_card", "email", "phone", "ssn"],
     }
 
 
@@ -118,18 +177,36 @@ GOVERNANCE_CONFIG_KEYS = frozenset(_default_governance_config())
 @dataclass
 class AgentConfig:
     agent_name: str = "OmniCoreAgent"
+    # Recorded as the trace's agent_version; a content hash of the harness
+    # (prompt, tools, model, and settings) is used when it is not set.
+    agent_version: str | None = None
     request_limit: int = 0
     total_tokens_limit: int = 0
-    max_steps: int = 15
-    tool_call_timeout: int = 30
+    max_steps: int = 50
+    tool_call_timeout: int = 180
+    # Seconds a delegation (spawn_subagents) may take. None: a worker is
+    # bounded by its own step cap and the run's deadline, not by the timeout
+    # for one tool call.
+    subagent_timeout: int | None = None
     mcp_enabled: bool = False
     enable_advanced_tool_use: bool = False
     enable_subagents: bool = False
     enable_agent_skills: bool = False
+    # Environment variables host skill scripts receive beyond the minimal set
+    # (PATH, HOME, locale, TMPDIR, TERM); secrets are not passed by default.
+    skill_script_env: list[str] = field(default_factory=list)
+    # A live run refreshes its heartbeat within this many seconds; a run whose
+    # heartbeat is older can be recovered by another process.
+    run_lease_seconds: int = 60
+    # Code mode: a run_code tool that runs Python in Monty (omnicoreagent[codemode]).
+    code_mode: dict[str, Any] = field(default_factory=dict)
+    # A project's own instructions for the agent (AGENTS.md), by path.
+    agents_md: dict[str, Any] = field(default_factory=dict)
     memory_config: dict[str, Any] = field(default_factory=_default_memory_config)
     enable_workspace_files: bool = True
     guardrail_config: dict[str, Any] = field(default_factory=dict)
     guardrail_mode: str = "full"
+    privacy_config: dict[str, Any] = field(default_factory=_default_privacy_config)
     context_management: dict[str, Any] = field(
         default_factory=_default_context_management
     )
@@ -138,11 +215,51 @@ class AgentConfig:
     workspace_config: WorkspaceConfig | dict[str, Any] | None = None
 
     def __post_init__(self):
+        self.guardrail_mode = normalize_guardrail_mode(self.guardrail_mode)
+        if self.agent_version is not None and (
+            not isinstance(self.agent_version, str) or not self.agent_version.strip()
+        ):
+            raise ValueError("agent_version must be a non-empty string or None")
+        if self.agents_md:
+            from omnicoreagent.core.project_instructions import ProjectInstructionsConfig
+
+            ProjectInstructionsConfig.from_value(self.agents_md)  # validates
+        if self.code_mode:
+            from omnicoreagent.core.tools.code_mode import CodeModeConfig
+
+            CodeModeConfig.from_value(self.code_mode)  # validates
+        if (
+            isinstance(self.run_lease_seconds, bool)
+            or not isinstance(self.run_lease_seconds, int)
+            or self.run_lease_seconds < 1
+        ):
+            raise ValueError("run_lease_seconds must be a positive integer")
+        if not isinstance(self.skill_script_env, (list, tuple)) or not all(
+            isinstance(name, str) and name for name in self.skill_script_env
+        ):
+            raise ValueError("skill_script_env must be a list of environment variable names")
+        self.skill_script_env = list(self.skill_script_env)
+        if not isinstance(self.guardrail_config, dict):
+            raise ValueError("guardrail_config must be a dict")
         self.request_limit = 0 if self.request_limit is None else self.request_limit
         self.total_tokens_limit = (
             0 if self.total_tokens_limit is None else self.total_tokens_limit
         )
         self.guardrail_config = self.guardrail_config or {}
+        if self.guardrail_mode != "off":
+            # Keep the package import path lightweight; validation still
+            # happens before any guarded runtime component is built.
+            from omnicoreagent.core.guardrails.models import DetectionConfig
+
+            # Validate the nested security policy at the public configuration
+            # boundary, before model/tool construction can begin.
+            DetectionConfig(**self.guardrail_config)
+        if not isinstance(self.privacy_config, dict):
+            raise ValueError("privacy_config must be a dict")
+        self.privacy_config = _merge_defaults(
+            _default_privacy_config(), self.privacy_config
+        )
+        PrivacyConfig(**self.privacy_config)
         self.memory_config = self.memory_config or _default_memory_config()
         self.context_management = _merge_defaults(
             _default_context_management(), self.context_management
@@ -165,12 +282,24 @@ class AgentConfig:
         _validate_range(
             "tool_call_timeout", self.tool_call_timeout, minimum=2, maximum=1000
         )
+        if self.subagent_timeout is not None:
+            _validate_range(
+                "subagent_timeout", self.subagent_timeout, minimum=2, maximum=86400
+            )
         _validate_context_management(self.context_management)
         _validate_tool_offload(self.tool_offload)
         _validate_governance_config(self.governance_config)
 
         if self.enable_subagents:
+            # Dynamic workers depend on a durable file surface for their output,
+            # in-run context management to prevent the lead and workers from
+            # exhausting their context, and tool offloading to keep large
+            # observations out of subsequent model requests.
+            # Preserve all caller-supplied context settings, but do not allow
+            # the required capability to be disabled by an incomplete config.
             self.enable_workspace_files = True
+            self.context_management["enabled"] = True
+            self.tool_offload["enabled"] = True
 
     def model_dump(self) -> dict[str, Any]:
         data = {}
@@ -186,10 +315,6 @@ class AgentConfig:
 
     def model_copy(self, *, update: dict[str, Any] | None = None) -> AgentConfig:
         return replace(self, **(update or {}))
-
-
-def default_agent_config(name: str) -> dict[str, Any]:
-    return AgentConfig(agent_name=name).model_dump()
 
 
 def normalize_model_config(config: dict[str, Any] | ModelConfig) -> dict[str, Any]:
@@ -214,18 +339,103 @@ def normalize_model_config(config: dict[str, Any] | ModelConfig) -> dict[str, An
     return data
 
 
+_MCP_COMMON_FIELDS = frozenset({"name", "transport_type", "connect_timeout", "call_timeout"})
+_MCP_STDIO_FIELDS = frozenset({"command", "args", "cwd", "env"})
+_MCP_HTTP_FIELDS = frozenset({"url", "headers", "timeout", "sse_read_timeout", "auth"})
+_MCP_AUTH_FIELDS = frozenset({"method", "callback_port", "callback_timeout"})
+
+
+def _transport_type(value: Any, name: str | None) -> TransportType:
+    text = getattr(value, "value", value)
+    text = "streamable_http" if text == "streamable-http" else text
+    try:
+        return TransportType(text)
+    except ValueError:
+        supported = ", ".join(t.value for t in TransportType)
+        raise ValueError(
+            f"MCP server {name!r}: Unsupported MCP transport_type {text!r}. "
+            f"Supported: {supported}"
+        ) from None
+
+
+def _positive(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+
+
+def _string_map(value: Any) -> bool:
+    return isinstance(value, dict) and all(
+        isinstance(k, str) and isinstance(v, str) for k, v in value.items()
+    )
+
+
+def _validate_mcp_server(data: dict[str, Any]) -> None:
+    """Reject settings that are wrong or that do nothing for the transport."""
+    name = data.get("name")
+
+    def fail(message: str) -> None:
+        raise ValueError(f"MCP server {name!r}: {message}")
+
+    transport = TransportType(data["transport_type"])
+    other = _MCP_HTTP_FIELDS if transport == TransportType.STDIO else _MCP_STDIO_FIELDS
+    other_names = "stdio" if transport != TransportType.STDIO else "sse, streamable_http"
+    for field_name in sorted(other & set(data)):
+        fail(f"'{field_name}' does not apply to {transport.value} (it applies to {other_names})")
+
+    if transport == TransportType.STDIO:
+        if not data.get("command"):
+            fail("command is required for stdio transport")
+    else:
+        url = data.get("url")
+        if not url:
+            fail(f"url is required for {transport.value} transport")
+        if not str(url).startswith(("http://", "https://")):
+            fail("url must start with http:// or https://")
+
+    if "args" in data and not (
+        isinstance(data["args"], list) and all(isinstance(a, str) for a in data["args"])
+    ):
+        fail("args must be a list of strings")
+    for field_name in ("env", "headers"):
+        if field_name in data and not _string_map(data[field_name]):
+            fail(f"{field_name} must map strings to strings")
+    for field_name in ("timeout", "sse_read_timeout", "connect_timeout", "call_timeout"):
+        if field_name in data and not _positive(data[field_name]):
+            fail(f"{field_name} must be a positive number of seconds")
+
+    auth = data.get("auth")
+    if auth is not None:
+        if not isinstance(auth, dict):
+            fail("auth must be a mapping such as {'method': 'oauth'}")
+        for key in sorted(set(auth) - _MCP_AUTH_FIELDS):
+            fail(f"Unknown auth setting {key!r}. Allowed: {', '.join(sorted(_MCP_AUTH_FIELDS))}")
+        if auth.get("method") != "oauth":
+            fail("auth method must be 'oauth' (use headers for a static token)")
+        port = auth.get("callback_port")
+        if port is not None and not (
+            isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535
+        ):
+            fail("auth callback_port must be an integer from 1 to 65535")
+        if "callback_timeout" in auth and not _positive(auth["callback_timeout"]):
+            fail("auth callback_timeout must be a positive number of seconds")
+
+
 def normalize_mcp_tool_config(config: dict[str, Any] | MCPToolConfig) -> dict[str, Any]:
-    tool = config if isinstance(config, MCPToolConfig) else MCPToolConfig(**config)
+    """Validate one MCP server's settings and return them as a plain mapping."""
+    if isinstance(config, MCPToolConfig):
+        tool = config
+    else:
+        known = _MCP_COMMON_FIELDS | _MCP_STDIO_FIELDS | _MCP_HTTP_FIELDS
+        for key in sorted(set(config) - known):
+            raise ValueError(
+                f"MCP server {config.get('name')!r}: Unknown MCP server setting {key!r}. "
+                f"Allowed: {', '.join(sorted(known))}"
+            )
+        tool = MCPToolConfig(**config)
     data = asdict(tool)
     data["transport_type"] = tool.transport_type.value
-
-    if tool.transport_type in {TransportType.SSE, TransportType.STREAMABLE_HTTP}:
-        if not tool.url:
-            raise ValueError(f"url is required for {tool.transport_type.value} transport")
-    elif tool.transport_type == TransportType.STDIO and not tool.command:
-        raise ValueError("command is required for stdio transport")
-
-    return {key: value for key, value in data.items() if value is not None}
+    data = {key: value for key, value in data.items() if value is not None}
+    _validate_mcp_server(data)
+    return data
 
 
 def normalize_mcp_tools(
@@ -351,8 +561,17 @@ def _validate_governance_config(value: dict[str, Any]):
         raise ValueError(
             "governance_config.allow_static_high_risk_approvals must be a boolean"
         )
+    if value.get("approval_mode", "suspend") not in {"suspend", "fail"}:
+        raise ValueError("governance_config.approval_mode must be 'suspend' or 'fail'")
     if not isinstance(value.get("allow_test_sandbox_runtime", False), bool):
         raise ValueError("governance_config.allow_test_sandbox_runtime must be a boolean")
+    budgets = value.get("budgets")
+    if budgets is not None:
+        if not isinstance(budgets, dict):
+            raise ValueError("governance_config.budgets must be a dict")
+        from omnicoreagent.governance import PolicyBudgets
+
+        PolicyBudgets(**budgets)  # read now, so a bad budget fails at startup
     sandbox_config = value.get("sandbox_config")
     if sandbox_config is not None:
         if value.get("sandbox_runtime") is not None:
@@ -365,7 +584,7 @@ def _validate_governance_config(value: dict[str, Any]):
             _validate_unknown_keys(
                 "governance_config.sandbox_config",
                 sandbox_config,
-                frozenset({"provider"}),
+                frozenset({"provider", "options"}),
             )
             provider = sandbox_config.get("provider", "none")
         else:
@@ -373,17 +592,23 @@ def _validate_governance_config(value: dict[str, Any]):
                 from omnicoreagent.sandbox import SandboxRuntimeConfig
 
                 valid_config = isinstance(sandbox_config, SandboxRuntimeConfig)
-                provider = sandbox_config.provider.value if valid_config else None
+                provider = sandbox_config.provider_name if valid_config else None
             except Exception:
                 valid_config = False
                 provider = None
             if not valid_config:
                 raise ValueError("governance_config.sandbox_config must be a dict or string")
-        if provider not in {"none", "local_test"}:
+        from omnicoreagent.sandbox import registered_sandbox_providers
+
+        if provider not in registered_sandbox_providers():
             raise ValueError(
-                "governance_config.sandbox_config.provider must be one of "
-                "{'none', 'local_test'}"
+                "governance_config.sandbox_config.provider must be a registered "
+                f"sandbox provider: {', '.join(registered_sandbox_providers())}"
             )
+    if value.get("sandbox_manifest") is not None:
+        from omnicoreagent.sandbox.factory import sandbox_manifest_from_config
+
+        sandbox_manifest_from_config(value["sandbox_manifest"])
     profile = value.get("profile", "interactive-dev")
     if profile not in {"permissive-dev", "interactive-dev", "strict-production"}:
         raise ValueError(

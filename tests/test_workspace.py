@@ -407,3 +407,26 @@ def test_s3_workspace_storage_delete_and_rename():
 
     storage.delete("new.txt")
     assert not storage.exists("new.txt")
+
+
+def test_local_writes_leave_no_lock_or_temp_files_among_the_workspace_files(tmp_path):
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+
+    storage.write_text("a/notes.txt", "one")
+    storage.append_text("a/notes.txt", "two")
+    storage.read_text("a/notes.txt")
+
+    assert sorted(item.name for item in storage.list_files("a")) == ["notes.txt"]
+
+
+def test_writing_one_file_never_touches_a_file_that_shares_its_stem(tmp_path):
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+    storage.write_text("notes.tmp", "precious")
+    storage.write_text("notes.lock", "also precious")
+
+    storage.write_text("notes.txt", "x")
+    storage.append_text("notes.txt", "y")
+
+    assert storage.read_text("notes.tmp") == "precious"
+    assert storage.read_text("notes.lock") == "also precious"
+    assert storage.read_text("notes.txt") == "x\ny"

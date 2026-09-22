@@ -21,11 +21,11 @@ class PatternManager:
                 "requires_target": True,
                 "patterns": [
                     (
-                        r"\b(?:ignore|disregard|forget|override|bypass|skip|cancel|break)\s+(?:all|any|previous|prior|above|earlier|your|the|existing|current)\s+(?:instructions?|rules?|prompts?|commands?|directives?|guidelines?|constraints?|safeguards?)",
+                        r"\b(?:ignore|disregard|forget|override|bypass|skip|cancel|break)\s+(?:(?:all|any|previous|prior|above|earlier|your|the|my|existing|current|original)\s+){1,3}(?:instructions?|rules?|prompts?|commands?|directives?|guidelines?|constraints?|safeguards?)",
                         True,
                     ),
                     (
-                        r"\b(?:new|updated|revised|latest|current|different|alternate|secret|hidden)\s+(?:instructions?|commands?|directives?|rules?|prompt|system)\s*[:=]\s*(?=\w)",
+                        r"\b(?:new|updated|revised|latest|current|different|alternate|secret|hidden)\s+(?:instructions?|commands?|directives?|rules?|prompt|system)(?:\s+for\s+(?:the\s+)?(?:assistant|model|ai|agent|you))?\s*[:=]\s*(?=\w)",
                         True,
                     ),
                     (
@@ -55,7 +55,9 @@ class PatternManager:
                         True,
                     ),
                     (
-                        r"(?:print|dump|export|output|write)\s+(?:your\s+|the\s+)?(?:system\s+)?(?:prompt|instructions?|config|settings|file)",
+                        # "your prompt", "the system prompt" — never "write file"
+                        # or "print the config", which developers say all day.
+                        r"(?:print|dump|export|output|write|reveal)\s+(?:your\s+(?:system\s+|hidden\s+|initial\s+)?(?:prompt|instructions?)|the\s+(?:system|hidden|initial|secret)\s+(?:prompt|instructions?))",
                         True,
                     ),
                     (
@@ -81,11 +83,13 @@ class PatternManager:
                         True,
                     ),
                     (
-                        r"\byou\s+(?:are\s+now|have\s+become|will\s+be|must\s+be)\s+(?:DAN|STAN|MONG|EVIE|UCAR)\b",
+                        r"\byou\s+(?:are(?:\s+now)?|have\s+become|will\s+be|must\s+be)\s+(?:DAN|STAN|MONG|EVIE|UCAR)\b",
                         False,
                     ),
                     (
-                        r"\b(?:jailbreak|break\s+free|escape|become\s+(?:unfiltered|unrestricted|uncensored|unlimited|free)|remove\s+(?:all\s+)?restrictions)",
+                        # "jailbreak mode", "jailbroken", "break free from your rules";
+                        # never the word "escape", which code is full of.
+                        r"\b(?:jailbreak\s+(?:mode|prompt|the)|jailbroken|break\s+free\s+(?:of|from)\s+(?:your|the|all)|become\s+(?:unfiltered|unrestricted|uncensored|unlimited|free)|remove\s+(?:all\s+)?(?:your\s+)?restrictions)",
                         True,
                     ),
                     (
@@ -111,7 +115,9 @@ class PatternManager:
                         False,
                     ),
                     (
-                        r"\[\s*[/\s]*(?:system|instruction|prompt|admin|root|command)[^\]]*\]",
+                        # "[SYSTEM]", "[/system]": a framing tag, not "[system
+                        # context: ...]", which the runtime itself writes.
+                        r"\[\s*/?\s*(?:system|instruction|prompt|admin|root|command)\s*\]",
                         False,
                     ),
                     (
@@ -158,15 +164,29 @@ class PatternManager:
                 "weight": 7,
                 "requires_target": False,
                 "patterns": [
-                    (r"(?:\\x[0-9a-f]{2,}|%[0-9a-f]{2}|&#x?[0-9a-f]+;)", False),
-                    (r"\\u[0-9a-f]{4,}", False),
+                    # Escape sequences are counted by the engine (three or
+                    # more); one "%20" in a URL is not hidden content.
                     (
-                        r"\b(?:base64|rot13|rot-?13|hex|unicode|url|binary)\s*(?:encode|decode|decrypt|encrypt)\s*[:=\(]",
+                        # The engine folds digits to letters before matching
+                        # (4→a, 3→e, 1→l), so "base64" arrives as "base6a".
+                        r"\b(?:base6[4a]|rot-?(?:13|le)|hex|unicode|url|binary)\s*(?:encode|decode|decrypt|encrypt)\s*[:=\(]",
                         False,
                     ),
-                    (r"[0-9a-f]{8,}", False),
+                    # A bare hexadecimal or base64-shaped token is not evidence of
+                    # an encoded payload: run ids, trace ids, commit SHAs and
+                    # UUIDs look exactly like that, and the runtime's own
+                    # background preamble carries one on every line. Evidence is
+                    # an escape sequence (above) or a stated intent to decode.
+                ],
+            },
+            # A stated intent to decode *with* the thing to decode is the
+            # strongest form of the same evidence, and stands on its own.
+            "payload_decode_intent": {
+                "weight": 25,
+                "requires_target": False,
+                "patterns": [
                     (
-                        r"(?:[A-Za-z0-9+/]{4}){4,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?",
+                        r"\b(?:base6[4a]|rot-?(?:13|le)|hex|unicode|url|binary)\s*(?:encode|decode|decrypt|encrypt)\s*[:=\(]\s*[A-Za-z0-9+/=\\x]{8,}",
                         False,
                     ),
                 ],
@@ -174,15 +194,18 @@ class PatternManager:
             "obfuscation_techniques": {
                 "weight": 6,
                 "requires_target": False,
+                # Matched against the text as written: normalization joins
+                # spaced-out letters so the intent behind them is seen too.
+                "match": "original",
                 "patterns": [
+                    # Letters spaced out to slip past a word match. The plain
+                    # words — "override the default", "the secret is in
+                    # .env", "dependency injection", an identifier ending in
+                    # _override — are not that.
                     (
-                        r"\b(?:s\s*e\s*c\s*r\s*e\s*t|i\s*n\s*j\s*e\s*c\s*t|o\s*v\s*e\s*r\s*r\s*i\s*d\s*e)",
-                        False,
-                    ),
-                    (r"([^\[\]{}()\"',:\n])\1{3,}", False),
-                    (r"[^\w\s{}\[\]():,\"'.=/\\-]{4,}", False),
-                    (
-                        r"\b[a-zA-Z]*\d[a-zA-Z]+\d[a-zA-Z]*\d[a-zA-Z]*\b",
+                        r"\b(?:s\s*e\s*c\s*r\s*e\s*t(?<!secret)"
+                        r"|i\s*n\s*j\s*e\s*c\s*t(?<!inject)"
+                        r"|o\s*v\s*e\s*r\s*r\s*i\s*d\s*e(?<!override))\b",
                         False,
                     ),
                 ],

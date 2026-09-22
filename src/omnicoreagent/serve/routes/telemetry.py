@@ -287,10 +287,14 @@ def create_telemetry_router() -> APIRouter:
         request: Request,
         session_id: str = Query(...),
         run_id: str | None = Query(default=None),
+        cursor: str | None = Query(default=None),
     ):
         agent = get_agent(request)
+        resume_cursor = cursor or request.headers.get("last-event-id")
         return StreamingResponse(
-            stream_session_events(agent, session_id, run_id=run_id),
+            stream_session_events(
+                agent, session_id, run_id=run_id, cursor=resume_cursor
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -347,6 +351,56 @@ def create_telemetry_router() -> APIRouter:
                 limit=limit,
             ),
             traces=traces,
+            count=len(traces),
+        )
+
+    @router.get(
+        "/traces/{trace_id}/family",
+        response_model=TelemetryTraceListResponse,
+        summary="Get linked telemetry trace family",
+        description="Return all traces linked to one execution boundary by parent trace links.",
+    )
+    async def get_trace_family(
+        request: Request,
+        trace_id: str,
+        normalize: bool = Query(default=False),
+    ) -> TelemetryTraceListResponse:
+        agent = get_agent(request)
+        get_family = getattr(agent, "get_trace_family", None)
+        if not callable(get_family):
+            raise HTTPException(status_code=501, detail="Trace families are unavailable")
+        traces = await _maybe_await(
+            get_family(trace_id=trace_id, normalize=normalize)
+        )
+        if not traces:
+            raise HTTPException(status_code=404, detail=f"Trace not found: {trace_id}")
+        return TelemetryTraceListResponse(
+            filters=_clean_filters(trace_id=trace_id, normalize=normalize),
+            traces=list(traces),
+            count=len(traces),
+        )
+
+    @router.get(
+        "/runs/{run_id}/family",
+        response_model=TelemetryTraceListResponse,
+        summary="Get linked telemetry family for a run",
+        description="Return all traces linked to one run_id by parent trace links.",
+    )
+    async def get_run_trace_family(
+        request: Request,
+        run_id: str,
+        normalize: bool = Query(default=False),
+    ) -> TelemetryTraceListResponse:
+        agent = get_agent(request)
+        get_family = getattr(agent, "get_trace_family", None)
+        if not callable(get_family):
+            raise HTTPException(status_code=501, detail="Trace families are unavailable")
+        traces = await _maybe_await(get_family(run_id=run_id, normalize=normalize))
+        if not traces:
+            raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+        return TelemetryTraceListResponse(
+            filters=_clean_filters(run_id=run_id, normalize=normalize),
+            traces=list(traces),
             count=len(traces),
         )
 
@@ -418,5 +472,53 @@ def create_telemetry_router() -> APIRouter:
             summary=_trace_summary(trace),
             trace=trace,
         )
+
+    @router.get(
+        "/runs/{run_id}/trajectory",
+        summary="Get run trajectory",
+        description=(
+            "Return the latest agent run with this run_id as an ordered trajectory: "
+            "request, harness, steps (context, model calls, tool calls, "
+            "observations), final answer, totals, and capture gaps, with child "
+            "runs nested under the tool call that started them."
+        ),
+    )
+    async def get_run_trajectory(request: Request, run_id: str) -> dict[str, Any]:
+        return await _trajectory_or_404(request, run_id=run_id)
+
+    @router.get(
+        "/traces/{trace_id}/trajectory",
+        summary="Get trace trajectory",
+        description="Return one trace as an ordered trajectory.",
+    )
+    async def get_trace_trajectory(request: Request, trace_id: str) -> dict[str, Any]:
+        return await _trajectory_or_404(request, trace_id=trace_id)
+
+    async def _trajectory_or_404(request: Request, **lookup: str) -> dict[str, Any]:
+        agent = get_agent(request)
+        get_trajectory = getattr(agent, "get_trajectory", None)
+        if not callable(get_trajectory):
+            raise HTTPException(status_code=501, detail="Trajectories are unavailable")
+        trajectory = await get_trajectory(**lookup)
+        if trajectory is None:
+            raise HTTPException(status_code=404, detail="Trajectory not found")
+        return trajectory
+
+    @router.get(
+        "/retention",
+        summary="Get telemetry retention status",
+        description=(
+            "Return the trace and payload retention policy and the most recent "
+            "automatic or explicit cleanup results."
+        ),
+    )
+    async def get_retention_status(request: Request) -> dict[str, Any]:
+        agent = get_agent(request)
+        status = getattr(agent, "telemetry_retention_status", None)
+        if not callable(status):
+            raise HTTPException(
+                status_code=501, detail="Telemetry retention status is unavailable"
+            )
+        return status()
 
     return router

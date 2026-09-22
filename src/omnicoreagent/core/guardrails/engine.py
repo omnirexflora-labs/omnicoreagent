@@ -5,10 +5,7 @@ import logging
 import re
 import sys
 import unicodedata
-from collections import Counter
 from datetime import datetime
-from math import log2
-from typing import Any
 
 from omnicoreagent.core.guardrails.models import DetectionConfig, DetectionResult, ThreatLevel
 from omnicoreagent.core.guardrails.patterns import PatternManager
@@ -21,7 +18,6 @@ class DetectionEngine:
         self.config = config
         self.pattern_manager = PatternManager()
         self.logger = self._setup_logger()
-        self._benign_patterns = self._compile_benign_patterns()
 
     def _setup_logger(self) -> logging.Logger:
         """Setup logging"""
@@ -35,34 +31,6 @@ class DetectionEngine:
             logger.addHandler(handler)
         logger.setLevel(getattr(logging, self.config.log_level))
         return logger
-
-    def _compile_benign_patterns(self) -> list[re.Pattern]:
-        """Compile benign context patterns"""
-        patterns = [
-            r"help me (?:ignore|avoid|overcome|manage|deal with|handle)",
-            r"how (?:do|can|could|should|would) I (?:ignore|avoid|prevent|stop)",
-            r"teach(?:ing)? (?:me|us) to (?:ignore|disregard|avoid)",
-            r"(?:show|tell|explain) me (?:how|why|what|when|where)",
-            r"pretend (?:you're|you are) (?:a |an )?(?:teacher|tutor|guide|helper|expert|coach|assistant)",
-            r"act as (?:a |an )?(?:teacher|tutor|guide|helper|expert|professional|assistant)",
-            r"roleplay (?:a |an )?(?:lesson|scenario|conversation|dialogue|situation)",
-            r"simulate (?:a |an )?(?:conversation|dialogue|interview|scenario|situation)",
-            r"what are your (?:thoughts|views|opinions|capabilities|features|limitations)",
-            r"explain your (?:reasoning|process|thinking|approach|method|logic)",
-            r"can you (?:help|assist|guide) me with",
-            r"I need (?:help|assistance|guidance) with",
-            r"what is (?:the|your) (?:best|recommended) way to",
-            r"how does (?:this|it|the system) work",
-            r"for (?:educational|learning|training|research) purposes",
-        ]
-
-        compiled = []
-        for pattern in patterns:
-            try:
-                compiled.append(re.compile(pattern, re.IGNORECASE))
-            except re.error:
-                continue
-        return compiled
 
     def analyze(self, user_input: str) -> DetectionResult:
         """Main analysis pipeline"""
@@ -89,15 +57,6 @@ class DetectionEngine:
                     start_time=start_time,
                 )
 
-            if self.config.allowlist_patterns:
-                if any(
-                    re.search(p, user_input, re.IGNORECASE)
-                    for p in self.config.allowlist_patterns
-                ):
-                    return self._create_safe_result(
-                        input_hash, len(user_input), start_time
-                    )
-
             if self.config.blocklist_patterns:
                 for pattern in self.config.blocklist_patterns:
                     if re.search(pattern, user_input, re.IGNORECASE):
@@ -113,43 +72,30 @@ class DetectionEngine:
 
             normalized = self._normalize_input(user_input)
 
-            if self._is_likely_benign(user_input, normalized):
-                result = self._analyze_with_reduced_sensitivity(user_input, normalized)
-                if result["threat_level"] in [ThreatLevel.SAFE, ThreatLevel.LOW_RISK]:
-                    result.update(
-                        {
-                            "input_hash": input_hash,
-                            "detection_time": datetime.now(),
-                            "input_length": len(user_input),
-                        }
+            if self.config.allowlist_patterns and any(
+                re.search(p, user_input, re.IGNORECASE)
+                for p in self.config.allowlist_patterns
+            ):
+                # A trusted pattern may bypass ordinary false positives, but
+                # it cannot authorize a known instruction override, extraction,
+                # jailbreak, or context-manipulation pattern.
+                _, allowlist_flags = self._pattern_matching(normalized, user_input)
+                if not self._has_high_risk_pattern(allowlist_flags):
+                    return self._create_safe_result(
+                        input_hash, len(user_input), start_time
                     )
-                    return DetectionResult(**result)
 
-            flags = []
-            total_score = 0
-
-            pattern_score, pattern_flags = self._pattern_matching(normalized)
-            total_score += pattern_score
-            flags.extend(pattern_flags)
-
-            if self.config.enable_heuristic_analysis:
-                heuristic_score, heuristic_flags = self._heuristic_analysis(
-                    user_input, normalized
-                )
-                total_score += heuristic_score
-                flags.extend(heuristic_flags)
-
-            if self.config.enable_sequential_analysis:
-                seq_score, seq_flags = self._sequential_analysis(user_input)
-                total_score += seq_score
-                flags.extend(seq_flags)
-
-            if self.config.enable_entropy_analysis:
-                entropy_score, entropy_flags = self._entropy_analysis(user_input)
-                total_score += entropy_score
-                flags.extend(entropy_flags)
-
-            total_score = int(total_score * self.config.sensitivity)
+            # Evidence is intent addressed to the model, or content hidden
+            # from a reader. Structure, vocabulary, length and entropy are
+            # not evidence: a diff, a docstring, a markdown rule, an
+            # identifier, the words "system" and "override" all belong to
+            # ordinary developer text, and a screen that scores them cannot
+            # be trusted. The verdict comes from the kinds of evidence found,
+            # never from adding up weak signals.
+            pattern_score, flags = self._pattern_matching(normalized, user_input)
+            if self.config.enable_encoding_detection:
+                flags.extend(self._encoding_flags(user_input))
+            total_score = int(pattern_score * self.config.sensitivity)
 
             result = self._calculate_threat(
                 total_score, flags, user_input, input_hash, start_time
@@ -170,6 +116,46 @@ class DetectionEngine:
                 input_hash=input_hash if "input_hash" in locals() else "error",
                 start_time=start_time,
             )
+
+    # Evidence that the text tries to redirect the model, or to reach its
+    # instructions: one of these is enough to block.
+    STRONG_KINDS = frozenset(
+        {
+            "instruction_override",
+            "prompt_extraction",
+            "jailbreak_roleplay",
+            "context_manipulation",
+            "payload_decode_intent",
+            "custom",
+        }
+    )
+    # Evidence that something is being hidden or framed: recorded, and
+    # blocking only beside strong evidence (or in strict mode).
+    WEAK_KINDS = frozenset({"delimiter_injection", "obfuscation_techniques", "payload_encoding"})
+
+    @classmethod
+    def _kinds(cls, flags: list[str]) -> tuple[set[str], set[str]]:
+        strong, weak = set(), set()
+        for flag in flags:
+            group = flag.split(":", 1)[0]
+            if group in cls.STRONG_KINDS or group.startswith("custom"):
+                strong.add(group)
+            elif group in cls.WEAK_KINDS:
+                weak.add(group)
+        return strong, weak
+
+    @classmethod
+    def _has_high_risk_pattern(cls, flags: list[str]) -> bool:
+        strong, _ = cls._kinds(flags)
+        return bool(strong)
+
+    @staticmethod
+    def _encoding_flags(original: str) -> list[str]:
+        """Escape sequences that hide text from a reader (three or more)."""
+        escapes = len(
+            re.findall(r"(?:\\x[0-9a-f]{2}|\\u[0-9a-f]{4}|&#\d+;|%[0-9a-f]{2})", original, re.IGNORECASE)
+        )
+        return [f"payload_encoding: {escapes} escape sequences"] if escapes >= 3 else []
 
     def _normalize_input(self, text: str) -> str:
         """Advanced normalization with obfuscation detection"""
@@ -202,15 +188,21 @@ class DetectionEngine:
         }
         def normalize_leet_token(match: re.Match[str]) -> str:
             token = match.group(0)
-            has_alpha = any(char.isalpha() for char in token)
-            has_digit = any(char.isdigit() for char in token)
-            if not (has_alpha and has_digit):
+            if not _could_be_leet(token):
                 return token
             for leet, normal in leet_map.items():
                 token = token.replace(leet, normal)
             return token
 
         normalized = re.sub(r"[\w@$!|€©®£¥¢µ°]+", normalize_leet_token, normalized)
+
+        # Letters spaced out to slip past a word match ("o v e r r i d e")
+        # are joined, so the intent behind them is matched as written.
+        normalized = re.sub(
+            r"\b((?:[A-Za-z] ){3,}[A-Za-z])\b",
+            lambda match: match.group(1).replace(" ", ""),
+            normalized,
+        )
 
         normalized = re.sub(
             r"([a-z])[\.\-_,;:\/\\]+([a-z])", r"\1 \2", normalized, flags=re.IGNORECASE
@@ -222,31 +214,9 @@ class DetectionEngine:
 
         return normalized.strip().lower()
 
-    def _is_likely_benign(self, original: str, normalized: str) -> bool:
-        """Check if input is likely benign"""
-        for pattern in self._benign_patterns:
-            if pattern.search(original):
-                return True
-
-        benign_indicators = [
-            "help me understand",
-            "can you explain",
-            "how do i",
-            "what does",
-            "tutorial",
-            "example of",
-            "learn about",
-            "advice on",
-            "guide me",
-            "teach me",
-            "for learning",
-            "educational purpose",
-        ]
-
-        original_lower = original.lower()
-        return any(indicator in original_lower for indicator in benign_indicators)
-
-    def _pattern_matching(self, normalized: str) -> tuple[int, list[str]]:
+    def _pattern_matching(
+        self, normalized: str, original: str | None = None
+    ) -> tuple[int, list[str]]:
         """Pattern matching analysis"""
         score = 0
         flags = []
@@ -254,15 +224,20 @@ class DetectionEngine:
 
         for group_name, config in patterns.items():
             group_score = 0
+            # A group may ask for the text as written, when folding it
+            # (leetspeak, separators) would create what the group looks for.
+            text = normalized
+            if config.get("match") == "original" and original is not None:
+                text = original.lower()
             for pattern, is_strict in config["patterns"]:
                 try:
-                    matches = list(pattern.finditer(normalized))
+                    matches = list(pattern.finditer(text))
                     for match in matches:
                         matched_text = match.group().strip()
                         if len(matched_text) < 4:
                             continue
 
-                        if is_strict and not self._validate_context(normalized, match):
+                        if is_strict and not self._validate_context(text, match):
                             continue
 
                         group_score += 1
@@ -300,241 +275,6 @@ class DetectionEngine:
 
         return True
 
-    def _heuristic_analysis(
-        self, original: str, normalized: str
-    ) -> tuple[int, list[str]]:
-        """Advanced heuristic analysis"""
-        score = 0
-        flags = []
-        n = len(original)
-
-        if n == 0:
-            return score, flags
-
-        special_chars = re.findall(r"[<>{}[\]\\|`~!@#$%^&*()+=]", original)
-        special_density = len(special_chars) / n
-        if special_density > 0.2:
-            flags.append("very_high_delimiter_density")
-            score += 8
-        elif special_density > 0.15:
-            flags.append("high_delimiter_density")
-            score += 5
-        elif special_density > 0.1:
-            score += 3
-
-        boundaries = len(
-            re.findall(
-                r"(?:---|===|```|\*\*\*|\[system\]|<system>|</?prompt>)",
-                original,
-                re.IGNORECASE,
-            )
-        )
-        if boundaries >= 4:
-            flags.append("multiple_context_boundaries")
-            score += 10
-        elif boundaries >= 3:
-            flags.append("context_boundary_markers")
-            score += 7
-        elif boundaries >= 2:
-            score += 4
-
-        risk_words = [
-            "ignore",
-            "disregard",
-            "system",
-            "prompt",
-            "reveal",
-            "instruction",
-            "override",
-            "bypass",
-            "admin",
-            "root",
-            "jailbreak",
-            "dan",
-            "secret",
-            "hidden",
-            "unrestricted",
-        ]
-        risk_count = sum(normalized.count(w) for w in risk_words)
-
-        if risk_count >= 5:
-            flags.append("very_dense_attack_keywords")
-            score += 12
-        elif risk_count >= 4:
-            flags.append("dense_attack_keywords")
-            score += 8
-        elif risk_count >= 3:
-            score += 5
-
-        if self.config.enable_encoding_detection:
-            encoding_patterns = len(
-                re.findall(
-                    r"(?:\\x[0-9a-f]{2}|\\u[0-9a-f]{4}|&#\d+;|%[0-9a-f]{2})",
-                    original,
-                    re.IGNORECASE,
-                )
-            )
-            if encoding_patterns >= 5:
-                flags.append("multiple_encoding_attempts")
-                score += 8
-            elif encoding_patterns >= 3:
-                flags.append("encoding_detected")
-                score += 5
-
-        instruction_words = [
-            "ignore",
-            "disregard",
-            "override",
-            "reveal",
-            "show",
-            "system",
-        ]
-        repeat_count = sum(
-            1 for word in instruction_words if normalized.count(word) >= 2
-        )
-        if repeat_count >= 3:
-            flags.append("repetitive_injection_pattern")
-            score += 6
-        elif repeat_count >= 2:
-            score += 3
-
-        role_pattern = r"you\s+(?:are|become|act\s+as)\s+(?:an?\s+)?(?!.*(?:teacher|tutor|helper|assistant|guide|expert))"
-        if re.search(role_pattern, normalized, re.IGNORECASE):
-            flags.append("role_manipulation_attempt")
-            score += 7
-
-        if n > 5000:
-            flags.append("potential_context_stuffing")
-            score += 6
-
-        if re.search(r'["\'`]{3,}', original):
-            flags.append("quote_manipulation")
-            score += 4
-
-        return score, flags
-
-    def _sequential_analysis(self, text: str) -> tuple[int, list[str]]:
-        """Analyze sequence and structure"""
-        score = 0
-        flags = []
-
-        lines = text.split("\n")
-        instruction_lines = []
-
-        for i, line in enumerate(lines):
-            line_lower = line.lower()
-            if any(
-                keyword in line_lower
-                for keyword in ["ignore", "disregard", "override", "system:", "prompt:"]
-            ):
-                instruction_lines.append((i, line_lower))
-
-        if len(instruction_lines) >= 3:
-            flags.append("multiple_instruction_lines")
-            score += 8
-
-        if len(lines) >= 3:
-            middle_index = len(lines) // 2
-            middle_line = lines[middle_index].lower()
-            if any(
-                keyword in middle_line
-                for keyword in ["ignore", "disregard", "override"]
-            ):
-                if (
-                    len(lines[middle_index - 1].split()) > 3
-                    and len(lines[middle_index + 1].split()) > 3
-                ):
-                    flags.append("sandwiched_injection_attempt")
-                    score += 6
-
-        return score, flags
-
-    def _entropy_analysis(self, text: str) -> tuple[int, list[str]]:
-        """Analyze entropy and randomness"""
-        score = 0
-        flags = []
-
-        if len(text) < 20:
-            return score, flags
-
-        freq = Counter(text)
-        entropy = -sum(
-            (count / len(text)) * log2(count / len(text))
-            for count in freq.values()
-        )
-
-        if entropy > 5.5:
-            flags.append(f"high_entropy_{entropy:.2f}")
-            score += 4
-
-        random_patterns = [
-            r"[a-z]{2}\d{2}[a-z]{2}\d{2}",
-            r"\b\w{8,12}\b.*\b\w{8,12}\b.*\b\w{8,12}\b",
-        ]
-
-        for pattern in random_patterns:
-            if re.search(pattern, text):
-                flags.append("random_like_pattern")
-                score += 3
-                break
-
-        return score, flags
-
-    def _analyze_with_reduced_sensitivity(
-        self, original: str, normalized: str
-    ) -> dict[str, Any]:
-        """Reduced sensitivity analysis for likely benign inputs"""
-        flags = []
-        score = 0
-
-        severe_patterns = [
-            (r"system\s*[:=]\s*(?:ignore|override|bypass|break)", 10),
-            (r"\bDAN\s*(?:mode|activate|enabled)", 9),
-            (
-                r"\byou\s+(?:are\s+now|have\s+become|will\s+be|must\s+be)\s+(?:DAN|STAN|MONG|EVIE|UCAR)\b",
-                18,
-            ),
-            (r"<\s*/?\s*system\s*>", 9),
-            (r"jailbreak", 8),
-            (r"ignore\s+all\s+previous\s+instructions", 12),
-        ]
-
-        for pattern_str, weight in severe_patterns:
-            if re.search(pattern_str, normalized, re.IGNORECASE):
-                flags.append(f"severe_pattern: {pattern_str[:30]}")
-                score += weight
-
-        if score >= 16:
-            return {
-                "threat_level": ThreatLevel.SUSPICIOUS,
-                "is_safe": False,
-                "flags": flags,
-                "confidence": 0.7,
-                "threat_score": score,
-                "message": "Flagged despite benign context",
-                "recommendations": ["Human review recommended"],
-            }
-        elif score >= 10:
-            return {
-                "threat_level": ThreatLevel.LOW_RISK,
-                "is_safe": True,
-                "flags": flags,
-                "confidence": 0.4,
-                "threat_score": score,
-                "message": "Low risk patterns detected",
-                "recommendations": ["Monitor for similar patterns"],
-            }
-
-        return {
-            "threat_level": ThreatLevel.SAFE,
-            "is_safe": True,
-            "flags": [],
-            "confidence": 0.95,
-            "threat_score": 0,
-            "message": "Input accepted",
-            "recommendations": [],
-        }
-
     def _calculate_threat(
         self,
         score: int,
@@ -543,42 +283,35 @@ class DetectionEngine:
         input_hash: str,
         start_time: datetime,
     ) -> DetectionResult:
-        """Calculate final threat level"""
-        if self.config.strict_mode:
-            thresholds = {
-                "critical": 25,
-                "dangerous": 18,
-                "suspicious": 10,
-                "low_risk": 5,
-            }
-        else:
-            thresholds = {
-                "critical": 35,
-                "dangerous": 25,
-                "suspicious": 15,
-                "low_risk": 8,
-            }
+        """The verdict, from the kinds of evidence found.
 
-        if score >= thresholds["critical"]:
+        Two kinds of strong evidence, or strong evidence beside hidden
+        content, is critical; one kind of strong evidence is dangerous;
+        hidden content or framing alone is suspicious (dangerous in strict
+        mode); nothing found is safe. The score is kept for callers that
+        read it, but it does not decide.
+        """
+        strong, weak = self._kinds(flags)
+        if len(strong) >= 2 or (strong and weak):
             threat_level = ThreatLevel.CRITICAL
             message = "CRITICAL: High-confidence injection - BLOCK"
-            confidence = min(0.95, 0.8 + (score - thresholds["critical"]) / 50.0)
-        elif score >= thresholds["dangerous"]:
+            confidence = 0.95
+        elif strong:
             threat_level = ThreatLevel.DANGEROUS
             message = "DANGEROUS: Likely injection attempt - BLOCK"
-            confidence = min(0.8, 0.6 + (score - thresholds["dangerous"]) / 40.0)
-        elif score >= thresholds["suspicious"]:
+            confidence = 0.85
+        elif weak and self.config.strict_mode:
+            threat_level = ThreatLevel.DANGEROUS
+            message = "DANGEROUS: Hidden or framed content (strict mode) - BLOCK"
+            confidence = 0.6
+        elif weak:
             threat_level = ThreatLevel.SUSPICIOUS
-            message = "SUSPICIOUS: Potential injection - REVIEW"
-            confidence = min(0.6, 0.4 + (score - thresholds["suspicious"]) / 30.0)
-        elif score >= thresholds["low_risk"]:
-            threat_level = ThreatLevel.LOW_RISK
-            message = "LOW RISK: Some concerning patterns"
-            confidence = min(0.4, 0.2 + (score - thresholds["low_risk"]) / 20.0)
+            message = "SUSPICIOUS: Hidden or framed content - REVIEW"
+            confidence = 0.5
         else:
             threat_level = ThreatLevel.SAFE
             message = "SAFE: No significant threats detected"
-            confidence = max(0.1, 1.0 - score / 10.0)
+            confidence = 1.0
 
         recommendations = self._generate_recommendations(threat_level, flags, score)
 
@@ -717,3 +450,27 @@ class DetectionEngine:
                 f"Input analyzed: {result.threat_level.value} "
                 f"(score: {result.threat_score})"
             )
+
+
+
+def _word_count(text: str, word: str) -> int:
+    return len(re.findall(rf"\b{re.escape(word)}\b", text))
+
+
+_HEX = re.compile(r"[0-9a-f]+", re.IGNORECASE)
+
+
+def _could_be_leet(token: str) -> bool:
+    """Whether folding digits to letters could reveal a word in ``token``.
+
+    A hexadecimal identifier (a run id, a commit SHA, a trace id) has digits
+    among letters but is never a word: folding it invents letter runs and
+    "words" that were never written. An identifier with underscores is code.
+    """
+    has_alpha = any(char.isalpha() for char in token)
+    has_digit = any(char.isdigit() for char in token)
+    if not (has_alpha and has_digit):
+        return False
+    if "_" in token:
+        return False
+    return _HEX.fullmatch(token) is None

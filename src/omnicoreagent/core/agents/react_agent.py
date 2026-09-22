@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from omnicoreagent.core.agents.base import BaseReactAgent
+from omnicoreagent.core.privacy import PrivacyFilter
 from omnicoreagent.core.runtime.config import AgentConfig
 
 if TYPE_CHECKING:
@@ -20,15 +21,20 @@ class ReactAgent(BaseReactAgent):
             agent_name=config.agent_name,
             max_steps=config.max_steps,
             tool_call_timeout=config.tool_call_timeout,
+            subagent_timeout=getattr(config, "subagent_timeout", None),
             request_limit=config.request_limit,
             total_tokens_limit=config.total_tokens_limit,
             enable_advanced_tool_use=config.enable_advanced_tool_use,
             enable_subagents=config.enable_subagents,
             enable_workspace_files=config.enable_workspace_files,
             enable_agent_skills=config.enable_agent_skills,
+            skill_script_env=getattr(config, "skill_script_env", None),
+            code_mode=getattr(config, "code_mode", None),
+            agents_md=getattr(config, "agents_md", None),
             context_management_config=config.context_management,
             tool_offload_config=getattr(config, "tool_offload", None),
             workspace_config=config.workspace_config,
             guardrail=guardrail,
             governance_engine=governance_engine,
+            privacy_filter=PrivacyFilter.from_value(config.privacy_config),
         )

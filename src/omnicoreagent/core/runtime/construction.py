@@ -1,22 +1,113 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from omnicoreagent.core.runtime.imports import runtime, runtime_logger
+from omnicoreagent.core.runtime.config import normalize_guardrail_mode
 
 
 def default_memory_router() -> Any:
     return runtime("MemoryRouter")(memory_store_type="in_memory")
 
 
-def default_telemetry_store() -> Any:
-    from omnicoreagent.core.telemetry import InMemoryTelemetryStore
+def default_telemetry_store(
+    *,
+    telemetry_config: Any = None,
+    workspace_config: Any = None,
+) -> Any:
+    """Build the built-in telemetry store selected by the effective policy.
 
-    return InMemoryTelemetryStore()
+    Injected stores are handled by the caller. ``auto`` and ``jsonl`` write
+    durable local JSONL (``storage_path``, or ``telemetry/traces.jsonl`` in the
+    local workspace directory); ``memory`` is an explicit opt-out. Every
+    component that resolves the same file shares one store object.
+    """
+    from omnicoreagent.core.telemetry import InMemoryTelemetryStore, TelemetryConfig
+    from omnicoreagent.core.telemetry.store import shared_jsonl_telemetry_store
+
+    config = TelemetryConfig.from_value(telemetry_config) or TelemetryConfig()
+    if config.storage == "memory":
+        return InMemoryTelemetryStore(max_traces=config.memory_max_traces)
+    return shared_jsonl_telemetry_store(
+        _telemetry_jsonl_path(config, workspace_config),
+        retention_days=config.retention_days,
+    )
+
+
+def default_telemetry_payload_store(
+    *,
+    telemetry_config: Any = None,
+    workspace_config: Any = None,
+) -> Any:
+    """Build the built-in store for oversized redacted telemetry payloads."""
+    from omnicoreagent.core.telemetry import TelemetryConfig
+    from omnicoreagent.core.telemetry.payloads import (
+        LocalTelemetryPayloadStore,
+        WorkspaceTelemetryPayloadStore,
+    )
+    from omnicoreagent.core.workspace.config import resolve_workspace_config
+
+    config = TelemetryConfig.from_value(telemetry_config) or TelemetryConfig()
+    if not config.offload_large_payloads:
+        return None
+
+    from omnicoreagent.core.workspace.storage import create_workspace_storage
+
+    resolved_workspace = resolve_workspace_config(workspace_config)
+    if config.offload_target == "object_storage":
+        if resolved_workspace.workspace_backend not in {"s3", "r2"}:
+            if config.strict:
+                raise ValueError(
+                    "telemetry offload_target='object_storage' requires an S3 or R2 workspace"
+                )
+            return None
+        storage = create_workspace_storage(
+            namespace="telemetry/payloads",
+            config=resolved_workspace,
+        )
+        return WorkspaceTelemetryPayloadStore(
+            storage,
+            retention_days=config.payload_retention_days,
+        )
+
+    if config.storage_path is not None:
+        return LocalTelemetryPayloadStore(
+            f"{Path(config.storage_path).expanduser()}.payloads",
+            retention_days=config.payload_retention_days,
+        )
+
+    storage = create_workspace_storage(
+        namespace="telemetry/payloads",
+        config=resolved_workspace,
+    )
+    return WorkspaceTelemetryPayloadStore(
+        storage,
+        retention_days=config.payload_retention_days,
+    )
+
+
+def _telemetry_jsonl_path(config: Any, workspace_config: Any = None) -> Path:
+    if config.storage_path is not None:
+        return Path(config.storage_path).expanduser()
+
+    from omnicoreagent.core.workspace.config import (
+        WorkspaceConfig,
+        resolve_workspace_config,
+    )
+
+    resolved_workspace = resolve_workspace_config(workspace_config)
+    if resolved_workspace.workspace_backend != "local":
+        # A cloud workspace never makes telemetry a cloud dependency: traces
+        # stay in the local workspace directory unless a path is configured.
+        resolved_workspace = WorkspaceConfig(
+            workspace_dir=WorkspaceConfig.from_env().workspace_dir
+        )
+    return resolved_workspace.local_namespace_path("telemetry") / "traces.jsonl"
 
 
 def build_guardrail(agent_name: str, agent_config: dict[str, Any]) -> tuple[str, Any]:
-    guardrail_mode = agent_config.get("guardrail_mode", "full")
+    guardrail_mode = normalize_guardrail_mode(agent_config.get("guardrail_mode", "full"))
     if guardrail_mode == "off":
         runtime_logger().info(f"Guardrail disabled for agent '{agent_name}'")
         return guardrail_mode, None
@@ -95,6 +186,51 @@ def create_react_agent(
     )
 
 
+def _refuse_policy_in_workspace(policy: Any, agent_config: dict[str, Any]) -> None:
+    """An agent must not be able to edit its own policy through its workspace."""
+    from pathlib import Path
+
+    from omnicoreagent.core.workspace.config import resolve_workspace_config
+    from omnicoreagent.governance import PolicyLoadError
+
+    source = getattr(policy.provenance, "source_ref", None)
+    if not source:
+        return
+    workspace = resolve_workspace_config(agent_config.get("workspace_config"))
+    if workspace.workspace_backend != "local" or workspace.workspace_dir is None:
+        return
+    root = Path(workspace.workspace_dir).resolve()
+    if Path(source).resolve().is_relative_to(root):
+        raise PolicyLoadError(
+            f"Policy file {source} is inside the agent's workspace directory {root}, "
+            "where the agent can write; keep the policy outside it"
+        )
+
+
+def _apply_configured_budgets(policy: Any, budgets: Any) -> None:
+    """Budgets set in ``governance_config``, for applications with no policy file.
+
+    The budget becomes part of the policy and is hashed with it, so it cannot
+    be widened at runtime without changing the policy's identity. A policy that
+    already sets budgets keeps them: two sources would leave it unclear which
+    one governs.
+    """
+    if budgets is None:
+        return
+    from omnicoreagent.governance import PolicyBudgets
+    from omnicoreagent.governance.hashing import attach_policy_hash
+
+    if policy.budgets is not None:
+        raise ValueError(
+            "governance_config.budgets cannot be set when the policy already has "
+            "budgets; keep them in one place"
+        )
+    policy.budgets = (
+        budgets if isinstance(budgets, PolicyBudgets) else PolicyBudgets(**budgets)
+    )
+    attach_policy_hash(policy)
+
+
 def build_governance_engine(agent_config: dict[str, Any], telemetry_recorder: Any = None) -> Any:
     governance_config = agent_config.get("governance_config") or {}
     if not governance_config.get("enabled", False):
@@ -108,6 +244,8 @@ def build_governance_engine(agent_config: dict[str, Any], telemetry_recorder: An
         project_root=governance_config.get("project_root"),
         profile=governance_config.get("profile", "interactive-dev"),
     )
+    _refuse_policy_in_workspace(policy, agent_config)
+    _apply_configured_budgets(policy, governance_config.get("budgets"))
     sandbox_runtime = governance_config.get("sandbox_runtime")
     if sandbox_runtime is None and governance_config.get("sandbox_config") is not None:
         from omnicoreagent.sandbox import build_sandbox_runtime
@@ -116,11 +254,21 @@ def build_governance_engine(agent_config: dict[str, Any], telemetry_recorder: An
             governance_config.get("sandbox_config"),
             telemetry_recorder=telemetry_recorder,
         )
+    from omnicoreagent.sandbox.factory import sandbox_manifest_from_config
+
+    sandbox_manifest = sandbox_manifest_from_config(governance_config.get("sandbox_manifest"))
+    approval_resolver = governance_config.get("approval_resolver")
+    if approval_resolver is None and governance_config.get("approval_mode", "suspend") == "suspend":
+        from omnicoreagent.core.run_approvals import RunApprovalResolver
+
+        # An unanswered ask pauses the run until a person decides.
+        approval_resolver = RunApprovalResolver()
     return GovernanceEngine(
         policy,
-        approval_resolver=governance_config.get("approval_resolver"),
+        approval_resolver=approval_resolver,
         telemetry_recorder=telemetry_recorder,
         sandbox_runtime=sandbox_runtime,
+        sandbox_manifest=sandbox_manifest,
         allow_test_sandbox_runtime=governance_config.get(
             "allow_test_sandbox_runtime", False
         ),

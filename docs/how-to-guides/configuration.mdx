@@ -29,7 +29,7 @@ export LLM_API_KEY=your_provider_key
 ```
 
 Set `model_config["provider"]` to choose the provider. The runtime reads
-`LLM_API_KEY` and internally passes it to LiteLLM for the selected provider.
+`LLM_API_KEY` and passes it to LiteLLM for the selected provider.
 Do not configure provider-specific key names in OmniCoreAgent examples.
 
 ### Optional Memory Backends
@@ -73,6 +73,65 @@ Optional workspace variables:
 
 Telemetry events and traces work in-process by default. Set exporter variables
 only when traces should leave the process for an OTLP-compatible backend.
+
+The built-in telemetry recorder does not require LangSmith, Opik, OpenTelemetry,
+or any other external service. Configure its recording and redaction policy
+directly on the agent when you need more or less evidence:
+
+```python
+agent = OmniCoreAgent(
+    ...,
+    telemetry_config={
+        "storage": "auto", # auto (durable JSONL), jsonl, or memory
+        "capture": "default", # default (privacy-first) or full
+        "record_inputs": True,
+        "record_outputs": True,
+        "record_tool_results": True,
+        "record_model_prompts": False,
+        "record_model_responses": False,
+        "retention_days": 7, # use None to keep every trace
+        "payload_retention_days": 7,
+        "offload_large_payloads": False,
+        "offload_target": "workspace", # workspace or object_storage
+        "max_payload_bytes": 64_000,
+        "strict": False,
+    },
+)
+```
+
+The effective policy is recorded as a non-secret configuration fingerprint in
+each agent trace. Traces are durable by default: `storage: "auto"` writes JSONL
+to `storage_path` when set, otherwise to `telemetry/traces.jsonl` in the local
+workspace directory (`OMNICOREAGENT_WORKSPACE_DIR`, default `./workspace`). A
+cloud workspace does not move telemetry to the cloud; traces stay in that local
+file unless a path is configured. Every agent and background manager that
+resolves the same file shares one store. Set `storage: "memory"` to keep traces
+in process memory only (bounded by `memory_max_traces`).
+
+`capture: "default"` is privacy-first: model prompts and responses are not
+recorded, and the trace marks them `not_recorded`. `capture: "full"` records the
+complete trajectory, including model input and output, still redacted,
+truncated, and offloaded under the same policy. Any `record_*` field you set
+explicitly overrides the preset.
+
+Finished traces older than `retention_days` and unreferenced payloads older
+than `payload_retention_days` are removed automatically once per agent before
+its first run; a payload referenced by a kept trace is never removed. Run
+`await agent.prune_telemetry()` to apply retention on demand and
+`agent.telemetry_retention_status()` (or `GET /telemetry/retention` in
+OmniServe) to see what was removed.
+An exporter is an optional outbound copy of a completed built-in trace and is
+not part of the runtime execution path.
+
+When `offload_large_payloads` is enabled, oversized redacted telemetry values
+are written to the built-in content-addressed payload store before their trace
+reference is persisted. `offload_target: "workspace"` uses the configured
+workspace backend; `"object_storage"` requires an S3 or R2 workspace. With an
+explicit `storage_path`, local payloads are stored beside it in a
+`<storage_path>.payloads` directory. The returned `telemetry://payload/...`
+reference can be read with `await agent.read_telemetry_payload(reference)` and
+cleaned with `await agent.prune_telemetry_payloads()`. Redacted payloads are
+kept by default when they are still referenced by stored traces.
 
 | Exporter | Variables |
 |----------|-----------|
@@ -189,13 +248,15 @@ The `AgentConfig` handles the runtime behavior of the agent, such as reasoning s
 
 ```python
 agent_config = {
-    "tool_call_timeout": 30,         # Max seconds per tool execution
-    "max_steps": 15,                 # Max reasoning loops per run()
+    "tool_call_timeout": 180,        # Max seconds per tool execution
+    "subagent_timeout": None,        # Max seconds per delegation; None = the worker's own limits
+    "max_steps": 50,                 # Max reasoning loops per run()
     "request_limit": 0,              # 0 = unlimited
     "total_tokens_limit": 0,         # 0 = unlimited
     "enable_subagents": True,        # Dynamic focused workers
     "enable_workspace_files": True,  # Default: workspace files for notes/logs/scratchpads
     "enable_agent_skills": True,     # Enable local skill discovery
+    "skill_script_env": [],          # Env vars host skill scripts receive (none beyond PATH/HOME/locale)
     "enable_advanced_tool_use": True, # Enable BM25 tool retrieval
     "context_management": {"enabled": True},
     "tool_offload": {"enabled": True},
@@ -239,6 +300,39 @@ agent_config = {
 }
 ```
 
+Governed sandbox command execution uses the explicit sandbox route. The normal
+tool path does not automatically become sandboxed just because a sandbox runtime
+is configured.
+
+```python
+from omnicoreagent import (
+    LocalTestSandboxRuntime,
+    SandboxCommandSpec,
+    SandboxExecResult,
+    SandboxExecutionService,
+)
+
+runtime = LocalTestSandboxRuntime()
+runtime.register_command(
+    "inspect",
+    lambda request: SandboxExecResult(exit_code=0, stdout="ok"),
+)
+
+engine = agent.agent.governance_engine
+engine.sandbox_runtime = runtime
+engine.allow_test_sandbox_runtime = True
+
+result = await SandboxExecutionService(engine).execute(
+    SandboxCommandSpec(command=["inspect"], cwd="/workspace")
+)
+```
+
+`SandboxExecutionService` authorizes `process.exec`, authorizes requested
+sandbox scope such as workspace mounts, network rules, environment keys, and
+secret references, then creates the sandbox session and executes the command.
+Model-bound sandbox output must still go through the normal observation and
+guardrail pipeline before it is injected back into an agent loop.
+
 ---
 
 ## 3. Model Configuration
@@ -256,7 +350,7 @@ model_config = {
 ```
 
 Supported provider values are: `openai`, `anthropic`, `groq`, `ollama`,
-`azure`, `gemini`, `deepseek`, `mistral`, `openrouter`, and `cencori`.
+`azure`, `gemini`, `deepseek`, `mistral`, and `openrouter`.
 
 Provider-specific runtime options currently supported by OmniCoreAgent are:
 
@@ -286,12 +380,21 @@ mcp_tools = [
 ]
 ```
 
+Each `name` is the server's identity in tool routing, governance, and
+telemetry. Settings are checked per transport when the agent is created:
+`command`, `args`, `cwd`, and `env` apply to stdio; `url`, `headers`,
+`timeout`, `sse_read_timeout`, and `auth` apply to `sse` and
+`streamable_http`; `connect_timeout` (default 30 s) and `call_timeout` apply to
+all. An unknown or inapplicable setting raises a `ValueError` naming the server.
+See [MCP Tools](/docs/core-concepts/mcp) for every setting, OAuth, errors, and
+reconnects.
+
 ---
 
 ## 5. Persistence Configuration
 
 Pass a `MemoryRouter` to customize conversation memory. Runtime evidence is
-recorded through telemetry, which defaults to in-memory storage.
+recorded through telemetry, which is stored durably in local JSONL by default.
 
 ```python
 from omnicoreagent import MemoryRouter

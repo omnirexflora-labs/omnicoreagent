@@ -42,12 +42,16 @@ _ALLOWED_TRANSITIONS: dict[RunStatus, set[RunStatus]] = {
     },
     RunStatus.RUNNING: {
         RunStatus.RETRYING,
+        RunStatus.AWAITING_APPROVAL,
+        RunStatus.AWAITING_BUDGET,
         RunStatus.COMPLETED,
         RunStatus.FAILED,
         RunStatus.TIMEOUT,
         RunStatus.CANCELLED,
     },
     RunStatus.RETRYING: {RunStatus.QUEUED, RunStatus.CANCELLED},
+    RunStatus.AWAITING_APPROVAL: {RunStatus.QUEUED, RunStatus.CANCELLED},
+    RunStatus.AWAITING_BUDGET: {RunStatus.QUEUED, RunStatus.CANCELLED},
     RunStatus.COMPLETED: set(),
     RunStatus.FAILED: set(),
     RunStatus.CANCELLED: set(),
@@ -158,12 +162,16 @@ class InMemoryTaskStore(AbstractTaskStore):
             self._schedule_states[state.task_id] = _copy_model(state)
 
     async def set_schedule_paused(
-        self, task_id: str, paused: bool
+        self, task_id: str, paused: bool, *, reason: str | None = None
     ) -> BackgroundScheduleState:
         async with self._lock:
             state = self._require_schedule_state(task_id)
             updated = state.model_copy(
-                update={"paused": paused, "updated_at": _now()},
+                update={
+                    "paused": paused,
+                    "paused_reason": reason if paused else None,
+                    "updated_at": _now(),
+                },
                 deep=True,
             )
             self._schedule_states[task_id] = updated

@@ -1,0 +1,1081 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omnicoreagent.dev/schemas/execution-evidence/v1.json",
+  "title": "OmniCoreAgent Portable Execution Evidence",
+  "description": "Versioned, judgment-free execution evidence. Payloads may be redacted, truncated, offloaded, unavailable, or missing according to their capture descriptor.",
+  "type": "object",
+  "required": [
+    "contract",
+    "schema_version",
+    "execution_id",
+    "source",
+    "adapter",
+    "trace",
+    "final_output_references",
+    "missing_evidence",
+    "facts"
+  ],
+  "properties": {
+    "contract": {
+      "const": "omnicoreagent.execution-evidence/v1"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "execution_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "adapter": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "trace": {
+      "$ref": "#/$defs/trace"
+    },
+    "final_output_references": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/reference"
+      }
+    },
+    "missing_evidence": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/reference"
+      }
+    }
+  },
+  "$defs": {
+    "reference": {
+      "type": "object",
+      "required": [
+        "kind",
+        "id"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "capture": {
+      "type": "object",
+      "required": [
+        "state",
+        "source",
+        "role"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "available",
+            "redacted",
+            "truncated",
+            "offloaded",
+            "not_recorded",
+            "missing",
+            "inferred"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reference": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "content_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "checksum": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "original_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "recorded_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "policy_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "not_recorded",
+                  "missing",
+                  "truncated",
+                  "inferred"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reason"
+            ],
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "error": {
+      "type": "object",
+      "required": [
+        "type",
+        "message"
+      ],
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "stack": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "prompt_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "completion_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "total_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "actor": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "span": {
+      "type": "object",
+      "required": [
+        "trace_id",
+        "span_id",
+        "name",
+        "kind",
+        "actor",
+        "status",
+        "event_ids"
+      ],
+      "properties": {
+        "trace_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "span_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parent_span_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "actor": {
+          "$ref": "#/$defs/actor"
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duration_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "input": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "output": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "token_usage": {
+          "$ref": "#/$defs/usage"
+        },
+        "estimated_cost_usd": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "attributes": {
+          "type": "object"
+        },
+        "event_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "schema_version": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "input_capture": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/capture"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "output_capture": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/capture"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "event": {
+      "type": "object",
+      "required": [
+        "trace_id",
+        "event_id",
+        "event_type",
+        "actor"
+      ],
+      "properties": {
+        "trace_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "event_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "span_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_event_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "event_type": {
+          "type": "string"
+        },
+        "actor": {
+          "$ref": "#/$defs/actor"
+        },
+        "sequence_number": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timestamp": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "input": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "output": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duration_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "token_usage": {
+          "$ref": "#/$defs/usage"
+        },
+        "estimated_cost_usd": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "metadata": {
+          "$ref": "#/$defs/eventMetadata"
+        },
+        "schema_version": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "input_capture": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/capture"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "output_capture": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/capture"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "trace": {
+      "type": "object",
+      "required": [
+        "trace_id",
+        "root_span_id",
+        "status",
+        "spans",
+        "events",
+        "evidence_status",
+        "provenance"
+      ],
+      "properties": {
+        "trace_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "root_span_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parent_trace_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_span_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "incomplete": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "task_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "suite_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "agent_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workflow_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "spans": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/span"
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/event"
+          }
+        },
+        "schema_version": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "execution_surface": {
+          "type": "string"
+        },
+        "evidence_status": {
+          "enum": [
+            "complete",
+            "partial",
+            "unknown"
+          ]
+        },
+        "provenance": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    },
+    "tokenCounts": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "output": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "total": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "cached_input": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "reasoning": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "modelCall": {
+      "description": "Facts about one model call, recorded under every capture policy.",
+      "type": "object",
+      "properties": {
+        "purpose": {
+          "enum": [
+            "agent_turn",
+            "context_summary"
+          ]
+        },
+        "request_settings": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "provider_response_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finish_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "refused": {
+          "type": "boolean"
+        },
+        "tokens": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/tokenCounts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "estimated_cost_usd": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "cost_source": {
+          "enum": [
+            "provider_response",
+            "price_table",
+            null
+          ]
+        },
+        "latency_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "time_to_first_delta_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "retries": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "continuation": {
+          "type": "object",
+          "description": "Presence of provider continuation data (signed thinking, encrypted reasoning, per-call signatures); the values themselves are never recorded.",
+          "properties": {
+            "thinking_blocks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "redacted_thinking": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reasoning_items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reasoning_details": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tool_call_signatures": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{16}$"
+            }
+          },
+          "required": [
+            "digest"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "runSummary": {
+      "description": "Totals for one run, derived from its own records.",
+      "type": "object",
+      "required": [
+        "steps",
+        "model_calls",
+        "tokens",
+        "tool_calls",
+        "duration_ms"
+      ],
+      "properties": {
+        "steps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "model_calls": {
+          "type": "object",
+          "properties": {
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "agent_turn": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "context_summary": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "failed": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "tokens": {
+          "$ref": "#/$defs/tokenCounts"
+        },
+        "estimated_cost_usd": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "cost_complete": {
+          "type": "boolean"
+        },
+        "model_latency_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "model_retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool_calls": {
+          "type": "object",
+          "required": [
+            "total",
+            "by_outcome"
+          ],
+          "properties": {
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "by_outcome": {
+              "type": "object",
+              "required": [
+                "success",
+                "error",
+                "rejected",
+                "timeout",
+                "cancelled",
+                "denied"
+              ],
+              "properties": {
+                "success": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "error": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "rejected": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "timeout": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "cancelled": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "denied": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "compressions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "subagents": {
+          "type": "object"
+        },
+        "executions": {
+          "type": "object",
+          "properties": {
+            "sessions": {"type": "integer", "minimum": 0},
+            "commands": {"type": "integer", "minimum": 0},
+            "failed": {"type": "integer", "minimum": 0},
+            "timed_out": {"type": "integer", "minimum": 0}
+          }
+        },
+        "workspace_changes": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "offloaded_results": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "including_subagents": {
+          "type": "object"
+        },
+        "duration_ms": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "eventMetadata": {
+      "description": "Links and facts carried by runtime events; kept under every capture policy.",
+      "type": "object",
+      "properties": {
+        "tool_call_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "batch_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_span_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model_span_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model_call_event_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model_response_event_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_requested_event_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_resolved_event_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_result_event_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "final_model_response_event_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "child_trace_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "child_run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observation_event_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "new_observation_event_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "purpose": {
+          "enum": [
+            "agent_turn",
+            "context_summary"
+          ]
+        },
+        "rejection_reason": {
+          "enum": [
+            "invalid_arguments",
+            "unknown_tool",
+            "arguments_rejected",
+            null
+          ]
+        },
+        "model_call": {
+          "$ref": "#/$defs/modelCall"
+        },
+        "run_summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/runSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_configuration": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

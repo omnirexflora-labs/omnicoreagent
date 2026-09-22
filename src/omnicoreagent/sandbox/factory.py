@@ -1,23 +1,129 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 from omnicoreagent.sandbox.base import SandboxRuntime
 from omnicoreagent.sandbox.local import LocalTestSandboxRuntime
-from omnicoreagent.sandbox.models import SandboxProvider
+from omnicoreagent.sandbox.models import SandboxManifest, SandboxProvider, sandbox_provider_name
 from omnicoreagent.sandbox.none import NoneSandboxRuntime
+
+# Builds a backend from its options: factory(options, telemetry_recorder).
+SandboxProviderFactory = Callable[[dict[str, Any], Any], SandboxRuntime]
+
+def _docker(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
+    from omnicoreagent.sandbox.docker import DockerSandboxRuntime
+
+    return DockerSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
+
+
+def _modal(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
+    from omnicoreagent.sandbox.modal_sandbox import ModalSandboxRuntime
+
+    return ModalSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
+
+
+def _e2b(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
+    from omnicoreagent.sandbox.e2b_sandbox import E2BSandboxRuntime
+
+    return E2BSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
+
+
+def _daytona(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
+    from omnicoreagent.sandbox.daytona_sandbox import DaytonaSandboxRuntime
+
+    return DaytonaSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
+
+
+def _vercel(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
+    from omnicoreagent.sandbox.vercel_sandbox import VercelSandboxRuntime
+
+    return VercelSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
+
+
+def _http(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
+    from omnicoreagent.sandbox.http_sandbox import HttpSandboxRuntime
+
+    return HttpSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
+
+
+_PROVIDERS: dict[str, SandboxProviderFactory] = {
+    "docker": _docker,
+    "modal": _modal,
+    "e2b": _e2b,
+    "daytona": _daytona,
+    "vercel": _vercel,
+    "http": _http,
+    SandboxProvider.NONE.value: lambda options, telemetry_recorder: NoneSandboxRuntime(),
+    SandboxProvider.LOCAL_TEST.value: lambda options, telemetry_recorder: LocalTestSandboxRuntime(
+        telemetry_recorder=telemetry_recorder
+    ),
+}
+
+
+def register_sandbox_provider(
+    name: str, factory: SandboxProviderFactory, *, replace: bool = False
+) -> None:
+    """Make a sandbox provider available by name (bring your own sandbox)."""
+    normalized = sandbox_provider_name(name)
+    key = str(getattr(normalized, "value", normalized))
+    if key in _PROVIDERS and not replace:
+        raise ValueError(f"Sandbox provider {key!r} is already registered; pass replace=True")
+    _PROVIDERS[key] = factory
+
+
+def registered_sandbox_providers() -> list[str]:
+    return sorted(_PROVIDERS)
 
 
 @dataclass(slots=True)
 class SandboxRuntimeConfig:
     provider: SandboxProvider | str = SandboxProvider.NONE
+    # Provider settings (image, credentials reference, region...).
+    options: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        try:
-            self.provider = SandboxProvider(self.provider)
-        except ValueError as exc:
-            raise ValueError(f"Unsupported sandbox provider: {self.provider}") from exc
+        self.provider = sandbox_provider_name(self.provider)
+        name = getattr(self.provider, "value", self.provider)
+        if name not in _PROVIDERS:
+            known = ", ".join(registered_sandbox_providers())
+            raise ValueError(f"Unknown sandbox provider {name!r}. Registered: {known}")
+        if not isinstance(self.options, dict):
+            raise ValueError("sandbox options must be a mapping")
+
+    @property
+    def provider_name(self) -> str:
+        return str(getattr(self.provider, "value", self.provider))
+
+
+def sandbox_manifest_from_config(value: Any) -> SandboxManifest | None:
+    """The manifest an application gives each run's sandbox, read at startup.
+
+    It names what the sandbox is — its network, image, working directory,
+    resources, environment — not which provider runs it or which session it
+    is; those are the runtime's. What it asks for is still authorized by the
+    policy when a session opens.
+    """
+    if value is None:
+        return None
+    if isinstance(value, SandboxManifest):
+        return value
+    if not isinstance(value, dict):
+        raise ValueError("governance_config.sandbox_manifest must be a dict")
+    for key in ("provider", "sandbox_id"):
+        if key in value:
+            raise ValueError(
+                f"governance_config.sandbox_manifest cannot set {key}: the provider "
+                "is sandbox_config's and each run's session is the runtime's"
+            )
+    try:
+        return SandboxManifest(**value)
+    except TypeError as exc:
+        # An unknown field, named by the dataclass constructor.
+        raise ValueError(f"governance_config.sandbox_manifest: {exc}") from None
+    except ValueError as exc:
+        raise ValueError(f"governance_config.sandbox_manifest: {exc}") from None
 
 
 def build_sandbox_runtime(
@@ -37,9 +143,6 @@ def build_sandbox_runtime(
         runtime_config = SandboxRuntimeConfig(**config)
     else:
         raise ValueError("sandbox_config must be a dict, string, or SandboxRuntime")
-
-    if runtime_config.provider == SandboxProvider.NONE:
-        return NoneSandboxRuntime()
-    if runtime_config.provider == SandboxProvider.LOCAL_TEST:
-        return LocalTestSandboxRuntime(telemetry_recorder=telemetry_recorder)
-    raise ValueError(f"Unsupported sandbox provider: {runtime_config.provider.value}")
+    return _PROVIDERS[runtime_config.provider_name](
+        dict(runtime_config.options), telemetry_recorder
+    )

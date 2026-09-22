@@ -10,12 +10,14 @@ from omnicoreagent.core.summarizer.tokenizer import (
     count_tokens,
     count_message_tokens,
     DEFAULT_SUMMARY_RATIO,
+    truncate_text_to_tokens,
 )
 from omnicoreagent.core.summarizer.summarizer_types import (
     SummaryConfig,
     format_summary_content,
 )
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.interaction_history import split_recent, interaction_groups
 
 
 SummarizeFn = Callable[[list[dict[str, Any]]], Coroutine[Any, Any, str]]
@@ -33,9 +35,9 @@ async def prepare_history_sliding_window(
     Prepare history using sliding window with optional summarization.
 
     Design invariant:
-    - Final working memory has exactly N messages (or less if history <= N)
+    - Final working memory has at most N messages, keeping call/result groups intact
     - If history > N and summarization enabled:
-        - Last N-1 messages stay raw
+        - Recent complete groups occupy at most N-1 raw message slots
         - Everything before becomes ONE summary
         - Summary occupies the Nth slot
 
@@ -61,11 +63,10 @@ async def prepare_history_sliding_window(
         logger.debug(
             f"Sliding window: truncating {len(messages)} messages to {window_size}"
         )
-        return messages[-window_size:], []
+        return split_recent(messages, window_size)[1], []
 
     raw_keep_count = window_size - 1
-    raw_messages = messages[-raw_keep_count:]
-    messages_to_summarize = messages[:-raw_keep_count]
+    messages_to_summarize, raw_messages = split_recent(messages, raw_keep_count)
 
     summarized_ids = [m.get("id") for m in messages_to_summarize if m.get("id")]
 
@@ -79,7 +80,7 @@ async def prepare_history_sliding_window(
         summary_content = format_summary_content(summary_text)
     except Exception as e:
         logger.error(f"Summarization failed: {e}. Falling back to truncation.")
-        return messages[-window_size:], []
+        return split_recent(messages, window_size)[1], []
 
     summary_message = {
         "role": "user",
@@ -93,7 +94,7 @@ async def prepare_history_sliding_window(
 
     working_memory = [summary_message] + raw_messages
 
-    assert len(working_memory) == window_size, (
+    assert len(working_memory) <= window_size, (
         f"Expected {window_size} messages, got {len(working_memory)}"
     )
 
@@ -147,11 +148,11 @@ async def prepare_history_token_budget(
     raw_messages = []
     raw_tokens = 0
 
-    for msg in reversed(messages):
-        msg_tokens = count_tokens(str(msg.get("content", "")), model)
+    for group in reversed(interaction_groups(messages)):
+        msg_tokens = count_message_tokens(group, model)
         if raw_tokens + msg_tokens > raw_budget:
             break
-        raw_messages.insert(0, msg)
+        raw_messages = group + raw_messages
         raw_tokens += msg_tokens
 
     if raw_messages:
@@ -179,6 +180,15 @@ async def prepare_history_token_budget(
         logger.warning(
             f"Summary exceeded budget: {summary_tokens} > {summary_budget} tokens"
         )
+
+    header_tokens = count_tokens(format_summary_content(""), model)
+    if summary_budget <= header_tokens:
+        return _truncate_to_token_budget(messages, max_tokens, model), []
+    summary_content = format_summary_content(
+        truncate_text_to_tokens(summary_text, summary_budget - header_tokens, model)
+    )
+    if count_tokens(summary_content, model) > summary_budget:
+        return _truncate_to_token_budget(messages, max_tokens, model), []
 
     summary_message = {
         "role": "user",
@@ -218,10 +228,10 @@ def _truncate_to_token_budget(
     result = []
     current_tokens = 0
 
-    for msg in reversed(messages):
-        msg_tokens = count_tokens(str(msg.get("content", "")), model)
+    for group in reversed(interaction_groups(messages)):
+        msg_tokens = count_message_tokens(group, model)
         if current_tokens + msg_tokens <= max_tokens:
-            result.insert(0, msg)
+            result = group + result
             current_tokens += msg_tokens
         else:
             break
@@ -260,7 +270,7 @@ async def apply_summarization_logic(
 
     if not (summary_config and summary_config.enabled and summarize_fn):
         if mode.lower() == "sliding_window":
-            return messages[-value:], None, []
+            return split_recent(messages, value)[1], None, []
         elif mode.lower() == "token_budget":
             return _truncate_to_token_budget(messages, value), None, []
         return messages, None, []

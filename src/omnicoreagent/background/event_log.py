@@ -9,6 +9,7 @@ from typing import Any
 from omnicoreagent.background.models import (
     INITIAL_EVENT_NAMES,
     TERMINAL_EVENT_NAMES,
+    TERMINAL_RUN_STATUSES,
     BackgroundRun,
     RunStatus,
 )
@@ -23,6 +24,7 @@ from omnicoreagent.core.telemetry import (
     TelemetrySpan,
     TelemetryTrace,
     TelemetryTraceMetadata,
+    TraceEvidenceStatus,
     TraceStatus,
 )
 from omnicoreagent.core.telemetry.models import utc_now
@@ -49,10 +51,20 @@ class BackgroundEventLog:
         self.event_sequences: dict[str, int] = {}
         self.event_tasks: set[asyncio.Task] = set()
         self._telemetry_traces: set[str] = set()
+        # Background traces that lost an event (failed or timed-out write);
+        # the next successful write marks them incomplete.
+        self._lost_event_trace_ids: set[str] = set()
+        # Per run: the run object the caller holds, and its task's workspace
+        # policy, so writing an event does not read both back from the store.
+        self._known_runs: dict[str, BackgroundRun] = {}
+        self._workspace_policies: dict[str, Any] = {}
 
     async def emit_run(
         self, event_name: str, run: BackgroundRun, **extra_payload: Any
     ) -> None:
+        # The run in hand is what the workspace writes describe; remembering
+        # it saves reading it back from the store for every event.
+        self._known_runs[run.run_id] = run
         snapshot_written_before_terminal = False
         if event_name in TERMINAL_EVENT_NAMES:
             try:
@@ -90,6 +102,9 @@ class BackgroundEventLog:
                 await self.write_run_snapshot(run)
             except Exception:
                 pass
+        if event_name in TERMINAL_EVENT_NAMES:
+            self._known_runs.pop(run.run_id, None)
+            self._workspace_policies.pop(run.run_id, None)
 
     async def emit(self, event_name: str, **payload: Any) -> None:
         run_id = payload.get("run_id")
@@ -130,6 +145,20 @@ class BackgroundEventLog:
     async def get_run_events(self, run: BackgroundRun | None) -> list[dict[str, Any]]:
         if not run:
             return []
+        events = await self._read_run_events(run)
+        if run.status not in TERMINAL_RUN_STATUSES:
+            return events
+        # A run's terminal status becomes visible before its terminal event is
+        # recorded. A reader of a finished run gets that event, waiting at most
+        # the replay timeout (the event may never come if the worker died).
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.replay_timeout_seconds
+        while not _ends_with_terminal_event(events) and loop.time() < deadline:
+            await asyncio.sleep(0.01)
+            events = await self._read_run_events(run)
+        return events
+
+    async def _read_run_events(self, run: BackgroundRun) -> list[dict[str, Any]]:
         await self.drain_event_tasks(run.run_id)
         events = self.prepare_event_trace(self.local_events.get(run.run_id) or [])
         workspace_events = self.prepare_event_trace(
@@ -207,7 +236,7 @@ class BackgroundEventLog:
             self.event_sequences[run_id] = 1
             return 1
 
-        run = await self.task_store.get_run(run_id)
+        run = self._known_runs.get(run_id) or await self.task_store.get_run(run_id)
         if run:
             sequences.extend(
                 int(event["sequence"])
@@ -218,9 +247,21 @@ class BackgroundEventLog:
         self.event_sequences[run_id] = next_sequence
         return next_sequence
 
+    async def _workspace_policy(self, run_id: str, task_id: str | None):
+        """The task's workspace policy, read once per run: it does not change
+        while the run is going, and every event used to read it again."""
+        if not task_id:
+            return None
+        if run_id not in self._workspace_policies:
+            task = await self.task_store.get_task(task_id)
+            self._workspace_policies[run_id] = (
+                task.workspace_policy if task is not None else None
+            )
+        return self._workspace_policies[run_id]
+
     async def write_run_snapshot(self, run: BackgroundRun) -> None:
-        task = await self.task_store.get_task(run.task_id)
-        if task and not task.workspace_policy.write_run_json:
+        policy = await self._workspace_policy(run.run_id, run.task_id)
+        if policy is not None and not policy.write_run_json:
             return
         self.workspace_io.write_run_snapshot(run)
         await self.append_workspace_telemetry_event(
@@ -232,13 +273,15 @@ class BackgroundEventLog:
 
     async def write_run_event(self, event: dict[str, Any]) -> None:
         task_id = event.get("task_id")
-        if task_id:
-            task = await self.task_store.get_task(task_id)
-            if task and not task.workspace_policy.write_events_jsonl:
+        run_id = event.get("run_id")
+        if task_id and run_id:
+            policy = await self._workspace_policy(run_id, task_id)
+            if policy is not None and not policy.write_events_jsonl:
                 return
         self.workspace_io.append_event(event)
-        run_id = event.get("run_id")
-        run = await self.task_store.get_run(run_id) if run_id else None
+        run = self._known_runs.get(run_id) if run_id else None
+        if run is None and run_id:
+            run = await self.task_store.get_run(run_id)
         if run is not None:
             await self.append_workspace_telemetry_event(
                 run=run,
@@ -260,6 +303,10 @@ class BackgroundEventLog:
                 timeout=self.append_timeout_seconds,
             )
         except Exception:
+            if event.get("run_id") is not None:
+                self._lost_event_trace_ids.add(
+                    self._telemetry_trace_id(str(event["run_id"]))
+                )
             return
 
     async def append_workspace_telemetry_event(
@@ -283,6 +330,7 @@ class BackgroundEventLog:
                 timeout=self.append_timeout_seconds,
             )
         except Exception:
+            self._lost_event_trace_ids.add(self._telemetry_trace_id(run.run_id))
             return
 
     async def _append_workspace_telemetry_event(
@@ -364,13 +412,16 @@ class BackgroundEventLog:
         span_id: str,
         event: dict[str, Any],
     ) -> None:
-        if self.telemetry_store is None or trace_id in self._telemetry_traces:
+        if self.telemetry_store is None:
             return
-        self._telemetry_traces.add(trace_id)
+        if trace_id in self._telemetry_traces:
+            await self._mark_lost_events(trace_id)
+            return
         await self.telemetry_store.upsert_trace(
             TelemetryTrace(
                 trace_id=trace_id,
                 root_span_id=span_id,
+                execution_surface="background",
                 run_id=event.get("run_id"),
                 session_id=event.get("session_id"),
                 task_id=event.get("task_id"),
@@ -403,6 +454,19 @@ class BackgroundEventLog:
                 ],
             )
         )
+        # Only a stored trace counts as created; a failed or cancelled upsert
+        # is retried by the next event instead of dropping every later one.
+        self._telemetry_traces.add(trace_id)
+        await self._mark_lost_events(trace_id)
+
+    async def _mark_lost_events(self, trace_id: str) -> None:
+        if trace_id not in self._lost_event_trace_ids:
+            return
+        await self.telemetry_store.update_trace(
+            trace_id,
+            {"incomplete": True, "evidence_status": TraceEvidenceStatus.PARTIAL.value},
+        )
+        self._lost_event_trace_ids.discard(trace_id)
 
     async def _finish_telemetry_trace(
         self,
@@ -430,6 +494,9 @@ class BackgroundEventLog:
             trace_id,
             {"status": self._trace_status_for_event(event).value, "ended_at": ended_at},
         )
+        # The run is finished; keep no per-run state for it.
+        self._telemetry_traces.discard(trace_id)
+        self._lost_event_trace_ids.discard(trace_id)
 
     @staticmethod
     def _trace_status_for_event(event: dict[str, Any]) -> TraceStatus:
@@ -460,8 +527,16 @@ class BackgroundEventLog:
         return f"trace_background_{run_id}"
 
     @staticmethod
+    def telemetry_trace_id(run_id: str) -> str:
+        return BackgroundEventLog._telemetry_trace_id(run_id)
+
+    @staticmethod
     def _telemetry_span_id(run_id: str) -> str:
         return f"span_background_{run_id}"
+
+    @staticmethod
+    def telemetry_span_id(run_id: str) -> str:
+        return BackgroundEventLog._telemetry_span_id(run_id)
 
     @staticmethod
     def prepare_event_trace(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -493,3 +568,7 @@ class BackgroundEventLog:
         ):
             return []
         return normalized
+
+
+def _ends_with_terminal_event(events: list[dict[str, Any]]) -> bool:
+    return bool(events) and events[-1].get("event") in TERMINAL_EVENT_NAMES

@@ -1,0 +1,91 @@
+---
+title: "Security Model"
+description: "What OmniCoreAgent enforces, where the boundaries are, and what it does not protect"
+---
+
+# Security Model
+
+An agent's tool calls and the code it runs are decided by a model, and a model
+can be steered by text it reads (prompt injection). OmniCoreAgent treats every
+tool call and command as untrusted and enforces two independent layers:
+
+1. **Governance decides.** Every tool call goes through one dispatch point
+   where a policy allows, asks for, or denies it before it runs.
+2. **The sandbox contains.** Code the agent runs with `execute` runs in a
+   separate container, never on your host.
+
+Both layers apply only when governance is enabled. It is off by default.
+
+## Recommended setup
+
+```python
+agent_config = {
+    "governance_config": {
+        "enabled": True,
+        "profile": "interactive-dev",  # or "strict-production" with your own rules
+        "sandbox_config": {"provider": "docker"},
+    },
+}
+```
+
+Install the Docker extra with `pip install "omnicoreagent[docker]"`.
+
+## What the Docker sandbox enforces
+
+- No network unless your policy allows it (turning it on asks for approval in
+  the development profiles).
+- A read-only root filesystem, an unprivileged user, all Linux capabilities
+  dropped, no privilege escalation, and memory, CPU, and process limits.
+- A size-limited working directory in memory, removed with the container.
+- Only the environment you set; your process's variables and credentials never
+  reach it.
+- Host paths that would hand over your machine are never mounted, whatever the
+  policy says: the Docker socket, system directories, and credential
+  directories such as `~/.ssh` or `~/.aws`.
+- One container per run, removed when the run ends, including when it is
+  cancelled.
+
+For a boundary that does not share your host kernel's system call surface,
+install gVisor and set `"options": {"runtime": "runsc"}` in `sandbox_config`.
+
+## Trust boundaries
+
+| Runs where | Governed | Contained | Sees your credentials |
+| --- | --- | --- | --- |
+| `execute` commands | Yes | Yes, in the sandbox | No |
+| Skill scripts, with a sandbox | Yes | Yes, in the sandbox | No |
+| Skill scripts, without a sandbox | Yes | **No**, on your host as your user | No (minimal environment; see [Skills](/docs/core-concepts/skills)) |
+| Your own tools (`local_tools`) | Yes | **No**, in your process | Yes |
+| MCP tools | Yes | Depends on the MCP server | Depends on the server |
+| `AGENTS.md` instructions | n/a: they are text, not actions | n/a | No |
+
+Governance decides whether a tool runs; it cannot limit what your own tool
+code does once it runs. Treat your tools as trusted code with your process's
+privileges.
+
+## Built-in protections
+
+- A governed agent only delegates to governed subagents.
+- A project's `AGENTS.md` instructions are guidance only: they cannot grant a
+  permission or change the policy, and one inside the agent's workspace, over
+  the size limit, or refused by the injection guardrail is not used
+  ([AGENTS.md](/docs/core-concepts/agents-md)).
+- A policy file inside the agent's workspace, or inside a directory mounted
+  read-write into the sandbox, is refused, so the agent cannot edit its own
+  policy.
+- Files the sandbox produces come back to the workspace only through governed,
+  bounded copies (no links, hidden paths, oversized or non-text files).
+- Every run's trace records each command, its policy decision, and each file
+  copy, and its header lists `security_warnings` for configurations with less
+  protection than you might assume (see
+  [Observability](/docs/how-to-guides/observability)).
+
+## What is not protected
+
+- **Anything your policy allows.** An allow rule for a dangerous capability is
+  honoured.
+- **Your own tools and host skill scripts** run with your privileges.
+- **Data leaving through an allowed channel** (an MCP tool, a tool of yours, a
+  sandbox with the network on). There is no data-flow tracking.
+- **The host kernel**, when the sandbox uses plain Docker rather than gVisor.
+- **Governance off.** Without it, no policy applies and the sandbox is unused.

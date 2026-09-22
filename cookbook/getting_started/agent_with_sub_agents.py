@@ -130,8 +130,6 @@ WHEN TO USE SUB-AGENTS:
 - Domain-specific expertise needed
 - Multi-step workflows
 - Parallel processing of multiple tasks
-
-See cookbook/workflows/ for SequentialAgent, ParallelAgent, RouterAgent patterns!
 """)
 
 

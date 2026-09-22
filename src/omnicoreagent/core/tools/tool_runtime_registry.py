@@ -4,22 +4,11 @@ from typing import TYPE_CHECKING, Any
 
 from omnicoreagent.core.workspace.artifacts import ToolResponseOffloader
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
-from omnicoreagent.core.tools.tool_prompt_renderer import (
-    ALWAYS_VISIBLE_TOOL_NAMES,
-    ToolPromptRenderer,
-)
 from omnicoreagent.core.workspace.config import WorkspaceConfig
+from omnicoreagent.core.privacy import PrivacyFilter
 
 if TYPE_CHECKING:
     from omnicoreagent.core.workspace.manager import Workspace
-
-
-async def build_tool_registry_advance_tools_use(registry: ToolRegistry):
-    from omnicoreagent.core.tools.advance_tools_use import (
-        build_tool_registry_advance_tools_use as build_advanced_tools,
-    )
-
-    return await build_advanced_tools(registry=registry)
 
 
 def build_tool_registry_workspace_files(
@@ -28,6 +17,7 @@ def build_tool_registry_workspace_files(
     workspace_files_backend: Any = None,
     workspace: Workspace | None = None,
     workspace_config: WorkspaceConfig | dict | None = None,
+    privacy_filter: PrivacyFilter | None = None,
 ):
     from omnicoreagent.core.workspace.tools import (
         build_tool_registry_workspace_files as build_workspace_files_tool,
@@ -38,6 +28,7 @@ def build_tool_registry_workspace_files(
         workspace_files_backend=workspace_files_backend,
         workspace=workspace,
         workspace_config=workspace_config,
+        privacy_filter=privacy_filter,
     )
 
 
@@ -59,10 +50,14 @@ def build_tool_registry_artifact_tool(
     return build_artifact_tools(offloader=offloader, registry=registry)
 
 
-def build_skill_tools(*, skill_manager: Any, registry: ToolRegistry):
+def build_skill_tools(
+    *, skill_manager: Any, registry: ToolRegistry, env_passthrough: list[str] | None = None
+):
     from omnicoreagent.core.skills.tools import build_skill_tools as build_tools
 
-    return build_tools(skill_manager=skill_manager, registry=registry)
+    return build_tools(
+        skill_manager=skill_manager, registry=registry, env_passthrough=env_passthrough
+    )
 
 
 class ToolRuntimeRegistry:
@@ -79,6 +74,11 @@ class ToolRuntimeRegistry:
         skill_manager: Any = None,
         workspace: Workspace | None = None,
         workspace_config: WorkspaceConfig | dict | None = None,
+        privacy_filter: PrivacyFilter | None = None,
+        sandbox_execution: Any = None,
+        tool_call_timeout: int = 60,
+        skill_script_env: list[str] | None = None,
+        code_mode: Any = None,
     ):
         self.register_internal_tool = register_internal_tool
         self.tool_offloader = tool_offloader
@@ -89,6 +89,11 @@ class ToolRuntimeRegistry:
         self.skill_manager = skill_manager
         self.workspace = workspace
         self.workspace_config = workspace_config
+        self.privacy_filter = privacy_filter
+        self.sandbox_execution = sandbox_execution
+        self.tool_call_timeout = tool_call_timeout
+        self.skill_script_env = list(skill_script_env or [])
+        self.code_mode = code_mode
 
     def _workspace_for_runtime_tools(self) -> Workspace:
         if self.workspace is None:
@@ -106,6 +111,8 @@ class ToolRuntimeRegistry:
             or self.enable_workspace_files
             or self.tool_offloader.config.enabled
             or (self.enable_agent_skills and self.skill_manager)
+            or self.sandbox_execution is not None
+            or bool(getattr(self.code_mode, "enabled", False))
         )
 
         if registry is None and needs_internal_registry:
@@ -121,6 +128,7 @@ class ToolRuntimeRegistry:
                 workspace_files_backend=None,
                 workspace=self._workspace_for_runtime_tools(),
                 workspace_config=self.workspace_config,
+                privacy_filter=self.privacy_filter,
             )
 
         if self.tool_offloader.config.enabled:
@@ -133,20 +141,27 @@ class ToolRuntimeRegistry:
             build_skill_tools(
                 skill_manager=self.skill_manager,
                 registry=registry,
+                env_passthrough=self.skill_script_env,
             )
 
-        if self.enable_advanced_tool_use:
-            await build_tool_registry_advance_tools_use(registry=registry)
+        if self.sandbox_execution is not None:
+            from omnicoreagent.core.tools.execution_tools import build_execution_tools
+
+            build_execution_tools(registry, max_timeout_seconds=self.tool_call_timeout)
+
+        if getattr(self.code_mode, "enabled", False):
+            from omnicoreagent.core.tools.code_mode import (
+                build_code_mode_tool,
+                callable_name,
+                function_signature,
+            )
+
+            # Registered last, so its description lists every tool a program may call.
+            signatures = [
+                function_signature(tool["name"], tool.get("inputSchema") or {}, tool.get("description"))
+                for tool in registry.get_available_tools()
+                if self.code_mode.allows(tool["name"]) and callable_name(tool["name"])
+            ]
+            build_code_mode_tool(registry, config=self.code_mode, functions=signatures)
 
         return registry
-
-    async def render_prompt_registry(
-        self, mcp_tools: dict | None = None, local_tools: Any = None
-    ) -> str:
-        renderer = ToolPromptRenderer(
-            include_mcp_tools=not self.enable_advanced_tool_use,
-            direct_tool_names=ALWAYS_VISIBLE_TOOL_NAMES
-            if self.enable_advanced_tool_use
-            else None,
-        )
-        return await renderer.render(mcp_tools=mcp_tools, local_tools=local_tools)

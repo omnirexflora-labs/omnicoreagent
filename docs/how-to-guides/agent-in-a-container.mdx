@@ -1,0 +1,71 @@
+---
+title: "Running the Agent in a Container"
+description: "Deploying the whole agent inside a container (the other sandbox model)"
+---
+
+# Running the Agent in a Container
+
+OmniCoreAgent's built-in containment puts **the code an agent runs** in a
+sandbox, while the harness — governance, memory, telemetry, your credentials —
+stays in your process ([execution](/docs/core-concepts/execution)).
+
+The other approach is to put **the whole agent** in a container: your process,
+its tools, and everything it touches. The two combine: run the agent in a
+container, and still give it a sandbox for the code it writes.
+
+This is a deployment pattern, not a feature: no OmniCoreAgent setting turns it
+on. What follows is what it takes to do it well.
+
+## A starting point
+
+```dockerfile
+FROM python:3.12-slim
+RUN useradd --create-home --uid 10001 agent
+WORKDIR /app
+COPY pyproject.toml /app/
+RUN pip install --no-cache-dir "omnicoreagent[redis]"
+COPY --chown=agent:agent . /app
+USER agent
+ENV OMNICOREAGENT_WORKSPACE_DIR=/data/workspace
+CMD ["python", "-m", "your_app"]
+```
+
+Run it with the container hardened:
+
+```bash
+docker run --rm \
+  --read-only --tmpfs /tmp \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --memory 1g --pids-limit 256 \
+  -v agent-data:/data \
+  -e LLM_API_KEY -e REDIS_URL \
+  your-image
+```
+
+## What to get right
+
+- **Keep the state outside the container.** Durable runs, memory, and
+  telemetry must survive a restart, so point them at a database you run
+  (`REDIS_URL`, `DATABASE_URL`, `MONGODB_URI`) and mount the workspace as a
+  volume. A crashed container's runs can then be recovered by the next one
+  ([durable runs](/docs/core-concepts/durable-runs)).
+- **Pass credentials as environment variables or mounted secrets**, never
+  baked into the image. They stay in the agent's process; they never enter a
+  sandbox.
+- **Keep governance on inside the container.** A container limits what the
+  agent's process can reach; it does not decide which tools may run. The
+  policy still does that.
+- **Keep the policy file outside the agent's reach**, mounted read-only. A
+  policy inside the workspace is refused.
+- **Give the agent a sandbox of its own** for code it runs. Inside a
+  container, a hosted provider (Modal, E2B, Daytona, Vercel) is usually
+  simpler than Docker-in-Docker; never mount the Docker socket, which the
+  sandbox backend refuses anyway
+  ([security model](/docs/core-concepts/security-model)).
+- **Run as a non-root user** with a read-only root filesystem, dropped
+  capabilities, and memory and process limits, as above.
+- **Scale by running more containers**, not more agents per container: each
+  run belongs to one process at a time, and a run whose process dies is picked
+  up by another once its lease expires — continuing from its checkpoint when
+  the agent keeps run state, so a restart mid-run costs the step in flight,
+  not the run.

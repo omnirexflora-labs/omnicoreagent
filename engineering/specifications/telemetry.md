@@ -221,6 +221,9 @@ suite_id: string | null
 agent_id: string | null
 workflow_id: string | null
 root_span_id: string
+parent_trace_id: string | null
+parent_span_id: string | null
+incomplete: bool
 status: running | completed | failed | cancelled | timeout | aborted_resource_guard | aborted_safety_guard | partial
 started_at: datetime
 ended_at: datetime | null
@@ -233,6 +236,9 @@ metadata:
   tool_schema_version: string | null
   memory_config_version: string | null
   constraint_config_version: string | null
+  guardrail_mode: string | null
+  guardrail_config_version: string | null
+  privacy_config_version: string | null
   tags: list[string]
 spans: list[TelemetrySpan]
 events: list[TelemetryEvent]
@@ -242,7 +248,13 @@ Rules:
 
 - a trace must contain exactly one root span.
 - `root_span_id` must refer to a span in `spans`.
+- `parent_trace_id` and `parent_span_id` identify the execution boundary that
+  created this trace when it is a child trace. They may refer to a different
+  trace; the child trace still has exactly one local root span.
 - partial traces are valid.
+- `incomplete` is true when best-effort persistence dropped one or more
+  evidence writes; it preserves the runtime status while making evidence loss
+  explicit.
 - failed or aborted traces must retain all evidence captured before failure.
 - `metadata` must preserve version fields needed for future regression
   evaluation.
@@ -389,10 +401,10 @@ Rules:
 - nested spans default to the current span as parent.
 - parallel tool calls share the same trace and parent `tool.batch` span.
 - each tool call gets its own child `tool.call` or `mcp.tool.call` span.
-- subagent execution is represented as child spans inside the parent trace in
-  the foundation design.
-- linked traces are out of scope until a future specification defines
-  `parent_trace_id`, trace links, and cross-trace evidence rules.
+- subagent execution records an explicit parent span. Child runtime traces may
+  remain separate while preserving the parent link and shared store.
+- trace-family queries must follow `parent_trace_id` links instead of relying
+  on shared `run_id` or latest-trace ordering.
 - background runs create or resume telemetry context from `run_id` and
   `session_id`.
 
@@ -437,7 +449,10 @@ Rules:
 - JSONL records must be append-friendly.
 - JSONL reload must preserve trace lookup, scoped event replay, and run/session
   filtering behavior.
-- in-memory store is for tests and local development.
+- JSONL in the workspace (`telemetry/traces.jsonl`) is the default store;
+  stores for the same file are one shared object. The in-memory store is an
+  explicit choice for tests and local development and is bounded by
+  `memory_max_traces`.
 - Redis stream is not the canonical trace store.
 - storage failure behavior depends on recorder strict/best-effort mode.
 
@@ -582,6 +597,12 @@ Rules:
 Telemetry configuration must support:
 
 ```yaml
+storage: auto | memory | jsonl
+storage_path: string | null
+retention_days: integer | null
+payload_retention_days: integer | null
+memory_max_traces: integer | null
+capture: default | full
 record_inputs: bool
 record_outputs: bool
 record_model_prompts: bool
@@ -599,10 +620,37 @@ Rules:
 - redaction runs before persistence.
 - keys matching `redact_keys` are replaced with a redaction marker.
 - payloads larger than `max_payload_bytes` are summarized and optionally
-  offloaded.
+  offloaded to the built-in content-addressed payload store.
 - offloaded payloads must store a reference, size, content type when known, and
   checksum when available.
+- payloads are redacted before being written; the reference is persisted only
+  after the payload store accepts the redacted record.
+- `offload_target: workspace` uses the configured workspace backend. The
+  `object_storage` target requires an S3 or R2 workspace. An explicit local
+  telemetry path uses a sibling `<path>.payloads` directory.
+- payload stores expose read and retention cleanup operations. Cleanup retains
+  references found in currently stored traces so active evidence is not broken.
 - secrets must not be stored by default.
+- common PII is redacted before telemetry persistence at the privacy boundary;
+  the effective privacy policy is identified by `privacy_config_version`.
+- `storage: auto` and `storage: jsonl` write durable local JSONL: the explicit
+  `storage_path`, otherwise `telemetry/traces.jsonl` in the local workspace
+  directory, including when the workspace backend is S3 or R2. `memory` is an
+  explicit opt-out bounded by `memory_max_traces`. An injected store takes
+  precedence. One store object is shared per resolved file path.
+- `capture: default` leaves model prompts and responses unrecorded;
+  `capture: full` records them. A preset fills only `record_*` fields that are
+  not set explicitly.
+- `retention_days: null` disables age cleanup. JSONL cleanup retains active
+  traces and compacts only ended traces older than the selected window.
+  Payloads use `payload_retention_days` and are never removed while a kept trace
+  references them. Cleanup runs automatically once per agent and on demand;
+  its results are observable through the retention status.
+- non-strict persistence failures leave the run result usable and set
+  `trace.incomplete`; strict persistence propagates the failure.
+- local and MCP tool output is scrubbed before the normal tool result event is
+  persisted; flagged or blocked decisions emit a guardrail event containing
+  tool identity and a content hash without retaining the unsanitized payload.
 
 ---
 
@@ -649,7 +697,13 @@ Current runtime facade coverage:
   and `runtime_error`, then fail the trace before re-raising the original
   exception.
 - cancellations emit `user_message` and `final_state`, then mark the trace
-  `cancelled` before re-raising the cancellation.
+  `cancelled` before re-raising the cancellation. A run stopped by its own
+  deadline (`run_with_timeout`, background attempt timeout, `/run/sync`
+  timeout) is recorded as `timeout` instead.
+- before the first step, every run emits `run_configuration` (the harness
+  header), and its terminal event and root span output carry `run_summary`.
+- `get_trajectory(...)` returns the ordered `omnicoreagent.trajectory/v1` view
+  of a run.
 - `OmniCoreAgent` exposes telemetry trace lookup and telemetry stream
   replay/follow helpers.
 - `OmniCoreAgent` exposes manual telemetry export through `export_trace(...)`.
@@ -692,6 +746,11 @@ Current runtime loop coverage:
   `context_compression`; compression failure emits `context_dropped`.
 - parsed tool observations emit `observation_pipeline_start`,
   `observation_pipeline_end`, and `observation_pipeline_error` events.
+- native tool calls emit `tool_requested` and `tool_resolved` (with raw
+  arguments and a rejection reason for malformed or unknown calls), and every
+  call emits `tool_observation` with the exact message returned to the model.
+- runtime-injected messages (datetime prefix, empty-response retry, loop
+  recovery) emit `runtime_message`.
 - workspace offloading emits `workspace_offload`.
 - artifact access tools (`read_artifact`, `tail_artifact`, `search_artifact`,
   `list_artifacts`) are recorded as workspace reads because artifacts live in
@@ -711,8 +770,6 @@ Current remaining runtime internals:
 - direct workspace storage internals outside workspace command tools, artifact
   tools, offload, and background run workspace writes
 - approval telemetry paths that are reserved but not fully wired
-- cross-trace links between `serve.request`, background runs, subagents, and
-  agent traces
 - durable telemetry stores beyond in-memory and JSONL
 
 ---

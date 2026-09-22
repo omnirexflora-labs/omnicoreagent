@@ -12,7 +12,7 @@ from omnicoreagent.core.telemetry import (
     TelemetryStream,
     TraceStatus,
 )
-from omnicoreagent.serve.sse import run_agent_stream, stream_session_events
+from omnicoreagent.serve.sse import format_sse_event, run_agent_stream, stream_session_events
 
 
 def _event_name(chunk: str) -> str:
@@ -22,6 +22,16 @@ def _event_name(chunk: str) -> str:
 def _event_data(chunk: str) -> dict:
     data_line = next(line for line in chunk.splitlines() if line.startswith("data: "))
     return json.loads(data_line.removeprefix("data: "))
+
+
+def test_format_sse_event_emits_resume_id_after_event_type():
+    chunk = format_sse_event("agent_step", {"stream_cursor": "17", "value": 1})
+
+    assert chunk.splitlines()[:3] == [
+        "event: agent_step",
+        "id: 17",
+        'data: {"stream_cursor": "17", "value": 1}',
+    ]
 
 
 class _TelemetryAgent:
@@ -146,16 +156,27 @@ async def test_run_agent_stream_yields_telemetry_before_complete():
 
     traces = await agent.store.list_traces()
     serve_trace = next(
-        trace for trace in traces if any(span.kind == "serve.request" for span in trace.spans)
+        trace
+        for trace in traces
+        if any(span.kind == "serve.request" for span in trace.spans)
     )
     assert serve_trace.run_id == _event_data(chunks[3])["run_id"]
     assert [event.event_type for event in serve_trace.events] == [
         "serve_request_start",
         "serve_request_end",
     ]
-    assert serve_trace.events[-1].output["agent_trace_id"] == _event_data(chunks[3])[
-        "trace_id"
-    ]
+    assert (
+        serve_trace.events[-1].output["agent_trace_id"]
+        == _event_data(chunks[3])["trace_id"]
+    )
+    agent_trace = next(
+        trace
+        for trace in traces
+        if trace.run_id == serve_trace.run_id
+        and trace.trace_id != serve_trace.trace_id
+    )
+    assert agent_trace.parent_trace_id == serve_trace.trace_id
+    assert agent_trace.parent_span_id == serve_trace.root_span_id
 
 
 @pytest.mark.asyncio
@@ -176,7 +197,9 @@ async def test_run_agent_stream_finishes_serve_trace_before_terminal_chunk_close
 
     traces = await agent.store.list_traces()
     serve_trace = next(
-        trace for trace in traces if any(span.kind == "serve.request" for span in trace.spans)
+        trace
+        for trace in traces
+        if any(span.kind == "serve.request" for span in trace.spans)
     )
     assert serve_trace.status == TraceStatus.COMPLETED
     assert [event.event_type for event in serve_trace.events] == [
@@ -242,7 +265,9 @@ async def test_concurrent_run_streams_same_session_only_emit_their_run_events():
 
     first, second = await asyncio.gather(collect("first"), collect("second"))
 
-    first_events = [_event_data(chunk) for chunk in first if _event_name(chunk) != "session"]
+    first_events = [
+        _event_data(chunk) for chunk in first if _event_name(chunk) != "session"
+    ]
     second_events = [
         _event_data(chunk) for chunk in second if _event_name(chunk) != "session"
     ]
@@ -290,9 +315,9 @@ async def test_concurrent_run_streams_do_not_leak_when_stream_ignores_run_id():
         ]
     }
     assert {event["run_id"] for event in second_events} == {
-        _event_data(next(chunk for chunk in second if _event_name(chunk) == "complete"))[
-            "run_id"
-        ]
+        _event_data(
+            next(chunk for chunk in second if _event_name(chunk) == "complete")
+        )["run_id"]
     }
 
 
@@ -315,6 +340,23 @@ async def test_stream_session_events_replays_existing_telemetry():
         "final_answer",
     ]
     assert _event_data(chunks[1])["run_id"] == "run_existing"
+
+
+@pytest.mark.asyncio
+async def test_stream_session_events_resumes_after_supplied_cursor():
+    agent = _TelemetryAgent()
+    await agent.run("old", session_id="session-resume", run_id="run_resume")
+
+    stream = stream_session_events(agent, "session-resume", cursor="1")
+    chunks = []
+    async for chunk in stream:
+        chunks.append(chunk)
+        if _event_name(chunk) == "final_answer":
+            break
+    await stream.aclose()
+
+    assert [_event_name(chunk) for chunk in chunks] == ["session", "final_answer"]
+    assert "id: 2" in chunks[1]
 
 
 @pytest.mark.asyncio
@@ -344,7 +386,9 @@ async def test_stream_session_events_filters_existing_telemetry_by_run_id():
 @pytest.mark.asyncio
 async def test_stream_session_events_ends_for_agents_without_telemetry_methods():
     chunks = []
-    async for chunk in stream_session_events(_NoTelemetryAgent(), "session-no-telemetry"):
+    async for chunk in stream_session_events(
+        _NoTelemetryAgent(), "session-no-telemetry"
+    ):
         chunks.append(chunk)
 
     assert [_event_name(chunk) for chunk in chunks] == ["session", "session"]
@@ -382,3 +426,64 @@ async def test_stream_session_events_defensively_filters_when_agent_ignores_run_
         "final_answer",
     ]
     assert {_event_data(chunk)["run_id"] for chunk in event_chunks} == {"run_second"}
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_queue_overflow_is_explicit_failure():
+    from omnicoreagent.serve.sse import _put_stream_item, _EventStreamFailure
+
+    queue = asyncio.Queue(maxsize=1)
+    assert await _put_stream_item(queue, {"event_id": "first"})
+    assert not await _put_stream_item(queue, {"event_id": "second"})
+    failure = queue.get_nowait()
+    assert isinstance(failure, _EventStreamFailure)
+    assert "overflow" in str(failure.error)
+
+
+@pytest.mark.asyncio
+async def test_stream_session_events_resumes_large_backlog_then_follows_live():
+    agent = _TelemetryAgent()
+    recorder = TelemetryRecorder(agent.store)
+    await recorder.start_trace(
+        trace_id="trace-backlog",
+        run_id="run_backlog",
+        session_id="session-backlog",
+    )
+    backlog = 1200
+    for index in range(backlog):
+        await recorder.emit_event("agent_step", output={"index": index})
+
+    stream = stream_session_events(agent, "session-backlog", cursor="1")
+    received: list[str] = []
+    live_sent = False
+    async for chunk in stream:
+        name = _event_name(chunk)
+        assert name != "error", chunk
+        if name == "agent_step":
+            received.append(_event_data(chunk)["event_id"])
+            if len(received) == backlog - 1 and not live_sent:
+                live_sent = True
+                await recorder.emit_event("final_answer", output={"response": "live"})
+        if name == "final_answer":
+            break
+    await stream.aclose()
+
+    assert len(received) == backlog - 1
+    assert len(set(received)) == len(received)
+
+
+def test_sse_seen_events_memory_is_bounded():
+    from omnicoreagent.serve.sse import _SeenEvents
+
+    seen = _SeenEvents(max_ids=10)
+    for index in range(100):
+        assert seen.first_time({"event_id": f"event-{index}"})
+    assert len(seen._ids) <= 10
+    assert not seen.first_time({"event_id": "event-99"})
+
+    ordered = _SeenEvents(max_ids=10)
+    assert ordered.first_time({"event_id": "a", "stream_cursor": "5"})
+    assert not ordered.first_time({"event_id": "b", "stream_cursor": "5"})
+    assert not ordered.first_time({"event_id": "c", "stream_cursor": "4"})
+    assert ordered.first_time({"event_id": "d", "stream_cursor": "6"})
+    assert ordered._ids == set()

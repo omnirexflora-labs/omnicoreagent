@@ -420,3 +420,35 @@ def test_telemetry_export_docs_and_extras_are_grounded():
         "opentelemetry-exporter-otlp-proto-http",
     }:
         assert extra in pyproject
+
+
+def test_every_test_the_threat_model_cites_exists():
+    import ast
+    import re
+
+    text = Path("engineering/architecture/threat-model.md").read_text()
+    cited = set(re.findall(r"`(tests/[\w/]+\.py)::(\w+)`", text))
+    assert cited, "the threat model must cite the tests that prove its controls"
+    missing = []
+    for path, name in sorted(cited):
+        source = Path(path)
+        tree = ast.parse(source.read_text()) if source.exists() else None
+        defined = {
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        } if tree else set()
+        if name not in defined:
+            missing.append(f"{path}::{name}")
+    assert missing == []
+
+
+def test_the_security_model_page_is_published_and_states_its_limits():
+    import json
+
+    pages = json.dumps(json.loads(Path("docs.json").read_text()))
+    text = Path("docs/core-concepts/security-model.mdx").read_text()
+
+    assert "docs/core-concepts/security-model" in pages
+    assert "## What is not protected" in text
+    assert "off by default" in text

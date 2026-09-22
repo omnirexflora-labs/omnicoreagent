@@ -7,6 +7,7 @@ from omnicoreagent.core.guardrails.guard import (
 from omnicoreagent.core.guardrails.models import (
     DetectionConfig,
     DetectionResult,
+    SUSPICIOUS_OUTPUT_ACTIONS,
     ThreatLevel,
 )
 from omnicoreagent.core.guardrails.patterns import PatternManager
@@ -15,6 +16,7 @@ __all__ = [
     "DetectionConfig",
     "DetectionEngine",
     "DetectionResult",
+    "SUSPICIOUS_OUTPUT_ACTIONS",
     "PatternManager",
     "PromptInjectionGuard",
     "ThreatLevel",

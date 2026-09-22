@@ -491,7 +491,10 @@ class TestConfiguration:
         assert "omnicoreagent-serve" in result.output
         assert "omniserver" not in result.output
         assert "Agent path inside image: /app/agents/agent file.py" in result.output
-        assert "docker build -f docker/Dockerfile -t omnicoreagent-serve ." in result.output
+        assert (
+            "docker build -f docker/Dockerfile -t omnicoreagent-serve ."
+            in result.output
+        )
         assert (output_dir / "Dockerfile").exists()
         assert not marker_file.exists()
 
@@ -528,7 +531,10 @@ class TestConfiguration:
         )
 
         assert result.exit_code != 0
-        assert "Agent file must be inside the current Docker build context" in result.output
+        assert (
+            "Agent file must be inside the current Docker build context"
+            in result.output
+        )
         assert not (project_root / "docker" / "Dockerfile").exists()
 
 
@@ -639,7 +645,9 @@ class TestMiddleware:
         assert resp.status_code == 200
         assert resp.headers["access-control-allow-origin"] == "https://example.com"
 
-    def test_rate_limit_middleware_allows_then_denies_protected_routes(self, mock_agent):
+    def test_rate_limit_middleware_allows_then_denies_protected_routes(
+        self, mock_agent
+    ):
         config = OmniServeConfig(
             rate_limit_enabled=True,
             rate_limit_requests=1,
@@ -809,6 +817,7 @@ class TestEndpoints:
             "agent_name": "ReadinessAgent",
             "initialized": True,
             "mcp_connected": True,
+            "mcp_servers": {},
         }
 
     def test_readiness_true_after_successful_lifespan_startup(self):
@@ -830,6 +839,7 @@ class TestEndpoints:
             "agent_name": "ReadyAgent",
             "initialized": True,
             "mcp_connected": True,
+            "mcp_servers": {},
         }
 
     def test_readiness_does_not_require_mcp_when_no_servers_are_configured(self):
@@ -859,6 +869,7 @@ class TestEndpoints:
             "agent_name": "LocalOnlyAgent",
             "initialized": True,
             "mcp_connected": True,
+            "mcp_servers": {},
         }
 
     def test_readiness_reflects_uninitialized_agent(self):
@@ -901,7 +912,10 @@ class TestEndpoints:
     @pytest.mark.parametrize(
         ("sessions", "expected_ready"),
         [
-            ({"server_one": {"connected": True}, "server_two": {"connected": True}}, True),
+            (
+                {"server_one": {"connected": True}, "server_two": {"connected": True}},
+                True,
+            ),
             (
                 {
                     "server_one": {"connected": True},
@@ -1107,7 +1121,9 @@ class TestEndpoints:
         resp = server_client.post("/run/sync", json={"query": "Hello"})
 
         assert resp.status_code == 200
-        traces = asyncio.run(server_client.app.state.agent.telemetry_store.list_traces())
+        traces = asyncio.run(
+            server_client.app.state.agent.telemetry_store.list_traces()
+        )
         serve_trace = next(
             trace
             for trace in traces
@@ -1291,6 +1307,41 @@ class TestEndpoints:
         agent = server_client.app.state.agent
         agent.get_trace.assert_awaited_with(trace_id="trace_endpoint", normalize=False)
 
+    def test_telemetry_trace_family_endpoint_uses_explicit_lineage_accessor(
+        self, server_client
+    ):
+        agent = server_client.app.state.agent
+        agent.get_trace_family = AsyncMock(
+            return_value=[
+                {
+                    "trace_id": "trace_endpoint",
+                    "run_id": "run_endpoint",
+                    "status": "completed",
+                    "events": [],
+                    "spans": [],
+                },
+                {
+                    "trace_id": "trace_child",
+                    "run_id": "run_child",
+                    "parent_trace_id": "trace_endpoint",
+                    "status": "completed",
+                    "events": [],
+                    "spans": [],
+                },
+            ]
+        )
+
+        resp = server_client.get("/telemetry/traces/trace_endpoint/family")
+
+        assert resp.status_code == 200
+        assert [item["trace_id"] for item in resp.json()["traces"]] == [
+            "trace_endpoint",
+            "trace_child",
+        ]
+        agent.get_trace_family.assert_awaited_with(
+            trace_id="trace_endpoint", normalize=False
+        )
+
     def test_telemetry_run_trace_endpoint_uses_run_id(self, server_client):
         resp = server_client.get("/telemetry/runs/run_endpoint/trace")
 
@@ -1300,6 +1351,32 @@ class TestEndpoints:
         assert data["summary"]["run_id"] == "run_endpoint"
         agent = server_client.app.state.agent
         agent.get_trace.assert_awaited_with(run_id="run_endpoint", normalize=False)
+
+    def test_telemetry_run_family_endpoint_uses_run_id(self, server_client):
+        agent = server_client.app.state.agent
+        agent.get_trace_family = AsyncMock(
+            return_value=[
+                {
+                    "trace_id": "trace_endpoint",
+                    "run_id": "run_endpoint",
+                    "status": "completed",
+                    "events": [],
+                    "spans": [],
+                }
+            ]
+        )
+
+        resp = server_client.get("/telemetry/runs/run_endpoint/family")
+
+        assert resp.status_code == 200
+        assert resp.json()["filters"] == {
+            "run_id": "run_endpoint",
+            "normalize": False,
+        }
+        assert [item["trace_id"] for item in resp.json()["traces"]] == [
+            "trace_endpoint"
+        ]
+        agent.get_trace_family.assert_awaited_with(run_id="run_endpoint", normalize=False)
 
     def test_telemetry_session_trace_endpoint_uses_latest_session_trace(
         self, server_client
@@ -1377,7 +1454,9 @@ class TestEndpoints:
 
         assert client.get("/telemetry/traces/requested-trace").status_code == 404
         assert client.get("/telemetry/runs/requested-run/trace").status_code == 404
-        assert client.get("/telemetry/sessions/requested-session/trace").status_code == 404
+        assert (
+            client.get("/telemetry/sessions/requested-session/trace").status_code == 404
+        )
 
     def test_telemetry_traces_endpoint_rejects_invalid_status(self, server_client):
         resp = server_client.get("/telemetry/traces?status=bogus")
@@ -1439,6 +1518,64 @@ class TestEndpoints:
         assert resp.status_code == 200
         assert "run-stream" in resp.text
         assert "run-drop" not in resp.text
+
+    def test_telemetry_events_stream_accepts_last_event_id_for_resume(self):
+        class ResumeTelemetryAgent:
+            name = "ResumeTelemetryAgent"
+
+            def get_telemetry_events_after(self, *, cursor, session_id, run_id):
+                assert cursor == "7"
+                assert session_id == "resume-session"
+                assert run_id == "resume-run"
+                return []
+
+            async def stream_telemetry_after(self, *, cursor, session_id, run_id):
+                assert cursor == "7"
+                if False:
+                    yield {}
+
+        server = OmniServe(
+            agent=ResumeTelemetryAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+        client = TestClient(server.app, raise_server_exceptions=False)
+
+        resp = client.get(
+            "/telemetry/events/stream?session_id=resume-session&run_id=resume-run",
+            headers={"Last-Event-ID": "7"},
+        )
+
+        assert resp.status_code == 200
+        assert '"status": "ended"' in resp.text
+
+    def test_legacy_session_event_stream_accepts_last_event_id(self):
+        class ResumeTelemetryAgent:
+            name = "ResumeTelemetryAgent"
+
+            def get_telemetry_events_after(self, *, cursor, session_id, run_id):
+                assert cursor == "7"
+                assert session_id == "legacy-session"
+                return []
+
+            async def stream_telemetry_after(self, *, cursor, session_id, run_id):
+                assert cursor == "7"
+                if False:
+                    yield {}
+
+        server = OmniServe(
+            agent=ResumeTelemetryAgent(),
+            config=OmniServeConfig(background_enabled=False),
+        )
+        client = TestClient(server.app, raise_server_exceptions=False)
+
+        resp = client.get(
+            "/events/legacy-session",
+            headers={"Last-Event-ID": "7"},
+        )
+
+        assert resp.status_code == 200
+        assert '"status": "ended"' in resp.text
+        assert "error" not in resp.text
 
     def test_events_list_endpoint_defensively_filters_run_id(self):
         class UnfilteredTelemetryAgent:
@@ -1756,11 +1893,16 @@ class TestEndpoints:
         assert data["run_id"].startswith("run_")
         assert data == {
             "response": "plain response",
+            "status": "success",
+            "termination_reason": None,
+            "guardrail_result": None,
             "session_id": "string-session",
             "agent_name": "StringAgent",
             "metric": None,
             "trace_id": None,
             "run_id": data["run_id"],
+            "approvals": None,
+            "budget_request": None,
         }
 
     def test_sync_run_ignores_non_telemetry_business_store(self):

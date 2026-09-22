@@ -51,11 +51,15 @@
                             "docs/core-concepts/mcp",
                             "docs/core-concepts/local-tools",
                             "docs/core-concepts/skills",
+                            "docs/core-concepts/agents-md",
                             "docs/core-concepts/workspace-files",
                             "docs/core-concepts/guardrails",
+                            "docs/core-concepts/security-model",
+                            "docs/core-concepts/durable-runs",
+                            "docs/core-concepts/code-mode",
+                            "docs/core-concepts/execution",
                             "docs/core-concepts/sub-agents",
-                            "docs/core-concepts/background-agents",
-                            "docs/core-concepts/workflows"
+                            "docs/core-concepts/background-agents"
                         ]
                     },
                     {
@@ -66,6 +70,8 @@
                             "docs/how-to-guides/advanced-tools",
                             "docs/how-to-guides/observability",
                             "docs/how-to-guides/models",
+                            "docs/how-to-guides/sandbox-providers",
+                            "docs/how-to-guides/agent-in-a-container",
                             "docs/how-to-guides/omniserve"
                         ]
                     },
@@ -90,7 +96,6 @@
                             "cookbook/real_applications/README",
                             "cookbook/omniserve/README",
                             "cookbook/background_agents/README",
-                            "cookbook/workflows/README",
                             "cookbook/production/README",
                             "cookbook/advanced_agent/README"
                         ]

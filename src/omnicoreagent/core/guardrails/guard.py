@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import fields, replace
+import logging
 from typing import Any
 
 from omnicoreagent.core.guardrails.engine import DetectionEngine
@@ -59,11 +61,27 @@ class PromptInjectionGuard:
             "critical_count": self.detection_stats.get("critical", 0),
         }
 
+    @property
+    def suspicious_output_action(self) -> str:
+        """Return the explicit policy for suspicious tool output."""
+        return self.config.suspicious_output_action
+
     def update_config(self, **kwargs):
-        """Update configuration"""
-        for key, value in kwargs.items():
-            if hasattr(self.config, key):
-                setattr(self.config, key, value)
+        """Atomically validate and apply configuration updates.
+
+        Unknown keys used to be silently ignored and individual assignments
+        could leave the engine with a partially updated policy.  Build a new
+        ``DetectionConfig`` first, then swap both references only after every
+        field has passed validation.
+        """
+        valid_keys = {item.name for item in fields(DetectionConfig)}
+        unknown = sorted(set(kwargs) - valid_keys)
+        if unknown:
+            raise ValueError(f"Unknown detection configuration field(s): {', '.join(unknown)}")
+        candidate = replace(self.config, **kwargs)
+        self.config = candidate
+        self.detection_engine.config = candidate
+        self.detection_engine.logger.setLevel(getattr(logging, candidate.log_level))
 
     def add_custom_pattern(self, group: str, pattern: str, **kwargs):
         """Add custom detection pattern"""

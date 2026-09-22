@@ -1,0 +1,14 @@
+Interpreter: 3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]
+Executable: /home/abiorh/ai/omnirexflora-labs_dir/omnicoreagent-xml-discovery/../omnicoreagent/.venv/bin/python
+Package source: /home/abiorh/ai/omnirexflora-labs_dir/omnicoreagent-xml-discovery/src/omnicoreagent/__init__.py
+Parser source: /home/abiorh/ai/omnirexflora-labs_dir/omnicoreagent-xml-discovery/src/omnicoreagent/core/agents/xml_parser.py
+Branch: main
+Commit: 60da57a6dacd3f7796fffd9d198c0a7420aa6aad
+pytest 9.0.3
+pytest-asyncio 1.3.0
+litellm 1.83.14
+openai 2.24.0
+pydantic 2.12.5
+mcp 1.27.0
+tiktoken 0.12.0
+fastapi 0.136.1

@@ -1,0 +1,79 @@
+{
+  "date": "2026-09-14",
+  "model": "gpt-5.6-luna",
+  "provider": "openai",
+  "endpoint": "chat.completions",
+  "reasoning_effort": "none",
+  "openai_sdk": "2.24.0",
+  "scenarios": [
+    {
+      "scenario": "xml_task_content",
+      "status": "passed",
+      "seconds": 4.5,
+      "provider_turns": 1,
+      "usage_tokens": 1176
+    },
+    {
+      "scenario": "native_batch_and_continued_session",
+      "status": "passed",
+      "seconds": 12.55,
+      "provider_turns": 3,
+      "native_calls": 2,
+      "stored_tool_results": 2
+    },
+    {
+      "scenario": "tool_failure_and_timeout",
+      "status": "passed",
+      "seconds": 8.29,
+      "provider_turns": 2,
+      "recoverable_errors": 2
+    },
+    {
+      "scenario": "public_stream_and_tool_continuation",
+      "status": "passed",
+      "seconds": 6.93,
+      "text_deltas": 60,
+      "first_delta_seconds": 6.19,
+      "provider_turns": 2
+    },
+    {
+      "scenario": "stream_cancellation",
+      "status": "passed",
+      "seconds": 3.02,
+      "closed_provider_streams": 1
+    },
+    {
+      "scenario": "configured_child_stream",
+      "status": "passed",
+      "seconds": 8.87,
+      "parent_turns": 2,
+      "child_turns": 1
+    },
+    {
+      "scenario": "http_sse_live_delivery",
+      "status": "passed",
+      "seconds": 16.67,
+      "text_deltas": 987,
+      "first_delta_seconds": 6.16,
+      "http_status": 200
+    },
+    {
+      "scenario": "dynamic_deep_agent_workspace",
+      "status": "passed",
+      "seconds": 11.06,
+      "parent_turns": 3,
+      "workspace_output_verified": true,
+      "dynamic_child_stream_verified": true
+    },
+    {
+      "scenario": "background_native_tool_run",
+      "status": "passed",
+      "seconds": 6.79,
+      "provider_turns": 3,
+      "background_status": "completed",
+      "events": 4
+    }
+  ],
+  "passed": 9,
+  "failed": 0
+}

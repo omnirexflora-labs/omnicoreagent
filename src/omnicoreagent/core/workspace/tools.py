@@ -9,6 +9,7 @@ from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.workspace.base import AbstractWorkspaceFilesBackend
 from omnicoreagent.core.workspace.config import WorkspaceConfig
 from omnicoreagent.core.workspace.factory import create_workspace_files_backend
+from omnicoreagent.core.privacy import PrivacyFilter
 
 if TYPE_CHECKING:
     from omnicoreagent.core.workspace.manager import Workspace
@@ -39,6 +40,7 @@ class WorkspaceFilesTool:
         workspace_files_backend: AbstractWorkspaceFilesBackend | None = None,
         workspace: Workspace | None = None,
         workspace_config: WorkspaceConfig | dict | None = None,
+        privacy_filter: PrivacyFilter | None = None,
     ):
         """
         Initialize WorkspaceFilesTool with the workspace files adapter.
@@ -56,6 +58,7 @@ class WorkspaceFilesTool:
                 workspace=workspace,
                 workspace_config=workspace_config,
             )
+        self.privacy_filter = privacy_filter
 
     def ls(self, path: str | None = None) -> str:
         """List directory contents inside workspace files."""
@@ -67,14 +70,23 @@ class WorkspaceFilesTool:
 
     def write(self, path: str, content: str, mode: str = "create") -> str:
         """Create, append, or overwrite a file."""
+        if self.privacy_filter is not None:
+            content = self.privacy_filter.redact(content, boundary="workspace")
         return self.files_backend.write(path, content, mode)
 
     def edit_file(self, path: str, old_str: str, new_str: str) -> str:
         """Replace all occurrences of old_str with new_str in a file."""
+        if self.privacy_filter is not None:
+            old_str = self.privacy_filter.redact(old_str, boundary="workspace")
+            new_str = self.privacy_filter.redact(new_str, boundary="workspace")
         return self.files_backend.replace(path, old_str, new_str)
 
     def insert_file(self, path: str, insert_line: int, insert_text: str) -> str:
         """Insert text at a specific line number in a file."""
+        if self.privacy_filter is not None:
+            insert_text = self.privacy_filter.redact(
+                insert_text, boundary="workspace"
+            )
         return self.files_backend.insert(path, insert_line, insert_text)
 
     def delete(self, path: str) -> str:
@@ -143,6 +155,7 @@ def build_tool_registry_workspace_files(
     workspace_files_backend: AbstractWorkspaceFilesBackend | None = None,
     workspace: Workspace | None = None,
     workspace_config: WorkspaceConfig | dict | None = None,
+    privacy_filter: PrivacyFilter | None = None,
 ) -> ToolRegistry:
     """
     Register workspace file commands in a ToolRegistry.
@@ -157,6 +170,7 @@ def build_tool_registry_workspace_files(
         workspace_files_backend=workspace_files_backend,
         workspace=workspace,
         workspace_config=workspace_config,
+        privacy_filter=privacy_filter,
     )
 
     def grep_tool(

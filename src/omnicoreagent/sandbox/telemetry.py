@@ -11,7 +11,9 @@ async def emit_sandbox_event(
     *,
     input: dict[str, Any] | None = None,
     output: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
     error: BaseException | None = None,
+    duration_ms: float | None = None,
     strict: bool = False,
 ) -> None:
     if recorder is None:
@@ -22,7 +24,9 @@ async def emit_sandbox_event(
             actor=TelemetryActor(type=ActorType.SYSTEM, name="sandbox"),
             input=input,
             output=output,
+            metadata=metadata,
             error=TelemetryError.from_exception(error) if error is not None else None,
+            duration_ms=duration_ms,
         )
     except RuntimeError:
         if strict or getattr(recorder.config, "strict", False):

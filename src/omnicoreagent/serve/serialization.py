@@ -3,6 +3,8 @@
 from dataclasses import asdict, is_dataclass
 from typing import Any, Iterable
 
+from omnicoreagent.core.privacy import PrivacyFilter
+
 
 def to_plain_dict(value: Any) -> dict[str, Any]:
     """Convert common runtime objects into JSON-ready dictionaries."""
@@ -32,22 +34,41 @@ def normalize_metric(metric: Any) -> dict[str, Any] | None:
     return to_plain_dict(metric)
 
 
-def normalize_run_result(result: Any, *, agent_name: str) -> dict[str, Any]:
+def normalize_run_result(
+    result: Any,
+    *,
+    agent_name: str,
+    privacy_filter: PrivacyFilter | None = None,
+) -> dict[str, Any]:
     """Normalize agent.run output into the stable OmniServe response shape."""
     if isinstance(result, dict):
-        return {
+        normalized = {
             "response": result.get("response", ""),
             "agent_name": result.get("agent_name", agent_name),
             "metric": normalize_metric(result.get("metric")),
             "trace_id": result.get("trace_id"),
             "run_id": result.get("run_id"),
+            **{
+                key: result[key]
+                for key in (
+                    "status",
+                    "termination_reason",
+                    "guardrail_result",
+                    "approvals",
+                    "budget_request",
+                )
+                if key in result
+            },
         }
-
-    return {
-        "response": str(result),
-        "agent_name": agent_name,
-        "metric": None,
-    }
+    else:
+        normalized = {
+            "response": str(result),
+            "agent_name": agent_name,
+            "metric": None,
+        }
+    if privacy_filter is not None:
+        return privacy_filter.redact(normalized, boundary="public")
+    return normalized
 
 
 def normalize_event(event: Any) -> dict[str, Any]:

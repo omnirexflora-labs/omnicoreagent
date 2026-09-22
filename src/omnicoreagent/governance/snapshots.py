@@ -6,6 +6,7 @@ from typing import Any
 from omnicoreagent.governance.hashing import attach_policy_hash
 from omnicoreagent.governance.errors import PolicyDeniedError
 from omnicoreagent.governance.models import (
+    BUDGET_SCOPES,
     PolicyBudget,
     PolicyEffect,
     PolicyEnvelope,
@@ -35,7 +36,24 @@ def policy_snapshot_from_policy(policy: PolicyEnvelope) -> dict[str, Any]:
             "used_cost": policy.budget.used_cost,
             "count_failed_attempts": policy.budget.count_failed_attempts,
         }
+    budgets = None
+    if policy.budgets is not None:
+        budgets = {"application_id": policy.budgets.application_id}
+        for scope in BUDGET_SCOPES:
+            limits = policy.budgets.limits_for(scope)
+            if limits:
+                budgets[scope] = [
+                    {
+                        "meter": limit.meter,
+                        "limit": limit.limit,
+                        "window": limit.window,
+                        "warn_at": limit.warn_at,
+                        "on_exhausted": limit.on_exhausted,
+                    }
+                    for limit in limits
+                ]
     return {
+        "budgets": budgets,
         "policy_id": policy.policy_id,
         "policy_hash": policy.provenance.policy_hash,
         "version": policy.version,

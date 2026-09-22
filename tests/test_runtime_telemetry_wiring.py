@@ -7,18 +7,25 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
+from omnicoreagent.core.agents.subagent_runner import SubAgentCallRunner
 from omnicoreagent.core.token_usage import Usage
 from omnicoreagent.core.telemetry import (
     InMemoryTelemetryStore,
+    JsonlTelemetryStore,
     TelemetryStream,
     TelemetryRecorder,
     TelemetryActor,
     TelemetrySpan,
     TelemetryTrace,
+    TelemetryTraceMetadata,
     TraceFilter,
     TraceStatus,
     ActorType,
+    TelemetryConfig,
+    InMemoryTelemetryExporter,
 )
+from omnicoreagent.core.workspace.config import WorkspaceConfig
+from omnicoreagent.core.guardrails import DetectionConfig
 
 
 def _initialized_agent(
@@ -48,6 +55,25 @@ def _initialized_agent(
     return agent
 
 
+def test_telemetry_metadata_identifies_effective_guardrail_policy() -> None:
+    agent = OmniCoreAgent(
+        name="guardrail-metadata-agent",
+        system_instruction="You are a test agent.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini", "api_key": "key"},
+        agent_config={
+            "guardrail_mode": "input_only",
+            "guardrail_config": {"strict_mode": True, "sensitivity": 1.2},
+        },
+    )
+
+    metadata = agent._telemetry_metadata()
+
+    assert metadata["guardrail_mode"] == "input_only"
+    assert metadata["guardrail_config_version"] == DetectionConfig(
+        strict_mode=True, sensitivity=1.2
+    ).fingerprint()
+
+
 @pytest.mark.asyncio
 async def test_run_records_completed_telemetry_trace() -> None:
     store = InMemoryTelemetryStore()
@@ -68,13 +94,105 @@ async def test_run_records_completed_telemetry_trace() -> None:
     assert trace.status == TraceStatus.COMPLETED
     assert trace.metadata.agent_name == "telemetry-agent"
     assert trace.metadata.model == "gpt-5.4-mini"
+    assert trace.metadata.telemetry_config_version == agent.telemetry_config.fingerprint()
     assert [event.event_type for event in trace.events] == [
         "user_message",
         "final_answer",
     ]
     assert trace.spans[0].kind == "agent.run"
-    assert trace.spans[0].output == {"response": "done"}
+    root_output = dict(trace.spans[0].output)
+    assert root_output.pop("run_summary")["steps"] == 0
+    assert root_output == {
+        "response": "done",
+        "status": "success",
+        "termination_reason": None,
+    }
     agent.agent.run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_child_agent_run_shares_store_and_records_parent_trace_link() -> None:
+    store = InMemoryTelemetryStore()
+    parent = _initialized_agent(store=store)
+    await parent.telemetry_recorder.start_trace(
+        trace_id="trace-parent",
+        run_id="run-parent",
+        session_id="session-parent",
+    )
+
+    child = _initialized_agent(store=store)
+    child.telemetry_recorder = parent.telemetry_recorder
+    child.telemetry_stream = parent.telemetry_stream
+    child.agent.run = AsyncMock(return_value="child done")
+
+    result = await child.run("child task", session_id="session-child")
+
+    child_trace = await store.get_trace(result["trace_id"])
+    assert child_trace.parent_trace_id == "trace-parent"
+    assert child_trace.parent_span_id == parent.telemetry_recorder.current_context().span_id
+
+    await parent.telemetry_recorder.end_trace()
+
+
+@pytest.mark.asyncio
+async def test_get_trace_family_follows_parent_and_child_traces() -> None:
+    store = InMemoryTelemetryStore()
+    agent = _initialized_agent(store=store)
+    recorder = agent.telemetry_recorder
+
+    await recorder.start_trace(trace_id="trace-family-parent", run_id="run-parent")
+    await recorder.start_trace(trace_id="trace-family-child", run_id="run-child")
+    await recorder.end_trace()
+    await recorder.end_trace()
+
+    family = await agent.get_trace_family(trace_id="trace-family-parent")
+
+    assert [trace["trace_id"] for trace in family] == [
+        "trace-family-parent",
+        "trace-family-child",
+    ]
+
+    child_family = await agent.get_trace_family(trace_id="trace-family-child")
+    assert [trace["trace_id"] for trace in child_family] == [
+        "trace-family-parent",
+        "trace-family-child",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_configured_child_inherits_parent_telemetry_and_is_linked() -> None:
+    store = InMemoryTelemetryStore()
+    parent = _initialized_agent(store=store)
+    await parent.telemetry_recorder.start_trace(
+        trace_id="trace-configured-parent",
+        run_id="run-configured-parent",
+        session_id="session-configured",
+    )
+    child = _initialized_agent(store=store)
+    child.name = "configured-child"
+    child.agent.run = AsyncMock(return_value="child done")
+
+    _, result = await SubAgentCallRunner("parent").run(
+        {
+            "agent": "configured-child",
+            "parameters": {"query": "child task"},
+        },
+        [child],
+        "session-configured",
+        telemetry_recorder=parent.telemetry_recorder,
+    )
+
+    # The runner returns the exception instead of raising; surface it.
+    assert isinstance(result, dict), repr(result)
+    child_trace = await store.get_trace(result["trace_id"])
+    assert child_trace is not None, result
+    assert child_trace.parent_trace_id == "trace-configured-parent"
+    parent_trace = await store.get_trace("trace-configured-parent")
+    delegation_span = next(span for span in parent_trace.spans if span.kind == "subagent.run")
+    assert child_trace.parent_span_id == delegation_span.span_id
+    assert delegation_span.output["child_trace_id"] == result["trace_id"]
+
+    await parent.telemetry_recorder.end_trace()
 
 
 @pytest.mark.asyncio
@@ -313,6 +431,168 @@ def test_ensure_telemetry_derives_store_from_supplied_stream() -> None:
     assert agent.telemetry_store is store
     assert agent.telemetry_recorder.store is store
     assert agent.telemetry_stream.store is store
+
+
+def test_ensure_telemetry_uses_facade_telemetry_config_without_exporters() -> None:
+    store = InMemoryTelemetryStore()
+    config = TelemetryConfig(
+        record_model_prompts=True,
+        record_model_responses=True,
+        strict=True,
+    )
+    agent = OmniCoreAgent(
+        name="telemetry-agent",
+        system_instruction="You are a test agent.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini", "api_key": "key"},
+        telemetry_store=store,
+        telemetry_config=config,
+    )
+
+    agent._ensure_telemetry()
+
+    assert agent.telemetry_recorder.config is config
+    assert agent.telemetry_recorder.exporters == []
+    assert agent._telemetry_metadata()["telemetry_config_version"] == config.fingerprint()
+    assert (
+        agent._telemetry_metadata()["privacy_config_version"]
+        == agent.privacy_filter.config.fingerprint()
+    )
+
+
+def test_ensure_telemetry_rejects_facade_recorder_config_mismatch() -> None:
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store, TelemetryConfig(strict=False))
+    agent = OmniCoreAgent(
+        name="telemetry-agent",
+        system_instruction="You are a test agent.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini", "api_key": "key"},
+        telemetry_store=store,
+        telemetry_recorder=recorder,
+        telemetry_config=TelemetryConfig(strict=True),
+    )
+
+    with pytest.raises(ValueError, match="telemetry_config must match"):
+        agent._ensure_telemetry()
+
+
+def test_ensure_telemetry_merges_injected_exporters_once() -> None:
+    store = InMemoryTelemetryStore()
+    recorder_exporter = InMemoryTelemetryExporter()
+    facade_exporter = InMemoryTelemetryExporter()
+    recorder = TelemetryRecorder(store, exporters=[recorder_exporter])
+    agent = OmniCoreAgent(
+        name="telemetry-agent",
+        system_instruction="You are a test agent.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini", "api_key": "key"},
+        telemetry_store=store,
+        telemetry_recorder=recorder,
+        telemetry_exporters=[facade_exporter],
+    )
+
+    agent._ensure_telemetry()
+
+    assert recorder.exporters == [recorder_exporter, facade_exporter]
+
+
+def test_telemetry_metadata_preserves_payload_storage_identity() -> None:
+    agent = OmniCoreAgent(
+        name="telemetry-agent",
+        system_instruction="You are a test agent.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini", "api_key": "key"},
+        telemetry_payload_store=SimpleNamespace(),
+    )
+
+    agent._ensure_telemetry()
+
+    metadata = agent._telemetry_metadata()
+    restored = TelemetryTraceMetadata.from_dict(metadata)
+    assert restored.telemetry_payload_storage == "SimpleNamespace"
+
+
+def test_telemetry_config_accepts_dictionary_at_facade_boundary() -> None:
+    agent = OmniCoreAgent(
+        name="telemetry-agent",
+        system_instruction="You are a test agent.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini", "api_key": "key"},
+        telemetry_config={"record_model_responses": True},
+    )
+
+    agent._ensure_telemetry()
+
+    assert agent.telemetry_config.record_model_responses is True
+
+
+def test_auto_telemetry_uses_jsonl_for_explicit_local_workspace(tmp_path) -> None:
+    agent = OmniCoreAgent(
+        name="durable-agent",
+        system_instruction="test",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        agent_config={
+            "workspace_config": WorkspaceConfig(workspace_dir=tmp_path),
+        },
+    )
+
+    agent._ensure_telemetry()
+
+    assert isinstance(agent.telemetry_store, JsonlTelemetryStore)
+    assert agent.telemetry_store.path == tmp_path / "telemetry" / "traces.jsonl"
+    assert agent._telemetry_metadata()["telemetry_storage"] == "jsonl"
+
+
+def test_explicit_memory_telemetry_overrides_workspace_auto(tmp_path) -> None:
+    agent = OmniCoreAgent(
+        name="ephemeral-agent",
+        system_instruction="test",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        agent_config={
+            "workspace_config": WorkspaceConfig(workspace_dir=tmp_path),
+        },
+        telemetry_config={"storage": "memory"},
+    )
+
+    agent._ensure_telemetry()
+
+    assert isinstance(agent.telemetry_store, InMemoryTelemetryStore)
+    assert agent._telemetry_metadata()["telemetry_storage"] == "memory"
+
+
+def test_explicit_jsonl_telemetry_accepts_a_path_without_workspace(tmp_path) -> None:
+    path = tmp_path / "traces.jsonl"
+    agent = OmniCoreAgent(
+        name="explicit-durable-agent",
+        system_instruction="test",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        telemetry_config={"storage": "jsonl", "storage_path": str(path)},
+    )
+
+    agent._ensure_telemetry()
+
+    assert isinstance(agent.telemetry_store, JsonlTelemetryStore)
+    assert agent.telemetry_store.path == path
+
+
+@pytest.mark.parametrize("storage", ["auto", "jsonl"])
+def test_cloud_workspace_keeps_telemetry_in_local_jsonl(
+    monkeypatch, tmp_path, storage
+) -> None:
+    monkeypatch.setenv("OMNICOREAGENT_WORKSPACE_DIR", str(tmp_path))
+    agent = OmniCoreAgent(
+        name="cloud-agent",
+        system_instruction="test",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        agent_config={
+            "workspace_config": {
+                "workspace_backend": "s3",
+                "s3_bucket": "example",
+            }
+        },
+        telemetry_config={"storage": storage},
+    )
+
+    agent._ensure_telemetry()
+
+    assert isinstance(agent.telemetry_store, JsonlTelemetryStore)
+    assert agent.telemetry_store.path == (tmp_path / "telemetry" / "traces.jsonl").resolve()
 
 
 @pytest.mark.asyncio
@@ -569,10 +849,197 @@ async def test_parallel_runs_share_session_without_mixing_trace_context() -> Non
             trace.trace_id,
             trace.trace_id,
         ]
-        assert trace.spans[0].output == {"response": trace.events[-1].output["response"]}
+        root_output = dict(trace.spans[0].output)
+        assert "run_summary" in root_output
+        root_output.pop("run_summary")
+        assert root_output == {
+            "response": trace.events[-1].output["response"],
+            "status": "success",
+            "termination_reason": None,
+        }
 
     output_by_run_id = {
         trace.run_id: trace.spans[0].output["response"] for trace in traces
     }
     assert output_by_run_id[first["run_id"]] == "first"
     assert output_by_run_id[second["run_id"]] == "second"
+
+
+class _FailingExporter:
+    name = "failing-exporter"
+
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+
+    async def export_trace(self, trace):
+        raise self.exc
+
+
+class _FinalAnswerFailingStore(InMemoryTelemetryStore):
+    async def append_event(self, trace_id, event):
+        if event.event_type == "final_answer":
+            raise RuntimeError("store unavailable")
+        return await super().append_event(trace_id, event)
+
+
+def _strict_agent_under_parent(store, *, exporters=()):
+    recorder = TelemetryRecorder(
+        store, TelemetryConfig(strict=True), exporters=list(exporters)
+    )
+    agent = _initialized_agent(store=store)
+    agent.telemetry_recorder = recorder
+    agent.telemetry_config = recorder.config
+    return agent, recorder
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "exc", [RuntimeError("collector down"), asyncio.TimeoutError()]
+)
+async def test_strict_export_failure_does_not_end_parent_trace(exc) -> None:
+    from omnicoreagent.core.telemetry import TelemetryExportError
+    from omnicoreagent.core.telemetry.context import current_telemetry_context
+
+    store = InMemoryTelemetryStore()
+    agent, recorder = _strict_agent_under_parent(
+        store, exporters=[_FailingExporter(exc)]
+    )
+    recorder.exporters = []
+    parent = await recorder.start_trace(trace_id="trace-serve", kind="serve.request")
+    recorder.exporters = [_FailingExporter(exc)]
+
+    with pytest.raises(TelemetryExportError):
+        await agent.run("hello", session_id="session-strict")
+
+    assert current_telemetry_context() == parent
+    parent_trace = await store.get_trace("trace-serve")
+    assert parent_trace.status == TraceStatus.RUNNING
+    assert [event.event_type for event in parent_trace.events] == []
+
+    child = next(
+        trace
+        for trace in await store.list_traces(TraceFilter(session_id="session-strict"))
+        if trace.trace_id != "trace-serve"
+    )
+    assert child.status == TraceStatus.COMPLETED
+    error_events = [e for e in child.events if e.event_type == "telemetry_error"]
+    assert len(error_events) == 1
+    assert error_events[0].metadata["exporter"] == "failing-exporter"
+
+
+@pytest.mark.asyncio
+async def test_strict_store_failure_fails_own_trace_and_restores_parent() -> None:
+    from omnicoreagent.core.telemetry.context import current_telemetry_context
+
+    store = _FinalAnswerFailingStore()
+    agent, recorder = _strict_agent_under_parent(store)
+    parent = await recorder.start_trace(trace_id="trace-serve", kind="serve.request")
+
+    with pytest.raises(RuntimeError, match="store unavailable"):
+        await agent.run("hello", session_id="session-store")
+
+    assert current_telemetry_context() == parent
+    parent_trace = await store.get_trace("trace-serve")
+    assert parent_trace.status == TraceStatus.RUNNING
+    child = next(
+        trace
+        for trace in await store.list_traces(TraceFilter(session_id="session-store"))
+        if trace.trace_id != "trace-serve"
+    )
+    assert child.status == TraceStatus.FAILED
+    assert "runtime_error" in [event.event_type for event in child.events]
+
+
+@pytest.mark.asyncio
+async def test_strict_finalization_failure_does_not_touch_parent_trace() -> None:
+    from omnicoreagent.core.telemetry.context import current_telemetry_context
+
+    class FinalUpdateFailingStore(InMemoryTelemetryStore):
+        async def update_trace(self, trace_id, patch):
+            if trace_id != "trace-serve" and "ended_at" in patch:
+                raise RuntimeError("final update failed")
+            return await super().update_trace(trace_id, patch)
+
+    store = FinalUpdateFailingStore()
+    agent, recorder = _strict_agent_under_parent(store)
+    parent = await recorder.start_trace(trace_id="trace-serve", kind="serve.request")
+
+    with pytest.raises(RuntimeError, match="final update failed"):
+        await agent.run("hello", session_id="session-final")
+
+    assert current_telemetry_context() == parent
+    parent_trace = await store.get_trace("trace-serve")
+    assert parent_trace.status == TraceStatus.RUNNING
+    assert parent_trace.events == []
+    assert all(span.status.value == "running" for span in parent_trace.spans)
+
+
+@pytest.mark.asyncio
+async def test_strict_telemetry_failure_does_not_replace_cancellation() -> None:
+    from omnicoreagent.core.telemetry.context import current_telemetry_context
+
+    class FinalStateFailingStore(InMemoryTelemetryStore):
+        async def append_event(self, trace_id, event):
+            if event.event_type == "final_state":
+                raise RuntimeError("store unavailable")
+            return await super().append_event(trace_id, event)
+
+    store = FinalStateFailingStore()
+    agent, recorder = _strict_agent_under_parent(store)
+    agent.agent.run = AsyncMock(side_effect=asyncio.CancelledError())
+    parent = await recorder.start_trace(trace_id="trace-serve", kind="serve.request")
+
+    with pytest.raises(asyncio.CancelledError):
+        await agent.run("hello", session_id="session-cancel")
+
+    assert current_telemetry_context() == parent
+    parent_trace = await store.get_trace("trace-serve")
+    assert parent_trace.status == TraceStatus.RUNNING
+    child = next(
+        trace
+        for trace in await store.list_traces(TraceFilter(session_id="session-cancel"))
+        if trace.trace_id != "trace-serve"
+    )
+    assert child.status == TraceStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_trace_family_lists_parents_before_children_with_equal_start_times() -> None:
+    from omnicoreagent.core.telemetry.models import utc_now
+
+    store = InMemoryTelemetryStore()
+    agent = _initialized_agent(store=store)
+    same_instant = utc_now()
+
+    def trace(trace_id, parent=None):
+        root = TelemetrySpan(
+            trace_id=trace_id,
+            name="agent.run",
+            kind="agent.run",
+            actor=TelemetryActor(type=ActorType.AGENT),
+        )
+        return TelemetryTrace(
+            trace_id=trace_id,
+            root_span_id=root.span_id,
+            parent_trace_id=parent,
+            started_at=same_instant,
+            spans=[root],
+        )
+
+    # Identifiers sort in the opposite order to the lineage.
+    for item in (
+        trace("trace-z-root"),
+        trace("trace-b-child", "trace-z-root"),
+        trace("trace-a-grandchild", "trace-b-child"),
+        trace("trace-c-child", "trace-z-root"),
+    ):
+        await store.upsert_trace(item)
+
+    family = await agent.get_trace_family(trace_id="trace-a-grandchild")
+
+    assert [item["trace_id"] for item in family] == [
+        "trace-z-root",
+        "trace-b-child",
+        "trace-a-grandchild",
+        "trace-c-child",
+    ]

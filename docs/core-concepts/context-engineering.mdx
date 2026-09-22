@@ -11,8 +11,8 @@ OmniCoreAgent has three context-control layers that work together:
 | Layer | Scope | Purpose | Default |
 |-------|-------|---------|---------|
 | **Session memory** | Across `agent.run()` calls | Controls how much conversation history is loaded for a session. | On through the memory router |
-| **Agent loop context management** | Inside one `agent.run()` loop | Checks active messages before every model call and reduces them before the configured budget is exceeded. | Off until enabled |
-| **Tool output offloading** | Individual tool responses | Moves large tool outputs into workspace artifacts and keeps only a preview in the prompt. | Off until enabled |
+| **Agent loop context management** | Inside one `agent.run()` loop | Checks active messages before every model call and reduces them before the configured budget is exceeded. | On |
+| **Tool output offloading** | Individual tool responses | Moves large tool outputs into workspace artifacts and keeps only a preview in the prompt. | On |
 
 When agent loop context management is enabled and configured with a budget below
 your model's real context window, OmniCoreAgent acts before the provider context

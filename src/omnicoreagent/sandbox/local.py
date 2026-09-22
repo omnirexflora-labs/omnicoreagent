@@ -21,7 +21,6 @@ from omnicoreagent.sandbox.models import (
     SandboxSnapshot,
     WorkspaceMountMode,
 )
-from omnicoreagent.sandbox.telemetry import emit_sandbox_event
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +42,7 @@ class LocalTestSandboxRuntime(SandboxRuntime):
 
     provider = SandboxProvider.LOCAL_TEST.value
     supports_required_sandbox = True
+    supports_execution = True
     is_test_adapter = True
 
     def __init__(
@@ -70,57 +70,13 @@ class LocalTestSandboxRuntime(SandboxRuntime):
         self.sessions[session.session_id] = session
         self.files[session.session_id] = {}
         self.network_policies[session.session_id] = manifest.network_policy
-        await emit_sandbox_event(
-            self.telemetry_recorder,
-            "sandbox_session_created",
-            output={
-                "session_id": session.session_id,
-                "provider": session.provider.value,
-                "working_dir": manifest.working_dir,
-            },
-        )
         return session
 
     async def execute(
         self, session_id: str, request: SandboxExecRequest
     ) -> SandboxExecResult:
         self._require_session(session_id)
-        await emit_sandbox_event(
-            self.telemetry_recorder,
-            "sandbox_exec_started",
-            input={
-                "session_id": session_id,
-                "command": _command_summary(request.command),
-                "authority": _authority_metadata(request),
-            },
-        )
-        try:
-            result = await self._run_registered_command(session_id, request)
-        except Exception as exc:
-            await emit_sandbox_event(
-                self.telemetry_recorder,
-                "sandbox_exec_failed",
-                input={
-                    "session_id": session_id,
-                    "command": _command_summary(request.command),
-                    "authority": _authority_metadata(request),
-                },
-                error=exc,
-            )
-            raise
-
-        await emit_sandbox_event(
-            self.telemetry_recorder,
-            "sandbox_exec_completed" if result.ok else "sandbox_exec_failed",
-            output={
-                "session_id": session_id,
-                "exit_code": result.exit_code,
-                "timed_out": result.timed_out,
-                "authority": _authority_metadata(request),
-                "observation_summary": _observation_summary(result),
-            },
-        )
-        return result
+        return await self._run_registered_command(session_id, request)
 
     async def read_file(self, session_id: str, path: str) -> bytes:
         safe_path = self._validate_file_path(session_id, path, write=False)
@@ -192,29 +148,6 @@ class LocalTestSandboxRuntime(SandboxRuntime):
         if write and mount.mode == WorkspaceMountMode.READ_ONLY:
             raise SandboxUnsupportedError("Sandbox workspace mount is read-only")
         return safe_path
-
-
-def _authority_metadata(request: SandboxExecRequest) -> dict | None:
-    return request.authority.to_metadata()
-
-
-def _command_summary(command: list[str]) -> dict[str, object]:
-    return {
-        "name": command[0] if command else "",
-        "argc": len(command),
-    }
-
-
-def _observation_summary(result: SandboxExecResult) -> dict[str, object]:
-    observation = result.to_observation(max_output_chars=0)
-    return {
-        "status": observation["status"],
-        "exit_code": observation["exit_code"],
-        "timed_out": observation["timed_out"],
-        "metadata": observation["metadata"],
-        "stdout_chars": len(result.stdout),
-        "stderr_chars": len(result.stderr),
-    }
 
 
 def _normalize_sandbox_path(path: str) -> str:

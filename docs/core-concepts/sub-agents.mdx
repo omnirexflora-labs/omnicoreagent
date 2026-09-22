@@ -35,14 +35,16 @@ agent = OmniCoreAgent(
     model_config={"provider": "openai", "model": "gpt-4o"},
     agent_config={
         "enable_subagents": True,
-        "context_management": {"enabled": True},
-        "tool_offload": {"enabled": True},
     },
 )
 ```
 
 Workspace files are available by default, and `enable_subagents` also keeps
-them enabled for worker output. Dynamic workers are expected to save output with
+them enabled for worker output. Dynamic subagents also force in-run context
+management on while preserving any context budget, threshold, strategy, and
+retention settings supplied by the caller. Context management and large tool
+result offloading are enabled by default for the harness and cannot be disabled
+for dynamic subagent runs. Dynamic workers are expected to save output with
 `write_file`, and the lead agent reads those paths with `read_file` before
 synthesizing.
 
@@ -69,7 +71,8 @@ items for parallel workers.
 ```
 
 Spawned workers inherit the parent's model, MCP tools, user local tools,
-workspace files, context management, and tool offloading. They do not inherit
+workspace files, context management, and tool offloading. Context management is
+enabled automatically for a parent with dynamic subagents. They do not inherit
 the lead agent's `spawn_subagents` tool, which keeps delegation controlled by
 the lead agent.
 
@@ -129,4 +132,23 @@ with them:
 - **Read Before Synthesis**: After workers finish, read every output path before producing the final answer.
 - **Explicit Instructions**: For fixed subagents, briefly describe each subagent's expertise in the parent instruction.
 - **Limit Depth**: While hierarchical agents are powerful, avoid nesting agents too deep (e.g., Parent -> Child -> Grandchild) to prevent excessive latency and token usage.
+- **A delegation is not one tool call**: `tool_call_timeout` does not apply to `spawn_subagents`; a worker is bounded by its own step cap and the run's deadline. Set `subagent_timeout` (seconds) to bound delegations explicitly.
 - **Keep Workers Focused**: Do not give one worker the whole task. Give it a bounded role and output contract.
+
+## Governance
+
+When the parent agent has governance enabled, each delegation is authorized
+(`subagent.spawn`) and the child must have governance enabled too. A governed
+agent refuses to delegate to an ungoverned one, because the child's tools
+would otherwise run without any policy. The child is governed by its own
+policy, so configure it for the child's tools.
+
+A worker's `ask` pauses its lead. The worker's pending approvals appear on
+the lead's run — each naming the worker's call, its arguments, and the
+worker's run (`delegated_run_id`) — and the lead's run goes to
+`awaiting_approval` with them. A decision on the lead's approval
+(`resolve_approval`, or `POST /runs/{run_id}/approvals/{approval_id}`) is
+forwarded to the worker's, and when the lead resumes, its delegation resumes
+the worker's run from where it stopped rather than starting a new worker.
+An `ask` on delegation itself (`subagent.spawn`, which the development
+profiles ask for) pauses the lead the same way, before any worker runs.

@@ -17,12 +17,6 @@ class AgentState(str, Enum):
     STUCK = "stuck"
 
 
-class ContextInclusion(str, Enum):
-    NONE = "none"
-    THIS_SERVER = "thisServer"
-    ALL_SERVERS = "allServers"
-
-
 def _to_plain(value: Any, *, exclude_none: bool = False) -> Any:
     if isinstance(value, Enum):
         return value.value
@@ -102,7 +96,7 @@ class Message(SerializableRecord):
     role: str
     content: str
     tool_call_id: str | None = None
-    tool_calls: str | None = None
+    tool_calls: list[ToolCall | dict[str, Any]] | None = None
     metadata: ToolCallMetadata | dict[str, Any] | None = None
     timestamp: str | None = None
 
@@ -112,18 +106,10 @@ class Message(SerializableRecord):
                 self.content = json.dumps(self.content, ensure_ascii=False)
             except Exception:
                 self.content = str(self.content)
-        if isinstance(self.metadata, dict):
-            self.metadata = ToolCallMetadata(**self.metadata)
-
-
-@dataclass
-class ParsedResponse(SerializableRecord):
-    action: bool | None = None
-    data: str | None = None
-    error: str | None = None
-    answer: str | None = None
-    tool_calls: bool | None = None
-    agent_calls: bool | None = None
+        # History metadata also carries tool diagnostics, summaries and delegation.
+        # It is not exclusively a tool-call schema.
+        if isinstance(self.metadata, ToolCallMetadata):
+            self.metadata = self.metadata.model_dump()
 
 
 @dataclass
@@ -137,29 +123,13 @@ class ToolCallResult(SerializableRecord):
 
 
 @dataclass
-class ToolError(SerializableRecord):
-    observation: str
-    tool_name: str
-    tool_args: dict | None = None
-
-
-@dataclass
-class ToolCallRecord(SerializableRecord):
-    tool_name: str
-    tool_args: str
-    observation: str
-
-
-@dataclass
-class LoopDetectorConfig(SerializableRecord):
-    max_repeats: int = 3
-    similarity_threshold: float = 0.9
-
-
-@dataclass
 class SessionState(SerializableRecord):
     messages: list[Message]
     state: AgentState
     loop_detector: Any
     assistant_with_tool_calls: dict | None
     pending_tool_responses: list[dict]
+    # Telemetry evidence only (never sent to the model): the observation event
+    # recorded for each tool call, and those already delivered to the model.
+    observation_event_ids: dict[str, str] = field(default_factory=dict)
+    delivered_observation_event_ids: set[str] = field(default_factory=set)

@@ -5,7 +5,7 @@ Handles:
 - Scanning skills directory for valid skills
 - Parsing SKILL.md YAML frontmatter
 - Runtime validation when tools access skills
-- Generating XML context for agent prompts
+- Generating a plain-text catalog for agent prompts
 """
 
 import re
@@ -22,7 +22,7 @@ class SkillManager:
     Usage:
         manager = SkillManager()
         skills = manager.discover_skills()
-        xml_context = manager.get_skills_context_xml()
+        skills_context = manager.get_skills_context()
     """
 
     def __init__(self, skills_root: Path = Path(".agents/skills")):
@@ -89,7 +89,9 @@ class SkillManager:
         """
         skill_path = (self.skills_root / skill_name).resolve()
 
-        if not str(skill_path).startswith(str(self.skills_root)):
+        # A string prefix check let "../skills-evil" pass for "/x/skills";
+        # the resolved path must be a real child of the skills root.
+        if skill_path == self.skills_root or not skill_path.is_relative_to(self.skills_root):
             raise RuntimeError(f"Invalid skill path: {skill_name}")
 
         if not skill_path.exists() or not skill_path.is_dir():
@@ -113,27 +115,20 @@ class SkillManager:
         """
         return self.skills.get(skill_name)
 
-    def get_skills_context_xml(self) -> str:
-        """
-        Generate XML representation of available skills for agent context.
-
-        This is injected into the agent's system prompt so it knows
-        which skills are available.
-
-        Returns:
-            XML string with skill names and descriptions.
-        """
+    def get_skills_context(self) -> str:
+        """Return a plain-text catalog of skills available to native tools."""
         if not self.skills:
             return ""
 
-        lines = ["<available_skills>"]
+        lines = []
         for skill in self.skills.values():
-            lines.append("  <skill>")
-            lines.append(f"    <name>{skill.name}</name>")
-            lines.append(f"    <description>{skill.description}</description>")
-            lines.append(f"    <location>{skill.path}/SKILL.md</location>")
-            lines.append("  </skill>")
-        lines.append("</available_skills>")
+            lines.extend(
+                [
+                    f"- name: {skill.name}",
+                    f"  description: {skill.description}",
+                    f"  instructions: {skill.path}/SKILL.md",
+                ]
+            )
 
         return "\n".join(lines)
 

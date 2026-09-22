@@ -10,6 +10,7 @@ from omnicoreagent.core.guardrails import (
     ThreatLevel,
 )
 from omnicoreagent.core.tools.mcp_tool_handler import MCPToolHandler
+from mcp import types
 
 
 # ---------------------------------------------------------------------------
@@ -53,16 +54,11 @@ def _make_handler(guardrail: PromptInjectionGuard | None = None) -> MCPToolHandl
     )
 
 
-def _make_mcp_result_obj(texts: list[str]) -> MagicMock:
-    """Simulate an MCP result object with a .content list of text items."""
-    items = []
-    for text in texts:
-        item = MagicMock()
-        item.text = text
-        items.append(item)
-    result = MagicMock()
-    result.content = items
-    return result
+def _make_mcp_result_obj(texts: list[str]) -> types.CallToolResult:
+    """A real MCP SDK result with one text block per item."""
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=text) for text in texts]
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -1,19 +1,28 @@
 from __future__ import annotations
 
-from contextlib import AsyncExitStack
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 
 @dataclass(slots=True)
 class ConnectedServer:
-    requested_name: str
+    """One connected server, identified by its configured name.
+
+    ``server_info`` is what the server reported about itself; it is metadata
+    only, because the server controls it.
+    """
+
     server_name: str
     session: Any
     read_stream: Any
     write_stream: Any
     transport_type: str
-    stack: AsyncExitStack
+    connection: Any = None
+    server_info: dict[str, Any] | None = None
+    protocol_version: str | None = None
+    call_timeout: float | None = None
+    reconnect: Callable[[], Awaitable[None]] | None = None
 
     def session_info(self) -> dict[str, Any]:
         return {
@@ -22,7 +31,13 @@ class ConnectedServer:
             "write_stream": self.write_stream,
             "connected": True,
             "transport_type": self.transport_type,
-            "stack": self.stack,
+            "connection": self.connection,
+            "server_info": self.server_info,
+            "protocol_version": self.protocol_version,
+            "call_timeout": self.call_timeout,
+            "reconnect": self.reconnect,
+            "reconnects": 0,
+            "last_error": None,
         }
 
 
@@ -32,6 +47,8 @@ class MCPClientState:
         self.available_tools: dict[str, list[Any]] = {}
         self.server_names: list[str] = []
         self.added_servers_names: dict[str, str] = {}
+        # Servers that failed to connect, with the reason.
+        self.failures: dict[str, dict[str, Any]] = {}
 
     def has_server(self, server_name: str) -> bool:
         return server_name in self.sessions
@@ -44,7 +61,7 @@ class MCPClientState:
             )
 
         self.server_names.append(connected_server.server_name)
-        self.added_servers_names[connected_server.requested_name] = (
+        self.added_servers_names[connected_server.server_name] = (
             connected_server.server_name
         )
         self.sessions[connected_server.server_name] = connected_server.session_info()
@@ -54,9 +71,6 @@ class MCPClientState:
 
     def resolve_server_name(self, name: str) -> str:
         name_lower = name.lower()
-        for requested_name, server_name in self.added_servers_names.items():
-            if name_lower in {requested_name.lower(), server_name.lower()}:
-                return server_name
         for server_name in self.server_names:
             if name_lower == server_name.lower():
                 return server_name
@@ -79,3 +93,4 @@ class MCPClientState:
         self.added_servers_names.clear()
         self.sessions.clear()
         self.available_tools.clear()
+        self.failures.clear()

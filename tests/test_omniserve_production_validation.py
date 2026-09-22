@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from omnicoreagent.core.model_protocol import ModelTurn, ToolRequest
 import asyncio
 import json
 import os
@@ -8,11 +8,9 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
-
 import pytest
 from dotenv import dotenv_values
 from fastapi.testclient import TestClient
-
 from omnicoreagent import (
     BackgroundAgentManager,
     MemoryRouter,
@@ -25,13 +23,17 @@ from omnicoreagent.core.workspace.config import WorkspaceConfig
 from omnicoreagent.core.workspace.manager import Workspace
 from omnicoreagent.serve.sse import stream_session_events
 
-
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
-
 AUTH_HEADERS = {"Authorization": "Bearer validation-token"}
-TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "timeout", "retry_exhausted"}
+TERMINAL_RUN_STATUSES = {
+    "completed",
+    "failed",
+    "cancelled",
+    "timeout",
+    "retry_exhausted",
+}
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -70,11 +72,12 @@ def load_local_validation_env():
     if os.getenv("REDIS_URL"):
         os.environ.setdefault("OMNICOREAGENT_TEST_REDIS_URL", os.environ["REDIS_URL"])
     if os.getenv("MONGODB_URI"):
-        os.environ.setdefault("OMNICOREAGENT_TEST_MONGODB_URI", os.environ["MONGODB_URI"])
+        os.environ.setdefault(
+            "OMNICOREAGENT_TEST_MONGODB_URI", os.environ["MONGODB_URI"]
+        )
     if os.getenv("MONGODB_DB_NAME"):
         os.environ.setdefault(
-            "OMNICOREAGENT_TEST_MONGODB_DATABASE",
-            os.environ["MONGODB_DB_NAME"],
+            "OMNICOREAGENT_TEST_MONGODB_DATABASE", os.environ["MONGODB_DB_NAME"]
         )
     yield
     os.environ.clear()
@@ -85,55 +88,76 @@ class ScriptedSupportOperationsLlm:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def llm_call(self, messages: list[Any]):
+    async def llm_call(self, messages: list[Any], tools=None):
         self.calls += 1
         if self.calls == 1:
-            return """
-<tool_calls>
-  <tool_call>
-    <tool_name>lookup_customer</tool_name>
-    <parameters>{"customer_id": "cust-001"}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>recent_orders</tool_name>
-    <parameters>{"customer_id": "cust-001"}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>support_policy_search</tool_name>
-    <parameters>{"query": "enterprise delayed shipment escalation"}</parameters>
-  </tool_call>
-</tool_calls>
-"""
+            return ModelTurn(
+                tool_calls=(
+                    ToolRequest(
+                        f"call_{self.calls}_0",
+                        "lookup_customer",
+                        '{"customer_id": "cust-001"}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_1",
+                        "recent_orders",
+                        '{"customer_id": "cust-001"}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_2",
+                        "support_policy_search",
+                        '{"query": "enterprise delayed shipment escalation"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            )
         if self.calls == 2:
             conversation = _messages_text(messages)
             assert "Ada Ventures" in conversation
             assert "ord-1002" in conversation
             assert "Enterprise delayed shipments" in conversation
-            return """
-<tool_calls>
-  <tool_call>
-    <tool_name>create_escalation</tool_name>
-    <parameters>{"ticket_id": "tck-1042", "severity": "medium", "summary": "Delayed enterprise shipment needs timeline and goodwill review."}</parameters>
-  </tool_call>
-  <tool_call>
-    <tool_name>write_file</tool_name>
-    <parameters>{"path": "tickets/tck-1042.md", "content": "# tck-1042\\n\\nEscalated delayed shipment for Ada Ventures.", "mode": "create"}</parameters>
-  </tool_call>
-</tool_calls>
-"""
+            return ModelTurn(
+                tool_calls=(
+                    ToolRequest(
+                        f"call_{self.calls}_0",
+                        "create_escalation",
+                        '{"ticket_id": "tck-1042", "severity": "medium", "summary": "Delayed enterprise shipment needs timeline and goodwill review."}',
+                    ),
+                    ToolRequest(
+                        f"call_{self.calls}_1",
+                        "write_file",
+                        '{"path": "tickets/tck-1042.md", "content": "# tck-1042\\n\\nEscalated delayed shipment for Ada Ventures.", "mode": "create"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            )
         conversation = _messages_text(messages)
         assert "queued_for_specialist" in conversation
         assert "tickets/tck-1042.md" in conversation
-        return """
-<final_answer>Support plan ready: explain the delay, share timeline, and route the medium escalation.</final_answer>
-"""
+        return "Support plan ready: explain the delay, share timeline, and route the medium escalation."
+
+    async def llm_stream(self, messages, tools=None):
+        from omnicoreagent.core.agents.llm_response import normalize_model_turn
+
+        turn = normalize_model_turn(await self.llm_call(messages, tools=tools))
+        if turn.text:
+            yield {"type": "text_delta", "text": turn.text}
+        yield {"type": "turn_complete", "turn": turn}
 
 
 class DirectAnswerLlm:
-    async def llm_call(self, messages: list[Any]):
+    async def llm_call(self, messages: list[Any], tools=None):
         conversation = _messages_text(messages)
         assert "remember production validation" in conversation
-        return "<final_answer>Production validation memory response stored.</final_answer>"
+        return "Production validation memory response stored."
+
+    async def llm_stream(self, messages, tools=None):
+        from omnicoreagent.core.agents.llm_response import normalize_model_turn
+
+        turn = normalize_model_turn(await self.llm_call(messages, tools=tools))
+        if turn.text:
+            yield {"type": "text_delta", "text": turn.text}
+        yield {"type": "turn_complete", "turn": turn}
 
 
 class WorkspaceBackgroundAgent:
@@ -156,10 +180,7 @@ class WorkspaceBackgroundAgent:
         return "workspace-background-validation"
 
     async def run(
-        self,
-        query: str,
-        session_id: str | None = None,
-        run_id: str | None = None,
+        self, query: str, session_id: str | None = None, run_id: str | None = None
     ) -> dict[str, Any]:
         workspace_path = _workspace_path_from_query(query)
         self.workspace.files.write_text(
@@ -191,13 +212,11 @@ def test_omniserve_real_app_sync_sse_telemetry_events_auth_rate_limit_and_prefix
         request_timeout=10,
     )
     server = OmniServe(agent, config)
-
     with TestClient(server.app) as client:
         assert client.get("/api/v1/health").status_code == 200
         ready = client.get("/api/v1/ready")
         assert ready.status_code == 200
         assert ready.json()["ready"] is True
-
         assert client.get("/api/v1/tools").status_code == 401
         tools = client.get("/api/v1/tools", headers=AUTH_HEADERS)
         assert tools.status_code == 200
@@ -211,15 +230,11 @@ def test_omniserve_real_app_sync_sse_telemetry_events_auth_rate_limit_and_prefix
             "read_file",
             "grep",
         }.issubset(tool_names)
-
         agent.llm_connection = ScriptedSupportOperationsLlm()
         sync_response = client.post(
             "/api/v1/run/sync",
             json={
-                "query": (
-                    "Handle ticket tck-1042 for customer cust-001. Use the support "
-                    "tools and save notes at tickets/tck-1042.md."
-                ),
+                "query": "Handle ticket tck-1042 for customer cust-001. Use the support tools and save notes at tickets/tck-1042.md.",
                 "session_id": "production-validation-sync",
             },
             headers=AUTH_HEADERS,
@@ -229,7 +244,6 @@ def test_omniserve_real_app_sync_sse_telemetry_events_auth_rate_limit_and_prefix
         assert sync_payload["response"].startswith("Support plan ready")
         assert sync_payload["trace_id"]
         assert sync_payload["run_id"]
-
         _assert_telemetry_http_endpoints(
             client,
             session_id="production-validation-sync",
@@ -251,7 +265,6 @@ def test_omniserve_real_app_sync_sse_telemetry_events_auth_rate_limit_and_prefix
                 run_id=sync_payload["run_id"],
             )
         )
-
         agent.llm_connection = ScriptedSupportOperationsLlm()
         sse_payloads = _collect_sse(
             client,
@@ -259,19 +272,15 @@ def test_omniserve_real_app_sync_sse_telemetry_events_auth_rate_limit_and_prefix
             "/api/v1/run",
             headers=AUTH_HEADERS,
             json_body={
-                "query": (
-                    "Handle ticket tck-1042 for customer cust-001. Use the support "
-                    "tools and save notes at tickets/tck-1042-stream.md."
-                ),
+                "query": "Handle ticket tck-1042 for customer cust-001. Use the support tools and save notes at tickets/tck-1042-stream.md.",
                 "session_id": "production-validation-sse",
             },
             stop_event="complete",
         )
-        complete = next(item for item in sse_payloads if item["event"] == "complete")
+        complete = next((item for item in sse_payloads if item["event"] == "complete"))
         assert complete["data"]["response"].startswith("Support plan ready")
         assert complete["data"]["run_id"]
         assert complete["data"]["trace_id"]
-
         ticket = workspace_dir / "files" / "tickets" / "tck-1042.md"
         assert ticket.read_text(encoding="utf-8").startswith("# tck-1042")
 
@@ -292,7 +301,6 @@ def test_omniserve_rate_limit_protects_api_routes_and_exempts_readiness(tmp_path
             background_enabled=False,
         ),
     )
-
     with TestClient(server.app) as client:
         health = client.get("/api/health")
         ready = client.get("/api/ready")
@@ -300,10 +308,8 @@ def test_omniserve_rate_limit_protects_api_routes_and_exempts_readiness(tmp_path
         assert ready.status_code == 200
         assert "X-RateLimit-Limit" not in health.headers
         assert "X-RateLimit-Limit" not in ready.headers
-
         allowed = client.get("/api/tools", headers=AUTH_HEADERS)
         denied = client.get("/api/tools", headers=AUTH_HEADERS)
-
         assert allowed.status_code == 200
         assert allowed.headers["X-RateLimit-Limit"] == "1"
         assert allowed.headers["X-RateLimit-Remaining"] == "0"
@@ -313,15 +319,12 @@ def test_omniserve_rate_limit_protects_api_routes_and_exempts_readiness(tmp_path
 
 @pytest.mark.parametrize("memory_backend", ["in_memory", "sql", "redis", "mongodb"])
 def test_omniserve_runtime_memory_backends_expose_session_history(
-    memory_backend,
-    tmp_path,
-    monkeypatch,
+    memory_backend, tmp_path, monkeypatch
 ):
     _configure_memory_backend_or_skip(memory_backend, tmp_path, monkeypatch)
     session_id = f"memory-validation-{memory_backend}-{uuid.uuid4().hex}"
     agent = _memory_validation_agent(memory_backend, tmp_path)
     server = OmniServe(agent, OmniServeConfig(background_enabled=False))
-
     try:
         with TestClient(server.app) as client:
             agent.llm_connection = DirectAnswerLlm()
@@ -334,13 +337,12 @@ def test_omniserve_runtime_memory_backends_expose_session_history(
             )
             assert response.status_code == 200
             assert response.json()["response"].startswith("Production validation")
-
             history = client.get(f"/sessions/{session_id}/history")
             assert history.status_code == 200
             messages = history.json()["messages"]
             assert len(messages) >= 2
-            assert any(message["role"] == "user" for message in messages)
-            assert any(message["role"] == "assistant" for message in messages)
+            assert any((message["role"] == "user" for message in messages))
+            assert any((message["role"] == "assistant" for message in messages))
     finally:
         asyncio.run(agent.memory_router.clear_memory(session_id, agent.name))
         asyncio.run(agent.cleanup())
@@ -348,8 +350,7 @@ def test_omniserve_runtime_memory_backends_expose_session_history(
 
 @pytest.mark.parametrize("workspace_backend", ["local", "s3", "r2"])
 def test_omniserve_background_workspace_backends_store_run_state(
-    workspace_backend,
-    tmp_path,
+    workspace_backend, tmp_path
 ):
     workspace = _workspace_for_backend_or_skip(workspace_backend, tmp_path).ensure()
     manager = BackgroundAgentManager(
@@ -370,14 +371,12 @@ def test_omniserve_background_workspace_backends_store_run_state(
         ),
         background_manager=manager,
     )
-
     try:
         with TestClient(server.app) as client:
             assert client.get("/api/background/status").status_code == 401
             status = client.get("/api/background/status", headers=AUTH_HEADERS)
             assert status.status_code == 200
             assert status.json()["agents"] == 1
-
             task_id = f"workspace_validation_{workspace_backend}_{uuid.uuid4().hex}"
             created = client.post(
                 "/api/background/tasks",
@@ -390,7 +389,6 @@ def test_omniserve_background_workspace_backends_store_run_state(
                 headers=AUTH_HEADERS,
             )
             assert created.status_code == 200
-
             run_response = client.post(
                 f"/api/background/tasks/{task_id}/run",
                 json={"wait": False},
@@ -400,32 +398,25 @@ def test_omniserve_background_workspace_backends_store_run_state(
             queued_run = run_response.json()
             assert queued_run["status"] in {"queued", "claimed", "running", "completed"}
             run = _wait_for_background_run(
-                client,
-                queued_run["run_id"],
-                headers=AUTH_HEADERS,
-                timeout_seconds=30,
+                client, queued_run["run_id"], headers=AUTH_HEADERS, timeout_seconds=30
             )
             assert run["status"] == "completed"
-
             events_response = client.get(
-                f"/api/background/runs/{run['run_id']}/events",
-                headers=AUTH_HEADERS,
+                f"/api/background/runs/{run['run_id']}/events", headers=AUTH_HEADERS
             )
             assert events_response.status_code == 200
             event_names = [event["event"] for event in events_response.json()["events"]]
             assert "background_run_completed" in event_names
-
             workspace_response = client.get(
-                f"/api/background/runs/{run['run_id']}/workspace",
-                headers=AUTH_HEADERS,
+                f"/api/background/runs/{run['run_id']}/workspace", headers=AUTH_HEADERS
             )
             assert workspace_response.status_code == 200
-            workspace_files = {item["name"] for item in workspace_response.json()["files"]}
+            workspace_files = {
+                item["name"] for item in workspace_response.json()["files"]
+            }
             assert {"run.json", "events.jsonl", "output.md"}.issubset(workspace_files)
-
             if workspace_backend == "local":
                 _assert_background_management_routes(client, task_id, run, AUTH_HEADERS)
-
         output = workspace.files.read_text(f"{run['workspace_path']}/output.md")
         assert "Workspace validation" in output
     finally:
@@ -481,9 +472,9 @@ def _configure_memory_backend_or_skip(memory_backend: str, tmp_path: Path, monke
         return
     if memory_backend == "sql":
         monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'memory.db'}")
-        from omnicoreagent.core.memory_store.sql_db_memory import get_sql_manager
+        from omnicoreagent.core.memory_store.sql_db_memory import close_all_sql_managers
 
-        get_sql_manager().close_all()
+        close_all_sql_managers()
         return
     if memory_backend == "redis":
         url = os.getenv("OMNICOREAGENT_TEST_REDIS_URL") or os.getenv("REDIS_URL")
@@ -503,8 +494,7 @@ def _configure_memory_backend_or_skip(memory_backend: str, tmp_path: Path, monke
         _require_mongodb(uri)
         monkeypatch.setenv("MONGODB_URI", uri)
         monkeypatch.setenv(
-            "MONGODB_COLLECTION",
-            f"messages_validation_{uuid.uuid4().hex}",
+            "MONGODB_COLLECTION", f"messages_validation_{uuid.uuid4().hex}"
         )
         return
     raise AssertionError(f"unknown memory backend: {memory_backend}")
@@ -575,23 +565,22 @@ def _assert_telemetry_http_endpoints(
     assert "observation_pipeline_end" in event_names
     assert "workspace_write" in event_names
     assert "final_answer" in event_names
-
     trace = client.get(
-        f"/api/v1/events/{session_id}/trace",
-        params={"run_id": run_id},
-        headers=headers,
+        f"/api/v1/events/{session_id}/trace", params={"run_id": run_id}, headers=headers
     )
     assert trace.status_code == 200
     assert trace.json()["summary"]["trace_id"] == trace_id
-
     filtered_events = client.get(
         "/api/v1/telemetry/events",
-        params={"session_id": session_id, "run_id": run_id, "event_type": "tool_result"},
+        params={
+            "session_id": session_id,
+            "run_id": run_id,
+            "event_type": "tool_result",
+        },
         headers=headers,
     )
     assert filtered_events.status_code == 200
     assert filtered_events.json()["count"] >= 4
-
     traces = client.get(
         "/api/v1/telemetry/traces",
         params={"session_id": session_id, "run_id": run_id},
@@ -599,28 +588,21 @@ def _assert_telemetry_http_endpoints(
     )
     assert traces.status_code == 200
     assert traces.json()["count"] >= 1
-
     exact_trace = client.get(f"/api/v1/telemetry/traces/{trace_id}", headers=headers)
     assert exact_trace.status_code == 200
     assert exact_trace.json()["summary"]["trace_id"] == trace_id
-
     run_trace = client.get(f"/api/v1/telemetry/runs/{run_id}/trace", headers=headers)
     assert run_trace.status_code == 200
     assert run_trace.json()["summary"]["trace_id"] == trace_id
-
     session_trace = client.get(
-        f"/api/v1/telemetry/sessions/{session_id}/trace",
-        headers=headers,
+        f"/api/v1/telemetry/sessions/{session_id}/trace", headers=headers
     )
     assert session_trace.status_code == 200
     assert session_trace.json()["summary"]["run_id"] == run_id
 
 
 async def _assert_event_stream_replay(
-    agent: OmniCoreAgent,
-    *,
-    session_id: str,
-    run_id: str,
+    agent: OmniCoreAgent, *, session_id: str, run_id: str
 ) -> None:
     event_names: set[str | None] = set()
     stream = stream_session_events(agent, session_id, run_id=run_id)
@@ -653,8 +635,7 @@ def _assert_http_sse_event_endpoints(
     agent.stream_telemetry_after = finite_stream
     try:
         event_stream = client.get(
-            f"/api/v1/events/{session_id}?run_id={run_id}",
-            headers=headers,
+            f"/api/v1/events/{session_id}?run_id={run_id}", headers=headers
         )
         telemetry_stream = client.get(
             f"/api/v1/telemetry/events/stream?session_id={session_id}&run_id={run_id}",
@@ -665,7 +646,6 @@ def _assert_http_sse_event_endpoints(
             delattr(agent, "stream_telemetry_after")
         else:
             agent.stream_telemetry_after = original_stream
-
     assert event_stream.status_code == 200
     assert telemetry_stream.status_code == 200
     assert "event: session" in event_stream.text
@@ -675,10 +655,7 @@ def _assert_http_sse_event_endpoints(
 
 
 def _assert_background_management_routes(
-    client: TestClient,
-    task_id: str,
-    run: dict[str, Any],
-    headers: dict[str, str],
+    client: TestClient, task_id: str, run: dict[str, Any], headers: dict[str, str]
 ) -> None:
     registered = client.post(
         "/api/background/agents",
@@ -686,33 +663,25 @@ def _assert_background_management_routes(
         headers=headers,
     )
     assert registered.status_code == 200
-
     agents = client.get("/api/background/agents", headers=headers)
     assert agents.status_code == 200
     assert {"workspace_agent", "spec_agent"}.issubset(
         {agent["agent_id"] for agent in agents.json()["agents"]}
     )
-
     spec_agent = client.get("/api/background/agents/spec_agent", headers=headers)
     assert spec_agent.status_code == 200
     assert spec_agent.json()["agent_id"] == "spec_agent"
-
     deleted_agent = client.delete(
-        "/api/background/agents/spec_agent",
-        params={"force": True},
-        headers=headers,
+        "/api/background/agents/spec_agent", params={"force": True}, headers=headers
     )
     assert deleted_agent.status_code == 200
     assert deleted_agent.json()["status"] == "deleted"
-
     tasks = client.get("/api/background/tasks", headers=headers)
     assert tasks.status_code == 200
     assert task_id in {task["task_id"] for task in tasks.json()["tasks"]}
-
     task = client.get(f"/api/background/tasks/{task_id}", headers=headers)
     assert task.status_code == 200
     assert task.json()["task_id"] == task_id
-
     patched = client.patch(
         f"/api/background/tasks/{task_id}",
         json={"metadata": {"validated": True}},
@@ -720,18 +689,15 @@ def _assert_background_management_routes(
     )
     assert patched.status_code == 200
     assert patched.json()["metadata"]["validated"] is True
-
     paused = client.post(f"/api/background/tasks/{task_id}/pause", headers=headers)
     resumed = client.post(f"/api/background/tasks/{task_id}/resume", headers=headers)
     assert paused.status_code == 200
     assert paused.json()["status"] == "paused"
     assert resumed.status_code == 200
     assert resumed.json()["status"] == "resumed"
-
     status = client.get(f"/api/background/tasks/{task_id}/status", headers=headers)
     assert status.status_code == 200
     assert status.json()["latest_run"]["run_id"] == run["run_id"]
-
     runs = client.get(
         "/api/background/runs",
         params={"task_id": task_id, "status": "completed"},
@@ -739,21 +705,16 @@ def _assert_background_management_routes(
     )
     assert runs.status_code == 200
     assert run["run_id"] in {item["run_id"] for item in runs.json()["runs"]}
-
     attempts = client.get(
-        f"/api/background/runs/{run['run_id']}/attempts",
-        headers=headers,
+        f"/api/background/runs/{run['run_id']}/attempts", headers=headers
     )
     assert attempts.status_code == 200
     assert attempts.json()[0]["status"] == "completed"
-
     cancel = client.post(
-        f"/api/background/runs/{run['run_id']}/cancel",
-        headers=headers,
+        f"/api/background/runs/{run['run_id']}/cancel", headers=headers
     )
     assert cancel.status_code == 200
     assert cancel.json()["status"] == "cancel_requested"
-
     deleted_task = client.delete(
         f"/api/background/tasks/{task_id}",
         params={"delete_runs": True},
@@ -793,7 +754,7 @@ def _collect_sse(
             if stop_event is not None and current_event == stop_event:
                 break
             if stop_event is None and any(
-                payload["event"] == "final_answer" for payload in payloads
+                (payload["event"] == "final_answer" for payload in payloads)
             ):
                 break
             if len(payloads) >= max_payloads:
@@ -829,6 +790,7 @@ def _skip_if_missing_env(names: list[str], label: str) -> None:
 
 
 def _require_redis(url: str) -> None:
+
     async def ping() -> None:
         import redis.asyncio as redis
 
@@ -847,6 +809,7 @@ def _require_redis(url: str) -> None:
 
 
 def _require_mongodb(uri: str) -> None:
+
     async def ping() -> None:
         from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -865,16 +828,14 @@ def _require_mongodb(uri: str) -> None:
         asyncio.run(ping())
     except Exception as exc:
         if os.getenv("OMNICOREAGENT_TEST_MONGODB_URI") or os.getenv("MONGODB_URI"):
-            raise AssertionError("MongoDB unavailable for production validation") from exc
+            raise AssertionError(
+                "MongoDB unavailable for production validation"
+            ) from exc
         pytest.skip("MongoDB unavailable for production validation")
 
 
 def _wait_for_background_run(
-    client: TestClient,
-    run_id: str,
-    *,
-    headers: dict[str, str],
-    timeout_seconds: float,
+    client: TestClient, run_id: str, *, headers: dict[str, str], timeout_seconds: float
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
     last_run: dict[str, Any] | None = None

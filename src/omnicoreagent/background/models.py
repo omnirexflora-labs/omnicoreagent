@@ -94,6 +94,14 @@ class RunStatus(str, Enum):
     CANCELLED = "cancelled"
     TIMEOUT = "timeout"
     SKIPPED = "skipped"
+    # The agent paused for a person's approval; resume_run queues it again.
+    AWAITING_APPROVAL = "awaiting_approval"
+    # The agent paused because a budget ran out; a top-up, then resume_run.
+    AWAITING_BUDGET = "awaiting_budget"
+
+
+# A run parked until a person acts: it holds its task's slot and no lease.
+WAITING_RUN_STATUSES = {RunStatus.AWAITING_APPROVAL, RunStatus.AWAITING_BUDGET}
 
 
 TERMINAL_RUN_STATUSES = {
@@ -123,7 +131,13 @@ ACTIVE_RUN_STATUSES = {
     RunStatus.CLAIMED,
     RunStatus.RUNNING,
     RunStatus.RETRYING,
+    # Still the task's run: it holds the task's slot while it waits.
+    RunStatus.AWAITING_APPROVAL,
+    RunStatus.AWAITING_BUDGET,
 }
+
+# A run that will not move until something outside the worker acts on it.
+SETTLED_RUN_STATUSES = {*TERMINAL_RUN_STATUSES, *WAITING_RUN_STATUSES}
 
 
 class AttemptStatus(str, Enum):
@@ -132,6 +146,9 @@ class AttemptStatus(str, Enum):
     FAILED = "failed"
     TIMEOUT = "timeout"
     CANCELLED = "cancelled"
+    # The worker vanished mid-attempt and the run continues from the agent's
+    # checkpoint in a later attempt: not a failure, and not a retry spent.
+    INTERRUPTED = "interrupted"
 
 
 class AttemptReason(str, Enum):
@@ -463,6 +480,9 @@ class BackgroundScheduleState(StrictModel):
     last_due_at: datetime | None = None
     last_dispatched_at: datetime | None = None
     paused: bool = False
+    # Why the schedule stopped, when the runtime stopped it (a policy that
+    # no longer covers the task); cleared when it is resumed.
+    paused_reason: str | None = None
     schedule_revision: int = 1
     misfire_cursor: str | None = None
     updated_at: datetime = Field(default_factory=utc_now)

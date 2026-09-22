@@ -68,14 +68,9 @@ def build_agent_runtime(
         prompt_builder=prompt_builder,
         memory_router=memory_router,
         governance_engine=governance_engine,
+        telemetry_recorder=telemetry_recorder,
         debug=debug,
     )
-
-    if local_tools:
-        harness_tools.index_tools_for_advanced_use(
-            enabled=agent.enable_advanced_tool_use,
-            local_tools=local_tools,
-        )
 
     return AgentRuntimeComponents(
         agent=agent,

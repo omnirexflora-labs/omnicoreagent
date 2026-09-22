@@ -1,0 +1,74 @@
+---
+title: "Execution"
+description: "The three ways an agent runs code, and what governs each of them"
+---
+
+# Execution
+
+An agent can run code in three ways. They share one rule: **every one of them
+is authorized by policy before it runs, and recorded afterwards.**
+
+| Lane | What it is | Runs where |
+|---|---|---|
+| Tools | Your own functions and MCP tools | In your process, or the MCP server |
+| Sandbox | The `execute` tool and skill scripts | A container ([sandbox providers](/docs/how-to-guides/sandbox-providers)) |
+| Code mode | A Python program the model writes ([code mode](/docs/core-concepts/code-mode)) | Monty, in a worker process |
+
+## Turning them on
+
+```python
+agent_config = {
+    "governance_config": {
+        "enabled": True,
+        "profile": "interactive-dev",
+        "sandbox_config": {"provider": "docker"},   # adds the execute tool
+    },
+    "enable_agent_skills": True,                     # skill scripts (in the sandbox when there is one)
+    "code_mode": {"enabled": True},                  # adds run_code
+}
+```
+
+The `execute` tool appears only when governance is on **and** the configured
+sandbox can run commands, so an agent never has a way to run code that policy
+has not seen. What the sandbox is — network, image, working directory — is
+`sandbox_manifest`, next to `sandbox_config`
+([Sandbox providers](/docs/how-to-guides/sandbox-providers)); what it asks
+for is authorized when the run's session opens.
+
+## What each one is governed as
+
+| Capability | For | Default in the dev profiles |
+|---|---|---|
+| `tool.local.call`, `tool.mcp.call` | Your tools, MCP tools | Allowed (MCP asks in interactive-dev) |
+| `sandbox.execute` | Calling `execute` | Allowed |
+| `process.exec` | Each command inside the sandbox | Allowed on the sandbox surface, never on the host |
+| `skill.script.run` | Running a skill script | Allowed (high risk; on the host when there is no sandbox) |
+| `code.run` | Running a program | Allowed |
+| `workspace.files.*` | Files, including what a sandbox writes back | Allowed |
+
+`strict-production` allows none of these without a rule you write.
+
+## Files
+
+Commands run with the agent's workspace files in the sandbox's working
+directory. After each command, text files it created or changed are copied
+back as governed workspace writes. The sandbox never mounts your workspace,
+and a file the policy protects is not copied in or out
+([security model](/docs/core-concepts/security-model)).
+
+## In the trace
+
+Each run records its sandbox session (with the provider's own name for it,
+`sandbox_ref`), every command (exit code, duration, output size, the rule
+that allowed it), every file copy, and every tool call a program made, nested
+under its `run_code` call. Run totals count the sandbox commands. See
+[Observability](/docs/how-to-guides/observability).
+
+A sandbox that dies mid-run — the provider stopped it, its lifetime ran out,
+someone killed it — is not a slow command: the model is told the sandbox was
+lost and that the next command runs in a fresh one (with the workspace files
+copied in again, and whatever else was in the old sandbox gone), and the
+trace records the session closed with `lost: true`.
+
+A run that pauses for approval mid-execution, or whose process dies, continues
+where it stopped: [Durable Runs](/docs/core-concepts/durable-runs).

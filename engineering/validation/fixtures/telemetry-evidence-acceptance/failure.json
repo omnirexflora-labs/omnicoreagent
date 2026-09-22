@@ -1,0 +1,4440 @@
+{
+  "adapter": "omnicoreagent",
+  "contract": "omnicoreagent.execution-evidence/v1",
+  "execution_id": "run_id_failure",
+  "facts": [
+    {
+      "id": "event_failure_000",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_001",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_002",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_003",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_004",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_005",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_006",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_007",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_008",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_009",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_010",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_011",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_012",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_013",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_014",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_015",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_016",
+      "kind": "event"
+    },
+    {
+      "id": "event_failure_017",
+      "kind": "event"
+    }
+  ],
+  "final_output_references": [
+    {
+      "id": "event_failure_017",
+      "kind": "event",
+      "role": "final_output"
+    }
+  ],
+  "missing_evidence": [],
+  "schema_version": 1,
+  "source": "production",
+  "task": {
+    "requirement": "The final answer must report ACCEPTANCE_READY only after reading the marker from the large tool result artifact."
+  },
+  "trace": {
+    "agent_id": "telemetry_acceptance",
+    "ended_at": "2026-09-14T22:53:10.327839+00:00",
+    "events": [
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "user"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_000",
+        "event_type": "user_message",
+        "input": {
+          "message": "Verify the telemetry evidence path."
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 50,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 50,
+          "reference": null,
+          "role": "request",
+          "source": "user",
+          "state": "available"
+        },
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure"
+        },
+        "output": null,
+        "output_capture": null,
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 1,
+        "span_id": "span_failure_000",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.030909+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": "telemetry_acceptance",
+          "type": "agent"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_001",
+        "event_type": "agent_step",
+        "input": {
+          "step": 1
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 11,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 11,
+          "reference": null,
+          "role": "input:agent_step",
+          "source": "runtime",
+          "state": "available"
+        },
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure"
+        },
+        "output": null,
+        "output_capture": null,
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 2,
+        "span_id": "span_failure_001",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.043043+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "system"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_002",
+        "event_type": "context_assembly",
+        "input": {
+          "context_digest": "93b34198740f815a9aef9c86871b40d53764caeda910136ec67c6811b514ff9a",
+          "interaction_group_count": 2,
+          "message_count": 2,
+          "message_digests": [
+            "9c1698f6e7018e86748e65557f3e147b67d7f03e5a64777431d5534e7cd721db",
+            "61ac550d3e0a7e86f7629ff4c1dd5d43a19dad9f8aaec7fd732aab46ce13d4bb"
+          ],
+          "messages": [
+            {
+              "content": "You are a telemetry acceptance agent.\nUse workspace tools to keep plans, intermediate findings and deliverables in files.\nUse ls/glob/grep to find existing files and read_file to inspect them before edits.\nUse write_file, edit_file or insert_file for changes and verify important output by\nreading it back. Paths refer to the configured workspace, not unrestricted host\naccess. Share output paths that tools actually created. Use files to coordinate\nsubagent work and retain useful information when context is compressed.",
+              "role": "system"
+            },
+            {
+              "content": "[CURRENT_DATETIME: 2026-09-14 23:53:10 ]\n\nVerify the telemetry evidence path.",
+              "role": "user"
+            }
+          ],
+          "role_counts": {
+            "system": 1,
+            "user": 1
+          },
+          "tool_catalog_digest": "4dd6ba4fbadd5c48415328444f1d14305fe84dcc3b1562b82395a1163cc1868a",
+          "tool_count": 12,
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "failing_tool",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ],
+          "tools": [
+            {
+              "function": {
+                "description": "Return a large report.",
+                "name": "bulk_report",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Always fails.",
+                "name": "failing_tool",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "List files and directories inside the workspace files area.\n\n        Use this before reading or editing when you need to discover what exists.",
+                "name": "ls",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Directory path inside workspace files. Defaults to the workspace files root.",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Read a file inside workspace files. This is the workspace equivalent of cat.",
+                "name": "read_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Safely create, append, or overwrite files in the workspace.\n        \n        Modes:\n        - 'create': Create a new file. If file exists, returns an error with a preview.\n        - 'append': Append text to an existing file. If file does not exist, returns error.\n        - 'overwrite': Replace the entire file content. If file does not exist, returns error.\n        \n        Why it exists:\n        - Prevents accidental overwrites (explicit overwrite mode required).\n        - Supports incremental note-taking (append).\n        - Provides safe, clear separation between create, append, and overwrite.",
+                "name": "write_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "content": {
+                      "description": "The text content to create, append, or overwrite.",
+                      "type": "string"
+                    },
+                    "mode": {
+                      "default": "create",
+                      "description": "Choose how the file should be modified.",
+                      "enum": [
+                        "create",
+                        "append",
+                        "overwrite"
+                      ],
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "content"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Replace all occurrences of a string inside a file.\n        \n        Why it exists:\n        - Useful for correcting or updating specific words, phrases, or values.\n        - Non-destructive to unrelated file contents.",
+                "name": "edit_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_str": {
+                      "description": "The replacement string.",
+                      "type": "string"
+                    },
+                    "old_str": {
+                      "description": "The string to search for.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "old_str",
+                    "new_str"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Insert text into a file at a specific line number.\n        \n        Why it exists:\n        - Allows precise placement of new content (e.g., add notes at top or bottom).\n        - Maintains file structure without full overwrite.",
+                "name": "insert_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "insert_line": {
+                      "description": "Line number to insert at (1-based index).",
+                      "type": "integer"
+                    },
+                    "insert_text": {
+                      "description": "The text to insert at the given line.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "insert_line",
+                    "insert_text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Delete a file or directory from workspace files.\n        \n        Why it exists:\n        - Provides cleanup capability when files or directories are no longer needed.\n        - Prevents clutter in the workspace files area.",
+                "name": "delete_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Rename or move a file/directory inside workspace files.\n        \n        Why it exists:\n        - Enables reorganization of stored files without deleting data.\n        - Useful for moving files between directories or renaming for clarity.",
+                "name": "move_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_path": {
+                      "description": "New desired path or name.",
+                      "type": "string"
+                    },
+                    "old_path": {
+                      "description": "Current path of the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "old_path",
+                    "new_path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Clear all workspace files.",
+                "name": "clear_files",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Find workspace file paths by glob pattern.",
+                "name": "glob",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Optional directory path to scope the search.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Glob pattern such as '*.md' or '**/*.txt'.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Search text inside workspace files and return matching path:line:content results.",
+                "name": "grep",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "case_sensitive": {
+                      "default": false,
+                      "description": "Whether matching should be case-sensitive.",
+                      "type": "boolean"
+                    },
+                    "include": {
+                      "description": "Optional glob filter such as '*.md'.",
+                      "type": "string"
+                    },
+                    "max_matches": {
+                      "default": 100,
+                      "description": "Maximum number of matches to return.",
+                      "type": "integer"
+                    },
+                    "path": {
+                      "description": "File or directory path to search. Defaults to workspace files root.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Text to search for.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 7386,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 7386,
+          "reference": null,
+          "role": "context",
+          "source": "runtime",
+          "state": "available"
+        },
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "context_digest": "93b34198740f815a9aef9c86871b40d53764caeda910136ec67c6811b514ff9a",
+          "context_span_id": "span_failure_002",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure"
+        },
+        "output": {
+          "context_digest": "93b34198740f815a9aef9c86871b40d53764caeda910136ec67c6811b514ff9a",
+          "interaction_group_count": 2,
+          "message_count": 2,
+          "message_digests": [
+            "9c1698f6e7018e86748e65557f3e147b67d7f03e5a64777431d5534e7cd721db",
+            "61ac550d3e0a7e86f7629ff4c1dd5d43a19dad9f8aaec7fd732aab46ce13d4bb"
+          ],
+          "role_counts": {
+            "system": 1,
+            "user": 1
+          },
+          "tool_catalog_digest": "4dd6ba4fbadd5c48415328444f1d14305fe84dcc3b1562b82395a1163cc1868a",
+          "tool_count": 12,
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "failing_tool",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ]
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 610,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 610,
+          "reference": null,
+          "role": "context",
+          "source": "runtime",
+          "state": "available"
+        },
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 3,
+        "span_id": "span_failure_002",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.057351+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "model"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_003",
+        "event_type": "model_call",
+        "input": {
+          "context_digest": "93b34198740f815a9aef9c86871b40d53764caeda910136ec67c6811b514ff9a",
+          "message_count": 2,
+          "messages": [
+            {
+              "content": "You are a telemetry acceptance agent.\nUse workspace tools to keep plans, intermediate findings and deliverables in files.\nUse ls/glob/grep to find existing files and read_file to inspect them before edits.\nUse write_file, edit_file or insert_file for changes and verify important output by\nreading it back. Paths refer to the configured workspace, not unrestricted host\naccess. Share output paths that tools actually created. Use files to coordinate\nsubagent work and retain useful information when context is compressed.",
+              "role": "system"
+            },
+            {
+              "content": "[CURRENT_DATETIME: 2026-09-14 23:53:10 ]\n\nVerify the telemetry evidence path.",
+              "role": "user"
+            }
+          ],
+          "model_span_id": "span_failure_003",
+          "streaming": false,
+          "tool_count": 12,
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "failing_tool",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ],
+          "tools": [
+            {
+              "function": {
+                "description": "Return a large report.",
+                "name": "bulk_report",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Always fails.",
+                "name": "failing_tool",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "List files and directories inside the workspace files area.\n\n        Use this before reading or editing when you need to discover what exists.",
+                "name": "ls",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Directory path inside workspace files. Defaults to the workspace files root.",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Read a file inside workspace files. This is the workspace equivalent of cat.",
+                "name": "read_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Safely create, append, or overwrite files in the workspace.\n        \n        Modes:\n        - 'create': Create a new file. If file exists, returns an error with a preview.\n        - 'append': Append text to an existing file. If file does not exist, returns error.\n        - 'overwrite': Replace the entire file content. If file does not exist, returns error.\n        \n        Why it exists:\n        - Prevents accidental overwrites (explicit overwrite mode required).\n        - Supports incremental note-taking (append).\n        - Provides safe, clear separation between create, append, and overwrite.",
+                "name": "write_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "content": {
+                      "description": "The text content to create, append, or overwrite.",
+                      "type": "string"
+                    },
+                    "mode": {
+                      "default": "create",
+                      "description": "Choose how the file should be modified.",
+                      "enum": [
+                        "create",
+                        "append",
+                        "overwrite"
+                      ],
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "content"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Replace all occurrences of a string inside a file.\n        \n        Why it exists:\n        - Useful for correcting or updating specific words, phrases, or values.\n        - Non-destructive to unrelated file contents.",
+                "name": "edit_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_str": {
+                      "description": "The replacement string.",
+                      "type": "string"
+                    },
+                    "old_str": {
+                      "description": "The string to search for.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "old_str",
+                    "new_str"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Insert text into a file at a specific line number.\n        \n        Why it exists:\n        - Allows precise placement of new content (e.g., add notes at top or bottom).\n        - Maintains file structure without full overwrite.",
+                "name": "insert_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "insert_line": {
+                      "description": "Line number to insert at (1-based index).",
+                      "type": "integer"
+                    },
+                    "insert_text": {
+                      "description": "The text to insert at the given line.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "insert_line",
+                    "insert_text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Delete a file or directory from workspace files.\n        \n        Why it exists:\n        - Provides cleanup capability when files or directories are no longer needed.\n        - Prevents clutter in the workspace files area.",
+                "name": "delete_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Rename or move a file/directory inside workspace files.\n        \n        Why it exists:\n        - Enables reorganization of stored files without deleting data.\n        - Useful for moving files between directories or renaming for clarity.",
+                "name": "move_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_path": {
+                      "description": "New desired path or name.",
+                      "type": "string"
+                    },
+                    "old_path": {
+                      "description": "Current path of the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "old_path",
+                    "new_path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Clear all workspace files.",
+                "name": "clear_files",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Find workspace file paths by glob pattern.",
+                "name": "glob",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Optional directory path to scope the search.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Glob pattern such as '*.md' or '**/*.txt'.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Search text inside workspace files and return matching path:line:content results.",
+                "name": "grep",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "case_sensitive": {
+                      "default": false,
+                      "description": "Whether matching should be case-sensitive.",
+                      "type": "boolean"
+                    },
+                    "include": {
+                      "description": "Optional glob filter such as '*.md'.",
+                      "type": "string"
+                    },
+                    "max_matches": {
+                      "default": 100,
+                      "description": "Maximum number of matches to return.",
+                      "type": "integer"
+                    },
+                    "path": {
+                      "description": "File or directory path to search. Defaults to workspace files root.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Text to search for.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 7145,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 7145,
+          "reference": null,
+          "role": "model_request",
+          "source": "provider",
+          "state": "available"
+        },
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "context_digest": "93b34198740f815a9aef9c86871b40d53764caeda910136ec67c6811b514ff9a",
+          "context_span_id": "span_failure_002",
+          "model_span_id": "span_failure_003",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure",
+          "streaming": false
+        },
+        "output": null,
+        "output_capture": null,
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 4,
+        "span_id": "span_failure_003",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.098086+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "model"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_004",
+        "event_type": "model_response",
+        "input": null,
+        "input_capture": null,
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "context_digest": "93b34198740f815a9aef9c86871b40d53764caeda910136ec67c6811b514ff9a",
+          "context_span_id": "span_failure_002",
+          "model_call_event_id": "event_failure_003",
+          "model_span_id": "span_failure_003",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure",
+          "tool_call_ids": [
+            "call_failing_tool"
+          ]
+        },
+        "output": {
+          "content": "",
+          "finish_reason": "tool_calls",
+          "refusal": null,
+          "stream_stats": {
+            "delta_count": 0,
+            "event_types": {},
+            "streaming": false,
+            "visible_text_bytes": 0
+          },
+          "tool_call_ids": [
+            "call_failing_tool"
+          ],
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{}",
+                "name": "failing_tool"
+              },
+              "id": "call_failing_tool",
+              "type": "function"
+            }
+          ],
+          "usage": null
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 340,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 340,
+          "reference": null,
+          "role": "model_response",
+          "source": "provider",
+          "state": "available"
+        },
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 5,
+        "span_id": "span_failure_003",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.105664+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "system"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_005",
+        "event_type": "tool_batch_start",
+        "input": {
+          "tool_batch_args": [
+            {}
+          ],
+          "tool_count": 1
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 42,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 42,
+          "reference": null,
+          "role": "input:tool_batch_start",
+          "source": "tool",
+          "state": "available"
+        },
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "agent_step_span_id": "span_failure_001",
+          "batch_id": "span_failure_004",
+          "model_call_event_id": "event_failure_003",
+          "model_call_span_id": "span_failure_003",
+          "model_response_event_id": "event_failure_004",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure",
+          "tool_call_ids": [
+            "call_failing_tool"
+          ]
+        },
+        "output": null,
+        "output_capture": null,
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 6,
+        "span_id": "span_failure_004",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.116538+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "model"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_006",
+        "event_type": "tool_requested",
+        "input": {
+          "arguments": {},
+          "tool_call_id": "call_failing_tool",
+          "tool_name": "failing_tool"
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 83,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 83,
+          "reference": null,
+          "role": "input:tool_requested",
+          "source": "tool",
+          "state": "available"
+        },
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "agent_step_span_id": "span_failure_001",
+          "batch_id": "span_failure_004",
+          "model_call_event_id": "event_failure_003",
+          "model_call_span_id": "span_failure_003",
+          "model_response_event_id": "event_failure_004",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure",
+          "tool_call_id": "call_failing_tool",
+          "tool_call_ids": [
+            "call_failing_tool"
+          ]
+        },
+        "output": {
+          "provider": "local",
+          "resolved_name": "failing_tool",
+          "server": null,
+          "status": "resolved"
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 92,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 92,
+          "reference": null,
+          "role": "output:tool_requested",
+          "source": "tool",
+          "state": "available"
+        },
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 7,
+        "span_id": "span_failure_004",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.121571+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "system"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_007",
+        "event_type": "tool_resolved",
+        "input": {
+          "arguments": {},
+          "tool_call_id": "call_failing_tool",
+          "tool_name": "failing_tool"
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 83,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 83,
+          "reference": null,
+          "role": "input:tool_resolved",
+          "source": "tool",
+          "state": "available"
+        },
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "agent_step_span_id": "span_failure_001",
+          "batch_id": "span_failure_004",
+          "model_call_event_id": "event_failure_003",
+          "model_call_span_id": "span_failure_003",
+          "model_response_event_id": "event_failure_004",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure",
+          "tool_call_id": "call_failing_tool",
+          "tool_call_ids": [
+            "call_failing_tool"
+          ]
+        },
+        "output": {
+          "provider": "local",
+          "resolved_name": "failing_tool",
+          "server": null,
+          "status": "resolved"
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 92,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 92,
+          "reference": null,
+          "role": "output:tool_resolved",
+          "source": "tool",
+          "state": "available"
+        },
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 8,
+        "span_id": "span_failure_004",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.128483+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": "failing_tool",
+          "type": "tool"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_008",
+        "event_type": "tool_call",
+        "input": {
+          "tool_args": {},
+          "tool_call_id": "call_failing_tool",
+          "tool_name": "failing_tool",
+          "tool_provider": "local",
+          "tool_server": null
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 130,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 130,
+          "reference": null,
+          "role": "tool_request",
+          "source": "tool",
+          "state": "available"
+        },
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "phase": "execution",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure",
+          "tool_call_id": "call_failing_tool",
+          "tool_name": "failing_tool",
+          "tool_provider": "local",
+          "tool_server": null,
+          "tool_span_id": "span_failure_005"
+        },
+        "output": null,
+        "output_capture": null,
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 9,
+        "span_id": "span_failure_005",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.141698+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": "failing_tool",
+          "type": "tool"
+        },
+        "duration_ms": null,
+        "error": {
+          "message": "synthetic tool failure for acceptance",
+          "metadata": {},
+          "retryable": null,
+          "stack": null,
+          "type": "ToolError"
+        },
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_009",
+        "event_type": "tool_error",
+        "input": null,
+        "input_capture": null,
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "phase": "result",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure",
+          "tool_call_id": "call_failing_tool",
+          "tool_name": "failing_tool",
+          "tool_provider": "local",
+          "tool_server": null,
+          "tool_span_id": "span_failure_005"
+        },
+        "output": {
+          "args": {},
+          "data": null,
+          "message": "synthetic tool failure for acceptance",
+          "status": "error",
+          "tool_name": "failing_tool"
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 126,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 126,
+          "reference": null,
+          "role": "tool_result",
+          "source": "tool",
+          "state": "available"
+        },
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 10,
+        "span_id": "span_failure_005",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.160582+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "model"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_010",
+        "event_type": "tool_observation",
+        "input": null,
+        "input_capture": null,
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "batch_id": "span_failure_004",
+          "model_call_event_id": "event_failure_003",
+          "model_response_event_id": "event_failure_004",
+          "observation_for": "call_failing_tool",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure",
+          "tool_call_id": "call_failing_tool"
+        },
+        "output": {
+          "message": {
+            "content": "{\"tool_name\": \"failing_tool\", \"args\": {}, \"status\": \"error\", \"data\": null, \"message\": \"synthetic tool failure for acceptance\"}",
+            "role": "tool",
+            "tool_call_id": "call_failing_tool"
+          },
+          "tool_call_id": "call_failing_tool",
+          "tool_name": "failing_tool"
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 289,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 289,
+          "reference": null,
+          "role": "observation",
+          "source": "tool",
+          "state": "available"
+        },
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 11,
+        "span_id": "span_failure_004",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.168986+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "system"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_011",
+        "event_type": "observation_pipeline_end",
+        "input": null,
+        "input_capture": null,
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "batch_id": "span_failure_004",
+          "model_call_event_id": "event_failure_003",
+          "model_response_event_id": "event_failure_004",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure"
+        },
+        "output": {
+          "observation_event_ids": [
+            "event_failure_010"
+          ],
+          "tool_count": 1
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 86,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 86,
+          "reference": null,
+          "role": "observation",
+          "source": "runtime",
+          "state": "available"
+        },
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 12,
+        "span_id": "span_failure_004",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.177545+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "system"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_012",
+        "event_type": "tool_batch_end",
+        "input": null,
+        "input_capture": null,
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "batch_id": "span_failure_004",
+          "model_call_event_id": "event_failure_003",
+          "model_response_event_id": "event_failure_004",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure"
+        },
+        "output": {
+          "tool_count": 1
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 17,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 17,
+          "reference": null,
+          "role": "output:tool_batch_end",
+          "source": "tool",
+          "state": "available"
+        },
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 13,
+        "span_id": "span_failure_004",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.184006+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": "telemetry_acceptance",
+          "type": "agent"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_013",
+        "event_type": "agent_step",
+        "input": {
+          "step": 2
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 11,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 11,
+          "reference": null,
+          "role": "input:agent_step",
+          "source": "runtime",
+          "state": "available"
+        },
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure"
+        },
+        "output": null,
+        "output_capture": null,
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 14,
+        "span_id": "span_failure_006",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.199732+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "system"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_014",
+        "event_type": "context_assembly",
+        "input": {
+          "context_digest": "013ac92a158004522cfa993a8b40a32f73476b32569918072bde89361ada6e09",
+          "interaction_group_count": 3,
+          "message_count": 4,
+          "message_digests": [
+            "9c1698f6e7018e86748e65557f3e147b67d7f03e5a64777431d5534e7cd721db",
+            "61ac550d3e0a7e86f7629ff4c1dd5d43a19dad9f8aaec7fd732aab46ce13d4bb",
+            "869a3fe02ba966d87cf7c2a200195e1d4b98f6086ac9e67f39ecdd72f9fa23b2",
+            "c38fd50a490bbc9e04d1ce7d053697e916d9c704e1ff3b748281f0b8bb1ac149"
+          ],
+          "messages": [
+            {
+              "content": "You are a telemetry acceptance agent.\nUse workspace tools to keep plans, intermediate findings and deliverables in files.\nUse ls/glob/grep to find existing files and read_file to inspect them before edits.\nUse write_file, edit_file or insert_file for changes and verify important output by\nreading it back. Paths refer to the configured workspace, not unrestricted host\naccess. Share output paths that tools actually created. Use files to coordinate\nsubagent work and retain useful information when context is compressed.",
+              "role": "system"
+            },
+            {
+              "content": "[CURRENT_DATETIME: 2026-09-14 23:53:10 ]\n\nVerify the telemetry evidence path.",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{}",
+                    "name": "failing_tool"
+                  },
+                  "id": "call_failing_tool",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{\"tool_name\": \"failing_tool\", \"args\": {}, \"status\": \"error\", \"data\": null, \"message\": \"synthetic tool failure for acceptance\"}",
+              "role": "tool",
+              "tool_call_id": "call_failing_tool"
+            }
+          ],
+          "role_counts": {
+            "assistant": 1,
+            "system": 1,
+            "tool": 1,
+            "user": 1
+          },
+          "tool_catalog_digest": "4dd6ba4fbadd5c48415328444f1d14305fe84dcc3b1562b82395a1163cc1868a",
+          "tool_count": 12,
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "failing_tool",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ],
+          "tools": [
+            {
+              "function": {
+                "description": "Return a large report.",
+                "name": "bulk_report",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Always fails.",
+                "name": "failing_tool",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "List files and directories inside the workspace files area.\n\n        Use this before reading or editing when you need to discover what exists.",
+                "name": "ls",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Directory path inside workspace files. Defaults to the workspace files root.",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Read a file inside workspace files. This is the workspace equivalent of cat.",
+                "name": "read_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Safely create, append, or overwrite files in the workspace.\n        \n        Modes:\n        - 'create': Create a new file. If file exists, returns an error with a preview.\n        - 'append': Append text to an existing file. If file does not exist, returns error.\n        - 'overwrite': Replace the entire file content. If file does not exist, returns error.\n        \n        Why it exists:\n        - Prevents accidental overwrites (explicit overwrite mode required).\n        - Supports incremental note-taking (append).\n        - Provides safe, clear separation between create, append, and overwrite.",
+                "name": "write_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "content": {
+                      "description": "The text content to create, append, or overwrite.",
+                      "type": "string"
+                    },
+                    "mode": {
+                      "default": "create",
+                      "description": "Choose how the file should be modified.",
+                      "enum": [
+                        "create",
+                        "append",
+                        "overwrite"
+                      ],
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "content"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Replace all occurrences of a string inside a file.\n        \n        Why it exists:\n        - Useful for correcting or updating specific words, phrases, or values.\n        - Non-destructive to unrelated file contents.",
+                "name": "edit_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_str": {
+                      "description": "The replacement string.",
+                      "type": "string"
+                    },
+                    "old_str": {
+                      "description": "The string to search for.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "old_str",
+                    "new_str"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Insert text into a file at a specific line number.\n        \n        Why it exists:\n        - Allows precise placement of new content (e.g., add notes at top or bottom).\n        - Maintains file structure without full overwrite.",
+                "name": "insert_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "insert_line": {
+                      "description": "Line number to insert at (1-based index).",
+                      "type": "integer"
+                    },
+                    "insert_text": {
+                      "description": "The text to insert at the given line.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "insert_line",
+                    "insert_text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Delete a file or directory from workspace files.\n        \n        Why it exists:\n        - Provides cleanup capability when files or directories are no longer needed.\n        - Prevents clutter in the workspace files area.",
+                "name": "delete_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Rename or move a file/directory inside workspace files.\n        \n        Why it exists:\n        - Enables reorganization of stored files without deleting data.\n        - Useful for moving files between directories or renaming for clarity.",
+                "name": "move_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_path": {
+                      "description": "New desired path or name.",
+                      "type": "string"
+                    },
+                    "old_path": {
+                      "description": "Current path of the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "old_path",
+                    "new_path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Clear all workspace files.",
+                "name": "clear_files",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Find workspace file paths by glob pattern.",
+                "name": "glob",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Optional directory path to scope the search.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Glob pattern such as '*.md' or '**/*.txt'.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Search text inside workspace files and return matching path:line:content results.",
+                "name": "grep",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "case_sensitive": {
+                      "default": false,
+                      "description": "Whether matching should be case-sensitive.",
+                      "type": "boolean"
+                    },
+                    "include": {
+                      "description": "Optional glob filter such as '*.md'.",
+                      "type": "string"
+                    },
+                    "max_matches": {
+                      "default": 100,
+                      "description": "Maximum number of matches to return.",
+                      "type": "integer"
+                    },
+                    "path": {
+                      "description": "File or directory path to search. Defaults to workspace files root.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Text to search for.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 7923,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 7923,
+          "reference": null,
+          "role": "context",
+          "source": "runtime",
+          "state": "available"
+        },
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "context_digest": "013ac92a158004522cfa993a8b40a32f73476b32569918072bde89361ada6e09",
+          "context_span_id": "span_failure_007",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure"
+        },
+        "output": {
+          "context_digest": "013ac92a158004522cfa993a8b40a32f73476b32569918072bde89361ada6e09",
+          "interaction_group_count": 3,
+          "message_count": 4,
+          "message_digests": [
+            "9c1698f6e7018e86748e65557f3e147b67d7f03e5a64777431d5534e7cd721db",
+            "61ac550d3e0a7e86f7629ff4c1dd5d43a19dad9f8aaec7fd732aab46ce13d4bb",
+            "869a3fe02ba966d87cf7c2a200195e1d4b98f6086ac9e67f39ecdd72f9fa23b2",
+            "c38fd50a490bbc9e04d1ce7d053697e916d9c704e1ff3b748281f0b8bb1ac149"
+          ],
+          "role_counts": {
+            "assistant": 1,
+            "system": 1,
+            "tool": 1,
+            "user": 1
+          },
+          "tool_catalog_digest": "4dd6ba4fbadd5c48415328444f1d14305fe84dcc3b1562b82395a1163cc1868a",
+          "tool_count": 12,
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "failing_tool",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ]
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 773,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 773,
+          "reference": null,
+          "role": "context",
+          "source": "runtime",
+          "state": "available"
+        },
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 15,
+        "span_id": "span_failure_007",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.226671+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "model"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_015",
+        "event_type": "model_call",
+        "input": {
+          "context_digest": "013ac92a158004522cfa993a8b40a32f73476b32569918072bde89361ada6e09",
+          "message_count": 4,
+          "messages": [
+            {
+              "content": "You are a telemetry acceptance agent.\nUse workspace tools to keep plans, intermediate findings and deliverables in files.\nUse ls/glob/grep to find existing files and read_file to inspect them before edits.\nUse write_file, edit_file or insert_file for changes and verify important output by\nreading it back. Paths refer to the configured workspace, not unrestricted host\naccess. Share output paths that tools actually created. Use files to coordinate\nsubagent work and retain useful information when context is compressed.",
+              "role": "system"
+            },
+            {
+              "content": "[CURRENT_DATETIME: 2026-09-14 23:53:10 ]\n\nVerify the telemetry evidence path.",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{}",
+                    "name": "failing_tool"
+                  },
+                  "id": "call_failing_tool",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{\"tool_name\": \"failing_tool\", \"args\": {}, \"status\": \"error\", \"data\": null, \"message\": \"synthetic tool failure for acceptance\"}",
+              "role": "tool",
+              "tool_call_id": "call_failing_tool"
+            }
+          ],
+          "model_span_id": "span_failure_008",
+          "streaming": false,
+          "tool_count": 12,
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "failing_tool",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ],
+          "tools": [
+            {
+              "function": {
+                "description": "Return a large report.",
+                "name": "bulk_report",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Always fails.",
+                "name": "failing_tool",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "List files and directories inside the workspace files area.\n\n        Use this before reading or editing when you need to discover what exists.",
+                "name": "ls",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Directory path inside workspace files. Defaults to the workspace files root.",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Read a file inside workspace files. This is the workspace equivalent of cat.",
+                "name": "read_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Safely create, append, or overwrite files in the workspace.\n        \n        Modes:\n        - 'create': Create a new file. If file exists, returns an error with a preview.\n        - 'append': Append text to an existing file. If file does not exist, returns error.\n        - 'overwrite': Replace the entire file content. If file does not exist, returns error.\n        \n        Why it exists:\n        - Prevents accidental overwrites (explicit overwrite mode required).\n        - Supports incremental note-taking (append).\n        - Provides safe, clear separation between create, append, and overwrite.",
+                "name": "write_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "content": {
+                      "description": "The text content to create, append, or overwrite.",
+                      "type": "string"
+                    },
+                    "mode": {
+                      "default": "create",
+                      "description": "Choose how the file should be modified.",
+                      "enum": [
+                        "create",
+                        "append",
+                        "overwrite"
+                      ],
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "content"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Replace all occurrences of a string inside a file.\n        \n        Why it exists:\n        - Useful for correcting or updating specific words, phrases, or values.\n        - Non-destructive to unrelated file contents.",
+                "name": "edit_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_str": {
+                      "description": "The replacement string.",
+                      "type": "string"
+                    },
+                    "old_str": {
+                      "description": "The string to search for.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "old_str",
+                    "new_str"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Insert text into a file at a specific line number.\n        \n        Why it exists:\n        - Allows precise placement of new content (e.g., add notes at top or bottom).\n        - Maintains file structure without full overwrite.",
+                "name": "insert_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "insert_line": {
+                      "description": "Line number to insert at (1-based index).",
+                      "type": "integer"
+                    },
+                    "insert_text": {
+                      "description": "The text to insert at the given line.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "insert_line",
+                    "insert_text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Delete a file or directory from workspace files.\n        \n        Why it exists:\n        - Provides cleanup capability when files or directories are no longer needed.\n        - Prevents clutter in the workspace files area.",
+                "name": "delete_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Rename or move a file/directory inside workspace files.\n        \n        Why it exists:\n        - Enables reorganization of stored files without deleting data.\n        - Useful for moving files between directories or renaming for clarity.",
+                "name": "move_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_path": {
+                      "description": "New desired path or name.",
+                      "type": "string"
+                    },
+                    "old_path": {
+                      "description": "Current path of the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "old_path",
+                    "new_path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Clear all workspace files.",
+                "name": "clear_files",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Find workspace file paths by glob pattern.",
+                "name": "glob",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Optional directory path to scope the search.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Glob pattern such as '*.md' or '**/*.txt'.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Search text inside workspace files and return matching path:line:content results.",
+                "name": "grep",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "case_sensitive": {
+                      "default": false,
+                      "description": "Whether matching should be case-sensitive.",
+                      "type": "boolean"
+                    },
+                    "include": {
+                      "description": "Optional glob filter such as '*.md'.",
+                      "type": "string"
+                    },
+                    "max_matches": {
+                      "default": 100,
+                      "description": "Maximum number of matches to return.",
+                      "type": "integer"
+                    },
+                    "path": {
+                      "description": "File or directory path to search. Defaults to workspace files root.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Text to search for.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 7519,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 7519,
+          "reference": null,
+          "role": "model_request",
+          "source": "provider",
+          "state": "available"
+        },
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "context_digest": "013ac92a158004522cfa993a8b40a32f73476b32569918072bde89361ada6e09",
+          "context_span_id": "span_failure_007",
+          "model_span_id": "span_failure_008",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure",
+          "streaming": false
+        },
+        "output": null,
+        "output_capture": null,
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 16,
+        "span_id": "span_failure_008",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.242590+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "model"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_016",
+        "event_type": "model_response",
+        "input": null,
+        "input_capture": null,
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "context_digest": "013ac92a158004522cfa993a8b40a32f73476b32569918072bde89361ada6e09",
+          "context_span_id": "span_failure_007",
+          "model_call_event_id": "event_failure_015",
+          "model_span_id": "span_failure_008",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure",
+          "tool_call_ids": []
+        },
+        "output": {
+          "content": "FAILURE_ACKNOWLEDGED",
+          "finish_reason": null,
+          "refusal": null,
+          "stream_stats": {
+            "delta_count": 0,
+            "event_types": {},
+            "streaming": false,
+            "visible_text_bytes": 0
+          },
+          "tool_call_ids": [],
+          "tool_calls": [],
+          "usage": null
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 229,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 229,
+          "reference": null,
+          "role": "model_response",
+          "source": "provider",
+          "state": "available"
+        },
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 17,
+        "span_id": "span_failure_008",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.252958+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": "telemetry_acceptance",
+          "type": "agent"
+        },
+        "duration_ms": null,
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_id": "event_failure_017",
+        "event_type": "final_answer",
+        "input": null,
+        "input_capture": null,
+        "metadata": {
+          "agent_id": "telemetry_acceptance",
+          "run_id": "run_id_failure",
+          "session_id": "session_id_failure"
+        },
+        "output": {
+          "response": "FAILURE_ACKNOWLEDGED",
+          "status": "success",
+          "termination_reason": "stop"
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 87,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 87,
+          "reference": null,
+          "role": "output:final_answer",
+          "source": "runtime",
+          "state": "available"
+        },
+        "parent_event_id": null,
+        "schema_version": 3,
+        "sequence_number": 18,
+        "span_id": "span_failure_000",
+        "stream_cursor": null,
+        "timestamp": "2026-09-14T22:53:10.302439+00:00",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      }
+    ],
+    "evidence_status": "complete",
+    "execution_surface": "interactive",
+    "incomplete": false,
+    "metadata": {
+      "agent_name": null,
+      "agent_version": null,
+      "constraint_config_version": null,
+      "extra": {},
+      "guardrail_config_version": null,
+      "guardrail_mode": null,
+      "memory_config_version": null,
+      "model": null,
+      "model_provider": null,
+      "privacy_config_version": null,
+      "prompt_version": null,
+      "tags": [],
+      "telemetry_config_version": null,
+      "telemetry_payload_storage": null,
+      "telemetry_storage": null,
+      "tool_schema_version": null
+    },
+    "parent_span_id": null,
+    "parent_trace_id": null,
+    "provenance": {
+      "adapter": null,
+      "application_version": null,
+      "case_id": null,
+      "deployment_id": null,
+      "environment": null,
+      "environment_id": null,
+      "evaluation_id": null,
+      "external_ids": {},
+      "extra": {},
+      "source": "omnicoreagent",
+      "trial_id": null,
+      "verifier_reference": null
+    },
+    "root_span_id": "span_failure_000",
+    "run_id": "run_id_failure",
+    "schema_version": 3,
+    "session_id": "session_id_failure",
+    "spans": [
+      {
+        "actor": {
+          "id": null,
+          "name": "telemetry_acceptance",
+          "type": "agent"
+        },
+        "attributes": {},
+        "duration_ms": 307,
+        "ended_at": "2026-09-14T22:53:10.330791+00:00",
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_ids": [
+          "event_failure_000",
+          "event_failure_017"
+        ],
+        "input": {
+          "query": "Verify the telemetry evidence path."
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 48,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 48,
+          "reference": null,
+          "role": "request",
+          "source": "runtime",
+          "state": "available"
+        },
+        "kind": "agent.run",
+        "name": "agent.run",
+        "output": {
+          "response": "FAILURE_ACKNOWLEDGED"
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 36,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 36,
+          "reference": null,
+          "role": "final_output",
+          "source": "runtime",
+          "state": "available"
+        },
+        "parent_span_id": null,
+        "schema_version": 3,
+        "span_id": "span_failure_000",
+        "started_at": "2026-09-14T22:53:10.023988+00:00",
+        "status": "ok",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": "telemetry_acceptance",
+          "type": "agent"
+        },
+        "attributes": {},
+        "duration_ms": 151,
+        "ended_at": "2026-09-14T22:53:10.191680+00:00",
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_ids": [
+          "event_failure_001"
+        ],
+        "input": {
+          "step": 1
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 11,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 11,
+          "reference": null,
+          "role": "input:agent.step",
+          "source": "runtime",
+          "state": "available"
+        },
+        "kind": "agent.step",
+        "name": "agent.step",
+        "output": {
+          "returned": false
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 19,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 19,
+          "reference": null,
+          "role": "output:agent.step",
+          "source": "runtime",
+          "state": "available"
+        },
+        "parent_span_id": "span_failure_000",
+        "schema_version": 3,
+        "span_id": "span_failure_001",
+        "started_at": "2026-09-14T22:53:10.040679+00:00",
+        "status": "ok",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "system"
+        },
+        "attributes": {
+          "context_digest": "93b34198740f815a9aef9c86871b40d53764caeda910136ec67c6811b514ff9a",
+          "message_digests": [
+            "9c1698f6e7018e86748e65557f3e147b67d7f03e5a64777431d5534e7cd721db",
+            "61ac550d3e0a7e86f7629ff4c1dd5d43a19dad9f8aaec7fd732aab46ce13d4bb"
+          ],
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "failing_tool",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ]
+        },
+        "duration_ms": 24,
+        "ended_at": "2026-09-14T22:53:10.071746+00:00",
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_ids": [
+          "event_failure_002"
+        ],
+        "input": {
+          "context_digest": "93b34198740f815a9aef9c86871b40d53764caeda910136ec67c6811b514ff9a",
+          "interaction_group_count": 2,
+          "message_count": 2,
+          "message_digests": [
+            "9c1698f6e7018e86748e65557f3e147b67d7f03e5a64777431d5534e7cd721db",
+            "61ac550d3e0a7e86f7629ff4c1dd5d43a19dad9f8aaec7fd732aab46ce13d4bb"
+          ],
+          "messages": [
+            {
+              "content": "You are a telemetry acceptance agent.\nUse workspace tools to keep plans, intermediate findings and deliverables in files.\nUse ls/glob/grep to find existing files and read_file to inspect them before edits.\nUse write_file, edit_file or insert_file for changes and verify important output by\nreading it back. Paths refer to the configured workspace, not unrestricted host\naccess. Share output paths that tools actually created. Use files to coordinate\nsubagent work and retain useful information when context is compressed.",
+              "role": "system"
+            },
+            {
+              "content": "[CURRENT_DATETIME: 2026-09-14 23:53:10 ]\n\nVerify the telemetry evidence path.",
+              "role": "user"
+            }
+          ],
+          "role_counts": {
+            "system": 1,
+            "user": 1
+          },
+          "tool_catalog_digest": "4dd6ba4fbadd5c48415328444f1d14305fe84dcc3b1562b82395a1163cc1868a",
+          "tool_count": 12,
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "failing_tool",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ],
+          "tools": [
+            {
+              "function": {
+                "description": "Return a large report.",
+                "name": "bulk_report",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Always fails.",
+                "name": "failing_tool",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "List files and directories inside the workspace files area.\n\n        Use this before reading or editing when you need to discover what exists.",
+                "name": "ls",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Directory path inside workspace files. Defaults to the workspace files root.",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Read a file inside workspace files. This is the workspace equivalent of cat.",
+                "name": "read_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Safely create, append, or overwrite files in the workspace.\n        \n        Modes:\n        - 'create': Create a new file. If file exists, returns an error with a preview.\n        - 'append': Append text to an existing file. If file does not exist, returns error.\n        - 'overwrite': Replace the entire file content. If file does not exist, returns error.\n        \n        Why it exists:\n        - Prevents accidental overwrites (explicit overwrite mode required).\n        - Supports incremental note-taking (append).\n        - Provides safe, clear separation between create, append, and overwrite.",
+                "name": "write_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "content": {
+                      "description": "The text content to create, append, or overwrite.",
+                      "type": "string"
+                    },
+                    "mode": {
+                      "default": "create",
+                      "description": "Choose how the file should be modified.",
+                      "enum": [
+                        "create",
+                        "append",
+                        "overwrite"
+                      ],
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "content"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Replace all occurrences of a string inside a file.\n        \n        Why it exists:\n        - Useful for correcting or updating specific words, phrases, or values.\n        - Non-destructive to unrelated file contents.",
+                "name": "edit_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_str": {
+                      "description": "The replacement string.",
+                      "type": "string"
+                    },
+                    "old_str": {
+                      "description": "The string to search for.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "old_str",
+                    "new_str"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Insert text into a file at a specific line number.\n        \n        Why it exists:\n        - Allows precise placement of new content (e.g., add notes at top or bottom).\n        - Maintains file structure without full overwrite.",
+                "name": "insert_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "insert_line": {
+                      "description": "Line number to insert at (1-based index).",
+                      "type": "integer"
+                    },
+                    "insert_text": {
+                      "description": "The text to insert at the given line.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "insert_line",
+                    "insert_text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Delete a file or directory from workspace files.\n        \n        Why it exists:\n        - Provides cleanup capability when files or directories are no longer needed.\n        - Prevents clutter in the workspace files area.",
+                "name": "delete_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Rename or move a file/directory inside workspace files.\n        \n        Why it exists:\n        - Enables reorganization of stored files without deleting data.\n        - Useful for moving files between directories or renaming for clarity.",
+                "name": "move_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_path": {
+                      "description": "New desired path or name.",
+                      "type": "string"
+                    },
+                    "old_path": {
+                      "description": "Current path of the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "old_path",
+                    "new_path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Clear all workspace files.",
+                "name": "clear_files",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Find workspace file paths by glob pattern.",
+                "name": "glob",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Optional directory path to scope the search.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Glob pattern such as '*.md' or '**/*.txt'.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Search text inside workspace files and return matching path:line:content results.",
+                "name": "grep",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "case_sensitive": {
+                      "default": false,
+                      "description": "Whether matching should be case-sensitive.",
+                      "type": "boolean"
+                    },
+                    "include": {
+                      "description": "Optional glob filter such as '*.md'.",
+                      "type": "string"
+                    },
+                    "max_matches": {
+                      "default": 100,
+                      "description": "Maximum number of matches to return.",
+                      "type": "integer"
+                    },
+                    "path": {
+                      "description": "File or directory path to search. Defaults to workspace files root.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Text to search for.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 7386,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 7386,
+          "reference": null,
+          "role": "context",
+          "source": "runtime",
+          "state": "available"
+        },
+        "kind": "context.assembly",
+        "name": "context.assembly",
+        "output": {
+          "context_digest": "93b34198740f815a9aef9c86871b40d53764caeda910136ec67c6811b514ff9a",
+          "interaction_group_count": 2,
+          "message_count": 2,
+          "message_digests": [
+            "9c1698f6e7018e86748e65557f3e147b67d7f03e5a64777431d5534e7cd721db",
+            "61ac550d3e0a7e86f7629ff4c1dd5d43a19dad9f8aaec7fd732aab46ce13d4bb"
+          ],
+          "role_counts": {
+            "system": 1,
+            "user": 1
+          },
+          "tool_catalog_digest": "4dd6ba4fbadd5c48415328444f1d14305fe84dcc3b1562b82395a1163cc1868a",
+          "tool_count": 12,
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "failing_tool",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ]
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 610,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 610,
+          "reference": null,
+          "role": "context",
+          "source": "runtime",
+          "state": "available"
+        },
+        "parent_span_id": "span_failure_001",
+        "schema_version": 3,
+        "span_id": "span_failure_002",
+        "started_at": "2026-09-14T22:53:10.048074+00:00",
+        "status": "ok",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "model"
+        },
+        "attributes": {
+          "context_digest": "93b34198740f815a9aef9c86871b40d53764caeda910136ec67c6811b514ff9a",
+          "context_span_id": "span_failure_002",
+          "streaming": false
+        },
+        "duration_ms": 27,
+        "ended_at": "2026-09-14T22:53:10.108013+00:00",
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_ids": [
+          "event_failure_003",
+          "event_failure_004"
+        ],
+        "input": {
+          "context_digest": "93b34198740f815a9aef9c86871b40d53764caeda910136ec67c6811b514ff9a",
+          "message_count": 2,
+          "messages": [
+            {
+              "content": "You are a telemetry acceptance agent.\nUse workspace tools to keep plans, intermediate findings and deliverables in files.\nUse ls/glob/grep to find existing files and read_file to inspect them before edits.\nUse write_file, edit_file or insert_file for changes and verify important output by\nreading it back. Paths refer to the configured workspace, not unrestricted host\naccess. Share output paths that tools actually created. Use files to coordinate\nsubagent work and retain useful information when context is compressed.",
+              "role": "system"
+            },
+            {
+              "content": "[CURRENT_DATETIME: 2026-09-14 23:53:10 ]\n\nVerify the telemetry evidence path.",
+              "role": "user"
+            }
+          ],
+          "streaming": false,
+          "tools": [
+            {
+              "function": {
+                "description": "Return a large report.",
+                "name": "bulk_report",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Always fails.",
+                "name": "failing_tool",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "List files and directories inside the workspace files area.\n\n        Use this before reading or editing when you need to discover what exists.",
+                "name": "ls",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Directory path inside workspace files. Defaults to the workspace files root.",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Read a file inside workspace files. This is the workspace equivalent of cat.",
+                "name": "read_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Safely create, append, or overwrite files in the workspace.\n        \n        Modes:\n        - 'create': Create a new file. If file exists, returns an error with a preview.\n        - 'append': Append text to an existing file. If file does not exist, returns error.\n        - 'overwrite': Replace the entire file content. If file does not exist, returns error.\n        \n        Why it exists:\n        - Prevents accidental overwrites (explicit overwrite mode required).\n        - Supports incremental note-taking (append).\n        - Provides safe, clear separation between create, append, and overwrite.",
+                "name": "write_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "content": {
+                      "description": "The text content to create, append, or overwrite.",
+                      "type": "string"
+                    },
+                    "mode": {
+                      "default": "create",
+                      "description": "Choose how the file should be modified.",
+                      "enum": [
+                        "create",
+                        "append",
+                        "overwrite"
+                      ],
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "content"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Replace all occurrences of a string inside a file.\n        \n        Why it exists:\n        - Useful for correcting or updating specific words, phrases, or values.\n        - Non-destructive to unrelated file contents.",
+                "name": "edit_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_str": {
+                      "description": "The replacement string.",
+                      "type": "string"
+                    },
+                    "old_str": {
+                      "description": "The string to search for.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "old_str",
+                    "new_str"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Insert text into a file at a specific line number.\n        \n        Why it exists:\n        - Allows precise placement of new content (e.g., add notes at top or bottom).\n        - Maintains file structure without full overwrite.",
+                "name": "insert_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "insert_line": {
+                      "description": "Line number to insert at (1-based index).",
+                      "type": "integer"
+                    },
+                    "insert_text": {
+                      "description": "The text to insert at the given line.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "insert_line",
+                    "insert_text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Delete a file or directory from workspace files.\n        \n        Why it exists:\n        - Provides cleanup capability when files or directories are no longer needed.\n        - Prevents clutter in the workspace files area.",
+                "name": "delete_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Rename or move a file/directory inside workspace files.\n        \n        Why it exists:\n        - Enables reorganization of stored files without deleting data.\n        - Useful for moving files between directories or renaming for clarity.",
+                "name": "move_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_path": {
+                      "description": "New desired path or name.",
+                      "type": "string"
+                    },
+                    "old_path": {
+                      "description": "Current path of the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "old_path",
+                    "new_path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Clear all workspace files.",
+                "name": "clear_files",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Find workspace file paths by glob pattern.",
+                "name": "glob",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Optional directory path to scope the search.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Glob pattern such as '*.md' or '**/*.txt'.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Search text inside workspace files and return matching path:line:content results.",
+                "name": "grep",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "case_sensitive": {
+                      "default": false,
+                      "description": "Whether matching should be case-sensitive.",
+                      "type": "boolean"
+                    },
+                    "include": {
+                      "description": "Optional glob filter such as '*.md'.",
+                      "type": "string"
+                    },
+                    "max_matches": {
+                      "default": 100,
+                      "description": "Maximum number of matches to return.",
+                      "type": "integer"
+                    },
+                    "path": {
+                      "description": "File or directory path to search. Defaults to workspace files root.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Text to search for.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 6902,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 6902,
+          "reference": null,
+          "role": "model_request",
+          "source": "provider",
+          "state": "available"
+        },
+        "kind": "model.call",
+        "name": "model.call",
+        "output": {
+          "context_digest": "93b34198740f815a9aef9c86871b40d53764caeda910136ec67c6811b514ff9a",
+          "context_span_id": "span_failure_002",
+          "finish_reason": "tool_calls",
+          "refusal": null,
+          "stream_stats": {
+            "delta_count": 0,
+            "event_types": {},
+            "streaming": false,
+            "visible_text_bytes": 0
+          },
+          "tool_call_ids": [
+            "call_failing_tool"
+          ],
+          "usage": null
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 349,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 349,
+          "reference": null,
+          "role": "model_response",
+          "source": "provider",
+          "state": "available"
+        },
+        "parent_span_id": "span_failure_001",
+        "schema_version": 3,
+        "span_id": "span_failure_003",
+        "started_at": "2026-09-14T22:53:10.080962+00:00",
+        "status": "ok",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "tool"
+        },
+        "attributes": {},
+        "duration_ms": 77,
+        "ended_at": "2026-09-14T22:53:10.187727+00:00",
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_ids": [
+          "event_failure_005",
+          "event_failure_006",
+          "event_failure_007",
+          "event_failure_010",
+          "event_failure_011",
+          "event_failure_012"
+        ],
+        "input": {
+          "tool_batch_args": [
+            {}
+          ],
+          "tool_count": 1
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 42,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 42,
+          "reference": null,
+          "role": "input:tool.batch",
+          "source": "tool",
+          "state": "available"
+        },
+        "kind": "tool.batch",
+        "name": "tool.batch",
+        "output": null,
+        "output_capture": null,
+        "parent_span_id": "span_failure_001",
+        "schema_version": 3,
+        "span_id": "span_failure_004",
+        "started_at": "2026-09-14T22:53:10.111170+00:00",
+        "status": "ok",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": "failing_tool",
+          "type": "tool"
+        },
+        "attributes": {},
+        "duration_ms": 31,
+        "ended_at": "2026-09-14T22:53:10.166022+00:00",
+        "error": {
+          "message": "synthetic tool failure for acceptance",
+          "metadata": {},
+          "retryable": null,
+          "stack": null,
+          "type": "ToolError"
+        },
+        "estimated_cost_usd": null,
+        "event_ids": [
+          "event_failure_008",
+          "event_failure_009"
+        ],
+        "input": {
+          "tool_args": {},
+          "tool_call_id": "call_failing_tool",
+          "tool_name": "failing_tool",
+          "tool_provider": "local",
+          "tool_server": null
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 130,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 130,
+          "reference": null,
+          "role": "tool_request",
+          "source": "tool",
+          "state": "available"
+        },
+        "kind": "tool.call",
+        "name": "failing_tool",
+        "output": {
+          "args": {},
+          "data": null,
+          "message": "synthetic tool failure for acceptance",
+          "status": "error",
+          "tool_name": "failing_tool"
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 126,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 126,
+          "reference": null,
+          "role": "tool_result",
+          "source": "tool",
+          "state": "available"
+        },
+        "parent_span_id": "span_failure_004",
+        "schema_version": 3,
+        "span_id": "span_failure_005",
+        "started_at": "2026-09-14T22:53:10.134998+00:00",
+        "status": "error",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": "telemetry_acceptance",
+          "type": "agent"
+        },
+        "attributes": {},
+        "duration_ms": 83,
+        "ended_at": "2026-09-14T22:53:10.276452+00:00",
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_ids": [
+          "event_failure_013"
+        ],
+        "input": {
+          "step": 2
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 11,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 11,
+          "reference": null,
+          "role": "input:agent.step",
+          "source": "runtime",
+          "state": "available"
+        },
+        "kind": "agent.step",
+        "name": "agent.step",
+        "output": {
+          "returned": true
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 18,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 18,
+          "reference": null,
+          "role": "output:agent.step",
+          "source": "runtime",
+          "state": "available"
+        },
+        "parent_span_id": "span_failure_000",
+        "schema_version": 3,
+        "span_id": "span_failure_006",
+        "started_at": "2026-09-14T22:53:10.193867+00:00",
+        "status": "ok",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "system"
+        },
+        "attributes": {
+          "context_digest": "013ac92a158004522cfa993a8b40a32f73476b32569918072bde89361ada6e09",
+          "message_digests": [
+            "9c1698f6e7018e86748e65557f3e147b67d7f03e5a64777431d5534e7cd721db",
+            "61ac550d3e0a7e86f7629ff4c1dd5d43a19dad9f8aaec7fd732aab46ce13d4bb",
+            "869a3fe02ba966d87cf7c2a200195e1d4b98f6086ac9e67f39ecdd72f9fa23b2",
+            "c38fd50a490bbc9e04d1ce7d053697e916d9c704e1ff3b748281f0b8bb1ac149"
+          ],
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "failing_tool",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ]
+        },
+        "duration_ms": 11,
+        "ended_at": "2026-09-14T22:53:10.231804+00:00",
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_ids": [
+          "event_failure_014"
+        ],
+        "input": {
+          "context_digest": "013ac92a158004522cfa993a8b40a32f73476b32569918072bde89361ada6e09",
+          "interaction_group_count": 3,
+          "message_count": 4,
+          "message_digests": [
+            "9c1698f6e7018e86748e65557f3e147b67d7f03e5a64777431d5534e7cd721db",
+            "61ac550d3e0a7e86f7629ff4c1dd5d43a19dad9f8aaec7fd732aab46ce13d4bb",
+            "869a3fe02ba966d87cf7c2a200195e1d4b98f6086ac9e67f39ecdd72f9fa23b2",
+            "c38fd50a490bbc9e04d1ce7d053697e916d9c704e1ff3b748281f0b8bb1ac149"
+          ],
+          "messages": [
+            {
+              "content": "You are a telemetry acceptance agent.\nUse workspace tools to keep plans, intermediate findings and deliverables in files.\nUse ls/glob/grep to find existing files and read_file to inspect them before edits.\nUse write_file, edit_file or insert_file for changes and verify important output by\nreading it back. Paths refer to the configured workspace, not unrestricted host\naccess. Share output paths that tools actually created. Use files to coordinate\nsubagent work and retain useful information when context is compressed.",
+              "role": "system"
+            },
+            {
+              "content": "[CURRENT_DATETIME: 2026-09-14 23:53:10 ]\n\nVerify the telemetry evidence path.",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{}",
+                    "name": "failing_tool"
+                  },
+                  "id": "call_failing_tool",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{\"tool_name\": \"failing_tool\", \"args\": {}, \"status\": \"error\", \"data\": null, \"message\": \"synthetic tool failure for acceptance\"}",
+              "role": "tool",
+              "tool_call_id": "call_failing_tool"
+            }
+          ],
+          "role_counts": {
+            "assistant": 1,
+            "system": 1,
+            "tool": 1,
+            "user": 1
+          },
+          "tool_catalog_digest": "4dd6ba4fbadd5c48415328444f1d14305fe84dcc3b1562b82395a1163cc1868a",
+          "tool_count": 12,
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "failing_tool",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ],
+          "tools": [
+            {
+              "function": {
+                "description": "Return a large report.",
+                "name": "bulk_report",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Always fails.",
+                "name": "failing_tool",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "List files and directories inside the workspace files area.\n\n        Use this before reading or editing when you need to discover what exists.",
+                "name": "ls",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Directory path inside workspace files. Defaults to the workspace files root.",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Read a file inside workspace files. This is the workspace equivalent of cat.",
+                "name": "read_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Safely create, append, or overwrite files in the workspace.\n        \n        Modes:\n        - 'create': Create a new file. If file exists, returns an error with a preview.\n        - 'append': Append text to an existing file. If file does not exist, returns error.\n        - 'overwrite': Replace the entire file content. If file does not exist, returns error.\n        \n        Why it exists:\n        - Prevents accidental overwrites (explicit overwrite mode required).\n        - Supports incremental note-taking (append).\n        - Provides safe, clear separation between create, append, and overwrite.",
+                "name": "write_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "content": {
+                      "description": "The text content to create, append, or overwrite.",
+                      "type": "string"
+                    },
+                    "mode": {
+                      "default": "create",
+                      "description": "Choose how the file should be modified.",
+                      "enum": [
+                        "create",
+                        "append",
+                        "overwrite"
+                      ],
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "content"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Replace all occurrences of a string inside a file.\n        \n        Why it exists:\n        - Useful for correcting or updating specific words, phrases, or values.\n        - Non-destructive to unrelated file contents.",
+                "name": "edit_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_str": {
+                      "description": "The replacement string.",
+                      "type": "string"
+                    },
+                    "old_str": {
+                      "description": "The string to search for.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "old_str",
+                    "new_str"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Insert text into a file at a specific line number.\n        \n        Why it exists:\n        - Allows precise placement of new content (e.g., add notes at top or bottom).\n        - Maintains file structure without full overwrite.",
+                "name": "insert_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "insert_line": {
+                      "description": "Line number to insert at (1-based index).",
+                      "type": "integer"
+                    },
+                    "insert_text": {
+                      "description": "The text to insert at the given line.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "insert_line",
+                    "insert_text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Delete a file or directory from workspace files.\n        \n        Why it exists:\n        - Provides cleanup capability when files or directories are no longer needed.\n        - Prevents clutter in the workspace files area.",
+                "name": "delete_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Rename or move a file/directory inside workspace files.\n        \n        Why it exists:\n        - Enables reorganization of stored files without deleting data.\n        - Useful for moving files between directories or renaming for clarity.",
+                "name": "move_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_path": {
+                      "description": "New desired path or name.",
+                      "type": "string"
+                    },
+                    "old_path": {
+                      "description": "Current path of the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "old_path",
+                    "new_path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Clear all workspace files.",
+                "name": "clear_files",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Find workspace file paths by glob pattern.",
+                "name": "glob",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Optional directory path to scope the search.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Glob pattern such as '*.md' or '**/*.txt'.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Search text inside workspace files and return matching path:line:content results.",
+                "name": "grep",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "case_sensitive": {
+                      "default": false,
+                      "description": "Whether matching should be case-sensitive.",
+                      "type": "boolean"
+                    },
+                    "include": {
+                      "description": "Optional glob filter such as '*.md'.",
+                      "type": "string"
+                    },
+                    "max_matches": {
+                      "default": 100,
+                      "description": "Maximum number of matches to return.",
+                      "type": "integer"
+                    },
+                    "path": {
+                      "description": "File or directory path to search. Defaults to workspace files root.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Text to search for.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 7923,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 7923,
+          "reference": null,
+          "role": "context",
+          "source": "runtime",
+          "state": "available"
+        },
+        "kind": "context.assembly",
+        "name": "context.assembly",
+        "output": {
+          "context_digest": "013ac92a158004522cfa993a8b40a32f73476b32569918072bde89361ada6e09",
+          "interaction_group_count": 3,
+          "message_count": 4,
+          "message_digests": [
+            "9c1698f6e7018e86748e65557f3e147b67d7f03e5a64777431d5534e7cd721db",
+            "61ac550d3e0a7e86f7629ff4c1dd5d43a19dad9f8aaec7fd732aab46ce13d4bb",
+            "869a3fe02ba966d87cf7c2a200195e1d4b98f6086ac9e67f39ecdd72f9fa23b2",
+            "c38fd50a490bbc9e04d1ce7d053697e916d9c704e1ff3b748281f0b8bb1ac149"
+          ],
+          "role_counts": {
+            "assistant": 1,
+            "system": 1,
+            "tool": 1,
+            "user": 1
+          },
+          "tool_catalog_digest": "4dd6ba4fbadd5c48415328444f1d14305fe84dcc3b1562b82395a1163cc1868a",
+          "tool_count": 12,
+          "tool_names": [
+            "bulk_report",
+            "clear_files",
+            "delete_file",
+            "edit_file",
+            "failing_tool",
+            "glob",
+            "grep",
+            "insert_file",
+            "ls",
+            "move_file",
+            "read_file",
+            "write_file"
+          ]
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 773,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 773,
+          "reference": null,
+          "role": "context",
+          "source": "runtime",
+          "state": "available"
+        },
+        "parent_span_id": "span_failure_006",
+        "schema_version": 3,
+        "span_id": "span_failure_007",
+        "started_at": "2026-09-14T22:53:10.220948+00:00",
+        "status": "ok",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      },
+      {
+        "actor": {
+          "id": null,
+          "name": null,
+          "type": "model"
+        },
+        "attributes": {
+          "context_digest": "013ac92a158004522cfa993a8b40a32f73476b32569918072bde89361ada6e09",
+          "context_span_id": "span_failure_007",
+          "streaming": false
+        },
+        "duration_ms": 24,
+        "ended_at": "2026-09-14T22:53:10.259409+00:00",
+        "error": null,
+        "estimated_cost_usd": null,
+        "event_ids": [
+          "event_failure_015",
+          "event_failure_016"
+        ],
+        "input": {
+          "context_digest": "013ac92a158004522cfa993a8b40a32f73476b32569918072bde89361ada6e09",
+          "message_count": 4,
+          "messages": [
+            {
+              "content": "You are a telemetry acceptance agent.\nUse workspace tools to keep plans, intermediate findings and deliverables in files.\nUse ls/glob/grep to find existing files and read_file to inspect them before edits.\nUse write_file, edit_file or insert_file for changes and verify important output by\nreading it back. Paths refer to the configured workspace, not unrestricted host\naccess. Share output paths that tools actually created. Use files to coordinate\nsubagent work and retain useful information when context is compressed.",
+              "role": "system"
+            },
+            {
+              "content": "[CURRENT_DATETIME: 2026-09-14 23:53:10 ]\n\nVerify the telemetry evidence path.",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{}",
+                    "name": "failing_tool"
+                  },
+                  "id": "call_failing_tool",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{\"tool_name\": \"failing_tool\", \"args\": {}, \"status\": \"error\", \"data\": null, \"message\": \"synthetic tool failure for acceptance\"}",
+              "role": "tool",
+              "tool_call_id": "call_failing_tool"
+            }
+          ],
+          "streaming": false,
+          "tools": [
+            {
+              "function": {
+                "description": "Return a large report.",
+                "name": "bulk_report",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Always fails.",
+                "name": "failing_tool",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "List files and directories inside the workspace files area.\n\n        Use this before reading or editing when you need to discover what exists.",
+                "name": "ls",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Directory path inside workspace files. Defaults to the workspace files root.",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Read a file inside workspace files. This is the workspace equivalent of cat.",
+                "name": "read_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Safely create, append, or overwrite files in the workspace.\n        \n        Modes:\n        - 'create': Create a new file. If file exists, returns an error with a preview.\n        - 'append': Append text to an existing file. If file does not exist, returns error.\n        - 'overwrite': Replace the entire file content. If file does not exist, returns error.\n        \n        Why it exists:\n        - Prevents accidental overwrites (explicit overwrite mode required).\n        - Supports incremental note-taking (append).\n        - Provides safe, clear separation between create, append, and overwrite.",
+                "name": "write_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "content": {
+                      "description": "The text content to create, append, or overwrite.",
+                      "type": "string"
+                    },
+                    "mode": {
+                      "default": "create",
+                      "description": "Choose how the file should be modified.",
+                      "enum": [
+                        "create",
+                        "append",
+                        "overwrite"
+                      ],
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file inside workspace files.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "content"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Replace all occurrences of a string inside a file.\n        \n        Why it exists:\n        - Useful for correcting or updating specific words, phrases, or values.\n        - Non-destructive to unrelated file contents.",
+                "name": "edit_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_str": {
+                      "description": "The replacement string.",
+                      "type": "string"
+                    },
+                    "old_str": {
+                      "description": "The string to search for.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "old_str",
+                    "new_str"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Insert text into a file at a specific line number.\n        \n        Why it exists:\n        - Allows precise placement of new content (e.g., add notes at top or bottom).\n        - Maintains file structure without full overwrite.",
+                "name": "insert_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "insert_line": {
+                      "description": "Line number to insert at (1-based index).",
+                      "type": "integer"
+                    },
+                    "insert_text": {
+                      "description": "The text to insert at the given line.",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "Path to the target file.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "insert_line",
+                    "insert_text"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Delete a file or directory from workspace files.\n        \n        Why it exists:\n        - Provides cleanup capability when files or directories are no longer needed.\n        - Prevents clutter in the workspace files area.",
+                "name": "delete_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Path to the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Rename or move a file/directory inside workspace files.\n        \n        Why it exists:\n        - Enables reorganization of stored files without deleting data.\n        - Useful for moving files between directories or renaming for clarity.",
+                "name": "move_file",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "new_path": {
+                      "description": "New desired path or name.",
+                      "type": "string"
+                    },
+                    "old_path": {
+                      "description": "Current path of the file or directory.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "old_path",
+                    "new_path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Clear all workspace files.",
+                "name": "clear_files",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Find workspace file paths by glob pattern.",
+                "name": "glob",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "description": "Optional directory path to scope the search.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Glob pattern such as '*.md' or '**/*.txt'.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "description": "Search text inside workspace files and return matching path:line:content results.",
+                "name": "grep",
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "case_sensitive": {
+                      "default": false,
+                      "description": "Whether matching should be case-sensitive.",
+                      "type": "boolean"
+                    },
+                    "include": {
+                      "description": "Optional glob filter such as '*.md'.",
+                      "type": "string"
+                    },
+                    "max_matches": {
+                      "default": 100,
+                      "description": "Maximum number of matches to return.",
+                      "type": "integer"
+                    },
+                    "path": {
+                      "description": "File or directory path to search. Defaults to workspace files root.",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "description": "Text to search for.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ]
+        },
+        "input_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 7276,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 7276,
+          "reference": null,
+          "role": "model_request",
+          "source": "provider",
+          "state": "available"
+        },
+        "kind": "model.call",
+        "name": "model.call",
+        "output": {
+          "context_digest": "013ac92a158004522cfa993a8b40a32f73476b32569918072bde89361ada6e09",
+          "context_span_id": "span_failure_007",
+          "finish_reason": null,
+          "refusal": null,
+          "stream_stats": {
+            "delta_count": 0,
+            "event_types": {},
+            "streaming": false,
+            "visible_text_bytes": 0
+          },
+          "tool_call_ids": [],
+          "usage": null
+        },
+        "output_capture": {
+          "checksum": null,
+          "content_type": "application/json",
+          "original_bytes": 322,
+          "policy_version": "a9faed23651d043d",
+          "reason": null,
+          "recorded_bytes": 322,
+          "reference": null,
+          "role": "model_response",
+          "source": "provider",
+          "state": "available"
+        },
+        "parent_span_id": "span_failure_006",
+        "schema_version": 3,
+        "span_id": "span_failure_008",
+        "started_at": "2026-09-14T22:53:10.234912+00:00",
+        "status": "ok",
+        "token_usage": {
+          "completion_tokens": null,
+          "prompt_tokens": null,
+          "total_tokens": null
+        },
+        "trace_id": "trace_id_failure"
+      }
+    ],
+    "started_at": "2026-09-14T22:53:10.024047+00:00",
+    "status": "completed",
+    "suite_id": null,
+    "task_id": null,
+    "trace_id": "trace_id_failure",
+    "workflow_id": null
+  }
+}

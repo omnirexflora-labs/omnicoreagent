@@ -1,20 +1,22 @@
 """Run an OmniCoreAgent task through the background manager."""
 
 import asyncio
-import os
 
+try:
+    from cookbook.background_agents._bootstrap import ROOT_DIR  # noqa: F401
+except ModuleNotFoundError:
+    from _bootstrap import ROOT_DIR  # noqa: F401
+from cookbook.shared import model_config, require_llm_api_key
 from omnicoreagent import BackgroundAgentManager, OmniCoreAgent
 
 
 async def main():
-    if not os.getenv("LLM_API_KEY"):
-        print("Set LLM_API_KEY to run this live background agent example.")
-        return
+    require_llm_api_key()
 
     agent = OmniCoreAgent(
         name="background_researcher",
         system_instruction="You write short background task reports.",
-        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        model_config=model_config(),
     )
 
     manager = BackgroundAgentManager()

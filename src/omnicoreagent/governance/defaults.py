@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from omnicoreagent.governance.hashing import attach_policy_hash
 from omnicoreagent.governance.models import (
+    PolicyConstraints,
     PolicyEffect,
     PolicyEnvelope,
     PolicyMode,
@@ -27,6 +28,54 @@ def build_default_policy(
     else:  # pragma: no cover - enum construction guards this.
         raise ValueError(f"Unknown policy profile: {profile}")
     return attach_policy_hash(policy)
+
+
+def _sandbox_ask_rules() -> list[PolicyRule]:
+    """Asks shared by the dev profiles: leaving the sandbox's containment."""
+    return [
+        PolicyRule(
+            rule_id="ask_sandbox_network",
+            effect=PolicyEffect.ASK,
+            capability="sandbox.network.configure",
+            reason="Turning the sandbox network on needs approval.",
+        ),
+        PolicyRule(
+            rule_id="ask_sandbox_host_mount",
+            effect=PolicyEffect.ASK,
+            capability="sandbox.filesystem.mount",
+            reason="Mounting host files into the sandbox needs approval.",
+        ),
+    ]
+
+
+def _sandbox_allow_rules() -> list[PolicyRule]:
+    """Contained execution, skill scripts, and code mode, allowed by the dev profiles."""
+    return [
+        PolicyRule(
+            rule_id="allow_sandboxed_execution",
+            effect=PolicyEffect.ALLOW,
+            capability="process.exec",
+            conditions=PolicyRuleConditions(execution_surface="sandbox"),
+            constraints=PolicyConstraints(sandbox_required=True),
+        ),
+        PolicyRule(
+            rule_id="allow_sandbox_setup",
+            effect=PolicyEffect.ALLOW,
+            capability="sandbox.*",
+        ),
+        PolicyRule(
+            rule_id="allow_skill_scripts",
+            effect=PolicyEffect.ALLOW,
+            capability="skill.*",
+        ),
+        # Programs run in Monty without OS access; each tool a program calls
+        # is authorized on its own.
+        PolicyRule(
+            rule_id="allow_code_mode",
+            effect=PolicyEffect.ALLOW,
+            capability="code.*",
+        ),
+    ]
 
 
 def _permissive_dev_policy() -> PolicyEnvelope:
@@ -61,7 +110,8 @@ def _permissive_dev_policy() -> PolicyEnvelope:
                     rule_id="deny_unrestricted_process_exec",
                     effect=PolicyEffect.DENY,
                     capability="process.exec",
-                    reason="Process execution needs explicit policy.",
+                    conditions=PolicyRuleConditions(exclude_execution_surface=["sandbox"]),
+                    reason="Host process execution needs explicit policy.",
                 ),
                 PolicyRule(
                     rule_id="deny_unrestricted_host_filesystem_access",
@@ -82,7 +132,9 @@ def _permissive_dev_policy() -> PolicyEnvelope:
                     reason="Package installation needs explicit policy.",
                 ),
             ],
+            ask=_sandbox_ask_rules(),
             allow=[
+                *_sandbox_allow_rules(),
                 PolicyRule(
                     rule_id="allow_local_dev_workspace",
                     effect=PolicyEffect.ALLOW,
@@ -146,7 +198,9 @@ def _interactive_dev_policy() -> PolicyEnvelope:
                     rule_id="ask_process_exec",
                     effect=PolicyEffect.ASK,
                     capability="process.*",
+                    conditions=PolicyRuleConditions(exclude_execution_surface=["sandbox"]),
                 ),
+                *_sandbox_ask_rules(),
                 PolicyRule(
                     rule_id="ask_network_egress",
                     effect=PolicyEffect.ASK,
@@ -186,10 +240,19 @@ def _interactive_dev_policy() -> PolicyEnvelope:
                     rule_id="ask_high_risk",
                     effect=PolicyEffect.ASK,
                     capability="*",
-                    conditions=PolicyRuleConditions(risk_level=["high", "critical"]),
+                    # Contained execution is high risk by design; the sandbox
+                    # rules above decide it.
+                    # Skill scripts are decided by allow_skill_scripts (agreed
+                    # 2026-09-19: they keep working on the host, governed).
+                    conditions=PolicyRuleConditions(
+                        risk_level=["high", "critical"],
+                        exclude_execution_surface=["sandbox"],
+                        exclude_capability=["skill.script.run"],
+                    ),
                 ),
             ],
             allow=[
+                *_sandbox_allow_rules(),
                 PolicyRule(
                     rule_id="allow_local_tools",
                     effect=PolicyEffect.ALLOW,

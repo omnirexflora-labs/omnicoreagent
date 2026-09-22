@@ -5,18 +5,25 @@ Provides utilities for streaming telemetry events via SSE.
 """
 
 import asyncio
+from collections import deque
 import contextlib
 import json
 from dataclasses import dataclass
-from inspect import isawaitable
+from inspect import isawaitable, signature
 from typing import TYPE_CHECKING, Any, AsyncGenerator
 from uuid import uuid4
 
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.runtime.deadline import run_with_timeout
 
 from .serialization import normalize_event, normalize_run_result
 from .state import get_agent_name
-from .telemetry import build_run_kwargs, finish_serve_trace, start_serve_trace
+from .telemetry import (
+    accepts_keyword,
+    build_run_kwargs,
+    finish_serve_trace,
+    start_serve_trace,
+)
 
 if TYPE_CHECKING:
     from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent as AgentType
@@ -24,6 +31,7 @@ else:
     AgentType = Any
 
 _SSE_EVENT_QUEUE_SIZE = 1000
+_SEEN_EVENT_ID_LIMIT = 10_000
 _EVENT_REPLAY_TIMEOUT_SECONDS = 10
 _TASK_CANCEL_TIMEOUT_SECONDS = 2
 
@@ -31,6 +39,58 @@ _TASK_CANCEL_TIMEOUT_SECONDS = 2
 @dataclass
 class _EventStreamFailure:
     error: Exception
+
+
+class _SeenEvents:
+    """Suppress duplicate SSE events with bounded memory.
+
+    Store events arrive in stream-cursor order, so a high-water mark is
+    enough for them. Events without a cursor fall back to a bounded window of
+    recent event IDs.
+    """
+
+    def __init__(self, max_ids: int = _SEEN_EVENT_ID_LIMIT) -> None:
+        self._high_water: int | None = None
+        self._ids: set[str] = set()
+        self._order: deque[str] = deque()
+        self._max_ids = max_ids
+
+    def first_time(self, event_data: dict[str, Any]) -> bool:
+        cursor = _cursor_value(event_data.get("stream_cursor"))
+        if cursor is not None:
+            if self._high_water is not None and cursor <= self._high_water:
+                return False
+            self._high_water = cursor
+            return True
+        event_id = event_data.get("event_id")
+        if event_id is None:
+            return True
+        event_id = str(event_id)
+        if event_id in self._ids:
+            return False
+        self._ids.add(event_id)
+        self._order.append(event_id)
+        if len(self._order) > self._max_ids:
+            self._ids.discard(self._order.popleft())
+        return True
+
+
+def _cursor_value(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _public_error(agent: AgentType, error: BaseException) -> str:
+    """Keep exception text behind the same public privacy boundary as results."""
+    message = str(error)
+    privacy_filter = getattr(agent, "privacy_filter", None)
+    if privacy_filter is not None:
+        return privacy_filter.redact_text(message, boundary="public")
+    return message
 
 
 def format_sse_event(event_type: str, data: dict) -> str:
@@ -45,7 +105,9 @@ def format_sse_event(event_type: str, data: dict) -> str:
         SSE-formatted string
     """
     json_data = json.dumps(data, default=str)
-    return f"event: {event_type}\ndata: {json_data}\n\n"
+    stream_id = data.get("stream_cursor") or data.get("event_id")
+    id_line = f"id: {stream_id}\n" if stream_id is not None else ""
+    return f"event: {event_type}\n{id_line}data: {json_data}\n\n"
 
 
 def _normalize_event_for_sse(event: Any, session_id: str) -> tuple[str, dict[str, Any]]:
@@ -79,11 +141,15 @@ async def _pump_session_events(
     cursor: str | None,
     run_id: str | None = None,
 ) -> None:
-    """Forward live telemetry events into a local queue for the SSE generator."""
+    """Forward live telemetry events into a local queue for the SSE generator.
+
+    The pump waits for queue space instead of declaring overflow: a slow client
+    is bounded by the store's own subscriber buffer, which reports overflow
+    explicitly when live traffic outruns it.
+    """
     try:
         async for event in _stream_telemetry_after(agent, session_id, cursor, run_id):
-            if not await _put_stream_item(queue, event):
-                return
+            await queue.put(event)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -147,7 +213,9 @@ async def _get_telemetry_events_after_cursor(
 ) -> list[Any]:
     events_after_method = getattr(agent, "get_telemetry_events_after", None)
     if callable(events_after_method):
-        result = events_after_method(cursor=cursor, session_id=session_id, run_id=run_id)
+        result = events_after_method(
+            cursor=cursor, session_id=session_id, run_id=run_id
+        )
         if isawaitable(result):
             return await result
         return result
@@ -173,17 +241,19 @@ async def _run_agent_with_timeout(
     session_id: str,
     timeout_seconds: int | None,
     run_id: str,
+    on_event: Any = None,
 ) -> Any:
-    run_coro = agent.run(query, **build_run_kwargs(agent, session_id=session_id, run_id=run_id))
-    if timeout_seconds and timeout_seconds > 0:
-        return await asyncio.wait_for(run_coro, timeout=timeout_seconds)
-    return await run_coro
+    kwargs = build_run_kwargs(agent, session_id=session_id, run_id=run_id)
+    if on_event is not None and accepts_keyword(signature(agent.run), "on_event"):
+        kwargs["on_event"] = on_event
+    # A deadline marks the agent trace as timed out, not cancelled.
+    return await run_with_timeout(agent.run(query, **kwargs), timeout_seconds)
 
 
 async def _drain_event_queue(
     queue: asyncio.Queue[Any],
     session_id: str,
-    seen_event_ids: set[str] | None = None,
+    seen: _SeenEvents | None = None,
     run_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     while True:
@@ -196,12 +266,8 @@ async def _drain_event_queue(
         event_type, event_data = _normalize_event_for_sse(event, session_id)
         if not _event_matches_run(event_data, run_id):
             continue
-        event_id = event_data.get("event_id")
-        if seen_event_ids is not None:
-            if event_id is not None and str(event_id) in seen_event_ids:
-                continue
-            if event_id is not None:
-                seen_event_ids.add(str(event_id))
+        if seen is not None and not seen.first_time(event_data):
+            continue
         yield format_sse_event(event_type, event_data)
 
 
@@ -229,7 +295,7 @@ async def run_agent_stream(
     pump_task: asyncio.Task[Any] | None = None
     run_task: asyncio.Task[Any] | None = None
     next_event_task: asyncio.Task[Any] | None = None
-    seen_event_ids: set[str] = set()
+    seen = _SeenEvents()
     run_id = f"run_{uuid4().hex}"
     serve_trace = None
 
@@ -248,7 +314,9 @@ async def run_agent_stream(
             _pump_session_events(agent, session_id, event_queue, cursor, run_id)
         )
         run_task = asyncio.create_task(
-            _run_agent_with_timeout(agent, query, session_id, timeout_seconds, run_id)
+            _run_agent_with_timeout(
+                agent, query, session_id, timeout_seconds, run_id, event_queue.put
+            )
         )
 
         while True:
@@ -272,10 +340,9 @@ async def run_agent_stream(
                         event,
                         session_id,
                     )
-                    if _event_matches_run(event_data, run_id):
-                        event_id = event_data.get("event_id")
-                        if event_id is not None:
-                            seen_event_ids.add(str(event_id))
+                    if _event_matches_run(event_data, run_id) and seen.first_time(
+                        event_data
+                    ):
                         yield format_sse_event(event_type, event_data)
                 else:
                     await _cancel_task(next_event_task)
@@ -293,7 +360,11 @@ async def run_agent_stream(
                     events_after_cursor = []
                     yield format_sse_event(
                         "error",
-                        {"error": str(exc), "session_id": session_id, "run_id": run_id},
+                        {
+                            "error": _public_error(agent, exc),
+                            "session_id": session_id,
+                            "run_id": run_id,
+                        },
                     )
 
                 for event in events_after_cursor:
@@ -303,17 +374,14 @@ async def run_agent_stream(
                     )
                     if not _event_matches_run(event_data, run_id):
                         continue
-                    event_id = event_data.get("event_id")
-                    if event_id is not None and str(event_id) in seen_event_ids:
+                    if not seen.first_time(event_data):
                         continue
-                    if event_id is not None:
-                        seen_event_ids.add(str(event_id))
                     yield format_sse_event(event_type, event_data)
 
                 async for event_chunk in _drain_event_queue(
                     event_queue,
                     session_id,
-                    seen_event_ids,
+                    seen,
                     run_id,
                 ):
                     yield event_chunk
@@ -321,6 +389,7 @@ async def run_agent_stream(
                 normalized = normalize_run_result(
                     response,
                     agent_name=get_agent_name(agent),
+                    privacy_filter=getattr(agent, "privacy_filter", None),
                 )
                 complete_payload = {
                     "session_id": session_id,
@@ -328,10 +397,13 @@ async def run_agent_stream(
                 }
                 complete_payload["run_id"] = normalized.get("run_id") or run_id
 
+                from .routes.runs import serve_trace_status
+
                 await finish_serve_trace(
                     serve_trace,
+                    status=serve_trace_status(normalized.get("status", "success")),
                     output={
-                        "status": "completed",
+                        "status": normalized.get("status"),
                         "agent_trace_id": complete_payload.get("trace_id"),
                     },
                 )
@@ -350,9 +422,8 @@ async def run_agent_stream(
                 event_type, event_data = _normalize_event_for_sse(event, session_id)
                 if not _event_matches_run(event_data, run_id):
                     continue
-                event_id = event_data.get("event_id")
-                if event_id is not None:
-                    seen_event_ids.add(str(event_id))
+                if not seen.first_time(event_data):
+                    continue
                 yield format_sse_event(event_type, event_data)
                 continue
 
@@ -384,7 +455,7 @@ async def run_agent_stream(
         yield format_sse_event(
             "error",
             {
-                "error": str(e),
+                "error": _public_error(agent, e),
                 "session_id": session_id,
                 "run_id": run_id,
             },
@@ -407,12 +478,16 @@ async def stream_session_events(
     agent: AgentType,
     session_id: str,
     run_id: str | None = None,
+    cursor: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Replay stored telemetry events, then stream live session telemetry via SSE.
 
-    The live subscriber starts before historical replay to avoid a gap where
-    events can be written after the snapshot but before the stream is active.
+    The live subscriber starts from a snapshot of the current stream position
+    before historical replay begins, so no event can fall between the replay
+    and the live stream. The replay covers the client's cursor up to that
+    snapshot; the live pump covers everything after it, so a large backlog is
+    never pushed through the live queue.
 
     Args:
         agent: The agent
@@ -428,17 +503,25 @@ async def stream_session_events(
 
     event_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=_SSE_EVENT_QUEUE_SIZE)
     pump_task: asyncio.Task[Any] | None = None
-    seen_event_ids: set[str] = set()
+    seen = _SeenEvents()
 
     try:
-        cursor = await _get_telemetry_stream_cursor(agent, session_id, run_id)
+        live_cursor = await _get_telemetry_stream_cursor(agent, session_id, run_id)
+        if live_cursor is None:
+            # Without a position snapshot the live stream must start from the
+            # client's cursor; duplicate suppression covers the overlap.
+            live_cursor = cursor
         pump_task = asyncio.create_task(
-            _pump_session_events(agent, session_id, event_queue, cursor, run_id)
+            _pump_session_events(
+                agent, session_id, event_queue, live_cursor, run_id
+            )
         )
 
         try:
             replay_events = await asyncio.wait_for(
-                _get_telemetry_events_after_cursor(agent, session_id, None, run_id),
+                _get_telemetry_events_after_cursor(
+                    agent, session_id, cursor, run_id
+                ),
                 timeout=_EVENT_REPLAY_TIMEOUT_SECONDS,
             )
         except Exception as exc:
@@ -446,16 +529,19 @@ async def stream_session_events(
             replay_events = []
             yield format_sse_event(
                 "error",
-                {"error": str(exc), "session_id": session_id, "run_id": run_id},
+                {
+                    "error": _public_error(agent, exc),
+                    "session_id": session_id,
+                    "run_id": run_id,
+                },
             )
 
         for event in replay_events:
             event_type, event_data = _normalize_event_for_sse(event, session_id)
             if not _event_matches_run(event_data, run_id):
                 continue
-            event_id = event_data.get("event_id")
-            if event_id is not None:
-                seen_event_ids.add(str(event_id))
+            if not seen.first_time(event_data):
+                continue
             yield format_sse_event(event_type, event_data)
 
         while True:
@@ -473,17 +559,18 @@ async def stream_session_events(
             event_type, event_data = _normalize_event_for_sse(event, session_id)
             if not _event_matches_run(event_data, run_id):
                 continue
-            event_id = event_data.get("event_id")
-            if event_id is not None and str(event_id) in seen_event_ids:
+            if not seen.first_time(event_data):
                 continue
-
-            if event_id is not None:
-                seen_event_ids.add(str(event_id))
             yield format_sse_event(event_type, event_data)
     except Exception as e:
         logger.error(f"OmniServe SSE: Event replay error: {e}")
         yield format_sse_event(
-            "error", {"error": str(e), "session_id": session_id, "run_id": run_id}
+            "error",
+            {
+                "error": _public_error(agent, e),
+                "session_id": session_id,
+                "run_id": run_id,
+            },
         )
     finally:
         await _cancel_task(pump_task)

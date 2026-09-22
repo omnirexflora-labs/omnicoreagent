@@ -42,6 +42,18 @@ class ApprovalExpiredError(GovernanceError):
     code = "approval_expired"
 
 
+class ApprovalInvalidError(GovernanceError):
+    """Raised when an approval resolver returns a mismatched result."""
+
+    code = "approval_invalid"
+
+
+class AuditRequiredError(GovernanceError):
+    """Raised when a policy requires authority evidence that cannot be recorded."""
+
+    code = "audit_required"
+
+
 class SandboxRequiredError(GovernanceError):
     """Raised when execution requires sandboxing that is unavailable."""
 

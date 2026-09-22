@@ -94,10 +94,33 @@ class BackgroundRunTransitions:
             return False
         if run.lease_token is not None:
             if not await self.refresh_run_lease(run.run_id, run.lease_token):
-                return True
+                recovered = await self._recover_expired_owned_cancelled_run(run)
+                if recovered is None:
+                    return True
+                run = recovered
         await self.mark_attempt_cancelled(attempt, run)
         await self.mark_terminal(run, RunStatus.CANCELLED, "cancelled")
         return True
+
+    async def _recover_expired_owned_cancelled_run(
+        self, run: BackgroundRun
+    ) -> BackgroundRun | None:
+        latest = await self.task_store.get_run(run.run_id)
+        if (
+            latest is None
+            or latest.lease_owner != self.worker_id
+            or latest.status
+            not in {RunStatus.CLAIMED, RunStatus.RUNNING, RunStatus.RETRYING}
+        ):
+            return None
+        try:
+            return await self.task_store.steal_expired_run(
+                latest.run_id,
+                self.worker_id,
+                self.lease_seconds,
+            )
+        except Exception:
+            return None
 
     async def transition_or_cancel(
         self,

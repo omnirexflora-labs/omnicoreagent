@@ -76,6 +76,7 @@ curl "http://localhost:8000/telemetry/events?run_id=RUN_ID&event_type=tool_resul
 curl "http://localhost:8000/telemetry/traces?session_id=research_1&limit=20"
 curl "http://localhost:8000/telemetry/traces/TRACE_ID"
 curl "http://localhost:8000/telemetry/runs/RUN_ID/trace"
+curl "http://localhost:8000/telemetry/runs/RUN_ID/family"
 curl "http://localhost:8000/telemetry/sessions/research_1/trace"
 curl -N "http://localhost:8000/telemetry/events/stream?session_id=research_1&run_id=RUN_ID"
 ```
@@ -105,11 +106,193 @@ run:
 latest_session_trace = await agent.get_latest_trace("research_1")
 run_correlated_trace = await agent.get_trace(run_id=result["run_id"])
 normalized = await agent.get_trace(result["trace_id"], normalize=True)
+trace_family = await agent.get_trace_family(trace_id=result["trace_id"])
 ```
+
+Traces expose `incomplete: true` when best-effort telemetry persistence lost
+an evidence write. The run can still complete; strict telemetry configuration
+instead propagates the persistence error. Trace metadata also reports the
+effective built-in storage type (`memory` or `jsonl`).
+
+Tool output guardrail decisions are recorded before the normal tool result
+event. Blocked or suspicious output includes the tool identity, threat level,
+score, and content hash in telemetry while the unsanitized content stays out of
+the result event and model context.
 
 `trace_id` is the exact trace handle. `run_id` is a correlation and filtering
 handle; when more than one trace is correlated to the same run, `get_trace(
 run_id=...)` returns the latest matching trace.
+
+`get_trace_family(...)` follows explicit parent trace links in both directions,
+so deep-agent child traces can be retrieved together with the parent without
+depending on latest-trace ordering. A family lists each parent before its
+children.
+
+### Read a run as a trajectory
+
+`get_trajectory` returns one run in order, from request to final answer:
+
+```python
+trajectory = await agent.get_trajectory(run_id=result["run_id"])
+# or: await agent.get_trajectory(result["trace_id"])
+
+for step in trajectory["steps"]:
+    for call in step["model_calls"]:
+        print(step["step"], call["purpose"], call["facts"]["tokens"], call["response"])
+    for tool in step["tool_calls"]:
+        print(tool["tool_name"], tool["raw_arguments"], tool["outcome"], tool["observation"])
+print(trajectory["final"], trajectory["totals"])
+```
+
+The structure (`omnicoreagent.trajectory/v1`) holds the request, the harness
+header and versions, runtime messages, and each step's context assemblies,
+model calls (request, response, facts, and the observations it newly
+received), and tool calls (raw and parsed arguments, outcome, governance
+decisions, result, and the exact observation returned to the model). A
+delegated run is nested under the tool call that started it
+(`subagent.child_trajectory`). The final section, the run totals, and the
+capture gaps close it. Every event of the trace appears once: events that fit
+no named slot are listed in `other_events` where they occurred, so nothing is
+hidden. Payloads appear only where the capture policy recorded them; each is
+paired with its capture state. OmniServe serves the same structure at
+`GET /telemetry/runs/{run_id}/trajectory` and
+`GET /telemetry/traces/{trace_id}/trajectory`.
+
+### Run header
+
+Before the first model step, every run records a `run_configuration` event
+describing the harness the model ran with: model and generation settings (never
+credentials), step and token limits, context management, memory and tool
+offload settings, enabled features, governance policy hash, configuration
+fingerprints, the model-facing tool catalog (count, sorted names, providers, and
+schema digest), the system prompt digest, and `mcp_servers`: each configured MCP
+server's status, reported name and version, protocol version, tool count,
+reconnects, and last error (never its command, URL, environment, or headers). The prompt text itself is recorded
+only with `capture: "full"`. The header lives in the event metadata, so it is
+recorded under every capture policy.
+
+When a project's `AGENTS.md` instructions are configured, the header also
+records `project_instructions`: each file used (path, size, digest) and each
+one skipped, with the reason.
+
+The header also lists `security_warnings`, each with a `code` and a message,
+for configurations where code runs with less protection than a reader might
+assume: `ungoverned_host_scripts` (skill scripts on the host with governance
+off), `sandbox_unused_without_governance` (a sandbox is configured but nothing
+runs in it because governance is off), and `host_scripts_not_contained` (skill
+scripts are governed but run on the host, not in a sandbox). Each warning is
+also logged once when the agent initializes.
+
+The same run fills the trace's `agent_version`, `prompt_version`,
+`tool_schema_version`, and `memory_config_version`. They are content hashes, so
+two runs with the same harness share them and any change to the prompt, tools,
+model, or settings changes them. Set `agent_config={"agent_version": "..."}` to
+record your own agent version instead.
+
+### Model calls
+
+Every `model_response` event carries a `model_call` record in its metadata, so
+it is kept under every capture policy: the request settings sent, the provider
+response ID and the exact model version served, the finish reason, whether the
+model refused (the refusal text itself follows the response capture policy),
+tokens (`input`, `output`, `total`, and `cached_input` / `reasoning` when the
+provider reports them), `estimated_cost_usd` with its `cost_source` (a LiteLLM
+price-table figure, not an invoiced amount), `latency_ms`, `time_to_first_delta_ms` for streamed
+turns (the first streamed text delta; a turn that streams only tool calls has
+none), and `attempts` with every retried provider failure. When a thinking model
+returns continuation data, `continuation` gives its counts (`thinking_blocks`,
+`redacted_thinking`, `reasoning_items`, `reasoning_details`,
+`tool_call_signatures`) and a `digest`; signatures and encrypted values are
+never recorded, even with `capture: "full"`, where they appear as
+`[opaque sha256:… len=…]` markers. Tokens and cost
+also fill the standard `token_usage` and `estimated_cost_usd` fields of the
+`model.call` span, which exporters map to `gen_ai.usage.*` attributes. A failed call
+records the same attempts on its `model_error` event. The raw tool-call
+argument strings the model produced are in the `model_response` output when
+model responses are recorded (`capture: "full"`).
+
+### Tool calls and observations
+
+A tool call is recorded from request to observation, and every record links to
+the others through event metadata, which is kept under every capture policy:
+
+- `tool_requested` keeps the exact raw argument text the model produced (even
+  invalid JSON) and, when rejected, a `rejection_reason` (`invalid_arguments`,
+  `unknown_tool`, `arguments_rejected`).
+- Execution records (`tool_call`, `tool_result`, `tool_error`) carry the
+  `batch_id`, the model call and response that requested them, and the
+  `tool_requested` / `tool_resolved` event IDs. A call that exceeds its time
+  limit is recorded as `timeout`, distinct from a cancelled run.
+- `tool_observation` is the exact message returned to the model. It carries the
+  `tool_result_event_id` and `tool_span_id` it was built from.
+- Each `context_assembly` lists the `observation_event_ids` in the model's
+  context and the `new_observation_event_ids` delivered for the first time; the
+  `model_call` event repeats the new ones. That is the link from an
+  observation to the model decision that first saw it.
+- Text the runtime adds to the model context (the current-datetime prefix,
+  empty-response retry, loop recovery) is a `runtime_message` event whose
+  `message_digest` matches the next context's message digest.
+- Every `model_call` records its `purpose`: `agent_turn`, or `context_summary`
+  for internal summarization.
+
+Under governance, at the default capture, tool arguments and delegation
+parameters are recorded redacted: the record shows which arguments a call
+used, not their values. At `capture: "full"`, which already records the
+model's calls, they are recorded as written, through the privacy filter and
+the secret keys like every other payload (a secret inside a model's
+JSON-encoded arguments is redacted too). Policy decisions carry the
+`tool_call_id` they authorized (and the `mcp_server` for MCP calls).
+
+MCP tool calls are recorded like local ones, as `mcp.tool.call` spans and
+`mcp_tool_call` / `mcp_tool_result` / `mcp_tool_error` events. In the
+trajectory each call names its `provider` (`mcp`) and `server` (the configured
+server name). A protocol error keeps its MCP code in the error message, for
+example `MCP error -32602`. When a dropped session is reconnected during a
+call, an `mcp_reconnect` event records it on that call (outcome `reconnected`
+or `failed`, the reason the session dropped, and any reconnect error); the
+trajectory lists these under the call's `reconnects`.
+
+Sandboxed commands are recorded by the governed execution service, the same
+way for every sandbox provider. A session records `sandbox_session_created`
+and `sandbox_session_closed` (with how many commands it ran and how long it
+lived). Each command records `sandbox_exec_started`, then
+`sandbox_exec_completed` or `sandbox_exec_failed` (a non-zero exit, a timeout,
+or an error from the provider). Facts are metadata and are kept under every
+capture policy: session, provider, exit code, whether it timed out, duration,
+output sizes and truncation, and the policy rules that allowed it. The command
+and its stdout and stderr are payloads and follow `record_tool_results`. When
+workspace files are enabled, `sandbox_workspace_sync` records which files were
+copied in, written back, or skipped and why. In the trajectory, each `execute`
+or skill script call lists its `executions` and its `workspace_sync`.
+
+### Run totals
+
+Every run ends with a `run_summary`, recorded in the metadata of its terminal
+event (`final_answer`, or `runtime_error` / `final_state` for failed, cancelled,
+and timed-out runs) and in the root span output: steps; model calls by purpose
+and failures; `input`, `output`, `total`, `cached_input`, and `reasoning`
+tokens; `estimated_cost_usd` and whether every call's cost was known; model
+latency and retries; tool calls by outcome (`success`, `error`, `rejected`,
+`timeout`, `cancelled`, `denied`, `awaiting_approval` for a call paused for a
+person); compressions; runtime messages; subagents and
+their child trace IDs; sandbox executions (sessions, commands, failed, timed
+out); workspace changes, each marked `via` a workspace tool or the sandbox;
+offloaded results; and duration.
+`including_subagents` adds the child runs' tokens and cost. The `final_answer`
+event also carries `final_model_response_event_id`, the model response that
+produced the answer.
+
+`execution_surface` records how the run was entered: `interactive` for a direct
+`agent.run(...)`, `serve` through OmniServe, and `background` for background
+attempts. Label a run or attach external identity without changing execution:
+
+```python
+result = await agent.run(
+    "Summarize the incident",
+    tags=["nightly"],
+    provenance={"evaluation_id": "eval-7", "case_id": "case-42", "trial_id": "3"},
+)
+```
 
 The trace is intentionally dependency-free inside the runtime. Exporters are
 optional adapters layered on top of this internal trace model.
@@ -193,6 +376,14 @@ The presets also read common environment variables:
 `trace_id` remains the exact lookup and export handle. `run_id` can be used for
 correlated export, but when a serving trace and an agent trace share the same
 `run_id`, the latest matching trace is exported.
+
+Large captured values may be represented by content-addressed
+`telemetry://payload/...` references. The built-in payload store writes the
+redacted value to the configured workspace or explicit local payload directory;
+use `agent.read_telemetry_payload(reference)` to retrieve it. Retention runs
+automatically once per agent; `agent.prune_telemetry()` applies it on demand and
+`agent.telemetry_retention_status()` reports what was removed. A payload
+referenced by a kept trace is never removed.
 
 <Tip>
 Use metrics for cost and performance monitoring, events for live UI streaming,

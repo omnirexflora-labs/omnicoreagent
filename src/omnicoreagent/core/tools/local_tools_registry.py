@@ -1,8 +1,12 @@
 import asyncio
 import inspect
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
+from types import UnionType
 
+
+# Built-in tool families governance classifies by their own capabilities.
+INTERNAL_TOOL_PROVIDERS = frozenset({"workspace", "artifact", "skill", "sandbox", "code"})
 
 class Tool:
     def __init__(
@@ -11,12 +15,16 @@ class Tool:
         description: str,
         inputSchema: dict[str, Any],
         function: Callable,
+        idempotent: bool = False,
     ):
         self.name = name
         self.description = description
         self.inputSchema = inputSchema
         self.function = function
         self.provider = "local"
+        # Safe to run again with the same arguments (a recovered run re-runs
+        # an interrupted call only when this is true).
+        self.idempotent = bool(idempotent)
         self.internal_provider = False
         self.is_async = asyncio.iscoroutinefunction(function)
 
@@ -32,21 +40,14 @@ class Tool:
 
     async def execute(self, parameters: dict[str, Any]) -> Any:
         """Execute the tool with extracted parameters"""
-        sig = inspect.signature(self.function)
-        func_params = {}
-
-        for param_name, param in sig.parameters.items():
-            if param_name in parameters:
-                func_params[param_name] = parameters[param_name]
-            elif param.default is not inspect.Parameter.empty:
-                func_params[param_name] = param.default
-            else:
-                raise ValueError(f"Missing required parameter: {param_name}")
-
+        try:
+            bound = inspect.signature(self.function).bind(**parameters)
+        except TypeError as exc:
+            raise ValueError(f"Invalid tool arguments: {exc}") from exc
+        bound.apply_defaults()
         if self.is_async:
-            return await self.function(**func_params)
-        else:
-            return self.function(**func_params)
+            return await self.function(*bound.args, **bound.kwargs)
+        return await asyncio.to_thread(self.function, *bound.args, **bound.kwargs)
 
     def __repr__(self):
         return f"<Tool name={self.name} async={self.is_async}>"
@@ -95,7 +96,16 @@ class ToolRegistry:
         name: str | None = None,
         inputSchema: dict[str, Any] | None = None,
         description: str = "",
+        idempotent: bool = False,
     ):
+        """Register a function as a tool.
+
+        ``idempotent=True`` declares that running it again with the same
+        arguments has no further effect, so a run recovered after a crash may
+        re-run an interrupted call; otherwise the model is told its outcome
+        is unknown.
+        """
+
         def decorator(func: Callable):
             tool_name = name or func.__name__.lower()
 
@@ -110,6 +120,7 @@ class ToolRegistry:
                 description=final_description.strip(),
                 inputSchema=final_schema,
                 function=func,
+                idempotent=idempotent,
             )
             self.tools[tool_name.lower()] = tool
             self._internal_tool_providers.pop(tool_name.lower(), None)
@@ -125,9 +136,10 @@ class ToolRegistry:
         if tool is None:
             raise ValueError(f"Tool '{name}' not found")
         normalized_provider = provider.strip().lower()
-        if normalized_provider not in {"workspace", "artifact"}:
+        if normalized_provider not in INTERNAL_TOOL_PROVIDERS:
             raise ValueError(
-                "internal tool provider must be either 'workspace' or 'artifact'"
+                "internal tool provider must be one of "
+                + ", ".join(repr(p) for p in sorted(INTERNAL_TOOL_PROVIDERS))
             )
         self._internal_tool_providers[name.lower()] = normalized_provider
         tool.provider = normalized_provider
@@ -135,6 +147,10 @@ class ToolRegistry:
 
     def get_tool_provider(self, name: str) -> str:
         return self._internal_tool_providers.get(name.lower(), "local")
+
+    def is_idempotent(self, name: str) -> bool:
+        tool = self.get_tool(name)
+        return bool(getattr(tool, "idempotent", False))
 
     def list_tools(self) -> list[Tool]:
         return list(self.tools.values())
@@ -165,6 +181,10 @@ class ToolRegistry:
         sig = inspect.signature(func)
         props = {}
         required = []
+        try:
+            annotations = get_type_hints(func)
+        except (NameError, TypeError):
+            annotations = {}
 
         docstring = func.__doc__ or ""
         doc_lines = [line.strip() for line in docstring.split("\n") if ":" in line]
@@ -176,7 +196,10 @@ class ToolRegistry:
                 param_docs[parts[0].strip()] = parts[1].strip()
 
         for param_name, param in sig.parameters.items():
-            if param_name == "self":
+            if param_name == "self" or param.kind in {
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            }:
                 continue
 
             param_type = (
@@ -184,7 +207,7 @@ class ToolRegistry:
                 if param.annotation is not inspect.Parameter.empty
                 else str
             )
-            schema = {"type": self._map_type(param_type)}
+            schema = self._schema_for_type(annotations.get(param_name, param_type))
 
             if param_name in param_docs:
                 schema["description"] = param_docs[param_name]
@@ -200,6 +223,31 @@ class ToolRegistry:
             "required": required,
             "additionalProperties": False,
         }
+
+    def _schema_for_type(self, annotation: Any) -> dict[str, Any]:
+        origin = get_origin(annotation)
+        args = get_args(annotation)
+        if annotation is Any:
+            return {}
+        if annotation is type(None):
+            return {"type": "null"}
+        if origin in {Union, UnionType}:
+            return {"anyOf": [self._schema_for_type(item) for item in args]}
+        if origin is Literal:
+            return {"enum": list(args)}
+        if annotation is list or origin is list:
+            return {
+                "type": "array",
+                "items": self._schema_for_type(args[0]) if args else {},
+            }
+        if annotation is dict or origin is dict:
+            return {
+                "type": "object",
+                "additionalProperties": self._schema_for_type(args[1])
+                if len(args) > 1
+                else True,
+            }
+        return {"type": self._map_type(annotation)}
 
     def _map_type(self, typ: Any) -> str:
         type_map = {

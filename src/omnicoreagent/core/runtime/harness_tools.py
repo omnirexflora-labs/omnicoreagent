@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from omnicoreagent.core.runtime.imports import runtime
+from omnicoreagent.core.tools.mcp_results import mcp_tool_definition
 
 
 def prepare_dynamic_subagents(
@@ -17,6 +18,7 @@ def prepare_dynamic_subagents(
     memory_router: Any,
     governance_engine: Any = None,
     debug: bool,
+    telemetry_recorder: Any = None,
 ) -> tuple[Any, Any]:
     if not enabled:
         return existing_factory, local_tools
@@ -36,25 +38,11 @@ def prepare_dynamic_subagents(
         prompt_builder=prompt_builder,
         memory_router=memory_router,
         governance_engine=governance_engine,
+        telemetry_recorder=telemetry_recorder,
         debug=debug,
     )
     runtime("build_subagent_tools")(factory, local_tools)
     return factory, local_tools
-
-
-def index_tools_for_advanced_use(
-    *,
-    enabled: bool,
-    mcp_tools: dict[str, Any] | None = None,
-    local_tools: Any = None,
-):
-    if not enabled:
-        return
-
-    runtime("AdvanceToolsUse")().load_and_process_tools(
-        mcp_tools=mcp_tools,
-        local_tools=local_tools,
-    )
 
 
 def available_tools(mcp_client: Any, local_tools: Any) -> list[dict[str, Any]]:
@@ -71,17 +59,4 @@ def available_tools(mcp_client: Any, local_tools: Any) -> list[dict[str, Any]]:
 
 
 def _available_mcp_tool(tool: Any) -> dict[str, Any]:
-    if isinstance(tool, dict):
-        return {
-            "name": tool.get("name", ""),
-            "description": tool.get("description", ""),
-            "inputSchema": tool.get("inputSchema", {}),
-            "type": "mcp",
-        }
-
-    return {
-        "name": tool.name,
-        "description": tool.description,
-        "inputSchema": tool.inputSchema,
-        "type": "mcp",
-    }
+    return {**mcp_tool_definition(tool), "type": "mcp"}
