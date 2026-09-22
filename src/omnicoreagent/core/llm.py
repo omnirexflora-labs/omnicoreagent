@@ -139,7 +139,29 @@ def retry_with_backoff(max_retries=3, base_delay=1, max_delay=60, backoff_factor
     return decorator
 
 
+# An account that cannot pay or authenticate stays that way however long one
+# waits. Providers send some of these as 429s, which read as rate limits: the
+# steward's account ran out of credits and every call was retried four times.
+_ACCOUNT_ERRORS = {
+    "insufficient_quota": "the provider account has no credits left (insufficient_quota)",
+    "credit_balance_exhausted": "the provider account has no credits left (insufficient_quota)",
+    "billing_hard_limit_reached": "the provider account reached its billing limit",
+    "invalid_api_key": "the provider rejected the API key (invalid_api_key)",
+    "incorrect api key": "the provider rejected the API key (invalid_api_key)",
+    "authenticationerror": "the provider rejected the API key",
+    "permission_denied": "the provider account is not allowed to use this model",
+}
+
+
+def account_error(exc: BaseException) -> str | None:
+    """What is wrong with the provider account, when that is the error."""
+    text = str(exc).lower()
+    return next((reason for marker, reason in _ACCOUNT_ERRORS.items() if marker in text), None)
+
+
 def _is_retryable(exc: Exception) -> bool:
+    if account_error(exc) is not None:
+        return False
     error_msg = str(exc).lower()
     return any(
         keyword in error_msg
