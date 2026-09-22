@@ -237,3 +237,57 @@ async def test_the_agent_execute_tool_works_on_its_workspace_files(tmp_path):
     ]
     assert writes, "the copy back must be authorized like any workspace write"
     assert _containers() == before
+
+
+async def test_the_bridge_records_one_summary_of_its_checks_not_one_per_file(tmp_path):
+    """Telemetry storage plan, T3: 8,812 of the steward's 10,831 policy
+    requests were this bridge checking workspace files one by one, each
+    recorded as a request and an allow. A copy records one summary; a file
+    it refuses is still recorded on its own."""
+    from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
+
+    policy = build_default_policy("interactive-dev")
+    policy.rules.deny.insert(
+        0,
+        PolicyRule(
+            rule_id="deny_secret_reads",
+            effect=PolicyEffect.DENY,
+            capability="workspace.files.read",
+            target={"path": "secret/*"},
+        ),
+    )
+    files = LocalWorkspaceStorage(tmp_path / "ws" / "files")
+    for number in range(30):
+        files.write_text(f"notes/{number}.txt", f"note {number}")
+    files.write_text("secret/key.txt", "do not share")
+    model = ScriptedModel([("c1", "execute", json.dumps({"command": "ls notes | wc -l"}))], "done")
+    agent = OmniCoreAgent(
+        name="bridge-summary",
+        system_instruction="Count the notes.",
+        model_config=_MODEL,
+        agent_config={
+            "guardrail_mode": "off",
+            "enable_workspace_files": True,
+            "workspace_config": {"workspace_dir": str(tmp_path / "ws")},
+            "governance_config": {
+                "enabled": True,
+                "policy": attach_policy_hash(policy),
+                "sandbox_config": {"provider": "docker", "options": {"image": "alpine:3.20"}},
+            },
+        },
+        telemetry_config={"capture": "full"},
+    )
+    await agent.initialize()
+    agent.llm_connection = model
+    result = await agent.run("count", session_id="bridge-summary")
+    trace = await agent.telemetry_store.get_trace(result["trace_id"])
+
+    bridge_requests = [
+        e for e in trace.events
+        if e.event_type == "policy_request_created"
+        and ((e.input or {}).get("request") or {}).get("metadata", {}).get("purpose") == "sandbox workspace bridge"
+    ]
+    assert [r.input["request"]["target"]["path"] for r in bridge_requests] == ["secret/key.txt"]
+    (summary,) = [e for e in trace.events if e.event_type == "policy_decisions_summarized"]
+    assert summary.output["allowed"] >= 30 and summary.output["denied"] == ["secret/key.txt"], summary.output
+    assert summary.output["purpose"] == "sandbox workspace bridge"

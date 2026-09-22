@@ -18,6 +18,7 @@ GOVERNANCE_EVENT_TYPES = frozenset(
         "policy_decision_allow",
         "policy_decision_ask",
         "policy_decision_deny",
+        "policy_decisions_summarized",
         "approval_request_created",
         "approval_resolved",
         "sandbox_session_created",
@@ -77,6 +78,31 @@ async def emit_policy_decision(
         output={"decision": to_plain(decision)},
         metadata=metadata,
         strict=strict,
+    )
+
+
+async def emit_policy_summary(
+    recorder: TelemetryRecorder | None,
+    *,
+    purpose: str,
+    capability: str,
+    allowed: int,
+    denied: list[str],
+) -> None:
+    """Routine checks, recorded as one: how many were allowed, which were not
+    (each refusal is also recorded on its own)."""
+    if recorder is None or not (allowed or denied):
+        return
+    await _emit(
+        recorder,
+        "policy_decisions_summarized",
+        output={
+            "purpose": purpose,
+            "capability": capability,
+            "allowed": allowed,
+            "denied": denied,
+        },
+        metadata={"purpose": purpose, "capability": capability},
     )
 
 

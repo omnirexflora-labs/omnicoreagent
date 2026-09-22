@@ -69,6 +69,8 @@ class WorkspaceBridge:
     ) -> None:
         self.storage = storage
         self.governance_engine = governance_engine
+        # Checks made during one copy, recorded as one summary after it.
+        self._checks: dict[str, dict[str, Any]] = {}
         self.privacy_filter = privacy_filter
         self.max_files = max_files
         self.max_file_bytes = max_file_bytes
@@ -91,6 +93,7 @@ class WorkspaceBridge:
         Returns the paths copied in.
         """
         entries = await asyncio.to_thread(self._workspace_files)
+        self._checks = {}
         uploads: dict[str, bytes] = {}
         total = 0
         for path, modified_at in entries[: self.max_files]:
@@ -113,6 +116,7 @@ class WorkspaceBridge:
             self._in_sandbox[path] = digest
         if uploads:
             await service._runtime().upload_files(session.session_id, uploads)
+        await self._record_checks()
         return sorted(uploads)
 
     def _workspace_files(self) -> list[tuple[str, Any]]:
@@ -139,6 +143,7 @@ class WorkspaceBridge:
 
         written: list[str] = []
         skipped: list[dict[str, str]] = []
+        self._checks = {}
         listing = await service.execute(
             SandboxCommandSpec(
                 command=["sh", "-c", _LIST_SCRIPT, str(self.max_file_bytes)],
@@ -190,6 +195,7 @@ class WorkspaceBridge:
             for item in entries:
                 if str(item.path).replace("\\", "/").strip("/") == path:
                     self._copied_in_at[path] = item.modified_at
+        await self._record_checks()
         return {"written": written, "skipped": skipped}
 
     # --- helpers --------------------------------------------------------------
@@ -206,12 +212,34 @@ class WorkspaceBridge:
             # "files/" from their arguments, the bridge does not.
             request.target = AuthorityTarget(path=path, tool_name=tool_name)
             request.metadata["purpose"] = "sandbox workspace bridge"
+        checks = self._checks.setdefault(
+            tool_name, {"capability": requests[0].capability if requests else "", "allowed": 0, "denied": []}
+        )
         try:
-            await self.governance_engine.authorize_all(requests)
+            # Each file is checked; only a refusal is recorded on its own. The
+            # rest are one summary per copy: the steward's trace held 8,812
+            # recorded "allow"s for files copied into its sandboxes.
+            await self.governance_engine.authorize_all(requests, record_allows=False)
         except (PolicyDeniedError, ApprovalRequiredError):
             # Anything else (budget, audit, evaluation failure) stops the command.
+            checks["denied"].append(path)
             return False
+        checks["allowed"] += 1
         return True
+
+    async def _record_checks(self) -> None:
+        from omnicoreagent.governance.telemetry import emit_policy_summary
+
+        recorder = getattr(self.governance_engine, "telemetry_recorder", None)
+        for checks in self._checks.values():
+            await emit_policy_summary(
+                recorder,
+                purpose="sandbox workspace bridge",
+                capability=checks["capability"],
+                allowed=checks["allowed"],
+                denied=checks["denied"],
+            )
+        self._checks = {}
 
 
 def _parse_listing(stdout: str) -> list[tuple[int, str, str]]:
