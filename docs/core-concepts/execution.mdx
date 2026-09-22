@@ -56,6 +56,18 @@ back as governed workspace writes. The sandbox never mounts your workspace,
 and a file the policy protects is not copied in or out
 ([security model](/docs/core-concepts/security-model)).
 
+Two things never come back: a folder a command made that holds a `.git` (a
+checkout; clone repositories outside the workspace folder, the model is told
+so), and a background run's own records (`run.json`, `events.jsonl`), which
+also never go in. To copy less, give the bridge glob patterns over workspace
+paths; `*` crosses folders, and the default copies everything:
+
+```python
+"governance_config": {
+    "workspace_bridge": {"include": ["src/*", "data/*.csv"], "exclude": ["data/archive/*"]},
+}
+```
+
 ## In the trace
 
 Each run records its sandbox session (with the provider's own name for it,

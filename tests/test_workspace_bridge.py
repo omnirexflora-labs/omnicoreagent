@@ -291,3 +291,82 @@ async def test_the_bridge_records_one_summary_of_its_checks_not_one_per_file(tmp
     (summary,) = [e for e in trace.events if e.event_type == "policy_decisions_summarized"]
     assert summary.output["allowed"] >= 30 and summary.output["denied"] == ["secret/key.txt"], summary.output
     assert summary.output["purpose"] == "sandbox workspace bridge"
+
+
+async def test_a_git_checkout_made_in_the_sandbox_does_not_come_back(tmp_path):
+    """Workspace bridge plan, W1. A steward worker cloned the repository
+    inside the bridged folder; the bridge copied the working tree back (470
+    files, twice), and every later run copied it into its sandbox again. A
+    folder with a .git is a checkout, not the agent's output."""
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+
+    async with _scope(storage).active() as scope:
+        result = await _sh(
+            scope,
+            "mkdir -p clone/.git clone/src && echo ref > clone/.git/HEAD && "
+            "echo code > clone/src/a.py && echo readme > clone/README.md && echo done > report.txt",
+        )
+
+    assert storage.exists("report.txt")
+    assert not storage.exists("clone/README.md") and not storage.exists("clone/src/a.py")
+    skipped = result.metadata["workspace"]["skipped"]
+    (checkout,) = [item for item in skipped if item["path"] == "clone"]
+    assert "git checkout" in checkout["reason"] and "outside the workspace" in checkout["reason"]
+
+
+async def test_a_workspace_that_is_itself_a_repository_still_comes_back(tmp_path):
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+
+    async with _scope(storage).active() as scope:
+        await _sh(scope, "mkdir -p .git && echo ref > .git/HEAD && echo kept > notes.txt")
+
+    assert storage.exists("notes.txt")
+
+
+async def test_the_runtimes_own_run_records_do_not_go_into_the_sandbox(tmp_path):
+    """Workspace bridge plan, W2. The background layer keeps each run's
+    records (run.json, events.jsonl) in the workspace; every sandbox got
+    every earlier run's records. What an agent wrote in a run's folder still
+    goes in."""
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+    storage.write_text("background/steward/triage/run_0123abcd/run.json", "{}")
+    storage.write_text("background/steward/triage/run_0123abcd/events.jsonl", "{}\n")
+    storage.write_text("background/steward/triage/run_0123abcd/output.md", "the answer")
+    storage.write_text("notes/run.json", "an agent's own file of that name")
+
+    async with _scope(storage).active() as scope:
+        result = await _sh(scope, "find . -type f | sort")
+
+        forged = await _sh(scope, "mkdir -p background/x/y/run_9 && echo forged > background/x/y/run_9/run.json")
+
+    listed = result.stdout
+    assert "output.md" in listed and "notes/run.json" in listed
+    assert "run_0123abcd/run.json" not in listed and "events.jsonl" not in listed
+    # Nor does a command write one back over the runtime's.
+    assert not storage.exists("background/x/y/run_9/run.json")
+    assert "background/x/y/run_9/run.json" in [i["path"] for i in forged.metadata["workspace"]["skipped"]]
+
+
+async def test_patterns_choose_what_the_bridge_copies_either_way(tmp_path):
+    """Workspace bridge plan, W3: a deployment with a large workspace says
+    what its sandboxes need. The default copies everything."""
+    from omnicoreagent.sandbox import SandboxExecutionService
+    from omnicoreagent.sandbox.scope import ExecutionScope
+    from omnicoreagent.sandbox.workspace_bridge import WorkspaceBridge
+
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+    storage.write_text("src/app.py", "print(1)")
+    storage.write_text("archive/old.csv", "a,b")
+    storage.write_text("notes.md", "notes")
+    engine = _engine()
+    bridge = WorkspaceBridge(storage, governance_engine=engine, include=["src/*", "notes.md", "out/*"], exclude=["src/secret*"])
+    storage.write_text("src/secret.env", "KEY=1")
+
+    async with ExecutionScope(SandboxExecutionService(engine), workspace_bridge=bridge).active() as scope:
+        result = await _sh(scope, "find . -type f | sort; mkdir -p out archive; echo r > out/r.txt; echo x > archive/new.csv")
+
+    assert "./src/app.py" in result.stdout and "./notes.md" in result.stdout
+    assert "archive/old.csv" not in result.stdout and "secret.env" not in result.stdout
+    assert storage.exists("out/r.txt") and not storage.exists("archive/new.csv")
+    skipped = {item["path"]: item["reason"] for item in result.metadata["workspace"]["skipped"]}
+    assert "patterns" in skipped["archive/new.csv"]

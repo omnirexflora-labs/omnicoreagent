@@ -348,10 +348,13 @@ class BaseReactAgent:
         from omnicoreagent.sandbox.workspace_bridge import WorkspaceBridge
 
         registry = self.tool_runtime_registry
+        patterns = getattr(self.governance_engine, "workspace_bridge", None) or {}
         return WorkspaceBridge(
             registry._workspace_for_runtime_tools().files,
             governance_engine=self.governance_engine,
             privacy_filter=registry.privacy_filter,
+            include=patterns.get("include"),
+            exclude=patterns.get("exclude"),
         )
 
     def _project_instructions(self):

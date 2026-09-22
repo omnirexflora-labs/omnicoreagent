@@ -48,6 +48,7 @@ class GovernanceEngine:
         telemetry_recorder: TelemetryRecorder | None = None,
         sandbox_runtime=None,
         sandbox_manifest=None,
+        workspace_bridge: dict | None = None,
         allow_test_sandbox_runtime: bool = False,
         allow_static_high_risk_approvals: bool = False,
     ) -> None:
@@ -60,6 +61,8 @@ class GovernanceEngine:
         self.sandbox_runtime = sandbox_runtime
         # What each run's sandbox is; None means the runtime's default.
         self.sandbox_manifest = sandbox_manifest
+        # What the workspace bridge copies into and out of each sandbox.
+        self.workspace_bridge = dict(workspace_bridge or {})
         self.allow_test_sandbox_runtime = allow_test_sandbox_runtime
         self.allow_static_high_risk_approvals = allow_static_high_risk_approvals
         self._budget_lock = asyncio.Lock()

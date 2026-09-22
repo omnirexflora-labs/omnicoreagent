@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING, Any
 
 from omnicoreagent.core.workspace.paths import normalize_workspace_path
@@ -45,7 +46,10 @@ LIST_TIMEOUT_SECONDS = 60
 # Lists regular files under the working directory, skipping hidden paths, as
 # "<size> <sha256 or -> <./path>" lines. `find` does not follow links, and a
 # link is not a regular file, so links are never listed.
+# First every nested ``.git`` (a checkout: size 0, no digest), then the files.
 _LIST_SCRIPT = (
+    "find . -mindepth 2 -name .git -prune -exec sh -c "
+    "'for f do printf \"0 - %s\\n\" \"$f\"; done' sh {} + ; "
     "find . \\( -name '.*' ! -name . \\) -prune -o -type f -exec sh -c '"
     "limit=$1; shift; "
     "for f do "
@@ -66,8 +70,14 @@ class WorkspaceBridge:
         max_files: int = DEFAULT_MAX_FILES,
         max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
         max_total_bytes: int = DEFAULT_MAX_TOTAL_BYTES,
+        include: list[str] | None = None,
+        exclude: list[str] | None = None,
     ) -> None:
         self.storage = storage
+        # Globs over workspace paths (``*`` crosses folders): what the bridge
+        # copies either way. No include copies everything not excluded.
+        self.include = list(include or [])
+        self.exclude = list(exclude or [])
         self.governance_engine = governance_engine
         # Checks made during one copy, recorded as one summary after it.
         self._checks: dict[str, dict[str, Any]] = {}
@@ -125,7 +135,9 @@ class WorkspaceBridge:
         while pending and len(found) < self.max_files:
             for item in self.storage.list_files(pending.pop()):
                 path = str(item.path).replace("\\", "/").strip("/")
-                if _hidden(path):
+                if _hidden(path) or _run_record(path):
+                    continue
+                if not item.is_dir and not self._wanted(path):
                     continue
                 if item.is_dir:
                     pending.append(path)
@@ -156,12 +168,40 @@ class WorkspaceBridge:
             return {"written": written, "skipped": [{"path": ".", "reason": "could not list the sandbox files"}]}
         runtime = service._runtime()
         total = 0
-        for size, digest, raw_path in _parse_listing(listing.stdout)[: self.max_files]:
+        listed = _parse_listing(listing.stdout)
+        # A folder the command made that holds a .git is a checkout, not the
+        # agent's output: a steward worker cloned the repository inside the
+        # bridged folder and its 470 files came back into the workspace, and
+        # into every sandbox after. The workspace itself may be a repository.
+        checkouts = sorted(
+            {path.rpartition("/")[0] for _, _, path in listed if path.endswith("/.git")} - {""}
+        )
+        for checkout in checkouts:
+            skipped.append(
+                {
+                    "path": checkout,
+                    "reason": "a git checkout; not copied back: clone repositories "
+                    "outside the workspace folder",
+                }
+            )
+        for size, digest, raw_path in [entry for entry in listed if not entry[2].endswith("/.git")][
+            : self.max_files
+        ]:
             try:
                 path = normalize_workspace_path(raw_path)
             except ValueError:
                 continue
             if not path or _hidden(path) or self._in_sandbox.get(path) == digest:
+                continue
+            if any(path == c or path.startswith(c + "/") for c in checkouts):
+                continue
+            if _run_record(path):
+                skipped.append({"path": path, "reason": "a background run's record; the runtime's own"})
+                self._in_sandbox[path] = digest
+                continue
+            if not self._wanted(path):
+                skipped.append({"path": path, "reason": "outside the bridge's include/exclude patterns"})
+                self._in_sandbox[path] = digest
                 continue
             if size > self.max_file_bytes or total + size > self.max_total_bytes:
                 skipped.append({"path": path, "reason": f"too large to copy back ({size} bytes)"})
@@ -227,6 +267,11 @@ class WorkspaceBridge:
         checks["allowed"] += 1
         return True
 
+    def _wanted(self, path: str) -> bool:
+        if self.include and not any(fnmatchcase(path, p) for p in self.include):
+            return False
+        return not any(fnmatchcase(path, p) for p in self.exclude)
+
     async def _record_checks(self) -> None:
         from omnicoreagent.governance.telemetry import emit_policy_summary
 
@@ -253,6 +298,16 @@ def _parse_listing(stdout: str) -> list[tuple[int, str, str]]:
             continue
         entries.append((int(size), digest, path[2:]))
     return sorted(entries, key=lambda entry: entry[2])
+
+
+_RUN_RECORDS = frozenset({"run.json", "events.jsonl"})
+
+
+def _run_record(path: str) -> bool:
+    """A background run's own record (``run_<id>/run.json``, ``events.jsonl``):
+    the runtime's, not the agent's; every sandbox got every earlier run's."""
+    parent, _, name = path.rpartition("/")
+    return name in _RUN_RECORDS and parent.rpartition("/")[2].startswith("run_")
 
 
 def _hidden(path: str) -> bool:

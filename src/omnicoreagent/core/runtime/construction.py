@@ -269,6 +269,7 @@ def build_governance_engine(agent_config: dict[str, Any], telemetry_recorder: An
         telemetry_recorder=telemetry_recorder,
         sandbox_runtime=sandbox_runtime,
         sandbox_manifest=sandbox_manifest,
+        workspace_bridge=governance_config.get("workspace_bridge"),
         allow_test_sandbox_runtime=governance_config.get(
             "allow_test_sandbox_runtime", False
         ),
