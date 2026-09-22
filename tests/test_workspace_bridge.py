@@ -291,3 +291,33 @@ async def test_the_bridge_records_one_summary_of_its_checks_not_one_per_file(tmp
     (summary,) = [e for e in trace.events if e.event_type == "policy_decisions_summarized"]
     assert summary.output["allowed"] >= 30 and summary.output["denied"] == ["secret/key.txt"], summary.output
     assert summary.output["purpose"] == "sandbox workspace bridge"
+
+
+async def test_a_git_checkout_made_in_the_sandbox_does_not_come_back(tmp_path):
+    """Workspace bridge plan, W1. A steward worker cloned the repository
+    inside the bridged folder; the bridge copied the working tree back (470
+    files, twice), and every later run copied it into its sandbox again. A
+    folder with a .git is a checkout, not the agent's output."""
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+
+    async with _scope(storage).active() as scope:
+        result = await _sh(
+            scope,
+            "mkdir -p clone/.git clone/src && echo ref > clone/.git/HEAD && "
+            "echo code > clone/src/a.py && echo readme > clone/README.md && echo done > report.txt",
+        )
+
+    assert storage.exists("report.txt")
+    assert not storage.exists("clone/README.md") and not storage.exists("clone/src/a.py")
+    skipped = result.metadata["workspace"]["skipped"]
+    (checkout,) = [item for item in skipped if item["path"] == "clone"]
+    assert "git checkout" in checkout["reason"] and "outside the workspace" in checkout["reason"]
+
+
+async def test_a_workspace_that_is_itself_a_repository_still_comes_back(tmp_path):
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+
+    async with _scope(storage).active() as scope:
+        await _sh(scope, "mkdir -p .git && echo ref > .git/HEAD && echo kept > notes.txt")
+
+    assert storage.exists("notes.txt")

@@ -45,7 +45,10 @@ LIST_TIMEOUT_SECONDS = 60
 # Lists regular files under the working directory, skipping hidden paths, as
 # "<size> <sha256 or -> <./path>" lines. `find` does not follow links, and a
 # link is not a regular file, so links are never listed.
+# First every nested ``.git`` (a checkout: size 0, no digest), then the files.
 _LIST_SCRIPT = (
+    "find . -mindepth 2 -name .git -prune -exec sh -c "
+    "'for f do printf \"0 - %s\\n\" \"$f\"; done' sh {} + ; "
     "find . \\( -name '.*' ! -name . \\) -prune -o -type f -exec sh -c '"
     "limit=$1; shift; "
     "for f do "
@@ -156,12 +159,32 @@ class WorkspaceBridge:
             return {"written": written, "skipped": [{"path": ".", "reason": "could not list the sandbox files"}]}
         runtime = service._runtime()
         total = 0
-        for size, digest, raw_path in _parse_listing(listing.stdout)[: self.max_files]:
+        listed = _parse_listing(listing.stdout)
+        # A folder the command made that holds a .git is a checkout, not the
+        # agent's output: a steward worker cloned the repository inside the
+        # bridged folder and its 470 files came back into the workspace, and
+        # into every sandbox after. The workspace itself may be a repository.
+        checkouts = sorted(
+            {path.rpartition("/")[0] for _, _, path in listed if path.endswith("/.git")} - {""}
+        )
+        for checkout in checkouts:
+            skipped.append(
+                {
+                    "path": checkout,
+                    "reason": "a git checkout; not copied back: clone repositories "
+                    "outside the workspace folder",
+                }
+            )
+        for size, digest, raw_path in [entry for entry in listed if not entry[2].endswith("/.git")][
+            : self.max_files
+        ]:
             try:
                 path = normalize_workspace_path(raw_path)
             except ValueError:
                 continue
             if not path or _hidden(path) or self._in_sandbox.get(path) == digest:
+                continue
+            if any(path == c or path.startswith(c + "/") for c in checkouts):
                 continue
             if size > self.max_file_bytes or total + size > self.max_total_bytes:
                 skipped.append({"path": path, "reason": f"too large to copy back ({size} bytes)"})
