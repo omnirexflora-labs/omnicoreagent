@@ -181,7 +181,7 @@ async def test_trajectory_from_a_reloaded_file_is_identical():
 
 @pytest.mark.asyncio
 async def test_default_capture_keeps_structure_and_states_what_is_missing():
-    _, trace, trajectory = await _run(await _parent(TelemetryConfig()))
+    _, trace, trajectory = await _run(await _parent(TelemetryConfig(capture="default")))
 
     first = trajectory["steps"][0]
     assert first["model_calls"][0]["response"] is None

@@ -54,7 +54,11 @@ class TelemetryConfig:
     memory_max_traces: int | None = 1000
     # A preset fills every ``record_*`` field left unset (``None``); a field
     # set explicitly always wins. After construction all are booleans.
-    capture: str = "default"
+    # ``full`` is the default (the maintainer's decision, 2026-09-22): a
+    # trace is worth keeping only if it holds what the model was sent, and a
+    # trainer or an evaluator cannot use one that does not. ``default`` is
+    # the privacy-first preset for a deployment that must not record prompts.
+    capture: str = "full"
     record_inputs: bool | None = None
     record_outputs: bool | None = None
     record_model_prompts: bool | None = None

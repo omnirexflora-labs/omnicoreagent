@@ -886,7 +886,7 @@ async def test_privacy_flags_block_model_and_tool_payloads():
     store = InMemoryTelemetryStore()
     recorder = TelemetryRecorder(
         store,
-        TelemetryConfig(record_tool_results=False),
+        TelemetryConfig(capture="default", record_tool_results=False),
     )
     await recorder.start_trace(trace_id="trace-privacy")
     await recorder.emit_event("model_call", input={"prompt": "secret prompt"})

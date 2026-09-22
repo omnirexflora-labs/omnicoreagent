@@ -168,7 +168,7 @@ fingerprints, the model-facing tool catalog (count, sorted names, providers, and
 schema digest), the system prompt digest, and `mcp_servers`: each configured MCP
 server's status, reported name and version, protocol version, tool count,
 reconnects, and last error (never its command, URL, environment, or headers). The prompt text itself is recorded
-only with `capture: "full"`. The header lives in the event metadata, so it is
+only when model prompts are recorded (the default). The header lives in the event metadata, so it is
 recorded under every capture policy.
 
 When a project's `AGENTS.md` instructions are configured, the header also
@@ -209,7 +209,7 @@ also fill the standard `token_usage` and `estimated_cost_usd` fields of the
 `model.call` span, which exporters map to `gen_ai.usage.*` attributes. A failed call
 records the same attempts on its `model_error` event. The raw tool-call
 argument strings the model produced are in the `model_response` output when
-model responses are recorded (`capture: "full"`).
+model responses are recorded (the default; not under `capture: "default"`).
 
 ### Tool calls and observations
 

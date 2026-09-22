@@ -53,6 +53,9 @@ async def _exported_run():
         model_config=_MODEL,
         local_tools=tools,
         agent_config={"guardrail_mode": "off", "enable_workspace_files": False},
+        # The privacy-first preset: a trace with gaps, which is what this
+        # contract is about.
+        telemetry_config={"capture": "default"},
     )
     await agent.initialize()
     agent.llm_connection = ScriptedModel([("call_1", "lookup", '{"key": "a"}')], "done")

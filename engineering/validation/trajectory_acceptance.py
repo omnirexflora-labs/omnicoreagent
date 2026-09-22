@@ -447,7 +447,7 @@ _AGENT_CONFIG = {
 async def build_scripted_agent(*, full_capture: bool):
     from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
 
-    telemetry = {"capture": "full"} if full_capture else {}
+    telemetry = {"capture": "full" if full_capture else "default"}
     child = OmniCoreAgent(
         name="researcher",
         system_instruction="You research one fact.",

@@ -167,7 +167,8 @@ async def test_refusal_text_stays_behind_the_response_capture_policy(monkeypatch
         "finish_reason": "stop",
         "message": {"content": None, "refusal": "I cannot share that private detail."},
     }
-    recorder = TelemetryRecorder(InMemoryTelemetryStore())
+    # The privacy-first preset: the refusal's text is not recorded.
+    recorder = TelemetryRecorder(InMemoryTelemetryStore(), TelemetryConfig(capture="default"))
 
     trace, response, span = await _step(recorder, _Connection(refusal))
 
