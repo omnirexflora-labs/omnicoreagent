@@ -96,6 +96,7 @@ class BackgroundSupervisor:
             worker_id=lambda: self.worker_id,
             lease_seconds=lambda: self.lease_seconds,
             emit_run=self.emit_run,
+            on_terminal=self.close_agent_run,
         )
         self.recovery = BackgroundRunRecovery(
             task_store=self.task_store,
@@ -276,6 +277,27 @@ class BackgroundSupervisor:
 
     async def recover_expired_runs(self) -> None:
         await self.recovery.recover_expired_runs()
+
+    async def close_agent_run(self, run: BackgroundRun, status: RunStatus, error: str | None) -> None:
+        """A run ended here that its agent did not finish: a cancel, a lost
+        worker, a timeout. The agent's own record of it ends too."""
+        closing = {
+            RunStatus.CANCELLED: "cancelled",
+            RunStatus.FAILED: "failed",
+            RunStatus.TIMEOUT: "timeout",
+        }.get(status)
+        if closing is None:
+            return
+        agent = await resolve_agent(
+            agent_id=run.agent_id,
+            agents=self.agents,
+            task_store=self.task_store,
+            memory_router=self.memory_router,
+            telemetry_store=self.telemetry_store,
+        )
+        abandon = getattr(agent, "abandon_run", None)
+        if abandon is not None:
+            await abandon(run.run_id, status=closing, reason=error or closing)
 
     async def checkpoint_of(self, run: BackgroundRun) -> dict[str, Any] | None:
         """The agent's durable record of ``run`` — what ``agent.run(run_id=)``

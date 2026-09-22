@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from omnicoreagent.core.logging import logger
+
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -26,8 +28,11 @@ class BackgroundRunTransitions:
         worker_id: str | Callable[[], str],
         lease_seconds: int | Callable[[], int],
         emit_run: Callable[..., Awaitable[None]],
+        on_terminal: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
         self.task_store = task_store
+        # Told when a run ends here, so what the agent keeps of it ends too.
+        self.on_terminal = on_terminal
         self._worker_id = worker_id if callable(worker_id) else lambda: worker_id
         self._lease_seconds = (
             lease_seconds if callable(lease_seconds) else lambda: lease_seconds
@@ -72,6 +77,11 @@ class BackgroundRunTransitions:
             latest.lease_token,
         )
         await self.emit_run(f"background_run_{status.value}", terminal)
+        if self.on_terminal is not None:
+            try:
+                await self.on_terminal(terminal, status, error)
+            except Exception as exc:  # noqa: BLE001 - the run has ended regardless.
+                logger.warning(f"Closing the agent's record of {terminal.run_id} failed: {exc}")
 
     async def mark_attempt_cancelled(
         self, attempt: BackgroundAttempt, run: BackgroundRun
