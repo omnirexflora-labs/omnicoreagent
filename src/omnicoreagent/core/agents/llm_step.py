@@ -298,7 +298,14 @@ class AgentLlmStepRunner:
             )
 
         except Exception as e:
-            error_message = "Model encountered an error, please do retry again"
+            from omnicoreagent.core.llm import account_error
+
+            reason = account_error(e)
+            error_message = (
+                f"The model call was refused: {reason}. Fix the account; retrying will not help."
+                if reason is not None
+                else f"Model encountered an error ({type(e).__name__}), please do retry again"
+            )
             logger.error(f"{error_message}: {e}")
             return AgentLlmStepResult(
                 error_result={

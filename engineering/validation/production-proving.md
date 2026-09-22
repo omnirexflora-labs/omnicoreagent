@@ -35,7 +35,7 @@ found **twenty-seven things wrong** — twenty of them runtime defects,
 two defaults that were wrong for real work,
 three deployment lessons, two missing capabilities — and fixing them
 surfaced two more in the suite's own acceptance check. Rerunning P3 cleanly
-found eight more: seven runtime defects and one mistake of the model's. P7 has found three more so far. Every
+found eight more: seven runtime defects and one mistake of the model's. P7 has found four more so far. Every
 defect is fixed with a test that fails without the fix; the runtime's test
 suite went from 1,756 to 1,881 tests. None of the steward's twenty-seven were visible to the
 suite before, because the suite's models are scripted and its stores are in
@@ -280,6 +280,13 @@ Each line names the commit; the plan's execution log has the detail.
     only what is running (967 MiB at rest before, 300 MiB after, on the
     server). The sandbox bridge's per-file policy checks, 8,812 of the
     steward's 10,831 policy records, are summarized. (PR #254)
+
+41. **An empty account was a busy provider.** The steward's OpenAI account
+    ran out of credits; the provider answered 429 with `insufficient_quota`,
+    the runtime took it for a rate limit and retried every call four times,
+    and each run failed with "Model encountered an error, please do retry
+    again". Account errors are not retried now, and the run says what is
+    wrong and that retrying will not help. (`654e515`)
 
 ## What it cost
 
