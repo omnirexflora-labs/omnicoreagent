@@ -187,6 +187,7 @@ FOUNDATION_EVENT_TYPES = frozenset(
         "policy_decision_allow",
         "policy_decision_ask",
         "policy_decision_deny",
+        "policy_decisions_summarized",
         "approval_request_created",
         "approval_resolved",
         "sandbox_session_created",

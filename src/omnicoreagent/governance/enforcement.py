@@ -64,11 +64,16 @@ class GovernanceEngine:
         self.allow_static_high_risk_approvals = allow_static_high_risk_approvals
         self._budget_lock = asyncio.Lock()
 
-    async def evaluate(self, request: AuthorityRequest) -> PolicyDecision:
-        await emit_policy_request(self.telemetry_recorder, request)
+    async def evaluate(
+        self, request: AuthorityRequest, *, record_allow: bool = True
+    ) -> PolicyDecision:
+        if record_allow:
+            await emit_policy_request(self.telemetry_recorder, request)
         try:
             decision = self.evaluator.evaluate(self.policy, request)
         except Exception as exc:  # noqa: BLE001 - governance must fail closed.
+            if not record_allow:
+                await emit_policy_request(self.telemetry_recorder, request)
             decision = PolicyDecision(
                 effect=PolicyEffect.DENY,
                 request_id=request.request_id,
@@ -86,14 +91,16 @@ class GovernanceEngine:
                 decision.reason,
                 metadata=_decision_metadata(decision),
             ) from exc
+        audited = decision.constraints.strict_telemetry or decision.constraints.audit_required
+        if not record_allow:
+            if decision.effect == PolicyEffect.ALLOW and not audited:
+                return decision
+            await emit_policy_request(self.telemetry_recorder, request)
         await emit_policy_decision(
             self.telemetry_recorder,
             decision,
             request=request,
-            strict=(
-                decision.constraints.strict_telemetry
-                or decision.constraints.audit_required
-            ),
+            strict=audited,
         )
         return decision
 
@@ -104,8 +111,19 @@ class GovernanceEngine:
     async def authorize_all(
         self,
         requests: list[AuthorityRequest],
+        *,
+        record_allows: bool = True,
     ) -> list[PolicyDecision]:
-        return await self._authorize_all(requests, sandbox_route=False)
+        """Authorize every request, or raise at the first refused.
+
+        ``record_allows=False`` is for routine checks a caller summarizes
+        itself (the sandbox workspace bridge checks each file it copies):
+        an allowed request is then not recorded on its own. A refusal, an
+        ask, a failure, and anything the policy says to audit always are.
+        """
+        return await self._authorize_all(
+            requests, sandbox_route=False, record_allows=record_allows
+        )
 
     async def authorize_sandboxed(self, request: AuthorityRequest) -> PolicyDecision:
         decisions = await self.authorize_all_sandboxed([request])
@@ -122,6 +140,7 @@ class GovernanceEngine:
         requests: list[AuthorityRequest],
         *,
         sandbox_route: bool,
+        record_allows: bool = True,
     ) -> list[PolicyDecision]:
         if not requests:
             return []
@@ -134,7 +153,10 @@ class GovernanceEngine:
                     budget_decision.reason,
                     metadata=_decision_metadata(budget_decision),
                 )
-            decisions = [await self.evaluate(request) for request in requests]
+            decisions = [
+                await self.evaluate(request, record_allow=record_allows)
+                for request in requests
+            ]
             self._require_audit_channel(decisions)
             self._raise_first_denied(decisions)
             for decision in decisions:

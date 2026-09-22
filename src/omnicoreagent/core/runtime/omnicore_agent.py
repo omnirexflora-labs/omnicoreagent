@@ -1790,6 +1790,10 @@ class OmniCoreAgent:
         )
 
     async def _stored_payload_references(self) -> set[str]:
+        # A store that indexes its traces answers without reading them all.
+        indexed = getattr(self.telemetry_store, "payload_references", None)
+        if callable(indexed):
+            return await indexed()
         references: set[str] = set()
         for trace in await self.telemetry_store.list_traces():
             references |= payload_references(trace)
