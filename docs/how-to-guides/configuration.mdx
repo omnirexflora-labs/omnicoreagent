@@ -108,6 +108,14 @@ file unless a path is configured. Every agent and background manager that
 resolves the same file shares one store. Set `storage: "memory"` to keep traces
 in process memory only (bounded by `memory_max_traces`).
 
+The JSONL file holds the traces that are still running, so a crash loses
+nothing. When a trace ends it moves to an archive beside the file
+(`telemetry/traces-archive/`): one file per trace and a SQLite index of what
+each trace is. Memory holds only running traces, reading a trace reads one
+file, and listing by run, session or status is an index query. The log is
+compacted to the running traces once it grows past 16 MiB. An existing
+`traces.jsonl` is migrated on first start, which reads it once.
+
 `capture: "default"` is privacy-first: model prompts and responses are not
 recorded, and the trace marks them `not_recorded`. `capture: "full"` records the
 complete trajectory, including model input and output, still redacted,

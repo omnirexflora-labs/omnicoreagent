@@ -115,7 +115,7 @@ async def test_a_stream_resumes_from_an_old_cursor(archive):
         trace, cursors = _trace(number, run_id=f"run_{number}")
         await archive.put(trace, cursors)
 
-    events = await archive.events_after(21)
+    events = [event for event, _ in await archive.events_after(21)]
 
     assert [int(e.stream_cursor) for e in events] == [22, 30, 31, 32]
     assert all(e.trace_id != f"trace_{1:032x}" for e in events)

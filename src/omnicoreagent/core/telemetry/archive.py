@@ -101,22 +101,38 @@ class TelemetryArchive:
     """Finished traces, one body each, found through a SQLite index."""
 
     def __init__(self, directory: str | Path, *, bodies: Any = None) -> None:
-        from omnicoreagent.core.workspace.storage import LocalWorkspaceStorage
-
+        # Opened on first use: an agent that records nothing pays nothing.
         self.directory = Path(directory)
-        self.directory.mkdir(parents=True, exist_ok=True)
-        self.bodies = bodies if bodies is not None else LocalWorkspaceStorage(self.directory / "bodies")
-        self._connection = sqlite3.connect(
-            self.directory / "index.sqlite", check_same_thread=False, isolation_level=None
-        )
-        self._connection.execute("PRAGMA journal_mode=WAL")
-        self._connection.executescript(_SCHEMA)
+        self._bodies = bodies
+        self._connection: sqlite3.Connection | None = None
         # One connection, used from worker threads one call at a time.
         self._guard = threading.Lock()
 
+    @property
+    def bodies(self) -> Any:
+        if self._bodies is None:
+            from omnicoreagent.core.workspace.storage import LocalWorkspaceStorage
+
+            self._bodies = LocalWorkspaceStorage(self.directory / "bodies")
+        return self._bodies
+
+    def _open(self) -> sqlite3.Connection:
+        """Call with the guard held."""
+        if self._connection is None:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            connection = sqlite3.connect(
+                self.directory / "index.sqlite", check_same_thread=False, isolation_level=None
+            )
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.executescript(_SCHEMA)
+            self._connection = connection
+        return self._connection
+
     def close(self) -> None:
         with self._guard:
-            self._connection.close()
+            if self._connection is not None:
+                self._connection.close()
+                self._connection = None
 
     # --- writing ----------------------------------------------------------
 
@@ -151,7 +167,7 @@ class TelemetryArchive:
         columns = ", ".join(row)
         marks = ", ".join("?" for _ in row)
         with self._guard:
-            self._connection.execute(
+            self._open().execute(
                 f"INSERT OR REPLACE INTO traces ({columns}) VALUES ({marks})",
                 list(row.values()),
             )
@@ -162,10 +178,11 @@ class TelemetryArchive:
     def _remove(self, trace_ids: set[str]) -> None:
         for trace_id in trace_ids:
             with self._guard:
-                row = self._connection.execute(
+                connection = self._open()
+                row = connection.execute(
                     "SELECT body FROM traces WHERE trace_id = ?", (trace_id,)
                 ).fetchone()
-                self._connection.execute("DELETE FROM traces WHERE trace_id = ?", (trace_id,))
+                connection.execute("DELETE FROM traces WHERE trace_id = ?", (trace_id,))
             if row is not None:
                 try:
                     self.bodies.delete(row[0])
@@ -230,15 +247,16 @@ class TelemetryArchive:
                 traces.append(loaded[0])
         return traces
 
-    async def events_after(self, cursor: int) -> list[TelemetryEvent]:
-        """Every archived event after ``cursor``, in cursor order."""
+    async def events_after(self, cursor: int) -> list[tuple[TelemetryEvent, TelemetryTrace]]:
+        """Every archived event after ``cursor``, in cursor order, each with
+        its trace (a stream's scope matches on the trace's run and session)."""
         return await asyncio.to_thread(self._events_after, cursor)
 
-    def _events_after(self, cursor: int) -> list[TelemetryEvent]:
+    def _events_after(self, cursor: int) -> list[tuple[TelemetryEvent, TelemetryTrace]]:
         rows = self._query(
             "SELECT trace_id FROM traces WHERE last_cursor > ? ORDER BY first_cursor", (cursor,)
         )
-        found: list[tuple[int, TelemetryEvent]] = []
+        found: list[tuple[int, TelemetryEvent, TelemetryTrace]] = []
         for (trace_id,) in rows:
             loaded = self._read_body(trace_id)
             if loaded is None:
@@ -248,9 +266,9 @@ class TelemetryArchive:
                 position = cursors.get(event.event_id)
                 if position is not None and position > cursor:
                     event.stream_cursor = str(position)
-                    found.append((position, event))
+                    found.append((position, event, trace))
         found.sort(key=lambda item: item[0])
-        return [event for _, event in found]
+        return [(event, trace) for _, event, trace in found]
 
     async def ended_before(self, cutoff: datetime) -> set[str]:
         rows = await asyncio.to_thread(
@@ -273,4 +291,4 @@ class TelemetryArchive:
 
     def _query(self, sql: str, values: tuple) -> list[tuple]:
         with self._guard:
-            return self._connection.execute(sql, values).fetchall()
+            return self._open().execute(sql, values).fetchall()

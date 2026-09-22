@@ -548,9 +548,18 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         path: str | Path,
         *,
         retention_days: int | None = None,
+        archive: Any = None,
+        compact_bytes: int = 16 * 1024 * 1024,
     ) -> None:
         self.path = Path(path)
         self.retention_days = retention_days
+        # Telemetry storage plan, T5: with an archive, a finished trace moves
+        # there and leaves memory; the log keeps what is still running and is
+        # compacted once it holds more than ``compact_bytes``.
+        self.archive = archive
+        self.compact_bytes = compact_bytes
+        self._finished: set[str] = set()
+        self._log_bytes = 0
         self.skipped_records = 0
         self.last_prune: dict[str, Any] | None = None
         self.removed_total = 0
@@ -568,6 +577,7 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
     async def append_event(self, trace_id: str, event: TelemetryEvent) -> None:
         async with self._lock:
             await self._load_unlocked()
+            await self._ensure_live_unlocked(trace_id)
             # One walk of the event: the same dump is rebuilt as the in-memory
             # copy and written as the line on disk.
             payload = event.model_dump()
@@ -586,6 +596,7 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
     async def end_span(self, trace_id: str, span_id: str, patch: dict[str, Any]) -> None:
         async with self._lock:
             await self._load_unlocked()
+            await self._ensure_live_unlocked(trace_id)
             await self._inner.end_span(trace_id, span_id, patch)
             await self._append_record_unlocked(
                 "span_end",
@@ -595,7 +606,9 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
     async def upsert_trace(self, trace: TelemetryTrace) -> None:
         async with self._lock:
             await self._load_unlocked()
+            await self._ensure_live_unlocked(trace.trace_id)
             await self._inner.upsert_trace(trace)
+            self._note_finished_unlocked(trace.trace_id)
             cursors = await self._inner.event_cursors(trace.trace_id)
             await self._append_record_unlocked(
                 "trace_upsert",
@@ -611,7 +624,9 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
     async def update_trace(self, trace_id: str, patch: dict[str, Any]) -> None:
         async with self._lock:
             await self._load_unlocked()
+            await self._ensure_live_unlocked(trace_id)
             await self._inner.update_trace(trace_id, patch)
+            self._note_finished_unlocked(trace_id)
             await self._append_record_unlocked(
                 "trace_update",
                 {"trace_id": trace_id, "patch": patch},
@@ -620,17 +635,44 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
     async def get_trace(self, trace_id: str) -> TelemetryTrace | None:
         async with self._lock:
             await self._load_unlocked()
-        return await self._inner.get_trace(trace_id)
+        trace = await self._inner.get_trace(trace_id)
+        if trace is None and self.archive is not None:
+            archived = await self.archive.get(trace_id)
+            trace = archived[0] if archived is not None else None
+        return trace
 
     async def peek_trace(self, trace_id: str) -> TelemetryTrace | None:
         async with self._lock:
             await self._load_unlocked()
-        return await self._inner.peek_trace(trace_id)
+        trace = await self._inner.peek_trace(trace_id)
+        if trace is None and self.archive is not None:
+            archived = await self.archive.get(trace_id)
+            trace = archived[0] if archived is not None else None
+        return trace
 
     async def list_traces(self, filter: TraceFilter | None = None) -> list[TelemetryTrace]:
         async with self._lock:
             await self._load_unlocked()
-        return await self._inner.list_traces(filter)
+        traces = await self._inner.list_traces(filter)
+        if self.archive is None:
+            return traces
+        running = {trace.trace_id for trace in traces}
+        archived = [t for t in await self.archive.list(filter) if t.trace_id not in running]
+        return sorted([*traces, *archived], key=_trace_sort_key)
+
+    async def payload_references(self) -> set[str]:
+        """Every payload a kept trace refers to; archived traces through the
+        index, without reading their bodies."""
+        from omnicoreagent.core.telemetry.payloads import payload_references
+
+        async with self._lock:
+            await self._load_unlocked()
+        references: set[str] = set()
+        for trace in await self._inner.list_traces():
+            references |= payload_references(trace)
+        if self.archive is not None:
+            references |= await self.archive.payload_references()
+        return references
 
     async def get_stream_cursor(self, scope: TelemetryStreamScope) -> str | None:
         async with self._lock:
@@ -644,6 +686,14 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
     ) -> AsyncIterator[TelemetryEvent]:
         async with self._lock:
             await self._load_unlocked()
+        if self.archive is not None:
+            # Archived and running events together, in cursor order; then the
+            # live stream from the last one delivered.
+            delivered = cursor
+            for event in await self.get_events_after(scope, cursor):
+                delivered = event.stream_cursor
+                yield event
+            cursor = delivered
         async for event in self._inner.stream_after(scope, cursor):
             yield event
 
@@ -654,15 +704,30 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
     ) -> list[TelemetryEvent]:
         async with self._lock:
             await self._load_unlocked()
-        return await self._inner.get_events_after(scope, cursor)
+        events = await self._inner.get_events_after(scope, cursor)
+        if self.archive is None:
+            return events
+        seen = {event.event_id for event in events}
+        after = _parse_stream_cursor(cursor)
+        archived = [
+            event
+            for event, trace in await self.archive.events_after(after)
+            if event.event_id not in seen and scope.matches(event, trace)
+        ]
+        return sorted([*events, *archived], key=lambda event: int(event.stream_cursor))
 
     async def _load_unlocked(self) -> None:
         if self._loaded:
             return
         if not self.path.exists():
             self._loaded = True
+            if self.archive is not None:
+                self._inner._event_cursor = max(
+                    self._inner._event_cursor, await self.archive.max_cursor()
+                )
             return
         raw_lines = await asyncio.to_thread(self.path.read_text)
+        self._log_bytes = len(raw_lines.encode("utf-8"))
         damaged_trace_ids: set[str] = set()
         for line in raw_lines.splitlines():
             if not line.strip():
@@ -688,6 +753,17 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
                 )
         await self._inner.finish_restore()
         self._loaded = True
+        if self.archive is not None:
+            # Cursors keep counting from the highest ever given, archived or not.
+            self._inner._event_cursor = max(
+                self._inner._event_cursor, await self.archive.max_cursor()
+            )
+            # The first start of an old log is its migration: every trace in
+            # it that has ended moves to the archive, and the log is
+            # compacted to what is still running.
+            for trace_id in list(self._inner._traces):
+                self._note_finished_unlocked(trace_id)
+            await self._archive_finished_unlocked()
         if self.retention_days is not None:
             await self._prune_expired_unlocked(self.retention_days, trigger="load")
 
@@ -724,18 +800,26 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             raise ValueError("retention_days must be non-negative or None")
         cutoff = utc_now() - timedelta(days=retention_days)
         expired = await self._inner.trace_ids_ended_before(cutoff)
+        if self.archive is not None:
+            archived = await self.archive.ended_before(cutoff)
+            if archived:
+                await self.archive.remove(archived)
+            expired_count_archived = len(archived)
+        else:
+            expired_count_archived = 0
         if expired:
             await self._inner.remove_traces(expired)
             # Only now, with something to remove, is the store read in full.
             survivors = await self._inner.list_traces()
             await self._rewrite_records_unlocked(survivors)
+        removed = len(expired) + expired_count_archived
         self.last_prune = {
             "at": utc_now().isoformat(),
             "trigger": trigger,
             "retention_days": retention_days,
-            "removed": len(expired),
+            "removed": removed,
         }
-        self.removed_total += len(expired)
+        self.removed_total += removed
         if expired:
             logger.info(
                 "Telemetry retention removed %d trace(s) older than %d day(s) from %s",
@@ -748,6 +832,10 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
     async def _replay_record_unlocked(self, record: dict[str, Any]) -> None:
         record_type = record["record_type"]
         payload = record["payload"]
+        if record_type != "span_start" and payload.get("trace_id"):
+            # After compaction the log can hold a late record of a trace
+            # already archived, without the records before it.
+            await self._ensure_live_unlocked(payload["trace_id"])
         if record_type == "trace_upsert":
             await self._inner.restore_trace(
                 TelemetryTrace.from_dict(payload),
@@ -831,11 +919,52 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             await self._run_writer(self._append_lines, lines)
 
     async def flush(self) -> None:
-        """Wait until every record given so far is written to the file."""
+        """Wait until every record given so far is written to the file; with
+        an archive, move the traces that have ended there."""
         while self._pending or (self._drain is not None and not self._drain.done()):
             if self._drain is None or self._drain.done():
                 self._drain = asyncio.get_running_loop().create_task(self._drain_pending())
             await asyncio.shield(self._drain)
+        if self.archive is not None and self._finished:
+            async with self._lock:
+                await self._archive_finished_unlocked()
+
+    def _note_finished_unlocked(self, trace_id: str) -> None:
+        if self.archive is None:
+            return
+        trace = self._inner._traces.get(trace_id)
+        if trace is not None and trace.ended_at is not None:
+            self._finished.add(trace_id)
+
+    async def _ensure_live_unlocked(self, trace_id: str) -> None:
+        """A record for an archived trace: bring it back to apply the record;
+        it is archived again at the next flush."""
+        if self.archive is None or trace_id in self._inner._traces:
+            return
+        archived = await self.archive.get(trace_id)
+        if archived is None:
+            return
+        trace, cursors = archived
+        await self._inner.restore_trace(trace, cursors=cursors, adopt=True)
+        self._finished.add(trace_id)
+
+    async def _archive_finished_unlocked(self) -> None:
+        """Move ended traces to the archive, then compact the log if it has
+        grown. A trace leaves the log only after it is in the archive."""
+        moved: set[str] = set()
+        for trace_id in sorted(self._finished):
+            trace = self._inner._traces.get(trace_id)
+            if trace is None or trace.ended_at is None:
+                continue
+            cursors = await self._inner.event_cursors(trace_id)
+            await self.archive.put(trace, cursors)
+            moved.add(trace_id)
+        self._finished.clear()
+        if not moved:
+            return
+        await self._inner.remove_traces(moved)
+        if self._log_bytes >= self.compact_bytes:
+            await self._rewrite_records_unlocked(await self._inner.list_traces())
 
     def _append_lines(self, lines: list[str]) -> None:
         """Runs on the writer thread: one batch, one flush."""
@@ -854,6 +983,7 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             self._handle = self.path.open("a", encoding="utf-8")
         self._handle.write(line)
         self._handle.flush()
+        self._log_bytes += len(line)
 
     def _close_handle(self) -> None:
         """Runs on the writer thread, before the file is replaced underneath it."""
@@ -873,9 +1003,13 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
                 )
             )
         content = "" if not records else "\n".join(records) + "\n"
-        await self.flush()
+        while self._pending or (self._drain is not None and not self._drain.done()):
+            if self._drain is None or self._drain.done():
+                self._drain = asyncio.get_running_loop().create_task(self._drain_pending())
+            await asyncio.shield(self._drain)
         await self._run_writer(self._close_handle)
         await self._run_writer(_replace_text, self.path, content)
+        self._log_bytes = len(content.encode("utf-8"))
 
     async def close(self) -> None:
         """Close the file and stop the writer thread; the store stays readable."""
@@ -909,17 +1043,29 @@ def shared_jsonl_telemetry_store(
     path: str | Path,
     *,
     retention_days: int | None = None,
+    archive: bool = True,
 ) -> JsonlTelemetryStore:
     """Return the process-wide store for one JSONL file.
 
     Two store objects appending to the same file would keep separate indexes,
     assign conflicting stream cursors, and interleave writes, so every agent
     and manager that resolves the same path shares one object.
+
+    Finished traces move to an archive beside the log (``<name>-archive``):
+    one body per trace and an index, so memory holds only what is running.
     """
     resolved = Path(path).expanduser().resolve()
     store = _SHARED_JSONL_STORES.get(resolved)
     if store is None:
-        store = JsonlTelemetryStore(resolved, retention_days=retention_days)
+        from omnicoreagent.core.telemetry.archive import TelemetryArchive
+
+        store = JsonlTelemetryStore(
+            resolved,
+            retention_days=retention_days,
+            archive=(
+                TelemetryArchive(resolved.parent / f"{resolved.stem}-archive") if archive else None
+            ),
+        )
         _SHARED_JSONL_STORES[resolved] = store
     elif store.retention_days != retention_days:
         logger.warning(
