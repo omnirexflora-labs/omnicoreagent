@@ -35,7 +35,7 @@ found **twenty-seven things wrong** — twenty of them runtime defects,
 two defaults that were wrong for real work,
 three deployment lessons, two missing capabilities — and fixing them
 surfaced two more in the suite's own acceptance check. Rerunning P3 cleanly
-found eight more: seven runtime defects and one mistake of the model's. Every
+found eight more: seven runtime defects and one mistake of the model's. P7 has found three more so far. Every
 defect is fixed with a test that fails without the fix; the runtime's test
 suite went from 1,756 to 1,881 tests. None of the steward's twenty-seven were visible to the
 suite before, because the suite's models are scripted and its stores are in
@@ -266,6 +266,21 @@ Each line names the commit; the plan's execution log has the detail.
     missing before anyone looked. The schedule now records why it was
     paused, and the scheduler and the worker loop log it. (`153b91c`)
 
+39. **A run the background layer ended stayed open in the agent.** A run
+    cancelled while it waited for a budget top-up, and one failed after its
+    worker died, left the agent's durable record "awaiting_budget" and
+    "running" for good, each with its request budget counter still in the
+    ledger. When the background layer ends a run the agent did not finish
+    itself, the agent's record now ends too, saying why, and the counter is
+    released. (`f4a5da6`)
+40. **Finished traces were kept in memory.** The trace store loaded every
+    trace it had recorded: OmniServe went from 303 MiB to 942 MiB on its first
+    trace read after a restart, and that read took 6.3 s. Finished traces now
+    move to an archive of one file per trace and a SQLite index; memory holds
+    only what is running (967 MiB at rest before, 300 MiB after, on the
+    server). The sandbox bridge's per-file policy checks, 8,812 of the
+    steward's 10,831 policy records, are summarized. (PR #254)
+
 ## What it cost
 
 A read-the-repository run costs about two to eight cents on `gpt-5.6-terra`
@@ -279,17 +294,15 @@ rather than a defect.
 
 ## What is still open
 
-- The sandbox bridge copies the whole agent workspace — every earlier run's
-  files — into every sandbox and hashes all of it after each command. P7
-  measures it.
+- The sandbox bridge copies the whole agent workspace into every sandbox.
+  The steward's workspace holds two clones of the repository (about 940
+  files) that a worker once copied back, so every run's first command copies
+  and checks all of them. Its policy records are now one summary per copy;
+  what it copies is still everything.
 - The SQL task store is SQLite-only; the steward's task store is Redis.
-- At `capture: "full"` the steward's model inputs (a hundred messages, about
-  170 KB) are recorded truncated at 64 KB, so its traces are *partial*.
-  Offloading large payloads is off by default; turning it on stores every
-  call's whole context, which grows with the conversation.
-- The JSONL trace store loads the whole file into memory: the server's
-  trace file was 173 MiB after a day and a half, and OmniServe's memory at
-  rest went from 586 to 755 MiB. P7 measures whether it keeps growing.
+- A Postgres telemetry index, for several OmniServe processes sharing one
+  store, and storing the tool catalog once across traces (about 70 KB per
+  run for the steward) are deferred.
 
 ## The traces
 

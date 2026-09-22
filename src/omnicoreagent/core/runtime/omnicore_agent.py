@@ -92,6 +92,9 @@ def _without_changed_continuation(original: Any, redacted: Any) -> Any:
     stored = {key: value for key, value in stored.items() if key not in dropped}
     return {**redacted, "model_message": stored, "continuation_dropped": dropped}
 
+# A run in one of these has ended; nothing from outside reopens or rewrites it.
+_ENDED_RUN_STATUSES = frozenset({"completed", "failed", "cancelled", "timeout"})
+
 class OmniCoreAgent:
     """
     Public facade for the OmniCoreAgent runtime.
@@ -1202,6 +1205,40 @@ class OmniCoreAgent:
             self.memory_router, run_id, lambda r: r.setdefault("inbox", []).append(entry)
         )
         return {"status": "queued", "message_id": entry["id"]}
+
+    async def abandon_run(self, run_id: str, *, status: str, reason: str) -> Dict[str, Any] | None:
+        """Close a run this agent did not finish itself.
+
+        For whoever ended it from outside: a background run cancelled while it
+        waited, or failed because its worker died. The record says ``status``
+        (``cancelled``, ``failed`` or ``timeout``) and why, and the request's
+        own budget counters are released, keeping what it spent on the
+        record. A run that already ended is left as it is. Found on the
+        steward's server: such runs stayed "running" or "awaiting_budget" for
+        good, each with its counter still in the ledger.
+        """
+        from omnicoreagent.core.runs import update_from_outside
+
+        if status not in {"cancelled", "failed", "timeout"}:
+            raise ValueError("status must be cancelled, failed or timeout")
+        record = await self.get_run(run_id)
+        if record is None or record.get("status") in _ENDED_RUN_STATUSES:
+            return record
+        spent = None
+        budgets = self._build_run_budgets(run_id=run_id, session_id=record.get("session_id"))
+        if budgets is not None:
+            spent = await budgets.settle()
+
+        def close(current: dict[str, Any]) -> None:
+            if current.get("status") in _ENDED_RUN_STATUSES:
+                return
+            current["status"] = status
+            current["error"] = {"type": "RunEndedOutside", "message": reason}
+            if spent:
+                current["budgets"] = spent
+
+        await update_from_outside(self.memory_router, run_id, close)
+        return await self.get_run(run_id)
 
     async def interrupt(self, run_id: str) -> Dict[str, Any]:
         """Ask a running run to stop at its next step boundary; it becomes
