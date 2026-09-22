@@ -52,3 +52,8 @@ Each unit: a test that fails first, the fix, the suite as CI runs it, a PR.
 
 | Unit | Status | Commit | Notes |
 | --- | --- | --- | --- |
+| R0 | Done | `8029f02` | `capture: "full"` is the default; `capture: "default"` is the privacy-first preset. Twelve tests and the acceptance script now name the preset they mean. |
+| R1 | Done | `8248dde` | `agent.record_outcome(run_id, source=, reward=, label=, detail=)` and `POST /runs/{run_id}/outcome`: kept on the run's record, in its trace as a `run_outcome` event, and in its trajectory. A run may gather several; a run that ended long ago still takes one. |
+| R2 | Done | `8248dde` | Each model call records `policy_version`: the model the provider served, its fingerprint, version and service tier when it reports them. |
+| R3 | Done | `8248dde` | `model_config`'s `logprobs`/`top_logprobs` ask for the tokens the model chose and their probabilities (a provider that refuses names the setting, as with any other); `telemetry_config.record_token_details` records them, off by default. A model's own token list is kept as the provider names it, not read as a credential. |
+| R4 | Done | `8248dde` | `agent.training_records(run_id=/session_id=/trace_ids=)`: one record per finished run — its messages, tools, responses, token details, tool calls and observations, policy version, totals and outcomes. A run recorded without model prompts is left out. A command-line export is not included; the records are JSON. |
