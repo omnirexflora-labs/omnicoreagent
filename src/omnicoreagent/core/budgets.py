@@ -8,8 +8,9 @@ workers cannot both spend the last dollar.
 
 Spending that is only known afterwards (a model call) is **reserved** first
 and **committed** at its real cost. A process that dies in between leaves the
-reservation standing: budgets over-count rather than lose a spend, and the
-reservations of a run whose process died are released when its lease expires.
+reservation standing: budgets over-count rather than lose a spend, and what
+the dead attempt held is released when its run is resumed, recovered, retried
+or ended from outside (``RunBudgets.release_stale``).
 
 A memory store without the budget methods leaves budgets off: the agent runs
 as before, and nothing is counted.
@@ -691,6 +692,24 @@ class RunBudgets:
     async def release(self, held: list[Reservation]) -> None:
         for reservation in held:
             await self.ledger.release(reservation)
+
+    async def release_stale(self) -> int:
+        """Release what this run held before it went on or ended.
+
+        Only one attempt of a run holds its lease, so a hold under this run's
+        id from before is what an attempt that died left standing. Without
+        this, a run killed during a model call held its worst case on the
+        day's counter until the day ended.
+        """
+        released = 0
+        seen: set[str] = set()
+        for meter in METERS:
+            for _, key, _ in self.limits(meter):
+                if key in seen:
+                    continue
+                seen.add(key)
+                released += await self.ledger.release_for_runs(key, run_ids=[self.run_id])
+        return released
 
     async def settle(self) -> dict[str, dict[str, float]]:
         """The run is over: return what it spent per scope, and remove its own

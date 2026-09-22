@@ -830,6 +830,9 @@ class OmniCoreAgent:
             run_budgets = self._build_run_budgets(
                 run_id=run_id, session_id=session_id, resumed=_resume
             )
+            if run_budgets is not None and (_resume is not None or retry_of is not None):
+                # What an earlier attempt of this run held and never committed.
+                await run_budgets.release_stale()
             async with run_tracker.active(), active_budgets(run_budgets):
                 response = await self.agent.run(
                     **({"on_event": emit_delta} if delivery is not None else {}),
@@ -1227,6 +1230,7 @@ class OmniCoreAgent:
         spent = None
         budgets = self._build_run_budgets(run_id=run_id, session_id=record.get("session_id"))
         if budgets is not None:
+            await budgets.release_stale()
             spent = await budgets.settle()
 
         def close(current: dict[str, Any]) -> None:

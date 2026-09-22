@@ -288,6 +288,14 @@ Each line names the commit; the plan's execution log has the detail.
     again". Account errors are not retried now, and the run says what is
     wrong and that retrying will not help. (`654e515`)
 
+42. **A killed run's budget hold was never released.** A model call is held
+    at its worst case, then committed. The runs killed mid-call in P1 and P3
+    left their holds (5 and 7 cents) on their day's counters for good: the
+    release the budget module promised was never called. A run that goes on
+    or is ended from outside now releases what its dead attempt held; with
+    the steward's daily cap lowered to 30 cents, one crash would otherwise
+    have locked up a fifth of a day. (`e97a618`)
+
 ## What it cost
 
 A read-the-repository run costs about two to eight cents on `gpt-5.6-terra`
