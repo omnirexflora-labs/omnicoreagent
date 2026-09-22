@@ -345,3 +345,28 @@ async def test_the_runtimes_own_run_records_do_not_go_into_the_sandbox(tmp_path)
     # Nor does a command write one back over the runtime's.
     assert not storage.exists("background/x/y/run_9/run.json")
     assert "background/x/y/run_9/run.json" in [i["path"] for i in forged.metadata["workspace"]["skipped"]]
+
+
+async def test_patterns_choose_what_the_bridge_copies_either_way(tmp_path):
+    """Workspace bridge plan, W3: a deployment with a large workspace says
+    what its sandboxes need. The default copies everything."""
+    from omnicoreagent.sandbox import SandboxExecutionService
+    from omnicoreagent.sandbox.scope import ExecutionScope
+    from omnicoreagent.sandbox.workspace_bridge import WorkspaceBridge
+
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+    storage.write_text("src/app.py", "print(1)")
+    storage.write_text("archive/old.csv", "a,b")
+    storage.write_text("notes.md", "notes")
+    engine = _engine()
+    bridge = WorkspaceBridge(storage, governance_engine=engine, include=["src/*", "notes.md", "out/*"], exclude=["src/secret*"])
+    storage.write_text("src/secret.env", "KEY=1")
+
+    async with ExecutionScope(SandboxExecutionService(engine), workspace_bridge=bridge).active() as scope:
+        result = await _sh(scope, "find . -type f | sort; mkdir -p out archive; echo r > out/r.txt; echo x > archive/new.csv")
+
+    assert "./src/app.py" in result.stdout and "./notes.md" in result.stdout
+    assert "archive/old.csv" not in result.stdout and "secret.env" not in result.stdout
+    assert storage.exists("out/r.txt") and not storage.exists("archive/new.csv")
+    skipped = {item["path"]: item["reason"] for item in result.metadata["workspace"]["skipped"]}
+    assert "patterns" in skipped["archive/new.csv"]

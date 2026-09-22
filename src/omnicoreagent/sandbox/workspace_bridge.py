@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING, Any
 
 from omnicoreagent.core.workspace.paths import normalize_workspace_path
@@ -69,8 +70,14 @@ class WorkspaceBridge:
         max_files: int = DEFAULT_MAX_FILES,
         max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
         max_total_bytes: int = DEFAULT_MAX_TOTAL_BYTES,
+        include: list[str] | None = None,
+        exclude: list[str] | None = None,
     ) -> None:
         self.storage = storage
+        # Globs over workspace paths (``*`` crosses folders): what the bridge
+        # copies either way. No include copies everything not excluded.
+        self.include = list(include or [])
+        self.exclude = list(exclude or [])
         self.governance_engine = governance_engine
         # Checks made during one copy, recorded as one summary after it.
         self._checks: dict[str, dict[str, Any]] = {}
@@ -130,6 +137,8 @@ class WorkspaceBridge:
                 path = str(item.path).replace("\\", "/").strip("/")
                 if _hidden(path) or _run_record(path):
                     continue
+                if not item.is_dir and not self._wanted(path):
+                    continue
                 if item.is_dir:
                     pending.append(path)
                 else:
@@ -188,6 +197,10 @@ class WorkspaceBridge:
                 continue
             if _run_record(path):
                 skipped.append({"path": path, "reason": "a background run's record; the runtime's own"})
+                self._in_sandbox[path] = digest
+                continue
+            if not self._wanted(path):
+                skipped.append({"path": path, "reason": "outside the bridge's include/exclude patterns"})
                 self._in_sandbox[path] = digest
                 continue
             if size > self.max_file_bytes or total + size > self.max_total_bytes:
@@ -253,6 +266,11 @@ class WorkspaceBridge:
             return False
         checks["allowed"] += 1
         return True
+
+    def _wanted(self, path: str) -> bool:
+        if self.include and not any(fnmatchcase(path, p) for p in self.include):
+            return False
+        return not any(fnmatchcase(path, p) for p in self.exclude)
 
     async def _record_checks(self) -> None:
         from omnicoreagent.governance.telemetry import emit_policy_summary

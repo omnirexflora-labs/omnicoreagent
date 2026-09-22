@@ -152,6 +152,9 @@ def _default_governance_config() -> dict[str, Any]:
         "sandbox_config": None,
         # What each run's sandbox is (network, image, working directory).
         "sandbox_manifest": None,
+        # What the sandbox workspace bridge copies: {"include": [...],
+        # "exclude": [...]} globs over workspace paths; None copies everything.
+        "workspace_bridge": None,
         "allow_test_sandbox_runtime": False,
         "allow_static_high_risk_approvals": False,
     }
@@ -609,6 +612,18 @@ def _validate_governance_config(value: dict[str, Any]):
         from omnicoreagent.sandbox.factory import sandbox_manifest_from_config
 
         sandbox_manifest_from_config(value["sandbox_manifest"])
+    bridge = value.get("workspace_bridge")
+    if bridge is not None:
+        if not isinstance(bridge, dict) or set(bridge) - {"include", "exclude"}:
+            raise ValueError(
+                "governance_config.workspace_bridge must be a dict with 'include' "
+                "and/or 'exclude' lists of glob patterns"
+            )
+        for key, patterns in bridge.items():
+            if patterns is not None and (
+                not isinstance(patterns, list) or not all(isinstance(p, str) for p in patterns)
+            ):
+                raise ValueError(f"governance_config.workspace_bridge.{key} must be a list of glob strings")
     profile = value.get("profile", "interactive-dev")
     if profile not in {"permissive-dev", "interactive-dev", "strict-production"}:
         raise ValueError(
