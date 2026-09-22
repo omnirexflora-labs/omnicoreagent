@@ -99,8 +99,18 @@ The steward on the server is the live check.
   reassemble it. The 64 KB cut then applies to a single message, not to a
   conversation. Test: a 100-message run is `complete` at full capture and
   its size grows linearly with its length.
-- **T3. Authorizations once.** The policy request recorded once, the
-  decision by reference. Test: records per sandbox command.
+- **T3. Routine checks summarized.** Measured after T1 and T2 (below): the
+  policy records were not a per-call cost but the sandbox workspace bridge
+  checking every workspace file before every run's first command, each
+  recorded as a request and an allow (8,812 of 10,831 requests; up to 983
+  per trace). The engine can authorize without recording what it allows;
+  a refusal, an ask, a failure and anything the policy audits are always
+  recorded. The bridge records one summary per copy. Test: a copy of 30
+  files and one refused file records the refusal and one summary.
+- **T3b. The tool catalog once across traces.** After T2 the largest item
+  in a short run is its tool catalog, about 70 KB per trace for the
+  steward's 60 tools, identical in every run. Stored once, content
+  addressed, where the payload store keeps large values.
 - **T4. The index.** A `TelemetryIndex` with SQLite and Postgres
   implementations; `list_traces`, filters, stream cursors and retention
   queries through it. Test: the store contract suite passes over it, and
@@ -116,9 +126,20 @@ The steward on the server is the live check.
 T1–T3 shrink what is written and help the current store at once; T4–T6
 change where it is kept. JSONL stays available for local development.
 
+### Measured after T1 and T2
+
+The steward's three scheduled runs of 2026-09-21 23:16 to 2026-09-22 05:21
+UTC, recorded with T1 and T2: 1,533 KB for 6 traces. The largest items were
+`context_message` (212 KB, 88 records), `context_tools` (209 KB, 3
+records: one catalog per trace), and span ends (148 KB). Policy records were
+not in the top ten: in the P3 runs they came from the workspace bridge,
+whose workspace held two clones of the repository (938 files) that a worker
+had copied back from its sandbox.
+
 ## Execution log
 
 | Unit | Status | Commit | Notes |
 | --- | --- | --- | --- |
 | T1 | Done | `abd3dc8` | The model call span keeps the one copy of the context (exporters read it there); the context assembly span and event record digests; the model call event points to its span; the trajectory reader resolves the request from the span, capture state included. The scripted acceptance run: 89 KB to 58 KB per model call (-35%), evidence still complete. On the steward, where the four copies were 63% of the file, the expected cut is close to half; P7 measures it. |
 | T2 | Done | `b5ef5fc` | Each message a `context_message` event once per trace, digest in metadata; the tool catalog a `context_tools` event once; a model call records the previous call's list it extends and what it appends; the context assembly keeps its digest list at every capture level, once and compact (it was written five times per call). The trajectory reader and exporters rebuild each whole request, in any span order. A 48-step run with 3 KB tool results: 13.8 MB and *partial* before T1, 2.4 MB and complete now; 6x the steps is 5.6x the size. |
+| T3 | Done | `c4c6190` | `authorize_all(record_allows=False)`: an allowed request is not recorded on its own; refusals, asks, failures and audited decisions always are. The bridge records one `policy_decisions_summarized` per copy (allowed count, refused paths). The P3 runs' 8,812 per-file request and allow pairs (about 19 MB) become one summary per copy. |
