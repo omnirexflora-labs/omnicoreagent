@@ -128,7 +128,7 @@ class WorkspaceBridge:
         while pending and len(found) < self.max_files:
             for item in self.storage.list_files(pending.pop()):
                 path = str(item.path).replace("\\", "/").strip("/")
-                if _hidden(path):
+                if _hidden(path) or _run_record(path):
                     continue
                 if item.is_dir:
                     pending.append(path)
@@ -185,6 +185,10 @@ class WorkspaceBridge:
             if not path or _hidden(path) or self._in_sandbox.get(path) == digest:
                 continue
             if any(path == c or path.startswith(c + "/") for c in checkouts):
+                continue
+            if _run_record(path):
+                skipped.append({"path": path, "reason": "a background run's record; the runtime's own"})
+                self._in_sandbox[path] = digest
                 continue
             if size > self.max_file_bytes or total + size > self.max_total_bytes:
                 skipped.append({"path": path, "reason": f"too large to copy back ({size} bytes)"})
@@ -276,6 +280,16 @@ def _parse_listing(stdout: str) -> list[tuple[int, str, str]]:
             continue
         entries.append((int(size), digest, path[2:]))
     return sorted(entries, key=lambda entry: entry[2])
+
+
+_RUN_RECORDS = frozenset({"run.json", "events.jsonl"})
+
+
+def _run_record(path: str) -> bool:
+    """A background run's own record (``run_<id>/run.json``, ``events.jsonl``):
+    the runtime's, not the agent's; every sandbox got every earlier run's."""
+    parent, _, name = path.rpartition("/")
+    return name in _RUN_RECORDS and parent.rpartition("/")[2].startswith("run_")
 
 
 def _hidden(path: str) -> bool:

@@ -321,3 +321,27 @@ async def test_a_workspace_that_is_itself_a_repository_still_comes_back(tmp_path
         await _sh(scope, "mkdir -p .git && echo ref > .git/HEAD && echo kept > notes.txt")
 
     assert storage.exists("notes.txt")
+
+
+async def test_the_runtimes_own_run_records_do_not_go_into_the_sandbox(tmp_path):
+    """Workspace bridge plan, W2. The background layer keeps each run's
+    records (run.json, events.jsonl) in the workspace; every sandbox got
+    every earlier run's records. What an agent wrote in a run's folder still
+    goes in."""
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+    storage.write_text("background/steward/triage/run_0123abcd/run.json", "{}")
+    storage.write_text("background/steward/triage/run_0123abcd/events.jsonl", "{}\n")
+    storage.write_text("background/steward/triage/run_0123abcd/output.md", "the answer")
+    storage.write_text("notes/run.json", "an agent's own file of that name")
+
+    async with _scope(storage).active() as scope:
+        result = await _sh(scope, "find . -type f | sort")
+
+        forged = await _sh(scope, "mkdir -p background/x/y/run_9 && echo forged > background/x/y/run_9/run.json")
+
+    listed = result.stdout
+    assert "output.md" in listed and "notes/run.json" in listed
+    assert "run_0123abcd/run.json" not in listed and "events.jsonl" not in listed
+    # Nor does a command write one back over the runtime's.
+    assert not storage.exists("background/x/y/run_9/run.json")
+    assert "background/x/y/run_9/run.json" in [i["path"] for i in forged.metadata["workspace"]["skipped"]]
