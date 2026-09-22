@@ -137,6 +137,8 @@ FOUNDATION_EVENT_TYPES = frozenset(
         "context_message",
         "context_tools",
         "run_configuration",
+        # What a run turned out to be worth, attached after it ended.
+        "run_outcome",
         "runtime_message",
         "context_compression",
         "context_dropped",

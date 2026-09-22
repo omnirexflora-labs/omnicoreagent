@@ -61,6 +61,10 @@ class ModelConfig:
     max_context_length: int | None = 100000
     top_p: float | None = None
     reasoning_effort: str | None = None
+    # Ask the provider for the tokens it chose and their probabilities, for
+    # a trainer that will reuse the run (traces for training plan, R3).
+    logprobs: bool | None = None
+    top_logprobs: int | None = None
     top_k: int | str | None = "N/A"
     api_key: str | None = None
     azure_endpoint: str | None = None

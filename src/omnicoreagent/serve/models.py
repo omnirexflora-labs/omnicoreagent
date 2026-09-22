@@ -156,6 +156,15 @@ class BudgetDecisionRequest(BaseModel):
     note: Optional[str] = Field(None, description="Why")
 
 
+class OutcomeRequest(BaseModel):
+    """What a run turned out to be worth, reported after it ended."""
+
+    source: str = Field(..., min_length=1, description="Who reports it (github, reviewer, an evaluator)")
+    reward: Optional[float] = Field(None, description="The number a trainer or evaluator uses")
+    label: Optional[str] = Field(None, description="What the outcome is called (merged, accepted)")
+    detail: Optional[dict] = Field(None, description="Anything else worth keeping")
+
+
 class SteerRequest(BaseModel):
     """A message for a run, delivered at its next step boundary."""
 

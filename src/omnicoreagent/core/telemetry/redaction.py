@@ -64,6 +64,10 @@ class TelemetryConfig:
     record_model_prompts: bool | None = None
     record_model_responses: bool | None = None
     record_tool_results: bool | None = None
+    # The tokens a model chose and their probabilities, when the provider
+    # returns them (``logprobs``). Off: they are large, and only a trainer
+    # reusing the run needs them.
+    record_token_details: bool = False
     max_payload_bytes: int = 64_000
     redact_keys: list[str] = field(
         default_factory=lambda: [
@@ -207,6 +211,11 @@ def redact_sensitive_text(value: str, config: TelemetryConfig) -> str:
     return _INLINE_ASSIGNMENT.sub(replace, text)
 
 
+# What the model chose, under its provider's own field names (one of them is
+# ``token``): its output, not a credential.
+_VERBATIM_KEYS = frozenset({"token_details"})
+
+
 def _redact(value: Any, redact_keys: set[str] | tuple[str, ...]) -> Any:
     if not isinstance(redact_keys, tuple):
         redact_keys = tuple(sorted(redact_keys))
@@ -214,6 +223,8 @@ def _redact(value: Any, redact_keys: set[str] | tuple[str, ...]) -> Any:
         return {
             key: REDACTION_MARKER
             if _should_redact_key(str(key), redact_keys)
+            else item
+            if key in _VERBATIM_KEYS
             else _redact(item, redact_keys)
             for key, item in value.items()
         }

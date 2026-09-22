@@ -1209,6 +1209,111 @@ class OmniCoreAgent:
         )
         return {"status": "queued", "message_id": entry["id"]}
 
+    async def training_records(
+        self,
+        *,
+        run_id: str | None = None,
+        session_id: str | None = None,
+        trace_ids: List[str] | None = None,
+        limit: int | None = None,
+    ) -> List[Dict[str, Any]]:
+        """Finished runs as one record each, for a trainer or an evaluator.
+
+        Each record holds what the model was sent at every step, what it
+        produced (its token details when they were recorded), what the tools
+        answered, the policy that served it, the run's totals, and the
+        outcomes attached to it. A run recorded without model prompts has
+        nothing to learn from and is left out.
+        """
+        self._ensure_telemetry()
+        if trace_ids:
+            candidates = [t for t in [await self.telemetry_store.get_trace(i) for i in trace_ids] if t]
+        else:
+            trace_filter = TraceFilter(run_id=run_id, session_id=session_id)
+            candidates = await self.telemetry_store.list_traces(trace_filter)
+        records = []
+        for trace in candidates:
+            if not any(span.kind == "agent.run" for span in trace.spans):
+                continue
+            trajectory = await self.get_trajectory(trace_id=trace.trace_id, include_children=False)
+            record = _training_record(trajectory) if trajectory else None
+            if record is not None:
+                records.append(record)
+            if limit is not None and len(records) >= limit:
+                break
+        return records
+
+    async def record_outcome(
+        self,
+        run_id: str,
+        *,
+        source: str,
+        reward: float | None = None,
+        label: str | None = None,
+        detail: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Record what a run turned out to be worth, whenever that is known.
+
+        A run's own result is not its outcome: a pull request is merged an
+        hour later, a customer accepts an answer the next day, CI runs the
+        tests afterwards. ``source`` says who is reporting it (``github``,
+        ``reviewer``, an evaluator's name), ``reward`` is the number a
+        trainer or an evaluator uses, ``label`` is what it is called, and
+        ``detail`` is anything else worth keeping. A run may gather several.
+        The outcome goes on the run's record and into its trace.
+        """
+        from omnicoreagent.core.runs import update_from_outside
+        from omnicoreagent.core.telemetry.models import telemetry_id, utc_now
+
+        if not str(source or "").strip():
+            raise ValueError("record_outcome needs a source: who reports this outcome")
+        record = await self.get_run(run_id)
+        if record is None:
+            raise LookupError(f"No run {run_id}")
+        outcome = {
+            "outcome_id": telemetry_id("outcome"),
+            "reward": float(reward) if reward is not None else None,
+            "label": label,
+            "source": str(source).strip(),
+            "detail": dict(detail or {}),
+            "recorded_at": utc_now().isoformat(),
+        }
+        await update_from_outside(
+            self.memory_router,
+            run_id,
+            lambda current: current.setdefault("outcomes", []).append(dict(outcome)),
+        )
+        trace_ids = record.get("trace_ids") or []
+        if trace_ids:
+            await self._record_outcome_event(trace_ids[-1], run_id, outcome)
+        return outcome
+
+    async def _record_outcome_event(
+        self, trace_id: str, run_id: str, outcome: Dict[str, Any]
+    ) -> None:
+        """Put the outcome in the run's trace, which has long since ended."""
+        from omnicoreagent.core.telemetry.models import (
+            ActorType,
+            TelemetryActor,
+            TelemetryEvent,
+        )
+
+        self._ensure_telemetry()
+        event = TelemetryEvent(
+            trace_id=trace_id,
+            event_type="run_outcome",
+            actor=TelemetryActor(type=ActorType.SYSTEM, name=outcome["source"]),
+            output=dict(outcome),
+            metadata={"run_id": run_id, "outcome_id": outcome["outcome_id"]},
+        )
+        try:
+            await self.telemetry_store.append_event(trace_id, event)
+            flush = getattr(self.telemetry_store, "flush", None)
+            if flush is not None:
+                await flush()
+        except Exception as exc:  # noqa: BLE001 - the record holds it regardless.
+            runtime_logger().warning(f"Outcome of {run_id} not written to its trace: {exc}")
+
     async def abandon_run(self, run_id: str, *, status: str, reason: str) -> Dict[str, Any] | None:
         """Close a run this agent did not finish itself.
 
@@ -2066,6 +2171,11 @@ class OmniCoreAgent:
         trajectory = await self._trajectory_for(
             trace, include_children=include_children, depth=max_depth, seen=set()
         )
+        trajectory["outcomes"] = [
+            event.output
+            for event in trace.events
+            if event.event_type == "run_outcome" and event.output
+        ]
         if run_id is not None:
             trajectory["other_trace_ids_for_run"] = other_trace_ids
         return trajectory
@@ -2341,3 +2451,63 @@ def _add_totals(total: Any, segment: Any) -> Any:
     if isinstance(total, list) and isinstance(segment, list):
         return [*total, *segment]
     return segment if segment is not None else total
+
+
+def _training_record(trajectory: Dict[str, Any]) -> Dict[str, Any] | None:
+    """One finished run, as a trainer reads it: nothing when its model calls
+    were not recorded (the privacy-first capture)."""
+    steps = []
+    policy_version: Dict[str, Any] = {}
+    for step in trajectory.get("steps") or []:
+        for call in step.get("model_calls") or []:
+            request = call.get("request") or {}
+            if call.get("purpose", "agent_turn") != "agent_turn" or "messages" not in request:
+                continue
+            facts = call.get("facts") or {}
+            policy_version = facts.get("policy_version") or policy_version
+            response = call.get("response") or {}
+            steps.append(
+                {
+                    "step": step.get("step"),
+                    "messages": request.get("messages"),
+                    "tools": request.get("tools"),
+                    "response": response,
+                    "token_details": response.get("token_details"),
+                    "finish_reason": facts.get("finish_reason"),
+                    "tokens": facts.get("tokens"),
+                    "tool_calls": [
+                        {
+                            "tool_call_id": tool.get("tool_call_id"),
+                            "name": tool.get("tool_name"),
+                            "arguments": tool.get("raw_arguments"),
+                            "outcome": tool.get("outcome"),
+                            "observation": ((tool.get("observation") or {}).get("content")),
+                            "error": tool.get("error"),
+                        }
+                        for tool in step.get("tool_calls") or []
+                    ],
+                }
+            )
+    if not steps:
+        return None
+    totals = trajectory.get("totals") or {}
+    return {
+        "run_id": trajectory.get("run_id"),
+        "trace_id": trajectory.get("trace_id"),
+        "session_id": trajectory.get("session_id"),
+        "agent": (trajectory.get("harness") or {}).get("agent"),
+        "status": trajectory.get("status"),
+        "started_at": trajectory.get("started_at"),
+        "ended_at": trajectory.get("ended_at"),
+        "policy_version": policy_version,
+        "request": (trajectory.get("request") or {}).get("message"),
+        "final_answer": (trajectory.get("final") or {}).get("response"),
+        "outcomes": trajectory.get("outcomes") or [],
+        "totals": {
+            "tokens": totals.get("tokens"),
+            "estimated_cost_usd": totals.get("estimated_cost_usd"),
+            "duration_ms": totals.get("duration_ms"),
+        },
+        "evidence_status": trajectory.get("evidence_status"),
+        "steps": steps,
+    }

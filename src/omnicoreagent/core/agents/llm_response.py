@@ -116,9 +116,11 @@ def normalize_model_turn(response: Any):
         choice = choices[0]
         message = get(choice, "message")
         finish_reason = get(choice, "finish_reason")
+        token_details = plain_copy(get(choice, "logprobs"))
     else:
         message = get(response, "message", response)
         finish_reason = get(response, "finish_reason")
+        token_details = None
     if message is None:
         raise ValueError("Model returned no message")
 
@@ -169,7 +171,10 @@ def normalize_model_turn(response: Any):
             for key in CONTINUATION_FIELDS
             if (value := _without_empty(plain_copy(get(message, key)))) not in (None, [], {}, "")
         },
-        response_metadata=_response_metadata(response, get),
+        response_metadata={
+            **_response_metadata(response, get),
+            **({"token_details": token_details} if token_details else {}),
+        },
     )
 
 
@@ -177,7 +182,10 @@ def _response_metadata(response: Any, get) -> dict[str, Any]:
     """Provider identity and cost; LiteLLM attaches its computed cost in hidden params."""
     metadata = {
         key: get(response, key)
-        for key in ("id", "model")
+        # What served the call: its model, the server's fingerprint of the
+        # weights and settings, and a version when it reports one. A trainer
+        # reusing a run has to know which policy produced it.
+        for key in ("id", "model", "system_fingerprint", "model_version", "service_tier")
         if get(response, key) is not None
     }
     hidden = get(response, "_hidden_params") or {}
