@@ -2171,11 +2171,6 @@ class OmniCoreAgent:
         trajectory = await self._trajectory_for(
             trace, include_children=include_children, depth=max_depth, seen=set()
         )
-        trajectory["outcomes"] = [
-            event.output
-            for event in trace.events
-            if event.event_type == "run_outcome" and event.output
-        ]
         if run_id is not None:
             trajectory["other_trace_ids_for_run"] = other_trace_ids
         return trajectory

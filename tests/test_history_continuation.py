@@ -165,11 +165,16 @@ class _OneCallModel:
 
 @pytest.mark.asyncio
 async def test_history_keeps_real_tool_arguments_while_the_trace_redacts_them():
+    """Under the privacy-first capture, a governed call's arguments are
+    recorded as ``[REDACTED]``; the model's own history keeps them. (At the
+    default capture the trace records them too, beside the model calls that
+    already hold them.)"""
     agent = OmniCoreAgent(
         name="governed-history",
         system_instruction="x",
         model_config={"provider": "openai", "model": "gpt-5.4-mini", "api_key": "fake-key"},
         local_tools=_tools(),
+        telemetry_config={"capture": "default"},
         agent_config={
             "guardrail_mode": "off",
             "enable_workspace_files": False,
