@@ -111,17 +111,33 @@ The steward on the server is the live check.
   in a short run is its tool catalog, about 70 KB per trace for the
   steward's 60 tools, identical in every run. Stored once, content
   addressed, where the payload store keeps large values.
-- **T4. The index.** A `TelemetryIndex` with SQLite and Postgres
-  implementations; `list_traces`, filters, stream cursors and retention
-  queries through it. Test: the store contract suite passes over it, and
-  listing does not read bodies.
-- **T5. Bodies apart.** A trace body written once when the trace ends, to a
-  local directory or the workspace's object storage; read one at a time with
-  a bounded cache. Test: memory does not grow with retained traces; a
-  restart reads nothing until asked.
-- **T6. Retention and migration.** Retention through the index;
-  `omnicoreagent telemetry migrate` converts a `traces.jsonl` into index and
-  bodies. The steward's file is migrated and P7 measures the targets above.
+- **T4. The archive.** A `TelemetryArchive` of finished traces: one body per
+  trace (the trace and each event's stream cursor), written through the
+  workspace storage interface, so a local directory, S3 or R2; and a SQLite
+  index, one row per trace: trace, run, parent, session, task, agent,
+  workflow, model, status, start and end, the trace's first and last stream
+  cursor, its payload references, its size and where its body is. It can
+  put, get, list by filter (headers from the index, bodies only for the
+  matches), give the events after a cursor, remove, and say its highest
+  cursor. Test: its own contract, and listing reads no body that does not
+  match. Postgres follows the same interface when a deployment needs a
+  shared index.
+- **T5. Running traces in the log, finished traces in the archive.** The
+  JSONL store keeps what it is good at, durability while a trace is written:
+  every record is appended as it happens, so a crash loses nothing. When a
+  trace ends, it is written to the archive and leaves memory, and the log is
+  compacted to the traces still running when it has grown. Reads look at
+  running traces first, then the archive through a small cache; listing
+  narrows through the index; a stream resumed from an old cursor reads the
+  archived traces whose cursors are after it. The cursor counter continues
+  from the archive's highest after a restart. A trace that receives a record
+  after it ended (an exporter failure) is updated in the archive. Test:
+  memory does not grow with finished traces; a restart reads only running
+  traces; the store contract and stream-resume tests pass over it.
+- **T6. Retention and migration.** Retention through the index. Migration
+  needs no command: the first start replays the old log, finds its traces
+  finished, archives them and compacts the log. The steward's 235 MiB file
+  is migrated this way and P7 measures the targets above.
 
 T1–T3 shrink what is written and help the current store at once; T4–T6
 change where it is kept. JSONL stays available for local development.
