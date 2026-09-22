@@ -38,3 +38,7 @@ a PR.
 
 | Unit | Status | Commit | Notes |
 | --- | --- | --- | --- |
+| W4 | Done | — | 2026-09-22 on the server: the two clones (468 and 470 files, 19 MB) removed; the steward's workspace went from about 1,030 files to 89 (1.1 MB). |
+| W1 | Done | `b99eafd` | The listing reports each nested `.git`; the files under that folder are not copied back and the model is told to clone outside the workspace. A `.git` at the workspace's top is not a checkout. |
+| W2 | Done | `1cea3d2` | `run.json` and `events.jsonl` in a `run_*` folder are not copied in, and a command cannot write one back; what an agent writes in a run's folder is copied as before. |
+| W3 | Done | `636201a` | `governance_config.workspace_bridge`: `include` and `exclude` globs, both directions, validated at startup; the default copies everything. Documented in the execution page. |

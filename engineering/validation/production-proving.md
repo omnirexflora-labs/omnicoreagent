@@ -35,7 +35,7 @@ found **twenty-seven things wrong** — twenty of them runtime defects,
 two defaults that were wrong for real work,
 three deployment lessons, two missing capabilities — and fixing them
 surfaced two more in the suite's own acceptance check. Rerunning P3 cleanly
-found eight more: seven runtime defects and one mistake of the model's. P7 has found four more so far. Every
+found eight more: seven runtime defects and one mistake of the model's. P7 has found five more so far. Every
 defect is fixed with a test that fails without the fix; the runtime's test
 suite went from 1,756 to 1,881 tests. None of the steward's twenty-seven were visible to the
 suite before, because the suite's models are scripted and its stores are in
@@ -309,11 +309,6 @@ rather than a defect.
 
 ## What is still open
 
-- The sandbox bridge copies the whole agent workspace into every sandbox.
-  The steward's workspace holds two clones of the repository (about 940
-  files) that a worker once copied back, so every run's first command copies
-  and checks all of them. Its policy records are now one summary per copy;
-  what it copies is still everything.
 - The SQL task store is SQLite-only; the steward's task store is Redis.
 - A Postgres telemetry index, for several OmniServe processes sharing one
   store, and storing the tool catalog once across traces (about 70 KB per
