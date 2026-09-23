@@ -163,3 +163,31 @@ async def test_the_archive_survives_a_restart(tmp_path):
         assert await second.max_cursor() == max(cursors.values())
     finally:
         second.close()
+
+
+@pytest.mark.asyncio
+async def test_a_stored_trace_is_walked_once(archive, monkeypatch):
+    """Keeping a trace converts it once.
+
+    Under load this is most of what the runtime spends: a finished run's
+    trace is large (a few hundred KB), and walking it is proportional to
+    everything in it. The body and the payload references it indexes come
+    from the same walk, not one each.
+    """
+    trace, cursors = _trace(1, run_id="run_a")
+    walks = 0
+    original = type(trace).model_dump
+
+    def counted(self):
+        nonlocal walks
+        if isinstance(self, TelemetryTrace):
+            walks += 1
+        return original(self)
+
+    monkeypatch.setattr(type(trace), "model_dump", counted)
+    await archive.put(trace, cursors)
+    assert walks == 1
+
+    stored, _ = await archive.get(trace.trace_id)
+    assert stored.trace_id == trace.trace_id
+    assert await archive.payload_references() == set()
