@@ -489,6 +489,13 @@ class AgentLlmStepRunner:
                 "refusal": normalized.refusal,
                 "usage": self._usage_payload(extract_response_usage(response)),
                 "stream_stats": stream_stats,
+                **(
+                    {"token_details": normalized.response_metadata["token_details"]}
+                    if telemetry_recorder.config.record_token_details
+                    and normalized is not None
+                    and normalized.response_metadata.get("token_details")
+                    else {}
+                ),
             }
             if budgets is not None and budgets.enabled:
                 await self._charge_what_the_call_cost(
@@ -665,6 +672,17 @@ class AgentLlmStepRunner:
             "request_settings": request_settings,
             "provider_response_id": response_metadata.get("id"),
             "provider_model": response_metadata.get("model"),
+            # The policy that produced this call, as the provider describes it.
+            "policy_version": {
+                key: value
+                for key, value in (
+                    ("model", response_metadata.get("model")),
+                    ("fingerprint", response_metadata.get("system_fingerprint")),
+                    ("version", response_metadata.get("model_version")),
+                    ("service_tier", response_metadata.get("service_tier")),
+                )
+                if value is not None
+            },
             "finish_reason": normalized.finish_reason if normalized else None,
             "refused": bool(normalized.refusal) if normalized else False,
             "tokens": tokens,

@@ -140,6 +140,7 @@ def build_trajectory(
         if event.event_type in {"model_response", "model_error"}
     }
     request: dict[str, Any] = {}
+    outcomes: list[dict[str, Any]] = []
     header: dict[str, Any] | None = None
     final: dict[str, Any] = {}
     top_level_runtime: list[dict[str, Any]] = []
@@ -176,6 +177,9 @@ def build_trajectory(
                     **_context_fields(event),
                 }
             )
+        elif kind == "run_outcome":
+            # What the run turned out to be worth, attached after it ended.
+            outcomes.append({"event_id": take(event), **(event.output or {})})
         elif kind == "model_call":
             response = responses.get(event.event_id)
             model_request, model_request_capture = _model_request(event, spans, contexts)
@@ -261,6 +265,7 @@ def build_trajectory(
         "tags": list(trace.metadata.tags),
         "provenance": trace.provenance.model_dump(),
         "request": request or None,
+        "outcomes": outcomes,
         "harness": header,
         "runtime_messages": top_level_runtime,
         "steps": steps,

@@ -141,8 +141,8 @@ async def test_explicit_agent_version_wins_over_the_content_hash():
 
 @pytest.mark.asyncio
 async def test_system_prompt_text_follows_the_capture_policy():
-    _, default_header = await _run(await _agent())
-    _, full_header = await _run(await _agent(telemetry_config={"capture": "full"}))
+    _, default_header = await _run(await _agent(telemetry_config={"capture": "default"}))
+    _, full_header = await _run(await _agent())
 
     assert default_header.input is None
     assert default_header.input_capture.state == CaptureState.NOT_RECORDED

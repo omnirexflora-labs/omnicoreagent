@@ -168,7 +168,7 @@ fingerprints, the model-facing tool catalog (count, sorted names, providers, and
 schema digest), the system prompt digest, and `mcp_servers`: each configured MCP
 server's status, reported name and version, protocol version, tool count,
 reconnects, and last error (never its command, URL, environment, or headers). The prompt text itself is recorded
-only with `capture: "full"`. The header lives in the event metadata, so it is
+only when model prompts are recorded (the default). The header lives in the event metadata, so it is
 recorded under every capture policy.
 
 When a project's `AGENTS.md` instructions are configured, the header also
@@ -209,7 +209,7 @@ also fill the standard `token_usage` and `estimated_cost_usd` fields of the
 `model.call` span, which exporters map to `gen_ai.usage.*` attributes. A failed call
 records the same attempts on its `model_error` event. The raw tool-call
 argument strings the model produced are in the `model_response` output when
-model responses are recorded (`capture: "full"`).
+model responses are recorded (the default; not under `capture: "default"`).
 
 ### Tool calls and observations
 
@@ -298,6 +298,39 @@ The trace is intentionally dependency-free inside the runtime. Exporters are
 optional adapters layered on top of this internal trace model.
 
 ---
+
+## Outcomes and training records
+
+A run's own result is not its outcome: a pull request is merged an hour
+later, a customer accepts an answer the next day, CI runs the tests
+afterwards. Attach it whenever it is known, as often as it is known:
+
+```python
+await agent.record_outcome(
+    run_id, source="github", reward=1.0, label="merged", detail={"pull_request": 252}
+)
+# or: POST /runs/{run_id}/outcome {"source": "github", "reward": 1.0, "label": "merged"}
+```
+
+Outcomes are kept on the run's record, in its trace (a `run_outcome` event)
+and in its trajectory. `agent.training_records(session_id=…)` reads finished
+runs back as one record each — the messages the model was sent at every
+step, what it produced, what the tools answered, the policy that served it,
+the totals and the outcomes — which is what an evaluator, or a trainer
+learning from one run per task, consumes:
+
+```python
+records = await agent.training_records(session_id="support", limit=500)
+Path("batch.jsonl").write_text("\n".join(json.dumps(record) for record in records))
+```
+
+Each model call records `policy_version`: the model the provider served,
+its fingerprint and version when it reports them, so a trainer can tell how
+stale a run is. To keep the tokens the model chose and their probabilities,
+ask the provider for them in `model_config` (`"logprobs": True`) and record
+them with `telemetry_config={"record_token_details": True}`; they are large,
+so they are off by default, and a hosted reasoning model usually refuses to
+return them.
 
 ## Export Traces
 

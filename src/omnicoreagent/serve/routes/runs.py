@@ -16,6 +16,7 @@ from omnicoreagent.core.telemetry import TraceStatus
 from ..models import (
     ApprovalDecisionRequest,
     BudgetDecisionRequest,
+    OutcomeRequest,
     ErrorResponse,
     RunRequest,
     RunResponse,
@@ -250,6 +251,31 @@ def create_runs_router() -> APIRouter:
         return decided
 
     @router.post(
+        "/runs/{run_id}/outcome",
+        summary="Record a run's outcome",
+        description=(
+            "What the run turned out to be worth, reported whenever it is known: "
+            "a pull request merged, an answer accepted, a test suite green. Kept "
+            "on the run's record and in its trace; a run may gather several."
+        ),
+        responses={404: {"model": ErrorResponse}},
+    )
+    async def record_outcome(request: Request, run_id: str, body: OutcomeRequest) -> dict:
+        agent = get_agent(request)
+        try:
+            return await agent.record_outcome(
+                run_id,
+                source=body.source,
+                reward=body.reward,
+                label=body.label,
+                detail=body.detail,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    @router.post(
         "/runs/{run_id}/steer",
         summary="Steer a run",
         description=(
@@ -348,5 +374,6 @@ def _public_run(agent, record: dict) -> dict:
     }
     view["approvals"] = [_public_view(agent, a, record) for a in record.get("approvals") or []]
     view["budget_requests"] = list(record.get("budget_requests") or [])
+    view["outcomes"] = list(record.get("outcomes") or [])
     privacy_filter = getattr(agent, "privacy_filter", None)
     return privacy_filter.redact(view, boundary="public") if privacy_filter else view

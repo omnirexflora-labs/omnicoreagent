@@ -212,6 +212,20 @@ CONTINUATION_FIELDS_BY_PROVIDER = {
 TOOL_CALL_FIELDS_PROVIDERS = frozenset({"gemini"})
 
 
+# Generation settings sent as given, and recorded with the call.
+# ``logprobs``/``top_logprobs`` are what a trainer needs to reuse a run
+# (traces for training plan, R3); a provider that refuses one names it, and
+# it is dropped for the retry like any other setting.
+_MODEL_SETTINGS = (
+    "temperature",
+    "max_tokens",
+    "top_p",
+    "reasoning_effort",
+    "logprobs",
+    "top_logprobs",
+)
+
+
 class LLMConnection:
     """Provider connection through LiteLLM."""
 
@@ -279,6 +293,8 @@ class LLMConnection:
             "temperature": self.model_config.get("temperature"),
             "max_tokens": self.model_config.get("max_tokens"),
             "top_p": self.model_config.get("top_p"),
+            "logprobs": self.model_config.get("logprobs"),
+            "top_logprobs": self.model_config.get("top_logprobs"),
             "reasoning_effort": self.model_config.get("reasoning_effort"),
         }
 
@@ -453,7 +469,7 @@ class LLMConnection:
     def request_settings(self) -> dict[str, Any]:
         """The model and generation settings sent with every request."""
         settings = {"model": self.llm_config["model"]}
-        for key in ("temperature", "max_tokens", "top_p", "reasoning_effort"):
+        for key in _MODEL_SETTINGS:
             if self.llm_config.get(key) is not None:
                 settings[key] = self.llm_config[key]
         return settings
@@ -490,7 +506,7 @@ class LLMConnection:
             "messages": [self.to_dict(m) for m in messages],
         }
 
-        for key in ("temperature", "max_tokens", "top_p", "reasoning_effort"):
+        for key in _MODEL_SETTINGS:
             if self.llm_config.get(key) is not None and key not in self._unsupported_params:
                 params[key] = self.llm_config[key]
 

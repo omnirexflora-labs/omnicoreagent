@@ -42,7 +42,7 @@ async def test_full_capture_records_the_traceback():
 
 
 @pytest.mark.asyncio
-async def test_the_default_keeps_the_traceback_out():
-    error = await _recorded_error(TelemetryConfig())
+async def test_the_privacy_first_capture_keeps_the_traceback_out():
+    error = await _recorded_error(TelemetryConfig(capture="default"))
     assert (error.type, error.message) == ("ValueError", "the digest choked on a schema")
     assert error.stack is None

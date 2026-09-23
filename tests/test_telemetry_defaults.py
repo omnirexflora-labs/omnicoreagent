@@ -21,10 +21,10 @@ _MODEL = {"provider": "openai", "model": "gpt-5.4-mini", "api_key": "key"}
 
 
 def test_capture_presets_fill_only_unset_recording_fields():
-    default = TelemetryConfig()
-    full = TelemetryConfig(capture="full")
-    full_without_prompts = TelemetryConfig(capture="full", record_model_prompts=False)
-    default_with_responses = TelemetryConfig(record_model_responses=True)
+    default = TelemetryConfig(capture="default")
+    full = TelemetryConfig()
+    full_without_prompts = TelemetryConfig(record_model_prompts=False)
+    default_with_responses = TelemetryConfig(capture="default", record_model_responses=True)
 
     assert (default.record_model_prompts, default.record_model_responses) == (False, False)
     assert (default.record_inputs, default.record_outputs, default.record_tool_results) == (
@@ -157,3 +157,19 @@ async def test_default_agent_trace_survives_a_restart(monkeypatch, tmp_path):
     [trace] = await reopened.list_traces(TraceFilter(session_id="durable-session"))
     assert trace.trace_id == result["trace_id"]
     assert agent._telemetry_metadata()["telemetry_storage"] == "jsonl"
+
+
+@pytest.mark.asyncio
+async def test_a_trace_records_the_whole_trajectory_by_default():
+    """The maintainer's decision, 2026-09-22: a trace is worth keeping only
+    if it holds what the model was actually sent, so `capture: "full"` is the
+    default. `capture: "default"` stays for a deployment that must not
+    record prompts. Personal data is redacted from telemetry either way."""
+    from omnicoreagent.core.telemetry import TelemetryConfig
+
+    config = TelemetryConfig()
+
+    assert config.capture == "full"
+    assert config.record_model_prompts and config.record_model_responses
+    privacy_first = TelemetryConfig(capture="default")
+    assert not privacy_first.record_model_prompts

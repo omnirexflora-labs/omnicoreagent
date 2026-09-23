@@ -108,7 +108,7 @@ async def _traced_run(provider: str, model: str, capture: str | None):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("capture", ["full", None])
+@pytest.mark.parametrize("capture", ["full", "default"])
 @pytest.mark.parametrize(
     ("provider", "model"),
     [("anthropic", "claude-sonnet-4-5"), ("gemini", "gemini-3-pro-preview")],
@@ -136,7 +136,7 @@ async def test_traces_record_continuation_without_storing_opaque_values(
     if capture == "full" and provider == "anthropic":
         # The thinking text is kept under full capture; its signature is not.
         assert THINKING in dump
-    if capture is None:
+    if capture == "default":
         assert THINKING not in dump
 
 

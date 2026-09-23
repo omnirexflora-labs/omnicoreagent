@@ -199,6 +199,7 @@ async def test_governance_records_redacted_arguments_and_links_decisions():
     agent = await _agent(
         ScriptedModel(("call_1", "lookup", '{"key": "secret-value"}')),
         governance_config=_governance(),
+        telemetry_config={"capture": "default"},
     )
     trace = await _trace(agent)
 
@@ -274,6 +275,7 @@ async def test_delegation_parameters_are_redacted_under_governance():
             ("call_child", "delegate_researcher", '{"query": "customer 4471 salary"}')
         ),
         sub_agents=[_child_agent()],
+        telemetry_config={"capture": "default"},
         governance_config={
             "enabled": True,
             "policy": {
