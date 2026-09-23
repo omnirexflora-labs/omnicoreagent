@@ -44,8 +44,13 @@ def github(path: str) -> dict:
 
 
 def pull_requests_of(run: dict) -> set[int]:
-    """The pull requests a run opened, from its answer and its trace."""
-    found = {int(number) for number in PULL_REQUEST.findall(str(run.get("result_preview") or ""))}
+    """The pull requests this run opened.
+
+    Only what its own ``create_pull_request`` call returned: a run that read
+    someone else's pull request, or mentioned one in its answer, did not earn
+    that verdict.
+    """
+    found: set[int] = set()
     try:
         trace = api("GET", f"/telemetry/runs/{run['run_id']}/trace", timeout=120)
     except SystemExit:
@@ -54,9 +59,9 @@ def pull_requests_of(run: dict) -> set[int]:
     for event in body.get("events", []):
         if event.get("event_type") != "mcp_tool_result":
             continue
-        output = json.dumps(event.get("output") or {})
-        if '"create_pull_request"' in output or "/pull/" in output:
-            found.update(int(number) for number in PULL_REQUEST.findall(output))
+        if (event.get("metadata") or {}).get("tool_name") != "create_pull_request":
+            continue
+        found.update(int(number) for number in PULL_REQUEST.findall(json.dumps(event.get("output") or {})))
     return found
 
 
