@@ -296,6 +296,15 @@ Each line names the commit; the plan's execution log has the detail.
     the steward's daily cap lowered to 30 cents, one crash would otherwise
     have locked up a fifth of a day. (`e97a618`)
 
+43. **Every finished trace was walked twice on its way to the archive.**
+    Storing a trace built its plain form for the body, then built it again to
+    index the payloads it refers to. A trace is the largest thing the runtime
+    keeps (~200 KB for a three-call run), so under load that second walk was
+    most of what storing one cost: removing it took a run from 54.7 to 51.0
+    ms of CPU and the runtime's ceiling from 15.0 to 16.2 runs a second. It
+    took a load test to see it at all — one run at a time, it is three
+    milliseconds. (`engineering/validation/scale.md`)
+
 ## What it cost
 
 A read-the-repository run costs about two to eight cents on `gpt-5.6-terra`
@@ -313,6 +322,9 @@ rather than a defect.
 - A Postgres telemetry index, for several OmniServe processes sharing one
   store, and storing the tool catalog once across traces (about 70 KB per
   run for the steward) are deferred.
+- One process serves about 15 runs a second of the runtime's own work and
+  cannot be made to serve more by raising concurrency; more than one process
+  on one shared database is not proved yet (scale plan S4).
 
 ## The traces
 

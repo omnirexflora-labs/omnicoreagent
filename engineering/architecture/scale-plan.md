@@ -50,3 +50,4 @@ CI gains a Postgres service for S2 and S3.
 
 | Unit | Status | Commit | Notes |
 | --- | --- | --- | --- |
+| S1 | done | | One process is one core: throughput flat at ~15 runs/s from concurrency 1 to 100, latency growing in step. The durable log is 45% of a run's CPU; full capture costs 10% more than the privacy-first default. Found and fixed: the archive walked every finished trace twice (-7% CPU a run). `engineering/validation/scale.md` |
