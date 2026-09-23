@@ -21,6 +21,7 @@ The plan, the units, and what each must survive:
 | `scenario_p3.py` | The third: fix that test behind a person's approval of each GitHub write, real branch and PR; with `--kill`, the server dies after the push and before the PR, and the push is never repeated. |
 | `scenario_p4.py` | The fourth: a run stops at its dollar cap and waits, a top-up over HTTP lets it finish, the ledger matches the traces; `--two-workers` proves the compare-and-swap across processes on Postgres. |
 | `scenario_p5.py` | The fifth: triage reads the steward's own failed runs and the issues, schedules one work item per cause, and a second triage schedules nothing new. |
+| `outcomes.py` | What its work turned out to be worth: the pull request a run opened, merged (reward 1.0) or closed unmerged (0.0), recorded on that run through `POST /runs/{run_id}/outcome`. Hourly from cron; a still-open pull request is asked about again next hour. |
 | `page.html` | The page: what the steward is doing now, its runs, their spend, the approvals — served by its own OmniServe at `/steward/` (no token for the page; the token for what it reads). |
 | `scenario_p6.py` | The sixth: the page is public on the API's origin, the API still needs the token, and every source the page reads answers for a real run. |
 | `scenario_p7.py`, `measure.sh` | The seventh: the steward on its schedule for a week (read the repository every 12 h, triage every 6 h), with one line an hour of memory, file descriptors, store sizes, runs and spend in `/opt/steward/logs/p7.csv`; `--status` reads it back. |
