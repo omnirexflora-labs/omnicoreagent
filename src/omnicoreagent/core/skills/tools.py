@@ -99,6 +99,19 @@ async def _run_in_sandbox(
     args: List[str], timeout: int,
 ) -> Dict[str, Any]:
     """Copy the skill into the run's sandbox and run the script there."""
+    runtime = getattr(scope.service.governance_engine, "sandbox_runtime", None)
+    if getattr(runtime, "execution_surface", "sandbox") == "host":
+        # The local sandbox runs on this machine, where the skill already is:
+        # run it in place (still authorized as a host command), copying nothing
+        # into the user's working directory.
+        result = await scope.execute(
+            [*interpreter, relative, *args],
+            cwd=str(skill_root.resolve()),
+            timeout_seconds=timeout,
+        )
+        if result.timed_out:
+            return {"status": "error", "message": f"Execution timed out after {timeout}s"}
+        return _script_result(result.exit_code, result.stdout, result.stderr, surface="host")
     files, total = {}, 0
     for path in sorted(skill_root.rglob("*")):
         if path.is_file() and not path.is_symlink():

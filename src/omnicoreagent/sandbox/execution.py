@@ -174,7 +174,7 @@ class SandboxExecutionService:
         if session is not None:
             return await self._execute_in_session(spec, session)
         runtime = self._runtime()
-        authority_request = _sandbox_authority_request(spec)
+        authority_request = _sandbox_authority_request(spec, _surface(runtime))
         manifest = spec.manifest or SandboxManifest()
         self._refuse_mount_over_policy(manifest)
         manifest_requests = _manifest_authority_requests(manifest, spec)
@@ -193,6 +193,7 @@ class SandboxExecutionService:
             **dict(result.metadata),
             "sandbox_session_id": session.session_id,
             "sandbox_provider": getattr(runtime, "provider", session.provider),
+            "execution_surface": _surface(runtime),
             "authority": authority.to_metadata(),
         }
         if _should_cleanup(manifest, result):
@@ -210,7 +211,7 @@ class SandboxExecutionService:
             raise ValueError("A command in an open session uses the session's manifest")
         runtime = self._runtime()
         decision = await self.governance_engine.authorize_sandboxed(
-            _sandbox_authority_request(spec)
+            _sandbox_authority_request(spec, _surface(runtime))
         )
         authority = SandboxAuthorityContext.from_policy_decision(decision)
         started, commands = self._session_started.get(session.session_id, (time.monotonic(), 0))
@@ -223,6 +224,7 @@ class SandboxExecutionService:
             **dict(result.metadata),
             "sandbox_session_id": session.session_id,
             "sandbox_provider": getattr(runtime, "provider", session.provider),
+            "execution_surface": _surface(runtime),
             "authority": authority.to_metadata(),
         }
         return result
@@ -330,9 +332,16 @@ def _session_facts(session: SandboxSession, runtime: SandboxRuntime) -> dict[str
     return {
         "sandbox_session_id": session.session_id,
         "sandbox_provider": _value(getattr(runtime, "provider", session.provider)),
+        "execution_surface": _surface(runtime),
         # The provider's own name for the sandbox, so a person can find it.
         "sandbox_ref": metadata.get("sandbox_id") or metadata.get("container_id"),
     }
+
+
+def _surface(runtime: SandboxRuntime) -> str:
+    """Where the runtime's commands run: "sandbox", or "host" for one that
+    runs them on this machine without isolation."""
+    return "host" if getattr(runtime, "execution_surface", "sandbox") == "host" else "sandbox"
 
 
 def _elapsed_ms(started: float) -> float:
@@ -343,12 +352,14 @@ def _value(value: Any) -> Any:
     return getattr(value, "value", value)
 
 
-def _default_authority_request(spec: SandboxCommandSpec) -> AuthorityRequest:
+def _default_authority_request(
+    spec: SandboxCommandSpec, surface: str = "sandbox"
+) -> AuthorityRequest:
     command_name = spec.command[0] if spec.command else ""
     return AuthorityRequest(
         capability="process.exec",
         provider="sandbox",
-        execution_surface="sandbox",
+        execution_surface=surface,
         target=AuthorityTarget(resource=command_name),
         risk_level="high",
         metadata={
@@ -359,15 +370,23 @@ def _default_authority_request(spec: SandboxCommandSpec) -> AuthorityRequest:
     )
 
 
-def _sandbox_authority_request(spec: SandboxCommandSpec) -> AuthorityRequest:
-    request = spec.authority_request or _default_authority_request(spec)
+def _sandbox_authority_request(
+    spec: SandboxCommandSpec, surface: str = "sandbox"
+) -> AuthorityRequest:
+    """The ``process.exec`` request for a command, on the runtime's surface.
+
+    A runtime that runs commands on this machine is authorized as ``host``
+    execution, whatever the caller asked for: the policy sees where the
+    command really runs.
+    """
+    request = spec.authority_request or _default_authority_request(spec, surface)
     command_name = spec.command[0] if spec.command else ""
     if request.capability != "process.exec":
         raise ValueError("sandbox command execution requires process.exec authority")
     if request.provider not in {None, "sandbox"}:
         raise ValueError("sandbox command authority provider must be sandbox")
-    if request.execution_surface not in {None, "sandbox"}:
-        raise ValueError("sandbox command authority execution_surface must be sandbox")
+    if request.execution_surface not in {None, "sandbox", surface}:
+        raise ValueError(f"sandbox command authority execution_surface must be {surface}")
     if request.target and request.target.resource not in {None, command_name}:
         raise ValueError("sandbox command authority target must match command name")
     return AuthorityRequest(
@@ -376,7 +395,7 @@ def _sandbox_authority_request(spec: SandboxCommandSpec) -> AuthorityRequest:
         target=AuthorityTarget(resource=command_name),
         request_id=request.request_id,
         provider="sandbox",
-        execution_surface="sandbox",
+        execution_surface=surface,
         risk_level="high",
         data_classes=list(request.data_classes),
         method=request.method,

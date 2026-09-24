@@ -14,21 +14,35 @@ from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 
 DEFAULT_TIMEOUT_SECONDS = 60
 
+_SANDBOX_DESCRIPTION = (
+    "Run a shell command in an isolated sandbox and return its exit code, "
+    "stdout, and stderr. The sandbox has no network access unless your "
+    "policy allows it, cannot see the host's files or credentials, and "
+    "keeps files you create in its working directory until the task "
+    "ends. When workspace files are enabled, they are in the working "
+    "directory and text files the command creates or changes are saved "
+    "back to the workspace. Use it to run code, scripts, and command-line tools."
+)
+# The local sandbox is not isolated, and the model is not told it is.
+_HOST_DESCRIPTION = (
+    "Run a shell command on this machine and return its exit code, stdout, "
+    "and stderr. It runs in the working directory, directly on the machine "
+    "you are working on: it is not isolated, so it can change real files and "
+    "reach the network, and what it changes stays changed. When workspace "
+    "files are enabled, they are in the working directory and text files the "
+    "command creates or changes are saved back to the workspace. Use it to "
+    "run code, scripts, and command-line tools."
+)
 
-def build_execution_tools(registry: ToolRegistry, *, max_timeout_seconds: int) -> ToolRegistry:
+
+def build_execution_tools(
+    registry: ToolRegistry, *, max_timeout_seconds: int, on_host: bool = False
+) -> ToolRegistry:
     max_timeout = max(1, int(max_timeout_seconds))
 
     @registry.register_tool(
         name="execute",
-        description=(
-            "Run a shell command in an isolated sandbox and return its exit code, "
-            "stdout, and stderr. The sandbox has no network access unless your "
-            "policy allows it, cannot see the host's files or credentials, and "
-            "keeps files you create in its working directory until the task "
-            "ends. When workspace files are enabled, they are in the working "
-            "directory and text files the command creates or changes are saved "
-            "back to the workspace. Use it to run code, scripts, and command-line tools."
-        ),
+        description=_HOST_DESCRIPTION if on_host else _SANDBOX_DESCRIPTION,
         inputSchema={
             "type": "object",
             "properties": {
@@ -70,7 +84,7 @@ def execution_result(result: Any, limit: int | None = None) -> dict[str, Any]:
         "stdout": result.stdout,
         "stderr": result.stderr,
         "timed_out": result.timed_out,
-        "execution_surface": "sandbox",
+        "execution_surface": result.metadata.get("execution_surface", "sandbox"),
     }
     for key in ("stdout_truncated", "stderr_truncated"):
         if result.metadata.get(key):

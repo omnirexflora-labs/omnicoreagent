@@ -11,7 +11,7 @@ is authorized by policy before it runs, and recorded afterwards.**
 | Lane | What it is | Runs where |
 |---|---|---|
 | Tools | Your own functions and MCP tools | In your process, or the MCP server |
-| Sandbox | The `execute` tool and skill scripts | A container ([sandbox providers](/docs/how-to-guides/sandbox-providers)) |
+| Sandbox | The `execute` tool and skill scripts | A container ([sandbox providers](/docs/how-to-guides/sandbox-providers)), or this machine with `local` |
 | Code mode | A Python program the model writes ([code mode](/docs/core-concepts/code-mode)) | Monty, in a worker process |
 
 ## Turning them on
@@ -41,7 +41,7 @@ for is authorized when the run's session opens.
 |---|---|---|
 | `tool.local.call`, `tool.mcp.call` | Your tools, MCP tools | Allowed (MCP asks in interactive-dev) |
 | `sandbox.execute` | Calling `execute` | Allowed |
-| `process.exec` | Each command inside the sandbox | Allowed on the sandbox surface, never on the host |
+| `process.exec` | Each command inside the sandbox | Allowed on the sandbox surface, never on the host (the `local` provider's surface) |
 | `skill.script.run` | Running a skill script | Allowed (high risk; on the host when there is no sandbox) |
 | `code.run` | Running a program | Allowed |
 | `workspace.files.*` | Files, including what a sandbox writes back | Allowed |

@@ -20,6 +20,9 @@ class SandboxRuntime(ABC):
     # Whether the backend can run commands; tools that execute are hidden from
     # the model when it cannot.
     supports_execution: bool = False
+    # Where commands really run, as governance sees it: "sandbox" for an
+    # isolated backend, "host" for one that runs them on this machine.
+    execution_surface: str = "sandbox"
 
     @abstractmethod
     async def create(self, manifest: SandboxManifest) -> SandboxSession: ...

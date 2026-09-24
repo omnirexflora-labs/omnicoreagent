@@ -53,12 +53,7 @@ if TYPE_CHECKING:
 
 def _sandbox_execution(governance_engine: Any):
     """A governed execution service when the configured sandbox can execute."""
-    runtime = getattr(governance_engine, "sandbox_runtime", None)
-    if (
-        governance_engine is None
-        or not getattr(runtime, "supports_execution", False)
-        or not governance_engine._sandbox_runtime_satisfies_required_boundary()
-    ):
+    if governance_engine is None or not governance_engine.sandbox_runtime_can_execute():
         return None
     from omnicoreagent.sandbox import SandboxExecutionService
 

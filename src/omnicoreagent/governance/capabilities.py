@@ -708,7 +708,12 @@ def _execution_surface(tool_provider: str, tool_name: str | None = None) -> str:
         # A skill script runs in the run's sandbox when it has one.
         from omnicoreagent.sandbox.scope import current_execution
 
-        return "sandbox" if current_execution() is not None else "host"
+        scope = current_execution()
+        if scope is None:
+            return "host"
+        # The local sandbox runs the script on this machine.
+        runtime = getattr(scope.service.governance_engine, "sandbox_runtime", None)
+        return "host" if getattr(runtime, "execution_surface", "sandbox") == "host" else "sandbox"
     if tool_provider == "workspace":
         return "workspace"
     if tool_provider == "artifact":
