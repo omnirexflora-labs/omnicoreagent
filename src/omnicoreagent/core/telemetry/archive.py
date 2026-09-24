@@ -142,7 +142,12 @@ class TelemetryArchive:
 
     def _put(self, trace: TelemetryTrace, cursors: dict[str, int]) -> None:
         body_name = f"{trace.trace_id}.json"
-        text = json.dumps({"trace": trace.model_dump(), "cursors": cursors})
+        # One walk of the trace: the body written and the payload references
+        # indexed beside it are read from the same plain form. A trace is the
+        # largest thing the runtime keeps, so walking it twice is most of what
+        # storing it would cost.
+        plain = trace.model_dump()
+        text = json.dumps({"trace": plain, "cursors": cursors})
         self.bodies.write_text(body_name, text)
         values = list(cursors.values())
         row = {
@@ -160,7 +165,7 @@ class TelemetryArchive:
             "ended_at": _iso(trace.ended_at),
             "first_cursor": min(values) if values else None,
             "last_cursor": max(values) if values else None,
-            "payload_references": json.dumps(sorted(payload_references(trace))),
+            "payload_references": json.dumps(sorted(payload_references(plain))),
             "body": body_name,
             "bytes": len(text.encode("utf-8")),
         }
