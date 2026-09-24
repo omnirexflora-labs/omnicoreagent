@@ -11,8 +11,7 @@ with finished runs, then count how many runs one ordinary write reads or
 writes. A store that keeps an entity per key touches the one it is writing; a
 snapshot store touches all of them.
 
-Redis takes part when ``OMNICOREAGENT_TEST_REDIS_URL`` is set, or a server is
-listening locally (CI has one).
+Redis and MongoDB take part when their servers are reachable (CI has both).
 """
 
 from __future__ import annotations
@@ -24,6 +23,7 @@ import pytest
 from omnicoreagent.background import (
     BackgroundAgentSpec,
     BackgroundRun,
+    MongoDbTaskStore,
     OverlapPolicy,
     RedisTaskStore,
     RunStatus,
@@ -32,6 +32,8 @@ from omnicoreagent.background import (
 
 from test_background_task_store_contract import (
     background_run,
+    mongodb_contract_database,
+    mongodb_contract_uri,
     redis_contract_url,
     task_spec,
 )
@@ -63,6 +65,14 @@ class RunTraffic:
 async def _store(kind: str, tmp_path):
     if kind == "sql":
         store = SqlTaskStore(url=f"sqlite:///{tmp_path / 'background.db'}")
+    elif kind == "mongodb":
+        store = MongoDbTaskStore(
+            uri=mongodb_contract_uri(),
+            database=mongodb_contract_database(),
+            collection_prefix=f"test_scope_{uuid4().hex}",
+            connect_timeout=5,
+            lock_timeout=5,
+        )
     else:
         store = RedisTaskStore(
             url=redis_contract_url(),
@@ -88,7 +98,7 @@ async def _fill(store, count: int) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["sql", "redis"])
+@pytest.mark.parametrize("kind", ["sql", "redis", "mongodb"])
 async def test_a_write_does_not_read_every_run_ever_kept(kind, tmp_path, monkeypatch):
     store = await _store(kind, tmp_path)
     try:

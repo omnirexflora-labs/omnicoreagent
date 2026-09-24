@@ -4,16 +4,13 @@ Found by P2 of the production proving plan: the steward's container was
 recreated while the worker held the Redis task-store lock, whose lease was
 five minutes; every restart gave up after thirty seconds — "Timed out
 acquiring Redis task-store lock" — and the deployment crash-looped until the
-lease lapsed. MongoDB still takes a lock over the whole store, so its lease is
-short (its operations take milliseconds; a long write refreshes it),
-acquisition always outlasts a full lease, and a lock still held after that
-names how long the holder has left.
+lease lapsed.
 
-Redis no longer has the failure mode at all: since scale plan S2b it writes an
-entity per key under optimistic transactions, and takes no lock over the store,
-so there is nothing for a dead process to leave behind. That is what the Redis
-tests here hold now — including that a lock key left by the old store is simply
-ignored.
+Neither store has the failure mode any more. Since scale plan S2b both write an
+entity at a time — a key in Redis under an optimistic transaction, a document in
+MongoDB under one atomic update — and neither takes a lock over the store, so
+there is nothing for a dead process to leave behind. That is what these hold
+now, including that a lock left by the old stores is simply ignored.
 """
 
 from __future__ import annotations
@@ -59,12 +56,6 @@ async def _mongo_store(**lock) -> MongoDbTaskStore:
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"MongoDB is not reachable at {MONGODB_URI}: {exc}")
     return store
-
-
-async def test_the_default_mongodb_lease_is_short_and_acquisition_outlasts_it():
-    store = MongoDbTaskStore(uri="mongodb://x", database="d")
-    assert store.lock_lease_seconds <= 30
-    assert store.lock_wait_seconds >= store.lock_lease_seconds
 
 
 async def test_redis_takes_no_lock_over_the_store():
@@ -115,16 +106,23 @@ async def test_two_redis_stores_write_at_the_same_time():
         await second.close()
 
 
-async def test_mongodb_waits_out_a_dead_holders_lease():
-    store = await _mongo_store(lock_timeout=0.1, lock_lease_seconds=0.6)
+async def test_mongodb_takes_no_lock_over_the_store():
+    """Nothing to inherit: a dead process leaves no lock, because none is taken."""
+    store = await _mongo_store()
     try:
         from datetime import timedelta
 
         from omnicoreagent.background.models import utc_now
 
-        await store._lock_collection.update_one(
+        # A lock document the old store would have left behind, lease running.
+        await store._collection("locks").update_one(
             {"_id": "task_store"},
-            {"$set": {"token": "dead-process", "expires_at": utc_now() + timedelta(seconds=0.6)}},
+            {
+                "$set": {
+                    "token": "dead-process",
+                    "expires_at": utc_now() + timedelta(minutes=10),
+                }
+            },
             upsert=True,
         )
 
@@ -132,7 +130,46 @@ async def test_mongodb_waits_out_a_dead_holders_lease():
         await store.save_agent(BackgroundAgentSpec(agent_id="agent"))
         waited = time.monotonic() - started
 
-        assert 0.4 < waited < 3
+        assert waited < 1, "a write waited for something; nothing should hold it"
         assert (await store.get_agent("agent")) is not None
     finally:
+        for name in ("agents", "tasks", "schedules", "runs", "attempts", "locks"):
+            try:
+                await store._collection(name).drop()
+            except Exception:
+                pass
         await store.close()
+
+
+async def test_two_mongodb_stores_write_at_the_same_time():
+    """What the lock used to serialize: both get through, neither waits."""
+    import asyncio
+
+    first = await _mongo_store()
+    second = MongoDbTaskStore(
+        uri=MONGODB_URI,
+        database=MONGODB_DATABASE,
+        collection_prefix=first.collection_prefix,
+        connect_timeout=1.0,
+    )
+    await second.initialize()
+    try:
+        started = time.monotonic()
+        await asyncio.gather(
+            *(
+                store.save_agent(BackgroundAgentSpec(agent_id=f"agent-{number}"))
+                for number, store in enumerate((first, second, first, second))
+            )
+        )
+        assert time.monotonic() - started < 3
+        assert {agent.agent_id for agent in await first.list_agents()} == {
+            f"agent-{number}" for number in range(4)
+        }
+    finally:
+        for name in ("agents", "tasks", "schedules", "runs", "attempts"):
+            try:
+                await first._collection(name).drop()
+            except Exception:
+                pass
+        await first.close()
+        await second.close()

@@ -13,19 +13,23 @@ database:
 
 On SQLite, which every checkout has, on PostgreSQL when
 ``OMNICOREAGENT_TEST_POSTGRES_URL`` is set (CI sets it), where claims take real
-row locks, and on Redis, whose claims are optimistic transactions on the run's
-own key (scale plan S2b).
+row locks, on Redis, whose claims are optimistic transactions on the run's own
+key, and on MongoDB, whose claims are one atomic update of the run's own
+document (scale plan S2b).
 """
 
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import os
+import time
 from uuid import uuid4
 
 import pytest
 
 from omnicoreagent.background import BackgroundAgentManager, RunStatus
+from omnicoreagent.background.store.mongodb import MongoDbTaskStore
 from omnicoreagent.background.store.redis import RedisTaskStore
 from omnicoreagent.background.store.sql import SqlTaskStore
 from omnicoreagent.core.workspace.manager import Workspace
@@ -33,13 +37,34 @@ from omnicoreagent.core.workspace.manager import Workspace
 POSTGRES_URL_ENV = "OMNICOREAGENT_TEST_POSTGRES_URL"
 REDIS_URL_ENV = "OMNICOREAGENT_TEST_REDIS_URL"
 DEFAULT_REDIS_URL = "redis://localhost:6379/0"
+MONGODB_URI_ENV = "OMNICOREAGENT_TEST_MONGODB_URI"
+MONGODB_DATABASE_ENV = "OMNICOREAGENT_TEST_MONGODB_DATABASE"
+DEFAULT_MONGODB_URI = "mongodb://localhost:27017"
+DEFAULT_MONGODB_DATABASE = "omnicoreagent_test"
 
 
-@pytest.fixture(params=["sqlite", "postgres", "redis"])
+@pytest.fixture(params=["sqlite", "postgres", "redis", "mongodb"])
 def store_config(request, tmp_path):
     """One database, described the way a deployment describes it."""
     if request.param == "sqlite":
         yield {"backend": "sql", "url": f"sqlite:///{tmp_path / 'background.db'}"}
+        return
+    if request.param == "mongodb":
+        uri = os.getenv(MONGODB_URI_ENV, DEFAULT_MONGODB_URI)
+        prefix = f"test_two_managers_{uuid4().hex}"
+        config = {
+            "backend": "mongodb",
+            "uri": uri,
+            "database": os.getenv(MONGODB_DATABASE_ENV, DEFAULT_MONGODB_DATABASE),
+            "collection_prefix": prefix,
+            "connect_timeout": 5,
+        }
+        try:
+            asyncio.run(_mongo_reachable(config))
+        except Exception as exc:
+            pytest.skip(f"MongoDB task store unavailable: {exc}")
+        yield config
+        asyncio.run(_clear_mongo(config))
         return
     if request.param == "redis":
         redis_url = os.getenv(REDIS_URL_ENV, DEFAULT_REDIS_URL)
@@ -64,6 +89,37 @@ def store_config(request, tmp_path):
     yield {"backend": "sql", "url": url, "prefix": prefix}
     cleaner = SqlTaskStore(url, table_prefix=prefix)
     asyncio.run(_drop(cleaner))
+
+
+async def _mongo_reachable(config: dict) -> None:
+    store = MongoDbTaskStore(
+        uri=config["uri"],
+        database=config["database"],
+        collection_prefix=config["collection_prefix"],
+        connect_timeout=5,
+    )
+    try:
+        await store.initialize()
+    finally:
+        await store.close()
+
+
+async def _clear_mongo(config: dict) -> None:
+    """The test's collections go with it, so a shared server stays clean."""
+    store = MongoDbTaskStore(
+        uri=config["uri"],
+        database=config["database"],
+        collection_prefix=config["collection_prefix"],
+        connect_timeout=5,
+    )
+    try:
+        await store.initialize()
+        for name in ("agents", "tasks", "schedules", "runs", "attempts"):
+            await store._collection(name).drop()
+    except Exception:
+        pass
+    finally:
+        await store.close()
 
 
 async def _reachable(config: dict) -> None:
@@ -209,7 +265,15 @@ async def test_a_stranded_claim_is_taken_over_by_the_other_manager(store_config,
         assert claimed.lease_owner == "worker-a"
         await first.shutdown()
 
-        await asyncio.sleep(1.2)
+        # Wait for the lease to lapse, not for a length of time: a loaded
+        # machine makes a fixed sleep a coin toss.
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if await second.task_store.list_expired_leases(datetime.now(timezone.utc)):
+                break
+            await asyncio.sleep(0.1)
+        else:  # pragma: no cover - only on a machine that has stopped
+            raise AssertionError("the claim's lease never expired")
         await second.start()
         recovered = await second.run_until_terminal(run.run_id, timeout_seconds=60)
 
