@@ -563,6 +563,11 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         self.skipped_records = 0
         self.last_prune: dict[str, Any] | None = None
         self.removed_total = 0
+        # An archive that cannot be written to is not allowed to fail a run,
+        # and is not allowed to be silent either: the count and the last
+        # reason are here, and each failure is logged.
+        self.archive_failures = 0
+        self.last_archive_error: str | None = None
         self._inner = InMemoryTelemetryStore()
         self._loaded = False
         self._loop_locks = _LoopLocks()
@@ -987,14 +992,31 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         """Move ended traces to the archive, then compact the log if it has
         grown. A trace leaves the log only after it is in the archive."""
         moved: set[str] = set()
+        keep: set[str] = set()
         for trace_id in sorted(self._finished):
             trace = self._inner._traces.get(trace_id)
             if trace is None or trace.ended_at is None:
                 continue
             cursors = await self._inner.event_cursors(trace_id)
-            await self.archive.put(trace, cursors)
+            try:
+                await self.archive.put(trace, cursors)
+            except Exception as exc:
+                # Telemetry does not fail a run, so this cannot raise; but a
+                # deployment whose archive is unwritable has to be able to see
+                # that, and the trace stays in the log and is tried again.
+                self.archive_failures += 1
+                self.last_archive_error = f"{type(exc).__name__}: {exc}"
+                logger.warning(
+                    "Telemetry archive write failed for trace %s: %s "
+                    "(the trace stays in %s and will be tried again)",
+                    trace_id,
+                    self.last_archive_error,
+                    self.path,
+                )
+                keep.add(trace_id)
+                continue
             moved.add(trace_id)
-        self._finished.clear()
+        self._finished = keep
         if not moved:
             return
         await self._inner.remove_traces(moved)

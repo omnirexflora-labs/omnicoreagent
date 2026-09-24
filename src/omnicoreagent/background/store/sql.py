@@ -61,6 +61,7 @@ from omnicoreagent.background.models import (
     initial_schedule_due,
 )
 from omnicoreagent.background.store.base import AbstractTaskStore
+from omnicoreagent.core.sql_schema import create_tables
 
 T = TypeVar("T")
 
@@ -230,7 +231,8 @@ class SqlTaskStore(AbstractTaskStore):
 
         self._tables = build_tables(self.table_prefix)
         try:
-            self._tables.metadata.create_all(engine)
+            # Another process may be creating the same tables right now.
+            create_tables(engine, self._tables.metadata)
         except Exception as exc:
             engine.dispose()
             raise InvalidTaskStoreError(

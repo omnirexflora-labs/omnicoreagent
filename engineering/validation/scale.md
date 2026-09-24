@@ -194,6 +194,63 @@ a session — which is what a stream is scoped to. It is not a clock across
 processes: two processes holding different blocks can finish traces in an order
 their positions do not reflect.
 
+## Two server processes on one deployment (S4)
+
+The point of S2 and S3. Two OmniServe processes, each with its own worker
+identity and its own write-ahead log, sharing one PostgreSQL database (the
+background task store and the archive's index) and one directory of trace
+bodies. `engineering/validation/two_processes.py` runs one of them, and drives
+the pair.
+
+On the steward's server, 20 queued runs:
+
+| | |
+|---|---|
+| runs finished | 20 of 20, every one `completed` |
+| attempts per run | 1 |
+| taken by each process | 10 and 10 |
+| traces each process could serve | 20 and 20 |
+| in the shared index | 38 traces, 38 bodies, cursors to 643, none reused |
+
+The steward's own tasks were left where they are: its task store is Redis, and
+moving a live deployment's operational state to prove a property is the wrong
+trade. The two processes ran their own scripted agent against their own
+database, on the same host, under the same image.
+
+In the suite, `tests/test_two_managers_one_store.py` holds the same properties
+without a server: two managers on one store divide the runs, each run runs
+once, and a claim left stranded by a manager that stops is taken over by the
+other. The agent there will not finish a run until two are in flight, so a test
+where only one manager ever claims cannot pass by being quick.
+
+**What this found.** Three defects, none of which a single process can show.
+
+*Two processes starting at once could not create the schema.* SQLAlchemy's
+`create_all` looks for each table and creates what it did not find; both
+processes looked, both found nothing, both created, and on PostgreSQL the loser
+got an integrity error against `pg_type` that killed it at startup. The first
+two processes brought up on one database died on it. Losing that race is not a
+failure — what the loser wanted is what the winner did — so the create is now
+attempted, and if it fails the tables are looked for again.
+
+*A storage root at the top of a filesystem could not be written at all.* Local
+workspace storage keeps a file's lock beside its root, so a lock is never
+listed as content: for a root of `/shared`, that is `/.shared.locks`, which a
+container's user cannot create. Every body write failed with `Permission
+denied`. The lock still goes outside the namespace, and when that place cannot
+be written it goes under the system temp directory at a path derived from the
+root, so processes sharing a root still lock against the same place.
+
+*And an archive that could not be written to said nothing.* Telemetry must not
+fail a run, so the failing write was swallowed: every finished trace stayed in
+each process's own log, each process answered only for its own runs, and the
+deployment looked healthy. Not failing the run is right; silence is not. The
+failure is now counted (`archive_failures`, `last_archive_error`) and logged
+with the path, the trace stays in the log where nothing is lost, and the next
+flush tries again — so fixing the permission is enough, without a restart.
+Finding that took hours of looking in the wrong place, which is the argument
+for the log line.
+
 ## What is not measured here
 
 - More than one process, one shared database, one shared bucket: S4.

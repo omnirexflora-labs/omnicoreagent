@@ -329,6 +329,34 @@ Each line names the commit; the plan's execution log has the detail.
     the same one; a process on its own keeps counting as before.
     (`engineering/validation/scale.md`)
 
+46. **Two processes starting on one database could not create its schema.**
+    SQLAlchemy's `create_all` looks for each table and creates what it did not
+    find. Two processes starting together both looked, both found nothing, both
+    created — and on PostgreSQL the loser got an integrity error against
+    `pg_type`, not a polite "already exists", which killed it during startup.
+    The first two server processes brought up on one database died on it
+    immediately. Losing that race is not a failure, so the create is attempted
+    and, if it fails, the tables are looked for again.
+
+47. **A storage root at the top of a filesystem could not be written at all.**
+    Local workspace storage keeps a file's lock beside its root, so a lock is
+    never listed as workspace content. For a root of `/shared` — a container
+    mount, which is how two processes share trace bodies — that is
+    `/.shared.locks`, and the container's user cannot create it. Every write
+    failed with `Permission denied`. The lock still lives outside the
+    namespace; when that place cannot be written it goes under the system temp
+    directory, at a path derived from the root so processes sharing a root
+    still lock against each other.
+
+48. **An archive that could not be written to said nothing.** Telemetry is not
+    allowed to fail a run, so the failing write above was swallowed: every
+    finished trace stayed in its own process's log, each process answered only
+    for its own runs, and the deployment looked healthy. Not failing the run is
+    right; being silent is not. The failure is now counted and logged with the
+    path and the reason, the trace stays in the log where nothing is lost, and
+    the next flush tries again, so fixing the permission needs no restart.
+    Without the log line, finding 47 took hours of looking in the wrong place.
+
 ## What it cost
 
 A read-the-repository run costs about two to eight cents on `gpt-5.6-terra`

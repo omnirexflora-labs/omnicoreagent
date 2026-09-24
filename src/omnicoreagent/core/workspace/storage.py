@@ -1,5 +1,7 @@
 import hashlib
+import logging
 import shutil
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +16,8 @@ from omnicoreagent.core.workspace.config import (
     resolve_workspace_config,
 )
 from omnicoreagent.core.workspace.paths import normalize_workspace_path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,7 @@ class LocalWorkspaceStorage:
 
     def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
+        self._locks: Path | None = None
         self.ensure_root()
 
     def ensure_root(self) -> None:
@@ -105,12 +110,40 @@ class LocalWorkspaceStorage:
             )
         return candidate
 
+    def _lock_directory(self) -> Path:
+        """Where locks live: outside the namespace, and writable.
+
+        Beside the root, so a lock is never listed as workspace content. When
+        that cannot be created — a root at the top of a filesystem, a
+        read-only mount, a directory owned by someone else — it goes under the
+        system temp directory instead, at a path derived from the root, so
+        every process using that root still locks against the same place.
+        """
+        if self._locks is not None:
+            return self._locks
+        beside = self.root.parent / f".{self.root.name}.locks"
+        try:
+            beside.mkdir(parents=True, exist_ok=True)
+            self._locks = beside
+            return beside
+        except OSError as exc:
+            key = hashlib.sha256(str(self.root).encode("utf-8")).hexdigest()[:32]
+            fallback = Path(tempfile.gettempdir()) / "omnicoreagent-locks" / key
+            fallback.mkdir(parents=True, exist_ok=True)
+            logger.info(
+                "Workspace storage cannot keep its locks beside %s (%s); "
+                "using %s instead",
+                self.root,
+                exc,
+                fallback,
+            )
+            self._locks = fallback
+            return fallback
+
     def _lock(self, resolved: Path) -> FileLock:
         """A lock for one path, kept outside the namespace so it is never listed."""
         key = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:32]
-        lock_dir = self.root.parent / f".{self.root.name}.locks"
-        lock_dir.mkdir(parents=True, exist_ok=True)
-        return FileLock(lock_dir / f"{key}.lock")
+        return FileLock(self._lock_directory() / f"{key}.lock")
 
     @staticmethod
     def _replace(resolved: Path, content: str) -> None:
