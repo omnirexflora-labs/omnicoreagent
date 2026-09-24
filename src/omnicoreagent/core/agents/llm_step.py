@@ -625,8 +625,9 @@ class AgentLlmStepRunner:
         else:
             await budgets.charge_many([("model_cost_usd", float(cost)), *counted])
 
-    @staticmethod
+    @classmethod
     def _model_call_facts(
+        cls,
         llm_connection: Any,
         telemetry_recorder: Any,
         *,
@@ -636,7 +637,46 @@ class AgentLlmStepRunner:
         normalized: ModelTurn | None = None,
         usage: Usage | None = None,
     ) -> dict[str, Any]:
-        """Describe one model call: identity, settings, tokens, timing, attempts."""
+        """Describe one model call, and never fail it.
+
+        A model call that worked is not allowed to end a run because
+        describing it did not: a defect here once turned a handled retry into
+        ``provider_error`` with nothing in the trace saying why. What could not
+        be described says so and the call goes on.
+        """
+        try:
+            return cls._describe_model_call(
+                llm_connection,
+                telemetry_recorder,
+                timing=timing,
+                retries=retries,
+                purpose=purpose,
+                normalized=normalized,
+                usage=usage,
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Could not describe this model call ({type(exc).__name__}: {exc}); "
+                "the call itself is unaffected"
+            )
+            return {
+                "purpose": purpose,
+                "attempts": len(retries) + 1,
+                "facts_error": f"{type(exc).__name__}: {exc}"[:300],
+            }
+
+    @staticmethod
+    def _describe_model_call(
+        llm_connection: Any,
+        telemetry_recorder: Any,
+        *,
+        timing: dict[str, float | None],
+        retries: list[dict[str, Any]],
+        purpose: str = "agent_turn",
+        normalized: ModelTurn | None = None,
+        usage: Usage | None = None,
+    ) -> dict[str, Any]:
+        """Identity, settings, tokens, timing, attempts."""
         now = time.perf_counter()
         started = timing.get("started")
         first_delta = timing.get("first_delta")
@@ -703,7 +743,12 @@ class AgentLlmStepRunner:
             "retries": [
                 {
                     **retry,
-                    "message": telemetry_recorder.redact_text(str(retry["message"])),
+                    # A record written by something this does not know about is
+                    # still described: telemetry does not decide whether a model
+                    # call succeeded.
+                    "message": telemetry_recorder.redact_text(
+                        str(retry.get("message") or retry.get("error") or retry)
+                    ),
                 }
                 for retry in retries
             ],

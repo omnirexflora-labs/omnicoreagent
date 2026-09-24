@@ -54,9 +54,12 @@ def _notify_unsupported(name: str, error: Exception) -> None:
         observer(
             {
                 "attempt": 1,
+                "error_type": error.__class__.__name__,
+                # Every retry record says what happened under the same name,
+                # so a reader never has to know which kind it is holding.
+                "message": str(error)[:300],
                 "reason": "unsupported_parameter",
                 "dropped": [name],
-                "error": str(error)[:300],
             }
         )
 
