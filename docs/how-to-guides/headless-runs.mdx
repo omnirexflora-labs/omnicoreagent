@@ -1,0 +1,81 @@
+---
+title: Headless runs
+description: 'Run one instruction unattended from the command line, for CI and evaluation harnesses'
+icon: 'terminal'
+---
+
+# Headless runs
+
+`omnicoreagent run` executes one instruction and exits. It needs only the core
+install — no server — which makes it the entry point for CI jobs and for
+evaluation harnesses such as Harbor that run an agent inside a task container.
+
+```bash
+omnicoreagent run --agent agent.py \
+  --instruction "Fix the failing test in tests/test_orders.py" \
+  --approval-mode deny --timeout 900 \
+  --provenance trial_id=trial-3 --provenance adapter=harbor \
+  --output-dir ./out
+```
+
+The agent file is the same one `omniserve run` uses: it defines an `agent`
+variable or a `create_agent()` function.
+
+## Nobody is there to approve
+
+A policy `ask` rule pauses a run for a person. In a headless run you choose,
+up front, how those requests are answered:
+
+| `--approval-mode` | What happens |
+|---|---|
+| `stop` (default) | The run is left waiting; the command exits with code 3. |
+| `allow` | Every request is approved. |
+| `deny` | Every request is denied; the model is told why and carries on. |
+| `scripted` | Rules in `--approvals-file` decide, first match wins. |
+
+```json
+{
+  "default": "deny",
+  "rules": [
+    {"tool_name": "create_pull_request", "decision": "approve", "note": "case allows PRs"},
+    {"capability": "sandbox.execute", "decision": "approve"}
+  ]
+}
+```
+
+`default` may be `approve`, `deny`, or `stop`. Every decision goes through
+`resolve_approval` with the approver `omnicoreagent-cli` and a note naming the
+mode, so the run's record shows who decided and how. The trace is tagged
+`headless`, `approval-mode:<mode>` and `budget-mode:<mode>`.
+
+When a budget runs out, `--budget-mode stop` (default) exits with code 4 and
+leaves the run waiting; `--budget-mode deny` denies the top-up and the run
+ends cleanly. The CLI never grants budget.
+
+`--timeout` is one deadline for the whole run, pauses and resumes included,
+recorded in the trace as `timeout`, not `cancelled`.
+
+## Exit codes
+
+| Code | Terminal state |
+|---|---|
+| 0 | success |
+| 1 | failed or error |
+| 2 | usage or agent file error |
+| 3 | awaiting approval |
+| 4 | awaiting budget |
+| 5 | timeout |
+| 6 | interrupted |
+
+## Output
+
+With `--output-dir`, the command writes:
+
+- `result.json` (`omnicoreagent.headless_result/v1`): status, exit code, run
+  and session IDs, trace IDs, the answer, termination reason, usage, what is
+  still pending, and every decision the CLI made.
+- `trajectory.json`: the run's durable trajectory across every pause and
+  resume (`get_run_trajectory`).
+
+The answer is printed to stdout (or the whole `result.json` with `--json`); a
+one-line status summary goes to stderr.
