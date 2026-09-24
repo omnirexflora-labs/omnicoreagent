@@ -357,6 +357,17 @@ Each line names the commit; the plan's execution log has the detail.
     the next flush tries again, so fixing the permission needs no restart.
     Without the log line, finding 47 took hours of looking in the wrong place.
 
+49. **The Redis task store copied all of its state on every write.** The one
+    the steward runs, and the most expensive of the three: each mutation wrote
+    a complete new generation of every hash and flipped a pointer at it, so all
+    the state was copied on each write and two copies lived at once. On the
+    server, a run write took 6.6 ms with a hundred runs kept and 103.5 ms with
+    two thousand. It is an entity per key now, written under optimistic
+    transactions: 0.6 ms and 1.2 ms, flat. The rewrite also removes the
+    store-wide lock, so finding P2 — the steward crash-looping on a dead
+    process's lock lease — is not mitigated but impossible.
+    (`engineering/validation/scale.md`)
+
 ## What it cost
 
 A read-the-repository run costs about two to eight cents on `gpt-5.6-terra`
