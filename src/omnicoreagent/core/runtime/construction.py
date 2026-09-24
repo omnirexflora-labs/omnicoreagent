@@ -32,6 +32,41 @@ def default_telemetry_store(
     return shared_jsonl_telemetry_store(
         _telemetry_jsonl_path(config, workspace_config),
         retention_days=config.retention_days,
+        archive_index=_telemetry_archive_index(config),
+        archive_bodies=_telemetry_archive_bodies(config, workspace_config),
+    )
+
+
+def _telemetry_archive_index(config: Any) -> Any:
+    """The index of finished traces: a shared database when one is configured."""
+    if not config.archive_index_url:
+        return None
+    from omnicoreagent.core.telemetry.archive_index import SqlTelemetryIndex
+
+    return SqlTelemetryIndex(config.archive_index_url)
+
+
+def _telemetry_archive_bodies(config: Any, workspace_config: Any) -> Any:
+    """Where trace bodies go: beside the log, or the deployment's bucket."""
+    if config.archive_target != "object_storage":
+        if config.archive_bodies_path:
+            from omnicoreagent.core.workspace.storage import LocalWorkspaceStorage
+
+            return LocalWorkspaceStorage(Path(config.archive_bodies_path).expanduser())
+        return None
+    from omnicoreagent.core.workspace.config import resolve_workspace_config
+    from omnicoreagent.core.workspace.storage import create_workspace_storage
+
+    resolved_workspace = resolve_workspace_config(workspace_config)
+    if resolved_workspace.workspace_backend not in {"s3", "r2"}:
+        if config.strict:
+            raise ValueError(
+                "telemetry archive_target='object_storage' requires an S3 or R2 workspace"
+            )
+        return None
+    return create_workspace_storage(
+        namespace="telemetry/traces",
+        config=resolved_workspace,
     )
 
 

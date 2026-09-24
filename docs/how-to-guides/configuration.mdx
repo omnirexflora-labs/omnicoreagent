@@ -116,6 +116,16 @@ file, and listing by run, session or status is an index query. The log is
 compacted to the running traces once it grows past 16 MiB. An existing
 `traces.jsonl` is migrated on first start, which reads it once.
 
+Several processes can share one archive. `archive_index_url` puts the index in
+a database instead of that SQLite file (`postgresql://...`, or any SQLAlchemy
+URL), and the bodies go to a directory the processes share
+(`archive_bodies_path`) or to the deployment's bucket
+(`archive_target: "object_storage"`, which needs an S3 or R2 workspace). Each
+process still keeps its own running traces in its own JSONL file, and any of
+them can then read or list a trace another one finished. A shared index also
+hands out stream cursors, so two processes recording at the same time never
+give the same stream position to different events.
+
 `capture: "full"` is the default: the whole trajectory is recorded, model
 input and output included, still redacted, truncated and offloaded under the
 same policy. A trace is worth keeping only if it holds what the model was

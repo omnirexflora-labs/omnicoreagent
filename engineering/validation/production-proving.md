@@ -317,6 +317,18 @@ Each line names the commit; the plan's execution log has the detail.
     has about forty runs, which is why this was invisible until it was measured.
     (`engineering/validation/scale.md`)
 
+45. **Two processes sharing one telemetry archive handed out the same stream
+    positions.** A stream cursor is a reader's place in the event stream. Each
+    process counted from the highest position it had seen, and a running
+    trace's events are only in that process's own log — so two processes
+    recording at the same time both issued 1, then both issued 2, and a reader
+    resuming after position 1 lost one of them. Found by asking for it: the
+    first shared-archive test only had one process recording at a time, and the
+    one written for the harder case failed with cursors `[1, 1, 2, 2]`. A shared
+    index now hands out blocks of positions, so no two processes can be given
+    the same one; a process on its own keeps counting as before.
+    (`engineering/validation/scale.md`)
+
 ## What it cost
 
 A read-the-repository run costs about two to eight cents on `gpt-5.6-terra`
