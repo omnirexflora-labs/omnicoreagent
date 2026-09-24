@@ -20,7 +20,9 @@
   answered by an explicit mode (`stop`, `allow`, `deny`, `scripted` rules)
   through `resolve_approval` as `omnicoreagent-cli`; budgets stop or are denied,
   never granted. One deadline covers the whole run. Writes `result.json` and
-  `trajectory.json`; exit codes name the terminal state.
+  `trajectory.json`; exit codes name the terminal state. Runs as
+  `python -m omnicoreagent.cli run ...` too, for a harness that cannot rely on
+  a console script being on PATH.
 
 - Exclude governance decision IDs and configured-child accounting from loop
   comparisons while retaining those fields in history. Expand live validation
