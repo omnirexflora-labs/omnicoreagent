@@ -573,11 +573,15 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         # per-record hop was most of what a request cost.
         self._pending: list[str] = []
         self._drain: asyncio.Task | None = None
+        # Stream positions this process has been given to hand out. Only a
+        # shared archive issues them; alone, the counter below is enough.
+        self._cursor_limit = 0
 
     async def append_event(self, trace_id: str, event: TelemetryEvent) -> None:
         async with self._lock:
             await self._load_unlocked()
             await self._ensure_live_unlocked(trace_id)
+            await self._reserve_cursors_unlocked(1)
             # One walk of the event: the same dump is rebuilt as the in-memory
             # copy and written as the line on disk.
             payload = event.model_dump()
@@ -607,6 +611,7 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         async with self._lock:
             await self._load_unlocked()
             await self._ensure_live_unlocked(trace.trace_id)
+            await self._reserve_cursors_unlocked(len(trace.events) or 1)
             await self._inner.upsert_trace(trace)
             self._note_finished_unlocked(trace.trace_id)
             cursors = await self._inner.event_cursors(trace.trace_id)
@@ -716,12 +721,39 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         ]
         return sorted([*events, *archived], key=lambda event: int(event.stream_cursor))
 
+    # How many positions a process takes at a time. Small enough that two
+    # processes stay roughly in step, large enough not to ask per event.
+    _CURSOR_BLOCK = 32
+
+    def _archive_issues_cursors(self) -> bool:
+        index = getattr(self.archive, "index", None) if self.archive is not None else None
+        return bool(index is not None and getattr(index, "shared", False))
+
+    async def _reserve_cursors_unlocked(self, count: int) -> None:
+        """Make sure this process owns the positions it is about to hand out.
+
+        Two processes on one archive used to count from their own highest and
+        give the same position to different events, so a reader resuming after
+        it lost one of them. A shared index hands out blocks instead; a process
+        alone keeps counting as before.
+        """
+        index = getattr(self.archive, "index", None) if self.archive is not None else None
+        if index is None or not getattr(index, "shared", False):
+            return
+        needed = max(count, 1)
+        if self._inner._event_cursor + needed <= self._cursor_limit:
+            return
+        size = max(self._CURSOR_BLOCK, needed)
+        start = await asyncio.to_thread(index.reserve_cursors, size)
+        self._inner._event_cursor = max(self._inner._event_cursor, start - 1)
+        self._cursor_limit = start + size - 1
+
     async def _load_unlocked(self) -> None:
         if self._loaded:
             return
         if not self.path.exists():
             self._loaded = True
-            if self.archive is not None:
+            if self.archive is not None and not self._archive_issues_cursors():
                 self._inner._event_cursor = max(
                     self._inner._event_cursor, await self.archive.max_cursor()
                 )
@@ -754,10 +786,13 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         await self._inner.finish_restore()
         self._loaded = True
         if self.archive is not None:
-            # Cursors keep counting from the highest ever given, archived or not.
-            self._inner._event_cursor = max(
-                self._inner._event_cursor, await self.archive.max_cursor()
-            )
+            if not self._archive_issues_cursors():
+                # Cursors keep counting from the highest ever given, archived
+                # or not. A shared index issues them instead, and taking its
+                # highest would walk into a block another process holds.
+                self._inner._event_cursor = max(
+                    self._inner._event_cursor, await self.archive.max_cursor()
+                )
             # The first start of an old log is its migration: every trace in
             # it that has ended moves to the archive, and the log is
             # compacted to what is still running.
@@ -1044,6 +1079,8 @@ def shared_jsonl_telemetry_store(
     *,
     retention_days: int | None = None,
     archive: bool = True,
+    archive_index: Any = None,
+    archive_bodies: Any = None,
 ) -> JsonlTelemetryStore:
     """Return the process-wide store for one JSONL file.
 
@@ -1053,6 +1090,8 @@ def shared_jsonl_telemetry_store(
 
     Finished traces move to an archive beside the log (``<name>-archive``):
     one body per trace and an index, so memory holds only what is running.
+    A deployment that shares its archive passes the index and the bodies in
+    (scale plan S3); both default to the local file and directory.
     """
     resolved = Path(path).expanduser().resolve()
     store = _SHARED_JSONL_STORES.get(resolved)
@@ -1063,7 +1102,13 @@ def shared_jsonl_telemetry_store(
             resolved,
             retention_days=retention_days,
             archive=(
-                TelemetryArchive(resolved.parent / f"{resolved.stem}-archive") if archive else None
+                TelemetryArchive(
+                    resolved.parent / f"{resolved.stem}-archive",
+                    bodies=archive_bodies,
+                    index=archive_index,
+                )
+                if archive
+                else None
             ),
         )
         _SHARED_JSONL_STORES[resolved] = store

@@ -86,6 +86,16 @@ class TelemetryConfig:
     )
     offload_large_payloads: bool = False
     offload_target: str = "workspace"
+    # Where the archive of finished traces keeps its index and its bodies.
+    # Unset is a SQLite file and a directory beside the log, which is what one
+    # process needs. A database URL makes the index shared, and
+    # ``archive_target="object_storage"`` puts the bodies in the deployment's
+    # bucket, so several server processes can read one archive.
+    archive_index_url: str | None = None
+    archive_target: str = "local"
+    # A directory the processes share, for a deployment that shares one host
+    # rather than a bucket. Ignored when ``archive_target`` is object storage.
+    archive_bodies_path: str | None = None
     strict: bool = False
     persistence_timeout_seconds: float | None = 5.0
     export_timeout_seconds: float | None = 5.0
@@ -113,6 +123,15 @@ class TelemetryConfig:
             raise ValueError(
                 "telemetry offload_target must be workspace or object_storage"
             )
+        self.archive_target = str(self.archive_target).lower().strip()
+        if self.archive_target not in {"local", "object_storage"}:
+            raise ValueError(
+                "telemetry archive_target must be local or object_storage"
+            )
+        if self.archive_index_url is not None and not str(self.archive_index_url).strip():
+            raise ValueError("telemetry archive_index_url must not be empty")
+        if self.archive_bodies_path is not None and not str(self.archive_bodies_path).strip():
+            raise ValueError("telemetry archive_bodies_path must not be empty")
         if self.retention_days is not None and self.retention_days < 0:
             raise ValueError("telemetry retention_days must be non-negative or None")
         if self.payload_retention_days is not None and self.payload_retention_days < 0:
