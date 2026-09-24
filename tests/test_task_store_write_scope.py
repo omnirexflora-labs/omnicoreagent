@@ -1,18 +1,23 @@
-"""Scale plan S2: a durable write touches one run, not every run.
+"""Scale plan S2 and S2b: a durable write touches one run, not every run.
 
 The durable task stores were snapshot stores: each mutation took a lock over
 the whole store, read all of its state, and wrote all of it back. The cost of
-one write therefore grew with everything the store had ever kept — measured
-on SQLite, 56 ms with 100 runs held and 344 ms with 2000 — and nothing prunes
-run history.
+one write therefore grew with everything the store had ever kept — measured on
+the server, 5.1 ms with a hundred runs held and 48.7 ms with two thousand on
+SQL, 6.6 ms and 103.5 ms on Redis — and nothing prunes run history.
 
 This holds the property that fixes it, without timing anything: fill a store
 with finished runs, then count how many runs one ordinary write reads or
-writes. A store that keeps a row per run touches the one it is writing; a
+writes. A store that keeps an entity per key touches the one it is writing; a
 snapshot store touches all of them.
+
+Redis takes part when ``OMNICOREAGENT_TEST_REDIS_URL`` is set, or a server is
+listening locally (CI has one).
 """
 
 from __future__ import annotations
+
+from uuid import uuid4
 
 import pytest
 
@@ -20,19 +25,29 @@ from omnicoreagent.background import (
     BackgroundAgentSpec,
     BackgroundRun,
     OverlapPolicy,
+    RedisTaskStore,
     RunStatus,
     SqlTaskStore,
 )
 
-from test_background_task_store_contract import background_run, task_spec
+from test_background_task_store_contract import (
+    background_run,
+    redis_contract_url,
+    task_spec,
+)
 
 
 class RunTraffic:
-    """How many runs crossed the serialization boundary."""
+    """How many runs crossed the serialization boundary, whichever way."""
 
     def __init__(self, monkeypatch) -> None:
         self.count = 0
-        for name in ("model_dump_json", "model_validate_json"):
+        for name in (
+            "model_dump",
+            "model_dump_json",
+            "model_validate",
+            "model_validate_json",
+        ):
             original = getattr(BackgroundRun, name)
 
             def counted(*args, _original=original, **kwargs):
@@ -45,6 +60,24 @@ class RunTraffic:
         self.count = 0
 
 
+async def _store(kind: str, tmp_path):
+    if kind == "sql":
+        store = SqlTaskStore(url=f"sqlite:///{tmp_path / 'background.db'}")
+    else:
+        store = RedisTaskStore(
+            url=redis_contract_url(),
+            prefix=f"test:scope:{uuid4().hex}",
+            connect_timeout=2.0,
+            lock_timeout=0.5,
+        )
+    try:
+        await store.initialize()
+    except Exception as exc:  # pragma: no cover - environment dependent
+        await store.close()
+        pytest.skip(f"{kind} task store unavailable: {exc}")
+    return store
+
+
 async def _fill(store, count: int) -> None:
     """Finished runs, so nothing a later write needs is among them."""
     for _ in range(count):
@@ -55,9 +88,9 @@ async def _fill(store, count: int) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_write_does_not_read_every_run_ever_kept(tmp_path, monkeypatch):
-    store = SqlTaskStore(url=f"sqlite:///{tmp_path / 'background.db'}")
-    await store.initialize()
+@pytest.mark.parametrize("kind", ["sql", "redis"])
+async def test_a_write_does_not_read_every_run_ever_kept(kind, tmp_path, monkeypatch):
+    store = await _store(kind, tmp_path)
     try:
         await store.save_agent(BackgroundAgentSpec(agent_id="agent"))
         await store.save_task(task_spec(overlap_policy=OverlapPolicy.ALLOW_PARALLEL))

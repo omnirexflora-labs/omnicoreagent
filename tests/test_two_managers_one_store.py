@@ -11,9 +11,10 @@ database:
 - a manager that stops holding a claim does not strand it: its lease expires
   and the other manager takes the run over and finishes it.
 
-On SQLite, which every checkout has, and on PostgreSQL when
+On SQLite, which every checkout has, on PostgreSQL when
 ``OMNICOREAGENT_TEST_POSTGRES_URL`` is set (CI sets it), where claims take real
-row locks.
+row locks, and on Redis, whose claims are optimistic transactions on the run's
+own key (scale plan S2b).
 """
 
 from __future__ import annotations
@@ -25,17 +26,36 @@ from uuid import uuid4
 import pytest
 
 from omnicoreagent.background import BackgroundAgentManager, RunStatus
+from omnicoreagent.background.store.redis import RedisTaskStore
 from omnicoreagent.background.store.sql import SqlTaskStore
 from omnicoreagent.core.workspace.manager import Workspace
 
 POSTGRES_URL_ENV = "OMNICOREAGENT_TEST_POSTGRES_URL"
+REDIS_URL_ENV = "OMNICOREAGENT_TEST_REDIS_URL"
+DEFAULT_REDIS_URL = "redis://localhost:6379/0"
 
 
-@pytest.fixture(params=["sqlite", "postgres"])
+@pytest.fixture(params=["sqlite", "postgres", "redis"])
 def store_config(request, tmp_path):
     """One database, described the way a deployment describes it."""
     if request.param == "sqlite":
         yield {"backend": "sql", "url": f"sqlite:///{tmp_path / 'background.db'}"}
+        return
+    if request.param == "redis":
+        redis_url = os.getenv(REDIS_URL_ENV, DEFAULT_REDIS_URL)
+        prefix = f"test:two-managers:{uuid4().hex}"
+        config = {
+            "backend": "redis",
+            "url": redis_url,
+            "prefix": prefix,
+            "connect_timeout": 2.0,
+        }
+        try:
+            asyncio.run(_reachable(config))
+        except Exception as exc:
+            pytest.skip(f"Redis task store unavailable: {exc}")
+        yield config
+        asyncio.run(_clear_redis(redis_url, prefix))
         return
     url = os.getenv(POSTGRES_URL_ENV)
     if not url:
@@ -44,6 +64,31 @@ def store_config(request, tmp_path):
     yield {"backend": "sql", "url": url, "prefix": prefix}
     cleaner = SqlTaskStore(url, table_prefix=prefix)
     asyncio.run(_drop(cleaner))
+
+
+async def _reachable(config: dict) -> None:
+    store = RedisTaskStore(
+        url=config["url"], prefix=config["prefix"], connect_timeout=2.0
+    )
+    try:
+        await store.initialize()
+    finally:
+        await store.close()
+
+
+async def _clear_redis(url: str, prefix: str) -> None:
+    """The test's keys go with it, so a shared server stays clean."""
+    store = RedisTaskStore(url=url, prefix=prefix, connect_timeout=2.0)
+    try:
+        await store.initialize()
+        client = store._require_client()
+        keys = [key async for key in client.scan_iter(match=f"{prefix}:*", count=500)]
+        if keys:
+            await client.delete(*keys)
+    except Exception:
+        pass
+    finally:
+        await store.close()
 
 
 async def _drop(store: SqlTaskStore) -> None:

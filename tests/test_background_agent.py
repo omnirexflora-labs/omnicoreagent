@@ -2,7 +2,10 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 import inspect
 import json
+import os
 import time
+
+from uuid import uuid4
 
 import pytest
 
@@ -174,74 +177,6 @@ class BrokenWorkspace:
     files = BrokenWorkspaceFiles()
 
 
-class FakeRedisClient:
-    def __init__(self):
-        self.values = {}
-        self.hashes = {}
-        self.sets = {}
-
-    async def get(self, key):
-        return self.values.get(key)
-
-    async def set(self, key, value, nx=False, px=None):
-        if nx and key in self.values:
-            return False
-        self.values[key] = value
-        return True
-
-    async def hset(self, key, mapping):
-        self.hashes.setdefault(key, {}).update(mapping)
-        return len(mapping)
-
-    async def hgetall(self, key):
-        return self.hashes.get(key, {})
-
-    async def sadd(self, key, *values):
-        self.sets.setdefault(key, set()).update(values)
-        return len(values)
-
-    async def smembers(self, key):
-        return self.sets.get(key, set())
-
-    async def delete(self, *keys):
-        for key in keys:
-            self.values.pop(key, None)
-            self.hashes.pop(key, None)
-            self.sets.pop(key, None)
-        return len(keys)
-
-    async def eval(self, script, numkeys, *args):
-        if "PEXPIRE" in script:
-            key, token, _lease_ms = args
-            return 1 if self.values.get(key) == token else 0
-        if "SET" in script and numkeys == 2:
-            lock_key, active_generation_key, token, generation = args
-            if self.values.get(lock_key) == token:
-                self.values[active_generation_key] = generation
-                return 1
-            return 0
-        if "SET" in script and numkeys == 3:
-            (
-                lock_key,
-                active_generation_key,
-                previous_generation_key,
-                token,
-                generation,
-                previous_generation,
-            ) = args
-            if self.values.get(lock_key) == token:
-                self.values[active_generation_key] = generation
-                if previous_generation:
-                    self.values[previous_generation_key] = previous_generation
-                return 1
-            return 0
-        key, token = args
-        if self.values.get(key) == token:
-            self.values.pop(key, None)
-            return 1
-        return 0
-
-
 class FakeMongoUpdateResult:
     def __init__(self, matched_count=0, upserted_id=None):
         self.matched_count = matched_count
@@ -349,21 +284,43 @@ class FakeMongoDb:
         return self
 
 
-class FakeRedisTaskStore(RedisTaskStore):
-    def __init__(self, client):
-        super().__init__(url="redis://localhost:6379", prefix="lazy")
-        self.client = client
+class CountingRedisTaskStore(RedisTaskStore):
+    """A real Redis store that counts the manager initializing and closing it."""
+
+    def __init__(self):
+        super().__init__(
+            url=os.getenv("OMNICOREAGENT_TEST_REDIS_URL", "redis://localhost:6379/0"),
+            prefix=f"test:lazy:{uuid4().hex}",
+            connect_timeout=2.0,
+        )
         self.initialize_count = 0
         self.close_count = 0
 
     async def initialize(self):
         self.initialize_count += 1
-        self._client = self.client
-        await self._load_backend_state()
+        await super().initialize()
 
     async def close(self):
         self.close_count += 1
-        self._client = None
+        client = self._client
+        if client is not None:
+            keys = [key async for key in client.scan_iter(match=f"{self.prefix}:*")]
+            if keys:
+                await client.delete(*keys)
+        await super().close()
+
+
+async def counting_redis_store() -> CountingRedisTaskStore:
+    """Skips when there is no Redis to talk to, as the contract suite does."""
+    store = CountingRedisTaskStore()
+    try:
+        await store.initialize()
+    except Exception as exc:  # noqa: BLE001 - the backend is optional in CI
+        pytest.skip(f"Redis is not reachable: {exc}")
+    await store.close()
+    store.initialize_count = 0
+    store.close_count = 0
+    return store
 
 
 class FakeMongoTaskStore(MongoDbTaskStore):
@@ -3236,7 +3193,7 @@ def test_task_store_router_uses_common_prefix_for_mongodb_collections():
 
 @pytest.mark.asyncio
 async def test_remote_task_stores_lazy_initialize_before_manager_registration():
-    redis_store = FakeRedisTaskStore(FakeRedisClient())
+    redis_store = await counting_redis_store()
     redis_manager = BackgroundAgentManager(task_store=redis_store)
 
     await redis_manager.register_agent("agent", FakeAgent())
@@ -3255,7 +3212,7 @@ async def test_remote_task_stores_lazy_initialize_before_manager_registration():
 
 @pytest.mark.asyncio
 async def test_manager_shutdown_closes_lazy_initialized_task_store():
-    store = FakeRedisTaskStore(FakeRedisClient())
+    store = await counting_redis_store()
     manager = BackgroundAgentManager(task_store=store)
 
     await manager.register_agent("agent", FakeAgent())
@@ -3263,78 +3220,6 @@ async def test_manager_shutdown_closes_lazy_initialized_task_store():
 
     assert store.close_count == 1
     assert store._client is None
-
-
-@pytest.mark.asyncio
-async def test_redis_task_store_persists_state_through_backend_snapshot():
-    client = FakeRedisClient()
-    first = RedisTaskStore(url="redis://localhost:6379", prefix="test")
-    first._client = client
-    await first.save_agent(agent_spec())
-    await first.save_task(task_spec())
-    run = await first.create_run_with_overlap_guard(
-        BackgroundRun(
-            task_id="task",
-            agent_id="agent",
-            query_snapshot="do work",
-            trigger_type=TriggerType.MANUAL,
-            session_id="background:agent:task",
-            workspace_path="background/agent/task/run",
-        ),
-        OverlapPolicy.SKIP_IF_RUNNING,
-    )
-
-    restored = RedisTaskStore(url="redis://localhost:6379", prefix="test")
-    restored._client = client
-
-    assert (await restored.get_task("task")).task_id == "task"
-    assert (await restored.get_run(run.run_id)).query_snapshot == "do work"
-
-
-@pytest.mark.asyncio
-async def test_redis_task_store_cleans_previous_generation_after_commit():
-    client = FakeRedisClient()
-    store = RedisTaskStore(url="redis://localhost:6379", prefix="test")
-    store._client = client
-
-    await store.save_agent(agent_spec())
-    first_generation = client.values[store._active_generation_key]
-    await store.save_task(task_spec())
-    second_generation = client.values[store._active_generation_key]
-
-    assert second_generation != first_generation
-    assert first_generation in client.values[store._previous_generation_key]
-
-    await store.save_task(task_spec(task_id="task_2"))
-
-    assert all(first_generation not in key for key in client.hashes)
-    assert all(first_generation not in key for key in client.sets)
-
-
-@pytest.mark.asyncio
-async def test_redis_task_store_reads_use_backend_lock():
-    client = FakeRedisClient()
-    store = RedisTaskStore(
-        url="redis://localhost:6379", prefix="test", lock_timeout=0.01, lock_lease_seconds=0.01
-    )
-    store._client = client
-    client.values[store._lock_key] = "other-worker"
-
-    with pytest.raises(TaskStoreError, match="Timed out acquiring Redis"):
-        await store.get_agent("agent")
-
-
-@pytest.mark.asyncio
-async def test_redis_task_store_rejects_commit_after_lock_loss():
-    client = FakeRedisClient()
-    store = RedisTaskStore(url="redis://localhost:6379", prefix="test")
-    store._client = client
-
-    token = await store._acquire_lock()
-    client.values.pop(store._lock_key)
-
-    with pytest.raises(Exception, match="lock expired before commit"):
-        await store._persist_backend_state(token)
 
 
 @pytest.mark.asyncio
