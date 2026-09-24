@@ -27,7 +27,9 @@ class TaskStoreRouter:
             return InMemoryTaskStore()
 
         if store_config.backend == TaskStoreBackend.SQL:
-            return SqlTaskStore(url=store_config.url)
+            return SqlTaskStore(
+                url=store_config.url, table_prefix=store_config.prefix or ""
+            )
         if store_config.backend == TaskStoreBackend.REDIS:
             return RedisTaskStore(
                 url=store_config.url or "",
@@ -67,6 +69,12 @@ class TaskStoreRouter:
                     return TaskStoreConfig(
                         backend=backend,
                         url=os.getenv("REDIS_URL"),
+                    )
+                if backend == TaskStoreBackend.SQL:
+                    # The same variable the SQL memory store reads, so one
+                    # database serves both; SQLite in a local file otherwise.
+                    return TaskStoreConfig(
+                        backend=backend, url=os.getenv("DATABASE_URL")
                     )
                 if backend == TaskStoreBackend.MONGODB:
                     return TaskStoreConfig(
