@@ -36,6 +36,11 @@ REVIEWED_SITES = {
         "host skill scripts; authorized as skill.script.run (surface host, "
         "risk high) before this runs, and only when the run has no sandbox"
     ),
+    ("sandbox/local_process.py", "asyncio.create_subprocess_exec"): (
+        "the local sandbox's commands; reached only through the governed "
+        "execution service, which authorizes each as process.exec on surface "
+        "host (never satisfying a rule that requires a sandbox) before it runs"
+    ),
     ("mcp_clients_connection/oauth.py", "socket.socket"): (
         "binds a loopback port to find a free one for the OAuth callback; "
         "sends and receives nothing"

@@ -42,6 +42,12 @@ def _vercel(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
     return VercelSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
 
 
+def _local(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
+    from omnicoreagent.sandbox.local_process import LocalProcessSandboxRuntime
+
+    return LocalProcessSandboxRuntime(options=options, telemetry_recorder=telemetry_recorder)
+
+
 def _http(options: dict[str, Any], telemetry_recorder: Any) -> SandboxRuntime:
     from omnicoreagent.sandbox.http_sandbox import HttpSandboxRuntime
 
@@ -55,6 +61,7 @@ _PROVIDERS: dict[str, SandboxProviderFactory] = {
     "daytona": _daytona,
     "vercel": _vercel,
     "http": _http,
+    "local": _local,
     SandboxProvider.NONE.value: lambda options, telemetry_recorder: NoneSandboxRuntime(),
     SandboxProvider.LOCAL_TEST.value: lambda options, telemetry_recorder: LocalTestSandboxRuntime(
         telemetry_recorder=telemetry_recorder

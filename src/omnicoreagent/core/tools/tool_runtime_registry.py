@@ -147,7 +147,12 @@ class ToolRuntimeRegistry:
         if self.sandbox_execution is not None:
             from omnicoreagent.core.tools.execution_tools import build_execution_tools
 
-            build_execution_tools(registry, max_timeout_seconds=self.tool_call_timeout)
+            runtime = getattr(self.sandbox_execution.governance_engine, "sandbox_runtime", None)
+            build_execution_tools(
+                registry,
+                max_timeout_seconds=self.tool_call_timeout,
+                on_host=getattr(runtime, "execution_surface", "sandbox") == "host",
+            )
 
         if getattr(self.code_mode, "enabled", False):
             from omnicoreagent.core.tools.code_mode import (

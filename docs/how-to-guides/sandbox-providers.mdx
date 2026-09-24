@@ -1,6 +1,6 @@
 ---
 title: "Sandbox Providers"
-description: "Where an agent's code runs: Docker, Modal, E2B, Daytona, Vercel, or your own service"
+description: "Where an agent's code runs: Docker, Modal, E2B, Daytona, Vercel, your own service, or this machine"
 ---
 
 # Sandbox Providers
@@ -26,6 +26,7 @@ agent_config = {
 | `daytona` | `omnicoreagent[daytona]` | Daytona | Off, on, or a host allow list |
 | `vercel` | `omnicoreagent[vercel]` | Vercel Sandbox | Off or on |
 | `http` | built in | A service you run | Whatever your service enforces |
+| `local` | built in | **This machine, not isolated** | Always on; asking for less is refused |
 
 Each hosted provider needs its own credentials in the environment (for
 example `modal token new`, `E2B_API_KEY`, `DAYTONA_API_KEY`, `VERCEL_TOKEN`).
@@ -124,6 +125,118 @@ Your service is responsible for the isolation it promises: the manifest says
 what network policy the run expects, and a service that cannot honour it
 should refuse the session. Only the plain environment is sent; secret
 references stay in the harness.
+
+## Running commands on this machine (`local`)
+
+`local` is not a sandbox. It runs each command as a process on the machine the
+agent runs on, with nothing in between: a command can reach the network, read
+and change any file the agent's user can, and change what stays changed. Use
+it only where the machine is already the boundary — a disposable container
+such as an evaluation task (Harbor), a CI job, a throwaway VM — or when you
+have decided to let the agent run commands directly.
+
+```python
+agent_config = {
+    "governance_config": {
+        "enabled": True,
+        "policy": policy,                             # allows host commands, see below
+        "sandbox_config": {"provider": "local"},
+        "sandbox_manifest": {
+            "working_dir": "/app",                    # a real directory, used as it is
+            "network_policy": {"default": "allow"},
+            "filesystem_policy": {"default": "allow"},
+        },
+    },
+}
+```
+
+**What it cannot do, and so refuses.** A manifest must ask for what `local`
+really gives: network `allow` and filesystem `allow`, with no host or path
+lists. The default manifest asks for no network, so it is refused, as is an
+image, a workspace mount, CPU, memory or GPU limits, a sandbox lifetime, and
+secret references. A request for isolation is refused rather than quietly not
+kept.
+
+**What it does enforce.**
+
+- Each command's time limit: the command and everything it started are
+  killed (exit code `137`, `timed_out: true`). Closing the run's session kills
+  commands still running.
+- A cap on captured output (`max_output_bytes`, 1 MB by default).
+- Files copied in and out by the runtime (the workspace bridge) stay inside
+  the working directory, links resolved.
+- The host's environment is not passed to commands: only `PATH`, `HOME`,
+  `USER`, `LOGNAME`, `LANG`, `LC_ALL`, `TERM`, `TMPDIR` and `TZ`, plus the
+  manifest's plain environment. Your model API keys and tokens therefore do
+  not reach the model's commands through the environment. Set
+  `environment_passthrough: ["PYTHONPATH", "VIRTUAL_ENV"]` to name the
+  variables a task needs, or `inherit_environment: true` to pass everything.
+  Prefer the named list: a task usually needs a few variables, not every
+  credential this process holds. Files are another matter: a command can read
+  whatever the user can, including credential files.
+
+**How policy sees it.** Commands are authorized as `process.exec` on the
+`host` surface, not `sandbox`. A rule that requires a sandbox
+(`sandbox_required`) never covers them, and the built-in profiles never allow
+them on their own:
+
+| Profile | Host commands |
+|---|---|
+| `permissive-dev` | Denied |
+| `interactive-dev` | Each command asks a person |
+| `strict-production` | Denied |
+
+To let an agent run commands without asking, start from a profile, drop the
+asks that stand in the way, and allow host commands with a rule of your own:
+
+```python
+from omnicoreagent.governance import (
+    PolicyEffect, PolicyRule, PolicyRuleConditions, build_default_policy,
+)
+
+policy = build_default_policy("interactive-dev")
+policy.rules.ask = [
+    rule for rule in policy.rules.ask
+    if rule.rule_id not in {"ask_process_exec", "ask_high_risk", "ask_sandbox_network"}
+]
+policy.rules.allow.insert(0, PolicyRule(
+    rule_id="allow_host_commands",
+    effect=PolicyEffect.ALLOW,
+    capability="process.exec",
+    conditions=PolicyRuleConditions(execution_surface="host"),
+))
+```
+
+Dropping `ask_high_risk` stops the profile asking about every other high-risk
+action on the host too; keep it if the agent has other tools that should
+still ask. A deny rule always wins over an allow, so this cannot be done from
+`permissive-dev`, which denies host commands outright.
+
+The model is told the truth too: with `local`, the `execute` tool says it runs
+on this machine and is not isolated, the agent reports the security warning
+`host_execution_not_contained`, and the trace records every command with
+`execution_surface: host`.
+
+Options: `max_output_bytes`, `inherit_environment` (default `false`),
+`environment_passthrough` (variable names to take from the host environment,
+empty by default), and `create_working_dir` (default `false`: a working
+directory that does not exist is an error, not created). The working directory
+is never deleted: when the run ends, its files stay.
+
+**Workspace files are not copied.** With an isolating provider the workspace is
+copied into the sandbox before each command and back after it, because the
+sandbox cannot see it. Here it can: copying would write the workspace over
+whatever is already in the working directory, and bring that directory's own
+files back as if a command had made them. So nothing is copied either way —
+point `working_dir` at the workspace directory to have commands work in it
+directly, or keep them apart on purpose.
+
+A command may name its own working directory, and it is not held to the
+session's: nothing about this backend contains where a command reads or
+writes, so containing the directory it starts in would suggest a boundary that
+is not there. What stays inside the working directory is what the *runtime*
+reads and writes on the agent's behalf — the workspace bridge — and that is
+enforced.
 
 ## Writing another provider
 

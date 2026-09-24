@@ -237,6 +237,25 @@ class GovernanceEngine:
             return self.allow_test_sandbox_runtime
         return True
 
+    def sandbox_runtime_can_execute(self) -> bool:
+        """Whether commands can be routed to the configured runtime at all.
+
+        An isolating runtime qualifies when it satisfies the required-sandbox
+        boundary. A runtime that runs commands on this machine ("host") also
+        qualifies: its commands are authorized as host execution, and any rule
+        that requires a sandbox still refuses them.
+        """
+        runtime = self.sandbox_runtime
+        if not isinstance(runtime, SandboxRuntime):
+            return False
+        if not getattr(runtime, "supports_execution", False):
+            return False
+        if self._sandbox_runtime_satisfies_required_boundary():
+            return True
+        return getattr(runtime, "execution_surface", "sandbox") == "host" and not getattr(
+            runtime, "is_test_adapter", False
+        )
+
     def _raise_first_denied(self, decisions: list[PolicyDecision]) -> None:
         for decision in decisions:
             if decision.effect != PolicyEffect.DENY:

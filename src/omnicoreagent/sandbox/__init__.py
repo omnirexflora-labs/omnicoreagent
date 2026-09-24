@@ -16,6 +16,7 @@ from omnicoreagent.sandbox.local import (
     SandboxCommand,
     SandboxCommandContext,
 )
+from omnicoreagent.sandbox.local_process import LocalProcessSandboxRuntime
 from omnicoreagent.sandbox.models import (
     NetworkPolicy,
     SandboxAuthorityContext,
@@ -40,6 +41,7 @@ from omnicoreagent.sandbox.none import NoneSandboxRuntime
 __all__ = [
     "register_sandbox_provider",
     "registered_sandbox_providers",
+    "LocalProcessSandboxRuntime",
     "LocalTestSandboxRuntime",
     "NetworkPolicy",
     "NoneSandboxRuntime",

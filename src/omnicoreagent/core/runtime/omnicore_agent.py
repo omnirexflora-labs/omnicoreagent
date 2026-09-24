@@ -549,6 +549,15 @@ class OmniCoreAgent:
                     "not contained by a sandbox.",
                 }
             )
+        if self.can_execute and self._runs_on_host:
+            warnings.append(
+                {
+                    "code": "host_execution_not_contained",
+                    "message": "The local sandbox runs commands on this machine: "
+                    "governed by policy but not isolated. A command can reach the "
+                    "network and any file this user can.",
+                }
+            )
         if getattr(getattr(self, "agent", None), "tool_offload_refused_by_policy", False):
             warnings.append(
                 {
@@ -564,16 +573,18 @@ class OmniCoreAgent:
     def can_execute(self) -> bool:
         """Whether this agent has a sandbox that can run commands.
 
-        Uses the same check governance uses before allowing a sandboxed
-        action, so a tool is never offered that governance would refuse.
+        Uses the same check governance uses before routing a command, so a
+        tool is never offered that governance could not route. A ``local``
+        sandbox counts: it runs commands, on the host.
         """
         engine = getattr(getattr(self, "agent", None), "governance_engine", None)
+        return bool(engine is not None and engine.sandbox_runtime_can_execute())
+
+    @property
+    def _runs_on_host(self) -> bool:
+        engine = getattr(getattr(self, "agent", None), "governance_engine", None)
         runtime = getattr(engine, "sandbox_runtime", None)
-        return bool(
-            engine is not None
-            and getattr(runtime, "supports_execution", False)
-            and engine._sandbox_runtime_satisfies_required_boundary()
-        )
+        return getattr(runtime, "execution_surface", "sandbox") == "host"
 
     @property
     def sandbox_execution(self):

@@ -2,6 +2,19 @@
 
 ## Unreleased — native tool runtime
 
+- Add the `local` sandbox provider: `execute` and skill scripts run as
+  processes on the machine the agent runs on, for places where that machine is
+  already the boundary (a disposable container, CI, an evaluation task). It is
+  not isolated and says so: commands are authorized as `process.exec` on the
+  `host` surface, never satisfy a rule that requires a sandbox, and are denied
+  or asked about by every built-in profile until a rule allows them; a manifest
+  asking for isolation it cannot give (no network, path limits, images, mounts,
+  resource limits, secret references) is refused. It enforces each command's
+  time limit (the process group is killed), bounded output, runtime file access
+  inside the working directory, and keeps the host environment out unless
+  `inherit_environment` is on. The `execute` tool tells the model it is not
+  isolated, and the agent reports `host_execution_not_contained`.
+
 - Exclude governance decision IDs and configured-child accounting from loop
   comparisons while retaining those fields in history. Expand live validation
   across non-MCP native execution, memory/context, skills and artifact readback.
