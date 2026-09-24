@@ -174,7 +174,23 @@ gave up before the lease lapsed. There is no store-wide lock now, so there is
 nothing for a dead process to leave behind; `tests/test_task_store_lock_recovery.py`
 holds that, including that a lock key left by the old store is simply ignored.
 
-MongoDB is still a snapshot store, and still measured beside these.
+MongoDB was the worst of the three and is the same shape now: a document per
+entity, written under MongoDB's own guarantee that one document's update is
+atomic, so a claim is a single update naming the status and version it
+expected.
+
+| MongoDB | 100 runs held | 500 | 2000 |
+|---|---|---|---|
+| whole state, in generations (before) | 27.5 ms | 69.6 ms | 145.5 ms |
+| a document per entity (after) | 4.0 ms | 3.4 ms | 3.6 ms |
+
+Forty times cheaper at two thousand runs, and flat. No durable task store
+copies its whole state on a write any more, and none of them takes a lock over
+the store, so P2's crash loop — a dead process leaving a lock nobody could take
+— cannot happen on any of them.
+
+What is still true for every backend: **nothing prunes run history**. The cost
+of a write no longer grows with it, but the runs themselves are kept for ever.
 
 `tests/test_task_store_write_scope.py` keeps the property without timing
 anything: it counts the runs one write touches at 21 runs held and at 201, and
