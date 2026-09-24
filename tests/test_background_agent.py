@@ -27,7 +27,6 @@ from omnicoreagent.background import (
     ScheduleSpec,
     SqlTaskStore,
     TaskNotFoundError,
-    TaskStoreError,
     TaskStoreRouter,
 )
 from omnicoreagent.background.models import (
@@ -183,107 +182,6 @@ class FakeMongoUpdateResult:
         self.upserted_id = upserted_id
 
 
-class FakeMongoCollection:
-    def __init__(self):
-        self.docs = {}
-
-    async def find_one(self, filter):
-        return self.docs.get(filter["_id"])
-
-    async def replace_one(self, filter, document, upsert=False):
-        self.docs[filter["_id"]] = document
-        return FakeMongoUpdateResult(matched_count=1)
-
-    def find(self, filter):
-        class Cursor:
-            def __init__(self, docs):
-                self.docs = docs
-
-            async def to_list(self, length=None):
-                return self.docs
-
-        generation = filter.get("_generation")
-        return Cursor(
-            [doc for doc in self.docs.values() if doc.get("_generation") == generation]
-        )
-
-    async def insert_one(self, document):
-        if document["_id"] in self.docs:
-            raise ValueError(f"duplicate document id: {document['_id']}")
-        self.docs[document["_id"]] = document
-
-    async def insert_many(self, documents):
-        for document in documents:
-            if document["_id"] in self.docs:
-                raise ValueError(f"duplicate document id: {document['_id']}")
-            self.docs[document["_id"]] = document
-
-    async def delete_one(self, filter):
-        deleted = self.docs.pop(filter["_id"], None)
-        return FakeMongoUpdateResult(matched_count=1 if deleted else 0)
-
-    async def delete_many(self, filter):
-        if "_generation" in filter:
-            generation = filter["_generation"]
-            to_delete = [
-                doc_id
-                for doc_id, doc in self.docs.items()
-                if doc.get("_generation") == generation
-            ]
-        else:
-            to_delete = [
-                doc_id
-                for doc_id, doc in self.docs.items()
-                if all(doc.get(key) == value for key, value in filter.items())
-            ]
-        for doc_id in to_delete:
-            self.docs.pop(doc_id, None)
-        return FakeMongoUpdateResult(matched_count=len(to_delete))
-
-    async def update_one(self, filter, update, upsert=False):
-        doc_id = filter["_id"]
-        doc = self.docs.get(doc_id)
-        if doc is None:
-            if not upsert:
-                return FakeMongoUpdateResult()
-            doc = {"_id": doc_id}
-            doc.update(update.get("$setOnInsert", {}))
-            self.docs[doc_id] = doc
-            return FakeMongoUpdateResult(upserted_id=doc_id)
-
-        if "$or" in filter and not any(
-            self._matches(doc, condition) for condition in filter["$or"]
-        ):
-            return FakeMongoUpdateResult()
-        if "token" in filter and doc.get("token") != filter["token"]:
-            return FakeMongoUpdateResult()
-        doc.update(update.get("$set", {}))
-        self.docs[doc_id] = doc
-        return FakeMongoUpdateResult(matched_count=1)
-
-    def _matches(self, doc, condition):
-        if condition == {"token": None}:
-            return doc.get("token") is None
-        if condition == {"token": {"$exists": False}}:
-            return "token" not in doc
-        if "expires_at" in condition:
-            return doc.get("expires_at") <= condition["expires_at"]["$lte"]
-        if "token" in condition:
-            return doc.get("token") == condition["token"]
-        return False
-
-
-class FakeMongoDb:
-    def __init__(self):
-        self.collections = {}
-
-    def __getitem__(self, name):
-        return self.collections.setdefault(name, FakeMongoCollection())
-
-    def with_options(self, **kwargs):
-        return self
-
-
 class CountingRedisTaskStore(RedisTaskStore):
     """A real Redis store that counts the manager initializing and closing it."""
 
@@ -323,26 +221,47 @@ async def counting_redis_store() -> CountingRedisTaskStore:
     return store
 
 
-class FakeMongoTaskStore(MongoDbTaskStore):
-    def __init__(self, db):
-        super().__init__(uri="mongodb://localhost:27017", database="test")
-        self.db = db
+class CountingMongoTaskStore(MongoDbTaskStore):
+    """A real MongoDB store that counts the manager initializing and closing it."""
+
+    def __init__(self):
+        super().__init__(
+            uri=os.getenv("OMNICOREAGENT_TEST_MONGODB_URI", "mongodb://localhost:27017"),
+            database=os.getenv(
+                "OMNICOREAGENT_TEST_MONGODB_DATABASE", "omnicoreagent_test"
+            ),
+            collection_prefix=f"test_lazy_{uuid4().hex}",
+            connect_timeout=5,
+        )
         self.initialize_count = 0
         self.close_count = 0
 
     async def initialize(self):
         self.initialize_count += 1
-        self._db = self.db
-        await self._lock_collection.update_one(
-            {"_id": "task_store"},
-            {"$setOnInsert": {"token": None, "expires_at": datetime.now(timezone.utc)}},
-            upsert=True,
-        )
-        await self._load_backend_state()
+        await super().initialize()
 
     async def close(self):
         self.close_count += 1
-        self._db = None
+        if self._db is not None:
+            for name in ("agents", "tasks", "schedules", "runs", "attempts"):
+                try:
+                    await self._collection(name).drop()
+                except Exception:
+                    pass
+        await super().close()
+
+
+async def counting_mongo_store() -> CountingMongoTaskStore:
+    """Skips when there is no MongoDB to talk to, as the contract suite does."""
+    store = CountingMongoTaskStore()
+    try:
+        await store.initialize()
+    except Exception as exc:  # noqa: BLE001 - the backend is optional in CI
+        pytest.skip(f"MongoDB is not reachable: {exc}")
+    await store.close()
+    store.initialize_count = 0
+    store.close_count = 0
+    return store
 
 
 class CancellingAttemptStore(InMemoryTaskStore):
@@ -3201,7 +3120,7 @@ async def test_remote_task_stores_lazy_initialize_before_manager_registration():
     assert redis_store.initialize_count == 1
     assert (await redis_manager.get_agent("agent")).agent_id == "agent"
 
-    mongo_store = FakeMongoTaskStore(FakeMongoDb())
+    mongo_store = await counting_mongo_store()
     mongo_manager = BackgroundAgentManager(task_store=mongo_store)
 
     await mongo_manager.register_agent("agent", FakeAgent())
@@ -3220,114 +3139,6 @@ async def test_manager_shutdown_closes_lazy_initialized_task_store():
 
     assert store.close_count == 1
     assert store._client is None
-
-
-@pytest.mark.asyncio
-async def test_mongodb_task_store_persists_state_through_backend_snapshot():
-    db = FakeMongoDb()
-    first = MongoDbTaskStore(uri="mongodb://localhost:27017", database="test")
-    first._db = db
-    await first._lock_collection.update_one(
-        {"_id": "task_store"},
-        {"$setOnInsert": {"token": None, "expires_at": datetime.now(timezone.utc)}},
-        upsert=True,
-    )
-    await first.save_agent(agent_spec())
-    await first.save_task(task_spec())
-    run = await first.create_run_with_overlap_guard(
-        BackgroundRun(
-            task_id="task",
-            agent_id="agent",
-            query_snapshot="do work",
-            trigger_type=TriggerType.MANUAL,
-            session_id="background:agent:task",
-            workspace_path="background/agent/task/run",
-        ),
-        OverlapPolicy.SKIP_IF_RUNNING,
-    )
-
-    restored = MongoDbTaskStore(uri="mongodb://localhost:27017", database="test")
-    restored._db = db
-
-    assert (await restored.get_task("task")).task_id == "task"
-    assert (await restored.get_run(run.run_id)).query_snapshot == "do work"
-
-
-@pytest.mark.asyncio
-async def test_mongodb_task_store_cleans_previous_generation_after_commit():
-    db = FakeMongoDb()
-    store = MongoDbTaskStore(uri="mongodb://localhost:27017", database="test")
-    store._db = db
-    await store._lock_collection.update_one(
-        {"_id": "task_store"},
-        {"$setOnInsert": {"token": None, "expires_at": datetime.now(timezone.utc)}},
-        upsert=True,
-    )
-
-    await store.save_agent(agent_spec())
-    first_generation = db["omnicoreagent_background_locks"].docs["task_store"][
-        "active_generation"
-    ]
-    await store.save_task(task_spec())
-    second_generation = db["omnicoreagent_background_locks"].docs["task_store"][
-        "active_generation"
-    ]
-
-    assert second_generation != first_generation
-    assert (
-        db["omnicoreagent_background_locks"].docs["task_store"]["previous_generation"]
-        == first_generation
-    )
-
-    await store.save_task(task_spec(task_id="task_2"))
-
-    for collection in db.collections.values():
-        assert all(
-            doc.get("_generation") != first_generation
-            for doc in collection.docs.values()
-        )
-
-
-@pytest.mark.asyncio
-async def test_mongodb_task_store_reads_use_backend_lock():
-    db = FakeMongoDb()
-    store = MongoDbTaskStore(
-        uri="mongodb://localhost:27017", database="test", lock_timeout=0.01
-    )
-    store._db = db
-    await store._lock_collection.update_one(
-        {"_id": "task_store"},
-        {
-            "$setOnInsert": {
-                "token": "other-worker",
-                "expires_at": datetime.now(timezone.utc) + timedelta(seconds=60),
-            }
-        },
-        upsert=True,
-    )
-
-    with pytest.raises(TaskStoreError, match="Timed out acquiring MongoDB"):
-        await store.get_agent("agent")
-
-
-@pytest.mark.asyncio
-async def test_mongodb_task_store_rejects_commit_after_lock_loss():
-    db = FakeMongoDb()
-    store = MongoDbTaskStore(uri="mongodb://localhost:27017", database="test")
-    store._db = db
-    await store._lock_collection.update_one(
-        {"_id": "task_store"},
-        {"$setOnInsert": {"token": None, "expires_at": datetime.now(timezone.utc)}},
-        upsert=True,
-    )
-    token = await store._acquire_lock()
-    await store._lock_collection.update_one(
-        {"_id": "task_store", "token": token},
-        {"$set": {"token": None, "expires_at": datetime.now(timezone.utc)}},
-    )
-
-    with pytest.raises(Exception, match="lock expired before commit"):
-        await store._persist_backend_state(token)
 
 
 @pytest.mark.asyncio

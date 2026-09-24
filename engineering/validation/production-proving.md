@@ -368,6 +368,17 @@ Each line names the commit; the plan's execution log has the detail.
     process's lock lease — is not mitigated but impossible.
     (`engineering/validation/scale.md`)
 
+50. **The MongoDB task store copied all of its state on every write, and cost
+    the most of the three.** Each mutation wrote a complete new generation of
+    every record and moved a pointer at it. On the server a run write took
+    27.5 ms with a hundred runs kept, 69.6 ms with five hundred, and 145.5 ms
+    with two thousand — worse than Redis at every size. It keeps a document per
+    entity now, written under MongoDB's atomic single-document update: 4.0, 3.4
+    and 3.6 ms, flat. With this no durable task store rewrites its whole state,
+    and none takes a lock over the store, so finding P2's crash loop is
+    impossible on all of them rather than mitigated on one.
+    (`engineering/validation/scale.md`)
+
 ## What it cost
 
 A read-the-repository run costs about two to eight cents on `gpt-5.6-terra`
@@ -385,8 +396,8 @@ rather than a defect.
 - A Postgres telemetry index, for several OmniServe processes sharing one
   store, and storing the tool catalog once across traces (about 70 KB per
   run for the steward) are deferred.
-- The Redis and MongoDB task stores still rewrite all of their state on every
-  write (scale plan S2b), and no backend prunes run history.
+- No backend prunes run history. A write no longer costs what the history
+  behind it weighs, but nothing removes old runs.
 - One process serves about 15 runs a second of the runtime's own work and
   cannot be made to serve more by raising concurrency; more than one process
   on one shared database is not proved yet (scale plan S4).

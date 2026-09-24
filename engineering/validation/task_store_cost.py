@@ -10,7 +10,8 @@ claim that a write now touches one row is a number and not an assertion.
 
     python engineering/validation/task_store_cost.py                  # SQLite
     OMNICOREAGENT_TEST_POSTGRES_URL=postgresql://... python engineering/validation/task_store_cost.py
-    MEASURE_REDIS=1 python engineering/validation/task_store_cost.py  # the snapshot store
+    MEASURE_REDIS=1 python engineering/validation/task_store_cost.py
+    MEASURE_MONGODB=1 OMNICOREAGENT_TEST_MONGODB_URI=mongodb://... python ...
 
 Numbers from a loaded machine mean nothing; run it on an idle one.
 """
@@ -32,6 +33,7 @@ from omnicoreagent.background import (  # noqa: E402
     BackgroundAgentSpec,
     BackgroundRun,
     BackgroundTaskSpec,
+    MongoDbTaskStore,
     OverlapPolicy,
     RedisTaskStore,
     RunStatus,
@@ -116,6 +118,19 @@ async def main() -> None:
         url = os.environ.get("OMNICOREAGENT_TEST_REDIS_URL", "redis://localhost:6379/0")
         await _measure(
             lambda: RedisTaskStore(url, prefix=f"cost:{uuid4().hex}"), "redis"
+        )
+    if os.environ.get("MEASURE_MONGODB"):
+        uri = os.environ.get("OMNICOREAGENT_TEST_MONGODB_URI", "mongodb://localhost:27017")
+        await _measure(
+            lambda: MongoDbTaskStore(
+                uri=uri,
+                database=os.environ.get(
+                    "OMNICOREAGENT_TEST_MONGODB_DATABASE", "omnicoreagent_test"
+                ),
+                collection_prefix=f"cost_{uuid4().hex}",
+                connect_timeout=10,
+            ),
+            "mongodb",
         )
 
 
