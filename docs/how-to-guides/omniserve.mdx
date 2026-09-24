@@ -373,9 +373,11 @@ survive restarts. Durable stores preserve queued runs across server restarts:
 OmniServe can queue a run, stop, start again with the same task store, and the
 new manager can claim and complete that run.
 
-Choose one durable backend per deployment. Use SQL/SQLite for local durability
-or simple single-node services. Use Redis when your deployment already operates
-Redis with persistence and no eviction for task-store keys. Use MongoDB when
+Choose one durable backend per deployment. Use SQL for local durability with
+SQLite, or PostgreSQL or MySQL when several processes share one store; a SQL
+write costs what one row costs, whatever the store already holds.
+Use Redis when your deployment already operates Redis with persistence and no
+eviction for task-store keys. Use MongoDB when
 MongoDB is your durable operational store.
 
 Common inspection endpoints:
