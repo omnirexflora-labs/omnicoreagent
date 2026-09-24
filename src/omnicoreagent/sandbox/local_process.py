@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
@@ -71,6 +72,10 @@ class LocalProcessSandboxRuntime(SandboxRuntime):
         self.max_output_bytes = int(options.pop("max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES))
         self.inherit_environment = options.pop("inherit_environment", False)
         self.create_working_dir = options.pop("create_working_dir", False)
+        # Named variables from the host environment, for a task that needs a
+        # few of them (PYTHONPATH, VIRTUAL_ENV) without being handed every
+        # credential this process holds.
+        self.environment_passthrough = tuple(options.pop("environment_passthrough", ()) or ())
         if options:
             raise ValueError(f"Unknown local sandbox option(s): {', '.join(sorted(options))}")
         for name in ("inherit_environment", "create_working_dir"):
@@ -78,6 +83,11 @@ class LocalProcessSandboxRuntime(SandboxRuntime):
                 raise ValueError(f"local sandbox option {name!r} must be true or false")
         if self.max_output_bytes <= 0:
             raise ValueError("local sandbox option 'max_output_bytes' must be positive")
+        if not all(isinstance(name, str) and name for name in self.environment_passthrough):
+            raise ValueError(
+                "local sandbox option 'environment_passthrough' must be a list of "
+                "variable names"
+            )
         self.telemetry_recorder = telemetry_recorder
         self._sessions: dict[str, SandboxSession] = {}
         # Process groups still running per session, killed when it closes.
@@ -97,7 +107,8 @@ class LocalProcessSandboxRuntime(SandboxRuntime):
                 )
             await asyncio.to_thread(os.makedirs, working_dir, exist_ok=True)
         session_id = manifest.sandbox_id or f"sandbox_{uuid4().hex}"
-        manifest.provider = self.provider
+        # The caller's manifest is theirs; the session keeps its own copy.
+        manifest = replace(manifest, provider=self.provider)
         session = SandboxSession(
             session_id=session_id,
             provider=self.provider,
@@ -121,6 +132,13 @@ class LocalProcessSandboxRuntime(SandboxRuntime):
         manifest = session.manifest
         environment = self._environment(manifest, request)
         cwd = request.cwd or session.metadata["working_dir"]
+        if not os.path.isdir(cwd):
+            # Told apart from a command that does not exist, which is the
+            # other way create_subprocess_exec reports FileNotFoundError.
+            return SandboxExecResult(
+                exit_code=127,
+                stderr=f"Working directory {cwd} does not exist",
+            )
         try:
             process = await asyncio.create_subprocess_exec(
                 *request.command,
@@ -136,6 +154,11 @@ class LocalProcessSandboxRuntime(SandboxRuntime):
             # As a shell reports a command it cannot run.
             return SandboxExecResult(exit_code=126 if isinstance(exc, PermissionError) else 127,
                                      stderr=f"{exc.__class__.__name__}: {exc}")
+        if session_id not in self._sessions:
+            # The session closed while the process was starting: it belongs to
+            # nobody, so it does not get to outlive the session.
+            await _kill(process)
+            raise SandboxUnsupportedError(f"Sandbox session {session_id} is not open")
         running = self._running.setdefault(session_id, set())
         running.add(process)
         try:
@@ -171,9 +194,15 @@ class LocalProcessSandboxRuntime(SandboxRuntime):
             await _kill(process)
             try:
                 # A process that left the group can still hold the output open.
-                await asyncio.wait_for(work, timeout=_DRAIN_SECONDS)
+                await asyncio.wait_for(asyncio.shield(work), timeout=_DRAIN_SECONDS)
             except asyncio.TimeoutError:
-                pass
+                # Something is still holding it; stop waiting and let nothing
+                # stay pending behind this call.
+                work.cancel()
+                try:
+                    await work
+                except (asyncio.CancelledError, Exception):
+                    pass
         except asyncio.CancelledError:
             await _kill(process)
             work.cancel()
@@ -198,6 +227,9 @@ class LocalProcessSandboxRuntime(SandboxRuntime):
             environment = dict(os.environ)
         else:
             environment = {name: os.environ[name] for name in _BASE_ENVIRONMENT if name in os.environ}
+        for name in self.environment_passthrough:
+            if name in os.environ:
+                environment[name] = os.environ[name]
         environment.update(manifest.environment.plain)
         environment.update({str(key): str(value) for key, value in (request.environment or {}).items()})
         return environment
@@ -231,6 +263,13 @@ class LocalProcessSandboxRuntime(SandboxRuntime):
         return session
 
     def _inside_workdir(self, session_id: str, path: str) -> str:
+        """A path for the runtime's own file calls, kept inside the directory.
+
+        This is not a boundary for commands: a command runs on this machine and
+        reaches whatever the user can. It keeps the runtime's own reads and
+        writes — the workspace bridge — from following a path out of the
+        working directory.
+        """
         workdir = self._session(session_id).metadata["working_dir"]
         # Links are resolved, so a link cannot carry a write outside.
         resolved = os.path.realpath(os.path.join(workdir, path))
@@ -279,14 +318,18 @@ async def _kill(process: asyncio.subprocess.Process) -> None:
 
 def _write(target: str, content: bytes) -> None:
     os.makedirs(os.path.dirname(target), exist_ok=True)
-    with open(target, "wb") as handle:
+    # O_NOFOLLOW: the path was checked after resolving links, so refuse a link
+    # put in its place since — the check and the open are not one step.
+    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "wb") as handle:
         handle.write(content)
 
 
 def _read(target: str) -> bytes:
     if os.path.isdir(target):
         raise IsADirectoryError(target)
-    with open(target, "rb") as handle:
+    descriptor = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, "rb") as handle:
         return handle.read()
 
 

@@ -549,7 +549,7 @@ class OmniCoreAgent:
                     "not contained by a sandbox.",
                 }
             )
-        elif self.can_execute and self._runs_on_host:
+        if self.can_execute and self._runs_on_host:
             warnings.append(
                 {
                     "code": "host_execution_not_contained",

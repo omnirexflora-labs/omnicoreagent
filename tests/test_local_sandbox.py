@@ -10,6 +10,7 @@ environment kept out by default — is tested against real processes.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 
@@ -473,3 +474,200 @@ async def test_a_skill_script_runs_in_place_as_a_host_command_copying_nothing(tm
     assert result["data"]["execution_surface"] == "host"
     assert result["data"]["stdout"].strip() == "ran in greeter"
     assert list(work.iterdir()) == [], "nothing was copied into the working directory"
+
+
+# --- what a task needs of it, and what it still will not do -------------------
+
+
+@pytest.mark.asyncio
+async def test_named_variables_pass_through_without_the_rest_of_the_environment(
+    session_of, tmp_path, monkeypatch
+):
+    """A task needs PYTHONPATH; it does not need the agent's provider key.
+
+    Inheriting the whole environment is the blunt option and stays available;
+    this is the one an evaluation harness can use without handing every
+    credential this process holds to the model's commands.
+    """
+    monkeypatch.setenv("PYTHONPATH", "/task/lib")
+    monkeypatch.setenv("LLM_API_KEY", "not-for-commands")
+    runtime = _runtime(environment_passthrough=["PYTHONPATH"])
+    session = await session_of(runtime)
+
+    result = await _run(runtime, session, "sh", "-c", "echo $PYTHONPATH:$LLM_API_KEY")
+
+    assert result.stdout.strip() == "/task/lib:"
+
+
+def test_a_passthrough_that_is_not_a_list_of_names_is_refused():
+    with pytest.raises(ValueError, match="environment_passthrough"):
+        _runtime(environment_passthrough=[""])
+    with pytest.raises(ValueError, match="environment_passthrough"):
+        _runtime(environment_passthrough=[3])
+
+
+@pytest.mark.asyncio
+async def test_creating_a_session_leaves_the_callers_manifest_alone(tmp_path):
+    runtime = _runtime()
+    manifest = _manifest(tmp_path)
+    before = manifest.provider
+
+    session = await runtime.create(manifest)
+    try:
+        assert manifest.provider == before, "the caller's manifest was changed"
+        assert session.manifest.provider == "local"
+    finally:
+        await runtime.terminate(session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_a_command_with_a_working_directory_that_is_not_there_says_so(
+    session_of, tmp_path
+):
+    """Told apart from a command that does not exist: both are FileNotFoundError."""
+    runtime = _runtime()
+    session = await session_of(runtime)
+
+    missing = await _run(runtime, session, "pwd", cwd=str(tmp_path / "nowhere"))
+    assert missing.exit_code == 127
+    assert "does not exist" in missing.stderr
+
+    unknown = await _run(runtime, session, "there-is-no-such-command")
+    assert unknown.exit_code == 127
+    assert "does not exist" not in unknown.stderr
+
+
+@pytest.mark.asyncio
+async def test_a_command_started_as_the_session_closes_does_not_outlive_it(
+    tmp_path, monkeypatch
+):
+    """The window between starting a process and tracking it, closed.
+
+    Terminating a session kills the commands it knows about. A command that
+    started while the session was closing was not yet one of them, and would
+    have been left running with nobody to stop it.
+    """
+    runtime = _runtime()
+    session = await runtime.create(_manifest(tmp_path))
+    marker = tmp_path / "survived"
+    original = asyncio.create_subprocess_exec
+
+    async def close_the_session_mid_start(*args, **kwargs):
+        process = await original(*args, **kwargs)
+        await runtime.terminate(session.session_id)
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", close_the_session_mid_start)
+
+    with pytest.raises(SandboxUnsupportedError):
+        await _run(
+            runtime,
+            session,
+            "sh",
+            "-c",
+            f"sleep 0.4; echo here > {marker}",
+            timeout_seconds=10,
+        )
+    await asyncio.sleep(0.7)
+
+    assert not marker.exists(), "a command outlived the session that started it"
+
+
+@pytest.mark.asyncio
+async def test_the_runtimes_own_writes_refuse_a_link_put_in_the_way(
+    session_of, tmp_path, monkeypatch
+):
+    """The check and the open are not one step, so the open refuses a link.
+
+    A path is checked after resolving links. Between that check and the write,
+    a link can be put in its place — this stands in for that timing, and the
+    write must refuse rather than follow it out of the directory.
+    """
+    runtime = _runtime()
+    session = await session_of(runtime)
+    outside = tmp_path.parent / "outside.txt"
+    outside.write_text("before")
+    original = runtime._inside_workdir
+
+    def link_it_after_the_check(session_id, path):
+        target = original(session_id, path)
+        if not os.path.islink(target):
+            os.symlink(outside, target)
+        return target
+
+    monkeypatch.setattr(runtime, "_inside_workdir", link_it_after_the_check)
+
+    with pytest.raises(OSError):
+        await runtime.write_file(session.session_id, "note.txt", b"after")
+
+    assert outside.read_text() == "before", "a write followed a link out"
+
+
+@pytest.mark.asyncio
+async def test_the_workspace_is_not_copied_into_the_directory_commands_run_in(
+    tmp_path,
+):
+    """On this machine there is nothing to copy the workspace into.
+
+    A sandbox never sees the workspace, so files are copied in before each
+    command and back after it. Here the working directory is a real directory
+    on this machine — an evaluation task's own directory, say — and copying the
+    agent's workspace into it would write over whatever is already there.
+    """
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "notes.md").write_text("the agent's own notes")
+    working = tmp_path / "task"
+    working.mkdir()
+    (working / "notes.md").write_text("the task's notes")
+
+    model = ScriptedModel(
+        [("c1", "execute", '{"command": "cat notes.md"}')],
+        "done",
+    )
+    governance = {
+        "enabled": True,
+        "policy": _agent_policy(),
+        "sandbox_config": {"provider": "local"},
+        "sandbox_manifest": {
+            "working_dir": str(working),
+            "network_policy": {"default": "allow"},
+            "filesystem_policy": {"default": "allow"},
+        },
+    }
+    agent = OmniCoreAgent(
+        name="local-agent",
+        system_instruction="Use execute to run commands.",
+        model_config=_MODEL,
+        agent_config={
+            "guardrail_mode": "off",
+            "enable_workspace_files": True,
+            "workspace_config": {"workspace_dir": str(workspace)},
+            "governance_config": governance,
+        },
+        telemetry_config={"capture": "full"},
+    )
+    await agent.initialize()
+    agent.llm_connection = model
+
+    result = await agent.run("go", session_id="bridge")
+
+    assert result["status"] == "success"
+    # The command reads the directory's own file, not one copied over it.
+    assert (working / "notes.md").read_text() == "the task's notes", (
+        "the agent's workspace was copied over the directory commands run in"
+    )
+    # And the directory's files are not command output to be taken back: the
+    # agent's own notes are still the agent's.
+    assert (workspace / "notes.md").read_text() == "the agent's own notes", (
+        "files that were already in the working directory were copied into "
+        "the workspace as if the command had made them"
+    )
+    [tool_result] = [
+        event.output
+        for event in (
+            await agent.telemetry_store.get_trace(result["trace_id"])
+        ).events
+        if event.event_type == "tool_result"
+    ]
+    assert not tool_result["data"].get("workspace_files", {}).get("written")

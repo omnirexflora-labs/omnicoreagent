@@ -169,8 +169,11 @@ kept.
   `USER`, `LOGNAME`, `LANG`, `LC_ALL`, `TERM`, `TMPDIR` and `TZ`, plus the
   manifest's plain environment. Your model API keys and tokens therefore do
   not reach the model's commands through the environment. Set
-  `inherit_environment: true` to pass everything. Files are another matter: a
-  command can read whatever the user can, including credential files.
+  `environment_passthrough: ["PYTHONPATH", "VIRTUAL_ENV"]` to name the
+  variables a task needs, or `inherit_environment: true` to pass everything.
+  Prefer the named list: a task usually needs a few variables, not every
+  credential this process holds. Files are another matter: a command can read
+  whatever the user can, including credential files.
 
 **How policy sees it.** Commands are authorized as `process.exec` on the
 `host` surface, not `sandbox`. A rule that requires a sandbox
@@ -214,10 +217,26 @@ on this machine and is not isolated, the agent reports the security warning
 `host_execution_not_contained`, and the trace records every command with
 `execution_surface: host`.
 
-Options: `max_output_bytes`, `inherit_environment` (default `false`), and
-`create_working_dir` (default `false`: a working directory that does not exist
-is an error, not created). The working directory is never deleted: when the
-run ends, its files stay.
+Options: `max_output_bytes`, `inherit_environment` (default `false`),
+`environment_passthrough` (variable names to take from the host environment,
+empty by default), and `create_working_dir` (default `false`: a working
+directory that does not exist is an error, not created). The working directory
+is never deleted: when the run ends, its files stay.
+
+**Workspace files are not copied.** With an isolating provider the workspace is
+copied into the sandbox before each command and back after it, because the
+sandbox cannot see it. Here it can: copying would write the workspace over
+whatever is already in the working directory, and bring that directory's own
+files back as if a command had made them. So nothing is copied either way —
+point `working_dir` at the workspace directory to have commands work in it
+directly, or keep them apart on purpose.
+
+A command may name its own working directory, and it is not held to the
+session's: nothing about this backend contains where a command reads or
+writes, so containing the directory it starts in would suggest a boundary that
+is not there. What stays inside the working directory is what the *runtime*
+reads and writes on the agent's behalf — the workspace bridge — and that is
+enforced.
 
 ## Writing another provider
 

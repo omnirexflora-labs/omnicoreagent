@@ -337,8 +337,20 @@ class BaseReactAgent:
             return await self._run(*args, **kwargs)
 
     def _workspace_bridge(self):
-        """Workspace files for the run's sandbox, when workspace files are enabled."""
+        """Workspace files for the run's sandbox, when workspace files are enabled.
+
+        A sandbox never sees the workspace, so files are copied in before each
+        command and back after it. A runtime that runs commands on this machine
+        needs none of that, and copying would do harm in both directions: the
+        workspace would be written over whatever is already in the working
+        directory, and the directory's own files — an evaluation task's, say —
+        would come back as if the command had made them. Point ``working_dir``
+        at the workspace to have commands work in it directly.
+        """
         if not self.enable_workspace_files:
+            return None
+        runtime = getattr(self.governance_engine, "sandbox_runtime", None)
+        if getattr(runtime, "execution_surface", "sandbox") == "host":
             return None
         from omnicoreagent.sandbox.workspace_bridge import WorkspaceBridge
 
