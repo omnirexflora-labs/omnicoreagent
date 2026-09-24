@@ -66,6 +66,24 @@ is SQLite-only, and a telemetry index that is a local file.
 - **S3. A shared telemetry index.** The archive's index behind an interface,
   with the SQLite implementation as it is and a Postgres one beside it;
   bodies in the workspace's object storage when the index is shared.
+
+  The shape: `TelemetryIndex` is the ten questions the archive asks of its
+  index (keep this row, drop these, does it hold this trace, the headers
+  matching a filter, the traces with a cursor after this one, the ones that
+  ended before then, the highest cursor, the payloads referred to). The
+  current SQLite code becomes `SqliteTelemetryIndex` and stays the default —
+  no new dependency, and the archive still opens nothing until a trace is
+  archived. Beside it, `SqlTelemetryIndex` over SQLAlchemy Core speaks any
+  database, in the idiom S2 established.
+
+  Configuration on `TelemetryConfig`: `archive_index_url` for the database,
+  `archive_bodies_backend` for where bodies go (`local` as now, or `s3`/`r2`
+  through the workspace storage factory, which already reads the deployment's
+  bucket configuration). Both unset is exactly today's behaviour.
+
+  What the tests must hold: one contract suite over both implementations, and
+  two archives on one index and one bodies store finding each other's traces,
+  streaming across both, and agreeing on the cursor — the property S4 needs.
 - **S4. Two server processes on one deployment.** The point of S2 and S3:
   two OmniServe processes on one Postgres and one bucket, each serving runs,
   neither losing or duplicating work. Proved on the steward's server.
