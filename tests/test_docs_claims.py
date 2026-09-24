@@ -309,9 +309,9 @@ def test_background_docs_include_durable_backend_selection_guidance():
         Path("cookbook/background_agents/README.mdx"),
     ]
     expected = {
-        "Use SQL/SQLite for local durability",
+        "Use SQL for local durability with",
+        "PostgreSQL or MySQL when several processes share one store",
         "Use Redis when your deployment already operates",
-        "Use MongoDB when",
         "MongoDB is your durable operational store",
     }
 

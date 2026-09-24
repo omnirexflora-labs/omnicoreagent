@@ -305,6 +305,18 @@ Each line names the commit; the plan's execution log has the detail.
     took a load test to see it at all — one run at a time, it is three
     milliseconds. (`engineering/validation/scale.md`)
 
+44. **Every durable task store rewrote all of its state on every write.**
+    Not only the SQLite one, as the assessment had it: `RedisTaskStore` and
+    `MongoDbTaskStore` are the same snapshot store, taking a lock over the whole
+    store, reading all of its state, mutating it in memory and writing all of it
+    back. So one background write cost what the store held, and nothing prunes
+    run history — on the server, a run write took 5.1 ms with a hundred runs
+    kept and 48.7 ms with two thousand (Redis: 6.6 ms and 103.5 ms). The SQL
+    store now keeps a row per entity in any SQLAlchemy database, and a write is
+    flat at about 3 ms; Redis and MongoDB are still snapshot stores. The steward
+    has about forty runs, which is why this was invisible until it was measured.
+    (`engineering/validation/scale.md`)
+
 ## What it cost
 
 A read-the-repository run costs about two to eight cents on `gpt-5.6-terra`
@@ -322,6 +334,8 @@ rather than a defect.
 - A Postgres telemetry index, for several OmniServe processes sharing one
   store, and storing the tool catalog once across traces (about 70 KB per
   run for the steward) are deferred.
+- The Redis and MongoDB task stores still rewrite all of their state on every
+  write (scale plan S2b), and no backend prunes run history.
 - One process serves about 15 runs a second of the runtime's own work and
   cannot be made to serve more by raising concurrency; more than one process
   on one shared database is not proved yet (scale plan S4).

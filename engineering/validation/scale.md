@@ -129,6 +129,39 @@ calls the report assumed. The model now reads how far a run has got from
 that run's own messages and keeps no state, so one model object serves any
 number of concurrent runs.
 
+## What a durable write costs (S2)
+
+The durable task stores were snapshot stores: every mutation took a lock over
+the whole store, read all of its state, mutated it in memory and wrote all of
+it back. `RedisTaskStore` and `MongoDbTaskStore` still do. So the cost of one
+write grew with everything the store had ever kept — and nothing prunes run
+history, so it only ever grew.
+
+`engineering/validation/task_store_cost.py` fills a store with finished runs
+and times an ordinary run write. On the server, median of ten writes:
+
+| store | 100 runs held | 500 | 2000 |
+|---|---|---|---|
+| SQL, whole state (before) | 5.1 ms | 14.7 ms | 48.7 ms |
+| Redis, whole state (ships today) | 6.6 ms | 20.6 ms | 103.5 ms |
+| SQL rows on SQLite (after) | 1.5 ms | 3.1 ms | 3.2 ms |
+| SQL rows on PostgreSQL (after) | 5.1 ms | 4.8 ms | 7.0 ms |
+
+A row per entity is flat where whole state is linear: ten times cheaper at two
+thousand runs on SQLite, and Redis — what the steward runs — spends a tenth of a
+second on every background write at that size. The steward has about forty runs,
+which is why nobody had felt it.
+
+`tests/test_task_store_write_scope.py` keeps the property without timing
+anything: it counts the runs one write touches at 21 runs held and at 201, and
+they have to be the same number.
+
+The store is now any SQL database. The contract suite runs against SQLite and
+PostgreSQL (CI has both), and `tests/test_sql_task_store_shared.py` proves what
+a shared store has to do: two stores on one database see the same runs and
+leases, six workers claiming six runs at once take one each, and state the old
+snapshot store wrote is taken over on first use.
+
 ## What is not measured here
 
 - More than one process, one shared database, one shared bucket: S4.

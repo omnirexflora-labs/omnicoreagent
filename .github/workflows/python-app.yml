@@ -27,6 +27,19 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: omnicoreagent
+          POSTGRES_PASSWORD: omnicoreagent
+          POSTGRES_DB: omnicoreagent_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U omnicoreagent -d omnicoreagent_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
       mongodb:
         image: mongo:7
         ports:
@@ -89,6 +102,7 @@ jobs:
         OMNICOREAGENT_TEST_REDIS_URL: redis://localhost:6379/0
         OMNICOREAGENT_TEST_MONGODB_URI: mongodb://localhost:27017
         OMNICOREAGENT_TEST_MONGODB_DATABASE: omnicoreagent_test
+        OMNICOREAGENT_TEST_POSTGRES_URL: postgresql://omnicoreagent:omnicoreagent@localhost:5432/omnicoreagent_test
 
     - name: Run live background manager backend tests
       run: |
@@ -97,3 +111,4 @@ jobs:
         OMNICOREAGENT_TEST_REDIS_URL: redis://localhost:6379/0
         OMNICOREAGENT_TEST_MONGODB_URI: mongodb://localhost:27017
         OMNICOREAGENT_TEST_MONGODB_DATABASE: omnicoreagent_test
+        OMNICOREAGENT_TEST_POSTGRES_URL: postgresql://omnicoreagent:omnicoreagent@localhost:5432/omnicoreagent_test

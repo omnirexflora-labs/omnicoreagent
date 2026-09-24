@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 import os
 from uuid import uuid4
@@ -37,7 +38,11 @@ MONGODB_CONTRACT_URI_ENV = "OMNICOREAGENT_TEST_MONGODB_URI"
 MONGODB_CONTRACT_DATABASE_ENV = "OMNICOREAGENT_TEST_MONGODB_DATABASE"
 DEFAULT_MONGODB_CONTRACT_URI = "mongodb://localhost:27017"
 DEFAULT_MONGODB_CONTRACT_DATABASE = "omnicoreagent_test"
-SHARED_CONTRACT_BACKENDS = ["in_memory", "sql", "redis", "mongodb"]
+POSTGRES_CONTRACT_URL_ENV = "OMNICOREAGENT_TEST_POSTGRES_URL"
+# The SQL store runs twice: on SQLite, which every checkout has, and on
+# PostgreSQL when one is configured — the same rows, the same contract, a
+# different dialect and real row locks.
+SHARED_CONTRACT_BACKENDS = ["in_memory", "sql", "postgres", "redis", "mongodb"]
 _UNAVAILABLE_BACKENDS: dict[str, str] = {}
 
 
@@ -96,6 +101,16 @@ async def create_store(kind: str, tmp_path):
             connect_timeout=REDIS_CONTRACT_CONNECT_TIMEOUT,
             lock_timeout=0.5,
         )
+    elif kind == "postgres":
+        url = os.getenv(POSTGRES_CONTRACT_URL_ENV)
+        if not url:
+            skip_backend(
+                kind,
+                "PostgreSQL task store contract tests need "
+                f"{POSTGRES_CONTRACT_URL_ENV} (for example "
+                "postgresql://omnicoreagent:omnicoreagent@localhost:5432/omnicoreagent_test)",
+            )
+        store = SqlTaskStore(url, table_prefix=f"t{uuid4().hex[:12]}_")
     elif kind == "mongodb":
         store = MongoDbTaskStore(
             uri=mongodb_contract_uri(),
@@ -114,11 +129,21 @@ async def create_store(kind: str, tmp_path):
             skip_backend(kind, redis_unavailable_message(exc))
         if kind == "mongodb":
             skip_backend(kind, mongodb_unavailable_message(exc))
+        if kind == "postgres":
+            skip_backend(kind, f"PostgreSQL task store unavailable: {exc}")
         raise
     return store
 
 
 async def close_store(store) -> None:
+    if isinstance(store, SqlTaskStore) and store.table_prefix:
+        # A test's tables go with it, so a shared database stays clean.
+        try:
+            await asyncio.to_thread(store._tables.metadata.drop_all, store._engine)
+        except Exception:
+            pass
+        await store.close()
+        return
     if isinstance(store, RedisTaskStore):
         try:
             await cleanup_redis_prefix(store)
