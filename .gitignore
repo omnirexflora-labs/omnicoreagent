@@ -20,7 +20,10 @@ site/
 venv/
 
 # ── Workspace (all agent runtime data) ──
-workspace/
+# Anchored: an unanchored rule also matched src/omnicoreagent/core/workspace,
+# so a new file of the workspace implementation would have been skipped.
+/workspace/
+cookbook/**/workspace/
 .omnicoreagent/
 
 .agents/skills/*

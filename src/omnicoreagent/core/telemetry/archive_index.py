@@ -30,6 +30,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from omnicoreagent.core.sql_schema import create_tables
+
 # What a row holds: what the trace is, where its body is, the stream cursors
 # it spans, the payloads it refers to, and its size.
 COLUMNS = (
@@ -346,7 +348,8 @@ class SqlTelemetryIndex(TelemetryIndex):
             Column("id", Integer, primary_key=True),
             Column("next_cursor", Integer, nullable=False),
         )
-        metadata.create_all(engine)
+        # Another process may be creating the same tables right now.
+        create_tables(engine, metadata)
         self._engine, self._table, self._metadata = engine, table, metadata
         self._cursors = cursors
         return engine, table
