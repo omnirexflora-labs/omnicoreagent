@@ -72,7 +72,8 @@
                             "docs/how-to-guides/models",
                             "docs/how-to-guides/sandbox-providers",
                             "docs/how-to-guides/agent-in-a-container",
-                            "docs/how-to-guides/omniserve"
+                            "docs/how-to-guides/omniserve",
+                            "docs/how-to-guides/headless-runs"
                         ]
                     },
                     {

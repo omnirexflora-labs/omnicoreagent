@@ -15,6 +15,15 @@
   `inherit_environment` is on. The `execute` tool tells the model it is not
   isolated, and the agent reports `host_execution_not_contained`.
 
+- Add `omnicoreagent run`, a headless command for one unattended run (CI and
+  evaluation harnesses such as Harbor). Core install only. Approvals are
+  answered by an explicit mode (`stop`, `allow`, `deny`, `scripted` rules)
+  through `resolve_approval` as `omnicoreagent-cli`; budgets stop or are denied,
+  never granted. One deadline covers the whole run. Writes `result.json` and
+  `trajectory.json`; exit codes name the terminal state. Runs as
+  `python -m omnicoreagent.cli run ...` too, for a harness that cannot rely on
+  a console script being on PATH.
+
 - Exclude governance decision IDs and configured-child accounting from loop
   comparisons while retaining those fields in history. Expand live validation
   across non-MCP native execution, memory/context, skills and artifact readback.
