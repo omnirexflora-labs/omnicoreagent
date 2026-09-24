@@ -162,6 +162,38 @@ a shared store has to do: two stores on one database see the same runs and
 leases, six workers claiming six runs at once take one each, and state the old
 snapshot store wrote is taken over on first use.
 
+## One archive, several processes (S3)
+
+The archive keeps one body per trace through the workspace storage interface,
+and finds them through an index. That index was a SQLite file in the archive's
+own directory, so two server processes could share the bodies and not the index
+that finds them. It is now an interface with two implementations: the SQLite
+file, still the default and needing nothing installed, and `SqlTelemetryIndex`
+over SQLAlchemy, which speaks any database. A deployment sets
+`archive_index_url` and either `archive_bodies_path` or
+`archive_target: "object_storage"`.
+
+`tests/test_telemetry_index.py` asks both implementations the same ten
+questions, and `tests/test_telemetry_shared_archive.py` holds the property S4
+needs: two stores, each with its own write-ahead log, one shared index and one
+set of bodies, each answering for traces the other finished. Both run on SQLite
+and on PostgreSQL.
+
+**What that found.** Writing the harder test — both processes recording before
+either finished — showed the two of them handing out the same stream positions:
+cursors `[1, 1, 2, 2]`, because each counted from the highest it had seen and a
+running trace's events are only in its own process's log. A reader resuming
+after position 1 would have lost an event, silently. A shared index now issues
+blocks of positions (32 at a time, one round trip per block), so two processes
+cannot be given the same one. A process alone does not ask, and its cursors are
+unchanged.
+
+What a cursor promises, stated plainly, because a shared index weakens it: a
+position is unique across the deployment, and ordered within a trace, a run and
+a session — which is what a stream is scoped to. It is not a clock across
+processes: two processes holding different blocks can finish traces in an order
+their positions do not reflect.
+
 ## What is not measured here
 
 - More than one process, one shared database, one shared bucket: S4.
