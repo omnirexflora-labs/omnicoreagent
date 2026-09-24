@@ -4,10 +4,16 @@ Found by P2 of the production proving plan: the steward's container was
 recreated while the worker held the Redis task-store lock, whose lease was
 five minutes; every restart gave up after thirty seconds — "Timed out
 acquiring Redis task-store lock" — and the deployment crash-looped until the
-lease lapsed. A store's lock lease is now short (its operations take
-milliseconds; a long write refreshes it), acquisition always outlasts a full
-lease, and a lock that is still held after that names how long the holder
-has left. The same holds for MongoDB.
+lease lapsed. MongoDB still takes a lock over the whole store, so its lease is
+short (its operations take milliseconds; a long write refreshes it),
+acquisition always outlasts a full lease, and a lock still held after that
+names how long the holder has left.
+
+Redis no longer has the failure mode at all: since scale plan S2b it writes an
+entity per key under optimistic transactions, and takes no lock over the store,
+so there is nothing for a dead process to leave behind. That is what the Redis
+tests here hold now — including that a lock key left by the old store is simply
+ignored.
 """
 
 from __future__ import annotations
@@ -18,7 +24,6 @@ from uuid import uuid4
 
 import pytest
 
-from omnicoreagent.background.errors import TaskStoreError
 from omnicoreagent.background.models import BackgroundAgentSpec
 from omnicoreagent.background.store.mongodb import MongoDbTaskStore
 from omnicoreagent.background.store.redis import RedisTaskStore
@@ -56,37 +61,58 @@ async def _mongo_store(**lock) -> MongoDbTaskStore:
     return store
 
 
-def test_the_default_lease_is_short_and_acquisition_outlasts_it():
-    for store in (RedisTaskStore(url="redis://x"), MongoDbTaskStore(uri="mongodb://x", database="d")):
-        assert store.lock_lease_seconds <= 30
-        assert store.lock_wait_seconds >= store.lock_lease_seconds
+async def test_the_default_mongodb_lease_is_short_and_acquisition_outlasts_it():
+    store = MongoDbTaskStore(uri="mongodb://x", database="d")
+    assert store.lock_lease_seconds <= 30
+    assert store.lock_wait_seconds >= store.lock_lease_seconds
 
 
-async def test_redis_waits_out_a_dead_holders_lease():
-    store = await _redis_store(lock_timeout=0.1, lock_lease_seconds=0.6)
+async def test_redis_takes_no_lock_over_the_store():
+    """Nothing to inherit: a dead process leaves no lock, because none is taken."""
+    store = await _redis_store()
     try:
-        # A process that died mid-operation: its token, its lease still running.
-        await store._client.set(store._lock_key, "dead-process", px=600)
+        # A lock key the old store would have left behind, lease still running.
+        await store._client.set(f"{store.prefix}:lock", "dead-process", px=600_000)
 
         started = time.monotonic()
         await store.save_agent(BackgroundAgentSpec(agent_id="agent"))
         waited = time.monotonic() - started
 
-        assert 0.4 < waited < 3, "waited for the lease to lapse, then went on"
+        assert waited < 1, "a write waited for something; nothing should hold it"
         assert (await store.get_agent("agent")) is not None
     finally:
+        await store._client.delete(f"{store.prefix}:lock")
         await store.close()
 
 
-async def test_redis_names_a_live_holder_when_it_gives_up():
-    store = await _redis_store(lock_timeout=0.1, lock_lease_seconds=0.3)
+async def test_two_redis_stores_write_at_the_same_time():
+    """What the lock used to serialize: both get through, neither waits."""
+    import asyncio
+
+    first = await _redis_store()
+    second = RedisTaskStore(url=REDIS_URL, prefix=first.prefix, connect_timeout=1.0)
+    await second.initialize()
     try:
-        await store._client.set(store._lock_key, "live-process", px=5_000)
-        with pytest.raises(TaskStoreError, match=r"held by another process.*\d+(\.\d+)?s"):
-            await store.save_agent(BackgroundAgentSpec(agent_id="agent"))
+        started = time.monotonic()
+        await asyncio.gather(
+            *(
+                store.save_agent(BackgroundAgentSpec(agent_id=f"agent-{number}"))
+                for number, store in enumerate((first, second, first, second))
+            )
+        )
+        assert time.monotonic() - started < 2
+        assert {agent.agent_id for agent in await first.list_agents()} == {
+            "agent-0",
+            "agent-1",
+            "agent-2",
+            "agent-3",
+        }
     finally:
-        await store._client.delete(store._lock_key)
-        await store.close()
+        keys = [key async for key in first._client.scan_iter(match=f"{first.prefix}:*")]
+        if keys:
+            await first._client.delete(*keys)
+        await first.close()
+        await second.close()
 
 
 async def test_mongodb_waits_out_a_dead_holders_lease():

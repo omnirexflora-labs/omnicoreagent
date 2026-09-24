@@ -106,6 +106,39 @@ is SQLite-only, and a telemetry index that is a local file.
   the steward to SQL is a separate decision, with its own Redis-to-SQL import
   to write first.
 
+- **S2b. Redis a key at a time, then MongoDB.** The Redis store is the one
+  the steward runs, and it is still a snapshot store — worse than SQL's was:
+  every mutation writes a whole new generation of every hash and flips a
+  pointer, so all of the state is copied on each write and two copies of it
+  live at once. Measured on the server, one run write costs 6.6 ms with a
+  hundred runs kept and 103.5 ms with two thousand.
+
+  Redis is a key-value store being used as one blob, so the shape is the
+  obvious one: an entity per key, and indexes for the questions asked.
+
+      {prefix}:agent:{id}, :task:{id}, :schedule:{task}, :run:{id},
+      :attempt:{id}                       one hash each: data, version
+      {prefix}:agents, :tasks             the ids, for listing
+      {prefix}:queued                     sorted set, the claim order
+      {prefix}:unfinished:{task}          sorted set, for the overlap guard
+      {prefix}:leased                     sorted set by lease expiry
+      {prefix}:occurrence:{task}:{id}     the run a schedule occurrence made
+      {prefix}:run_attempts:{run}         sorted set by attempt number
+
+  Mutations are optimistic transactions (`WATCH`/`MULTI`, retried on
+  conflict) against the keys they touch, so two workers contend only where
+  they overlap and the logic stays in Python rather than in Lua. A claim
+  writes the run's key with the status and version it expected, so exactly
+  one worker wins — the same rule as SQL's.
+
+  What the state the snapshot store wrote must not lose: the steward's own
+  history is in it, so the active generation is imported to per-key entities
+  on first use, and the old keys are left where they are.
+
+  The store contract suite, the two-manager races and the write-scope
+  property test all already exist; Redis joins them. MongoDB gets the same
+  treatment after, and is measured either way.
+
 CI gains a Postgres service for S2 and S3.
 
 ## Execution log
@@ -116,3 +149,4 @@ CI gains a Postgres service for S2 and S3.
 | S2 | done | | A row per entity over SQLAlchemy: SQLite, PostgreSQL or MySQL, version CAS, `FOR UPDATE SKIP LOCKED` where the database has it, and the snapshot store's state imported once. One write: 48.7 ms → 3.2 ms with 2000 runs held, and flat. Contract suite on SQLite and PostgreSQL, CI gains a Postgres service. Redis and MongoDB still snapshot stores (S2b) |
 | S3 | done | | The index behind an interface: the SQLite file as the default, `SqlTelemetryIndex` over SQLAlchemy for a shared one, bodies in a shared directory or the deployment's bucket. Found and fixed: two processes on one archive handed out the same stream cursors (`[1, 1, 2, 2]`); a shared index now issues blocks |
 | S4 | done | | Two OmniServe processes on one PostgreSQL and one bodies directory, on the steward's server: 20 runs, 10 and 10, one attempt each, both serving all 20 traces. Found and fixed: the schema create race at startup, an unwritable lock directory for a root at a filesystem top, and a silent archive write failure. Suite: `test_two_managers_one_store.py` |
+| S2b | done (Redis) | | An entity per key under optimistic transactions, the snapshot store's state imported once. One write: 103.5 ms -> 1.2 ms with 2000 runs held, and flat. The store-wide lock is gone, so P2's dead-holder crash loop cannot happen. Contract suite, write-scope and two-manager races all run on Redis. MongoDB still to do |

@@ -148,9 +148,33 @@ and times an ordinary run write. On the server, median of ten writes:
 | SQL rows on PostgreSQL (after) | 5.1 ms | 4.8 ms | 7.0 ms |
 
 A row per entity is flat where whole state is linear: ten times cheaper at two
-thousand runs on SQLite, and Redis — what the steward runs — spends a tenth of a
+thousand runs on SQLite, and Redis — what the steward runs — spent a tenth of a
 second on every background write at that size. The steward has about forty runs,
 which is why nobody had felt it.
+
+Redis is now an entity per key too (S2b), and it was the worst of them: each
+mutation wrote a complete new generation of every hash and flipped a pointer at
+it, so all of the state was copied on every write and two copies lived at once.
+Measured the same way, on the same server:
+
+| Redis | 100 runs held | 500 | 2000 |
+|---|---|---|---|
+| whole state, in generations (before) | 6.6 ms | 20.6 ms | 103.5 ms |
+| an entity per key (after) | 0.6 ms | 0.5 ms | 1.2 ms |
+
+Ninety times cheaper at two thousand runs, and flat. A write is an optimistic
+transaction on the keys it touches — watched, read and written in one atomic
+step, retried if something else changed them — so two workers contend only
+where they overlap.
+
+It also deletes a failure mode rather than mitigating one. Finding P2 of the
+production proving was the steward crash-looping because a container was
+recreated while its worker held the store-wide Redis lock, and every restart
+gave up before the lease lapsed. There is no store-wide lock now, so there is
+nothing for a dead process to leave behind; `tests/test_task_store_lock_recovery.py`
+holds that, including that a lock key left by the old store is simply ignored.
+
+MongoDB is still a snapshot store, and still measured beside these.
 
 `tests/test_task_store_write_scope.py` keeps the property without timing
 anything: it counts the runs one write touches at 21 runs held and at 201, and
