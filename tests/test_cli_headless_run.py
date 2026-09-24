@@ -229,11 +229,16 @@ async def test_budget_deny_ends_the_run_instead_of_waiting():
 @pytest.mark.asyncio
 async def test_the_deadline_covers_the_run_and_is_recorded_as_a_timeout(tmp_path):
     ledger = tmp_path / "ledger"
-    agent = await _agent(RecordingModel(SEND, "sent"), ledger, ask=False, slow=2.0)
+    # The tool takes far longer than the deadline, and the deadline is long
+    # enough to land after the run has started recording: a deadline that fires
+    # during startup leaves no trace to read, which is a loaded machine's
+    # timing rather than what this test is about.
+    agent = await _agent(RecordingModel(SEND, "sent"), ledger, ask=False, slow=30.0)
 
-    outcome = await execute_headless(agent, HeadlessRequest(instruction="send", timeout=0.3))
+    outcome = await execute_headless(agent, HeadlessRequest(instruction="send", timeout=2.0))
 
     assert (outcome.status, outcome.exit_code) == ("timeout", ExitCode.TIMEOUT)
+    assert outcome.trace_ids, "a run that timed out recorded no trace"
     trace = await agent.telemetry_store.get_trace(outcome.trace_ids[0])
     assert trace.status.value == "timeout"
 
