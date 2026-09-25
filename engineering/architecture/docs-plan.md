@@ -24,6 +24,23 @@ release, not only on the day:
    happened" — and must finish from the docs alone. Where it stalls is a page
    to fix. One task per journey below.
 
+## For agents as much as people
+
+Many readers will send their coding agent in first. The docs site already
+serves `llms.txt`, copy-as-markdown, an MCP server and the editor integrations
+(`docs.json` → `contextual`). The repository gets **`AGENTS.md`**: what lives
+where, how to run the tests the way CI does, the conventions, and which page
+explains which part — so an agent can answer "how do I…" from the source as
+well as from the docs. Every page stands on its own: an agent that lands on it
+cold, from a search, has what it needs on that page.
+
+## The story, told once
+
+This release is a reset of how OmniCoreAgent is described, not of the code
+people run. The upgrade guide is **measured**: the public surface of v0.3.9 —
+every exported name, constructor argument and configuration key — compared with
+this release, and only what a 0.3.9 user would actually meet is listed.
+
 ## Organized by what a reader is trying to do
 
 | Section | Pages | The reader leaves with |
@@ -55,8 +72,9 @@ a list of every option before the reader has seen one work.
 
 ## Units
 
-- **D1. The README** — the front door: what is different in one screen, a
-  quick start that ends with the evidence, the CLI and Harbor, a diagram.
+- **D1. The README and `AGENTS.md`** — the front doors, for people and for
+  their agents: what is different in one screen, a quick start that ends with
+  the evidence, the CLI and Harbor, a diagram; a map of the repository.
 - **D2. Start** — Install, Quickstart, the tour; the stranger test for "first
   agent".
 - **D3. The coverage test and the generated reference** — CLI, HTTP API,
