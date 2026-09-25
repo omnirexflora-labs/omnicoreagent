@@ -62,7 +62,7 @@ dependencies = [
 redis = ["redis>=8.1.0"]
 docker = ["docker>=7.2.0"]
 # Code mode (run_code): an alpha interpreter, so the version is pinned exactly.
-codemode = ["pydantic-monty==0.0.23"]
+codemode = ["pydantic-monty>=1.0.0,<2"]
 modal = ["modal>=1.5.5"]
 e2b = ["e2b>=2.51.0"]
 daytona = ["daytona>=0.214.0"]

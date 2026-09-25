@@ -192,3 +192,69 @@ def test_run_code_is_governed_as_its_own_capability():
     (request,) = tool_authority_requests(tool_name="run_code", tool_args={"code": "1"}, tool_provider="code")
 
     assert (request.capability, request.execution_surface, request.risk_level) == ("code.run", "code", "medium")
+
+
+# --- Monty 1.0: what a program may now ask the host for ------------------------------
+#
+# Monty 1.0 answers the clock, sleeps and random numbers itself, and routes files and
+# the environment to the host as OS calls. Code mode refuses the second kind and
+# bounds the first.
+
+
+@pytest.mark.asyncio
+async def test_code_cannot_read_the_hosts_environment(monkeypatch):
+    monkeypatch.setenv("CODE_MODE_SECRET_PROBE", "must-not-reach-the-program")
+    calls: list = []
+    model = RecordingModel(
+        _code_call(
+            "import os\n"
+            "values = [os.getenv('CODE_MODE_SECRET_PROBE'), os.getenv('HOME')]\n"
+            "values",
+            "k1",
+        ),
+        "done",
+    )
+    agent = await _agent(model, calls, code_mode={"tools": ["price"]})
+
+    await agent.run("look around", session_id="env")
+    result = json.dumps(_result(model, "k1"))
+
+    assert "must-not-reach-the-program" not in result
+    assert "os.getenv" in result and "not supported" in result
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_program_cannot_sleep():
+    """A program orchestrates tool calls; it has no reason to wait, and waiting
+    would spend the run's time without its limits noticing."""
+    calls: list = []
+    model = RecordingModel(
+        _code_call("import time\nfor i in range(10):\n    time.sleep(1)\n'woke'", "k1"),
+        "done",
+    )
+    agent = await _agent(model, calls, code_mode={"max_duration_seconds": 5})
+
+    started = __import__("time").monotonic()
+    await agent.run("wait", session_id="sleep")
+    elapsed = __import__("time").monotonic() - started
+    slept = _result(model, "k1")
+
+    assert slept["status"] == "error"
+    assert "sleep" in slept["message"] and "not supported" in slept["message"]
+    assert elapsed < 5, "the program slept"
+
+
+@pytest.mark.asyncio
+async def test_the_clock_and_random_numbers_work():
+    """Monty 1.0 answers these itself; a program may timestamp or sample."""
+    calls: list = []
+    model = RecordingModel(
+        _code_call("import datetime, random\n[datetime.datetime.now().year > 2000, 0 <= random.random() < 1]", "k1"),
+        "done",
+    )
+    agent = await _agent(model, calls)
+
+    await agent.run("stamp", session_id="clock")
+
+    assert _result(model, "k1")["data"]["result"] == [True, True]

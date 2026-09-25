@@ -45,10 +45,11 @@ late
 
 ## How it stays safe
 
-- Programs run in [Monty](https://github.com/pydantic/monty), Pydantic's
-  interpreter for a Python subset, in a separate worker process. A program
-  has no filesystem, network, or environment access; an attempt raises an
-  error inside the program.
+- Programs run in [Monty](https://github.com/pydantic/monty) 1.x, Pydantic's
+  sandboxed interpreter for Python, in a separate worker process
+  (`pip install "omnicoreagent[codemode]"`). A program has no filesystem,
+  network, or environment access, and cannot sleep; an attempt raises an error
+  inside the program. The clock and random numbers work.
 - Every tool call a program makes goes through the same path as a direct tool
   call: governance authorizes it (a denied call raises an error the program
   can catch), the run's record notes it before it starts, and it is recorded
