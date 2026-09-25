@@ -1,0 +1,139 @@
+---
+title: Harbor and Terminal-Bench
+description: 'Run OmniCoreAgent on Harbor tasks and datasets, and read what each trial did'
+icon: 'flask'
+---
+
+# Harbor and Terminal-Bench
+
+[Harbor](https://github.com/laude-institute/harbor) runs an agent on tasks: each
+task is a container, the agent is installed into it and solves the task by
+running commands there, and a verifier then decides the reward. Terminal-Bench
+is run on it. `omnicoreagent harbor` is Harbor's own command line with this
+runtime as the agent.
+
+```bash
+pip install 'omnicoreagent[harbor]'
+export LLM_API_KEY=...
+
+omnicoreagent harbor doctor -m gpt-5.6-terra
+omnicoreagent harbor run -p ./my-task -m gpt-5.6-terra
+omnicoreagent harbor run -d terminal-bench@2.0 -m gpt-5.6-terra -n 4
+omnicoreagent harbor results jobs
+```
+
+Every Harbor command works — `view`, `job resume`, `trial start`, `init`,
+`dataset`, `download`, and the rest pass through unchanged. Four things are done
+around them:
+
+- **This runtime is the default agent.** `run`, `exec`, `job start`, `trial start`
+  and the `init` scaffolders use it unless you pass `-a` or a config file that
+  names another agent.
+- **One key.** `LLM_API_KEY` — from the environment or from `./.env` — is handed
+  to the model's provider in Harbor's environment. It is never put in a
+  command's arguments, which other users of the machine can see, and never in
+  the job's files. A key you set under the provider's own name is left alone.
+- **Model names.** `gpt-5.6-terra`, `o3`, `claude-sonnet-5`, `gemini-2.5-pro` and
+  `deepseek-chat` get their provider prefix; any other model is named as
+  `provider/model` (for example `openrouter/meta/llama-4`), because guessing
+  a provider wrong fails a trial late.
+- **Plain errors.** No Docker, or no Harbor, is a sentence saying what to do.
+
+## Before the first trial
+
+```bash
+omnicoreagent harbor doctor -m gpt-5.6-terra --container
+```
+
+`doctor` checks Python, Harbor, a Docker daemon that answers, that the model's
+provider has a key (it never prints it), and what the task container will
+install. `--container` installs the agent into a throwaway task container, the
+same way a trial does.
+
+## What the container runs
+
+The container gets **this** runtime: the same release when you run a release,
+and otherwise a wheel built from your checkout, uploaded and installed. It lives
+in a virtual environment of its own under `/installed-agent`, so the task's own
+Python is left as the task set it up, and its files stay outside the task's
+directory, which the verifier checks.
+
+Commands run in the task's directory through the `local` sandbox provider: the
+container is the boundary. Policy still governs every command, and the run's
+trace records each one with the rule that allowed it.
+
+## Options
+
+Pass them with `--ak name=value` (Harbor's `--agent-kwarg`):
+
+| Option | Default | What it does |
+|---|---|---|
+| `max_steps` | `60` | Model turns the agent may take. |
+| `command_timeout` | `300` | Seconds any one command may run. |
+| `run_timeout` | none | Seconds the run gives itself. Set it a little under the task's agent timeout: a run stopped from outside leaves no result behind, one that stops itself does. |
+| `approval_mode` | `deny` | How an approval nobody is there to give is answered: `stop`, `allow` or `deny`. |
+| `budget_mode` | `stop` | How an exhausted budget is answered: `stop` or `deny`. |
+| `capture` | `full` | What the trace keeps. `full` keeps what the model was sent. |
+| `record_token_details` | `false` | Keep the chosen tokens' logprobs. |
+| `install_spec` | this runtime | Install something else: a requirement, a path in the container, or a VCS URL. |
+| `wheel` | this runtime | A wheel on this machine to upload and install. |
+
+## Tasks that restrict the network
+
+A task can let the agent reach only the hosts it names (`[agent] network_mode =
+"allowlist"`). The agent still has to reach its model, so allow the model's
+host for the run:
+
+```bash
+omnicoreagent harbor run -p ./task -m gpt-5.6-terra --allow-agent-host api.openai.com
+```
+
+Everything else the agent needs is fetched when it is installed, while the
+network is open. If the model's host is not allowed, the run ends saying it
+could not connect to it.
+
+## MCP servers and skills
+
+A task's MCP servers (`[[environment.mcp_servers]]`) and those you add with
+`--mcp-config` are connected for the run, over stdio or HTTP. Skills a task
+provides (`environment.skills_dir`) or that you add with `--skill` are found
+where Harbor puts them. If an MCP server cannot be used, the trial's record
+says so — a task can sometimes be passed without its tools, and that is not the
+result it was meant to measure.
+
+Names you set with `--ae NAME=value` reach the commands the agent runs, except
+credentials, which stay with the runtime.
+
+## Reading a job
+
+```bash
+omnicoreagent harbor results jobs/2026-09-25__06-07-24
+omnicoreagent harbor results jobs --json
+```
+
+For each trial: passed, failed, errored or still running; the reward; the
+run's own status and, when it did not succeed, why it ended (`max_steps`,
+`provider_error`, …); cost, tokens and steps; the line of an error that says
+what went wrong; MCP servers the run could not use; and where its trajectory
+is. Harbor exits 0 even when every trial errored, so read the results.
+
+```
+  passed    reward 1    agent-network-allowlist__yDMGhKr    status success               steps 6    cost $0.0140
+  failed    reward 0    receipts-subtotal__ttHF2WG          status error (max_steps)     steps 3    cost $0.0030
+            Agent reached its step limit.
+```
+
+## What the agent never sees
+
+The runtime replaces its own credentials — the model's key, and values of
+environment variables that hold credentials — in everything a tool returns,
+before the model sees it, and in everything it records. A command that prints
+the agent's environment shows `[REDACTED:credential]`. This keeps the key out of
+the model's context and out of the trajectory; it cannot stop a command from
+sending a key it can read, so run trials with a key meant for them, with a
+spending limit.
+
+Each trial's `agent/trajectory.json` is in Harbor's trajectory format (ATIF): the
+instruction, then one step per model call with what the model said, the tools
+it called with their arguments, what they returned and how each command ran,
+and what each call cost. `harbor view jobs` shows it next to any other agent's.
