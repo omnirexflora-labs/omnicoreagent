@@ -286,13 +286,15 @@ agent_config = {
     "governance_config": {
         "enabled": True,
         "profile": "interactive-dev",
-        "sandbox_config": {"provider": "none"}
-    }
+        "sandbox_config": {"provider": "none"},
+    },
 }
 
 agent = OmniCoreAgent(
-    ...
-    agent_config=agent_config
+    name="assistant",
+    system_instruction="You are a helpful assistant.",
+    model_config={"provider": "openai", "model": "gpt-5.6-terra"},
+    agent_config=agent_config,
 )
 ```
 
@@ -423,8 +425,10 @@ recorded through telemetry, which is stored durably in local JSONL by default.
 from omnicoreagent import MemoryRouter
 
 agent = OmniCoreAgent(
-    ...
-    memory_router=MemoryRouter("redis")
+    name="assistant",
+    system_instruction="You are a helpful assistant.",
+    model_config={"provider": "openai", "model": "gpt-5.6-terra"},
+    memory_router=MemoryRouter("redis"),
 )
 ```
 

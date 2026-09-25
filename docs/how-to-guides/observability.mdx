@@ -317,7 +317,10 @@ and in its trajectory. `agent.training_records(session_id=…)` reads finished
 runs back as one record each — the messages the model was sent at every
 step, what it produced, what the tools answered, the policy that served it,
 the totals and the outcomes — which is what an evaluator, or a trainer
-learning from one run per task, consumes:
+learning from one run per task, consumes. A run that paused for an approval
+and was resumed is one record, its steps from every segment (`trace_ids`,
+and each step's `segment`); a run still running or waiting is left out until
+it finishes:
 
 ```python
 records = await agent.training_records(session_id="support", limit=500)

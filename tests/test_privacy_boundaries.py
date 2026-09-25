@@ -30,18 +30,20 @@ SENSITIVE_TEXT = (
 )
 
 
+# The detector is tested at the telemetry boundary: it is the one redacted by
+# default, and a test at a boundary that is off would pass without testing anything.
 def test_privacy_filter_redacts_common_pii_but_keeps_model_context_by_default():
     privacy = PrivacyFilter()
 
     assert "[REDACTED_EMAIL]" in privacy.redact_text(
-        SENSITIVE_TEXT, boundary="public"
+        SENSITIVE_TEXT, boundary="telemetry"
     )
     assert "[REDACTED_PHONE]" in privacy.redact_text(
-        SENSITIVE_TEXT, boundary="public"
+        SENSITIVE_TEXT, boundary="telemetry"
     )
-    assert "[REDACTED_SSN]" in privacy.redact_text(SENSITIVE_TEXT, boundary="public")
+    assert "[REDACTED_SSN]" in privacy.redact_text(SENSITIVE_TEXT, boundary="telemetry")
     assert "[REDACTED_CREDIT_CARD]" in privacy.redact_text(
-        SENSITIVE_TEXT, boundary="public"
+        SENSITIVE_TEXT, boundary="telemetry"
     )
     assert privacy.redact_text(SENSITIVE_TEXT, boundary="model") == SENSITIVE_TEXT
 
@@ -74,7 +76,7 @@ def test_privacy_filter_preserves_protocol_identifiers():
         "message": "alice@example.com",
     }
 
-    redacted = privacy.redact(payload, boundary="public")
+    redacted = privacy.redact(payload, boundary="telemetry")
 
     assert redacted["trace_id"] == payload["trace_id"]
     assert redacted["run_id"] == payload["run_id"]
@@ -207,7 +209,7 @@ def test_offloaded_workspace_artifact_redacts_full_payload_and_preview(tmp_path:
 
 
 @pytest.mark.asyncio
-async def test_stream_delivery_redacts_events_before_callback():
+async def test_stream_delivery_redacts_events_before_callback_when_asked():
     delivered = []
 
     async def callback(event):
@@ -216,7 +218,7 @@ async def test_stream_delivery_redacts_events_before_callback():
     delivery = StreamDelivery(
         callback,
         "run-privacy",
-        privacy_filter=PrivacyFilter(),
+        privacy_filter=PrivacyFilter(PrivacyConfig(redact_stream=True)),
     )
     await delivery.emit(
         {"type": "text_delta", "text": SENSITIVE_TEXT},
@@ -231,19 +233,19 @@ async def test_stream_delivery_redacts_events_before_callback():
     assert "[REDACTED_EMAIL]" in delivered[0]["text"]
 
 
-def test_public_result_normalization_redacts_response():
+def test_public_result_normalization_redacts_response_when_asked():
     result = normalize_run_result(
         {"response": SENSITIVE_TEXT, "status": "success"},
         agent_name="privacy-agent",
-        privacy_filter=PrivacyFilter(),
+        privacy_filter=PrivacyFilter(PrivacyConfig(redact_public=True)),
     )
 
     assert "alice@example.com" not in result["response"]
     assert "[REDACTED_EMAIL]" in result["response"]
 
 
-def test_public_stream_errors_redact_exception_text():
-    agent = type("Agent", (), {"privacy_filter": PrivacyFilter()})()
+def test_public_stream_errors_redact_exception_text_when_asked():
+    agent = type("Agent", (), {"privacy_filter": PrivacyFilter(PrivacyConfig(redact_public=True))})()
 
     message = _public_error(
         agent,
@@ -269,7 +271,6 @@ def test_privacy_filter_never_corrupts_generated_identifiers_or_digests():
     }
 
     assert privacy.redact(payload, boundary="telemetry") == payload
-    assert privacy.redact(payload, boundary="public") == payload
 
 
 def test_privacy_filter_still_redacts_standalone_card_numbers():
@@ -282,7 +283,7 @@ def test_privacy_filter_still_redacts_standalone_card_numbers():
         "numbers (4111111111111111)",
         "order-4111111111111111",
     ):
-        redacted = privacy.redact_text(text, boundary="public")
+        redacted = privacy.redact_text(text, boundary="telemetry")
         assert "[REDACTED_CREDIT_CARD]" in redacted, text
         assert "4111" not in redacted, text
 
@@ -350,3 +351,67 @@ def test_privacy_filter_keeps_numbers_intact():
     ):
         assert privacy.redact_text(text, boundary="telemetry") == text, text
         assert privacy.redact_text(text, boundary="memory") == text, text
+
+
+# --- the default: records are redacted, the run's own work and output are not ---
+#
+# An agent that links an email to a user has to read the email, and an application
+# that asked for a user's contact details has to receive them. In 0.4's first cut the
+# answer run() returned and the events streamed to the application were redacted by
+# default: "Contact [REDACTED_EMAIL]". The maintainer's rule (2026-09-25): redaction by
+# default is for the record, not the run.
+
+
+def test_by_default_only_the_record_is_redacted():
+    config = PrivacyConfig()
+
+    assert config.redact_telemetry is True
+    assert config.redact_public is False
+    assert config.redact_stream is False
+    assert config.redact_model_io is False
+    assert config.redact_memory is False
+    assert config.redact_workspace is False
+
+
+@pytest.mark.asyncio
+async def test_the_run_sees_and_returns_real_data_and_the_trace_does_not_keep_it(tmp_path, monkeypatch):
+    import json
+
+    from omnicoreagent import OmniCoreAgent, ToolRegistry
+    from test_credential_scrubbing import RecordingModel
+
+    monkeypatch.chdir(tmp_path)
+    tools = ToolRegistry()
+
+    @tools.register_tool("find_user")
+    def find_user(name: str) -> dict:
+        """Find a user."""
+        return {"name": name, "email": "ada@example.com"}
+
+    agent = OmniCoreAgent(
+        name="support",
+        system_instruction="Hi.",
+        model_config={"provider": "openai", "model": "gpt-5.6-terra", "api_key": "k"},
+        local_tools=tools,
+        agent_config={"guardrail_mode": "off"},
+        telemetry_config={"capture": "full"},
+    )
+    await agent.initialize()
+    model = RecordingModel([("c1", "find_user", '{"name": "Ada"}')], "Ada's email is ada@example.com.")
+    agent.llm_connection = model
+    streamed = []
+
+    async def on_event(event):
+        streamed.append(json.dumps(getattr(event, "__dict__", event), default=str))
+
+    try:
+        result = await agent.run("What is Ada's email?", session_id="s", on_event=on_event)
+        trajectory = json.dumps(await agent.get_trajectory(result["trace_id"]), default=str)
+    finally:
+        await agent.cleanup()
+
+    assert "ada@example.com" in json.dumps(model.requests), "the model reads it"
+    assert result["response"] == "Ada's email is ada@example.com.", "the application receives it"
+    assert any("ada@example.com" in event for event in streamed), "the stream carries it"
+    assert "ada@example.com" not in trajectory, "the record does not keep it"
+    assert "[REDACTED_EMAIL]" in trajectory

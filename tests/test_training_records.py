@@ -59,3 +59,45 @@ async def test_a_run_with_nothing_recorded_is_not_offered_as_training_data():
     records = await agent.training_records(run_id=result["run_id"])
 
     assert records == []
+
+
+@pytest.mark.asyncio
+async def test_a_paused_and_resumed_run_is_one_record_with_every_segment_and_its_reward(tmp_path):
+    """A run that waited for a person is two traces: the part before the pause
+    and the part after it. A trainer needs one run, whole, with the reward that
+    arrived after it finished — not a record per trace, and not the paused part
+    as if it were a finished run."""
+    from test_durable_runs_end_to_end import _agent as _billing_agent
+    from test_durable_runs_end_to_end import _tools as _billing_tools
+    from test_run_suspend import RecordingModel
+
+    model = RecordingModel(
+        [("t1", "draft", "{}"), ("t2", "send_invoice", json.dumps({"invoice": "INV-1"}))],
+        "invoice sent",
+    )
+    agent = await _billing_agent(model, _billing_tools(tmp_path / "ledger", {"armed": False}))
+
+    paused = await agent.run("draft and send the invoice", session_id="billing", run_id="run_rl")
+    assert paused["status"] == "awaiting_approval"
+    assert await agent.training_records(run_id="run_rl") == [], "an unfinished run is not training data"
+
+    (approval,) = paused["approvals"]
+    await agent.resolve_approval("run_rl", approval["approval_id"], decision="approve", approver="alice")
+    finished = await agent.resume("run_rl")
+    assert finished["response"] == "invoice sent"
+    await agent.record_outcome("run_rl", reward=1.0, label="paid", source="billing")
+
+    by_run = await agent.training_records(run_id="run_rl")
+    by_session = await agent.training_records(session_id="billing")
+
+    assert by_run == by_session
+    (record,) = by_run
+    run = await agent.get_run("run_rl")
+    assert record["run_id"] == "run_rl" and record["status"] == "completed"
+    assert record["trace_ids"] == run["trace_ids"] and len(record["trace_ids"]) == 2
+    called = [call["name"] for step in record["steps"] for call in step["tool_calls"]]
+    assert called[:1] == ["draft"] and "send_invoice" in called, "both segments' steps"
+    assert {step["segment"] for step in record["steps"]} == {0, 1}
+    assert record["steps"][-1]["response"]["content"] == "invoice sent"
+    assert record["request"] == "draft and send the invoice"
+    assert [(o["reward"], o["label"]) for o in record["outcomes"]] == [(1.0, "paid")]

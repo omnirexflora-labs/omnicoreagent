@@ -299,20 +299,27 @@ class AgentLlmStepRunner:
             )
 
         except Exception as e:
-            from omnicoreagent.core.llm import account_error
+            from omnicoreagent.core.llm import account_error, model_error
 
             reason = account_error(e)
-            error_message = (
-                f"The model call was refused: {reason}. Fix the account; retrying will not help."
-                if reason is not None
-                else (
+            wrong_model = model_error(e)
+            if reason is not None:
+                error_message = (
+                    f"The model call was refused: {reason}. Fix the account; "
+                    "retrying will not help."
+                )
+            elif wrong_model is not None:
+                error_message = (
+                    f"The model call was refused: {wrong_model}. Retrying will not help."
+                )
+            else:
+                error_message = (
                     # What failed, not only its type: "SSLError" alone sent a
                     # reader looking at the model when a tokenizer download
                     # had been cut. Credentials the runtime holds are scrubbed.
                     f"Model encountered an error ({type(e).__name__}: "
                     f"{scrub_credentials(str(e))[:300]}), please do retry again"
                 )
-            )
             logger.error(f"{error_message}: {e}")
             return AgentLlmStepResult(
                 error_result={

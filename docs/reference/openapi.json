@@ -1,0 +1,5348 @@
+{
+  "components": {
+    "schemas": {
+      "ApprovalDecisionRequest": {
+        "description": "A person's decision on an approval a run is waiting for.",
+        "properties": {
+          "approver": {
+            "description": "Who decided",
+            "minLength": 1,
+            "title": "Approver",
+            "type": "string"
+          },
+          "arguments": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Approve this edited call instead of the one asked for",
+            "title": "Arguments"
+          },
+          "decision": {
+            "enum": [
+              "approve",
+              "deny"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reason; a denial's note reaches the model",
+            "title": "Note"
+          }
+        },
+        "required": [
+          "decision",
+          "approver"
+        ],
+        "title": "ApprovalDecisionRequest",
+        "type": "object"
+      },
+      "AttemptReason": {
+        "enum": [
+          "initial",
+          "retry",
+          "recovery",
+          "lease_expired"
+        ],
+        "title": "AttemptReason",
+        "type": "string"
+      },
+      "AttemptStatus": {
+        "enum": [
+          "running",
+          "completed",
+          "failed",
+          "timeout",
+          "cancelled",
+          "interrupted"
+        ],
+        "title": "AttemptStatus",
+        "type": "string"
+      },
+      "BackgroundAgentRegistrationRequest": {
+        "description": "Register the served agent or an agent spec for background work.",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent id. Defaults to OmniServe background_agent_id.",
+            "title": "Agent Id"
+          },
+          "replace": {
+            "default": false,
+            "description": "Replace an existing agent spec",
+            "title": "Replace",
+            "type": "boolean"
+          },
+          "spec": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackgroundAgentSpec"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional agent spec. Omit to register the served agent."
+          }
+        },
+        "title": "BackgroundAgentRegistrationRequest",
+        "type": "object"
+      },
+      "BackgroundAgentSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_config": {
+            "additionalProperties": true,
+            "title": "Agent Config",
+            "type": "object"
+          },
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "local_tools_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Tools Ref"
+          },
+          "mcp_tools": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Mcp Tools",
+            "type": "array"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "model_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Config"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "system_instruction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Instruction"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "workspace_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Config"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "title": "BackgroundAgentSpec",
+        "type": "object"
+      },
+      "BackgroundAgentsResponse": {
+        "description": "Response model for background agent listing.",
+        "properties": {
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/BackgroundAgentSpec"
+            },
+            "title": "Agents",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "agents",
+          "total"
+        ],
+        "title": "BackgroundAgentsResponse",
+        "type": "object"
+      },
+      "BackgroundAttempt": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "attempt_number": {
+            "title": "Attempt Number",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "lease_token": {
+            "title": "Lease Token",
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/AttemptReason",
+            "default": "initial"
+          },
+          "retry_delay_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Delay Seconds"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AttemptStatus",
+            "default": "running"
+          },
+          "worker_id": {
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "attempt_number",
+          "worker_id",
+          "lease_token"
+        ],
+        "title": "BackgroundAttempt",
+        "type": "object"
+      },
+      "BackgroundManagerStatusResponse": {
+        "description": "Inspectable background manager state.",
+        "properties": {
+          "active_runs": {
+            "title": "Active Runs",
+            "type": "integer"
+          },
+          "agents": {
+            "title": "Agents",
+            "type": "integer"
+          },
+          "initialized": {
+            "title": "Initialized",
+            "type": "boolean"
+          },
+          "lease_seconds": {
+            "title": "Lease Seconds",
+            "type": "number"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Status Counts",
+            "type": "object"
+          },
+          "tasks": {
+            "title": "Tasks",
+            "type": "integer"
+          },
+          "worker_id": {
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "running",
+          "initialized",
+          "worker_id",
+          "lease_seconds",
+          "agents",
+          "tasks",
+          "runs",
+          "active_runs",
+          "status_counts"
+        ],
+        "title": "BackgroundManagerStatusResponse",
+        "type": "object"
+      },
+      "BackgroundRun": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "attempt": {
+            "default": 0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "cancel_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested At"
+          },
+          "claimed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimed At"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
+          "lease_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Expires At"
+          },
+          "lease_generation": {
+            "default": 0,
+            "title": "Lease Generation",
+            "type": "integer"
+          },
+          "lease_owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Owner"
+          },
+          "lease_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Token"
+          },
+          "max_attempts": {
+            "default": 1,
+            "title": "Max Attempts",
+            "type": "integer"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "occurrence_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurrence Id"
+          },
+          "query_snapshot": {
+            "title": "Query Snapshot",
+            "type": "string"
+          },
+          "queued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queued At"
+          },
+          "result_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Preview"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus",
+            "default": "queued"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "trigger_metadata": {
+            "additionalProperties": true,
+            "title": "Trigger Metadata",
+            "type": "object"
+          },
+          "trigger_type": {
+            "$ref": "#/components/schemas/TriggerType"
+          },
+          "triggered_at": {
+            "format": "date-time",
+            "title": "Triggered At",
+            "type": "string"
+          },
+          "workspace_path": {
+            "title": "Workspace Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "agent_id",
+          "query_snapshot",
+          "trigger_type",
+          "session_id",
+          "workspace_path"
+        ],
+        "title": "BackgroundRun",
+        "type": "object"
+      },
+      "BackgroundRunEventsResponse": {
+        "description": "Response model for background run event replay.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "events": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "events",
+          "count"
+        ],
+        "title": "BackgroundRunEventsResponse",
+        "type": "object"
+      },
+      "BackgroundRunTimeoutDetail": {
+        "description": "Detail payload for a background run wait timeout.",
+        "properties": {
+          "message": {
+            "description": "Timeout message",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Outer HTTP request timeout",
+            "title": "Request Timeout Seconds"
+          },
+          "run_id": {
+            "description": "Run that can be inspected later",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "Latest run status",
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Task that created the run",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "wait_timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Background run wait budget applied to the request",
+            "title": "Wait Timeout Seconds"
+          }
+        },
+        "required": [
+          "message",
+          "run_id",
+          "task_id",
+          "status"
+        ],
+        "title": "BackgroundRunTimeoutDetail",
+        "type": "object"
+      },
+      "BackgroundRunTimeoutResponse": {
+        "description": "HTTPException response for background run wait timeout.",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/BackgroundRunTimeoutDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "BackgroundRunTimeoutResponse",
+        "type": "object"
+      },
+      "BackgroundRunWorkspaceResponse": {
+        "description": "Response model for background run workspace inspection.",
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "workspace_path": {
+            "title": "Workspace Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "task_id",
+          "agent_id",
+          "workspace_path",
+          "files"
+        ],
+        "title": "BackgroundRunWorkspaceResponse",
+        "type": "object"
+      },
+      "BackgroundRunsResponse": {
+        "description": "Response model for background run listing.",
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/BackgroundRun"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runs",
+          "total"
+        ],
+        "title": "BackgroundRunsResponse",
+        "type": "object"
+      },
+      "BackgroundScheduleState": {
+        "additionalProperties": false,
+        "properties": {
+          "last_dispatched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Dispatched At"
+          },
+          "last_due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Due At"
+          },
+          "misfire_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Misfire Cursor"
+          },
+          "next_due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Due At"
+          },
+          "paused": {
+            "default": false,
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "paused_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused Reason"
+          },
+          "schedule_revision": {
+            "default": 1,
+            "title": "Schedule Revision",
+            "type": "integer"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "title": "BackgroundScheduleState",
+        "type": "object"
+      },
+      "BackgroundStatusResponse": {
+        "description": "Simple status response for background control endpoints.",
+        "properties": {
+          "status": {
+            "description": "Operation status",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "BackgroundStatusResponse",
+        "type": "object"
+      },
+      "BackgroundTaskCreateRequest": {
+        "description": "Create a background task.",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent id. Defaults to OmniServe background_agent_id.",
+            "title": "Agent Id"
+          },
+          "enabled": {
+            "default": true,
+            "description": "Whether the scheduler may run it",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "overlap_policy": {
+            "$ref": "#/components/schemas/OverlapPolicy",
+            "default": "skip_if_running"
+          },
+          "query": {
+            "description": "Instruction executed for each run",
+            "title": "Query",
+            "type": "string"
+          },
+          "replace": {
+            "default": false,
+            "description": "Replace an existing task",
+            "title": "Replace",
+            "type": "boolean"
+          },
+          "retry_policy": {
+            "$ref": "#/components/schemas/RetryPolicy"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/ScheduleSpec",
+            "description": "Manual, once, interval, or cron"
+          },
+          "session_policy": {
+            "$ref": "#/components/schemas/SessionPolicy"
+          },
+          "task_id": {
+            "description": "Stable task identifier",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-run timeout",
+            "title": "Timeout Seconds"
+          },
+          "workspace_policy": {
+            "$ref": "#/components/schemas/WorkspacePolicy"
+          }
+        },
+        "required": [
+          "task_id",
+          "query",
+          "schedule"
+        ],
+        "title": "BackgroundTaskCreateRequest",
+        "type": "object"
+      },
+      "BackgroundTaskPatchRequest": {
+        "description": "Patch mutable fields on a background task.",
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "overlap_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OverlapPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query"
+          },
+          "retry_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RetryPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schedule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "session_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Seconds"
+          },
+          "workspace_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspacePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "BackgroundTaskPatchRequest",
+        "type": "object"
+      },
+      "BackgroundTaskRunRequest": {
+        "description": "Queue a manual run, optionally waiting for terminal state.",
+        "properties": {
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional one-off query override for this run",
+            "title": "Query"
+          },
+          "wait": {
+            "default": false,
+            "description": "Wait for the run to reach a terminal status before returning",
+            "title": "Wait",
+            "type": "boolean"
+          }
+        },
+        "title": "BackgroundTaskRunRequest",
+        "type": "object"
+      },
+      "BackgroundTaskSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "overlap_policy": {
+            "$ref": "#/components/schemas/OverlapPolicy",
+            "default": "skip_if_running"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "retry_policy": {
+            "$ref": "#/components/schemas/RetryPolicy"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/ScheduleSpec"
+          },
+          "session_policy": {
+            "$ref": "#/components/schemas/SessionPolicy"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Seconds"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "workspace_policy": {
+            "$ref": "#/components/schemas/WorkspacePolicy"
+          }
+        },
+        "required": [
+          "task_id",
+          "agent_id",
+          "query",
+          "schedule"
+        ],
+        "title": "BackgroundTaskSpec",
+        "type": "object"
+      },
+      "BackgroundTaskStatusResponse": {
+        "description": "Inspectable status for one background task.",
+        "properties": {
+          "active_runs": {
+            "title": "Active Runs",
+            "type": "integer"
+          },
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "latest_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackgroundRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/ScheduleSpec"
+          },
+          "schedule_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackgroundScheduleState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Status Counts",
+            "type": "object"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "agent_id",
+          "enabled",
+          "schedule",
+          "schedule_state",
+          "runs",
+          "active_runs",
+          "status_counts",
+          "latest_run"
+        ],
+        "title": "BackgroundTaskStatusResponse",
+        "type": "object"
+      },
+      "BackgroundTasksResponse": {
+        "description": "Response model for background task listing.",
+        "properties": {
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/BackgroundTaskSpec"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tasks",
+          "total"
+        ],
+        "title": "BackgroundTasksResponse",
+        "type": "object"
+      },
+      "BackoffPolicy": {
+        "enum": [
+          "fixed",
+          "exponential"
+        ],
+        "title": "BackoffPolicy",
+        "type": "string"
+      },
+      "BudgetDecisionRequest": {
+        "description": "A person's decision on the budget a waiting run ran out of.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How much to add; the run's shortfall when left out",
+            "title": "Amount"
+          },
+          "approver": {
+            "description": "Who decided",
+            "minLength": 1,
+            "title": "Approver",
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "grant",
+              "deny"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why",
+            "title": "Note"
+          }
+        },
+        "required": [
+          "decision",
+          "approver"
+        ],
+        "title": "BudgetDecisionRequest",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "description": "Standard error response model.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Additional error details",
+            "title": "Detail"
+          },
+          "error": {
+            "description": "Error type",
+            "title": "Error",
+            "type": "string"
+          },
+          "message": {
+            "description": "Error message",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "message"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "EventsResponse": {
+        "description": "Response model for telemetry events endpoint.",
+        "properties": {
+          "count": {
+            "description": "Number of telemetry events",
+            "title": "Count",
+            "type": "integer"
+          },
+          "events": {
+            "description": "Telemetry events list",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "session_id": {
+            "description": "Session ID",
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "events",
+          "count"
+        ],
+        "title": "EventsResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "description": "Response model for health check endpoint.",
+        "properties": {
+          "agent_name": {
+            "description": "Name of the agent",
+            "title": "Agent Name",
+            "type": "string"
+          },
+          "status": {
+            "description": "Health status ('healthy' or 'unhealthy')",
+            "title": "Status",
+            "type": "string"
+          },
+          "uptime": {
+            "description": "Server uptime in seconds",
+            "title": "Uptime",
+            "type": "number"
+          },
+          "version": {
+            "default": "0+unknown",
+            "description": "OmniCoreAgent version",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "agent_name",
+          "uptime"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "HttpErrorResponse": {
+        "description": "Response shape produced by FastAPI HTTPException.",
+        "properties": {
+          "detail": {
+            "description": "Error detail",
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "HttpErrorResponse",
+        "type": "object"
+      },
+      "MetricsResponse": {
+        "description": "Response model for metrics endpoint.",
+        "properties": {
+          "average_time": {
+            "default": 0,
+            "description": "Average time per request",
+            "title": "Average Time",
+            "type": "number"
+          },
+          "total_request_tokens": {
+            "default": 0,
+            "description": "Total request tokens used",
+            "title": "Total Request Tokens",
+            "type": "integer"
+          },
+          "total_requests": {
+            "default": 0,
+            "description": "Total number of requests",
+            "title": "Total Requests",
+            "type": "integer"
+          },
+          "total_response_tokens": {
+            "default": 0,
+            "description": "Total response tokens used",
+            "title": "Total Response Tokens",
+            "type": "integer"
+          },
+          "total_time": {
+            "default": 0,
+            "description": "Total processing time in seconds",
+            "title": "Total Time",
+            "type": "number"
+          },
+          "total_tokens": {
+            "default": 0,
+            "description": "Total tokens used",
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "title": "MetricsResponse",
+        "type": "object"
+      },
+      "MisfirePolicy": {
+        "enum": [
+          "skip_missed",
+          "run_once",
+          "queue_all"
+        ],
+        "title": "MisfirePolicy",
+        "type": "string"
+      },
+      "OutcomeRequest": {
+        "description": "What a run turned out to be worth, reported after it ended.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Anything else worth keeping",
+            "title": "Detail"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the outcome is called (merged, accepted)",
+            "title": "Label"
+          },
+          "reward": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The number a trainer or evaluator uses",
+            "title": "Reward"
+          },
+          "source": {
+            "description": "Who reports it (github, reviewer, an evaluator)",
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "OutcomeRequest",
+        "type": "object"
+      },
+      "OverlapPolicy": {
+        "enum": [
+          "skip_if_running",
+          "queue_next",
+          "cancel_previous",
+          "allow_parallel"
+        ],
+        "title": "OverlapPolicy",
+        "type": "string"
+      },
+      "ReadinessResponse": {
+        "description": "Response model for readiness check endpoint.",
+        "properties": {
+          "agent_name": {
+            "description": "Name of the agent",
+            "title": "Agent Name",
+            "type": "string"
+          },
+          "initialized": {
+            "description": "Whether the agent is initialized",
+            "title": "Initialized",
+            "type": "boolean"
+          },
+          "mcp_connected": {
+            "description": "Whether MCP readiness is satisfied. True when no MCP servers are configured, or when every configured MCP server has a connected session.",
+            "title": "Mcp Connected",
+            "type": "boolean"
+          },
+          "mcp_servers": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "description": "Each configured MCP server's status (connected, disconnected, failed, not_connected) and its last error, so a partial failure is visible.",
+            "title": "Mcp Servers",
+            "type": "object"
+          },
+          "ready": {
+            "description": "Whether the agent is ready",
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ready",
+          "agent_name",
+          "initialized",
+          "mcp_connected"
+        ],
+        "title": "ReadinessResponse",
+        "type": "object"
+      },
+      "RetryPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "backoff": {
+            "$ref": "#/components/schemas/BackoffPolicy",
+            "default": "fixed"
+          },
+          "initial_delay_seconds": {
+            "default": 30,
+            "title": "Initial Delay Seconds",
+            "type": "integer"
+          },
+          "max_delay_seconds": {
+            "default": 300,
+            "title": "Max Delay Seconds",
+            "type": "integer"
+          },
+          "max_retries": {
+            "default": 0,
+            "title": "Max Retries",
+            "type": "integer"
+          },
+          "retry_on": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Retry On",
+            "type": "array"
+          }
+        },
+        "title": "RetryPolicy",
+        "type": "object"
+      },
+      "RunRequest": {
+        "description": "Request model for agent run endpoint.",
+        "properties": {
+          "query": {
+            "description": "The query/prompt for the agent",
+            "title": "Query",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional session ID for conversation continuity",
+            "title": "Session Id"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "RunRequest",
+        "type": "object"
+      },
+      "RunResponse": {
+        "description": "Response model for synchronous agent run.",
+        "properties": {
+          "agent_name": {
+            "description": "Name of the agent",
+            "title": "Agent Name",
+            "type": "string"
+          },
+          "approvals": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Approvals a paused run is waiting for",
+            "title": "Approvals"
+          },
+          "budget_request": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The budget a waiting run ran out of, and what it needs",
+            "title": "Budget Request"
+          },
+          "guardrail_result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guardrail Result"
+          },
+          "metric": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional metrics for this run",
+            "title": "Metric"
+          },
+          "response": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent's response (none while the run awaits approval)",
+            "title": "Response"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Runtime run ID for this run",
+            "title": "Run Id"
+          },
+          "session_id": {
+            "description": "Session ID for this conversation",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "default": "success",
+            "description": "Runtime outcome: success, error, cancelled, awaiting_approval, or awaiting_budget",
+            "title": "Status",
+            "type": "string"
+          },
+          "termination_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why execution terminated",
+            "title": "Termination Reason"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Telemetry trace ID for this run",
+            "title": "Trace Id"
+          }
+        },
+        "required": [
+          "session_id",
+          "agent_name"
+        ],
+        "title": "RunResponse",
+        "type": "object"
+      },
+      "RunStatus": {
+        "enum": [
+          "queued",
+          "claimed",
+          "running",
+          "retrying",
+          "completed",
+          "failed",
+          "cancelled",
+          "timeout",
+          "skipped",
+          "awaiting_approval",
+          "awaiting_budget"
+        ],
+        "title": "RunStatus",
+        "type": "string"
+      },
+      "ScheduleSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "end_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End At"
+          },
+          "expression": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expression"
+          },
+          "jitter_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jitter Seconds"
+          },
+          "misfire_policy": {
+            "$ref": "#/components/schemas/MisfirePolicy",
+            "default": "skip_missed"
+          },
+          "run_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run At"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          },
+          "start_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start At"
+          },
+          "timezone": {
+            "default": "UTC",
+            "title": "Timezone",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ScheduleType"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "ScheduleSpec",
+        "type": "object"
+      },
+      "ScheduleType": {
+        "enum": [
+          "manual",
+          "interval",
+          "cron",
+          "once"
+        ],
+        "title": "ScheduleType",
+        "type": "string"
+      },
+      "SessionHistoryResponse": {
+        "description": "Response model for session history endpoint.",
+        "properties": {
+          "count": {
+            "description": "Number of messages",
+            "title": "Count",
+            "type": "integer"
+          },
+          "messages": {
+            "description": "Message history",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "session_id": {
+            "description": "Session ID",
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "messages",
+          "count"
+        ],
+        "title": "SessionHistoryResponse",
+        "type": "object"
+      },
+      "SessionMode": {
+        "enum": [
+          "task",
+          "run",
+          "fixed"
+        ],
+        "title": "SessionMode",
+        "type": "string"
+      },
+      "SessionPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/SessionMode",
+            "default": "task"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          }
+        },
+        "title": "SessionPolicy",
+        "type": "object"
+      },
+      "SteerRequest": {
+        "description": "A message for a run, delivered at its next step boundary.",
+        "properties": {
+          "message": {
+            "description": "The message for the run",
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "sender": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who sent it (recorded)",
+            "title": "Sender"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "SteerRequest",
+        "type": "object"
+      },
+      "TelemetryEventsResponse": {
+        "description": "Response model for filtered telemetry events.",
+        "properties": {
+          "count": {
+            "description": "Number of telemetry events",
+            "title": "Count",
+            "type": "integer"
+          },
+          "events": {
+            "description": "Telemetry events list",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "filters": {
+            "additionalProperties": true,
+            "title": "Filters",
+            "type": "object"
+          }
+        },
+        "required": [
+          "events",
+          "count"
+        ],
+        "title": "TelemetryEventsResponse",
+        "type": "object"
+      },
+      "TelemetryTraceDetailResponse": {
+        "description": "Response model for one telemetry trace.",
+        "properties": {
+          "filters": {
+            "additionalProperties": true,
+            "title": "Filters",
+            "type": "object"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "description": "Telemetry trace summary",
+            "title": "Summary",
+            "type": "object"
+          },
+          "trace": {
+            "additionalProperties": true,
+            "description": "Full telemetry trace",
+            "title": "Trace",
+            "type": "object"
+          }
+        },
+        "required": [
+          "summary",
+          "trace"
+        ],
+        "title": "TelemetryTraceDetailResponse",
+        "type": "object"
+      },
+      "TelemetryTraceListResponse": {
+        "description": "Response model for filtered telemetry traces.",
+        "properties": {
+          "count": {
+            "description": "Number of telemetry traces",
+            "title": "Count",
+            "type": "integer"
+          },
+          "filters": {
+            "additionalProperties": true,
+            "title": "Filters",
+            "type": "object"
+          },
+          "traces": {
+            "description": "Telemetry traces",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Traces",
+            "type": "array"
+          }
+        },
+        "required": [
+          "traces",
+          "count"
+        ],
+        "title": "TelemetryTraceListResponse",
+        "type": "object"
+      },
+      "ToolInfo": {
+        "description": "Information about an available tool.",
+        "properties": {
+          "description": {
+            "description": "Tool description",
+            "title": "Description",
+            "type": "string"
+          },
+          "inputSchema": {
+            "additionalProperties": true,
+            "description": "Tool input schema",
+            "title": "Inputschema",
+            "type": "object"
+          },
+          "name": {
+            "description": "Tool name",
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "description": "Tool type ('mcp' or 'local')",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "type"
+        ],
+        "title": "ToolInfo",
+        "type": "object"
+      },
+      "ToolsResponse": {
+        "description": "Response model for tools listing endpoint.",
+        "properties": {
+          "tools": {
+            "description": "List of available tools",
+            "items": {
+              "$ref": "#/components/schemas/ToolInfo"
+            },
+            "title": "Tools",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of tools",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tools",
+          "total"
+        ],
+        "title": "ToolsResponse",
+        "type": "object"
+      },
+      "TraceResponse": {
+        "description": "Response model for session telemetry trace summary endpoint.",
+        "properties": {
+          "session_id": {
+            "description": "Session ID",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "steps": {
+            "description": "Ordered telemetry events",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "description": "Telemetry trace summary",
+            "title": "Summary",
+            "type": "object"
+          }
+        },
+        "required": [
+          "session_id",
+          "summary",
+          "steps"
+        ],
+        "title": "TraceResponse",
+        "type": "object"
+      },
+      "TriggerType": {
+        "enum": [
+          "manual",
+          "interval",
+          "cron",
+          "once"
+        ],
+        "title": "TriggerType",
+        "type": "string"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkspacePolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "namespace_template": {
+            "default": "background/{agent_id}/{task_id}/{run_id}",
+            "title": "Namespace Template",
+            "type": "string"
+          },
+          "write_events_jsonl": {
+            "default": true,
+            "title": "Write Events Jsonl",
+            "type": "boolean"
+          },
+          "write_run_json": {
+            "default": true,
+            "title": "Write Run Json",
+            "type": "boolean"
+          }
+        },
+        "title": "WorkspacePolicy",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "The HTTP API of an agent served with `omniserve run --agent agent.py`: runs, approvals, budgets, background tasks, sessions and the evidence of every run.",
+    "title": "OmniServe",
+    "version": "latest"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/background/agents": {
+      "get": {
+        "operationId": "list_background_agents_background_agents_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundAgentsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List background agents",
+        "tags": [
+          "Background"
+        ]
+      },
+      "post": {
+        "operationId": "register_background_agent_background_agents_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackgroundAgentRegistrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundAgentSpec"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Register a background agent",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/background/agents/{agent_id}": {
+      "delete": {
+        "operationId": "delete_background_agent_background_agents__agent_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Delete a background agent spec",
+        "tags": [
+          "Background"
+        ]
+      },
+      "get": {
+        "operationId": "get_background_agent_background_agents__agent_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundAgentSpec"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get a background agent spec",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/background/runs": {
+      "get": {
+        "operationId": "list_background_runs_background_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "task_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Task Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundRunsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "List background runs",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/background/runs/{run_id}": {
+      "get": {
+        "operationId": "get_background_run_background_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundRun"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get background run status",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/background/runs/{run_id}/attempts": {
+      "get": {
+        "operationId": "list_background_run_attempts_background_runs__run_id__attempts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BackgroundAttempt"
+                  },
+                  "title": "Response List Background Run Attempts Background Runs  Run Id  Attempts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "List background run attempts",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/background/runs/{run_id}/cancel": {
+      "post": {
+        "operationId": "cancel_background_run_background_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Cancel a queued or running background run",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/background/runs/{run_id}/events": {
+      "get": {
+        "operationId": "list_background_run_events_background_runs__run_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundRunEventsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Replay background run lifecycle events",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/background/runs/{run_id}/resume": {
+      "post": {
+        "description": "After its approvals are decided (POST /runs/{run_id}/approvals/{approval_id}), queue the run again; its next attempt continues the same durable run.",
+        "operationId": "resume_background_run_background_runs__run_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Queue a background run that was waiting for approval",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/background/runs/{run_id}/workspace": {
+      "get": {
+        "operationId": "get_background_run_workspace_background_runs__run_id__workspace_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundRunWorkspaceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Inspect background run workspace files",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/background/status": {
+      "get": {
+        "operationId": "get_background_status_background_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundManagerStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Inspect background manager status",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/background/tasks": {
+      "get": {
+        "operationId": "list_background_tasks_background_tasks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "agent_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundTasksResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List background tasks",
+        "tags": [
+          "Background"
+        ]
+      },
+      "post": {
+        "operationId": "create_background_task_background_tasks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackgroundTaskCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundTaskSpec"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Create a background task",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/background/tasks/{task_id}": {
+      "delete": {
+        "operationId": "delete_background_task_background_tasks__task_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "delete_runs",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Delete Runs",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Delete a background task",
+        "tags": [
+          "Background"
+        ]
+      },
+      "get": {
+        "operationId": "get_background_task_background_tasks__task_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundTaskSpec"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get a background task",
+        "tags": [
+          "Background"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_background_task_background_tasks__task_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackgroundTaskPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundTaskSpec"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Patch a background task",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/background/tasks/{task_id}/pause": {
+      "post": {
+        "operationId": "pause_background_task_background_tasks__task_id__pause_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Pause scheduled dispatch for a task",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/background/tasks/{task_id}/resume": {
+      "post": {
+        "operationId": "resume_background_task_background_tasks__task_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Resume scheduled dispatch for a task",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/background/tasks/{task_id}/run": {
+      "post": {
+        "operationId": "run_background_task_background_tasks__task_id__run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/BackgroundTaskRunRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundRun"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundRunTimeoutResponse"
+                }
+              }
+            },
+            "description": "Run did not finish before request timeout"
+          }
+        },
+        "summary": "Queue or wait for a manual task run",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/background/tasks/{task_id}/status": {
+      "get": {
+        "operationId": "get_background_task_status_background_tasks__task_id__status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundTaskStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Inspect background task status",
+        "tags": [
+          "Background"
+        ]
+      }
+    },
+    "/events/{session_id}": {
+      "get": {
+        "description": "Replay stored telemetry events for a session, then follow live telemetry events over SSE.",
+        "operationId": "stream_telemetry_events_events__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional run id to isolate one run inside the session.",
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional run id to isolate one run inside the session.",
+              "title": "Run Id"
+            }
+          },
+          {
+            "description": "Resume after this stream cursor (or send Last-Event-ID).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Resume after this stream cursor (or send Last-Event-ID).",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream telemetry events (SSE)",
+        "tags": [
+          "Sessions"
+        ]
+      }
+    },
+    "/events/{session_id}/list": {
+      "get": {
+        "description": "Get stored telemetry events for a specific session as JSON.",
+        "operationId": "list_telemetry_events_events__session_id__list_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional run id to isolate one run inside the session.",
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional run id to isolate one run inside the session.",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get telemetry events",
+        "tags": [
+          "Sessions"
+        ]
+      }
+    },
+    "/events/{session_id}/trace": {
+      "get": {
+        "description": "Build a compact summary from the latest stored telemetry trace for the session.",
+        "operationId": "get_trace_events__session_id__trace_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional run id. When omitted, the latest session trace is returned.",
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional run id. When omitted, the latest session trace is returned.",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get telemetry trace summary",
+        "tags": [
+          "Sessions"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Check if the server is healthy and running.",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health check",
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "description": "Get cumulative usage metrics from the agent runtime.",
+        "operationId": "get_metrics_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get agent metrics",
+        "tags": [
+          "Metrics"
+        ]
+      }
+    },
+    "/prometheus": {
+      "get": {
+        "description": "OmniServe HTTP request metrics in Prometheus text format.",
+        "operationId": "prometheus_metrics_prometheus_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Prometheus metrics",
+        "tags": [
+          "Metrics"
+        ]
+      }
+    },
+    "/ready": {
+      "get": {
+        "description": "Check if the agent is ready to accept requests.",
+        "operationId": "readiness_check_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Readiness check",
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/run": {
+      "post": {
+        "description": "Run the agent with a query and stream SSE events.",
+        "operationId": "run_agent_sse_run_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "SSE stream of agent events"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Run agent (SSE streaming)",
+        "tags": [
+          "Runs"
+        ]
+      }
+    },
+    "/run/sync": {
+      "post": {
+        "description": "Run the agent with a query and return a JSON response.",
+        "operationId": "run_agent_sync_run_sync_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Run agent (synchronous)",
+        "tags": [
+          "Runs"
+        ]
+      }
+    },
+    "/runs/{run_id}": {
+      "get": {
+        "description": "A run's durable record: status, step, usage, trace IDs, tool call states, and approvals. Its saved conversation is not returned.",
+        "operationId": "get_run_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Run Runs  Run Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get a run",
+        "tags": [
+          "Runs"
+        ]
+      }
+    },
+    "/runs/{run_id}/approvals/{approval_id}": {
+      "post": {
+        "description": "Approve or deny an approval a paused run is waiting for.",
+        "operationId": "decide_approval_runs__run_id__approvals__approval_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "approval_id",
+            "required": true,
+            "schema": {
+              "title": "Approval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Approval Runs  Run Id  Approvals  Approval Id  Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide an approval",
+        "tags": [
+          "Runs"
+        ]
+      }
+    },
+    "/runs/{run_id}/budget": {
+      "get": {
+        "description": "Every budget covering the run \u2014 its own, its session's, its agent's, the application's \u2014 with the limit, what is spent and reserved, and the ledger key. Empty when nothing is budgeted.",
+        "operationId": "read_budgets_runs__run_id__budget_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Read Budgets Runs  Run Id  Budget Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read a run's budgets",
+        "tags": [
+          "Runs"
+        ]
+      },
+      "post": {
+        "description": "Grant or refuse the budget a waiting run ran out of. A grant is a recorded exception to that one budget, with the name of whoever made it; the policy is unchanged. Resume the run afterwards.",
+        "operationId": "decide_budget_runs__run_id__budget_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BudgetDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Budget Runs  Run Id  Budget Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide a budget",
+        "tags": [
+          "Runs"
+        ]
+      }
+    },
+    "/runs/{run_id}/interrupt": {
+      "post": {
+        "description": "Stop a running run at its next step boundary; resume continues it.",
+        "operationId": "interrupt_run_runs__run_id__interrupt_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Interrupt Run Runs  Run Id  Interrupt Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Interrupt a run",
+        "tags": [
+          "Runs"
+        ]
+      }
+    },
+    "/runs/{run_id}/outcome": {
+      "post": {
+        "description": "What the run turned out to be worth, reported whenever it is known: a pull request merged, an answer accepted, a test suite green. Kept on the run's record and in its trace; a run may gather several.",
+        "operationId": "record_outcome_runs__run_id__outcome_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutcomeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Record Outcome Runs  Run Id  Outcome Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record a run's outcome",
+        "tags": [
+          "Runs"
+        ]
+      }
+    },
+    "/runs/{run_id}/resume": {
+      "post": {
+        "description": "Continue a run once every approval it asked for is decided.",
+        "operationId": "resume_run_runs__run_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resume a paused run",
+        "tags": [
+          "Runs"
+        ]
+      }
+    },
+    "/runs/{run_id}/steer": {
+      "post": {
+        "description": "Send a message to a running, waiting, or interrupted run; it arrives as a user message at the run's next step boundary. The injection guardrail checks it first (422 when blocked).",
+        "operationId": "steer_run_runs__run_id__steer_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SteerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Steer Run Runs  Run Id  Steer Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Steer a run",
+        "tags": [
+          "Runs"
+        ]
+      }
+    },
+    "/sessions/{session_id}": {
+      "delete": {
+        "description": "Clear message history for a specific session.",
+        "operationId": "clear_session_sessions__session_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear session history",
+        "tags": [
+          "Sessions"
+        ]
+      }
+    },
+    "/sessions/{session_id}/history": {
+      "get": {
+        "description": "Get message history for a specific session.",
+        "operationId": "get_session_history_sessions__session_id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get session history",
+        "tags": [
+          "Sessions"
+        ]
+      }
+    },
+    "/telemetry/events": {
+      "get": {
+        "description": "Return stored telemetry events filtered by trace, run, session, task, or event type.",
+        "operationId": "list_events_telemetry_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "trace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trace Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Run Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "task_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Task Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryEventsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List telemetry events",
+        "tags": [
+          "Telemetry"
+        ]
+      }
+    },
+    "/telemetry/events/stream": {
+      "get": {
+        "description": "Replay and follow telemetry events for one session. Add run_id to isolate one run.",
+        "operationId": "stream_events_telemetry_events_stream_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Run Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream telemetry events",
+        "tags": [
+          "Telemetry"
+        ]
+      }
+    },
+    "/telemetry/retention": {
+      "get": {
+        "description": "Return the trace and payload retention policy and the most recent automatic or explicit cleanup results.",
+        "operationId": "get_retention_status_telemetry_retention_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Retention Status Telemetry Retention Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get telemetry retention status",
+        "tags": [
+          "Telemetry"
+        ]
+      }
+    },
+    "/telemetry/runs/{run_id}/family": {
+      "get": {
+        "description": "Return all traces linked to one run_id by parent trace links.",
+        "operationId": "get_run_trace_family_telemetry_runs__run_id__family_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "normalize",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Normalize",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryTraceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get linked telemetry family for a run",
+        "tags": [
+          "Telemetry"
+        ]
+      }
+    },
+    "/telemetry/runs/{run_id}/trace": {
+      "get": {
+        "description": "Return the latest telemetry trace correlated to one run_id.",
+        "operationId": "get_run_trace_telemetry_runs__run_id__trace_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "normalize",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Normalize",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryTraceDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get run telemetry trace",
+        "tags": [
+          "Telemetry"
+        ]
+      }
+    },
+    "/telemetry/runs/{run_id}/trajectory": {
+      "get": {
+        "description": "Return the latest agent run with this run_id as an ordered trajectory: request, harness, steps (context, model calls, tool calls, observations), final answer, totals, and capture gaps, with child runs nested under the tool call that started them.",
+        "operationId": "get_run_trajectory_telemetry_runs__run_id__trajectory_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Run Trajectory Telemetry Runs  Run Id  Trajectory Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get run trajectory",
+        "tags": [
+          "Telemetry"
+        ]
+      }
+    },
+    "/telemetry/sessions/{session_id}/trace": {
+      "get": {
+        "description": "Return the latest telemetry trace for one session_id.",
+        "operationId": "get_session_trace_telemetry_sessions__session_id__trace_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "normalize",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Normalize",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryTraceDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get latest session telemetry trace",
+        "tags": [
+          "Telemetry"
+        ]
+      }
+    },
+    "/telemetry/traces": {
+      "get": {
+        "description": "Return telemetry traces filtered by trace, run, session, task, agent, workflow, model, or status.",
+        "operationId": "list_traces_telemetry_traces_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "trace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trace Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Run Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "task_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Task Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "agent_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workflow_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Model"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "normalize",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Normalize",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryTraceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List telemetry traces",
+        "tags": [
+          "Telemetry"
+        ]
+      }
+    },
+    "/telemetry/traces/{trace_id}": {
+      "get": {
+        "description": "Return one telemetry trace by exact trace_id.",
+        "operationId": "get_exact_trace_telemetry_traces__trace_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "normalize",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Normalize",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryTraceDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get exact telemetry trace",
+        "tags": [
+          "Telemetry"
+        ]
+      }
+    },
+    "/telemetry/traces/{trace_id}/family": {
+      "get": {
+        "description": "Return all traces linked to one execution boundary by parent trace links.",
+        "operationId": "get_trace_family_telemetry_traces__trace_id__family_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "normalize",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Normalize",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryTraceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get linked telemetry trace family",
+        "tags": [
+          "Telemetry"
+        ]
+      }
+    },
+    "/telemetry/traces/{trace_id}/trajectory": {
+      "get": {
+        "description": "Return one trace as an ordered trajectory.",
+        "operationId": "get_trace_trajectory_telemetry_traces__trace_id__trajectory_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Trace Trajectory Telemetry Traces  Trace Id  Trajectory Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get trace trajectory",
+        "tags": [
+          "Telemetry"
+        ]
+      }
+    },
+    "/tools": {
+      "get": {
+        "description": "List all tools available to the agent.",
+        "operationId": "list_tools_tools_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List available tools",
+        "tags": [
+          "Tools"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "omniserve run, locally",
+      "url": "http://localhost:8000"
+    }
+  ]
+}

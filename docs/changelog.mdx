@@ -1,46 +1,98 @@
 ---
 title: Changelog
-description: 'Release history and version notes for OmniCoreAgent'
+description: 'What each release changed'
 icon: 'clock-rotate-left'
 ---
 
 # Changelog
 
-OmniCoreAgent is being rebuilt around the production agent harness direction:
-runtime, tools, MCP, memory, workspace, guardrails, background tasks, telemetry,
-and OmniServe as one application-facing base layer.
+Every release, with its notes, is also on
+[GitHub Releases](https://github.com/omnirexflora-labs/omnicoreagent/releases).
 
-Detailed version history is published with GitHub releases:
+## 0.4.0
 
-<Card
-  title="GitHub Releases"
-  href="https://github.com/omnirexflora-labs/omnicoreagent/releases"
->
-  Review tagged releases, release notes, and package versions.
-</Card>
+*September 2026 · Python 3.12+*
 
-## Current Package Direction
+0.4 rebuilds OmniCoreAgent as a runtime for agents that **act**: an agent
+that can run commands, spend money and change things needs a policy over what
+it may do, a person to ask, a sandbox, a budget, a record of everything it
+did, and a run that survives a crash. 0.4 has each of them, on by default
+where that is safe and one setting away where it is not.
 
-- Agent harness positioning instead of generic framework positioning.
-- Single `LLM_API_KEY` public API-key variable for hosted model providers.
-- Optional extras for heavier production integrations.
-- Workspace files on local disk, S3, or Cloudflare R2.
-- Memory backends: `in_memory`, `sql`, `redis`, and `mongodb`.
-- Background task stores: `in_memory`, `sql`, `redis`, and `mongodb`.
-- Telemetry stores: in-memory and JSONL, with OTLP-compatible exporters for
-  OpenTelemetry, LangSmith, and Opik.
-- OmniServe configuration through `OMNICOREAGENT_SERVE_*`.
-- Background serving configuration through `OMNICOREAGENT_BACKGROUND_*`.
+Coming from 0.3? [Upgrading to 0.4](/docs/upgrading) lists, as measured,
+what runs unchanged, what was removed and what took its place, and the
+defaults that changed.
 
-## Configuration Source Of Truth
+### New
 
-Use the configuration guide for current environment variables and runtime
-settings:
+- **Governance.** A policy — allow, ask, deny — over every capability: each
+  tool, each MCP server, the sandbox, the network, delegation, background
+  runs. Built-in profiles; `ask` pauses the run for a person. [Security
+  model](/docs/core-concepts/security-model)
+- **Durable runs.** Every run has a record. It pauses for an approval or a
+  budget top-up and resumes where it stopped (`resolve_approval`, `resume`);
+  `interrupt`, `steer` and `abandon_run`; a run whose process died continues
+  from its checkpoint, and a call interrupted mid-way is reported, never
+  repeated. [Durable runs](/docs/core-concepts/durable-runs)
+- **Budgets** in dollars, tokens, calls and sandbox seconds, per request,
+  session, agent or application.
+- **Sandboxed execution.** An `execute` tool whose commands run in Docker,
+  E2B, Modal, Daytona or Vercel — or `local` where a container is already
+  the boundary — with no network unless the policy allows it and never your
+  credentials. [Sandbox providers](/docs/how-to-guides/sandbox-providers)
+- **Code mode.** A `run_code` tool: the model writes a short Python program
+  that calls your tools, run in Monty, every call inside it governed and
+  traced. [Code mode](/docs/core-concepts/code-mode)
+- **Telemetry.** One trace per run, readable end to end, kept on local disk
+  by default; trajectories, `get_run_trajectory` across a run's segments,
+  export to OTLP, LangSmith, Opik or JSONL. Outcomes that arrive later
+  (`record_outcome`) and `training_records()` for evaluators and trainers.
+  [Observability](/docs/how-to-guides/observability)
+- **Privacy.** Emails, phone numbers, SSNs and card numbers are redacted from
+  the record; the run itself works with the real data.
+- **Native tool calls** for every provider, streamed (`agent.stream()`,
+  `on_event=`), with provider continuation data kept across turns.
+- **Sub-agents** spawned under the same policy and budgets, each with a
+  linked trace; `sub_agents=[...]` exposes agents as `delegate_*` tools.
+- **Skills** (`.agents/skills`), **AGENTS.md** files, **workspace files** on
+  local disk, S3 or R2.
+- **Background agents** rebuilt on a durable task store (memory, SQL, Redis,
+  MongoDB): cron, intervals, leases, retries, recovery after a restart.
+- **OmniServe** gains approvals, budgets, runs, background tasks and traces
+  over REST and SSE. [OmniServe](/docs/how-to-guides/omniserve)
+- **The `omnicoreagent` command**: `run` for one headless run (CI,
+  evaluations); `harbor` for Terminal-Bench through Harbor, with `harbor
+  doctor` and `harbor results`. [CLI reference](/docs/reference/cli)
+- **The reference**, generated from the code: every method, setting, command
+  and HTTP route. [Reference](/docs/reference/omnicoreagent)
 
-<Card
-  title="Configuration"
-  href="/docs/how-to-guides/configuration"
->
-  Current model, memory, workspace, background, telemetry, and OmniServe
-  settings.
-</Card>
+### Changed
+
+- Python 3.12 or later.
+- Defaults: `max_steps` 50 (was 15), `tool_call_timeout` 180 s (was 30),
+  context management and tool offload on, the prompt-injection guardrail on
+  (`guardrail_mode="full"`), workspace files on, telemetry on.
+- `get_trace` also takes `trace_id=` and `run_id=`.
+- An `agent_config` key that does not exist is refused with the settings
+  that do, instead of a bare `TypeError`.
+
+### Removed
+
+- `SequentialAgent`, `ParallelAgent`, `RouterAgent`, `DeepAgent`, `OmniAgent`.
+- `EventRouter`, `event_router=` and the event-store methods, replaced by
+  telemetry.
+- `BackgroundOmniCoreAgent`, `BackgroundTaskScheduler`, `APSchedulerBackend`,
+  `TaskRegistry`, and the `background` extra.
+- `agent_config["memory_tool_backend"]` and the `memory_*` tools, replaced by
+  workspace files.
+- The top-level retry and circuit-breaker helpers; `omniserve run --reload`.
+
+### Fixed
+
+- 0.3.9 was published without `omnicoreagent.core.workspace`, so
+  `OmniCoreAgent(...)` failed on import. A test now fails if any source file
+  of the package is left out of the wheel.
+
+## 0.3.x and earlier
+
+See [GitHub Releases](https://github.com/omnirexflora-labs/omnicoreagent/releases).

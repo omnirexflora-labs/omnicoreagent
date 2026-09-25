@@ -34,6 +34,9 @@ def _get_litellm():
     if not _LITELLM_CONFIGURED:
         os.environ["LITELLM_LOG"] = "CRITICAL"
         litellm.set_verbose = False
+        # Its "Give Feedback / Get Help" banner on every error reads, to a new
+        # user, as the place to report this runtime's errors.
+        litellm.suppress_debug_info = True
         litellm.telemetry = False
         litellm.callbacks = []
         litellm.success_callback = []
@@ -162,8 +165,25 @@ def account_error(exc: BaseException) -> str | None:
     return next((reason for marker, reason in _ACCOUNT_ERRORS.items() if marker in text), None)
 
 
+_MODEL_NAME = re.compile(r"model [`'\"]?([\w.:/@-]+)[`'\"]? does not exist", re.IGNORECASE)
+
+
+def model_error(exc: BaseException) -> str | None:
+    """What is wrong with the model name, when the provider does not serve it."""
+    text = str(exc)
+    lowered = text.lower()
+    if "does not exist or you do not have access" not in lowered and "model_not_found" not in lowered:
+        return None
+    found = _MODEL_NAME.search(text)
+    name = f" `{found.group(1)}`" if found else ""
+    return (
+        f"the provider does not serve the model{name} to this account; check "
+        "model_config's model name and provider"
+    )
+
+
 def _is_retryable(exc: Exception) -> bool:
-    if account_error(exc) is not None:
+    if account_error(exc) is not None or model_error(exc) is not None:
         return False
     error_msg = str(exc).lower()
     return any(

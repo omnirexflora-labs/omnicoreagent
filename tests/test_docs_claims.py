@@ -374,12 +374,14 @@ def test_telemetry_docs_do_not_reference_old_event_router():
         "event-router",
         "core/events",
     }
+    # The release pages name it once, as removed, with what replaced it.
+    release_pages = {Path("docs/upgrading.mdx"), Path("docs/changelog.mdx")}
     offenders: list[str] = []
 
     for path in docs:
         files = [path] if path.is_file() else path.rglob("*")
         for file_path in files:
-            if file_path.suffix not in {".md", ".mdx", ".py"}:
+            if file_path.suffix not in {".md", ".mdx", ".py"} or file_path in release_pages:
                 continue
             text = file_path.read_text(encoding="utf-8")
             found = sorted(phrase for phrase in forbidden if phrase in text)

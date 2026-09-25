@@ -255,3 +255,16 @@ async def test_provider_cancellation_cannot_leave_public_consumer_hanging():
         await anext(stream)
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(anext(stream), 2)
+
+
+@pytest.mark.asyncio
+async def test_a_plain_function_can_receive_the_events():
+    """`on_event=print` is the first thing a reader tries. Awaited blindly, a
+    plain function's None failed the run as a model error."""
+    model = StreamingModel([ModelTurn(content="Hello", finish_reason="stop")])
+    model.release.set()
+    events = []
+    result = await agent_with(model).run("hello", on_event=events.append)
+    assert result["status"] == "success"
+    assert result["response"] == "Hello"
+    assert [event["text"] for event in events] == ["Hello"]

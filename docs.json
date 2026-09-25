@@ -36,6 +36,7 @@
                             "docs/index",
                             "docs/getting-started/installation",
                             "docs/getting-started/quickstart",
+                            "docs/getting-started/tour",
                             "docs/getting-started/use-docs-with-ai-tools"
                         ]
                     },
@@ -78,8 +79,22 @@
                         ]
                     },
                     {
-                        "group": "Changelog",
+                        "group": "Reference",
                         "pages": [
+                            "docs/reference/omnicoreagent",
+                            "docs/reference/agent-config",
+                            "docs/reference/telemetry-config",
+                            "docs/reference/cli"
+                        ]
+                    },
+                    {
+                        "group": "HTTP API (OmniServe)",
+                        "openapi": "/docs/reference/openapi.json"
+                    },
+                    {
+                        "group": "Releases",
+                        "pages": [
+                            "docs/upgrading",
                             "docs/changelog"
                         ]
                     }

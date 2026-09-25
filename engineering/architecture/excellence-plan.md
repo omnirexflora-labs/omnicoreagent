@@ -63,6 +63,12 @@ three tasks of our own, which must keep passing.
 - **X5. The trajectory's last gap.** A run with `capture="full"` still reports
   `evidence_status: partial`; find why and close it, or say in the trace what
   is left out and why.
+  *Measured 2026-09-25:* a default agent with full capture now reports
+  `complete`; `partial` remains only where something was really redacted or
+  truncated. One false positive is left: a tool with a parameter named like a
+  secret (`api_key`) has that parameter's schema (`{"type": "string"}`)
+  redacted in the `context_tools` event by `redact_keys`, which marks the run
+  partial. Fix: redact values, not JSON-schema property definitions.
 
 ## Cost
 

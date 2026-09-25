@@ -111,28 +111,39 @@ uv add "omnicoreagent[redis]"
 
 ## Verify Installation
 
-After installation, verify that you can import the package:
+After installation, check the version you got:
 
 ```bash
-python -c "import omnicoreagent; print(omnicoreagent.__version__)"
+omnicoreagent --version
 ```
+
+```text
+omnicoreagent, version 0.4.0
+```
+
+These docs describe 0.4.0 and later. If the command is not found, `pip show
+omnicoreagent` names the version you have; for 0.3.x, see *An older version was
+installed* below.
 
 ---
 
 ## Troubleshooting
 
 <AccordionGroup>
-  <Accordion title="Python Version Error">
-    **Error**: `OmniCoreAgent requires Python 3.12+`
+  <Accordion title="An older version was installed">
+    OmniCoreAgent 0.4.0 needs Python 3.12 or later. On Python 3.10 or 3.11, pip does not
+    fail: it quietly installs **0.3.9**, the last release that supported 3.11 —
+    which cannot even build an agent (its package was published without one of
+    its own modules, so `OmniCoreAgent(...)` raises `ModuleNotFoundError: No
+    module named 'omnicoreagent.core.workspace'`).
 
-    **Solution**: Upgrade your Python version:
+    Check which Python you are installing into, and use 3.12 or later:
+
     ```bash
-    # Check available Python versions
-    python3.12 --version
-
-    # Use specific Python version with UV
+    python --version
     uv python install 3.12
-    uv add omnicoreagent
+    uv venv --python 3.12 && source .venv/bin/activate
+    pip install omnicoreagent
     ```
   </Accordion>
   <Accordion title="Permission Denied">
@@ -144,14 +155,14 @@ python -c "import omnicoreagent; print(omnicoreagent.__version__)"
     ```
   </Accordion>
   <Accordion title="Missing Optional Backend">
-    **Error**: `ImportError: Redis memory requires optional dependency 'redis'`
+    **Error**: `ImportError: Redis memory requires optional dependency 'redis'. Install it with: pip install 'omnicoreagent[redis]'`
 
-    **Solution**: Install the matching extra:
+    **Solution**: Install the extra the message names:
     ```bash
     pip install "omnicoreagent[redis]"
     ```
 
-    Use `postgres`, `mongodb`, `s3`, `serve`, `tokenizer`, `otel`, `langsmith`, `opik`, or `all` for other optional integrations.
+    Every extra is in the table above; `all` installs every one but `harbor`.
   </Accordion>
   <Accordion title="Getting Help">
     If you encounter issues:
@@ -171,7 +182,7 @@ python -c "import omnicoreagent; print(omnicoreagent.__version__)"
 
 <CardGroup cols={3}>
   <Card title="Quick Start" icon="bolt" href="/docs/getting-started/quickstart">
-    Build your first agent in under 30 seconds
+    Your first agent, a tool, and the evidence of its run, in five minutes
   </Card>
   <Card title="Core Concepts" icon="brain" href="/docs/core-concepts/overview">
     Learn about memory, events, and tools

@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from enum import Enum
 from os import PathLike
 from typing import Any
+import difflib
 import hashlib
 import json
 from pathlib import Path
@@ -171,8 +172,8 @@ def _default_privacy_config() -> dict[str, Any]:
         # The agent's conversation and files are its work; see PrivacyConfig.
         "redact_memory": False,
         "redact_workspace": False,
-        "redact_stream": True,
-        "redact_public": True,
+        "redact_stream": False,
+        "redact_public": False,
         "redact_model_io": False,
         "categories": ["credit_card", "email", "phone", "ssn"],
     }
@@ -183,21 +184,35 @@ GOVERNANCE_CONFIG_KEYS = frozenset(_default_governance_config())
 
 @dataclass
 class AgentConfig:
+    # The agent's name in its traces and records; OmniCoreAgent(name=...) sets it.
     agent_name: str = "OmniCoreAgent"
     # Recorded as the trace's agent_version; a content hash of the harness
     # (prompt, tools, model, and settings) is used when it is not set.
     agent_version: str | None = None
+    # Most model calls one run may make, and most tokens (in and out) it may
+    # use; over either, the run ends with termination_reason resource_limit.
+    # 0 is no limit. For limits in dollars, use governance budgets.
     request_limit: int = 0
     total_tokens_limit: int = 0
+    # Most model turns one run may take; then it ends with termination_reason
+    # max_steps. 1 to 1000.
     max_steps: int = 50
+    # Seconds one tool call may take before it fails with a timeout. 2 to 1000.
     tool_call_timeout: int = 180
     # Seconds a delegation (spawn_subagents) may take. None: a worker is
     # bounded by its own step cap and the run's deadline, not by the timeout
     # for one tool call.
     subagent_timeout: int | None = None
+    # Accepted for compatibility with 0.3.x and has no effect: MCP is on when
+    # mcp_tools are given.
     mcp_enabled: bool = False
+    # For large tool sets: a tools_retriever tool the model uses to find tools
+    # by describing what it needs; the matching tools are offered on the next turn.
     enable_advanced_tool_use: bool = False
+    # Let the agent spawn focused workers (spawn_subagents), each under the same
+    # policy and budgets with its own linked trace. Turns workspace files on.
     enable_subagents: bool = False
+    # Offer the skills found in skills_dir: their instructions, files and scripts.
     enable_agent_skills: bool = False
     # Where skills are found; None is ./.agents/skills in the working directory.
     # A harness names its own, so the task's directory stays the task's.
@@ -216,16 +231,35 @@ class AgentConfig:
     code_mode: dict[str, Any] = field(default_factory=dict)
     # A project's own instructions for the agent (AGENTS.md), by path.
     agents_md: dict[str, Any] = field(default_factory=dict)
+    # How much of a session's history a run is given: a sliding window of
+    # messages or tokens, and optional summaries of what falls out of it.
     memory_config: dict[str, Any] = field(default_factory=_default_memory_config)
+    # File tools over the agent's workspace (ls, read_file, write_file, edit_file,
+    # glob, grep, ...). The workspace itself is set by workspace_config.
     enable_workspace_files: bool = True
+    # The prompt-injection guardrail: guardrail_mode is full (input and tool
+    # results), input_only, or off; guardrail_config tunes its detection.
     guardrail_config: dict[str, Any] = field(default_factory=dict)
     guardrail_mode: str = "full"
+    # Personal data (email, phone, SSN, card numbers) redacted per boundary.
+    # By default only the record (telemetry and its exports) is redacted; the
+    # model, memory, files, stream and answer see the real data.
     privacy_config: dict[str, Any] = field(default_factory=_default_privacy_config)
+    # Keeps a run's context under a token budget before each model call:
+    # past threshold_percent of value, older messages are truncated or
+    # summarized, keeping the preserve_recent latest.
     context_management: dict[str, Any] = field(
         default_factory=_default_context_management
     )
+    # A tool result over the thresholds is saved to the workspace, and the
+    # model gets a preview and an artifact it can read in full.
     tool_offload: dict[str, Any] = field(default_factory=_default_tool_offload)
+    # The policy (a profile, a policy, or a policy file), budgets, the sandbox
+    # provider and its manifest, and how unanswered approvals are handled. Off
+    # by default; see the security model.
     governance_config: dict[str, Any] = field(default_factory=_default_governance_config)
+    # Where the agent's workspace lives: workspace_dir on local disk (default
+    # ./workspace), or S3 / R2 storage.
     workspace_config: WorkspaceConfig | dict[str, Any] | None = None
 
     def __post_init__(self):
@@ -253,6 +287,9 @@ class AgentConfig:
         ):
             raise ValueError("skill_script_env must be a list of environment variable names")
         self.skill_script_env = list(self.skill_script_env)
+        if self.guardrail_config is None:
+            # 0.3's own default; a config copied from it still means "none".
+            self.guardrail_config = {}
         if not isinstance(self.guardrail_config, dict):
             raise ValueError("guardrail_config must be a dict")
         self.request_limit = 0 if self.request_limit is None else self.request_limit
@@ -470,12 +507,42 @@ def normalize_agent_config(
     if isinstance(config, AgentConfig):
         data = config.model_copy(update={"agent_name": name}).model_dump()
     elif isinstance(config, dict):
+        _check_agent_config_keys(config)
         data = AgentConfig(**{**config, "agent_name": name}).model_dump()
     elif config is None:
         data = AgentConfig(agent_name=name).model_dump()
     else:
         raise ValueError("agent_config must be a dict or AgentConfig")
     return data
+
+
+# Keys 0.3 accepted that 0.4 does not, and what took their place.
+_REMOVED_AGENT_CONFIG_KEYS = {
+    "memory_tool_backend": (
+        "the memory_* tools are gone: the agent's files live in its workspace, "
+        "on by default (enable_workspace_files), on local disk or S3 / R2 "
+        "through workspace_config"
+    ),
+}
+
+
+def _check_agent_config_keys(config: dict[str, Any]) -> None:
+    known = {item.name for item in fields(AgentConfig)}
+    for key in config:
+        if key in known:
+            continue
+        if key in _REMOVED_AGENT_CONFIG_KEYS:
+            raise ValueError(
+                f"agent_config[{key!r}] was removed in 0.4: "
+                f"{_REMOVED_AGENT_CONFIG_KEYS[key]}. "
+                "See https://docs-omnicoreagent.omnirexfloralabs.com/docs/upgrading"
+            )
+        close = difflib.get_close_matches(key, known, n=1)
+        hint = f" Did you mean {close[0]!r}?" if close else ""
+        raise ValueError(
+            f"Unknown agent_config setting {key!r}.{hint} "
+            f"Settings: {', '.join(sorted(known))}"
+        )
 
 
 def _merge_defaults(defaults: dict[str, Any], value: dict[str, Any] | None) -> dict[str, Any]:

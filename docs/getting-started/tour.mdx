@@ -1,0 +1,225 @@
+---
+title: A Tour
+description: 'Fifteen minutes: a policy that asks a person, a sandbox for commands, a budget, and the evidence of it all'
+icon: 'map'
+---
+
+# A Tour
+
+The [quickstart](/docs/getting-started/quickstart) agent could answer and call a
+tool. This tour gives an agent what it needs before it is allowed to *act*: a
+policy that asks a person before a refund, a sandbox where its commands run, a
+budget it cannot overspend — and the record of each.
+
+<Info>
+About fifteen minutes and a few cents of model usage. Part 2 needs Docker running
+and `pip install "omnicoreagent[docker]"`. Every output shown is what the code
+printed; the model's wording will differ on your run, the statuses, calls and
+numbers will not.
+</Info>
+
+## 1. Ask a person before a refund
+
+A **policy** decides, for every capability the agent has, whether to *allow* it,
+*deny* it, or *ask* a person. Start from a built-in profile and add one rule:
+refunds are asked about.
+
+<Note>
+**The built-in profiles.** `interactive-dev` allows your local tools, the
+workspace, memory, skills, code mode and sandboxed commands; it asks before
+commands outside a sandbox, network access, package installs, MCP tools,
+sub-agents and background runs; and it denies reading raw secrets.
+`permissive-dev` allows sub-agents and background runs outright, and *denies*
+unsandboxed commands, host files, network access and package installs instead of
+asking. `strict-production` allows nothing but its own telemetry without a rule
+of yours. See the [security model](/docs/core-concepts/security-model).
+</Note>
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy
+
+tools = ToolRegistry()
+
+@tools.register_tool("lookup_order")
+def lookup_order(order_id: str) -> dict:
+    """Look an order up."""
+    return {"order_id": order_id, "status": "delivered", "total": 42.0}
+
+@tools.register_tool("issue_refund")
+def issue_refund(order_id: str, amount: float) -> dict:
+    """Refund an order."""
+    return {"order_id": order_id, "refunded": amount}
+
+policy = build_default_policy("interactive-dev")
+policy.rules.ask.append(
+    PolicyRule(
+        rule_id="ask_before_refunds",
+        effect=PolicyEffect.ASK,
+        capability="tool.local.call",
+        target={"tool_name": "issue_refund"},
+    )
+)
+
+async def main():
+    agent = OmniCoreAgent(
+        name="support",
+        system_instruction="You help with orders. Refund when the customer asks.",
+        model_config={"provider": "openai", "model": "gpt-5.6-terra"},
+        local_tools=tools,
+        agent_config={"governance_config": {"enabled": True, "policy": policy}},
+    )
+    result = await agent.run("Order 1042 arrived broken, please refund it in full.")
+    print("status:", result["status"])
+
+    # A run can pause more than once — once per call that needs a person.
+    while result["status"] == "awaiting_approval":
+        for approval in result["approvals"]:
+            print("waiting on:", approval["tool_name"], approval["arguments"])
+            await agent.resolve_approval(
+                result["run_id"], approval["approval_id"], decision="approve", approver="alice"
+            )
+        result = await agent.resume(result["run_id"])
+        print("status:", result["status"])
+    print(result["response"])
+
+    story = await agent.get_run_trajectory(result["run_id"])
+    print("segments:", len(story["segments"]))
+    for call in story["tool_calls"]:
+        print(" ", call["tool_name"], "->", call["outcome"])
+
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+status: awaiting_approval
+waiting on: issue_refund {'order_id': '1042', 'amount': 42}
+status: success
+Issued a full refund of **$42.00** for order **1042**.
+segments: 2
+  lookup_order -> success
+  issue_refund -> success
+```
+
+What happened:
+
+- The run **paused** at the refund — `status` `awaiting_approval` — with the
+  exact call it wanted to make. Nothing was refunded until someone decided.
+- `resolve_approval` recorded who decided. `decision="deny"` with a `note`
+  sends the model the reason instead; `arguments={...}` approves an edited call.
+- `resume` continued the run where it stopped. It can happen minutes or days
+  later, in another process: the run's record is durable.
+- A run can pause **again** after a resume — once for each call that needs a
+  person — so approve in a loop until the status is no longer
+  `awaiting_approval`. A `session_id` is optional; the run makes one.
+- The **story** of the run has a segment for each stretch between pauses — here
+  two — and `story["tool_calls"]` lists every call with how it finally ended.
+  Each segment's own trajectory has the details, including the policy decision
+  behind every call.
+
+Over HTTP, [OmniServe](/docs/how-to-guides/omniserve) exposes the same flow:
+approvals, decisions and resume are endpoints.
+
+## 2. Run commands in a sandbox
+
+Turn on a sandbox provider and the agent gets an `execute` tool. Its commands run
+inside the sandbox — never on your machine, never with your credentials.
+
+```python
+agent = OmniCoreAgent(
+    name="builder",
+    system_instruction="Use the execute tool to run commands.",
+    model_config={"provider": "openai", "model": "gpt-5.6-terra"},
+    agent_config={
+        "governance_config": {
+            "enabled": True,
+            "profile": "interactive-dev",
+            "sandbox_config": {"provider": "docker"},
+        },
+    },
+)
+result = await agent.run("Which Linux distribution and Python version does your sandbox have? Check, don't guess.")
+print(result["response"])
+
+trajectory = await agent.get_trajectory(result["trace_id"])
+for step in trajectory["steps"]:
+    for call in step["tool_calls"]:
+        for execution in call["executions"]:
+            print("ran:", execution["command"], "| exit", execution["exit_code"], "| in", execution["sandbox_provider"])
+```
+
+```text
+- **Linux distribution:** Debian GNU/Linux 13 (trixie), specifically `13.7`
+- **Python:** Python `3.12.14` (`/usr/local/bin/python` and `/usr/local/bin/python3`)
+ran: ['sh', '-c', "printf 'OS release:\\n'; cat /etc/os-release; printf '\\nKernel:\\n'; uname -a; printf '\\nPython commands:\\n'; python --version 2>&1 || true; python3 --version 2>&1 || true; command -v python || true; command -v python3 || true"] | exit 0 | in docker
+```
+
+Every command the agent ran, with its exit code and where it ran, is in the
+record. Docker, E2B, Modal, Daytona and Vercel sandboxes are one line of
+configuration each ([sandbox providers](/docs/how-to-guides/sandbox-providers)).
+
+## 3. Put a price on it
+
+A **budget** caps what a run, a session, an agent or the whole application may
+spend. The runtime holds a model call's worst-case cost *before* making it, so a
+limit cannot be overshot. Here, a limit far too small:
+
+```python
+agent = OmniCoreAgent(
+    name="thrifty",
+    system_instruction="You are a helpful assistant.",
+    model_config={"provider": "openai", "model": "gpt-5.6-terra"},
+    agent_config={
+        "governance_config": {
+            "enabled": True,
+            "profile": "interactive-dev",
+            "budgets": {"request": [{"meter": "model_cost_usd", "limit": 0.0001}]},
+        },
+    },
+)
+result = await agent.run("Write a haiku about budgets.")
+print("status:", result["status"])
+request = result["budget_request"]
+print("needs", request["needed"], "| limit", request["limit"], "| spent", request["used"])
+
+await agent.grant_budget(result["run_id"], approver="alice", note="one-off, for the tour")
+resumed = await agent.resume(result["run_id"])
+print("status:", resumed["status"])
+print(resumed["response"])
+```
+
+```text
+status: awaiting_budget
+needs 0.049888 | limit 0.0001 | spent 0.0
+status: success
+Budgets balance dreams
+Coins whisper through careful hands
+Future blooms on plans
+```
+
+The run stopped **before** spending anything and waited. `grant_budget` is a
+recorded, one-off exception with a name on it — the policy itself is unchanged —
+and `resume` carried on. To end the run instead, `deny_budget`.
+
+## What you have now
+
+An agent that can act, and a record that says what it did and why it was
+allowed to. From here:
+
+<CardGroup cols={2}>
+  <Card title="Security model" icon="shield-halved" href="/docs/core-concepts/security-model">
+    Profiles, rules, targets, and what every capability means.
+  </Card>
+  <Card title="Durable runs" icon="rotate" href="/docs/core-concepts/durable-runs">
+    Pauses, crashes and resumes; budgets in full.
+  </Card>
+  <Card title="Execution" icon="terminal" href="/docs/core-concepts/execution">
+    The execute tool, the workspace bridge, sandboxes that die.
+  </Card>
+  <Card title="Every run is evidence" icon="magnifying-glass-chart" href="/docs/how-to-guides/observability">
+    Trajectories, outcomes, training records, exporters.
+  </Card>
+</CardGroup>
