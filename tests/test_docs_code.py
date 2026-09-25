@@ -82,13 +82,15 @@ def test_every_extra_named_exists():
     assert not unknown
 
 
-def test_a_page_that_builds_an_agent_imports_it():
-    missing = [
-        str(page.relative_to(ROOT))
-        for page in PAGES
-        if "OmniCoreAgent(" in page.read_text()
-        and not re.search(r"from omnicoreagent import (\(|[^\n]*\bOmniCoreAgent\b)", page.read_text())
-    ]
+def test_a_page_whose_code_builds_an_agent_imports_it():
+    """In a code block: prose may name the constructor without importing it."""
+    missing = []
+    for page in PAGES:
+        code = "\n".join(m.group(3) for m in FENCE.finditer(page.read_text()) if m.group(2) in ("python", "py"))
+        if "OmniCoreAgent(" in code and not re.search(
+            r"from omnicoreagent import (\(|[^\n]*\bOmniCoreAgent\b)", code
+        ):
+            missing.append(str(page.relative_to(ROOT)))
     assert not missing
 
 

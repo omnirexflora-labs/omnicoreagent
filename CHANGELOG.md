@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased — native tool runtime
+## 0.4.0
+
+The release notes: <https://docs-omnicoreagent.omnirexfloralabs.com/docs/changelog>.
+Upgrading from 0.3, measured against 0.3.8:
+<https://docs-omnicoreagent.omnirexfloralabs.com/docs/upgrading>.
+
+The entries below were written as 0.4.0 was built.
+
+### Native tool runtime
 
 - Add the `local` sandbox provider: `execute` and skill scripts run as
   processes on the machine the agent runs on, for places where that machine is
@@ -74,21 +82,19 @@
 
 
 
-All notable changes to this project will be documented in this file.
+### Earlier 0.4.0 entries
 
-## [Unreleased]
-
-### Fixed
+#### Fixed
 - Conversation history now accepts tool, summary, delegation, and custom metadata
   without dropping prior turns. Reconstructed tool batches exclude orphan and
   duplicate results and retain their call identifiers.
 
-### Changed
+#### Changed
 - Agent execution now uses native tool calls and plain final text. XML-looking text
   is task content. Tool call IDs and typed JSON arguments survive execution/history.
 - Dynamic spawning accepts a `subagents` array, replacing `subagents_json`.
 
-### Removed
+#### Removed
 - **Breaking change:** Deleted `RouterAgent`, `ParallelAgent`, and `SequentialAgent`,
   including their package exports, examples, and documentation. These APIs have no
   compatibility aliases or fallback implementations.

@@ -79,8 +79,22 @@
                         ]
                     },
                     {
-                        "group": "Changelog",
+                        "group": "Reference",
                         "pages": [
+                            "docs/reference/omnicoreagent",
+                            "docs/reference/agent-config",
+                            "docs/reference/telemetry-config",
+                            "docs/reference/cli"
+                        ]
+                    },
+                    {
+                        "group": "HTTP API (OmniServe)",
+                        "openapi": "/docs/reference/openapi.json"
+                    },
+                    {
+                        "group": "Releases",
+                        "pages": [
+                            "docs/upgrading",
                             "docs/changelog"
                         ]
                     }

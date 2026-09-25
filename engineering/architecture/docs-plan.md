@@ -51,7 +51,7 @@ this release, and only what a 0.3.9 user would actually meet is listed.
 | **Run it** | Durable runs and recovery · Background agents · OmniServe · Deploying in a container · Stores and scale | An agent in production |
 | **See and improve** | Trajectories · Telemetry and exporters · Outcomes and training records · Headless runs in CI · Harbor and Terminal-Bench · Portable evidence | Evidence, evaluation, data to train on |
 | **Reference** | `OmniCoreAgent` · `agent_config` · `telemetry_config` · Policy schema · CLI · OmniServe HTTP API · Environment variables · Errors | Every name, looked up in seconds |
-| **Releases** | Upgrading from 0.3.9 · Changelog | A painless upgrade |
+| **Releases** | Upgrading to 0.4 · Changelog | A painless upgrade |
 
 The reference is **generated** where it can be — the CLI from its command
 definitions, the HTTP API from OmniServe's own OpenAPI document (rendered as
@@ -79,7 +79,7 @@ a list of every option before the reader has seen one work.
   agent".
 - **D3. The coverage test and the generated reference** — CLI, HTTP API,
   settings, `OmniCoreAgent`.
-- **D4. Upgrading from 0.3.9**, and the v0.4.0 release notes.
+- **D4. Upgrading to 0.4 (measured against 0.3.8; 0.3.9 cannot build an agent)**, and the v0.4.0 release notes.
 - **D5–D8. Build, Make it safe, Run it, See and improve** — page by page in the
   shape above, each section closed by its stranger test.
 

@@ -121,7 +121,8 @@ omnicoreagent --version
 omnicoreagent, version 0.4.0
 ```
 
-These docs describe 0.4.0 and later. If it says 0.3.x, see *An older version was
+These docs describe 0.4.0 and later. If the command is not found, `pip show
+omnicoreagent` names the version you have; for 0.3.x, see *An older version was
 installed* below.
 
 ---
@@ -130,9 +131,11 @@ installed* below.
 
 <AccordionGroup>
   <Accordion title="An older version was installed">
-    OmniCoreAgent 0.4.0 needs Python 3.12 or later. On Python 3.11, pip does not
+    OmniCoreAgent 0.4.0 needs Python 3.12 or later. On Python 3.10 or 3.11, pip does not
     fail: it quietly installs **0.3.9**, the last release that supported 3.11 —
-    and nothing in these docs works with it.
+    which cannot even build an agent (its package was published without one of
+    its own modules, so `OmniCoreAgent(...)` raises `ModuleNotFoundError: No
+    module named 'omnicoreagent.core.workspace'`).
 
     Check which Python you are installing into, and use 3.12 or later:
 

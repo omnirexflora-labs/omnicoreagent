@@ -93,18 +93,28 @@ knows still cannot make the agent do what the policy does not allow.
 
 ## Privacy boundaries
 
-The runtime has a separate privacy policy for data that is persisted or exposed
-outside the model context. It redacts email addresses, phone numbers, Social
-Security numbers, and valid payment card numbers from telemetry, stream
-events, and public results by default. What the agent works from is kept as
-written: the model's input (unless `redact_model_io` is on), its
-conversation memory, and the files in its workspace. A later step, a later
-turn and a resumed run continue from that memory, and the files are what it
-pushes. The repository steward twice pushed a `pyproject.toml` whose author
-email had become `[REDACTED_EMAIL]`: once through a redacted workspace, once
-because a resumed run rebuilt its approved call from redacted memory. Turn
-`redact_memory` or `redact_workspace` on where they must hold no PII at rest,
-knowing that the agent will then see, and may write, the redacted text.
+The runtime has a separate privacy policy for what is kept **about** a run. By
+default it redacts email addresses, phone numbers, Social Security numbers and
+valid payment card numbers from one place: the record — telemetry, and every
+trajectory and export made from it. The run itself works with real data. The
+model reads it, the conversation memory and the workspace keep it, and the
+events streamed to `on_event` and the answer `run()` returns carry it: an agent
+asked to find a user's email has to be able to give it.
+
+```text
+model input   memory   workspace   stream   answer   │   telemetry
+    real       real       real      real     real    │   [REDACTED_EMAIL]
+```
+
+Turn a boundary on where it must hold no personal data, knowing what that
+costs. `redact_stream` and `redact_public` change what the application
+receives. `redact_memory` and `redact_workspace` change what the agent works
+from: a later turn and a resumed run continue from that memory, and the files
+are what it writes. The repository steward twice pushed a `pyproject.toml`
+whose author email had become `[REDACTED_EMAIL]` — once through a redacted
+workspace, once because a resumed run rebuilt its approved call from redacted
+memory. `redact_model_io` keeps personal data from the model provider, and the
+model then cannot use it.
 
 Configure it through `agent_config["privacy_config"]`:
 
@@ -115,8 +125,8 @@ agent_config = {
         "redact_memory": False,
         "redact_workspace": False,
         "redact_telemetry": True,
-        "redact_stream": True,
-        "redact_public": True,
+        "redact_stream": False,
+        "redact_public": False,
         "redact_model_io": False,
         "categories": ["email", "phone", "ssn", "credit_card"],
     }
