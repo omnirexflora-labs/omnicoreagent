@@ -219,7 +219,7 @@ def agent_file_source(
     passthrough: tuple[str, ...] = DEFAULT_ENVIRONMENT_PASSTHROUGH,
     mcp_servers: list[dict[str, Any]] | None = None,
     skills_dir: str | None = None,
-    completion_review: int = 1,
+    completion_review: int = 0,
 ) -> str:
     """The agent file the adapter writes into the task container.
 

@@ -41,6 +41,16 @@ three tasks of our own, which must keep passing.
     a small gain from noise; five per arm are next. Our own tasks: house-report
     passed; the other two never started (the server's Docker address pools were
     exhausted by stale networks, pruned since).
+  - Five trials per arm (2026-09-25), same model, caps and task, run side by
+    side: reward 0 in all ten. Verifier checks passed 65.2 on average before
+    (63–69) and 66.6 after (64–70): +1.4, within the ±3 one trial varies by.
+    Steps about 10 before and 25 after; cost $0.16 and $0.33 a trial. The
+    agent checks and reports more; its checks share its reading of the task's
+    core logic, where every trial failed. The prompt and the review changed
+    together, so this cannot say which one cost the extra steps.
+  - Decision: `completion_review` stays in the runtime and is **off by default
+    in Harbor trials** (`--agent-kwarg completion_review=1` turns it on); the
+    engineering prompt stays.
 - **X2. The CLI on a first try.** A clean container, a fresh install, every
   command and flag run as a stranger would: help text, errors, exit codes.
   Findings fixed, and the walk kept as a test.
