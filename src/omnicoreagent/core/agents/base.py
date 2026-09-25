@@ -7,6 +7,7 @@ import time
 
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
+from omnicoreagent.core.agents.review import COMPLETION_REVIEW_PROMPT
 from omnicoreagent.core.system_prompts import AgentPromptContextBuilder
 from omnicoreagent.core.token_usage import (
     Usage,
@@ -76,6 +77,7 @@ class BaseReactAgent:
         enable_workspace_files: bool = False,
         enable_agent_skills: bool = False,
         skills_dir: str | None = None,
+        completion_review: int = 0,
         skill_script_env: list[str] | None = None,
         code_mode: dict[str, Any] | None = None,
         agents_md: dict[str, Any] | None = None,
@@ -102,6 +104,7 @@ class BaseReactAgent:
         self.enable_workspace_files = enable_workspace_files or enable_subagents
         self.enable_agent_skills = enable_agent_skills
         self.skills_dir = skills_dir
+        self.completion_review = completion_review
         self.skill_manager = None
         from omnicoreagent.core.tools.code_mode import CodeModeConfig
 
@@ -519,6 +522,7 @@ class BaseReactAgent:
             new_state=AgentState.RUNNING, session_id=session_id, debug=debug
         ):
             current_steps = 0
+            reviews_done = 0
             if resume is not None:
                 current_steps = int(resume.get("step") or 0)
                 pending, unknown = _pending_calls(resume, catalog)
@@ -666,6 +670,27 @@ class BaseReactAgent:
                             await self._record_runtime_message(
                                 telemetry_recorder, recovery, kind="loop_recovery"
                             )
+                    elif (
+                        turn.text.strip()
+                        and reviews_done < self.completion_review
+                        and session_state.state != AgentState.STUCK
+                    ):
+                        # "Done" is a claim: ask once for the evidence, keep
+                        # the answer in the context, and go on in this run.
+                        reviews_done += 1
+                        answer = Message(role="assistant", content=turn.text)
+                        session_state.messages.append(answer)
+                        await add_message_to_history(
+                            role="assistant",
+                            content=turn.text,
+                            session_id=session_id,
+                            metadata={"agent_name": self.agent_name},
+                        )
+                        review = Message(role="user", content=COMPLETION_REVIEW_PROMPT)
+                        session_state.messages.append(review)
+                        await self._record_runtime_message(
+                            telemetry_recorder, review, kind="completion_review"
+                        )
                     elif turn.text.strip():
                         if telemetry_recorder is not None and step_span is not None:
                             await telemetry_recorder.end_span(

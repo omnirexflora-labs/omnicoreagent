@@ -202,6 +202,10 @@ class AgentConfig:
     # Where skills are found; None is ./.agents/skills in the working directory.
     # A harness names its own, so the task's directory stays the task's.
     skills_dir: str | None = None
+    # How many times a final answer is reviewed before it is accepted: the
+    # model is asked for each requirement and the check that showed it, and
+    # the run goes on in the same trace. Off by default.
+    completion_review: int = 0
     # Environment variables host skill scripts receive beyond the minimal set
     # (PATH, HOME, locale, TMPDIR, TERM); secrets are not passed by default.
     skill_script_env: list[str] = field(default_factory=list)
@@ -289,6 +293,7 @@ class AgentConfig:
             self.workspace_config = resolve_workspace_config(self.workspace_config)
 
         _validate_range("max_steps", self.max_steps, minimum=1, maximum=1000)
+        _validate_range("completion_review", self.completion_review, minimum=0, maximum=3)
         _validate_range(
             "tool_call_timeout", self.tool_call_timeout, minimum=2, maximum=1000
         )
