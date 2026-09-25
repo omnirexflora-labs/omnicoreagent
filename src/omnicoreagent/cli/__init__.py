@@ -147,6 +147,11 @@ def run(agent_path, instruction, instruction_file, session_id, run_id, tags,
     sys.exit(outcome.exit_code)
 
 
+from omnicoreagent.cli.harbor import harbor_command  # noqa: E402
+
+cli.add_command(harbor_command)
+
+
 def main() -> None:
     cli()
 

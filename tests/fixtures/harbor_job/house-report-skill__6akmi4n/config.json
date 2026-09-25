@@ -1,0 +1,15 @@
+{
+    "task": {
+        "path": "repo/engineering/validation/harbor_task/house-report-skill"
+    },
+    "trial_name": "house-report-skill__6akmi4n",
+    "trials_dir": "jobs/c1-agent/2026-09-25__06-07-24",
+    "agent": {
+        "name": "omnicoreagent.harbor.agent:OmniCoreAgentHarbor",
+        "model_name": "openai/gpt-5.6-terra",
+        "kwargs": {
+            "run_timeout": 780
+        }
+    },
+    "job_id": "d55eb112-6b2a-4ece-80ec-377c06acea5e"
+}

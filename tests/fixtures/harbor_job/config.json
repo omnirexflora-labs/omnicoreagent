@@ -1,0 +1,19 @@
+{
+    "job_name": "2026-09-25__06-07-24",
+    "jobs_dir": "jobs/c1-agent",
+    "n_concurrent_trials": 1,
+    "agents": [
+        {
+            "name": "omnicoreagent.harbor.agent:OmniCoreAgentHarbor",
+            "model_name": "openai/gpt-5.6-terra",
+            "kwargs": {
+                "run_timeout": 780
+            }
+        }
+    ],
+    "tasks": [
+        {
+            "path": "repo/engineering/validation/harbor_task/house-report-skill"
+        }
+    ]
+}

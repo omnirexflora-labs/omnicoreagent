@@ -1,0 +1,118 @@
+{
+    "id": "667614d7-61f4-4e21-bcf3-ca0a59658950",
+    "task_name": "omnicoreagent-labs/receipts-subtotal",
+    "trial_name": "receipts-subtotal__YQwKwim",
+    "trial_uri": "file:///opt/steward/harbor/jobs/2026-09-24__21-50-47/receipts-subtotal__YQwKwim",
+    "task_id": {
+        "path": "repo/engineering/validation/harbor_task/receipts-subtotal"
+    },
+    "source": null,
+    "task_checksum": "818fb72eb371273792dca314be5bc887a19fc0108aeea36b98507bc2c90a829e",
+    "config": {
+        "task": {
+            "path": "repo/engineering/validation/harbor_task/receipts-subtotal",
+            "git_url": null,
+            "git_commit_id": null,
+            "name": null,
+            "ref": null,
+            "overwrite": false,
+            "download_dir": null,
+            "source": null
+        },
+        "trial_name": "receipts-subtotal__YQwKwim",
+        "trials_dir": "/opt/steward/harbor/jobs/2026-09-24__21-50-47",
+        "install_only": false,
+        "timeout_multiplier": 1.0,
+        "agent_timeout_multiplier": null,
+        "verifier_timeout_multiplier": null,
+        "agent_setup_timeout_multiplier": null,
+        "environment_build_timeout_multiplier": null,
+        "agent": {
+            "name": "omnicoreagent.harbor.agent:OmniCoreAgentHarbor",
+            "import_path": null,
+            "model_name": "openai/gpt-5.6-terra",
+            "n_concurrent": null,
+            "concurrency_group": null,
+            "skills": [],
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "resume_trajectory": false,
+            "load_trajectory": null,
+            "extra_allowed_hosts": [],
+            "kwargs": {},
+            "mcp_servers": []
+        },
+        "user_agent": null,
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "cpu_enforcement_policy": "auto",
+            "memory_enforcement_policy": "auto",
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "override_tpu": null,
+            "mounts": null,
+            "extra_docker_compose": [],
+            "kwargs": {},
+            "extra_allowed_hosts": []
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "disable": false
+        },
+        "artifacts": [],
+        "extra_instruction_paths": [],
+        "extra_instructions": [],
+        "job_id": "f94d14bd-b50a-4559-b50e-1d9f08db104c",
+        "source_trial": null
+    },
+    "agent_info": {
+        "name": "omnicoreagent",
+        "version": "0.3.9",
+        "model_info": {
+            "name": "gpt-5.6-terra",
+            "provider": "openai"
+        }
+    },
+    "agent_result": {
+        "n_input_tokens": 0,
+        "n_cache_tokens": 0,
+        "n_output_tokens": 0,
+        "cost_usd": null,
+        "model_usage": null,
+        "rollout_details": null,
+        "metadata": {}
+    },
+    "verifier_result": {
+        "rewards": {
+            "reward": 0.0
+        }
+    },
+    "verifier_environment_mode": "shared",
+    "exception_info": null,
+    "started_at": "2026-09-24T21:50:47.931177Z",
+    "finished_at": "2026-09-24T21:51:40.213690Z",
+    "environment_setup": {
+        "started_at": "2026-09-24T21:50:47.954491Z",
+        "finished_at": "2026-09-24T21:50:53.752404Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-09-24T21:50:53.752477Z",
+        "finished_at": "2026-09-24T21:51:22.603709Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-09-24T21:51:22.603897Z",
+        "finished_at": "2026-09-24T21:51:23.128308Z"
+    },
+    "verifier": {
+        "started_at": "2026-09-24T21:51:23.728219Z",
+        "finished_at": "2026-09-24T21:51:25.995284Z"
+    },
+    "step_results": null
+}

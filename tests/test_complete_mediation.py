@@ -49,6 +49,23 @@ REVIEWED_SITES = {
         "starts an MCP server the application configured (command, args, env "
         "from application config, never from the model)"
     ),
+    # The Harbor tooling: run by the person operating a trial, on their own
+    # machine, never by an agent or with anything a model wrote.
+    ("cli/harbor.py", "os.execve"): (
+        "`omnicoreagent harbor` becomes Harbor's own CLI, with the operator's "
+        "arguments and environment"
+    ),
+    ("cli/harbor.py", "subprocess.run"): (
+        "the same, where exec is unavailable (Windows)"
+    ),
+    ("cli/harbor_doctor.py", "subprocess.run"): (
+        "`doctor` asks the Docker daemon its version and runs an install-only "
+        "Harbor trial of a throwaway task it wrote itself"
+    ),
+    ("harbor/trial.py", "subprocess.run"): (
+        "builds a wheel of this runtime's own source for the task container "
+        "(uv build or pip wheel, on the operator's machine)"
+    ),
 }
 _PROCESS_OR_SOCKET = {
     "subprocess.run",

@@ -75,6 +75,7 @@ class BaseReactAgent:
         enable_subagents: bool = False,
         enable_workspace_files: bool = False,
         enable_agent_skills: bool = False,
+        skills_dir: str | None = None,
         skill_script_env: list[str] | None = None,
         code_mode: dict[str, Any] | None = None,
         agents_md: dict[str, Any] | None = None,
@@ -100,6 +101,7 @@ class BaseReactAgent:
         self.enable_subagents = enable_subagents
         self.enable_workspace_files = enable_workspace_files or enable_subagents
         self.enable_agent_skills = enable_agent_skills
+        self.skills_dir = skills_dir
         self.skill_manager = None
         from omnicoreagent.core.tools.code_mode import CodeModeConfig
 
@@ -187,9 +189,13 @@ class BaseReactAgent:
 
     def init_skills(self):
         if self.enable_agent_skills:
+            from pathlib import Path
+
             from omnicoreagent.core.skills.manager import SkillManager
 
-            self.skill_manager = SkillManager()
+            self.skill_manager = (
+                SkillManager(Path(self.skills_dir)) if self.skills_dir else SkillManager()
+            )
             self.skill_manager.discover_skills()
             logger.info(
                 f"Agent Skills enabled: found {len(self.skill_manager.skills)} skills"
