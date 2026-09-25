@@ -29,6 +29,10 @@ from omnicoreagent.core.runtime import (
     summaries,
     streaming,
 )
+from omnicoreagent.core.credentials import (
+    register_config_credentials,
+    register_environment,
+)
 from omnicoreagent.core.privacy import PrivacyFilter
 from omnicoreagent.core.interaction_history import stable_message_digest
 from omnicoreagent.core.runtime.deadline import (
@@ -149,6 +153,11 @@ class OmniCoreAgent:
         self.system_instruction = system_instruction
         self.model_config = normalization.build_model_config(model_config)
         self.mcp_tools = normalization.build_mcp_tools(mcp_tools)
+        # The credentials this process holds are never handed to a model or
+        # written into a record, however a command comes to print them.
+        register_config_credentials(self.model_config)
+        register_config_credentials(self.mcp_tools)
+        register_environment()
         self.local_tools = normalization.normalize_local_tools(local_tools)
 
         self.sub_agents = sub_agents

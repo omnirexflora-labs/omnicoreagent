@@ -7,6 +7,7 @@ import asyncio
 from typing import Any
 
 from omnicoreagent.core.continuation import mask_opaque
+from omnicoreagent.core.credentials import scrub_credentials
 from omnicoreagent.core.telemetry.context import (
     TelemetryContext,
     current_telemetry_context,
@@ -238,7 +239,7 @@ class TelemetryRecorder:
     def canonicalize_for_digest(self, value: Any) -> Any:
         """Return the representation used for privacy-safe context hashes."""
 
-        privacy_safe = self.privacy_filter.redact(mask_opaque(value), boundary="telemetry")
+        privacy_safe = self.privacy_filter.redact(scrub_credentials(mask_opaque(value)), boundary="telemetry")
         return redact_sensitive_payload(privacy_safe, self.config)
 
     async def start_trace(
@@ -976,7 +977,7 @@ class TelemetryRecorder:
         """Apply the telemetry privacy boundary to free text such as errors."""
 
         try:
-            text = self.privacy_filter.redact_text(mask_opaque(str(value)), boundary="telemetry")
+            text = self.privacy_filter.redact_text(scrub_credentials(mask_opaque(str(value))), boundary="telemetry")
         except Exception as exc:
             # An unfiltered value must never be persisted.
             self._mark_payload_failure()
@@ -991,7 +992,7 @@ class TelemetryRecorder:
     def _record_payload(self, value: Any) -> Any:
         try:
             # Provider signatures and encrypted reasoning are never recorded.
-            value = self.privacy_filter.redact(mask_opaque(value), boundary="telemetry")
+            value = self.privacy_filter.redact(scrub_credentials(mask_opaque(value)), boundary="telemetry")
         except Exception as exc:
             # An unfiltered value must never be persisted.
             self._mark_payload_failure()

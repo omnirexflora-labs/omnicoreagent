@@ -8,6 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from omnicoreagent.core.credentials import scrub_credentials
 from omnicoreagent.core.agents.loop_detection import ToolInteraction
 from omnicoreagent.core.budgets import BudgetExhaustedForRun, RunAwaitingBudget
 from omnicoreagent.core.model_protocol import ModelTurn
@@ -424,6 +425,9 @@ async def execute_native_turn(
                 "data": None,
                 "message": str(exc),
             }
+        # Whatever the tool printed, a credential the runtime holds is not
+        # handed to the model, the run's state, the workspace or the trace.
+        result = scrub_credentials(result)
         if run_call_started:
             if _waiting_for_approval(request.id):
                 awaiting.add(request.id)
