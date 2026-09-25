@@ -98,6 +98,16 @@ class OmniCoreAgentOptions(InstalledAgentOptions):
         default=False,
         description="Keep the tokens the model chose and their logprobs.",
     )
+    completion_review: Annotated[int, Cli("--completion-review")] = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description=(
+            "How many times the agent's final answer is reviewed before it is "
+            "accepted: it is asked for each requirement and the check that showed "
+            "it, and works on where it has none. 0 accepts the first answer."
+        ),
+    )
     run_timeout: Annotated[int | None, Cli("--run-timeout")] = Field(
         default=None,
         description=(
@@ -318,6 +328,7 @@ class OmniCoreAgentHarbor(BaseInstalledAgent):
             passthrough=self._passthrough(),
             mcp_servers=self._mcp_servers(),
             skills_dir=self.skills_dir,
+            completion_review=int(self._option("completion_review", 1)),
         )
         await self._upload_config_text(
             environment,

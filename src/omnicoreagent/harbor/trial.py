@@ -89,6 +89,30 @@ PASSTHROUGH = {passthrough!r}
 MCP_SERVERS = {mcp_servers!r}
 # Where Harbor put the trial's skills, or None.
 SKILLS_DIR = {skills_dir!r}
+# How many times "done" is reviewed before it is accepted.
+COMPLETION_REVIEW = {completion_review!r}
+
+SYSTEM_INSTRUCTION = """\
+You are an expert software engineer solving a task in a Linux container. The
+working directory is the task's own; run commands there with the execute tool.
+
+How to work:
+- Read the task and every file it points to - specifications, contracts,
+  documentation, examples, the code you are to change - completely before you
+  build anything. When a tool's output was saved to an artifact, read the whole
+  artifact with read_artifact.
+- Write down the requirements, including every error case and every kind of
+  invalid input the specification names.
+- Build it, then check it: for each requirement, run a case that exercises it,
+  including each kind of invalid input, and fix what fails. Generate inputs with
+  small scripts where that is quicker than writing them by hand.
+- Keep going while steps remain: the task is done when each requirement has been
+  checked, not when the main case works.
+- Do not change the tests or the inputs they read, and do not weaken a
+  requirement to make a check pass.
+- Report honestly: say what you checked and how, and what does not work. Never
+  report a check you did not run.
+"""
 
 
 def _policy():
@@ -142,17 +166,14 @@ def _model_config():
 
 agent = OmniCoreAgent(
     name="omnicoreagent",
-    system_instruction=(
-        "You are solving a task in the working directory. Use the execute tool "
-        "to run shell commands: read files, change them, and check your work. "
-        "Keep going until the task is done. Do not change the tests."
-    ),
+    system_instruction=SYSTEM_INSTRUCTION,
     model_config=_model_config(),
     mcp_tools=MCP_SERVERS,
     agent_config={{
         "max_steps": MAX_STEPS,
         "tool_call_timeout": COMMAND_TIMEOUT,
         "enable_workspace_files": True,
+        "completion_review": COMPLETION_REVIEW,
         "enable_agent_skills": bool(SKILLS_DIR),
         "skills_dir": SKILLS_DIR,
         # Outside the task's directory: the workspace would otherwise appear
@@ -198,6 +219,7 @@ def agent_file_source(
     passthrough: tuple[str, ...] = DEFAULT_ENVIRONMENT_PASSTHROUGH,
     mcp_servers: list[dict[str, Any]] | None = None,
     skills_dir: str | None = None,
+    completion_review: int = 1,
 ) -> str:
     """The agent file the adapter writes into the task container.
 
@@ -219,6 +241,7 @@ def agent_file_source(
         passthrough=tuple(passthrough),
         mcp_servers=list(mcp_servers or []),
         skills_dir=skills_dir,
+        completion_review=completion_review,
     )
 
 

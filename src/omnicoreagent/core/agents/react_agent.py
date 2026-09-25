@@ -29,6 +29,7 @@ class ReactAgent(BaseReactAgent):
             enable_workspace_files=config.enable_workspace_files,
             enable_agent_skills=config.enable_agent_skills,
             skills_dir=getattr(config, "skills_dir", None),
+            completion_review=getattr(config, "completion_review", 0),
             skill_script_env=getattr(config, "skill_script_env", None),
             code_mode=getattr(config, "code_mode", None),
             agents_md=getattr(config, "agents_md", None),

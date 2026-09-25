@@ -75,6 +75,9 @@ def test_the_options_a_trial_can_set_are_harbor_flags():
     assert fields["budget_mode"].default == "stop"
     # And the capture a reviewer or a trainer needs.
     assert fields["capture"].default == "full"
+    # "Done" is reviewed once before it is accepted.
+    assert fields["completion_review"].default == 1
+    assert fields["completion_review"].description
 
 
 def test_the_agents_own_files_live_outside_the_task():

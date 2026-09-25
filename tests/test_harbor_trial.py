@@ -748,3 +748,38 @@ def test_the_detail_prefers_the_error_and_is_short():
     assert usage["detail"] == "run exceeded its deadline"
     long = usage_from_result({"status": "error", "response": "y" * 5000})
     assert len(long["detail"]) <= 300
+
+
+# --- how the agent is asked to work -------------------------------------------------
+#
+# A real trial scored 0 with 66 of 83 checks passing: the agent stopped at step 13
+# of 60 and generalized one passing check of invalid input into a claim about all
+# of it. The full specification had reached it; the guidance was three lines.
+
+
+def test_the_agent_is_told_to_read_everything_before_it_builds():
+    instruction = _agent_namespace(_source())["SYSTEM_INSTRUCTION"]
+
+    assert "read_artifact" in instruction, "an offloaded output must be read in full"
+    assert "specification" in instruction
+
+
+def test_the_agent_is_told_to_check_every_requirement_including_invalid_input():
+    instruction = _agent_namespace(_source())["SYSTEM_INSTRUCTION"]
+
+    assert "invalid input" in instruction
+    assert "each requirement" in instruction
+
+
+def test_the_agent_is_told_done_means_checked_and_to_report_honestly():
+    instruction = _agent_namespace(_source())["SYSTEM_INSTRUCTION"]
+
+    assert "while steps remain" in instruction
+    assert "did not run" in instruction
+    assert "Do not change the tests" in instruction
+
+
+def test_the_final_answer_is_reviewed_by_default_and_can_be_turned_off():
+    assert _agent_namespace(_source())["COMPLETION_REVIEW"] == 1
+    assert _agent_namespace(_source(completion_review=0))["COMPLETION_REVIEW"] == 0
+    assert '"completion_review": COMPLETION_REVIEW' in _source()
