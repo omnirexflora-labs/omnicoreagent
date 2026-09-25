@@ -779,7 +779,9 @@ def test_the_agent_is_told_done_means_checked_and_to_report_honestly():
     assert "Do not change the tests" in instruction
 
 
-def test_the_final_answer_is_reviewed_by_default_and_can_be_turned_off():
-    assert _agent_namespace(_source())["COMPLETION_REVIEW"] == 1
-    assert _agent_namespace(_source(completion_review=0))["COMPLETION_REVIEW"] == 0
+def test_the_final_answer_is_not_reviewed_unless_asked():
+    """Five trials each way on a hard task: +1.4 of 83 checks, within noise, for
+    2.5x the steps and twice the cost. Off by default, one flag away."""
+    assert _agent_namespace(_source())["COMPLETION_REVIEW"] == 0
+    assert _agent_namespace(_source(completion_review=1))["COMPLETION_REVIEW"] == 1
     assert '"completion_review": COMPLETION_REVIEW' in _source()

@@ -75,6 +75,7 @@ Pass them with `--ak name=value` (Harbor's `--agent-kwarg`):
 | `budget_mode` | `stop` | How an exhausted budget is answered: `stop` or `deny`. |
 | `capture` | `full` | What the trace keeps. `full` keeps what the model was sent. |
 | `record_token_details` | `false` | Keep the chosen tokens' logprobs. |
+| `completion_review` | `0` | Rounds of review before a final answer is accepted: the agent is asked for each requirement and the check that showed it, and keeps working where it has none. Its report is more thorough; on a hard task it did not raise the score and doubled the cost. |
 | `install_spec` | this runtime | Install something else: a requirement, a path in the container, or a VCS URL. |
 | `wheel` | this runtime | A wheel on this machine to upload and install. |
 

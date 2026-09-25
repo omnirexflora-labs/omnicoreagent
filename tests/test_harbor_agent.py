@@ -75,8 +75,9 @@ def test_the_options_a_trial_can_set_are_harbor_flags():
     assert fields["budget_mode"].default == "stop"
     # And the capture a reviewer or a trainer needs.
     assert fields["capture"].default == "full"
-    # "Done" is reviewed once before it is accepted.
-    assert fields["completion_review"].default == 1
+    # Off by default: five trials each way showed no gain for twice the cost;
+    # one flag turns it on.
+    assert fields["completion_review"].default == 0
     assert fields["completion_review"].description
 
 
