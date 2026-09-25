@@ -70,6 +70,8 @@ def summarize_trial(trial_dir: Path) -> dict[str, Any]:
         "outcome": "running",
         "reward": None,
         "status": None,
+        "termination_reason": None,
+        "detail": None,
         "exit_code": None,
         "cost_usd": None,
         "input_tokens": None,
@@ -93,6 +95,8 @@ def summarize_trial(trial_dir: Path) -> dict[str, Any]:
         task=result.task_name,
         reward=_reward(result.verifier_result),
         status=metadata.get("omnicoreagent_status"),
+        termination_reason=metadata.get("omnicoreagent_termination_reason"),
+        detail=metadata.get("omnicoreagent_detail"),
         exit_code=metadata.get("omnicoreagent_exit_code"),
         cost_usd=agent.cost_usd if agent else None,
         input_tokens=agent.n_input_tokens if agent else None,
@@ -165,12 +169,14 @@ def _render(summary: dict[str, Any]) -> str:
     for trial in summary["trials"]:
         reward = "-" if trial["reward"] is None else f"{trial['reward']:g}"
         status = trial["status"] or "-"
+        if trial["termination_reason"] and trial["termination_reason"] != trial["status"]:
+            status = f"{status} ({trial['termination_reason']})"
         steps = trial["steps"] if trial["steps"] is not None else "-"
         lines.append(
             f"  {trial['outcome']:<9} reward {reward:<4} {trial['trial']:<40} "
-            f"status {status:<10} steps {steps!s:<4} cost {_money(trial['cost_usd'])}"
+            f"status {status:<20} steps {steps!s:<4} cost {_money(trial['cost_usd'])}"
         )
-        for detail in filter(None, [trial["error"], trial["note"]]):
+        for detail in filter(None, [trial["error"], trial["detail"], trial["note"]]):
             lines.append(f"            {detail}")
         for failed in trial["mcp_failed"]:
             lines.append(f"            MCP server unusable: {failed}")

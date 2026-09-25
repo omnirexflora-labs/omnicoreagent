@@ -139,3 +139,25 @@ def test_a_directory_that_is_not_a_job_is_a_sentence(tmp_path):
 
     assert result.exit_code != 0
     assert "no Harbor job" in result.output
+
+
+def test_why_a_run_ended_is_shown_beside_its_status(tmp_path):
+    job = tmp_path / "job"
+    shutil.copytree(FIXTURE, job)
+    result_path = job / PASSED / "result.json"
+    result = json.loads(result_path.read_text())
+    metadata = result["agent_result"]["metadata"]
+    metadata.update(
+        omnicoreagent_status="error",
+        omnicoreagent_termination_reason="max_steps",
+        omnicoreagent_detail="Agent reached its step limit.",
+    )
+    result_path.write_text(json.dumps(result))
+
+    trial = _trials(summarize_job(job))[PASSED]
+    printed = CliRunner().invoke(cli, ["harbor", "results", str(job)]).output
+
+    assert trial["termination_reason"] == "max_steps"
+    assert trial["detail"] == "Agent reached its step limit."
+    assert "error (max_steps)" in printed
+    assert "Agent reached its step limit." in printed

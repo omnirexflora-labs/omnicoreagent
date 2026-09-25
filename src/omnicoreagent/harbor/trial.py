@@ -493,7 +493,20 @@ def usage_from_result(
         ),
         "status": (result or {}).get("status"),
         "exit_code": (result or {}).get("exit_code"),
+        # A step limit and a crash share status "error"; this tells them apart.
+        "termination_reason": (result or {}).get("termination_reason"),
+        "detail": _detail_of(result),
     }
+
+
+def _detail_of(result: dict[str, Any] | None) -> str | None:
+    """What a run that did not succeed said about why, briefly."""
+    if not isinstance(result, dict) or result.get("status") in (None, "success"):
+        return None
+    for value in (result.get("error"), result.get("response")):
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:300]
+    return None
 
 
 def _instruction_of(request: dict[str, Any]) -> str:
