@@ -15,6 +15,8 @@ sandbox. The screen makes an attempt visible early, and records it in the
 trace; the policy is what stops the damage.
 
 ```python
+from omnicoreagent import OmniCoreAgent
+
 agent_config = {
     "guardrail_mode": "full",          # full (default), input_only, or off
     "guardrail_config": {

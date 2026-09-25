@@ -29,13 +29,17 @@ An agent skill is a directory following a specific structure that packages every
 Enable skill discovery in the agent configuration:
 
 ```python
+from omnicoreagent import OmniCoreAgent
+
 agent_config = {
-    "enable_agent_skills": True  # Enable discovery and tools for skills
+    "enable_agent_skills": True,  # Enable discovery and tools for skills
 }
 
 agent = OmniCoreAgent(
-    ...
-    agent_config=agent_config
+    name="assistant",
+    system_instruction="You are a helpful assistant.",
+    model_config={"provider": "openai", "model": "gpt-5.6-terra"},
+    agent_config=agent_config,
 )
 ```
 

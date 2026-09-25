@@ -36,6 +36,8 @@ Session memory decides what historical messages are loaded when a new
 `agent.run()` starts. This is the cross-request layer.
 
 ```python
+from omnicoreagent import OmniCoreAgent
+
 agent = OmniCoreAgent(
     name="assistant",
     system_instruction="You are helpful.",
