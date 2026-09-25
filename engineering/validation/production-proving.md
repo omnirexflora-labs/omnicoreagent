@@ -411,6 +411,30 @@ Each line names the commit; the plan's execution log has the detail.
     passed, not only that it did, is what found it.
     (`src/omnicoreagent/harbor/trial.py`, `engineering/validation/harbor_task/rates-over-mcp`)
 
+53. **A trial's model read the provider key out of the runtime's environment.**
+    Given a task whose answer did not exist, the model went looking for a
+    "vault" and ran `tr '\0' '\n' </proc/<pid>/environ`. Passing the
+    environment to commands by name kept the key out of *their* environment;
+    it could not keep it out of the runtime's, which a command running as the
+    same user can read. The key went into the model's context and two
+    trajectory files; the files were redacted and the key rotated. The runtime
+    now registers the credentials it holds and replaces them in every tool
+    result and everything telemetry records. On the rerun the model read our
+    own `credentials.py`, dumped the environment again, and got
+    `[REDACTED:credential]`; no file of the job held the key. What this cannot
+    stop — a command sending a key it can read — is the same for every agent
+    in a container, and is why trials want a key of their own with a limit.
+    (`src/omnicoreagent/core/credentials.py`)
+
+54. **A closed network failed every run before the model was called.** Under a
+    task's agent-phase allowlist with the model's host allowed, every run ended
+    "Model encountered an error (SSLError)". Logging every host the runtime
+    contacted showed one: tiktoken downloading its encoding to count tokens,
+    cut by the policy and reported as the model's failure. Counting now falls
+    back to an estimate when the encoding cannot load, a model error says what
+    failed, and the Harbor adapter fetches the encodings at install. The same
+    trial then passed. (`src/omnicoreagent/core/summarizer/tokenizer.py`)
+
 ## What it cost
 
 A read-the-repository run costs about two to eight cents on `gpt-5.6-terra`

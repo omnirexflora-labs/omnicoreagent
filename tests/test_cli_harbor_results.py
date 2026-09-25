@@ -161,3 +161,16 @@ def test_why_a_run_ended_is_shown_beside_its_status(tmp_path):
     assert trial["detail"] == "Agent reached its step limit."
     assert "error (max_steps)" in printed
     assert "Agent reached its step limit." in printed
+
+
+def test_a_successful_runs_ordinary_ending_is_not_shown(tmp_path):
+    job = tmp_path / "job"
+    shutil.copytree(FIXTURE, job)
+    result_path = job / PASSED / "result.json"
+    result = json.loads(result_path.read_text())
+    result["agent_result"]["metadata"]["omnicoreagent_termination_reason"] = "stop"
+    result_path.write_text(json.dumps(result))
+
+    printed = CliRunner().invoke(cli, ["harbor", "results", str(job)]).output
+
+    assert "(stop)" not in printed

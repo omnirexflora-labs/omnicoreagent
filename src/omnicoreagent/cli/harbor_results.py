@@ -169,7 +169,8 @@ def _render(summary: dict[str, Any]) -> str:
     for trial in summary["trials"]:
         reward = "-" if trial["reward"] is None else f"{trial['reward']:g}"
         status = trial["status"] or "-"
-        if trial["termination_reason"] and trial["termination_reason"] != trial["status"]:
+        # Why it ended matters when it did not succeed; "success (stop)" is noise.
+        if trial["termination_reason"] and trial["status"] not in (None, "success"):
             status = f"{status} ({trial['termination_reason']})"
         steps = trial["steps"] if trial["steps"] is not None else "-"
         lines.append(
