@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import time
 from typing import Any
 
+from omnicoreagent.core.credentials import scrub_credentials
 from omnicoreagent.core.continuation import continuation_summary
 from omnicoreagent.core.agents.llm_response import (
     extract_response_content,
@@ -304,7 +305,13 @@ class AgentLlmStepRunner:
             error_message = (
                 f"The model call was refused: {reason}. Fix the account; retrying will not help."
                 if reason is not None
-                else f"Model encountered an error ({type(e).__name__}), please do retry again"
+                else (
+                    # What failed, not only its type: "SSLError" alone sent a
+                    # reader looking at the model when a tokenizer download
+                    # had been cut. Credentials the runtime holds are scrubbed.
+                    f"Model encountered an error ({type(e).__name__}: "
+                    f"{scrub_credentials(str(e))[:300]}), please do retry again"
+                )
             )
             logger.error(f"{error_message}: {e}")
             return AgentLlmStepResult(
