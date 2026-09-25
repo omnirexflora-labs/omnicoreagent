@@ -1,0 +1,13 @@
+services:
+  main:
+    depends_on:
+      ledger:
+        condition: service_healthy
+  ledger:
+    build:
+      context: ./ledger
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), 2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

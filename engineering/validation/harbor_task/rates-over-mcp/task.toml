@@ -1,0 +1,45 @@
+schema_version = "1.4"
+artifacts = []
+
+[task]
+name = "omnicoreagent-labs/rates-over-mcp"
+version = "1.1.0"
+description = "Two VAT rates, one behind each MCP transport, that nothing else knows."
+keywords = ["mcp", "tools"]
+[[task.authors]]
+name = "OmniCoreAgent"
+
+[metadata]
+difficulty = "easy"
+
+[verifier]
+timeout_sec = 300.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 900.0
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 900.0
+os = "linux"
+
+# zeldovia's rate: a stdio server in the task's own container.
+[[environment.mcp_servers]]
+name = "archive"
+transport = "stdio"
+command = "/opt/archive/venv/bin/python"
+args = ["/opt/archive/server.py"]
+
+# kestria's rate: a streamable-HTTP server in a container of its own, whose
+# files the agent cannot read — so the reward cannot be earned without MCP.
+[[environment.mcp_servers]]
+name = "ledger"
+transport = "streamable-http"
+url = "http://ledger:8000/mcp"
+
+[environment.env]
+
+[solution.env]
