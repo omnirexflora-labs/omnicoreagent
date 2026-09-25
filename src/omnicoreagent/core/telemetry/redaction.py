@@ -40,15 +40,18 @@ class TelemetryPayloadError(RuntimeError):
 
 @dataclass
 class TelemetryConfig:
-    # ``auto`` keeps the lightweight in-memory fallback unless a local
-    # workspace was explicitly configured at the runtime boundary. ``jsonl``
-    # is the built-in durable local option; no external exporter is required.
+    # ``auto`` (like ``jsonl``) keeps every trace on local disk, in
+    # telemetry/traces.jsonl under the workspace directory (./workspace unless
+    # configured), even when the workspace itself is S3 or R2. ``memory``
+    # keeps them in this process only. No external exporter is required.
     storage: str = "auto"
+    # Where the jsonl store writes; None is telemetry/traces.jsonl in the workspace.
     storage_path: str | None = None
     # Finished traces older than this are pruned automatically; ``None`` keeps
-    # every trace. Payloads have their own window, and a payload referenced by
-    # a kept trace is never pruned.
+    # every trace.
     retention_days: int | None = 7
+    # The same for offloaded payloads, on their own window; a payload a kept
+    # trace still refers to is never pruned.
     payload_retention_days: int | None = 7
     # Upper bound on finished traces kept by an in-memory store.
     memory_max_traces: int | None = 1000
@@ -59,6 +62,9 @@ class TelemetryConfig:
     # trainer or an evaluator cannot use one that does not. ``default`` is
     # the privacy-first preset for a deployment that must not record prompts.
     capture: str = "full"
+    # What a trace keeps of each part of a run: inputs, outputs, what the model
+    # was sent and what it answered, and what tools returned. None takes the
+    # capture preset's value.
     record_inputs: bool | None = None
     record_outputs: bool | None = None
     record_model_prompts: bool | None = None
@@ -68,7 +74,11 @@ class TelemetryConfig:
     # returns them (``logprobs``). Off: they are large, and only a trainer
     # reusing the run needs them.
     record_token_details: bool = False
+    # A recorded payload larger than this is replaced by a truncated marker
+    # with its size and checksum, unless offload_large_payloads keeps it whole.
     max_payload_bytes: int = 64_000
+    # Keys whose values are replaced with [REDACTED] wherever they appear in a
+    # recorded payload, at any depth.
     redact_keys: list[str] = field(
         default_factory=lambda: [
             "access_token",
@@ -84,6 +94,8 @@ class TelemetryConfig:
             "token",
         ]
     )
+    # Keep payloads over max_payload_bytes whole, in the workspace or object
+    # storage, referenced from the trace, instead of truncating them.
     offload_large_payloads: bool = False
     offload_target: str = "workspace"
     # Where the archive of finished traces keeps its index and its bodies.
@@ -96,7 +108,11 @@ class TelemetryConfig:
     # A directory the processes share, for a deployment that shares one host
     # rather than a bucket. Ignored when ``archive_target`` is object storage.
     archive_bodies_path: str | None = None
+    # Raise when a record cannot be made safely (redaction or persistence
+    # failed) instead of recording a marker and carrying on.
     strict: bool = False
+    # Seconds a write to the trace store, or an export to an external
+    # exporter, may take before it is given up and reported.
     persistence_timeout_seconds: float | None = 5.0
     export_timeout_seconds: float | None = 5.0
 

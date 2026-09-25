@@ -114,7 +114,7 @@ class OmniCoreAgent:
         model_config: Any,
         mcp_tools: Optional[List[Any]] = None,
         local_tools: Optional[Any] = None,
-        sub_agents: Optional[Dict[str, Any]] = None,
+        sub_agents: Optional[List[Any]] = None,
         agent_config: Optional[Any] = None,
         memory_router: Optional[Any] = None,
         telemetry_store: Optional[Any] = None,
@@ -127,27 +127,38 @@ class OmniCoreAgent:
         telemetry_payload_store: Optional[Any] = None,
     ):
         """
-        Initialize the OmniCoreAgent with user-friendly configuration.
+        An agent: a model, what it may use, and how it is run and recorded.
 
         Args:
-            name: Name of the agent
-            system_instruction: System instruction for the agent
-            model_config: Model configuration (dict or ModelConfig)
-            mcp_tools: List of MCP tool configurations (optional)
-            local_tools: LocalToolsIntegration instance (optional)
-            sub_agents: SubAgentsIntegration instance (optional)
-            agent_config: Optional agent configuration
-            embedding_config: Optional embedding configuration
-            memory_router: Optional memory router (MemoryRouter)
-            telemetry_store: Optional telemetry store
-            telemetry_recorder: Optional telemetry recorder
-            telemetry_stream: Optional telemetry stream
-            telemetry_exporters: Optional telemetry exporters
-            telemetry_config: Optional TelemetryConfig or dictionary controlling
-                built-in recording, redaction, and payload policy
-            telemetry_payload_store: Optional built-in store for oversized
-                redacted telemetry payloads
-            debug: Enable debug logging
+            name: The agent's name, in its traces, records and workspace.
+            system_instruction: What the agent is for; the start of its system
+                prompt, before the runtime's own instructions.
+            model_config: The model: ``{"provider": "openai", "model": "..."}``,
+                with optional ``temperature``, ``max_tokens``, ``base_url`` and
+                others (see Models). The key comes from ``LLM_API_KEY``.
+            mcp_tools: MCP servers whose tools the agent may use: a list of
+                dicts with ``name``, ``transport_type`` (``stdio``, ``sse`` or
+                ``streamable_http``), and ``command``/``args`` or ``url``.
+            local_tools: Your Python functions as tools: a ``ToolRegistry``, or
+                a list of functions.
+            sub_agents: Other ``OmniCoreAgent`` instances this one may hand a
+                task to, by name, through a ``call_sub_agent`` tool.
+            agent_config: The agent's settings (see Agent settings).
+            memory_router: Where session history is kept:
+                ``MemoryRouter("in_memory" | "redis" | "sql" | "mongodb")``;
+                in memory by default.
+            telemetry_store: A trace store to use instead of the built-in one,
+                for example one shared by several agents.
+            telemetry_recorder: A recorder to use instead of the built-in one.
+            telemetry_stream: A stream of telemetry events to publish to.
+            telemetry_exporters: Where traces are exported as they finish:
+                OTLP, LangSmith, Opik or JSONL exporters.
+            prompt_builder: Replaces how the system prompt is assembled.
+            debug: Log each step in detail.
+            telemetry_config: What a trace records, where, and for how long
+                (see Telemetry settings).
+            telemetry_payload_store: Where payloads too large to keep inline
+                are stored, when offloading is on.
         """
         self.name = name
         self.system_instruction = system_instruction
@@ -160,6 +171,13 @@ class OmniCoreAgent:
         register_environment()
         self.local_tools = normalization.normalize_local_tools(local_tools)
 
+        if sub_agents is not None and (
+            not isinstance(sub_agents, (list, tuple))
+            or not all(callable(getattr(agent, "run", None)) for agent in sub_agents)
+        ):
+            raise ValueError(
+                "sub_agents must be a list of agents, e.g. sub_agents=[researcher]"
+            )
         self.sub_agents = sub_agents
         self.agent_config = normalization.build_agent_config(name, agent_config)
         self.privacy_filter = PrivacyFilter.from_value(
@@ -1242,8 +1260,9 @@ class OmniCoreAgent:
         Each record holds what the model was sent at every step, what it
         produced (its token details when they were recorded), what the tools
         answered, the policy that served it, the run's totals, and the
-        outcomes attached to it. A run recorded without model prompts has
-        nothing to learn from and is left out.
+        outcomes attached to it. A run that paused and resumed is one record
+        with the steps of every trace segment. A run still running or
+        waiting, or one recorded without model prompts, is left out.
         """
         self._ensure_telemetry()
         if trace_ids:
@@ -1252,11 +1271,34 @@ class OmniCoreAgent:
             trace_filter = TraceFilter(run_id=run_id, session_id=session_id)
             candidates = await self.telemetry_store.list_traces(trace_filter)
         records = []
+        seen: set[str] = set()
         for trace in candidates:
             if not any(span.kind == "agent.run" for span in trace.spans):
                 continue
-            trajectory = await self.get_trajectory(trace_id=trace.trace_id, include_children=False)
-            record = _training_record(trajectory) if trajectory else None
+            # A run that paused for a person, or was recovered, is several
+            # traces: it is read once, whole, from its durable record.
+            key = trace.run_id or trace.trace_id
+            if key in seen:
+                continue
+            seen.add(key)
+            run = await self.get_run(trace.run_id) if trace.run_id else None
+            if run is not None:
+                if run.get("status") not in _FINISHED_RUN_STATUSES:
+                    continue
+                trace_ids = list(run.get("trace_ids") or [trace.trace_id])
+            elif str(getattr(trace.status, "value", trace.status)) in _UNFINISHED_TRACE_STATUSES:
+                continue
+            else:
+                trace_ids = [trace.trace_id]
+            segments = [
+                t
+                for t in [
+                    await self.get_trajectory(trace_id=trace_id, include_children=False)
+                    for trace_id in trace_ids
+                ]
+                if t
+            ]
+            record = _training_record(segments, run) if segments else None
             if record is not None:
                 records.append(record)
             if limit is not None and len(records) >= limit:
@@ -2468,22 +2510,69 @@ def _add_totals(total: Any, segment: Any) -> Any:
     return segment if segment is not None else total
 
 
-def _training_record(trajectory: Dict[str, Any]) -> Dict[str, Any] | None:
-    """One finished run, as a trainer reads it: nothing when its model calls
-    were not recorded (the privacy-first capture)."""
+# A run in one of these is over; running, awaiting_approval and interrupted
+# runs continue, and are not yet anything to learn from.
+_FINISHED_RUN_STATUSES = frozenset({"completed", "blocked", "failed", "cancelled"})
+_UNFINISHED_TRACE_STATUSES = frozenset({"running", "suspended"})
+
+
+def _training_record(
+    segments: List[Dict[str, Any]], run: Dict[str, Any] | None = None
+) -> Dict[str, Any] | None:
+    """One finished run, as a trainer reads it, from every trace segment it
+    took: nothing when its model calls were not recorded (the privacy-first
+    capture)."""
     steps = []
     policy_version: Dict[str, Any] = {}
+    totals: Dict[str, Any] = {}
+    for index, trajectory in enumerate(segments):
+        totals = _add_totals(totals, trajectory.get("totals") or {})
+        for step in _training_steps(trajectory):
+            policy_version = step.pop("_policy_version") or policy_version
+            steps.append({**step, "segment": index})
+    if not steps:
+        return None
+    first, last = segments[0], segments[-1]
+    outcomes = (run or {}).get("outcomes")
+    if outcomes is None:
+        outcomes = [o for trajectory in segments for o in trajectory.get("outcomes") or []]
+    return {
+        "run_id": last.get("run_id"),
+        "trace_id": last.get("trace_id"),
+        "trace_ids": [trajectory.get("trace_id") for trajectory in segments],
+        "session_id": last.get("session_id"),
+        "agent": (last.get("harness") or {}).get("agent"),
+        "status": last.get("status"),
+        "started_at": first.get("started_at"),
+        "ended_at": last.get("ended_at"),
+        "policy_version": policy_version,
+        "request": (first.get("request") or {}).get("message"),
+        "final_answer": (last.get("final") or {}).get("response"),
+        "outcomes": list(outcomes),
+        "totals": {
+            "tokens": totals.get("tokens"),
+            "estimated_cost_usd": totals.get("estimated_cost_usd"),
+            "duration_ms": totals.get("duration_ms"),
+        },
+        "evidence_status": last.get("evidence_status"),
+        "steps": steps,
+    }
+
+
+def _training_steps(trajectory: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The agent turns of one trace segment, each with the policy that served it."""
+    steps = []
     for step in trajectory.get("steps") or []:
         for call in step.get("model_calls") or []:
             request = call.get("request") or {}
             if call.get("purpose", "agent_turn") != "agent_turn" or "messages" not in request:
                 continue
             facts = call.get("facts") or {}
-            policy_version = facts.get("policy_version") or policy_version
             response = call.get("response") or {}
             steps.append(
                 {
                     "step": step.get("step"),
+                    "_policy_version": facts.get("policy_version"),
                     "messages": request.get("messages"),
                     "tools": request.get("tools"),
                     "response": response,
@@ -2503,26 +2592,4 @@ def _training_record(trajectory: Dict[str, Any]) -> Dict[str, Any] | None:
                     ],
                 }
             )
-    if not steps:
-        return None
-    totals = trajectory.get("totals") or {}
-    return {
-        "run_id": trajectory.get("run_id"),
-        "trace_id": trajectory.get("trace_id"),
-        "session_id": trajectory.get("session_id"),
-        "agent": (trajectory.get("harness") or {}).get("agent"),
-        "status": trajectory.get("status"),
-        "started_at": trajectory.get("started_at"),
-        "ended_at": trajectory.get("ended_at"),
-        "policy_version": policy_version,
-        "request": (trajectory.get("request") or {}).get("message"),
-        "final_answer": (trajectory.get("final") or {}).get("response"),
-        "outcomes": trajectory.get("outcomes") or [],
-        "totals": {
-            "tokens": totals.get("tokens"),
-            "estimated_cost_usd": totals.get("estimated_cost_usd"),
-            "duration_ms": totals.get("duration_ms"),
-        },
-        "evidence_status": trajectory.get("evidence_status"),
-        "steps": steps,
-    }
+    return steps

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
@@ -35,7 +36,10 @@ class StreamDelivery:
             "sequence": self.sequence,
             "event_id": f"{self.run_id}:text:{self.sequence}",
         }
-        await self.callback(event_payload)
+        # A plain function (`on_event=print`) works as well as a coroutine.
+        delivered = self.callback(event_payload)
+        if inspect.isawaitable(delivered):
+            await delivered
 
 
 current_delivery: ContextVar[StreamDelivery | None] = ContextVar(

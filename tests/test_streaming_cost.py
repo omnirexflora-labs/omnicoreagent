@@ -12,8 +12,14 @@ from __future__ import annotations
 
 import pytest
 
-from omnicoreagent.core.privacy import PrivacyFilter
+from omnicoreagent.core.privacy import PrivacyConfig, PrivacyFilter
 from omnicoreagent.core.runtime.streaming import StreamDelivery
+
+
+def _stream_filter() -> PrivacyFilter:
+    # The stream is not redacted by default; these tests are about what
+    # redacting it costs when an application turns it on.
+    return PrivacyFilter(PrivacyConfig(redact_stream=True))
 
 
 async def _delivered(delivery: StreamDelivery, event: dict) -> dict:
@@ -32,7 +38,7 @@ async def _delivered(delivery: StreamDelivery, event: dict) -> dict:
 
 @pytest.mark.asyncio
 async def test_a_delta_with_personal_data_in_it_is_still_redacted():
-    delivery = StreamDelivery(callback=None, run_id="run_1", privacy_filter=PrivacyFilter())
+    delivery = StreamDelivery(callback=None, run_id="run_1", privacy_filter=_stream_filter())
 
     payload = await _delivered(
         delivery, {"type": "text_delta", "text": "write to ada@example.com today"}
@@ -44,7 +50,7 @@ async def test_a_delta_with_personal_data_in_it_is_still_redacted():
 
 @pytest.mark.asyncio
 async def test_redacting_a_delta_runs_the_patterns_once_on_its_text():
-    filter_ = PrivacyFilter()
+    filter_ = _stream_filter()
     delivery = StreamDelivery(callback=None, run_id="run_1", privacy_filter=filter_)
     calls = []
     original = filter_.redact_text
@@ -64,7 +70,7 @@ async def test_the_envelope_around_a_delta_is_left_as_it_is():
     """Identifiers and phases are never personal data; a phone-shaped run id
     must not be rewritten into a marker."""
     delivery = StreamDelivery(
-        callback=None, run_id="run 555-0100-1234-567", privacy_filter=PrivacyFilter()
+        callback=None, run_id="run 555-0100-1234-567", privacy_filter=_stream_filter()
     )
 
     payload = await _delivered(delivery, {"type": "text_delta", "text": "hi"})

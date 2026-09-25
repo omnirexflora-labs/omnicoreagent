@@ -41,8 +41,13 @@ class PrivacyConfig:
     # its author's email replaced by "[REDACTED_EMAIL]"). Turn this on for
     # a workspace that must hold no PII at rest.
     redact_workspace: bool = False
-    redact_stream: bool = True
-    redact_public: bool = True
+    # What the run streams to the application and the answer it returns are
+    # the application's own output: an agent asked for a user's email has to
+    # be able to give it. Redacted, a 0.4 prerelease answered "Contact
+    # [REDACTED_EMAIL]". By default only the record — telemetry, and what is
+    # exported from it — is redacted (the maintainer's rule, 2026-09-25).
+    redact_stream: bool = False
+    redact_public: bool = False
     redact_model_io: bool = False
     categories: list[str] = field(default_factory=lambda: sorted(PII_CATEGORIES))
 
