@@ -195,7 +195,9 @@ async def run_program(
         return {"status": "error", "message": "The program is empty."}
     output = monty.CollectString(max_bytes=config.max_output_bytes)
     limits = {
-        "max_duration_secs": float(config.max_duration_seconds),
+        # The program's own compute time (Monty 1.0); the clock stops while it
+        # waits on a tool.
+        "max_feed_duration_secs": float(config.max_duration_seconds),
         "max_memory": int(config.max_memory_bytes),
         # Tool calls plus refused OS calls; the tool cap is enforced below.
         "max_suspensions": int(config.max_tool_calls) + 100,
@@ -217,7 +219,9 @@ async def run_program(
                     )
                 while not isinstance(snapshot, monty.MontyComplete):
                     if getattr(snapshot, "is_os_function", False):
-                        # No filesystem, environment, or clock beyond Monty's own.
+                        # Files, the environment and sleeping come back to the
+                        # host as OS calls, and are refused. The clock and random
+                        # numbers Monty answers itself.
                         snapshot = await snapshot.resume_not_handled()
                         continue
                     name = getattr(snapshot, "function_name", None)
