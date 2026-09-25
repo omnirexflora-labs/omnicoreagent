@@ -428,3 +428,53 @@ async def test_a_failed_mcp_server_is_in_the_trials_record(tmp_path: Path, caplo
 
     assert context.metadata["omnicoreagent_mcp_failed"] == ["rates: Connection closed"]
     assert "rates: Connection closed" in caplog.text
+
+
+# --- a run under a task's network policy -------------------------------------
+#
+# A task that allows the agent to reach only its model's host failed every run:
+# counting tokens made tiktoken download its encoding, and the policy cut it.
+
+
+@pytest.mark.asyncio
+async def test_the_tokenizer_is_fetched_while_the_network_is_open(tmp_path: Path):
+    agent = _agent(tmp_path, install_spec="omnicoreagent==1.0")
+    environment = FakeEnvironment()
+
+    await agent.setup(environment)
+
+    from omnicoreagent.harbor.agent import TIKTOKEN_CACHE_DIR
+
+    warm = [c for c in environment.commands if "tiktoken" in c]
+    assert warm, "the encodings are not fetched at install"
+    assert any(f"TIKTOKEN_CACHE_DIR={TIKTOKEN_CACHE_DIR}" in c for c in warm)
+    assert any("cl100k_base" in c and "o200k_base" in c for c in warm)
+
+
+def test_the_run_uses_the_fetched_tokenizer_and_the_bundled_price_table(tmp_path: Path):
+    from omnicoreagent.harbor.agent import TIKTOKEN_CACHE_DIR
+
+    env = _agent(tmp_path)._model_env()
+
+    assert env["TIKTOKEN_CACHE_DIR"] == TIKTOKEN_CACHE_DIR
+    # LiteLLM otherwise fetches its price table from GitHub on every start.
+    assert env["LITELLM_LOCAL_MODEL_COST_MAP"] == "True"
+
+
+@pytest.mark.asyncio
+async def test_why_the_run_ended_is_in_the_trials_metadata(tmp_path: Path):
+    from harbor.models.agent.context import AgentContext
+
+    logs = tmp_path / "agent"
+    (logs / NATIVE_SUBDIR).mkdir(parents=True)
+    (logs / NATIVE_SUBDIR / "result.json").write_text(json.dumps(
+        {"status": "error", "exit_code": 1, "termination_reason": "max_steps",
+         "response": "Agent reached its step limit.", "run_id": "run_1"}
+    ))
+    agent = OmniCoreAgentHarbor(model_name="openai/gpt-5.6-terra", logs_dir=logs)
+    context = AgentContext()
+
+    agent.populate_context_post_run(context)
+
+    assert context.metadata["omnicoreagent_termination_reason"] == "max_steps"
+    assert context.metadata["omnicoreagent_detail"] == "Agent reached its step limit."

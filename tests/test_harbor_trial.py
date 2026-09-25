@@ -370,6 +370,8 @@ def test_what_a_finished_run_cost():
         "cost_usd": 0.0123,
         "status": "success",
         "exit_code": 0,
+        "termination_reason": None,
+        "detail": None,
     }
 
 
@@ -713,3 +715,36 @@ def test_failed_mcp_servers_are_named_for_the_trials_record():
     for status in ("disconnected", "not_connected"):
         assert failed_mcp_servers(_with_mcp(status)) == [f"rates: {status}"]
     assert failed_mcp_servers(None) == []
+
+
+# --- why a run ended ---------------------------------------------------------------
+
+
+def test_why_a_run_ended_is_reported_not_only_its_status():
+    """A step limit and a crash both have status "error"; the reason tells them apart."""
+    usage = usage_from_result(
+        {"status": "error", "exit_code": 1, "termination_reason": "max_steps",
+         "response": "Agent reached its step limit.", "error": None}
+    )
+
+    assert usage["termination_reason"] == "max_steps"
+    assert usage["detail"] == "Agent reached its step limit."
+
+
+def test_a_successful_run_has_no_detail():
+    usage = usage_from_result(
+        {"status": "success", "exit_code": 0, "response": "Fixed it.", "termination_reason": None}
+    )
+
+    assert usage["detail"] is None
+
+
+def test_the_detail_prefers_the_error_and_is_short():
+    usage = usage_from_result(
+        {"status": "timeout", "exit_code": 5, "error": "run exceeded its deadline",
+         "response": "x" * 5000}
+    )
+
+    assert usage["detail"] == "run exceeded its deadline"
+    long = usage_from_result({"status": "error", "response": "y" * 5000})
+    assert len(long["detail"]) <= 300

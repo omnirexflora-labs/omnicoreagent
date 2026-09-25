@@ -5,9 +5,12 @@ Uses tiktoken when installed, with a lightweight word-count fallback for core
 installations.
 """
 
+import logging
 from functools import lru_cache
 from typing import Any
 from omnicoreagent.core.interaction_history import render_message
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_ENCODING = "cl100k_base"
@@ -28,14 +31,27 @@ def get_encoding(model: str = "gpt-4") -> Any:
     """
     try:
         import tiktoken
-
-        return tiktoken.encoding_for_model(model)
     except ModuleNotFoundError:
         return None
-    except KeyError:
-        import tiktoken
-
-        return tiktoken.get_encoding(DEFAULT_ENCODING)
+    try:
+        try:
+            return tiktoken.encoding_for_model(model)
+        except KeyError:
+            return tiktoken.get_encoding(DEFAULT_ENCODING)
+    except Exception as exc:
+        # tiktoken downloads an encoding on first use. Where the network is
+        # closed — a task that allows only the model's host — counting falls
+        # back to an estimate; a count is not a reason for the run to fail.
+        # Cached, so this is said once, not on every count.
+        logger.warning(
+            "Token counting uses an estimate: the tiktoken encoding for %s could "
+            "not be loaded (%s: %s). Set TIKTOKEN_CACHE_DIR to a directory "
+            "holding it to count exactly without the network.",
+            model,
+            type(exc).__name__,
+            exc,
+        )
+        return None
 
 
 def count_tokens(text: str, model: str = "gpt-4") -> int:

@@ -63,6 +63,10 @@ NATIVE_SUBDIR = "omnicoreagent"
 # Ubuntu refuses that install outright (PEP 668).
 VENV_DIR = f"{AGENT_DIR}/venv"
 PYTHON = f"{VENV_DIR}/bin/python"
+# tiktoken downloads its encodings on first use, and a task may close the network
+# while the agent runs; they are fetched at install, while it is open.
+TIKTOKEN_CACHE_DIR = f"{AGENT_DIR}/tiktoken"
+_ENCODINGS = ("cl100k_base", "o200k_base")
 
 
 class OmniCoreAgentOptions(InstalledAgentOptions):
@@ -186,7 +190,14 @@ class OmniCoreAgentHarbor(BaseInstalledAgent):
     def _model_env(self) -> dict[str, str]:
         """What the run needs in its environment: the provider's own variables."""
         access: ResolvedModelConnection = self.model_connection
-        return {"PYTHONUNBUFFERED": "1", **{k: v for k, v in (access.env or {}).items()}}
+        return {
+            "PYTHONUNBUFFERED": "1",
+            "TIKTOKEN_CACHE_DIR": TIKTOKEN_CACHE_DIR,
+            # LiteLLM otherwise fetches its price table from GitHub on every
+            # start — slow, and cut where the network is closed.
+            "LITELLM_LOCAL_MODEL_COST_MAP": "True",
+            **{k: v for k, v in (access.env or {}).items()},
+        }
 
     # --- install ----------------------------------------------------------
 
@@ -223,6 +234,20 @@ class OmniCoreAgentHarbor(BaseInstalledAgent):
                 "if hasattr(omnicoreagent, \"__version__\") else \"installed\")'"
             ),
             timeout_sec=900,
+        )
+        # Not fatal: without the cache the run counts tokens by estimate.
+        encodings = ", ".join(repr(name) for name in _ENCODINGS)
+        await self.exec_as_agent(
+            environment,
+            command=(
+                f"mkdir -p {TIKTOKEN_CACHE_DIR} && "
+                f"TIKTOKEN_CACHE_DIR={TIKTOKEN_CACHE_DIR} {PYTHON} -c "
+                + shlex.quote(
+                    f"import tiktoken\nfor name in ({encodings},): tiktoken.get_encoding(name)"
+                )
+                + " || echo 'tiktoken encodings not fetched; token counts will be estimates'"
+            ),
+            timeout_sec=300,
         )
 
     async def _install_source(self) -> tuple[str, str]:
@@ -360,6 +385,8 @@ class OmniCoreAgentHarbor(BaseInstalledAgent):
                     ("omnicoreagent_status", usage["status"]),
                     ("omnicoreagent_exit_code", usage["exit_code"]),
                     ("omnicoreagent_run_id", (result or {}).get("run_id")),
+                    ("omnicoreagent_termination_reason", usage["termination_reason"]),
+                    ("omnicoreagent_detail", usage["detail"]),
                 )
                 if value is not None
             }

@@ -317,9 +317,9 @@ async def test_llm_step_returns_model_error(monkeypatch):
     )
 
     assert result.response is None
-    # The error's type is named; an account problem would be said plainly
-    # (tests/test_provider_account_errors.py).
+    # The error's type and what it said are named; an account problem would be
+    # said plainly (tests/test_provider_account_errors.py).
     assert result.error_result["answer"] == (
-        "Model encountered an error (RuntimeError), please do retry again"
+        "Model encountered an error (RuntimeError: provider down), please do retry again"
     )
     assert isinstance(result.error_result["usage"], Usage)
