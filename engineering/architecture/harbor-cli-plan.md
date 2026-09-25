@@ -93,14 +93,18 @@ trial on the server.
   every trial errored. Tested on three real trials copied from the server.
 - **C5. Dropped.** Harbor's own `harbor init --task` writes a task skeleton;
   `omnicoreagent harbor init` passes through to it. A second one would drift.
-- **C6. A task set, through the command.** On the server, via
-  `omnicoreagent harbor run`: the receipts task (should pass), a task the agent
-  cannot solve (reward 0, reported as such), a command that times out, a run that
-  reaches its step limit, and a task whose network is denied. `results` on the
-  job must say what happened to each without opening a log.
-- **C7. The user's page.** `docs/` gets one page for running this agent on
-  Harbor, held by `tests/test_docs_claims.py` like the others (it names only
-  `LLM_API_KEY`).
+- **C6. A task set, through the command.** Done, on the server, every job
+  through `omnicoreagent harbor run` with only `LLM_API_KEY` set
+  (`engineering/validation/harbor_failures`, each task passed by the oracle
+  first). The three passing tasks passed as one concurrent job. An unknowable
+  answer scored 0 and the agent said it could not find it rather than invent
+  one. A command that never finishes timed out and the agent said so. A run
+  with a short deadline ended itself as `timeout` and left its evidence. A
+  step limit ends as `error (max_steps)`, now reported as such. An agent-phase
+  allowlist passes with `--allow-agent-host` for the model's host, and fails
+  saying it cannot reach it without. The set found findings 53 and 54.
+- **C7. The user's page.** Done: `docs/how-to-guides/harbor.mdx`, held by
+  `tests/test_docs_claims.py` like the others.
 
 ## Operating rule on the server
 

@@ -1,0 +1,33 @@
+schema_version = "1.4"
+artifacts = []
+
+[task]
+name = "omnicoreagent-labs/unknowable-code"
+version = "1.0.0"
+description = "The answer is only in the verifier; the agent cannot know it."
+keywords = ["failure-modes"]
+[[task.authors]]
+name = "OmniCoreAgent"
+
+[metadata]
+difficulty = "easy"
+
+[verifier]
+timeout_sec = 120.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 600.0
+
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 900.0
+os = "linux"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]

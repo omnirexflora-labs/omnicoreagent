@@ -1,0 +1,34 @@
+schema_version = "1.4"
+artifacts = []
+
+[task]
+name = "omnicoreagent-labs/agent-network-allowlist"
+version = "1.0.0"
+description = "Only named hosts are reachable while the agent runs."
+keywords = ["failure-modes"]
+[[task.authors]]
+name = "OmniCoreAgent"
+
+[metadata]
+difficulty = "easy"
+
+[verifier]
+timeout_sec = 120.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 600.0
+network_mode = "allowlist"
+allowed_hosts = []
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 900.0
+os = "linux"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]
