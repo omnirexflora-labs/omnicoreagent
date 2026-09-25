@@ -1,0 +1,12 @@
+{
+    "task": {
+        "path": "repo/engineering/validation/harbor_task/receipts-subtotal"
+    },
+    "trial_name": "receipts-subtotal__YQwKwim",
+    "trials_dir": "/opt/steward/harbor/jobs/2026-09-24__21-50-47",
+    "agent": {
+        "name": "omnicoreagent.harbor.agent:OmniCoreAgentHarbor",
+        "model_name": "openai/gpt-5.6-terra"
+    },
+    "job_id": "f94d14bd-b50a-4559-b50e-1d9f08db104c"
+}

@@ -379,6 +379,38 @@ Each line names the commit; the plan's execution log has the detail.
     impossible on all of them rather than mitigated on one.
     (`engineering/validation/scale.md`)
 
+51. **A trial passed while the trajectory it left behind said nothing.** The
+    Harbor adapter's first real trial solved the task and scored reward 1.0, and
+    the evaluation record of it was empty: no steps, no cost, no model usage.
+    The conversion had been written against a shape nobody had run. The headless
+    command writes a *run* trajectory, whose per-trace trajectories sit under
+    `segments[*].trajectory`, and whose model facts name the model under
+    `provider_model`; reading `steps` from the top level found none. Nothing
+    complained: the harness reads per-model usage out of that file, and a file
+    its own model rejects is answered the same way as a file that is not there —
+    `None`. The cost was missing for a second reason, that `result.json` reports
+    tokens but not cost, which only the run's totals hold. Two lessons, both
+    about evidence rather than about Harbor: a converter between two formats is
+    tested against a **captured** document (`tests/fixtures/harbor_run_trajectory.json`
+    is now a real trial's own trajectory), and a writer of a validated format
+    should be read back by the reader's own validator in a test, because an
+    invalid file and an absent one look alike to whoever consumes it.
+    (`src/omnicoreagent/harbor/trial.py`, `tests/test_harbor_agent.py`)
+
+52. **A task's MCP server died and the trial still scored 1.0.** The first trial
+    of a task whose answer only an MCP server knew: the server crashed on start
+    (the task pinned `mcp>=1.9`, and mcp 2.x renamed `FastMCP`), the run went
+    on without its tools, and the agent searched the filesystem, found the
+    server's source, and read the answer out of it. Our trace recorded the
+    server as `failed: Connection closed`; the ATIF, Harbor's metadata and the
+    trial log said nothing, so an evaluator would have read a clean pass. The
+    adapter now carries each MCP server's state into the trajectory Harbor reads
+    and a failed one into the trial's metadata and log, and the task keeps one
+    answer behind a streamable-HTTP server in a container the agent cannot read,
+    so its reward cannot be earned without MCP working. Reading how a trial
+    passed, not only that it did, is what found it.
+    (`src/omnicoreagent/harbor/trial.py`, `engineering/validation/harbor_task/rates-over-mcp`)
+
 ## What it cost
 
 A read-the-repository run costs about two to eight cents on `gpt-5.6-terra`

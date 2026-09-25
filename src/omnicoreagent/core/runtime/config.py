@@ -199,6 +199,9 @@ class AgentConfig:
     enable_advanced_tool_use: bool = False
     enable_subagents: bool = False
     enable_agent_skills: bool = False
+    # Where skills are found; None is ./.agents/skills in the working directory.
+    # A harness names its own, so the task's directory stays the task's.
+    skills_dir: str | None = None
     # Environment variables host skill scripts receive beyond the minimal set
     # (PATH, HOME, locale, TMPDIR, TERM); secrets are not passed by default.
     skill_script_env: list[str] = field(default_factory=list)

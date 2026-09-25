@@ -1,0 +1,15 @@
+{
+    "task": {
+        "path": "repo/engineering/validation/harbor_task/receipts-subtotal"
+    },
+    "trial_name": "receipts-subtotal__Fg2eKg2",
+    "trials_dir": "jobs/c4-err/2026-09-25__06-23-23",
+    "agent": {
+        "name": "omnicoreagent.harbor.agent:OmniCoreAgentHarbor",
+        "model_name": "openai/gpt-5.6-terra",
+        "kwargs": {
+            "install_spec": "omnicoreagent==0.0.0.nonexistent"
+        }
+    },
+    "job_id": "13126eb2-0538-466e-ba0e-20599201f712"
+}

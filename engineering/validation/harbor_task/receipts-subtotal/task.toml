@@ -1,0 +1,32 @@
+schema_version = "1.4"
+artifacts = []
+
+[task]
+name = "omnicoreagent-labs/receipts-subtotal"
+version = "1.0.0"
+description = "A shop's receipt totals are wrong and its tests say so."
+keywords = ["python", "debugging", "pytest"]
+[[task.authors]]
+name = "OmniCoreAgent"
+
+[metadata]
+difficulty = "easy"
+
+[verifier]
+timeout_sec = 300.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 900.0
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 900.0
+os = "linux"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]

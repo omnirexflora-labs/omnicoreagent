@@ -68,6 +68,9 @@ e2b = ["e2b>=2.51.0"]
 daytona = ["daytona>=0.214.0"]
 vercel = ["vercel-sandbox>=0.6.0"]
 postgres = ["sqlalchemy>=2.0.54", "psycopg2-binary>=2.9.13"]
+# Running as a Harbor (Terminal-Bench) agent: the adapter in
+# omnicoreagent.harbor derives from Harbor's own installed-agent base class.
+harbor = ["harbor>=0.23.0"]
 mongodb = ["motor>=3.7.1", "pymongo>=4.18.1"]
 s3 = ["boto3>=1.43.98"]
 serve = ["fastapi>=0.141.1", "uvicorn>=0.53.0", "python-multipart>=0.0.32"]

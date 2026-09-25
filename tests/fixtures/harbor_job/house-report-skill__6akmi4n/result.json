@@ -1,0 +1,131 @@
+{
+    "id": "b9a58bed-3254-4b5a-bb14-8e20e6b99dc4",
+    "task_name": "omnicoreagent-labs/house-report-skill",
+    "trial_name": "house-report-skill__6akmi4n",
+    "trial_uri": "file:///opt/steward/harbor/jobs/c1-agent/2026-09-25__06-07-24/house-report-skill__6akmi4n",
+    "task_id": {
+        "path": "repo/engineering/validation/harbor_task/house-report-skill"
+    },
+    "source": null,
+    "task_checksum": "41ab5a52ef41ac32981147fad16425d2ed118884f5d19b5630decf1e0b727d8b",
+    "config": {
+        "task": {
+            "path": "repo/engineering/validation/harbor_task/house-report-skill",
+            "git_url": null,
+            "git_commit_id": null,
+            "name": null,
+            "ref": null,
+            "overwrite": false,
+            "download_dir": null,
+            "source": null
+        },
+        "trial_name": "house-report-skill__6akmi4n",
+        "trials_dir": "jobs/c1-agent/2026-09-25__06-07-24",
+        "install_only": false,
+        "timeout_multiplier": 1.0,
+        "agent_timeout_multiplier": null,
+        "verifier_timeout_multiplier": null,
+        "agent_setup_timeout_multiplier": null,
+        "environment_build_timeout_multiplier": null,
+        "agent": {
+            "name": "omnicoreagent.harbor.agent:OmniCoreAgentHarbor",
+            "import_path": null,
+            "model_name": "openai/gpt-5.6-terra",
+            "n_concurrent": null,
+            "concurrency_group": null,
+            "skills": [],
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "resume_trajectory": false,
+            "load_trajectory": null,
+            "extra_allowed_hosts": [],
+            "kwargs": {
+                "run_timeout": 780
+            },
+            "mcp_servers": []
+        },
+        "user_agent": null,
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "cpu_enforcement_policy": "auto",
+            "memory_enforcement_policy": "auto",
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "override_tpu": null,
+            "mounts": null,
+            "extra_docker_compose": [],
+            "kwargs": {},
+            "extra_allowed_hosts": []
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "disable": false
+        },
+        "artifacts": [],
+        "extra_instruction_paths": [],
+        "extra_instructions": [],
+        "job_id": "d55eb112-6b2a-4ece-80ec-377c06acea5e",
+        "source_trial": null
+    },
+    "agent_info": {
+        "name": "omnicoreagent",
+        "version": "0.0.0+harbor",
+        "model_info": {
+            "name": "gpt-5.6-terra",
+            "provider": "openai"
+        }
+    },
+    "agent_result": {
+        "n_input_tokens": 9436,
+        "n_cache_tokens": 6679,
+        "n_output_tokens": 352,
+        "cost_usd": 0.0124463,
+        "model_usage": {
+            "openai/gpt-5.6-terra": {
+                "n_input_tokens": 9436,
+                "n_cache_tokens": 6679,
+                "n_output_tokens": 352,
+                "cost_usd": 0.0124463
+            }
+        },
+        "rollout_details": null,
+        "metadata": {
+            "omnicoreagent_status": "success",
+            "omnicoreagent_exit_code": 0,
+            "omnicoreagent_run_id": "run_bd5b632d4020433a9b27165861f52d19"
+        }
+    },
+    "verifier_result": {
+        "rewards": {
+            "reward": 1.0
+        }
+    },
+    "verifier_environment_mode": "shared",
+    "exception_info": null,
+    "started_at": "2026-09-25T06:07:25.096272Z",
+    "finished_at": "2026-09-25T06:08:29.570301Z",
+    "environment_setup": {
+        "started_at": "2026-09-25T06:07:25.115084Z",
+        "finished_at": "2026-09-25T06:07:30.097577Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-09-25T06:07:30.097669Z",
+        "finished_at": "2026-09-25T06:07:59.634281Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-09-25T06:07:59.634498Z",
+        "finished_at": "2026-09-25T06:08:14.649541Z"
+    },
+    "verifier": {
+        "started_at": "2026-09-25T06:08:15.296765Z",
+        "finished_at": "2026-09-25T06:08:15.724953Z"
+    },
+    "step_results": null
+}
