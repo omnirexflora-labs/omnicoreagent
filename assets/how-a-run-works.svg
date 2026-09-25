@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 360" width="960" height="360" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <title>How a run works in OmniCoreAgent</title>
+  <desc>Your application calls the agent. The runtime governs every action with a policy, a budget and a sandbox, talks to the model and to tools, and keeps the evidence of the run: the trajectory, outcomes and training records, exported to your observability tools and to Harbor.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6B7280"/>
+    </marker>
+    <linearGradient id="core" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#10A37F"/>
+      <stop offset="1" stop-color="#0D9373"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="360" rx="18" fill="#F8FAF9"/>
+
+  <!-- your application -->
+  <rect x="28" y="130" width="150" height="84" rx="12" fill="#FFFFFF" stroke="#D1D5DB" stroke-width="1.5"/>
+  <text x="103" y="166" text-anchor="middle" font-size="16" font-weight="600" fill="#111827">Your app</text>
+  <text x="103" y="190" text-anchor="middle" font-size="12.5" fill="#6B7280">script · CLI · server</text>
+
+  <!-- the runtime -->
+  <rect x="226" y="58" width="330" height="228" rx="16" fill="url(#core)"/>
+  <text x="391" y="94" text-anchor="middle" font-size="19" font-weight="700" fill="#FFFFFF">OmniCoreAgent</text>
+  <text x="391" y="116" text-anchor="middle" font-size="12.5" fill="#D1FAE5">the loop · memory · workspace · guardrail</text>
+  <rect x="238" y="136" width="98" height="56" rx="10" fill="#FFFFFF" fill-opacity="0.16" stroke="#FFFFFF" stroke-opacity="0.5"/>
+  <text x="287" y="160" text-anchor="middle" font-size="14" font-weight="600" fill="#FFFFFF">Policy</text>
+  <text x="287" y="178" text-anchor="middle" font-size="10.5" fill="#D1FAE5">allow · ask · deny</text>
+  <rect x="342" y="136" width="98" height="56" rx="10" fill="#FFFFFF" fill-opacity="0.16" stroke="#FFFFFF" stroke-opacity="0.5"/>
+  <text x="391" y="160" text-anchor="middle" font-size="14" font-weight="600" fill="#FFFFFF">Budget</text>
+  <text x="391" y="178" text-anchor="middle" font-size="10.5" fill="#D1FAE5">held, then spent</text>
+  <rect x="446" y="136" width="98" height="56" rx="10" fill="#FFFFFF" fill-opacity="0.16" stroke="#FFFFFF" stroke-opacity="0.5"/>
+  <text x="495" y="160" text-anchor="middle" font-size="14" font-weight="600" fill="#FFFFFF">Sandbox</text>
+  <text x="495" y="178" text-anchor="middle" font-size="10.5" fill="#D1FAE5">no keys inside</text>
+  <text x="391" y="226" text-anchor="middle" font-size="12.5" fill="#FFFFFF">durable: pauses for a person,</text>
+  <text x="391" y="244" text-anchor="middle" font-size="12.5" fill="#FFFFFF">survives a crash, resumes where it stopped</text>
+
+  <!-- model and tools -->
+  <rect x="610" y="58" width="150" height="84" rx="12" fill="#FFFFFF" stroke="#D1D5DB" stroke-width="1.5"/>
+  <text x="685" y="94" text-anchor="middle" font-size="16" font-weight="600" fill="#111827">Model</text>
+  <text x="685" y="118" text-anchor="middle" font-size="12.5" fill="#6B7280">any provider</text>
+  <rect x="610" y="202" width="150" height="84" rx="12" fill="#FFFFFF" stroke="#D1D5DB" stroke-width="1.5"/>
+  <text x="685" y="238" text-anchor="middle" font-size="16" font-weight="600" fill="#111827">Tools</text>
+  <text x="685" y="262" text-anchor="middle" font-size="12.5" fill="#6B7280">yours · MCP · code</text>
+
+  <!-- evidence -->
+  <rect x="804" y="58" width="130" height="228" rx="12" fill="#ECFDF5" stroke="#0D9373" stroke-width="1.5"/>
+  <text x="869" y="92" text-anchor="middle" font-size="16" font-weight="700" fill="#065F46">Evidence</text>
+  <text x="869" y="128" text-anchor="middle" font-size="12.5" fill="#065F46">trajectory</text>
+  <text x="869" y="152" text-anchor="middle" font-size="12.5" fill="#065F46">outcomes</text>
+  <text x="869" y="176" text-anchor="middle" font-size="12.5" fill="#065F46">training records</text>
+  <line x1="826" y1="196" x2="912" y2="196" stroke="#A7F3D0"/>
+  <text x="869" y="220" text-anchor="middle" font-size="11.5" fill="#047857">OTLP · LangSmith</text>
+  <text x="869" y="240" text-anchor="middle" font-size="11.5" fill="#047857">Opik · JSONL</text>
+  <text x="869" y="260" text-anchor="middle" font-size="11.5" fill="#047857">Harbor (ATIF)</text>
+
+  <!-- arrows -->
+  <line x1="180" y1="172" x2="222" y2="172" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+  <line x1="558" y1="110" x2="606" y2="100" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+  <line x1="558" y1="234" x2="606" y2="244" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+  <path d="M762,100 C784,100 784,110 800,110" fill="none" stroke="#0D9373" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <path d="M762,244 C784,244 784,234 800,234" fill="none" stroke="#0D9373" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+
+  <text x="480" y="326" text-anchor="middle" font-size="13" fill="#6B7280">Every action is authorized, paid for and recorded — and the record is yours.</text>
+</svg>
