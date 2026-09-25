@@ -106,9 +106,22 @@ def test_every_internal_link_resolves():
     broken = []
     for page in PAGES:
         text = page.read_text()
-        for target in re.findall(r"\]\((/docs/[^)#\s]+)", text) + re.findall(r'href="(/docs/[^"#]+)"', text):
+        # Every link to a page of the site, not only those under /docs: a link
+        # that lost its /docs prefix is broken on the site (found by Mintlify's
+        # own checker, 2026-09-25).
+        prose = FENCE.sub("", text)
+        for target in re.findall(r"\]\((/[^)#\s]+)", prose) + re.findall(r'href="(/[^"#]+)"', prose):
             path = target.lstrip("/").rstrip("/")
-            if not (ROOT / f"{path}.mdx").exists() and not (ROOT / path / "index.mdx").exists():
+            exists = any(
+                candidate.exists()
+                for candidate in (
+                    ROOT / f"{path}.mdx",
+                    ROOT / f"{path}.md",
+                    ROOT / path / "index.mdx",
+                    ROOT / path,
+                )
+            )
+            if not exists:
                 broken.append(f"{page.relative_to(ROOT)} -> {target}")
         for target in re.findall(r"\]\((\./[^)#\s]+)", text):
             if not (page.parent / target).exists():

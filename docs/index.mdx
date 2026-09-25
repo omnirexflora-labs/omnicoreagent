@@ -1,6 +1,6 @@
 ---
 title: OmniCoreAgent
-description: 'Open Python agent harness and runtime for production AI agents'
+description: 'The open Python runtime for AI agents that have to hold up in production'
 mode: 'wide'
 ---
 
@@ -15,177 +15,61 @@ mode: 'wide'
   alt="OmniCoreAgent Dark"
 />
 
-## Open Python Agent Harness For Production AI Applications
+## The runtime around the model
 
-**OmniCoreAgent** is the runtime around the model: the loop, tools, memory,
-context control, workspace files, MCP tools, subagents, background tasks, and
-REST/SSE serving — and, once the agent can do real things, the policy that
-says what it may do, the sandbox its code runs in, the record that survives a
-crash, the budget that stops it spending, and the trace a person reads
-afterwards.
+A model is not an agent. **OmniCoreAgent** is everything around it: the loop,
+tools, memory and files — and, once the agent can do real things, the policy
+that says what it may do, the sandbox its code runs in, the record that survives
+a crash, the budget that stops it spending, and the evidence of every run.
 
-Start small with one agent and one model. Add tools, memory, workspace files,
-background tasks, telemetry, and OmniServe only when the application needs them.
+One agent object, from a first script to a governed background worker on a
+server, and onto a benchmark.
 
-```bash
-pip install omnicoreagent
-```
+<Frame>
+  <img src="/assets/how-a-run-works.svg" alt="How a run works: your app calls OmniCoreAgent, which governs every action with a policy, a budget and a sandbox, talks to the model and to tools, and keeps the evidence of the run." />
+</Frame>
 
-```bash
-export LLM_API_KEY=your_api_key_here
-```
-
-<CardGroup cols={2}>
-  <Card title="Run The Quickstart" icon="bolt" href="/docs/getting-started/quickstart">
-    Install OmniCoreAgent, create your first agent, add one tool, and learn the
-    next paths.
+<CardGroup cols={3}>
+  <Card title="It acts safely" icon="shield-check">
+    A policy allows, denies or **asks a person** before each action. Commands
+    run in a sandbox, never with your credentials. Budgets cannot be overspent.
   </Card>
-  <Card title="Use Docs With AI Tools" icon="sparkles" href="/docs/getting-started/use-docs-with-ai-tools">
-    Use Ask AI, Markdown export, `llms.txt`, hosted docs MCP, Cursor, VS Code,
-    ChatGPT, Claude, and Perplexity.
+  <Card title="It survives" icon="rotate">
+    A run pauses for a person or a top-up and resumes where it stopped — even
+    after a crash, in another process — and never repeats a call silently.
+  </Card>
+  <Card title="It leaves evidence" icon="magnifying-glass-chart">
+    Every run is kept: what the model saw at each step, what it did, what came
+    back, outcomes that arrive later, and records to evaluate or train on.
   </Card>
 </CardGroup>
 
-Add only the production extras you need later:
+## Start in three steps
 
-```bash
-pip install "omnicoreagent[redis]"
-pip install "omnicoreagent[serve]"
-pip install "omnicoreagent[all]"
-```
+<Steps>
+  <Step title="Install">
+    ```bash
+    pip install omnicoreagent
+    ```
+  </Step>
+  <Step title="Set your model key">
+    ```bash
+    export LLM_API_KEY=your_api_key_here
+    ```
+  </Step>
+  <Step title="Build something">
+    <CardGroup cols={2}>
+      <Card title="Quickstart — 5 minutes" icon="bolt" href="/docs/getting-started/quickstart">
+        An agent, a tool, a memory, and the evidence of its run.
+      </Card>
+      <Card title="Tour — 15 minutes" icon="map" href="/docs/getting-started/tour">
+        A policy that asks a person, a sandbox, a budget.
+      </Card>
+    </CardGroup>
+  </Step>
+</Steps>
 
----
-
-## Choose Your Path
-
-<CardGroup cols={2}>
-  <Card title="Build Your First Agent" icon="bolt" href="/docs/getting-started/quickstart">
-    One model, one agent, one task.
-  </Card>
-  <Card title="Add Python Tools" icon="toolbox" href="/docs/core-concepts/local-tools">
-    Register application-owned functions with `ToolRegistry`.
-  </Card>
-  <Card title="Connect MCP Tools" icon="plug" href="/docs/core-concepts/mcp">
-    Load tools from external MCP servers.
-  </Card>
-  <Card title="Keep Session Memory" icon="database" href="/docs/core-concepts/memory">
-    Store conversation history in memory, Redis, MongoDB, or SQL.
-  </Card>
-  <Card title="Use Workspace Files" icon="folder-tree" href="/docs/core-concepts/workspace-files">
-    Give agents a file surface for notes, artifacts, and offloads.
-  </Card>
-  <Card title="Serve An Agent API" icon="server" href="/docs/how-to-guides/omniserve">
-    Run the same agent behind REST and SSE endpoints.
-  </Card>
-  <Card title="Run Background Work" icon="clock" href="/docs/core-concepts/background-agents">
-    Schedule durable agent work with run history, retries, and workspace output.
-  </Card>
-  <Card title="Govern What It May Do" icon="shield-check" href="/docs/core-concepts/security-model">
-    A policy of allow, ask, and deny over every capability; `ask` pauses the run for a person.
-  </Card>
-  <Card title="Run Code In A Sandbox" icon="box" href="/docs/core-concepts/execution">
-    An `execute` tool whose commands run in Docker, E2B, Modal, Daytona, or Vercel — never on your host.
-  </Card>
-  <Card title="Pause, Resume, Recover" icon="rotate-right" href="/docs/core-concepts/durable-runs">
-    Every run has a record: approvals, budgets, checkpoints, and what to do after a crash.
-  </Card>
-  <Card title="Read Every Run" icon="eye" href="/docs/how-to-guides/observability">
-    One trace per run, end to end; export to OTLP, LangSmith, Opik, or JSONL.
-  </Card>
-  <Card title="Build A Real Application" icon="rocket" href="/cookbook/real_applications">
-    Start from production-shaped examples.
-  </Card>
-</CardGroup>
-
----
-
-## Why It Exists
-
-OmniCoreAgent is built around real agent runtime problems:
-
-<CardGroup cols={2}>
-  <Card title="Parallel tool batches" icon="bolt">
-    The runtime supports independent tool calls in one batch, executes them
-    concurrently, and returns one structured observation.
-  </Card>
-  <Card title="Structured observations" icon="filter">
-    Tool results are parsed, formatted, guardrail-checked, and offloaded when
-    they cross the configured threshold before the model sees them.
-  </Card>
-  <Card title="Signature loop detection" icon="rotate">
-    The harness detects repeated tool signatures and repeated tool interaction
-    patterns beyond max-step exhaustion.
-  </Card>
-  <Card title="Workspace-backed context" icon="folder-tree">
-    Agents, subagents, tool offloads, notes, scratchpads, and artifacts share one
-    local, S3, or R2-backed workspace.
-  </Card>
-  <Card title="Automatic context control" icon="brain-circuit">
-    When enabled, the runtime checks context before each model call and acts
-    before the configured budget is exceeded.
-  </Card>
-  <Card title="Governed, sandboxed execution" icon="shield-check">
-    Every tool call, MCP server, command, network, delegation, and background
-    run is a capability a policy decides; code runs in a sandbox with no
-    network unless the policy allows it and never with your credentials.
-  </Card>
-  <Card title="Durable, budgeted runs" icon="coins">
-    A run pauses for an approval or a top-up and resumes where it stopped,
-    continues from its checkpoint after a crash, and never repeats an
-    interrupted call silently; budgets in dollars, tokens, and calls hold
-    each model call at its worst case before it is made.
-  </Card>
-  <Card title="Proved in production" icon="flask">
-    A repository steward runs on this runtime on a server — reproducing,
-    fixing, triaging, on a schedule — and every defect it finds is fixed with
-    a test. The write-up is in the repository under `engineering/validation/`.
-  </Card>
-</CardGroup>
-
----
-
-## Start Building
-
-<CardGroup cols={2}>
-  <Card
-    title="Quick Start"
-    icon="bolt"
-    href="/docs/getting-started/quickstart"
-  >
-    Build your first OmniCoreAgent and run a task.
-  </Card>
-  <Card
-    title="Agent Harness"
-    icon="layer-group"
-    href="/docs/core-concepts/agent-harness"
-  >
-    Understand what OmniCoreAgent adds around the model.
-  </Card>
-  <Card
-    title="Installation"
-    icon="download"
-    href="/docs/getting-started/installation"
-  >
-    Install the core package or the extras your agent uses.
-  </Card>
-  <Card title="Local Tools" icon="toolbox" href="/docs/core-concepts/local-tools">
-    Register application-owned Python functions as tools.
-  </Card>
-  <Card title="MCP Tools" icon="plug" href="/docs/core-concepts/mcp">
-    Connect external MCP servers over stdio, SSE, or Streamable HTTP.
-  </Card>
-  <Card title="Configuration" icon="gear" href="/docs/how-to-guides/configuration">
-    Environment variables, memory, workspace, task stores, telemetry, and
-    OmniServe settings.
-  </Card>
-  <Card title="OmniServe" icon="server" href="/docs/how-to-guides/omniserve">
-    Production REST/SSE serving, auth, rate limits, events, and background APIs.
-  </Card>
-</CardGroup>
-
----
-
-## See It In Action
+## See it
 
 ```python
 import asyncio
@@ -193,73 +77,134 @@ from omnicoreagent import OmniCoreAgent, ToolRegistry
 
 tools = ToolRegistry()
 
-@tools.register_tool("search_web")
-def search_web(query: str) -> dict:
-    """Search the web for information."""
-    return {"results": [f"Result for: {query}"]}
+@tools.register_tool("lookup_order")
+def lookup_order(order_id: str) -> dict:
+    """Look an order up in the application's own store."""
+    return {"order_id": order_id, "status": "shipped", "carrier": "DHL"}
 
-@tools.register_tool("fetch_document")
-def fetch_document(path: str) -> dict:
-    """Fetch a domain document from an application-owned source."""
-    return {"path": path, "content": f"Contents of {path}"}
+agent = OmniCoreAgent(
+    name="support",
+    system_instruction="You answer questions about orders, using the tools.",
+    model_config={"provider": "openai", "model": "gpt-5.6-terra"},
+    local_tools=tools,
+)
 
 async def main():
-    agent = OmniCoreAgent(
-        name="research_agent",
-        system_instruction=(
-            "Use tools in parallel when the calls are independent."
-        ),
-        model_config={"provider": "openai", "model": "gpt-4o"},
-        local_tools=tools,
-        agent_config={
-            "context_management": {"enabled": True},
-            "tool_offload": {"enabled": True},
-        },
-    )
-
-    result = await agent.run(
-        "Search for current agent papers and read notes.md. Do both at once "
-        "if neither depends on the other."
-    )
+    result = await agent.run("Where is order 1042?", session_id="customer-7")
     print(result["response"])
+
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    for step in trajectory["steps"]:
+        for call in step["tool_calls"]:
+            print(step["step"], call["tool_name"], call["arguments"], "->", call["observation"]["content"])
+
     await agent.cleanup()
 
 asyncio.run(main())
 ```
 
----
+```text
+Order **1042** has **shipped** and is being delivered by **DHL**.
+1 lookup_order {'order_id': '1042'} -> {"tool_name": "lookup_order", "args": {"order_id": "1042"}, "status": "success", "data": {"order_id": "1042", "status": "shipped", "carrier": "DHL"}, "message": null}
+```
 
-## Core Documentation
+The second line is the run's **trajectory**: the step, the tool the model
+chose, its arguments, and exactly what the model received back.
 
-<CardGroup cols={3}>
-  <Card title="OmniCoreAgent" icon="robot" href="/docs/core-concepts/overview">
-    The main agent harness API and runtime capabilities.
+## Find your way
+
+<Tabs>
+  <Tab title="Build">
+    <CardGroup cols={2}>
+      <Card title="Tools" icon="toolbox" href="/docs/core-concepts/local-tools">
+        Your Python functions as tools, in parallel batches.
+      </Card>
+      <Card title="MCP servers" icon="plug" href="/docs/core-concepts/mcp">
+        stdio, SSE and streamable HTTP, with OAuth.
+      </Card>
+      <Card title="Code mode" icon="code" href="/docs/core-concepts/code-mode">
+        The model writes a program that calls your tools.
+      </Card>
+      <Card title="Skills" icon="wand-magic-sparkles" href="/docs/core-concepts/skills">
+        Packaged instructions and scripts the agent can use.
+      </Card>
+      <Card title="Memory" icon="database" href="/docs/core-concepts/memory">
+        Sessions in memory, Redis, Postgres or MongoDB.
+      </Card>
+      <Card title="Workspace files" icon="folder-tree" href="/docs/core-concepts/workspace-files">
+        Files for notes and artifacts, local, S3 or R2.
+      </Card>
+      <Card title="Context" icon="brain-circuit" href="/docs/core-concepts/context-engineering">
+        Long tasks without running out of context.
+      </Card>
+      <Card title="Sub-agents" icon="users" href="/docs/core-concepts/sub-agents">
+        Workers the lead agent spawns and reads back.
+      </Card>
+      <Card title="Models" icon="microchip" href="/docs/how-to-guides/models">
+        OpenAI, Anthropic, Gemini, Groq, DeepSeek, Ollama and more.
+      </Card>
+      <Card title="Events and streaming" icon="signal-stream" href="/docs/core-concepts/events">
+        Follow a run as it happens.
+      </Card>
+    </CardGroup>
+  </Tab>
+  <Tab title="Make it safe">
+    <CardGroup cols={2}>
+      <Card title="Security model" icon="shield-halved" href="/docs/core-concepts/security-model">
+        Policies — allow, ask, deny — over every capability.
+      </Card>
+      <Card title="Execution and sandboxes" icon="terminal" href="/docs/core-concepts/execution">
+        The execute tool, and where its commands run.
+      </Card>
+      <Card title="Sandbox providers" icon="box" href="/docs/how-to-guides/sandbox-providers">
+        Docker, E2B, Modal, Daytona, Vercel, your own, or local.
+      </Card>
+      <Card title="Guardrails" icon="shield" href="/docs/core-concepts/guardrails">
+        Prompt-injection screening on what the agent reads.
+      </Card>
+    </CardGroup>
+  </Tab>
+  <Tab title="Run it">
+    <CardGroup cols={2}>
+      <Card title="Durable runs and budgets" icon="rotate" href="/docs/core-concepts/durable-runs">
+        Approvals, top-ups, checkpoints, recovery after a crash.
+      </Card>
+      <Card title="Background agents" icon="clock" href="/docs/core-concepts/background-agents">
+        Scheduled and queued work, with retries and leases.
+      </Card>
+      <Card title="OmniServe" icon="server" href="/docs/how-to-guides/omniserve">
+        REST and SSE for runs, approvals, budgets and traces.
+      </Card>
+      <Card title="In a container" icon="docker" href="/docs/how-to-guides/agent-in-a-container">
+        Package and deploy an agent.
+      </Card>
+    </CardGroup>
+  </Tab>
+  <Tab title="See and improve">
+    <CardGroup cols={2}>
+      <Card title="Observability" icon="magnifying-glass-chart" href="/docs/how-to-guides/observability">
+        Trajectories, outcomes, training records, and exporters.
+      </Card>
+      <Card title="Headless runs" icon="terminal" href="/docs/how-to-guides/headless-runs">
+        `omnicoreagent run` for CI and scripts.
+      </Card>
+      <Card title="Harbor and Terminal-Bench" icon="flask" href="/docs/how-to-guides/harbor">
+        Run the agent on benchmark tasks; read every trial.
+      </Card>
+      <Card title="Configuration" icon="gear" href="/docs/how-to-guides/configuration">
+        Every setting, and the environment variables.
+      </Card>
+    </CardGroup>
+  </Tab>
+</Tabs>
+
+## Using an AI coding agent?
+
+<CardGroup cols={2}>
+  <Card title="Use these docs with AI tools" icon="sparkles" href="/docs/getting-started/use-docs-with-ai-tools">
+    Ask AI, `llms.txt`, copy as Markdown, the docs MCP server, Cursor and VS Code.
   </Card>
-  <Card title="Agent Harness" icon="layer-group" href="/docs/core-concepts/agent-harness">
-    The implementation-backed map of the runtime pieces around the model.
-  </Card>
-  <Card title="Architecture" icon="sitemap" href="/docs/core-concepts/architecture">
-    How the loop, tools, observations, memory, workspace, and serving layers fit.
-  </Card>
-  <Card title="Memory" icon="database" href="/docs/core-concepts/memory">
-    Session history across in-memory, Redis, MongoDB, and SQL database storage.
-  </Card>
-  <Card title="Context Engineering" icon="brain-circuit" href="/docs/core-concepts/context-engineering">
-    Context strategies plus tool-output offloading for long-running tasks.
-  </Card>
-  <Card title="Workspace Files" icon="folder-tree" href="/docs/core-concepts/workspace-files">
-    Local, S3, or R2 files for notes, scratchpads, artifacts, and offloads.
-  </Card>
-  <Card title="Subagents" icon="users" href="/docs/core-concepts/sub-agents">
-    Dynamic focused workers that write outputs back into the workspace.
-  </Card>
-  <Card title="Guardrails" icon="shield" href="/docs/core-concepts/guardrails">
-    Prompt-injection screening inside the observation pipeline.
-  </Card>
-  <Card title="Events" icon="signal-stream" href="/docs/core-concepts/events">
-    Runtime events for runs, tool calls, and streaming integrations.
-  </Card>
-  <Card title="OmniServe" icon="server" href="/docs/how-to-guides/omniserve">
-    Run an OmniCoreAgent behind REST and SSE endpoints.
+  <Card title="AGENTS.md" icon="map" href="https://github.com/omnirexflora-labs/omnicoreagent/blob/main/AGENTS.md">
+    A map of the repository for coding agents: what lives where, and how to work in it.
   </Card>
 </CardGroup>

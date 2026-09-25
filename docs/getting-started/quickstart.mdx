@@ -1,40 +1,45 @@
 ---
-title: Quick Start
-description: 'Build your first OmniCoreAgent and understand what the harness gives you'
+title: Quickstart
+description: 'Your first agent in five minutes: a tool, a memory, and the evidence of its run'
 icon: 'bolt'
 ---
 
-# Quick Start
+# Quickstart
 
-This guide creates the smallest useful OmniCoreAgent: one model, one harness
-runtime, one task, one local tool, and one stable session.
+In five minutes you will have an agent that calls a Python function as a tool,
+remembers a conversation, and leaves a record of every step it took — which you
+will read back.
 
-The core install stays light. Redis, PostgreSQL, MongoDB, S3/R2, OmniServe, and
-background scheduling install as extras when the agent needs them.
+<Info>
+About five minutes, and a fraction of a cent of model usage. Every output on this
+page is what the code printed when it was run; the model's wording will differ on
+your run.
+</Info>
 
 <Steps>
   <Step title="Install">
     ```bash
     pip install omnicoreagent
     ```
+
+    The core install is light. Databases, sandboxes, the server and the rest come
+    as [extras](/docs/getting-started/installation), when you need them.
   </Step>
 
-  <Step title="Set API Key">
-    Export the model key for the provider you choose:
-
+  <Step title="Set your model key">
     ```bash
     export LLM_API_KEY=your_api_key_here
     ```
 
     <Tip>
-    OmniCoreAgent uses `LLM_API_KEY` as the single public API-key variable.
-    Choose the provider with `model_config["provider"]`. See
-    [Model Support](/docs/how-to-guides/models) for supported provider names.
+    `LLM_API_KEY` is the one key variable, whichever provider you use; the
+    provider is chosen in `model_config`. See [Models](/docs/how-to-guides/models)
+    for the providers and their names.
     </Tip>
   </Step>
 
-  <Step title="Create Your First Agent">
-    Create `hello_agent.py`:
+  <Step title="Your first agent">
+    Save this as `hello_agent.py` and run `python hello_agent.py`:
 
     ```python
     import asyncio
@@ -44,245 +49,178 @@ background scheduling install as extras when the agent needs them.
         agent = OmniCoreAgent(
             name="my_agent",
             system_instruction="You are a helpful assistant.",
-            model_config={"provider": "openai", "model": "gpt-4o"},
+            model_config={"provider": "openai", "model": "gpt-5.6-terra"},
         )
-
-        result = await agent.run("Hello, what can you do?")
+        result = await agent.run("Hello! In one sentence, what can you do?")
         print(result["response"])
+        await agent.cleanup()
+
+    asyncio.run(main())
+    ```
+
+    ```text
+    I can answer questions, research and analyze information, create or edit workspace files, and help plan, write, troubleshoot, and complete tasks accurately.
+    ```
+
+    `result` is a dictionary; which keys it has depends on how the run ended:
+
+    | Key | When | What |
+    |---|---|---|
+    | `response` | always | the agent's answer, or why it stopped |
+    | `status` | always | `success`, `error`, `awaiting_approval`, `awaiting_budget`, `interrupted`, or `blocked` (the guardrail refused the input) |
+    | `run_id`, `session_id`, `trace_id` | always | where to find this run again |
+    | `metric` | finished | token usage (a `Usage`: `requests`, `request_tokens`, `response_tokens`, `total_tokens`, `total_time`) |
+    | `termination_reason` | finished | why it stopped: `stop`, `max_steps`, `provider_error`, … |
+    | `approvals` | `awaiting_approval` | each call waiting for a person ([tour](/docs/getting-started/tour)) |
+    | `budget_request` | `awaiting_budget` | what the run needs to carry on |
+
+    The run's **cost in dollars** is in its trajectory, next step:
+    `trajectory["totals"]["estimated_cost_usd"]`.
+  </Step>
+
+  <Step title="Give it a tool">
+    A tool is a Python function with type hints and a docstring. The model
+    decides when to call it.
+
+    ```python
+    import asyncio
+    from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+    tools = ToolRegistry()
+
+    @tools.register_tool("get_weather")
+    def get_weather(city: str) -> dict:
+        """Get current weather for a city."""
+        return {"city": city, "temp": "22C", "condition": "Sunny"}
+
+    async def main():
+        agent = OmniCoreAgent(
+            name="weather_agent",
+            system_instruction="Use tools when they help answer the user.",
+            model_config={"provider": "openai", "model": "gpt-5.6-terra"},
+            local_tools=tools,
+        )
+        result = await agent.run("What's the weather in Tokyo?")
+        print(result["response"])
+
+        trajectory = await agent.get_trajectory(result["trace_id"])
+        for step in trajectory["steps"]:
+            for call in step["tool_calls"]:
+                print("step", step["step"], "->", call["tool_name"], call["arguments"], call["outcome"])
+        print("totals:", {k: trajectory["totals"].get(k) for k in ("steps", "tokens", "estimated_cost_usd")})
 
         await agent.cleanup()
 
-    if __name__ == "__main__":
-        asyncio.run(main())
+    asyncio.run(main())
     ```
+
+    ```text
+    Tokyo is currently **sunny** with a temperature of **22°C**.
+    step 1 -> get_weather {'city': 'Tokyo'} success
+    totals: {'steps': 2, 'tokens': {'input': 3007, 'output': 38, 'total': 3045, 'cached_input': 1461, 'reasoning': 0}, 'estimated_cost_usd': 0.0046102}
+    ```
+
+    The last lines are the run's **trajectory**: every step, the tool the model
+    called, the arguments it chose, how the call ended, and what the run cost.
+    Every run keeps one. [Everything in a trajectory](/docs/how-to-guides/observability#read-a-run-as-a-trajectory)
+    — including exactly what the model was sent and what each tool returned —
+    is on the Observability page.
   </Step>
 
-  <Step title="Run It">
-    ```bash
-    python hello_agent.py
+  <Step title="Remember a conversation">
+    Runs with the same `session_id` share their history. A different one starts
+    fresh.
+
+    ```python
+    await agent.run("My name is Ada and I like short answers.", session_id="user_123")
+    result = await agent.run("What is my name?", session_id="user_123")
+    print(result["response"])
+
+    other = await agent.run("What is my name?", session_id="someone_else")
+    print(other["response"])
     ```
 
-    You now have an agent with the core harness loop, session memory, workspace
-    files, guardrails, events, metrics, and cleanup lifecycle.
+    ```text
+    Ada.
+    I don’t know your name—you haven’t told me.
+    ```
+
+    History lives in memory by default. To keep it across restarts, use Redis,
+    Postgres or MongoDB ([Memory](/docs/core-concepts/memory)).
   </Step>
 </Steps>
 
----
+## What you just used
 
-## Add Local Tools
+Without asking for any of it, that agent ran the runtime's loop — the model
+calling tools, independent calls in one batch, results as structured
+observations — with session memory, a workspace for files, the prompt-injection
+guardrail, and a full record of the run.
 
-Local tools are normal Python functions registered through `ToolRegistry`.
+You will find a `workspace/` folder where you ran the script: the agent's files
+(`files/`), large tool results saved for the agent to read back (`artifacts/`),
+and the record of every run (`telemetry/`). To keep it elsewhere, set
+`agent_config={"workspace_config": {"workspace_dir": "/path/to/workspace"}}`. Everything else is switched on when you
+want it: a policy over what the agent may do, a sandbox for commands, budgets,
+background runs, a server.
 
-```python
-import asyncio
-from omnicoreagent import OmniCoreAgent, ToolRegistry
+## When things go wrong
 
-tools = ToolRegistry()
-
-@tools.register_tool("get_weather")
-def get_weather(city: str) -> dict:
-    """Get current weather for a city."""
-    return {"city": city, "temp": "22C", "condition": "Sunny"}
-
-async def main():
-    agent = OmniCoreAgent(
-        name="weather_agent",
-        system_instruction="Use tools when they help answer the user.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
-        local_tools=tools,
-    )
-
-    result = await agent.run("What's the weather in Tokyo?")
-    print(result["response"])
-    await agent.cleanup()
-
-asyncio.run(main())
-```
-
----
-
-## Keep Continuity With Session IDs
-
-Agents keep continuity when you provide a stable `session_id`:
-
-```python
-await agent.run("My name is Abiola.", session_id="user_123")
-result = await agent.run("What is my name?", session_id="user_123")
-print(result["response"])
-```
-
-The default memory backend is in-memory and works for local development. Use
-Redis, MongoDB, or SQL database storage when conversation history must survive
-process restarts.
-
----
-
-## Common First-Run Errors
+These are the messages you will actually see.
 
 <AccordionGroup>
-  <Accordion title="LLM_API_KEY not found">
-    Export the model key before running your script:
+  <Accordion title="ValueError: LLM_API_KEY not found in environment variables">
+    The key is not set in the shell that runs the script:
 
     ```bash
     export LLM_API_KEY=your_api_key_here
     ```
 
-    OmniCoreAgent examples use `LLM_API_KEY` as the single public model API-key
-    variable.
-  </Accordion>
-
-  <Accordion title="model_config requires provider and model">
-    Set both fields:
+    The runtime does not read `.env` files itself. If your key is in one, load it
+    at the top of your script:
 
     ```python
-    model_config={"provider": "openai", "model": "gpt-4o"}
-    ```
+    from dotenv import load_dotenv
 
-    See [Models](/docs/how-to-guides/models) for supported provider names.
+    load_dotenv()
+    ```
   </Accordion>
 
-  <Accordion title="Missing optional backend package">
-    Install the extra for the backend you are using:
+  <Accordion title="ValueError: model_config.provider is required">
+    Name both the provider and the model:
 
-    ```bash
-    pip install "omnicoreagent[redis]"
-    pip install "omnicoreagent[mongodb]"
-    pip install "omnicoreagent[serve]"
+    ```python
+    model_config = {"provider": "openai", "model": "gpt-5.6-terra"}
+    ```
+  </Accordion>
+
+  <Accordion title="The model call was refused: the provider does not serve the model … to this account">
+    The run ends with `status` `"error"` and this message when the model name is
+    wrong, or your account cannot use that model:
+
+    ```text
+    The model call was refused: the provider does not serve the model `gpt-does-not-exist` to this account; check model_config's model name and provider. Retrying will not help.
     ```
 
-    The base quickstart does not require these extras.
+    Check the spelling against your provider's model list, and that
+    `model_config["provider"]` is the provider that serves it.
   </Accordion>
 </AccordionGroup>
 
----
+## Next
 
-## Next: Add MCP Tools
-
-MCP servers are external tool providers. OmniCoreAgent connects to them and loads
-their tools into the same runtime view as local tools.
-
-This optional example uses Node.js and `npx` because the filesystem MCP server is
-published as an npm package:
-
-```python
-import asyncio
-from omnicoreagent import OmniCoreAgent
-
-async def main():
-    agent = OmniCoreAgent(
-        name="fs_agent",
-        system_instruction="Inspect files when the task needs filesystem context.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
-        mcp_tools=[
-            {
-                "name": "filesystem",
-                "transport_type": "stdio",
-                "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-            }
-        ],
-    )
-
-    await agent.connect_mcp_servers()
-    result = await agent.run("List files in /tmp")
-    print(result["response"])
-    await agent.cleanup()
-
-asyncio.run(main())
-```
-
-<Note>
-MCP connects external MCP server tools into OmniCoreAgent's tool runtime. Those
-tools run beside local tools, workspace tools, artifact tools, skills, and
-harness tools.
-</Note>
-
----
-
-## Next: Turn On Heavier Harness Features
-
-For longer tasks, enable the heavier harness features explicitly: automatic
-context control before each model call, tool output offloading into the
-workspace, BM25 tool retrieval, subagents, and skills.
-
-```python
-agent = OmniCoreAgent(
-    name="research_agent",
-    system_instruction=(
-        "Use tools in parallel when the calls are independent. Write useful "
-        "notes and outputs to the workspace when the task is long."
-    ),
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    local_tools=tools,
-    agent_config={
-        "max_steps": 20,
-        "context_management": {"enabled": True},
-        "tool_offload": {"enabled": True},
-        "enable_advanced_tool_use": True,
-        "enable_subagents": True,
-        "enable_agent_skills": True,
-    },
-)
-```
-
-When `enable_subagents` is true, workspace files are enabled automatically so
-workers write outputs that the lead agent reads back.
-
----
-
-## Next: Govern It, Give It A Sandbox
-
-Once an agent can do real things — call a write tool, run code, spend money —
-turn governance on. A policy decides every capability; `ask` pauses the run
-for a person; commands run in a sandbox, never on your machine; the run has a
-record it can resume from; and every run has a trace.
-
-```python
-agent = OmniCoreAgent(
-    name="builder",
-    system_instruction="Fix the failing test in the sandbox; ask before pushing.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
-    agent_config={
-        "governance_config": {
-            "enabled": True,
-            "profile": "interactive-dev",              # asks before risky things; strict-production allows nothing without a rule
-            "sandbox_config": {"provider": "docker"},  # adds the execute tool
-            "budgets": {"request": [{"meter": "model_cost_usd", "limit": 0.50}]},
-        },
-    },
-    telemetry_config={"capture": "full"},
-)
-
-result = await agent.run("Run the tests and report", session_id="s1")
-if result["status"] == "awaiting_approval":            # a person decides, then the run resumes
-    ...
-```
-
-Read [Security model](/docs/core-concepts/security-model),
-[Execution](/docs/core-concepts/execution), and
-[Durable runs](/docs/core-concepts/durable-runs) before the first deployment.
-
----
-
-## Next Steps
-
-<CardGroup cols={3}>
-  <Card title="Local Tools" icon="toolbox" href="/docs/core-concepts/local-tools">
-    Register Python functions as tools.
+<CardGroup cols={2}>
+  <Card title="Take the tour" icon="map" href="/docs/getting-started/tour">
+    Fifteen minutes: a policy that asks a person, a sandbox for commands, a
+    budget, and the evidence of it all.
   </Card>
-  <Card title="Workspace Files" icon="folder-tree" href="/docs/core-concepts/workspace-files">
-    Store notes, artifacts, scratchpads, and tool offloads.
+  <Card title="Tools and MCP" icon="toolbox" href="/docs/core-concepts/local-tools">
+    Your functions, MCP servers, and code mode.
   </Card>
-  <Card title="OmniServe" icon="server" href="/docs/how-to-guides/omniserve">
-    Serve this agent through REST and SSE.
+  <Card title="Every run is evidence" icon="magnifying-glass-chart" href="/docs/how-to-guides/observability">
+    Trajectories, outcomes, training records, exporters.
   </Card>
-  <Card title="Configuration" icon="gear" href="/docs/how-to-guides/configuration">
-    Configure context, tool offload, memory, events, and workspace storage.
-  </Card>
-  <Card title="Use Docs With AI Tools" icon="sparkles" href="/docs/getting-started/use-docs-with-ai-tools">
-    Ask questions against the official docs from your editor or AI tool.
-  </Card>
-  <Card title="Architecture" icon="sitemap" href="/docs/core-concepts/architecture">
-    Understand the runtime layers and request flow.
+  <Card title="Serve it" icon="server" href="/docs/how-to-guides/omniserve">
+    REST and SSE for runs, approvals and traces.
   </Card>
 </CardGroup>
