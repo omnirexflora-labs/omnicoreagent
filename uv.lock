@@ -2277,9 +2277,13 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "boto3" },
+    { name = "daytona" },
+    { name = "docker" },
+    { name = "e2b" },
     { name = "fastapi" },
     { name = "markdown" },
     { name = "matplotlib" },
+    { name = "modal" },
     { name = "motor" },
     { name = "numpy" },
     { name = "opentelemetry-api" },
@@ -2287,6 +2291,7 @@ all = [
     { name = "opentelemetry-sdk" },
     { name = "pillow" },
     { name = "psycopg2-binary" },
+    { name = "pydantic-monty" },
     { name = "pymongo" },
     { name = "python-multipart" },
     { name = "redis" },
@@ -2294,6 +2299,7 @@ all = [
     { name = "sqlalchemy" },
     { name = "tiktoken" },
     { name = "uvicorn" },
+    { name = "vercel-sandbox" },
 ]
 codemode = [
     { name = "pydantic-monty" },
@@ -2387,9 +2393,12 @@ requires-dist = [
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.43.98" },
     { name = "click", specifier = ">=8.5.0" },
     { name = "colorlog", specifier = ">=6.12.0" },
+    { name = "daytona", marker = "extra == 'all'", specifier = ">=0.214.0" },
     { name = "daytona", marker = "extra == 'daytona'", specifier = ">=0.214.0" },
+    { name = "docker", marker = "extra == 'all'", specifier = ">=7.2.0" },
     { name = "docker", marker = "extra == 'docker'", specifier = ">=7.2.0" },
     { name = "docstring-parser", specifier = ">=0.18.0" },
+    { name = "e2b", marker = "extra == 'all'", specifier = ">=2.51.0" },
     { name = "e2b", marker = "extra == 'e2b'", specifier = ">=2.51.0" },
     { name = "fastapi", marker = "extra == 'all'", specifier = ">=0.141.1" },
     { name = "fastapi", marker = "extra == 'serve'", specifier = ">=0.141.1" },
@@ -2403,6 +2412,7 @@ requires-dist = [
     { name = "matplotlib", marker = "extra == 'all'", specifier = ">=3.11.2" },
     { name = "matplotlib", marker = "extra == 'examples'", specifier = ">=3.11.2" },
     { name = "mcp", extras = ["cli"], specifier = ">=2.2.0,<3" },
+    { name = "modal", marker = "extra == 'all'", specifier = ">=1.5.5" },
     { name = "modal", marker = "extra == 'modal'", specifier = ">=1.5.5" },
     { name = "motor", marker = "extra == 'all'", specifier = ">=3.7.1" },
     { name = "motor", marker = "extra == 'mongodb'", specifier = ">=3.7.1" },
@@ -2426,6 +2436,7 @@ requires-dist = [
     { name = "psycopg2-binary", marker = "extra == 'all'", specifier = ">=2.9.13" },
     { name = "psycopg2-binary", marker = "extra == 'postgres'", specifier = ">=2.9.13" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.13.5" },
+    { name = "pydantic-monty", marker = "extra == 'all'", specifier = ">=1.0.0,<2" },
     { name = "pydantic-monty", marker = "extra == 'codemode'", specifier = ">=1.0.0,<2" },
     { name = "pymongo", marker = "extra == 'all'", specifier = ">=4.18.1" },
     { name = "pymongo", marker = "extra == 'mongodb'", specifier = ">=4.18.1" },
@@ -2443,6 +2454,7 @@ requires-dist = [
     { name = "tiktoken", marker = "extra == 'tokenizer'", specifier = ">=0.14.0" },
     { name = "uvicorn", marker = "extra == 'all'", specifier = ">=0.53.0" },
     { name = "uvicorn", marker = "extra == 'serve'", specifier = ">=0.53.0" },
+    { name = "vercel-sandbox", marker = "extra == 'all'", specifier = ">=0.6.0" },
     { name = "vercel-sandbox", marker = "extra == 'vercel'", specifier = ">=0.6.0" },
 ]
 provides-extras = ["all", "codemode", "daytona", "docker", "e2b", "examples", "harbor", "langsmith", "modal", "mongodb", "opik", "otel", "postgres", "redis", "s3", "serve", "tokenizer", "vercel"]

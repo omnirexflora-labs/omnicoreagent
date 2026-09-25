@@ -88,7 +88,11 @@ The base install stays focused on the core agent harness. Add heavier production
 | `otel` | OpenTelemetry OTLP/HTTP trace export |
 | `langsmith` | LangSmith trace export through OTLP |
 | `opik` | Comet Opik trace export through OTLP |
-| `all` | Every optional integration |
+| `codemode` | Code mode: programs that call your tools, run in Monty 1.x |
+| `docker` | Docker sandboxes for the `execute` tool |
+| `e2b`, `modal`, `daytona`, `vercel` | Hosted sandboxes for the `execute` tool |
+| `harbor` | Running this agent on Harbor and Terminal-Bench (`omnicoreagent harbor`) |
+| `all` | Every extra above except `harbor` |
 
 ```bash
 pip install "omnicoreagent[redis]"

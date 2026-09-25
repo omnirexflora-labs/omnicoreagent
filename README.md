@@ -150,7 +150,8 @@ pip install "omnicoreagent[redis]"        # Redis memory and task store; postgre
 pip install "omnicoreagent[s3]"           # S3 / R2 workspace storage
 pip install "omnicoreagent[tokenizer]"    # token-exact context and budget estimates
 pip install "omnicoreagent[otel]"         # OTLP export; langsmith, opik likewise
-pip install "omnicoreagent[all]"
+pip install "omnicoreagent[codemode]"     # code mode, in Monty
+pip install "omnicoreagent[all]"          # every extra above; Harbor is its own: [harbor]
 ```
 
 ## Cookbook

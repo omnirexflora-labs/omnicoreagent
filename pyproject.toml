@@ -109,6 +109,12 @@ all = [
     "numpy>=2.5.3",
     "pillow>=12.3.0",
     "requests>=2.34.2",
+    "pydantic-monty>=1.0.0,<2",
+    "docker>=7.2.0",
+    "e2b>=2.51.0",
+    "modal>=1.5.5",
+    "daytona>=0.214.0",
+    "vercel-sandbox>=0.6.0",
 ]
 examples = [
     "markdown>=3.10.3",
