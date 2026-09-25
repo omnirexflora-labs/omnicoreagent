@@ -1,4 +1,4 @@
-# Contributing to OmmiCoreAgent
+# Contributing to OmniCoreAgent
 
 First off, thank you for considering contributing to OmniCoreAgent! It's people like you that make OmniCoreAgent such a great tool. 👏
 
@@ -23,8 +23,8 @@ This project and everyone participating in it is governed by our Code of Conduct
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git https://github.com/omnirexflora-labs/omnicoreagent.git
-   cd ommicoreagent
+   git clone https://github.com/omnirexflora-labs/omnicoreagent.git
+   cd omnicoreagent
    ```
 3. Create a virtual environment:
    ```bash
