@@ -63,8 +63,10 @@ also never go in. To copy less, give the bridge glob patterns over workspace
 paths; `*` crosses folders, and the default copies everything:
 
 ```python
-"governance_config": {
-    "workspace_bridge": {"include": ["src/*", "data/*.csv"], "exclude": ["data/archive/*"]},
+agent_config = {
+    "governance_config": {
+        "workspace_bridge": {"include": ["src/*", "data/*.csv"], "exclude": ["data/archive/*"]},
+    },
 }
 ```
 
