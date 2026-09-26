@@ -39,12 +39,20 @@ def _blocks(languages: set[str]):
 
 PYTHON = list(_blocks({"python", "py"}))
 SHELL = list(_blocks({"bash", "sh", "shell"}))
+OUTPUT = list(_blocks({"text"}))
 
 
 def _tree(body: str):
     return compile(
         body, "<docs>", "exec", flags=ast.PyCF_ONLY_AST | ast.PyCF_ALLOW_TOP_LEVEL_AWAIT
     )
+
+
+@pytest.mark.parametrize("body", OUTPUT)
+def test_printed_output_shows_no_markdown_the_reader_would_see_raw(body):
+    """A model that answers in markdown prints `**1042**`, and a text block
+    shows it as is; the home page did. The examples ask for plain text."""
+    assert not re.search(r"\*\*[^*\n]+\*\*|^\s*[-*] \*\*|^#{1,6} ", body, re.M)
 
 
 @pytest.mark.parametrize("body", PYTHON)

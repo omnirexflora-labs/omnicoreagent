@@ -96,7 +96,7 @@ your run.
     async def main():
         agent = OmniCoreAgent(
             name="weather_agent",
-            system_instruction="Use tools when they help answer the user.",
+            system_instruction="Use tools when they help answer the user. Answer in plain text.",
             model_config={"provider": "openai", "model": "gpt-5.6-terra"},
             local_tools=tools,
         )
@@ -115,9 +115,9 @@ your run.
     ```
 
     ```text
-    Tokyo is currently **sunny** with a temperature of **22°C**.
+    Tokyo is currently sunny, with a temperature of 22°C.
     step 1 -> get_weather {'city': 'Tokyo'} success
-    totals: {'steps': 2, 'tokens': {'input': 3007, 'output': 38, 'total': 3045, 'cached_input': 1461, 'reasoning': 0}, 'estimated_cost_usd': 0.0046102}
+    totals: {'steps': 2, 'tokens': {'input': 3017, 'output': 35, 'total': 3052, 'cached_input': 1466, 'reasoning': 0}, 'estimated_cost_usd': 0.0045877}
     ```
 
     The last lines are the run's **trajectory**: every step, the tool the model

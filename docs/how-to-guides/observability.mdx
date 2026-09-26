@@ -1,140 +1,31 @@
 ---
-title: Runtime Visibility
-description: 'Production metrics and per-request performance monitoring'
-icon: 'chart-line'
+title: Execution Evidence & Observability
+description: 'Every run as evidence: its trajectory, its outcomes, its trace, and where to export them'
+icon: 'magnifying-glass-chart'
 ---
 
-# Runtime Visibility & Metrics
+# Execution Evidence & Observability
 
-Monitor your agents with built-in metrics, telemetry streams, and in-house trace summaries.
+Every run leaves evidence: what the model was sent at each step, what it
+chose, what each tool returned, what the policy decided, and what it cost.
+Read a run back as a **trajectory**, attach what it turned out to be worth,
+stream its events while it runs, and export it to the tools you already use.
 
----
-
-## Real-time Usage Metrics
-
-OmniCoreAgent tracks request counts, runtime, and provider-reported token usage when available. Each `run()` returns a `metric` object, and you can get cumulative stats anytime.
-
-```python
-result = await agent.run("Analyze this data")
-print(f"Request Tokens: {result['metric'].request_tokens}")
-print(f"Time Taken: {result['metric'].total_time:.2f}s")
-
-# Get aggregated metrics for the agent's lifecycle
-stats = await agent.get_metrics()
-print(f"Avg Response Time: {stats['average_time']:.2f}s")
-```
+A **trace** is the record of one uninterrupted stretch of a run. A run that
+paused for a person or a budget and was resumed is several traces, one per
+**segment**; `get_run_trajectory(run_id)` reads them as one story.
 
 ---
 
-## Runtime Metrics
+## Read a run as a trajectory
 
-OmniCoreAgent exposes lightweight runtime metrics without requiring an external
-tracing service.
-
-### What's Available
-
-- Request count
-- Request, response, and total tokens
-- Total runtime
-- Average response time
-
----
-
-## Telemetry Events
-
-OmniCoreAgent emits typed telemetry events for user messages, tool calls, tool
-results, final answers, subagent calls, and background run lifecycle changes.
-Use events when you need a live UI, session debugging, or a lightweight
-execution record.
+`get_trajectory` returns one trace in order, from request to final answer —
+for a run that never paused, the whole run:
 
 ```python
-result = await agent.run("Research this topic", session_id="research_1")
-
-events = await agent.get_telemetry_events_after(
-    cursor=None,
-    session_id="research_1",
-    run_id=result["run_id"],
-)
-for event in events:
-    print(event.event_type, event.model_dump())
-```
-
-When serving through OmniServe, `POST /run` streams the live run over SSE.
-For application UIs and APIs, use the `/telemetry` routes to replay, inspect,
-and stream stored telemetry. Filter by `run_id` when a UI needs to isolate one
-execution inside a shared session.
-The compact `/events/{session_id}` aliases are still available and accept
-`?run_id=...` for the same run-scoped isolation.
-
-```bash
-curl -N -X POST http://localhost:8000/run \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Research this topic", "session_id": "research_1"}'
-
-curl "http://localhost:8000/telemetry/events?session_id=research_1&run_id=RUN_ID"
-curl "http://localhost:8000/telemetry/events?run_id=RUN_ID&event_type=tool_result&limit=100"
-curl "http://localhost:8000/telemetry/traces?session_id=research_1&limit=20"
-curl "http://localhost:8000/telemetry/traces/TRACE_ID"
-curl "http://localhost:8000/telemetry/runs/RUN_ID/trace"
-curl "http://localhost:8000/telemetry/runs/RUN_ID/family"
-curl "http://localhost:8000/telemetry/sessions/research_1/trace"
-curl -N "http://localhost:8000/telemetry/events/stream?session_id=research_1&run_id=RUN_ID"
-```
-
----
-
-## Agent Trace
-
-Every run emits typed telemetry. Retrieve the trace by the `trace_id` returned
-from `agent.run(...)`.
-
-```python
-trace = await agent.get_trace(result["trace_id"])
-
-print(trace["status"])
-print(len(trace["events"]))
-print(len(trace["spans"]))
-
-for event in trace["events"]:
-    print(event["event_type"], event.get("input"), event.get("output"))
-```
-
-You can also retrieve the latest trace for a session or a trace correlated to a
-run:
-
-```python
-latest_session_trace = await agent.get_latest_trace("research_1")
-run_correlated_trace = await agent.get_trace(run_id=result["run_id"])
-normalized = await agent.get_trace(result["trace_id"], normalize=True)
-trace_family = await agent.get_trace_family(trace_id=result["trace_id"])
-```
-
-Traces expose `incomplete: true` when best-effort telemetry persistence lost
-an evidence write. The run can still complete; strict telemetry configuration
-instead propagates the persistence error. Trace metadata also reports the
-effective built-in storage type (`memory` or `jsonl`).
-
-Tool output guardrail decisions are recorded before the normal tool result
-event. Blocked or suspicious output includes the tool identity, threat level,
-score, and content hash in telemetry while the unsanitized content stays out of
-the result event and model context.
-
-`trace_id` is the exact trace handle. `run_id` is a correlation and filtering
-handle; when more than one trace is correlated to the same run, `get_trace(
-run_id=...)` returns the latest matching trace.
-
-`get_trace_family(...)` follows explicit parent trace links in both directions,
-so deep-agent child traces can be retrieved together with the parent without
-depending on latest-trace ordering. A family lists each parent before its
-children.
-
-### Read a run as a trajectory
-
-`get_trajectory` returns one run in order, from request to final answer:
-
-```python
+trajectory = await agent.get_trajectory(result["trace_id"])
+# or, by run: the run's latest trace segment
 trajectory = await agent.get_trajectory(run_id=result["run_id"])
-# or: await agent.get_trajectory(result["trace_id"])
 
 for step in trajectory["steps"]:
     for call in step["model_calls"]:
@@ -155,8 +46,8 @@ capture gaps close it. Every event of the trace appears once: events that fit
 no named slot are listed in `other_events` where they occurred, so nothing is
 hidden. Payloads appear only where the capture policy recorded them; each is
 paired with its capture state. OmniServe serves the same structure at
-`GET /telemetry/runs/{run_id}/trajectory` and
-`GET /telemetry/traces/{trace_id}/trajectory`.
+`GET /telemetry/traces/{trace_id}/trajectory`, and
+`GET /telemetry/runs/{run_id}/trajectory` for a run's latest segment.
 
 ### Run header
 
@@ -297,6 +188,29 @@ result = await agent.run(
 The trace is intentionally dependency-free inside the runtime. Exporters are
 optional adapters layered on top of this internal trace model.
 
+### A run that paused: one story
+
+A run that waited for an approval or a budget top-up, or was recovered after a
+crash, continues in a new trace segment. `get_run_trajectory` reads every
+segment of the run in order, with totals summed across them and each tool call
+listed once, with how it finally ended:
+
+```python
+story = await agent.get_run_trajectory(result["run_id"])
+
+print(story["status"])
+for segment in story["segments"]:
+    print(segment["trace_id"], segment["status"])  # suspended, then completed
+for call in story["tool_calls"]:
+    print(call["tool_name"], call["outcome"])
+print(story["totals"])
+```
+
+Each segment carries its own full trajectory (`segment["trajectory"]`). The
+[tour](/docs/getting-started/tour) shows a run that paused for a refund
+approval and resumed: two segments, one story.
+
+
 ---
 
 ## Outcomes and training records
@@ -334,6 +248,130 @@ ask the provider for them in `model_config` (`"logprobs": True`) and record
 them with `telemetry_config={"record_token_details": True}`; they are large,
 so they are off by default, and a hosted reasoning model usually refuses to
 return them.
+
+
+---
+
+## Agent Trace
+
+Every run emits typed telemetry. Retrieve the trace by the `trace_id` returned
+from `agent.run(...)`.
+
+```python
+trace = await agent.get_trace(result["trace_id"])
+
+print(trace["status"])
+print(len(trace["events"]))
+print(len(trace["spans"]))
+
+for event in trace["events"]:
+    print(event["event_type"], event.get("input"), event.get("output"))
+```
+
+You can also retrieve the latest trace for a session or a trace correlated to a
+run:
+
+```python
+latest_session_trace = await agent.get_latest_trace("research_1")
+run_correlated_trace = await agent.get_trace(run_id=result["run_id"])
+normalized = await agent.get_trace(result["trace_id"], normalize=True)
+trace_family = await agent.get_trace_family(trace_id=result["trace_id"])
+```
+
+Traces expose `incomplete: true` when best-effort telemetry persistence lost
+an evidence write. The run can still complete; strict telemetry configuration
+instead propagates the persistence error. Trace metadata also reports the
+effective built-in storage type (`memory` or `jsonl`).
+
+Tool output guardrail decisions are recorded before the normal tool result
+event. Blocked or suspicious output includes the tool identity, threat level,
+score, and content hash in telemetry while the unsanitized content stays out of
+the result event and model context.
+
+`trace_id` is the exact trace handle. `run_id` is a correlation and filtering
+handle; when more than one trace is correlated to the same run, `get_trace(
+run_id=...)` returns the latest matching trace.
+
+`get_trace_family(...)` follows explicit parent trace links in both directions,
+so sub-agent child traces can be retrieved together with the parent without
+depending on latest-trace ordering. A family lists each parent before its
+children.
+
+
+---
+
+## Telemetry Events
+
+OmniCoreAgent emits typed telemetry events for user messages, tool calls, tool
+results, final answers, subagent calls, and background run lifecycle changes.
+Use events when you need a live UI, session debugging, or a lightweight
+execution record.
+
+```python
+result = await agent.run("Research this topic", session_id="research_1")
+
+events = await agent.get_telemetry_events_after(
+    cursor=None,
+    session_id="research_1",
+    run_id=result["run_id"],
+)
+for event in events:
+    print(event.event_type, event.model_dump())
+```
+
+When serving through OmniServe, `POST /run` streams the live run over SSE.
+For application UIs and APIs, use the `/telemetry` routes to replay, inspect,
+and stream stored telemetry. Filter by `run_id` when a UI needs to isolate one
+execution inside a shared session.
+The compact `/events/{session_id}` aliases are still available and accept
+`?run_id=...` for the same run-scoped isolation.
+
+```bash
+curl -N -X POST http://localhost:8000/run \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Research this topic", "session_id": "research_1"}'
+
+curl "http://localhost:8000/telemetry/events?session_id=research_1&run_id=RUN_ID"
+curl "http://localhost:8000/telemetry/events?run_id=RUN_ID&event_type=tool_result&limit=100"
+curl "http://localhost:8000/telemetry/traces?session_id=research_1&limit=20"
+curl "http://localhost:8000/telemetry/traces/TRACE_ID"
+curl "http://localhost:8000/telemetry/runs/RUN_ID/trace"
+curl "http://localhost:8000/telemetry/runs/RUN_ID/family"
+curl "http://localhost:8000/telemetry/sessions/research_1/trace"
+curl -N "http://localhost:8000/telemetry/events/stream?session_id=research_1&run_id=RUN_ID"
+```
+
+
+---
+
+## Usage metrics
+
+OmniCoreAgent tracks request counts, runtime, and provider-reported token usage when available. Each `run()` returns a `metric` object, and you can get cumulative stats anytime.
+
+```python
+result = await agent.run("Analyze this data")
+print(f"Request Tokens: {result['metric'].request_tokens}")
+print(f"Time Taken: {result['metric'].total_time:.2f}s")
+
+# Get aggregated metrics for the agent's lifecycle
+stats = await agent.get_metrics()
+print(f"Avg Response Time: {stats['average_time']:.2f}s")
+```
+
+### Runtime metrics
+
+OmniCoreAgent exposes lightweight runtime metrics without requiring an external
+tracing service.
+
+#### What's available
+
+- Request count
+- Request, response, and total tokens
+- Total runtime
+- Average response time
+
+
+---
 
 ## Export Traces
 

@@ -62,7 +62,7 @@ def lookup_order(order_id: str) -> dict:
 
 agent = OmniCoreAgent(
     name="support",
-    system_instruction="You answer questions about orders, using the tools.",
+    system_instruction="You answer questions about orders, using the tools. Answer in plain text.",
     model_config={"provider": "openai", "model": "gpt-5.6-terra"},
     local_tools=tools,
 )
@@ -92,9 +92,9 @@ asyncio.run(main())
 What it printed:
 
 ```text
-Order **1042** has **shipped** and is being delivered by **DHL**.
+Order 1042 has shipped via DHL.
 1 lookup_order {'order_id': '1042'} -> {"tool_name": "lookup_order", "args": {"order_id": "1042"}, "status": "success", "data": {"order_id": "1042", "status": "shipped", "carrier": "DHL"}, "message": null}
-[{'event_id': 'event_6f89c3c5d9994c558b6bc8898ec03b05', 'outcome_id': 'outcome_0f7b68f41c5e4f74acef2654c2c33b52', 'reward': 1.0, 'label': 'resolved', 'source': 'support-lead', 'detail': {}, 'recorded_at': '2026-09-25T14:48:15.448554+00:00'}]
+[{'outcome_id': 'outcome_57a6d81724c44f51b08c540fe83f4694', 'reward': 1.0, 'label': 'resolved', 'source': 'support-lead', 'detail': {}, 'recorded_at': '2026-09-25T18:00:36.136396+00:00'}]
 ```
 
 That is the whole loop: the model calls tools (independent calls run in one
@@ -160,9 +160,9 @@ omnicoreagent harbor results jobs
 | **Tools** | Your Python functions, and MCP servers (stdio, SSE, streamable HTTP, OAuth) through one catalog; parallel batches; loop detection by call signature; tool retrieval for large tool sets. | [Local tools](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/local-tools), [MCP](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/mcp) |
 | **Code mode** | A `run_code` tool: the model writes a short Python program that calls your tools, loops and computes, run in [Monty](https://github.com/pydantic/monty) — every call inside it governed and traced, and a call that needs approval pauses the program itself. | [Code mode](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/code-mode) |
 | **Governance** | A policy — allow, ask, deny — over every capability the agent has: each tool, each MCP server, the sandbox, the network, delegation, background runs. `ask` pauses the run for a person. Hashed, so it cannot widen at runtime. | [Security model](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/security-model) |
-| **Execution** | An `execute` tool whose commands run in a sandbox — Docker, E2B, Modal, Daytona, Vercel, your own, or `local` where a container is already the boundary — with no network unless the policy allows it, never your credentials, and the workspace bridged in and out. A sandbox that dies is reported and replaced. | [Execution](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/execution), [Providers](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/sandbox-providers) |
-| **Durable runs** | Every run has a record: its step, its tool calls, its approvals. A run pauses for an approval or a top-up and resumes where it stopped; a run whose process died continues from its checkpoint; a call that was interrupted is never silently repeated. | [Durable runs](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/durable-runs) |
-| **Budgets** | Limits in dollars, tokens, calls, sandbox seconds, per request, session, agent, or application, per day or month; a model call is held at its worst case before it is made; a run that runs out waits for a person. | [Durable runs](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/durable-runs) |
+| **Execution** | An `execute` tool whose commands run in a sandbox — Docker, E2B, Modal, Daytona, Vercel, your own, or `local` where a container is already the boundary — with no network unless the policy allows it, none of your process's keys and tokens, and the workspace bridged in and out. A sandbox that dies is reported and replaced. | [Execution](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/execution), [Providers](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/sandbox-providers) |
+| **Durable runs** | Every run has a record: its step, its tool calls, its approvals. A run pauses for an approval or a top-up and resumes where it stopped; with a durable memory store, a run whose process died continues from its checkpoint; a call that was interrupted is never silently repeated. | [Durable runs](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/durable-runs) |
+| **Budgets** | Limits in dollars, tokens, calls, sandbox seconds, per request, session, agent, or application, per day or month; each model call is priced and held before it is made; a run that runs out waits for a person. | [Durable runs](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/durable-runs) |
 | **Memory and context** | Session memory in memory, Redis, Postgres/SQL, or MongoDB; context managed before each model call; large tool outputs offloaded to workspace files. | [Memory](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/memory), [Context](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/context-engineering) |
 | **Sub-agents** | Workers spawned by the lead under the same policy and budgets, each with its own trace linked to the parent's. | [Sub-agents](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
 | **Background work** | Scheduled and manual tasks with a durable task store (Redis, MongoDB, SQL), leases, retries, recovery after a restart, one run per task at a time. | [Background agents](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/background-agents) |

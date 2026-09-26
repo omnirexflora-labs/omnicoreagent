@@ -32,11 +32,13 @@ server, and onto a benchmark.
 <CardGroup cols={3}>
   <Card title="It acts safely" icon="shield-check">
     A policy allows, denies or **asks a person** before each action. Commands
-    run in a sandbox, never with your credentials. Budgets cannot be overspent.
+    run in a sandbox that is not given your keys and tokens. A budget prices
+    each model call and holds that amount before the call is made.
   </Card>
   <Card title="It survives" icon="rotate">
-    A run pauses for a person or a top-up and resumes where it stopped — even
-    after a crash, in another process — and never repeats a call silently.
+    A run pauses for a person or a top-up and resumes where it stopped — with
+    a durable memory store, even after a crash, in another process — and never
+    repeats a call silently.
   </Card>
   <Card title="It leaves evidence" icon="magnifying-glass-chart">
     Every run is kept: what the model saw at each step, what it did, what came
@@ -84,7 +86,7 @@ def lookup_order(order_id: str) -> dict:
 
 agent = OmniCoreAgent(
     name="support",
-    system_instruction="You answer questions about orders, using the tools.",
+    system_instruction="You answer questions about orders, using the tools. Answer in plain text.",
     model_config={"provider": "openai", "model": "gpt-5.6-terra"},
     local_tools=tools,
 )
@@ -104,7 +106,7 @@ asyncio.run(main())
 ```
 
 ```text
-Order **1042** has **shipped** and is being delivered by **DHL**.
+Order 1042 has shipped via DHL.
 1 lookup_order {'order_id': '1042'} -> {"tool_name": "lookup_order", "args": {"order_id": "1042"}, "status": "success", "data": {"order_id": "1042", "status": "shipped", "carrier": "DHL"}, "message": null}
 ```
 

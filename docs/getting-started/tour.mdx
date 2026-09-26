@@ -9,13 +9,15 @@ icon: 'map'
 The [quickstart](/docs/getting-started/quickstart) agent could answer and call a
 tool. This tour gives an agent what it needs before it is allowed to *act*: a
 policy that asks a person before a refund, a sandbox where its commands run, a
-budget it cannot overspend — and the record of each.
+budget checked before every model call — and the record of each.
 
 <Info>
 About fifteen minutes and a few cents of model usage. Part 2 needs Docker running
 and `pip install "omnicoreagent[docker]"`. Every output shown is what the code
-printed; the model's wording will differ on your run, the statuses, calls and
-numbers will not.
+printed on one run. Yours will differ where the model decides: its wording,
+the commands it chooses, and the tokens and cost. What the runtime does will
+not: the run pauses at the refund, resumes after the approval, and stops
+before the budget is spent.
 </Info>
 
 ## 1. Ask a person before a refund
@@ -65,7 +67,7 @@ policy.rules.ask.append(
 async def main():
     agent = OmniCoreAgent(
         name="support",
-        system_instruction="You help with orders. Refund when the customer asks.",
+        system_instruction="You help with orders. Refund when the customer asks. Answer in plain text.",
         model_config={"provider": "openai", "model": "gpt-5.6-terra"},
         local_tools=tools,
         agent_config={"governance_config": {"enabled": True, "policy": policy}},
@@ -96,9 +98,9 @@ asyncio.run(main())
 
 ```text
 status: awaiting_approval
-waiting on: issue_refund {'order_id': '1042', 'amount': 42}
+waiting on: issue_refund {'order_id': '1042', 'amount': 42.0}
 status: success
-Issued a full refund of **$42.00** for order **1042**.
+A full refund of $42.00 has been issued for order 1042.
 segments: 2
   lookup_order -> success
   issue_refund -> success
@@ -111,7 +113,10 @@ What happened:
 - `resolve_approval` recorded who decided. `decision="deny"` with a `note`
   sends the model the reason instead; `arguments={...}` approves an edited call.
 - `resume` continued the run where it stopped. It can happen minutes or days
-  later, in another process: the run's record is durable.
+  later, in another process, when the agent's memory is a durable store —
+  SQL, Redis or MongoDB — through `memory_router`. This example keeps it in
+  memory, so here the run lives only as long as the process
+  ([durable runs](/docs/core-concepts/durable-runs)).
 - A run can pause **again** after a resume — once for each call that needs a
   person — so approve in a loop until the status is no longer
   `awaiting_approval`. A `session_id` is optional; the run makes one.
@@ -126,12 +131,13 @@ approvals, decisions and resume are endpoints.
 ## 2. Run commands in a sandbox
 
 Turn on a sandbox provider and the agent gets an `execute` tool. Its commands run
-inside the sandbox — never on your machine, never with your credentials.
+inside the sandbox, not on your machine, and the sandbox is not given your
+process's keys and tokens.
 
 ```python
 agent = OmniCoreAgent(
     name="builder",
-    system_instruction="Use the execute tool to run commands.",
+    system_instruction="Use the execute tool to run commands. Answer in plain text, without markdown.",
     model_config={"provider": "openai", "model": "gpt-5.6-terra"},
     agent_config={
         "governance_config": {
@@ -152,9 +158,9 @@ for step in trajectory["steps"]:
 ```
 
 ```text
-- **Linux distribution:** Debian GNU/Linux 13 (trixie), specifically `13.7`
-- **Python:** Python `3.12.14` (`/usr/local/bin/python` and `/usr/local/bin/python3`)
-ran: ['sh', '-c', "printf 'OS release:\\n'; cat /etc/os-release; printf '\\nKernel:\\n'; uname -a; printf '\\nPython commands:\\n'; python --version 2>&1 || true; python3 --version 2>&1 || true; command -v python || true; command -v python3 || true"] | exit 0 | in docker
+Debian GNU/Linux 13 (trixie), specifically Debian 13.7.
+Python: 3.12.14 at /usr/local/bin/python3.
+ran: ['sh', '-c', "printf 'OS release:\\n'; cat /etc/os-release; printf '\\nPython:\\n'; python3 --version; printf 'Python path:\\n'; command -v python3"] | exit 0 | in docker
 ```
 
 Every command the agent ran, with its exit code and where it ran, is in the
@@ -164,8 +170,12 @@ configuration each ([sandbox providers](/docs/how-to-guides/sandbox-providers)).
 ## 3. Put a price on it
 
 A **budget** caps what a run, a session, an agent or the whole application may
-spend. The runtime holds a model call's worst-case cost *before* making it, so a
-limit cannot be overshot. Here, a limit far too small:
+spend. Before each model call, the runtime prices the call — the input it
+counts, and the output at `model_config["max_tokens"]` — and holds that
+amount. If the hold does not fit, the run waits for a person instead of
+making the call. Set `max_tokens` for a hold that is a true maximum: without
+it, 4,096 output tokens are assumed and a longer answer settles above the
+hold. The real cost is recorded either way. Here, a limit far too small:
 
 ```python
 agent = OmniCoreAgent(
