@@ -367,10 +367,15 @@ class GovernanceEngine:
             decision.approval_id = approval.approval_id
             raise ApprovalRequiredError(
                 result.reason if result is not None and result.reason else decision.reason,
-                metadata=_decision_metadata(
-                    decision,
-                    reason_code=ReasonCode.APPROVAL_REQUIRED,
-                ),
+                metadata={
+                    **_decision_metadata(
+                        decision,
+                        reason_code=ReasonCode.APPROVAL_REQUIRED,
+                    ),
+                    # Answered, and not approved: by a person, or by the
+                    # system when the approval expired.
+                    "resolved_by": result.resolved_by,
+                },
             )
         if approval.expires_at is not None and result.resolved_at > approval.expires_at:
             decision.approval_id = approval.approval_id

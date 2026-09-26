@@ -18,8 +18,12 @@ Every release, with its notes, is also on
 - A call that crosses a `model_tokens` budget is recorded in full, and the
   next call is stopped before it is made. The crossing call's tokens were
   lost, its dollar hold left open, and a resume made the call again.
-- An approval past its expiry no longer strands its run: deciding it records
-  it as expired, and `resume()` asks again.
+- An approval past its expiry no longer strands its run. One nobody decided
+  in time is a no: `resume()` refuses the call, the model is told it expired,
+  and the run finishes. A decision made in time stands, however late the
+  resume.
+- A person's denial reaches the model as theirs ("Denied by bob: ..."), note
+  included.
 - With `approval_mode="fail"`, the model is told the call was refused
   (nobody will be asked), and the trajectory says `denied`.
 - Sandbox settings no provider keeps are refused when the agent is built:

@@ -355,6 +355,9 @@ class GovernedToolRunner:
                 f"Waiting for a person's approval: {governance_error}"
                 if isinstance(governance_error, ApprovalRequiredError)
                 and waiting_for_approval(single_tool.tool_call_id)
+                else f"Not approved: {governance_error}"
+                if isinstance(governance_error, ApprovalRequiredError)
+                and (getattr(governance_error, "metadata", None) or {}).get("resolved_by")
                 else f"Refused: this call needs a person's approval and none can be asked: {governance_error}"
                 if isinstance(governance_error, ApprovalRequiredError)
                 else f"Invalid arguments for {single_tool.tool_name}: {governance_error}"
