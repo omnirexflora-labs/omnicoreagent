@@ -1,0 +1,556 @@
+---
+title: "Approvals"
+description: "A person in the loop: a run pauses at an ask, someone decides, and it resumes, in the same process or another"
+icon: "user-check"
+---
+
+# Approvals
+
+When a [policy](/docs/core-concepts/policies) rule says `ask`, the run
+pauses before that call until a person decides, then resumes: in the same
+process, another one, or over HTTP.
+
+<Info>
+Every output on this page is what the code printed when it was run. The
+model's wording, and the ids, will differ on your run.
+</Info>
+
+```mermaid
+sequenceDiagram
+    participant App as Your app
+    participant Run as The run
+    participant Person
+    App->>Run: agent.run(...)
+    Run-->>App: status awaiting_approval, approvals
+    App->>Person: show the call and its arguments
+    Person->>App: approve, deny with a note, or approve edited arguments
+    App->>Run: resolve_approval(...), then resume(run_id)
+    Run-->>App: status success
+```
+
+## Pause, decide, resume
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy
+
+tools = ToolRegistry()
+
+@tools.register_tool("issue_refund")
+def issue_refund(order_id: str, amount: float) -> dict:
+    """Refund an order."""
+    return {"order_id": order_id, "refunded": amount}
+
+policy = build_default_policy("interactive-dev")
+policy.rules.ask.append(
+    PolicyRule(
+        rule_id="ask_before_refunds",
+        effect=PolicyEffect.ASK,
+        capability="tool.local.call",
+        target={"tool_name": "issue_refund"},
+        reason="Refunds need a person.",
+    )
+)
+
+async def main():
+    agent = OmniCoreAgent(
+        name="support",
+        system_instruction="You help with orders. Refund when asked. Answer in plain text, in one sentence.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        local_tools=tools,
+        agent_config={"governance_config": {"enabled": True, "policy": policy}},
+    )
+    result = await agent.run("Please refund order 1042 in full: 42 dollars.")
+    print("status:", result["status"])
+    approval = result["approvals"][0]
+    for key, value in approval.items():
+        print(f"  {key}: {value}")
+
+    # Approve a smaller refund than the one asked for.
+    await agent.resolve_approval(
+        result["run_id"], approval["approval_id"],
+        decision="approve", approver="alice", note="partial refund agreed",
+        arguments={"order_id": "1042", "amount": 30.0},
+    )
+    result = await agent.resume(result["run_id"])
+    print("status:", result["status"])
+    print(result["response"])
+
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    for step in trajectory["steps"]:
+        for call in step["tool_calls"]:
+            print(call["tool_name"], call["arguments"], call["outcome"])
+            for decision in call["governance"]:
+                print("  ", decision["effect"], decision["reason_code"],
+                      decision["approved_by"], decision["approval_id"])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+status: awaiting_approval
+  approval_id: approval_b9ab6c7c4a394832975ba69d4def93d5
+  tool_call_id: call_VIIA94lbdxEadjdCPYOVmHLB
+  tool_name: issue_refund
+  capability: tool.local.call
+  target: {'path': None, 'host': None, 'resource': None, 'tool_name': 'issue_refund', 'mcp_server': None}
+  arguments: {'order_id': '1042', 'amount': 42}
+  risk_level: low
+  reason: Refunds need a person.
+  expires_at: 2026-09-27T16:26:21.045398+00:00
+  delegated_run_id: None
+  delegated_name: None
+status: success
+Refunded order 1042 for $30.
+issue_refund {'order_id': '1042', 'amount': 30.0} success
+   ask matched_ask None None
+   allow approved alice approval_b9ab6c7c4a394832975ba69d4def93d5
+```
+
+- `run()` returned `awaiting_approval`; nothing unapproved ran.
+- Each approval has the tool, the model's **arguments**, the rule's `reason`
+  and `expires_at`.
+- `arguments=` replaced the model's: 30 was refunded, not 42.
+- On `resume`, the call was asked again and allowed by the recorded decision.
+
+A run can pause again after a resume, so decide in a loop:
+
+```python
+while result["status"] == "awaiting_approval":
+    for approval in result["approvals"]:
+        await agent.resolve_approval(
+            result["run_id"], approval["approval_id"], decision="approve", approver="alice"
+        )
+    result = await agent.resume(result["run_id"])
+```
+
+## The three decisions
+
+```python
+# Approve the call as the model made it:
+await agent.resolve_approval(run_id, approval_id, decision="approve", approver="alice")
+
+# Deny it; the note reaches the model:
+await agent.resolve_approval(run_id, approval_id, decision="deny", approver="carol",
+                             note="Store credit only for this order.")
+
+# Approve a different call instead:
+await agent.resolve_approval(run_id, approval_id, decision="approve", approver="alice",
+                             arguments={"order_id": "1042", "amount": 30.0})
+```
+
+After a denial, the call does not run and the model reads the note. With
+the note above ([over HTTP](#over-http-with-omniserve)), the run answered:
+
+```text
+Refund for order 1042 couldn’t be issued because approval was denied and store credit only is allowed for this order.
+```
+
+A decision applies once, to that exact call (tool, target and arguments).
+
+## From another process
+
+A paused run lives in the agent's memory store. With a durable store, any
+process with an agent built the same way (same memory store, workspace,
+tools and policy) can decide and resume it.
+
+<Steps>
+  <Step title="One definition, shared">
+    ```python
+    # agent_def.py
+    import os
+    os.environ.setdefault("DATABASE_URL", "sqlite:///./runs.db")
+
+    from omnicoreagent import MemoryRouter, OmniCoreAgent, ToolRegistry
+    from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy
+
+    tools = ToolRegistry()
+
+    @tools.register_tool("issue_refund")
+    def issue_refund(order_id: str, amount: float) -> dict:
+        """Refund an order."""
+        return {"order_id": order_id, "refunded": amount}
+
+    policy = build_default_policy("interactive-dev")
+    policy.rules.ask.append(
+        PolicyRule(rule_id="ask_before_refunds", effect=PolicyEffect.ASK,
+                   capability="tool.local.call", target={"tool_name": "issue_refund"})
+    )
+
+    def build_agent() -> OmniCoreAgent:
+        return OmniCoreAgent(
+            name="support",
+            system_instruction="You help with orders. Refund when asked. Answer in plain text, in one sentence.",
+            model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+            local_tools=tools,
+            memory_router=MemoryRouter("sql"),
+            agent_config={"governance_config": {"enabled": True, "policy": policy}},
+        )
+    ```
+  </Step>
+  <Step title="Process one: run until it pauses, then exit">
+    ```python
+    # start.py
+    import asyncio
+    from agent_def import build_agent
+
+    async def main():
+        agent = build_agent()
+        result = await agent.run("Please refund order 1042 in full: 42 dollars.")
+        print(result["status"], result["run_id"])
+        for approval in result["approvals"]:
+            print(approval["approval_id"], approval["tool_name"], approval["arguments"])
+        await agent.cleanup()
+
+    asyncio.run(main())
+    ```
+
+    ```text
+    awaiting_approval run_0969e2425de24a57be913bbfd47c1565
+    approval_5c2368402c1444e38ae3e8977d42311f issue_refund {'order_id': '1042', 'amount': 42}
+    ```
+  </Step>
+  <Step title="Process two: decide and resume">
+    ```python
+    # decide.py
+    import asyncio, sys
+    from agent_def import build_agent
+
+    async def main(run_id: str, approval_id: str):
+        agent = build_agent()
+        run = await agent.get_run(run_id)
+        print("found:", run["status"], [a["status"] for a in run["approvals"]])
+        await agent.resolve_approval(run_id, approval_id, decision="approve", approver="bob")
+        result = await agent.resume(run_id)
+        print(result["status"], "|", result["response"])
+        await agent.cleanup()
+
+    asyncio.run(main(sys.argv[1], sys.argv[2]))
+    ```
+
+    ```bash
+    python decide.py run_0969e2425de24a57be913bbfd47c1565 approval_5c2368402c1444e38ae3e8977d42311f
+    ```
+
+    ```text
+    found: awaiting_approval ['pending']
+    success | Refunded order 1042 for $42.
+    ```
+  </Step>
+</Steps>
+
+The same two processes worked unchanged on each durable store; only the
+store in `agent_def.py` changes:
+
+| Store | In `agent_def.py` | Install |
+|---|---|---|
+| SQLite (one machine) | `DATABASE_URL=sqlite:///./runs.db`, `MemoryRouter("sql")` | core |
+| PostgreSQL | `DATABASE_URL=postgresql://user:pass@host/db`, `MemoryRouter("sql")` | `omnicoreagent[postgres]` |
+| Redis | `REDIS_URL=redis://host:6379/0`, `MemoryRouter("redis")` | `omnicoreagent[redis]` |
+| MongoDB | `MONGODB_URI=mongodb://host:27017`, `MemoryRouter("mongodb")` | `omnicoreagent[mongodb]` |
+
+On Redis, for example, process two printed:
+
+```text
+found: awaiting_approval ['pending']
+success | Refunded order 1042 for 42 dollars.
+```
+
+The default in-memory store dies with the process
+([Memory](/docs/core-concepts/memory)).
+
+## Answer in the moment: `approval_resolver`
+
+To answer while the run waits (a console prompt, a chat button), give a
+resolver. It is called at every ask; the run does not pause:
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+from omnicoreagent.governance import (
+    ApprovalRequest, ApprovalResult, PolicyEffect, PolicyRule, build_default_policy,
+)
+
+tools = ToolRegistry()
+
+@tools.register_tool("issue_refund")
+def issue_refund(order_id: str, amount: float) -> dict:
+    """Refund an order."""
+    return {"order_id": order_id, "refunded": amount}
+
+policy = build_default_policy("interactive-dev")
+policy.rules.ask.append(
+    PolicyRule(rule_id="ask_before_refunds", effect=PolicyEffect.ASK,
+               capability="tool.local.call", target={"tool_name": "issue_refund"})
+)
+
+class OnCallApprover:
+    """Answers each ask in the moment, while the run waits."""
+
+    async def resolve(self, request: ApprovalRequest) -> ApprovalResult | None:
+        print("asked:", request.capability, request.metadata["tool_name"], request.reason)
+        # Call your chat tool, ticket system or console here.
+        return ApprovalResult(
+            approved=True,
+            approval_id=request.approval_id,  # must be the request's own id
+            resolved_by="on-call:dana",
+            reason="Refund within policy",
+        )
+
+async def main():
+    agent = OmniCoreAgent(
+        name="support",
+        system_instruction="You help with orders. Refund when asked. Answer in plain text, in one sentence.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        local_tools=tools,
+        agent_config={"governance_config": {
+            "enabled": True, "policy": policy, "approval_resolver": OnCallApprover(),
+        }},
+    )
+    result = await agent.run("Please refund order 1042 in full: 42 dollars.")
+    print(result["status"], "|", result["response"])
+
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    for step in trajectory["steps"]:
+        for call in step["tool_calls"]:
+            for decision in call["governance"]:
+                print(call["tool_name"], decision["effect"], decision["reason_code"], decision["approved_by"])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+asked: tool.local.call issue_refund Matched ask policy rule.
+success | Refunded order 1042 for 42 dollars.
+issue_refund ask matched_ask None
+issue_refund allow approved on-call:dana
+```
+
+- `ApprovalRequest` has `capability`, `target`, `risk_level`, `reason`,
+  `expires_at`, and `metadata["tool_name"]`; not the call's arguments.
+- Returning `None` or `approved=False` refuses the call; nothing is saved
+  for later.
+- `StaticApprovalResolver(approved=True)` approves everything (tests); not
+  high-risk requests unless `allow_static_high_risk_approvals` is `True`.
+
+## Refuse instead of pausing: `approval_mode="fail"`
+
+For unattended jobs:
+
+```python
+agent_config = {"governance_config": {"enabled": True, "policy": policy, "approval_mode": "fail"}}
+```
+
+The same refund request then finished at once:
+
+```text
+success | I can’t complete the refund without approval.
+issue_refund denied {'type': 'ApprovalRequiredError', 'message': 'Matched ask policy rule.'} ask matched_ask None
+```
+
+The tool did not run, and its `outcome` is `denied`. The model was told the
+call was refused because it needs a person's approval and none can be asked.
+(0.4.1 reported it as `awaiting_approval` and told the model it was waiting.)
+
+## Expiry
+
+24 hours by default; per rule:
+
+```python
+PolicyRule(rule_id="ask_before_refunds", effect=PolicyEffect.ASK,
+           capability="tool.local.call", target={"tool_name": "issue_refund"},
+           constraints={"approval_expires_seconds": 900})  # 15 minutes
+```
+
+After `expires_at` the approval can no longer be decided: nothing runs on
+it. `resume(run_id)` then asks again, with a new approval for a person to
+decide, or end the run with `abandon_run`. (In 0.4.1 an expired approval
+left its run unable to resume; `abandon_run` is the way out there.)
+
+## Over HTTP, with OmniServe
+
+The refund agent above as a module-level `agent` in `refund_agent.py`,
+served with `omniserve run --agent refund_agent.py --port 8765`:
+
+```bash
+curl -s -X POST localhost:8765/run/sync -H "Content-Type: application/json" \
+  -d '{"query": "Please refund order 1042 in full: 42 dollars."}'
+```
+
+```text
+{
+    "status": "awaiting_approval",
+    "termination_reason": null,
+    "guardrail_result": null,
+    "response": null,
+    "approvals": [
+        {
+            "approval_id": "approval_17ef0caeab45476a8111230da88ca123",
+            "tool_call_id": "call_lwco7KcQbejqDVaoP274zL4Z",
+            "tool_name": "issue_refund",
+            "capability": "tool.local.call",
+            "target": {
+                "path": null,
+                "host": null,
+                "resource": null,
+                "tool_name": "issue_refund",
+                "mcp_server": null
+            },
+            "arguments": {
+                "order_id": "1042",
+                "amount": 42
+            },
+            "risk_level": "low",
+            "reason": "Matched ask policy rule.",
+            "expires_at": "2026-09-27T16:31:43.848500+00:00",
+            "delegated_run_id": null,
+            "delegated_name": null
+        }
+    ],
+    "budget_request": null,
+    "session_id": "omni_core_agent_support_5a3ab1cb",
+    "agent_name": "support",
+    "metric": null,
+    "trace_id": "trace_00ee4a1be1e0419389108690ddfa9e53",
+    "run_id": "run_4a33c9adb579417ba7a47fb607ecb384"
+}
+```
+
+Decide, then resume:
+
+```bash
+curl -s -X POST localhost:8765/runs/$RUN_ID/approvals/$APPROVAL_ID \
+  -H "Content-Type: application/json" \
+  -d '{"decision": "deny", "approver": "carol", "note": "Store credit only for this order."}'
+
+curl -s -X POST localhost:8765/runs/$RUN_ID/resume
+```
+
+The decision returns the approval (`status` `denied`, `approver`, `note`,
+`decided_at`); the resume returns the finished run.
+
+| Route | Body | Errors |
+|---|---|---|
+| `POST /runs/{run_id}/approvals/{approval_id}` | `decision`, `approver`, `note`?, `arguments`? | `404`, `409` decided or expired |
+| `POST /runs/{run_id}/resume` | none | `404`, `409` still waiting or finished |
+| `GET /runs/{run_id}` | none | `404` |
+
+## Who decided, in the evidence
+
+| Where | What |
+|---|---|
+| Run record: `get_run(run_id)`, `GET /runs/{run_id}` | each approval's `status`, `approver`, `note`, `decided_at`, `edited_arguments` |
+| Trajectory: the call's `governance` | `reason_code` `approved`, `approved_by`, `approval_id` |
+
+Each pause and resume is its own trace segment; `get_run_trajectory(run_id)`
+joins them ([Durable runs](/docs/core-concepts/durable-runs)).
+
+## Options
+
+In `agent_config["governance_config"]`:
+
+| Key | Default | What it does |
+|---|---|---|
+| `approval_mode` | `"suspend"` | `suspend` pauses, `fail` refuses |
+| `approval_resolver` | `None` | Answers each ask in the moment |
+| `allow_static_high_risk_approvals` | `False` | Static approvals for high-risk requests |
+| rule `constraints.approval_expires_seconds` | 24 hours | How long an approval waits |
+
+Methods: `resolve_approval(run_id, approval_id, *, decision, approver, note=None, arguments=None)`,
+`resume(run_id)` ([reference](/docs/reference/omnicoreagent)).
+
+Asks from inside a call (sandbox network, a command, a sub-agent) pause the
+run the same way; a worker's ask shows on its lead's run with
+`delegated_run_id` ([Sub-agents](/docs/core-concepts/sub-agents),
+[Background agents](/docs/core-concepts/background-agents)).
+
+## When things go wrong
+
+<AccordionGroup>
+  <Accordion title="ValueError: Run ... is still waiting for approval">
+    `resume` was called before every approval was decided:
+
+    ```text
+    ValueError: Run run_243180db3831427c8d064f76696879ed is still waiting for approval: approval_b8f052bbfd504443a74345e7d3026860
+    ```
+
+    Decide each approval the run lists first. Over HTTP this is a `409`.
+  </Accordion>
+
+  <Accordion title="ValueError: Approval ... expired at ...">
+    The approval waited longer than its window:
+
+    ```text
+    ValueError: Approval approval_b8f052bbfd504443a74345e7d3026860 expired at 2026-09-26T16:30:33.295381+00:00; resume the run to ask again
+    ```
+
+    It is recorded as `expired` and nothing runs on it. `resume(run_id)` asks
+    again (the run returns `awaiting_approval` with a new approval), or end
+    the run:
+
+    ```python
+    ended = await agent.abandon_run(run_id, status="cancelled", reason="approval expired")
+    print(ended["status"], ended["error"])
+    ```
+
+    ```text
+    cancelled {'type': 'RunEndedOutside', 'message': 'approval expired'}
+    ```
+
+    Set a longer `approval_expires_seconds` if people need more time.
+  </Accordion>
+
+  <Accordion title="ValueError: Approval ... is already denied">
+    A decision is final; it cannot be changed or made twice:
+
+    ```text
+    {"detail":"Approval approval_17ef0caeab45476a8111230da88ca123 is already denied"}
+    ```
+
+    That is the `409` OmniServe returned; in Python it is a `ValueError`.
+  </Accordion>
+
+  <Accordion title="LookupError: No approval ... on run ...">
+    The approval id is not one of this run's, or the run is not in this
+    agent's memory store:
+
+    ```text
+    LookupError: No approval approval_nope on run run_b597df1120d849f0815c074b30874d42
+    ```
+
+    In another process, build the agent with the same `memory_router`.
+    `ValueError: approver is required` means `approver` was empty: every
+    decision carries a name.
+  </Accordion>
+
+  <Accordion title="The run did not pause; the model said it needs approval">
+    `approval_mode` is `"fail"`, or an `approval_resolver` returned `None`.
+    Either refuses the call on the spot. Remove both to pause for a person.
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Policies" icon="scale-balanced" href="/docs/core-concepts/policies">
+    Decide what is asked about, and test the rules.
+  </Card>
+  <Card title="Durable runs" icon="rotate" href="/docs/core-concepts/durable-runs">
+    Run records, resuming after a crash, and how long evidence is kept.
+  </Card>
+  <Card title="Budgets" icon="coins" href="/docs/core-concepts/budgets">
+    The other pause: a run that needs more budget.
+  </Card>
+  <Card title="OmniServe" icon="server" href="/docs/how-to-guides/omniserve">
+    Every route, including approvals and resume.
+  </Card>
+  <Card title="Security model" icon="shield-halved" href="/docs/core-concepts/security-model">
+    How approvals fit with the policy, sandbox and the rest.
+  </Card>
+  <Card title="Execution" icon="terminal" href="/docs/core-concepts/execution">
+    Commands and scripts, and the asks they can raise.
+  </Card>
+</CardGroup>

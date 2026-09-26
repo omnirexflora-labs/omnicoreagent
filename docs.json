@@ -69,9 +69,13 @@
                         "group": "Make It Safe",
                         "pages": [
                             "docs/core-concepts/security-model",
-                            "docs/core-concepts/guardrails",
+                            "docs/core-concepts/policies",
+                            "docs/core-concepts/approvals",
                             "docs/core-concepts/execution",
-                            "docs/how-to-guides/sandbox-providers"
+                            "docs/how-to-guides/sandbox-providers",
+                            "docs/core-concepts/budgets",
+                            "docs/core-concepts/guardrails",
+                            "docs/core-concepts/privacy"
                         ]
                     },
                     {

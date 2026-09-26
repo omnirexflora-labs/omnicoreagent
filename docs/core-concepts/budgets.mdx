@@ -1,0 +1,434 @@
+---
+title: "Budgets"
+description: "Cap what a run, a session, an agent or the whole application spends in dollars, tokens, calls and sandbox seconds, and top it up when it runs out"
+icon: "wallet"
+---
+
+# Budgets
+
+A budget caps what an agent may spend — dollars, tokens, model calls, tool
+calls, sandbox seconds — for one run, a session, the agent, or the whole
+application. By the end of this page you will have a run that stops **before**
+a model call it cannot afford, waits for a person to top it up, and carries on.
+
+<Info>
+Every output on this page is what the code printed when it was run. Prices and
+the model's wording will differ on your run.
+</Info>
+
+## A run that waits for money
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent
+
+def show(budgets):
+    for b in budgets:
+        print(f"  {b['scope']:8} {b['meter']:15} limit {b['limit']:g}  granted {b['granted']:g}  "
+              f"spent {b['spent']:.6f}  remaining {b['remaining']:.6f}")
+
+async def main():
+    agent = OmniCoreAgent(
+        name="writer",
+        system_instruction="Answer in plain text.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini", "max_tokens": 300},
+        agent_config={
+            "governance_config": {
+                "enabled": True,
+                "budgets": {
+                    "request": [{"meter": "model_cost_usd", "limit": 0.0005}],
+                    "session": [{"meter": "model_calls", "limit": 20}],
+                },
+            },
+        },
+    )
+    result = await agent.run("In two sentences, why do budgets matter for agents?")
+    print("status:", result["status"])
+    request = result["budget_request"]
+    print(f"{request['scope']} {request['meter']}: limit {request['limit']}, used {request['used']}, "
+          f"needed {request['needed']:.6f}, short {request['shortfall']:.6f}")
+    show(await agent.budget_status(result["run_id"]))
+
+    await agent.grant_budget(result["run_id"], approver="alice", amount=0.01, note="demo")
+    resumed = await agent.resume(result["run_id"])
+    print("status:", resumed["status"])
+    print(resumed["response"])
+    show(await agent.budget_status(result["run_id"]))
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+status: awaiting_budget
+request model_cost_usd: limit 0.0005, used 0.0, needed 0.001628, short 0.001128
+  request  model_cost_usd  limit 0.0005  granted 0  spent 0.000000  remaining 0.000500
+  session  model_calls     limit 20  granted 0  spent 0.000000  remaining 20.000000
+status: success
+Budgets matter for agents because they keep actions constrained to available resources like time, tokens, money, or compute, preventing waste and runaway behavior. They also force prioritization, helping agents choose the most valuable steps and finish tasks reliably within limits.
+  request  model_cost_usd  limit 0.0005  granted 0.01  spent 0.001321  remaining 0.009179
+  session  model_calls     limit 20  granted 0  spent 1.000000  remaining 19.000000
+```
+
+The first call was priced at $0.001628 — its input, plus 300 output tokens at
+`max_tokens` — which did not fit in $0.0005. Nothing was spent and no call was
+made: not even the session's call counter moved. Alice granted $0.01, the run
+resumed, and the call really cost $0.001321.
+
+## How it works
+
+<Steps>
+  <Step title="Every scope that covers the run is charged">
+    A run charges its own `request` budget, its session's, its agent's, and the
+    application's. Any one of them running out stops the work, and the run says
+    which.
+  </Step>
+  <Step title="A model call is held before it is made">
+    The runtime counts the input it is about to send and prices the most the
+    call could return: `model_config["max_tokens"]`, or 4,096 tokens when none
+    is set (sent to the provider as the call's ceiling, so an answer that
+    reaches it ends with `termination_reason` `length`). That amount is
+    **held**, together with one model call. If it does not fit, the call is
+    not made.
+  </Step>
+  <Step title="The real cost replaces the hold">
+    When the call returns, the hold is settled at what it really cost and its
+    tokens are counted. The trace records a `budget_warning` when a meter
+    reaches `warn_at` (80%) of its limit, and `budget_exhausted` when it runs
+    out.
+  </Step>
+  <Step title="At the wall: pause or end">
+    With `on_exhausted: "pause"` (the default) the run returns
+    `status: "awaiting_budget"` with a `budget_request`, keeping the work done
+    so far. With `"terminate"` it ends with `status: "error"` and
+    `termination_reason: "budget_exhausted"`.
+  </Step>
+</Steps>
+
+Counters live in the agent's memory store, next to its run records, and are
+changed with compare-and-swap, so workers sharing a Redis, SQL or MongoDB store
+share a budget and two of them cannot both spend the last dollar. With the
+default in-memory store, a budget lasts as long as the process. A finished
+run's own `request` counter is removed and its spend kept on the run's record;
+session, agent and application counters stay.
+
+## Scopes, meters and windows
+
+```python
+agent_config = {
+    "governance_config": {
+        "enabled": True,
+        "budgets": {
+            "application_id": "support-desk",
+            "application": [{"meter": "model_cost_usd", "limit": 20.0, "window": "day"}],
+            "agent": [{"meter": "sandbox_seconds", "limit": 3600, "window": "day"}],
+            "session": [{"meter": "model_tokens", "limit": 200000}],
+            "request": [
+                {"meter": "model_cost_usd", "limit": 0.50},
+                {"meter": "tool_calls", "limit": 40, "on_exhausted": "terminate"},
+            ],
+        },
+    },
+}
+```
+
+| Scope | Counts | Keyed by |
+|---|---|---|
+| `request` | One run, resumes included | the `run_id` |
+| `session` | Every run with the same `session_id` | the `session_id` |
+| `agent` | Every run of this agent | the agent's `name` |
+| `application` | Every agent that names the same `application_id` (required for this scope) | `application_id` |
+
+| Meter | Counts | Checked |
+|---|---|---|
+| `model_cost_usd` | Dollars, from the provider's published prices | before each call (held), settled after |
+| `model_calls` | Model calls | before each call |
+| `model_tokens` | Tokens in and out | before each call (its input must fit), counted after |
+| `tool_calls` | Tool calls | as each is authorized |
+| `sandbox_seconds` | Seconds a sandbox session is open | before each command, and when the session closes |
+| `subagent_runs` | Workers started with `spawn_subagents` | as each starts |
+
+A window resets a counter: `total` (never), `day` (00:00 UTC) or `month` (the
+1st, 00:00 UTC).
+
+<Note>
+A call's output is known only when it returns, so a call can cross a token
+limit: what it used is still counted in full, and the next call is stopped
+before it is made (its input would not fit). Leave a call's worth of headroom
+if the limit must never be passed. (In 0.4.1 the call that crossed the limit
+was not counted, and resuming made it again.)
+</Note>
+
+Every field, default and meter is in the [budgets reference](/docs/reference/budgets).
+Budgets can also live in a policy file (`budgets:` in the
+[policy](/docs/reference/policy)); set them in one place or the other, not both.
+
+## When a budget runs out
+
+### Pause, then grant or deny
+
+`budget_request` says what stopped the run:
+
+| Field | What |
+|---|---|
+| `scope`, `meter`, `window` | Which budget |
+| `limit` | Its limit, plus any earlier grants |
+| `used` | Spent and held so far |
+| `needed` | What the call that stopped needs |
+| `shortfall` | How much more the budget needs for that call |
+| `request_id` | The request to answer (the latest pending one when omitted) |
+
+Then, from this process or any other sharing the memory store:
+
+- `await agent.grant_budget(run_id, approver="alice", amount=..., note=...)`
+  adds to that one budget. Without `amount`, the grant is exactly the
+  `shortfall`: enough for the call that stopped, so the run may stop again at
+  its next call. The policy is not changed; the grant is recorded with the
+  approver's name.
+- `await agent.deny_budget(run_id, approver="alice", note=...)` refuses it.
+- `await agent.resume(run_id)` then continues a granted run, or ends a denied
+  one cleanly.
+- `await agent.budget_status(run_id)` lists every budget covering the run:
+  `limit`, `granted`, `spent`, `reserved` and `remaining`.
+
+### End instead of waiting
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
+
+@tools.register_tool("get_weather")
+def get_weather(city: str) -> dict:
+    """Get the current weather for a city."""
+    return {"city": city, "temperature": "25C"}
+
+async def main():
+    agent = OmniCoreAgent(
+        name="weather",
+        system_instruction="Call get_weather once per city. Answer in plain text.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        local_tools=tools,
+        agent_config={
+            "governance_config": {
+                "enabled": True,
+                "budgets": {"request": [{"meter": "tool_calls", "limit": 2, "on_exhausted": "terminate"}]},
+            },
+        },
+    )
+    result = await agent.run("What is the weather in Lagos, Accra and Nairobi?")
+    print(result["status"], "|", result["termination_reason"])
+    print(result["response"])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+error | budget_exhausted
+This run stopped because the request budget is exhausted: The request budget for tool_calls is exhausted: 2 of 2 used, 1 more needed
+```
+
+Use `terminate` where no person is watching: batch jobs, evaluations, a
+background worker. A budget a person has already denied for this run is not
+asked about again: the run ends.
+
+## A model with no published price
+
+A model behind `base_url` (vLLM, LM Studio, a gateway) usually has no
+published price. Its calls are made and recorded, but a `model_cost_usd`
+budget cannot govern them: it would never trip. Budget its calls and tokens
+instead. Here against a local OpenAI-compatible server (a small stand-in that
+gives the same answer to every question):
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent
+
+async def main():
+    agent = OmniCoreAgent(
+        name="local_model",
+        system_instruction="Answer in one sentence.",
+        model_config={"provider": "openai", "model": "qwen3-coder-30b", "base_url": "http://localhost:8000/v1"},
+        agent_config={
+            "governance_config": {
+                "enabled": True,
+                "budgets": {"session": [
+                    {"meter": "model_calls", "limit": 2},
+                    {"meter": "model_tokens", "limit": 50000},
+                ]},
+            },
+        },
+    )
+    for turn in range(1, 4):
+        result = await agent.run("What is the largest city in Nigeria?", session_id="demo")
+        print(turn, result["status"], "|", result["response"])
+        if result["status"] == "success":
+            totals = (await agent.get_trajectory(result["trace_id"]))["totals"]
+            print("  cost:", totals["estimated_cost_usd"], "| cost_complete:", totals["cost_complete"])
+    request = result["budget_request"]
+    print(request["scope"], request["meter"], "limit", request["limit"], "used", request["used"])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+1 success | Lagos is the largest city in Nigeria.
+  cost: 0.0 | cost_complete: False
+2 success | Lagos is the largest city in Nigeria.
+  cost: 0.0 | cost_complete: False
+3 awaiting_budget | None
+session model_calls limit 2.0 used 2.0
+```
+
+The third run stopped before its call. `cost_complete: False` says the `0.0`
+is not a real price, and the trace has a `budget_cost_incomplete` event for
+each such call.
+
+## Over HTTP
+
+[OmniServe](/docs/how-to-guides/omniserve) has the same flow. This server
+(on port 8123, beside the stand-in model on 8000) allows one model call per
+session:
+
+```python
+from omnicoreagent import OmniCoreAgent
+from omnicoreagent.serve import OmniServe, OmniServeConfig
+
+agent = OmniCoreAgent(
+    name="served",
+    system_instruction="Answer in one sentence.",
+    model_config={"provider": "openai", "model": "qwen3-coder-30b", "base_url": "http://localhost:8000/v1"},
+    agent_config={
+        "governance_config": {
+            "enabled": True,
+            "budgets": {"session": [{"meter": "model_calls", "limit": 1}]},
+        },
+    },
+)
+
+if __name__ == "__main__":
+    OmniServe(agent, config=OmniServeConfig(port=8123)).start()
+```
+
+The first question in session `demo` was answered; the second returned
+`"status": "awaiting_budget"` with its `run_id` and `budget_request`:
+
+```bash
+curl -s localhost:8123/run/sync -H 'content-type: application/json' \
+  -d '{"query": "Which city is the largest in Nigeria?", "session_id": "demo"}'
+curl -s localhost:8123/runs/$RUN_ID/budget
+```
+
+`GET /runs/{run_id}/budget` returns `budgets` (as `budget_status`) and
+`requests` (each time the run ran out). Its budget entry and the request's
+status:
+
+```text
+{'scope': 'session', 'meter': 'model_calls', 'window': 'total', 'key': 'session:demo:total', 'limit': 1.0, 'granted': 0.0, 'spent': 1.0, 'reserved': 0.0, 'remaining': 0.0}
+['pending']
+```
+
+A person grants (or sends `"decision": "deny"`), and the run is resumed:
+
+```bash
+curl -s -X POST localhost:8123/runs/$RUN_ID/budget -H 'content-type: application/json' \
+  -d '{"decision": "grant", "approver": "alice", "amount": 5, "note": "more questions today"}'
+curl -s -X POST localhost:8123/runs/$RUN_ID/resume
+```
+
+```text
+{"run_id":"run_816dd331f5c74a9cbc23f9098f5b1fab","request_id":"budgetreq_7a68f7ce60894e4ab871694d70be0b84","status":"granted","meter":"model_calls","scope":"session","amount":5.0,"approver":"alice","note":"more questions today"}
+success | Lagos is the largest city in Nigeria.
+```
+
+The last line is the resumed run's `status` and `response`. Leave out
+`amount` to grant the shortfall.
+
+## Budgets and the other limits
+
+Budgets are not the only thing that stops a run; they are the only limit in
+dollars, and the only one across runs.
+
+| You want to stop | Use | When it is reached |
+|---|---|---|
+| A run that goes round in circles | `max_steps` (on, 50) | The run ends: `termination_reason` `max_steps` |
+| One run's model calls or tokens, simply | `request_limit`, `total_tokens_limit` (off) | The run ends: `resource_limit` |
+| Spending, for a run, session, agent or application | Budgets | Before the call; pause for a person, or end |
+
+More in [which limit to use](/docs/how-to-guides/configuration#which-limit-to-use).
+
+## When things go wrong
+
+<AccordionGroup>
+  <Accordion title="ValueError: budget meter must be one of …">
+    A meter name that does not exist:
+
+    ```text
+    ValueError: budget meter must be one of: model_cost_usd, model_tokens, model_calls, tool_calls, sandbox_seconds, subagent_runs; got 'dollars'
+    ```
+
+    The window and `on_exhausted` are checked the same way:
+
+    ```text
+    ValueError: budget window must be one of: total, day, month; got 'week'
+    ValueError: budget on_exhausted must be one of: pause, terminate; got 'stop'
+    ```
+  </Accordion>
+
+  <Accordion title="ValueError: budgets.application_id is required to budget an application">
+    An `application` budget needs to know which application it belongs to:
+
+    ```text
+    ValueError: budgets.application_id is required to budget an application: it names the deployment or tenant the budget belongs to
+    ```
+
+    Add `"application_id": "support-desk"` beside the scopes.
+  </Accordion>
+
+  <Accordion title="Run … is not waiting for a budget decision">
+    `grant_budget` or `deny_budget` on a run that is not `awaiting_budget` —
+    already granted, or never stopped — raises `LookupError`; over HTTP it is
+    a 404:
+
+    ```text
+    {"detail":"Run run_5645e83bbd0f4fa2bb6e92de682abae8 is not waiting for a budget decision"}
+    ```
+  </Accordion>
+
+  <Accordion title="A dollar budget never stops a local model">
+    The model has no published price, so `model_cost_usd` has nothing to
+    count; `cost_complete` is `False` in the run's totals. Budget
+    `model_calls` and `model_tokens` instead (above).
+  </Accordion>
+
+  <Accordion title="The run keeps stopping after every grant">
+    A grant without `amount` covers only the call that stopped. Grant more
+    headroom: `amount=0.50`.
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Budgets reference" icon="book" href="/docs/reference/budgets">
+    Every meter, window, scope and field.
+  </Card>
+  <Card title="Approvals" icon="user-check" href="/docs/core-concepts/approvals">
+    Pausing for a person, for tools as well as money.
+  </Card>
+  <Card title="Policies" icon="shield-halved" href="/docs/core-concepts/policies">
+    Budgets can live in a policy file, with its rules.
+  </Card>
+  <Card title="Sandboxes and execution" icon="terminal" href="/docs/core-concepts/execution">
+    Where sandbox seconds are spent.
+  </Card>
+  <Card title="Durable runs" icon="rotate" href="/docs/core-concepts/durable-runs">
+    Resume a waiting run from another process, days later.
+  </Card>
+  <Card title="Security model" icon="lock" href="/docs/core-concepts/security-model">
+    What is enforced, and where.
+  </Card>
+</CardGroup>

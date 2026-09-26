@@ -1,88 +1,430 @@
 ---
-title: "Execution"
-description: "The three ways an agent runs code, and what governs each of them"
+title: "Sandboxes and Execution"
+description: "The execute tool: commands in a sandbox, files in and out of the workspace, the network off by default, and a record of every command"
+icon: "terminal"
 ---
 
-# Execution
+# Sandboxes and Execution
 
-An agent can run code in three ways. They share one rule: **every one of them
-is authorized by policy before it runs, and recorded afterwards.**
+Give an agent a sandbox and it gets one more tool, `execute`: a shell command
+run inside an isolated container, not on your machine. By the end of this page
+you will have an agent that runs Python in Docker against a file from its
+workspace, writes a result back, and leaves a record of every command.
 
-| Lane | What it is | Runs where |
+<Info>
+Every output on this page is what the code printed when it was run, with
+Docker on Linux and `gpt-5.4-mini`. The model writes its own commands, so the
+commands and the wording will differ on your run.
+</Info>
+
+## A first run in Docker
+
+<Steps>
+  <Step title="Install the Docker extra">
+    ```bash
+    pip install "omnicoreagent[docker]"
+    ```
+
+    Docker must be running. The first run pulls the default image,
+    `python:3.12-slim`, which can take a minute; later runs start in seconds.
+  </Step>
+
+  <Step title="Put a file in the workspace">
+    The agent's workspace is `./workspace/files/` by default. Create
+    `workspace/files/sales.csv`:
+
+    ```text
+    region,amount
+    north,120
+    south,80
+    east,200
+    west,50
+    ```
+  </Step>
+
+  <Step title="Run the agent">
+    ```python
+    import asyncio
+    from omnicoreagent import OmniCoreAgent
+
+    async def main():
+        agent = OmniCoreAgent(
+            name="analyst",
+            system_instruction="Use the execute tool to run commands. Answer in plain text, in one or two sentences.",
+            model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+            agent_config={
+                "governance_config": {
+                    "enabled": True,
+                    "profile": "interactive-dev",
+                    "sandbox_config": {"provider": "docker"},
+                },
+            },
+        )
+        result = await agent.run(
+            "sales.csv is in your working directory. Use Python to add up the amount column, "
+            "and write the total to total.txt."
+        )
+        print(result["status"], "|", result["response"])
+
+        trajectory = await agent.get_trajectory(result["trace_id"])
+        for step in trajectory["steps"]:
+            for call in step["tool_calls"]:
+                for run in call["executions"]:
+                    print("ran:", run["command"], "| exit", run["exit_code"],
+                          "| in", run["sandbox_provider"], "|", run["duration_ms"], "ms")
+                sync = call["workspace_sync"]
+                if sync:
+                    print("copied in:", sync["copied_in"], "| copied back:", sync["written"])
+        print("totals:", trajectory["totals"]["executions"])
+        await agent.cleanup()
+
+    asyncio.run(main())
+    ```
+
+    ```text
+    success | Done — I summed the amount column and wrote the total to total.txt.
+    ran: ['sh', '-c', "python3 - <<'PY'\nimport csv\nfrom decimal import Decimal\nfrom pathlib import Path\np = Path('sales.csv')\nwith p.open(newline='', encoding='utf-8') as f:\n    reader = csv.DictReader(f)\n    total = Decimal('0')\n    for row in reader:\n        val = row.get('amount', '').strip()\n        if val:\n            total += Decimal(val)\nPath('total.txt').write_text(str(total), encoding='utf-8')\nprint(total)\nPY"] | exit 0 | in docker | 1325.076 ms
+    copied in: ['sales.csv'] | copied back: ['total.txt']
+    totals: {'sessions': 1, 'commands': 1, 'failed': 0, 'timed_out': 0}
+    ```
+
+    `workspace/files/total.txt` now holds `450`. The command ran in a
+    container; the file it wrote came back to your workspace.
+  </Step>
+</Steps>
+
+## How it works
+
+<Steps>
+  <Step title="The tool appears only with a sandbox">
+    `execute` is added when governance is on **and** the configured provider can
+    run commands. Without `governance_config["enabled"]`, or with provider
+    `none`, the agent has no way to run a command.
+  </Step>
+  <Step title="Each command is authorized twice">
+    The tool call is `sandbox.execute`; the command inside the sandbox is
+    `process.exec`, on the `sandbox` surface (or `host` for the
+    [`local` provider](/docs/how-to-guides/sandbox-providers#local-this-machine-not-a-sandbox)).
+    The development profiles allow sandboxed commands; `strict-production`
+    allows none without a rule of yours ([Policies](/docs/core-concepts/policies)).
+  </Step>
+  <Step title="One sandbox per run">
+    The first command opens a session; later commands in the same run reuse it,
+    so files persist between them. When the run ends — success, error, a pause
+    for approval, or a cancel — the session is closed and the container removed.
+    A resumed run opens a fresh one.
+  </Step>
+  <Step title="Workspace files go in, text outputs come back">
+    Before each command, workspace files that changed since the last copy are
+    uploaded into the sandbox's working directory (`/workspace`). After it, text
+    files the command created or changed are copied back as governed workspace
+    writes. The sandbox never mounts your workspace.
+  </Step>
+</Steps>
+
+The model sends `command` (run with `sh -c` in the working directory) and an
+optional `timeout` in seconds: 60 by default, at most the agent's
+`tool_call_timeout` (180 by default). A command that exits non-zero or times
+out comes back to the model as an error, with its exit code, `stdout` and
+`stderr`.
+
+## Files between the workspace and the sandbox
+
+What is copied, and what is not:
+
+| | Copied in | Copied back |
 |---|---|---|
-| Tools | Your own functions and MCP tools | In your process, or the MCP server |
-| Sandbox | The `execute` tool and skill scripts | A container ([sandbox providers](/docs/how-to-guides/sandbox-providers)), or this machine with `local` |
-| Code mode | A Python program the model writes ([code mode](/docs/core-concepts/code-mode)) | Monty, in a worker process |
+| Text files (UTF-8) | Yes, when changed since the last copy | Yes, when created or changed by a command |
+| Binary files | No | No: skipped, and the model is told why |
+| Hidden paths (`.anything`), links | — | Never |
+| A folder holding a `.git` (a checkout) | — | Never; clone repositories outside the workspace folder |
+| A background run's `run.json`, `events.jsonl` | Never | Never |
+| A file the policy protects | No (a `read_file` of it would be refused) | No (a `write_file` of it would be refused) |
+| Deletions | Not propagated either way | |
 
-## Turning them on
+Limits: 500 files, 2 MB per file and 20 MB per copy. To copy less, give glob
+patterns over workspace paths (`*` crosses folders; no `include` copies
+everything not excluded):
 
 ```python
 agent_config = {
     "governance_config": {
         "enabled": True,
-        "profile": "interactive-dev",
-        "sandbox_config": {"provider": "docker"},   # adds the execute tool
-    },
-    "enable_agent_skills": True,                     # skill scripts (in the sandbox when there is one)
-    "code_mode": {"enabled": True},                  # adds run_code
-}
-```
-
-The `execute` tool appears only when governance is on **and** the configured
-sandbox can run commands, so an agent never has a way to run code that policy
-has not seen. What the sandbox is — network, image, working directory — is
-`sandbox_manifest`, next to `sandbox_config`
-([Sandbox providers](/docs/how-to-guides/sandbox-providers)); what it asks
-for is authorized when the run's session opens.
-
-## What each one is governed as
-
-| Capability | For | Default in the dev profiles |
-|---|---|---|
-| `tool.local.call`, `tool.mcp.call` | Your tools, MCP tools | Allowed (MCP asks in interactive-dev) |
-| `sandbox.execute` | Calling `execute` | Allowed |
-| `process.exec` | Each command inside the sandbox | Allowed on the sandbox surface, never on the host (the `local` provider's surface) |
-| `skill.script.run` | Running a skill script | Allowed (high risk; on the host when there is no sandbox) |
-| `code.run` | Running a program | Allowed |
-| `workspace.files.*` | Files, including what a sandbox writes back | Allowed |
-
-`strict-production` allows none of these without a rule you write.
-
-## Files
-
-Commands run with the agent's workspace files in the sandbox's working
-directory. After each command, text files it created or changed are copied
-back as governed workspace writes. The sandbox never mounts your workspace,
-and a file the policy protects is not copied in or out
-([security model](/docs/core-concepts/security-model)).
-
-Two things never come back: a folder a command made that holds a `.git` (a
-checkout; clone repositories outside the workspace folder, the model is told
-so), and a background run's own records (`run.json`, `events.jsonl`), which
-also never go in. To copy less, give the bridge glob patterns over workspace
-paths; `*` crosses folders, and the default copies everything:
-
-```python
-agent_config = {
-    "governance_config": {
+        "sandbox_config": {"provider": "docker"},
         "workspace_bridge": {"include": ["src/*", "data/*.csv"], "exclude": ["data/archive/*"]},
     },
 }
 ```
 
-## In the trace
+With `enable_workspace_files: False` nothing is copied. With the `local`
+provider nothing is copied either: commands already run on the machine, so
+point its `working_dir` at the workspace directory instead.
 
-Each run records its sandbox session (with the provider's own name for it,
-`sandbox_ref`), every command (exit code, duration, output size, the rule
-that allowed it), every file copy, and every tool call a program made, nested
-under its `run_code` call. Run totals count the sandbox commands. See
+## The network is off
+
+A sandbox has no network unless its **manifest** asks for it, and the policy
+allows that. Here the agent looks at its own sandbox:
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent
+
+async def main():
+    agent = OmniCoreAgent(
+        name="checker",
+        system_instruction="Use the execute tool to run commands. Answer in plain text, without markdown.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        agent_config={
+            "governance_config": {
+                "enabled": True,
+                "profile": "interactive-dev",
+                "sandbox_config": {"provider": "docker"},
+            },
+        },
+    )
+    result = await agent.run(
+        "In your sandbox: list the names (not values) of the environment variables, "
+        "then try to open https://pypi.org with Python (5 second timeout). "
+        "Report both in two short lines."
+    )
+    print(result["response"])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+GPG_KEY, HOME, HOSTNAME, LANG, PATH, PWD, PYTHON_SHA256, PYTHON_VERSION
+URLError: <urlopen error [Errno -3] Temporary failure in name resolution>
+```
+
+No network, and none of your process's variables: `LLM_API_KEY` is not there.
+The variables listed come from the `python:3.12-slim` image itself
+(`GPG_KEY` is the ID of the key Python's releases are signed with).
+
+To turn the network on, ask for it in `sandbox_manifest`. The development
+profiles ask a person first (rule `ask_sandbox_network`), so the run pauses
+before its first command:
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent
+
+async def main():
+    agent = OmniCoreAgent(
+        name="fetcher",
+        system_instruction="Use the execute tool to run commands. Answer in plain text, in one sentence.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        agent_config={
+            "governance_config": {
+                "enabled": True,
+                "profile": "interactive-dev",
+                "sandbox_config": {"provider": "docker"},
+                "sandbox_manifest": {"network_policy": {"default": "allow"}},
+            },
+        },
+    )
+    result = await agent.run("Use Python in your sandbox to fetch https://pypi.org and report the HTTP status code.")
+    print("status:", result["status"])
+    while result["status"] == "awaiting_approval":
+        for approval in result["approvals"]:
+            print("waiting on:", approval["capability"], approval["target"]["host"], "|", approval["reason"])
+            await agent.resolve_approval(
+                result["run_id"], approval["approval_id"], decision="approve", approver="alice"
+            )
+        result = await agent.resume(result["run_id"])
+        print("status:", result["status"])
+    print(result["response"])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+status: awaiting_approval
+waiting on: sandbox.network.configure * | Turning the sandbox network on needs approval.
+status: success
+200
+```
+
+`"allow"` opens the whole internet. To allow only named hosts, use
+`"allowed_hosts": ["pypi.org", "*.pythonhosted.org"]` on a provider that
+enforces a host allowlist; Docker, E2B, Vercel and `local` cannot, and the
+agent is refused when it is built rather than given more network than it asked
+for. Which providers enforce what is on
+[Sandbox providers](/docs/how-to-guides/sandbox-providers#network-what-each-provider-enforces).
+
+### What the manifest can ask for
+
+`sandbox_config` says **who** runs the sandbox; `sandbox_manifest` says **what**
+it is. Each thing it asks for is a policy question when the session opens:
+
+| Field | Default | Asked as |
+|---|---|---|
+| `network_policy` | `{"default": "deny"}` | `sandbox.network.configure` (once per allowed host) |
+| `image` | the provider's (`python:3.12-slim` for Docker) | `sandbox.image.use` |
+| `working_dir` | `/workspace` | — |
+| `environment` | `{"plain": {}}` | `sandbox.environment.set` |
+| `resources` | none (e.g. `{"cpu": "2", "memory": "1g"}`) | `sandbox.resources.set` |
+| `workspace_mount` | none | `sandbox.filesystem.mount` (asks in the dev profiles) |
+
+A manifest with an unknown field, or one that sets `provider` or `sandbox_id`,
+is refused when the agent is built.
+
+## Secrets stay out
+
+A sandbox gets only the environment you give it in
+`sandbox_manifest["environment"]["plain"]` — never your process's environment,
+and never your model key or provider credentials, which stay in your process
+with the policy and the telemetry. Docker also never mounts the Docker socket,
+system directories or credential folders such as `~/.ssh` or `~/.aws`, whatever
+the policy says ([Security model](/docs/core-concepts/security-model)).
+
+```python
+agent_config = {
+    "governance_config": {
+        "enabled": True,
+        "sandbox_config": {"provider": "docker"},
+        "sandbox_manifest": {"environment": {"plain": {"APP_ENV": "test"}}},
+    },
+}
+```
+
+Put nothing secret in `plain`: the model's commands can read it and print it.
+`environment.secret_refs` is refused when the agent is built, since no built-in
+provider delivers secrets to a command. Keep a secret in a tool that runs in your
+process, and let the model call the tool.
+
+## What a command's record holds
+
+Each command is in the run's trajectory under the tool call that ran it
+(`call["executions"]`):
+
+| Field | What |
+|---|---|
+| `command` | The argv, `['sh', '-c', '<the model's command>']` |
+| `exit_code`, `timed_out`, `duration_ms` | How it ended |
+| `stdout`, `stderr` | Its output, subject to the [privacy](/docs/core-concepts/privacy) capture policy |
+| `stdout_bytes`, `stderr_bytes`, `*_truncated` | Output size; output over 1 MB is cut |
+| `sandbox_provider`, `sandbox_session_id` | Where it ran |
+| `matched_rule_ids` | The rule that allowed it, e.g. `allow_sandboxed_execution` |
+
+`call["workspace_sync"]` lists what was copied in, written back and skipped
+(with the reason), and `trajectory["totals"]["executions"]` counts sessions,
+commands, failures and timeouts. The trace also has the session itself, as
+`sandbox_session_created` and `sandbox_session_closed` events: provider, the
+provider's own name for the sandbox (`sandbox_ref`, the container ID for
+Docker), image, network, working directory, and on close the number of
+commands, how long it was open, and `lost`. See
 [Observability](/docs/how-to-guides/observability).
 
-A sandbox that dies mid-run — the provider stopped it, its lifetime ran out,
-someone killed it — is not a slow command: the model is told the sandbox was
-lost and that the next command runs in a fresh one (with the workspace files
-copied in again, and whatever else was in the old sandbox gone), and the
-trace records the session closed with `lost: true`.
+## A sandbox that dies
 
-A run that pauses for approval mid-execution, or whose process dies, continues
-where it stopped: [Durable Runs](/docs/core-concepts/durable-runs).
+A sandbox can die under a run: the provider stopped it, its lifetime ran out,
+someone removed it, or a command ignored its time limit and the sandbox was
+stopped. That is not reported as a slow command. The model is told:
+
+```text
+The sandbox was lost during this command (...). Files created in it are gone; the next command runs in a fresh sandbox with the workspace files copied in again.
+```
+
+The next command opens a fresh sandbox, and the trace records the old session
+closed with `lost: true`. A run that pauses for approval, or whose process
+dies, continues where it stopped ([Durable runs](/docs/core-concepts/durable-runs)).
+
+## Options
+
+| Where | Option | Default | What it does |
+|---|---|---|---|
+| `governance_config` | `sandbox_config` | none | `{"provider": ..., "options": {...}}`: who runs the sandbox ([providers](/docs/how-to-guides/sandbox-providers)) |
+| `governance_config` | `sandbox_manifest` | no network, provider's image, `/workspace` | What the sandbox is (above) |
+| `governance_config` | `workspace_bridge` | copy everything | `{"include": [...], "exclude": [...]}` globs |
+| `governance_config` | `sandbox_runtime` | none | A runtime object instead of `sandbox_config` (not both) |
+| `agent_config` | `tool_call_timeout` | `180` | The most seconds one command may be given |
+| `agent_config` | `enable_workspace_files` | `True` | Off: nothing is copied in or out |
+
+Every agent setting is in the [agent settings reference](/docs/reference/agent-config);
+every capability in the [policy reference](/docs/reference/policy).
+
+## When things go wrong
+
+<AccordionGroup>
+  <Accordion title="The agent never calls execute">
+    The tool is not there. Check that `governance_config` has `"enabled": True`
+    and a `sandbox_config` whose provider runs commands (`none` does not). A
+    model that asks for it anyway gets:
+
+    ```text
+    Tool 'execute' is not available; discover it first if hidden
+    ```
+  </Accordion>
+
+  <Accordion title="Command timed out after 1s">
+    The command ran longer than the `timeout` the model gave it. It is killed
+    inside the sandbox and the model receives:
+
+    ```text
+    {"tool_name": "execute", "args": {"command": "sleep 5", "timeout": 1}, "status": "error", "data": {"exit_code": 137, "stdout": "", "stderr": "", "timed_out": true, "execution_surface": "sandbox"}, "message": "Command timed out after 1s"}
+    ```
+
+    The model can retry with a longer `timeout`, up to `tool_call_timeout`.
+  </Accordion>
+
+  <Accordion title="Command exited with 2">
+    The command failed; the model sees its `stderr` and usually corrects itself:
+
+    ```text
+    {"tool_name": "execute", "args": {"command": "ls /nope", "timeout": 30}, "status": "error", "data": {"exit_code": 2, "stdout": "", "stderr": "ls: cannot access '/nope': No such file or directory\n", "timed_out": false, "execution_surface": "sandbox"}, "message": "Command exited with 2"}
+    ```
+  </Accordion>
+
+  <Accordion title="Temporary failure in name resolution / pip install fails">
+    The sandbox has no network, as intended. Either build an image with what
+    your tasks need and name it (`"sandbox_manifest": {"image": "..."}`), or
+    allow the network in the manifest (above).
+  </Accordion>
+
+  <Accordion title="ValueError: The docker sandbox cannot enforce a network host allowlist">
+    Raised when the agent is built with `allowed_hosts` on a provider that
+    cannot keep it:
+
+    ```text
+    ValueError: The docker sandbox cannot enforce a network host allowlist (allowed_hosts): use network_policy default 'deny' or 'allow', or a provider that enforces one (modal, http)
+    ```
+
+    Use `"default": "allow"`, or [Modal](/docs/how-to-guides/sandbox-providers#modal)
+    or your own [`http` service](/docs/how-to-guides/sandbox-providers#http-your-own-sandbox-service).
+  </Accordion>
+
+  <Accordion title="Sandbox image … is not present and pulling is disabled">
+    With `"pull": "never"`, the image must already be on the Docker host. The
+    command's call fails with:
+
+    ```text
+    Sandbox image example/not-here:1 is not present and pulling is disabled
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Sandbox providers" icon="box" href="/docs/how-to-guides/sandbox-providers">
+    Docker, E2B, Daytona, Modal, Vercel, your own service, or this machine.
+  </Card>
+  <Card title="Policies" icon="shield-halved" href="/docs/core-concepts/policies">
+    Allow, ask or deny each command, image and network request.
+  </Card>
+  <Card title="Approvals" icon="user-check" href="/docs/core-concepts/approvals">
+    Pause a run for a person, and resume it later.
+  </Card>
+  <Card title="Budgets" icon="wallet" href="/docs/core-concepts/budgets">
+    Cap dollars, tokens, calls and sandbox seconds.
+  </Card>
+  <Card title="Security model" icon="lock" href="/docs/core-concepts/security-model">
+    What is enforced, and where the boundaries are.
+  </Card>
+  <Card title="Privacy" icon="eye-slash" href="/docs/core-concepts/privacy">
+    What the record of a command keeps.
+  </Card>
+</CardGroup>
