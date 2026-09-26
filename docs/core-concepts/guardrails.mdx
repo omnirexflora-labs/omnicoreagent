@@ -28,7 +28,8 @@ agent_config = {
 agent = OmniCoreAgent(..., agent_config=agent_config)
 
 # A blocked input:
-# result["status"] == "blocked"; result["guardrail_result"] has the verdict and what was found
+# result["status"] == "error", result["termination_reason"] == "safety_guard";
+# result["guardrail_result"] has the verdict and what was found
 ```
 
 ## What counts as evidence
@@ -67,8 +68,9 @@ the screen is wrong about something real.
 | `input_only` | checked and blocked as above | not checked | No |
 | `off` | not checked | not checked | No |
 
-Blocked input ends the run with a `blocked` status and the verdict in
-`guardrail_result`. Blocked tool output is replaced by a note the model can
+Blocked input ends the run: `run()` returns `status` `error` with
+`termination_reason` `safety_guard` and the verdict in `guardrail_result`,
+and the run's record says `blocked`. Blocked tool output is replaced by a note the model can
 see, and the tool call is recorded as an error. Either way the trace has a
 `guardrail_violation` event with what was found.
 

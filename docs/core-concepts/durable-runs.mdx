@@ -34,7 +34,7 @@ the same moments in two vocabularies:
 | `awaiting_approval` | `awaiting_approval` | It waits for a person to decide (`resolve_approval`, then `resume`). |
 | `awaiting_budget` | `awaiting_budget` | It ran out of budget (`grant_budget` or `deny_budget`, then `resume`). |
 | `interrupted` | `interrupted` | Someone called `interrupt`; `resume` continues it. |
-| `blocked` | `blocked` | The guardrail refused the input. |
+| `error`, with `termination_reason` `safety_guard` | `blocked` | The guardrail refused the input. |
 | — | `running` | Still running, or its process died (see *Recovering a run after a crash*). |
 | — | `cancelled`, `timeout` | Ended from outside with `abandon_run` (a background run cancelled while it waited, or out of time). |
 

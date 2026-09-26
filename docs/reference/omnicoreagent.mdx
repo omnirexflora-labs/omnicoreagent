@@ -18,9 +18,9 @@ from omnicoreagent import OmniCoreAgent
 |---|---|---|
 | `name` | `required` | The agent's name, in its traces, records and workspace. |
 | `system_instruction` | `required` | What the agent is for; the start of its system prompt, before the runtime's own instructions. |
-| `model_config` | `required` | The model: `{"provider": "openai", "model": "..."}`, with optional `temperature`, `max_tokens`, `base_url` and others (see Models). The key comes from `LLM_API_KEY`. |
+| `model_config` | `required` | The model: `{"provider": "openai", "model": "..."}`, with optional `temperature`, `max_tokens`, `top_p`, `reasoning_effort`, `logprobs` and `api_key`, and `azure_*` or `ollama_host` for those providers (see Models). The key comes from `LLM_API_KEY` unless `api_key` is given. |
 | `mcp_tools` | `None` | MCP servers whose tools the agent may use: a list of dicts with `name`, `transport_type` (`stdio`, `sse` or `streamable_http`), and `command`/`args` or `url`. |
-| `local_tools` | `None` | Your Python functions as tools: a `ToolRegistry`, or a list of functions. |
+| `local_tools` | `None` | Your Python functions as tools: a `ToolRegistry` (functions registered with `@tools.register_tool`), or a list of `Tool` objects. |
 | `sub_agents` | `None` | Other `OmniCoreAgent` instances this one may hand a task to: each becomes a `delegate_<name>` tool. |
 | `agent_config` | `None` | The agent's settings (see Agent settings). |
 | `memory_router` | `None` | Where session history is kept: `MemoryRouter("in_memory" | "redis" | "sql" | "mongodb")`; in memory by default. |

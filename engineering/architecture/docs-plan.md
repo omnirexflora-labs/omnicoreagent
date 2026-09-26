@@ -85,3 +85,14 @@ a list of every option before the reader has seen one work.
 
 For v0.4.0 on Monday: D1–D4, and the existing pages kept correct by the tests.
 D5–D8 continue after the release; the docs site updates without one.
+
+## Status
+
+- D1–D4 shipped with 0.4.0 (#279–#288).
+- The navigation follows the sections (#291).
+- D5 Build done: 15 pages rewritten in the shape, every example run with
+  `gpt-5.4-mini`; about 20 statements the code contradicted corrected. Its
+  stranger test (a study-buddy app using all 11 Build features) passed
+  11/11 first try; what it found is fixed (#292: a shared ToolRegistry, file
+  failures recorded as successes, get_latest_trace; plus the docs).
+- D6–D8 next: Make It Safe, Run It, See and Improve.

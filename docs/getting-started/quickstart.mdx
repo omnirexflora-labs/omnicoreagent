@@ -67,7 +67,7 @@ your run.
     | Key | When | What |
     |---|---|---|
     | `response` | always | the agent's answer, or why it stopped |
-    | `status` | always | `success`, `error`, `awaiting_approval`, `awaiting_budget`, `interrupted`, or `blocked` (the guardrail refused the input) |
+    | `status` | always | `success`, `error` (a refusal by the guardrail too: `termination_reason` `safety_guard`), `awaiting_approval`, `awaiting_budget`, or `interrupted` |
     | `run_id`, `session_id`, `trace_id` | always | where to find this run again |
     | `metric` | finished | token usage (a `Usage`: `requests`, `request_tokens`, `response_tokens`, `total_tokens`, `total_time`) |
     | `termination_reason` | finished | why it stopped: `stop`, `max_steps`, `provider_error`, … |

@@ -1,12 +1,22 @@
 ---
 title: Local Tools
-description: 'Register Python functions as AI-callable tools with ToolRegistry'
+description: 'Turn your Python functions into tools the model can call, with ToolRegistry'
 icon: 'wrench'
 ---
 
-# Local Tools System
+# Local Tools
 
-Register any Python function as an AI tool using the `ToolRegistry`.
+A local tool is a Python function in your application that the model may call.
+By the end of this page you will have an agent that calls two of your functions
+in one step, and you will know what the model sees of them, what it gets back,
+and how a failure reaches it.
+
+<Info>
+Every output on this page is what the code printed when it was run. The model's
+wording, and sometimes the arguments it chooses, will differ on your run.
+</Info>
+
+## Two tools, one agent
 
 ```python
 import asyncio
@@ -16,141 +26,364 @@ tools = ToolRegistry()
 
 @tools.register_tool("get_weather")
 def get_weather(city: str) -> dict:
-    """Get weather for a city."""
+    """Get the current weather for a city."""
     return {"city": city, "temperature": "25C", "condition": "Sunny"}
 
-@tools.register_tool("calculate_area")
-def calculate_area(length: float, width: float) -> dict:
-    """Calculate rectangle area."""
-    return {"area": length * width, "unit": "square units"}
+@tools.register_tool("room_area")
+async def room_area(length: float, width: float, unit: str = "m") -> dict:
+    """Calculate the floor area of a rectangular room."""
+    return {"area": length * width, "unit": f"{unit}2"}
 
 async def main():
     agent = OmniCoreAgent(
         name="tool_agent",
-        system_instruction="Use local tools when they help answer the user.",
-        model_config={"provider": "openai", "model": "gpt-5.4"},
+        system_instruction="Use tools when they help answer the user. Answer in plain text.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
         local_tools=tools,
     )
-
     result = await agent.run(
-        "What is the weather in Lagos, and what is the area of a 12 by 8 room?"
+        "What is the weather in Lagos, and what is the area of a 12 by 8 metre room?"
     )
     print(result["response"])
+
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    for step in trajectory["steps"]:
+        for call in step["tool_calls"]:
+            print("step", step["step"], "->", call["tool_name"], call["arguments"], call["outcome"])
+
     await agent.cleanup()
 
 asyncio.run(main())
 ```
 
----
+```text
+In Lagos, it is currently 25°C and sunny.
 
-## How It Works
-
-1. **Decorate** any Python function with `@tools.register_tool("tool_name")`
-2. **Type hints** are automatically converted into JSON Schema for the LLM
-3. **Docstrings** become tool descriptions the LLM uses to decide when to call the tool
-4. **Pass** the `ToolRegistry` to your agent via `local_tools=`
-
-Workspace files are enabled by default and reserve these built-in tool names:
-`ls`, `read_file`, `write_file`, `edit_file`, `insert_file`, `delete_file`,
-`move_file`, `clear_files`, `glob`, and `grep`. Use domain-specific names for
-application tools, such as `fetch_invoice` or `query_knowledge_base`.
-
----
-
-## Async Tools
-
-Async functions work seamlessly:
-
-```python
-@tools.register_tool("fetch_data")
-async def fetch_data(url: str) -> dict:
-    """Fetch data from a URL."""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url)
-        return response.json()
+The area of a 12 by 8 metre room is 96 square metres.
+step 1 -> get_weather {'city': 'Lagos'} success
+step 1 -> room_area {'length': 12, 'width': 8, 'unit': 'metre'} success
 ```
 
----
+Both calls happened in step 1: the model asked for them together and the
+runtime ran them as one batch. One tool is a plain function and the other is
+`async`; both work. A plain function runs in a worker thread, so a slow one
+does not block the agent.
 
-## Class-Based Tools
+## How it works
 
-For more complex tools, use a class with a `get_tool()` method:
+<Steps>
+  <Step title="Register">
+    `@tools.register_tool("name")` adds the function to the registry and returns
+    it unchanged, so you can still call it yourself. Without a name, the
+    function's own name is used.
+  </Step>
+  <Step title="The schema is inferred">
+    Type hints become the JSON Schema the model is sent. A parameter with no
+    default is required; unknown arguments are rejected.
+  </Step>
+  <Step title="The docstring is the description">
+    The model reads it to decide when to call the tool. A docstring line
+    `name: text` also becomes that parameter's description.
+  </Step>
+  <Step title="Each call is checked, then run">
+    The runtime validates the model's arguments against the schema, asks the
+    [policy](/docs/reference/policy) if governance is on, runs the function
+    under `tool_call_timeout`, passes the result through the guardrail, and
+    records the call in the run's trajectory.
+  </Step>
+</Steps>
 
-```python
-from omnicoreagent import Tool
+### What the model sees
 
-class DatabaseTool:
-    def __init__(self, connection_string: str):
-        self.conn = connection_string
-
-    def get_tool(self) -> Tool:
-        return Tool(
-            name="query_db",
-            description="Run a SQL query against the database.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "SQL query to execute"}
-                },
-                "required": ["query"]
-            },
-            function=self._query,
-        )
-
-    async def _query(self, query: str) -> dict:
-        # Your database logic
-        return {"status": "success", "data": [...], "message": "Query executed"}
-```
-
-Register class-based tools:
-
-```python
-registry = ToolRegistry()
-registry.register(DatabaseTool(connection_string="postgresql://..."))
-```
-
----
-
-## Composing Local Tools
+This registry is never given to an agent; it only prints what the model would
+be sent:
 
 ```python
-from omnicoreagent import OmniCoreAgent, ToolRegistry
+import json
+from typing import Literal
+from omnicoreagent import ToolRegistry
 
 tools = ToolRegistry()
 
-@tools.register_tool("greet")
-def greet(name: str) -> str:
-    """Greet someone."""
-    return f"Hello, {name}!"
+@tools.register_tool("search_orders")
+def search_orders(
+    customer: str,
+    status: Literal["open", "shipped", "refunded"] = "open",
+    limit: int | None = None,
+    tags: list[str] | None = None,
+) -> list[dict]:
+    """Find a customer's orders.
 
-@tools.register_tool("calculate_total")
-def calculate_total(price: float, quantity: int) -> float:
-    """Calculate an order total."""
-    return price * quantity
+    customer: the customer's email address
+    status: which orders to return
+    """
+    return []
 
-agent = OmniCoreAgent(
-    name="local_tools_agent",
-    system_instruction="Use local tools when they help answer the user.",
-    model_config={"provider": "openai", "model": "gpt-5.4"},
-    local_tools=tools,
-)
+print(json.dumps(tools.get_available_tools()[0], indent=2))
 ```
 
-<Tip>
-Use Local Tools for custom business logic, internal APIs, or Python functionality
-that belongs to your application. Use MCP for shared external services.
-</Tip>
+```text
+{
+  "name": "search_orders",
+  "description": "Find a customer's orders.\n\n    customer: the customer's email address\n    status: which orders to return",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "customer": {
+        "type": "string",
+        "description": "the customer's email address"
+      },
+      "status": {
+        "enum": [
+          "open",
+          "shipped",
+          "refunded"
+        ],
+        "description": "which orders to return"
+      },
+      "limit": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "tags": {
+        "anyOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "customer"
+    ],
+    "additionalProperties": false
+  },
+  "type": "local"
+}
+```
 
-## Tool return values
+`str`, `int`, `float`, `bool`, `list[...]`, `dict[...]`, `Literal[...]`,
+unions and `Optional` map to their JSON Schema types. Any other annotation, or
+none, is sent as `string`. When inference is not enough, pass your own schema:
+`register_tool("name", inputSchema={...}, description="...")`.
 
-Ordinary values, including dictionaries with `data` or `message` fields, are
-preserved as tool data. An explicit result envelope uses `status` (`success`,
-`partial`, or `error`) and only `data`, `message`, and/or `error` alongside it.
-A dictionary containing only `error` and optionally `message` is also an error
-envelope. Raise an exception for a failed execution, or return an explicit error
-envelope. To return a business dictionary that has exactly an envelope shape,
-wrap it in `{"status": "success", "data": business_dictionary}`.
+## Tools that hold state: `Tool` and `get_tool()`
 
-The agent runtime owns persistence: it writes one result per native call ID after
-output guarding and optional offloading. Tool functions and execution handlers do
-not receive a conversation-history callback.
+When a tool needs a connection, a client or configuration, build it as a
+`Tool` from an object. `registry.register(obj)` accepts a `Tool`, or any object
+with a `get_tool()` method that returns one.
+
+```python
+import asyncio
+from omnicoreagent import Tool, ToolRegistry
+
+class InvoiceLookup:
+    def __init__(self, invoices: dict):
+        self.invoices = invoices
+
+    def get_tool(self) -> Tool:
+        return Tool(
+            name="fetch_invoice",
+            description="Fetch an invoice by its number.",
+            inputSchema={
+                "type": "object",
+                "properties": {"number": {"type": "string", "description": "Invoice number"}},
+                "required": ["number"],
+                "additionalProperties": False,
+            },
+            function=self.fetch,
+            idempotent=True,
+        )
+
+    def fetch(self, number: str) -> dict:
+        return self.invoices.get(number, {"error": f"No invoice {number}"})
+
+registry = ToolRegistry()
+registry.register(InvoiceLookup({"INV-7": {"number": "INV-7", "total": 120.0}}))
+
+async def main():
+    print(await registry.execute_tool("fetch_invoice", {"number": "INV-7"}))
+    print(await registry.execute_tool("fetch_invoice", {"number": "INV-9"}))
+
+asyncio.run(main())
+```
+
+```text
+{'number': 'INV-7', 'total': 120.0}
+{'error': 'No invoice INV-9'}
+```
+
+Pass `local_tools=registry` to the agent as before. `execute_tool` is how you
+test a tool without a model. `local_tools` also accepts a list of `Tool`
+objects (or objects with `get_tool()`), and `registry.merge(other)` copies
+another registry's tools in.
+
+## What a tool returns
+
+Return any value: a string, a number, a list, a dictionary. The model receives
+it as the call's data.
+
+A dictionary is read as a **result envelope** only when it has exactly that
+shape:
+
+| Returned | The call is |
+|---|---|
+| `{"status": "success" \| "partial" \| "error", ...}` with only `data`, `message` and `error` beside `status` | that status, with that data and message |
+| `{"error": "..."}`, optionally with `message` | an error |
+| any other dictionary, such as `{"status": "shipped", "id": 7}` | a success whose data is the whole dictionary |
+
+So `{"error": f"No invoice {number}"}` above is an error the model sees as one.
+To return a business dictionary that happens to have an envelope's shape, wrap
+it: `{"status": "success", "data": your_dict}`.
+
+**Raising** is the other way to fail. The exception's message goes to the
+model, and the call is recorded as an error:
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
+INVOICES = {"INV-7": 120.0}
+
+@tools.register_tool("fetch_invoice")
+def fetch_invoice(number: str) -> dict:
+    """Fetch an invoice by its number."""
+    if number not in INVOICES:
+        raise LookupError(f"No invoice {number}")
+    return {"number": number, "total": INVOICES[number]}
+
+async def main():
+    agent = OmniCoreAgent(
+        name="billing",
+        system_instruction="Use tools to answer. Answer in plain text, in one sentence.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        local_tools=tools,
+    )
+    result = await agent.run("What is the total of invoice INV-9?")
+    print(result["response"])
+
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    for step in trajectory["steps"]:
+        for call in step["tool_calls"]:
+            print(call["tool_name"], call["outcome"], call["error"])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+Invoice INV-9 was not found.
+fetch_invoice error {'type': 'ToolError', 'message': 'No invoice INV-9'}
+```
+
+A result too large for the context is saved to the workspace as an artifact,
+and the model gets a preview it can read further with `read_artifact`
+(`tool_offload` in the [agent settings](/docs/reference/agent-config)). Your tool
+does not write to the conversation history itself: the runtime stores one
+result per call.
+
+## Options
+
+| Where | Option | Default | What it does |
+|---|---|---|---|
+| `register_tool` | `name` | the function's name | The name the model calls. Letters, digits, `_` and `-`, up to 64 characters, or the runtime exposes it under a safe alias. |
+| `register_tool` | `description` | the docstring | What the model reads to decide when to call it. |
+| `register_tool` | `inputSchema` | inferred from type hints | A JSON Schema object for the arguments. |
+| `register_tool`, `Tool` | `idempotent` | `False` | Running it twice with the same arguments does no harm. A run [recovered](/docs/core-concepts/durable-runs) after a crash re-runs an interrupted idempotent call; any other call is reported to the model as having an unknown outcome. |
+| `agent_config` | `tool_call_timeout` | `180` | Seconds one call may take (2 to 1000). |
+| `agent_config` | `tool_offload` | on | When a large result is saved as an artifact instead. |
+
+Every agent setting is in the [agent settings reference](/docs/reference/agent-config).
+
+## Names the runtime reserves
+
+Workspace files are on by default, and they bring their own tools: `ls`,
+`read_file`, `write_file`, `edit_file`, `insert_file`, `delete_file`,
+`move_file`, `clear_files`, `glob` and `grep`. Result offloading adds
+`read_artifact`, `tail_artifact`, `search_artifact` and `list_artifacts`. Give
+your tools names from your domain, such as `fetch_invoice` or
+`query_knowledge_base`.
+
+## When things go wrong
+
+<AccordionGroup>
+  <Accordion title="ValueError: Tool name conflict: built-in workspace tools reserve these names">
+    Raised when the agent prepares its tools (the first `run`, or
+    `list_all_available_tools`) if one of yours is named like a workspace tool:
+
+    ```text
+    ValueError: Tool name conflict: built-in workspace tools reserve these names when enable_workspace_files=True: read_file. Rename the app tool or disable workspace files for this agent.
+    ```
+
+    Rename your tool, or set `agent_config={"enable_workspace_files": False}`.
+  </Accordion>
+
+  <Accordion title="TypeError: Expected Tool object or object with get_tool() method">
+    `local_tools` was given a list of plain functions, or `register()` was
+    given one:
+
+    ```text
+    TypeError: Expected Tool object or object with get_tool() method, got <class 'builtin_function_or_method'>
+    ```
+
+    Decorate plain functions with `@tools.register_tool(...)` and pass the
+    registry; a list must hold `Tool` objects or objects with `get_tool()`.
+  </Accordion>
+
+  <Accordion title="The call failed with 'Tool execution exceeded its time limit'">
+    The tool ran longer than `tool_call_timeout`. With
+    `agent_config={"tool_call_timeout": 2}` and a tool that sleeps for ten
+    seconds, the run carried on and the trajectory showed:
+
+    ```text
+    The monthly report build timed out, so I couldn’t complete it this turn.
+    slow_report timeout {'type': 'TimeoutError', 'message': 'Tool execution exceeded its time limit'}
+    ```
+
+    Raise the timeout, or make the tool return sooner (start the work and
+    return a handle the model can check later).
+  </Accordion>
+
+  <Accordion title="The model's arguments were rejected">
+    Arguments that do not match the schema never reach your function; the
+    model is told why and usually corrects itself. Called directly, a missing
+    argument reads:
+
+    ```text
+    ValueError: Invalid tool arguments: missing a required argument: 'number'
+    ```
+
+    If the model keeps getting it wrong, make the docstring say what each
+    parameter is (`name: description` lines), or use `Literal` for fixed choices.
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="MCP tools" icon="plug" href="/docs/core-concepts/mcp">
+    Tools from MCP servers, next to your own.
+  </Card>
+  <Card title="Code mode" icon="code" href="/docs/core-concepts/code-mode">
+    Let the model call your tools from a short Python program.
+  </Card>
+  <Card title="Many tools" icon="wand-magic-sparkles" href="/docs/how-to-guides/advanced-tools">
+    Dozens or hundreds of tools: the model searches for the ones it needs.
+  </Card>
+  <Card title="Ask before a tool runs" icon="shield-halved" href="/docs/getting-started/tour">
+    A policy that asks a person before a refund.
+  </Card>
+</CardGroup>

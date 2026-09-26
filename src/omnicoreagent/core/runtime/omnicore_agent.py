@@ -134,13 +134,17 @@ class OmniCoreAgent:
             system_instruction: What the agent is for; the start of its system
                 prompt, before the runtime's own instructions.
             model_config: The model: ``{"provider": "openai", "model": "..."}``,
-                with optional ``temperature``, ``max_tokens``, ``base_url`` and
-                others (see Models). The key comes from ``LLM_API_KEY``.
+                with optional ``temperature``, ``max_tokens``, ``top_p``,
+                ``reasoning_effort``, ``logprobs`` and ``api_key``, and
+                ``azure_*`` or ``ollama_host`` for those providers (see
+                Models). The key comes from ``LLM_API_KEY`` unless
+                ``api_key`` is given.
             mcp_tools: MCP servers whose tools the agent may use: a list of
                 dicts with ``name``, ``transport_type`` (``stdio``, ``sse`` or
                 ``streamable_http``), and ``command``/``args`` or ``url``.
-            local_tools: Your Python functions as tools: a ``ToolRegistry``, or
-                a list of functions.
+            local_tools: Your Python functions as tools: a ``ToolRegistry``
+                (functions registered with ``@tools.register_tool``), or a
+                list of ``Tool`` objects.
             sub_agents: Other ``OmniCoreAgent`` instances this one may hand a
                 task to: each becomes a ``delegate_<name>`` tool.
             agent_config: The agent's settings (see Agent settings).

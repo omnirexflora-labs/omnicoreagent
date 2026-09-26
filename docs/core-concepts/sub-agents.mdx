@@ -1,57 +1,181 @@
 ---
-title: Subagents
-description: 'Dynamic and explicit task delegation inside OmniCoreAgent'
+title: Sub-agents
+description: 'Hand work to other agents: a fixed team as delegate_<name> tools, or workers spawned on demand with spawn_subagents — each with its own linked trace'
 icon: 'users'
 ---
 
-# Subagents
+# Sub-agents
 
-OmniCoreAgent supports subagents as part of the core harness. A lead agent can
-spawn focused workers dynamically with `spawn_subagents`, or you can attach
-explicit subagents when you want a fixed team. Workers can execute any assigned
-task their tools support: research, coding, review, data work, writing,
-verification, or operational actions.
+A lead agent can hand work to other agents in two ways. By the end of this page
+you will have run both, found every child's trace from the lead's, and put a
+person in front of a delegation.
 
-## Why Use Sub-Agents?
+| | Explicit sub-agents | Spawned workers |
+|---|---|---|
+| You write | `sub_agents=[researcher, coder]` | `agent_config={"enable_subagents": True}` |
+| The lead gets | one tool per child: `delegate_researcher`, `delegate_coder` | one tool: `spawn_subagents` |
+| Who the children are | agents you built, with their own instructions, tools and settings | workers the model describes on the spot: a name, a role, a task, an output file |
+| Results come back as | the child's answer, as the tool result | a file in the workspace, which the lead reads, and each worker's answer as a `summary` (up to 500 characters) in the tool result |
+| Use it when | the team is known and each member has its own tools | the split depends on the task, or parts can run in parallel |
 
-- **Modular Design**: Build and test small, expert agents individually before integrating them.
-- **Improved Accuracy**: Specialized agents (e.g., a "Math Expert" or "Code Auditor") are less likely to hallucinate in their specific domain.
-- **Tool Management**: Avoid cluttering a single agent's prompt with hundreds of tools. Instead, give each sub-agent only the tools it needs.
-- **Parallel Work**: Use one `spawn_subagents` call with multiple specs when independent tasks can run at the same time.
-- **Workspace Continuity**: Dynamic subagents write output to workspace files, so outputs survive context compression and tool offloading.
+<Info>
+Every output on this page is what the code printed when it was run with
+`gpt-5.4-mini`. The model's wording, the tasks it writes for its children, and
+whether it calls them one after the other or together, will differ on your run.
+</Info>
 
----
+## A fixed team
 
-## Dynamic Subagents
-
-Enable dynamic subagents directly on OmniCoreAgent:
+Each agent in `sub_agents` becomes a `delegate_<name>` tool on the lead. The
+lead's model decides when to call it and what to ask.
 
 ```python
-from omnicoreagent import OmniCoreAgent
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
 
-agent = OmniCoreAgent(
-    name="task_manager",
-    system_instruction="You coordinate complex work and synthesize outputs.",
-    model_config={"provider": "openai", "model": "gpt-5.4"},
-    agent_config={
-        "enable_subagents": True,
-    },
+research_tools = ToolRegistry()
+
+@research_tools.register_tool("country_facts")
+def country_facts(country: str) -> dict:
+    """Look up facts about a country."""
+    return {"country": country, "capital": "Lisbon", "population_millions": 10.6}
+
+MODEL = {"provider": "openai", "model": "gpt-5.4-mini"}
+
+researcher = OmniCoreAgent(
+    name="researcher",
+    system_instruction="You look facts up with your tools. Answer in plain text.",
+    model_config=MODEL,
+    local_tools=research_tools,
 )
+coder = OmniCoreAgent(
+    name="coder",
+    system_instruction="You write short Python snippets. Reply with the code only, no markdown fences.",
+    model_config=MODEL,
+)
+lead = OmniCoreAgent(
+    name="manager",
+    system_instruction=(
+        "You manage a researcher and a coder. Get the facts from the researcher first; "
+        "only when you have them, give them to the coder. Answer in plain text, without markdown."
+    ),
+    model_config=MODEL,
+    sub_agents=[researcher, coder],
+)
+
+async def main():
+    tools = await lead.list_all_available_tools()
+    print("lead's delegation tools:", [t["name"] for t in tools if t["name"].startswith("delegate_")])
+
+    result = await lead.run(
+        "Find Portugal's capital and population, then get one line of Python that prints them."
+    )
+    print(result["response"])
+
+    trajectory = await lead.get_trajectory(result["trace_id"])
+    for step in trajectory["steps"]:
+        for call in step["tool_calls"]:
+            print("step", step["step"], "->", call["tool_name"], call["arguments"], call["outcome"])
+
+    family = await lead.get_trace_family(trace_id=result["trace_id"])
+    names = {trace["trace_id"]: trace["agent_id"] for trace in family}
+    for trace in family:
+        print("trace:", trace["agent_id"], "| parent:", names.get(trace["parent_trace_id"]))
+
+    for agent in (lead, researcher, coder):
+        await agent.cleanup()
+
+asyncio.run(main())
 ```
 
-Workspace files are available by default, and `enable_subagents` also keeps
-them enabled for worker output. Dynamic subagents also force in-run context
-management on while preserving any context budget, threshold, strategy, and
-retention settings supplied by the caller. Context management and large tool
-result offloading are enabled by default for the harness and cannot be disabled
-for dynamic subagent runs. Dynamic workers are expected to save output with
-`write_file`, and the lead agent reads those paths with `read_file` before
-synthesizing.
+```text
+lead's delegation tools: ['delegate_researcher', 'delegate_coder']
+Portugal’s capital is Lisbon, and its population is about 10.6 million.
 
-### `spawn_subagents`
+print("Portugal's capital is Lisbon and its population is about 10.6 million.")
+step 1 -> delegate_researcher {'query': "Find Portugal's capital and population. Return the capital and a population figure with source context if possible. Keep it concise.", 'tags': ['geography', 'population'], 'provenance': {'user_request': 'Portugal capital and population'}} success
+step 2 -> delegate_coder {'query': "Write one line of Python that prints Portugal's capital and population using: capital = Lisbon, population = about 10.6 million. Make it a single print statement.", 'tags': ['python', 'formatting'], 'provenance': {'source': 'researcher_result', 'capital': 'Lisbon', 'population': 'about 10.6 million'}} success
+trace: manager | parent: None
+trace: researcher | parent: manager
+trace: coder | parent: manager
+```
 
-`spawn_subagents` takes a `subagents` list. Use one item for one worker, or
-many items for parallel workers. The model calls it like this:
+What happened:
+
+- The lead's model called `delegate_researcher`, then passed what it learned
+  to `delegate_coder`. A `delegate_<name>` tool takes the parameters of the
+  child's `run()`: `query` (the task, required), and optional `tags` and
+  `provenance`, which are recorded on the child's trace.
+- Each child ran as a whole agent run of its own — its own tools, its own
+  trace — with the lead's `session_id` and a new `run_id`.
+- `get_trace_family` returned the lead's trace and both children's, each
+  child naming its parent in `parent_trace_id`. The lead's trajectory also
+  nests each child's trajectory under the call that started it
+  (`call["subagent"]["child_trajectory"]`).
+
+<Tip>
+With the first wording of this instruction ("ask the researcher, then the
+coder"), the model called both children **in the same step** — independent
+calls in one step run together — and the coder wrote placeholders. Say so in
+the lead's instruction when one child needs another's answer.
+</Tip>
+
+## Workers spawned on demand
+
+With `enable_subagents`, the lead gets a `spawn_subagents` tool and writes the
+workers itself:
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent
+
+async def main():
+    lead = OmniCoreAgent(
+        name="planner",
+        system_instruction=(
+            "You split work across workers with spawn_subagents, then read their "
+            "output files and combine them. Answer in plain text, without markdown."
+        ),
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        agent_config={"enable_subagents": True},
+    )
+    result = await lead.run(
+        "In parallel, have one worker write three tips for a first trip to Kyoto and "
+        "another write three tips for a first trip to Lisbon. Then give me one line per city."
+    )
+    print(result["response"])
+
+    trajectory = await lead.get_trajectory(result["trace_id"])
+    for step in trajectory["steps"]:
+        for call in step["tool_calls"]:
+            if call["tool_name"] == "spawn_subagents":
+                for spec in call["arguments"]["subagents"]:
+                    print("spawned:", spec["name"], "->", spec["output_path"])
+            else:
+                print("step", step["step"], "->", call["tool_name"], call["arguments"])
+
+    family = await lead.get_trace_family(trace_id=result["trace_id"])
+    print("traces:", [trace["agent_id"] for trace in family])
+    await lead.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+Kyoto: Start sightseeing early to beat crowds, use a prepaid transit card, and bring cash for smaller places.
+
+Lisbon: Wear comfortable shoes for the hills, get a Viva Viagem transit card, and visit popular sights early to avoid crowds.
+spawned: kyoto_tips -> kyoto_tips.txt
+spawned: lisbon_tips -> lisbon_tips.txt
+step 2 -> read_file {'path': 'kyoto_tips.txt'}
+step 3 -> read_file {'path': 'lisbon_tips.txt'}
+traces: ['planner', 'subagent_kyoto_tips', 'subagent_lisbon_tips']
+```
+
+Both workers ran in parallel from one `spawn_subagents` call, each wrote its
+file (`workspace/files/kyoto_tips.txt` and `lisbon_tips.txt`), and the lead
+read them before answering. The model sends the tool a `subagents` list — one
+item for one worker, up to 15 for parallel work:
 
 ```json
 {"subagents": [
@@ -70,90 +194,160 @@ many items for parallel workers. The model calls it like this:
 ]}
 ```
 
-Spawned workers inherit the parent's model, MCP tools, user local tools, and
-its whole `agent_config` — workspace files, skills, the sandbox, context
-management and tool offloading — with at most 50 steps each. Under governance,
-each worker runs under the lead's policy plus one rule: it cannot spawn workers
-of its own. Context management is enabled automatically for a parent with
-dynamic subagents.
+All four fields are required. A leading `/workspace/` in `output_path` means
+the agent's workspace files folder.
 
----
+## How it works
 
-## Explicit Subagents
+**What a spawned worker gets.** A worker, named `subagent_<name>`, inherits
+the lead's model, MCP servers, your local tools, and its whole `agent_config`
+— workspace files, skills, the sandbox, context management and tool offloading
+— with these changes: at most **50 steps**, no `spawn_subagents` of its own,
+and workspace files, context management and offloading always on. Its system
+instruction is its role, its task, and the file to write. Output goes to files,
+not the lead's context, so it survives the lead's context being trimmed.
 
-Use explicit subagents when the team is known upfront and each child agent has a
-stable role or custom tool set.
+**What `enable_subagents` changes on the lead.** It turns workspace files,
+[context management and tool offloading](/docs/core-concepts/context-engineering)
+on — keeping any budget, threshold and strategy you set — because the lead
+reads its workers' files and must not run out of context doing it.
 
-```python
-research_agent = OmniCoreAgent(
-    name="researcher",
-    system_instruction="You specialize in web research and summarization.",
-    model_config={"provider": "openai", "model": "gpt-5.4"},
-)
+**Time.** A `delegate_<name>` call is a tool call: it is bounded by
+`tool_call_timeout` (180 seconds by default). `spawn_subagents` is not: a
+worker is bounded by its own step cap and the run's deadline, and by
+`subagent_timeout` if you set it.
 
-code_agent = OmniCoreAgent(
-    name="coder",
-    system_instruction="You are an expert Python developer.",
-    model_config={"provider": "openai", "model": "gpt-5.4"},
-)
-
-parent_agent = OmniCoreAgent(
-    name="manager",
-    system_instruction="You manage a team of specialists.",
-    model_config={"provider": "openai", "model": "gpt-5.4"},
-    sub_agents=[research_agent, code_agent],
-)
-```
-
-When a parent agent has explicit subagents, it is given one tool per child,
-named after it:
-
-| Tool | Action |
-|------|--------|
-| `delegate_<name>` | Send a task to the child named `<name>` (`delegate_researcher` and `delegate_coder` above) and wait for its result. |
-
-Each child runs with its own trace, linked to the parent's: `await
-agent.get_trace_family(trace_id=result["trace_id"])` returns the parent and
-every child (`parent_trace_id` on each child names the parent).
-
----
-
-## Example Workflow
-
-1. **User Query**: "Research the latest AI news and write a Python script for a news aggregator."
-2. **Manager (Parent)**: Recognizes this requires research and coding.
-3. **Manager**: Calls `spawn_subagents` with research and coding workers, or calls explicit child agents.
-4. **Researcher (Sub)**: Performs web search, returns summaries.
-5. **Manager**: Receives summaries, then calls `code_agent` with "Write a Python aggregator using this data: [summaries]".
-6. **Coder (Sub)**: Writes the code, returns it.
-7. **Manager**: Synthesizes the final response to the user.
-
----
-
-## Best Practices
-
-- **Use One Spawn Call**: When tasks are independent, put every worker spec in one `spawn_subagents` array so they run in parallel.
-- **Write to Workspace Files**: Give each worker a clear `output_path` under `/workspace/{task_name}/...`.
-- **Read Before Synthesis**: After workers finish, read every output path before producing the final answer.
-- **Explicit Instructions**: For fixed subagents, briefly describe each subagent's expertise in the parent instruction.
-- **Limit Depth**: While hierarchical agents are powerful, avoid nesting agents too deep (e.g., Parent -> Child -> Grandchild) to prevent excessive latency and token usage.
-- **A delegation is not one tool call**: `tool_call_timeout` does not apply to `spawn_subagents`; a worker is bounded by its own step cap and the run's deadline. Set `subagent_timeout` (seconds) to bound delegations explicitly.
-- **Keep Workers Focused**: Do not give one worker the whole task. Give it a bounded role and output contract.
+**Evidence.** Every child's trace is linked to the lead's: find them with
+`get_trace_family(trace_id=...)` or `get_trace_family(run_id=...)`, or read
+them nested in the lead's trajectory. The lead's trace records
+`subagent_spawn`, `subagent_result` and `subagent_error` events.
 
 ## Governance
 
-When the parent agent has governance enabled, each delegation is authorized
-(`subagent.spawn`) and the child must have governance enabled too. A governed
-agent refuses to delegate to an ungoverned one, because the child's tools
-would otherwise run without any policy. The child is governed by its own
-policy, so configure it for the child's tools.
+When the lead has governance on, every delegation is a `subagent.spawn`
+request, decided by the lead's policy. The development profiles
+(`interactive-dev`) **ask** for it, so the run pauses before any child starts:
 
-A worker's `ask` pauses its lead. The worker's pending approvals appear on
-the lead's run — each naming the worker's call, its arguments, and the
-worker's run (`delegated_run_id`) — and the lead's run goes to
-`awaiting_approval` with them. A decision on the lead's approval
-(`resolve_approval`, or `POST /runs/{run_id}/approvals/{approval_id}`) is
-forwarded to the worker's, and when the lead resumes, its delegation resumes
-the worker's run from where it stopped rather than starting a new worker.
-An `ask` on delegation itself (`subagent.spawn`, which the development
-profiles ask for) pauses the lead the same way, before any worker runs.
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent
+
+MODEL = {"provider": "openai", "model": "gpt-5.4-mini"}
+GOVERNED = {"governance_config": {"enabled": True, "profile": "interactive-dev"}}
+
+async def main():
+    translator = OmniCoreAgent(
+        name="translator",
+        system_instruction="You translate English to French. Reply with the translation only.",
+        model_config=MODEL,
+        agent_config=GOVERNED,
+    )
+    lead = OmniCoreAgent(
+        name="desk",
+        system_instruction="Delegate translations to the translator. Answer in plain text.",
+        model_config=MODEL,
+        sub_agents=[translator],
+        agent_config=GOVERNED,
+    )
+    result = await lead.run("Translate 'the train leaves at noon' into French.")
+    print("status:", result["status"])
+    while result["status"] == "awaiting_approval":
+        for approval in result["approvals"]:
+            print("waiting on:", approval["tool_name"], approval["arguments"])
+            await lead.resolve_approval(
+                result["run_id"], approval["approval_id"], decision="approve", approver="alice"
+            )
+        result = await lead.resume(result["run_id"])
+        print("status:", result["status"])
+    print(result["response"])
+    await lead.cleanup()
+    await translator.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+status: awaiting_approval
+waiting on: delegate_translator {'query': 'the train leaves at noon'}
+status: success
+le train part à midi
+```
+
+The rules:
+
+- **A governed agent only delegates to governed children.** An explicit child
+  without governance is refused — its tools would run under no policy. The
+  child is then governed by *its own* policy, so configure it for the child's
+  tools.
+- **Spawned workers** run under the lead's policy plus one rule: they cannot
+  spawn workers of their own. What they spend counts against the lead's
+  [budgets](/docs/reference/budgets).
+- **A child's ask pauses the lead.** The child's pending approvals appear on
+  the lead's run — each naming the child's call, its arguments, and the
+  child's run (`delegated_run_id`) — and the lead's run goes to
+  `awaiting_approval`. A decision on the lead's approval (`resolve_approval`,
+  or `POST /runs/{run_id}/approvals/{approval_id}`) is forwarded to the
+  child's, and when the lead resumes, the child's run resumes where it stopped
+  rather than starting over.
+- An ask on the delegation itself, as above, pauses the lead the same way,
+  before any child runs.
+
+See the [security model](/docs/core-concepts/security-model) and the
+[policy reference](/docs/reference/policy) for `subagent.spawn`.
+
+## Options
+
+| Where | Setting | Default | What it does |
+|---|---|---|---|
+| constructor | `sub_agents` | `None` | A list of `OmniCoreAgent`s; each becomes a `delegate_<name>` tool. |
+| `agent_config` | `enable_subagents` | `False` | Gives the lead `spawn_subagents`. |
+| `agent_config` | `subagent_timeout` | `None` | Seconds one `spawn_subagents` call may take (2–86,400). |
+| `agent_config` | `tool_call_timeout` | `180` | Seconds one tool call may take — including a `delegate_<name>` call. |
+| `agent_config` | `max_steps` | `50` | The lead's step cap; a spawned worker gets the smaller of this and 50. |
+
+Everything else is in the [agent settings](/docs/reference/agent-config) and
+[OmniCoreAgent](/docs/reference/omnicoreagent) references.
+
+## When things go wrong
+
+<AccordionGroup>
+  <Accordion title="Delegation refused: agent 'translator' is not governed. A governed agent can only delegate to agents with governance enabled.">
+    The lead has governance on and the child does not. The call fails with
+    this as its error, and the run carries on — in our run the model simply
+    translated the sentence itself. Give the child a `governance_config` too.
+  </Accordion>
+  <Accordion title="ValueError: sub_agents must be a list of agents, e.g. sub_agents=[researcher]">
+    `sub_agents` takes a list, even for one child: `sub_agents=[researcher]`.
+  </Accordion>
+  <Accordion title="ValueError: subagent_timeout must be between 2 and 86400, got 1">
+    `subagent_timeout` is in seconds, from 2 to 86,400 — or `None` for no limit
+    beyond the workers' own.
+  </Accordion>
+  <Accordion title="The lead's run is awaiting_approval and no tool of yours was called">
+    The profile asks before `subagent.spawn` (both `delegate_<name>` and
+    `spawn_subagents`), or a child hit an ask. Approve as above, or allow the
+    capability in your policy; `permissive-dev` allows it outright.
+  </Accordion>
+  <Accordion title="A worker's output is missing">
+    A worker must write its `output_path`. When it did not, the lead is told
+    `Subagent '<name>' did not create the requested output: <path>`. Give the
+    worker a task it can finish within 50 steps, with the tools it inherits.
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Context engineering" icon="brain-circuit" href="/docs/core-concepts/context-engineering">
+    What keeps the lead and its workers inside their context.
+  </Card>
+  <Card title="Durable runs" icon="rotate" href="/docs/core-concepts/durable-runs">
+    Approvals, pauses and resumes — for delegated runs too.
+  </Card>
+  <Card title="Observability" icon="magnifying-glass-chart" href="/docs/how-to-guides/observability">
+    Trajectories with every child run nested in.
+  </Card>
+  <Card title="Security model" icon="shield-halved" href="/docs/core-concepts/security-model">
+    What a policy decides, for sub-agents and everything else.
+  </Card>
+</CardGroup>

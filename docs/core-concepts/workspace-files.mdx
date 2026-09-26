@@ -1,199 +1,290 @@
 ---
 title: Workspace Files
-description: 'Persistent workspace files inside the active local, S3, or R2 workspace'
+description: 'The agent’s own files — notes, plans, generated work — on local disk, S3 or R2'
 icon: 'folder-open'
 ---
 
 # Workspace Files
 
-> Workspace files give agents durable file-style storage for notes, scratchpads, logs, todos, task progress, generated code, and research files.
+Every agent has a workspace: a folder where it writes notes, plans and
+finished work with file tools, and where you can put files for it to work on.
+It is on local disk by default (`./workspace/files/`), or in S3 or R2 when
+several machines need the same files.
 
-The workspace has two clear areas:
+## The agent writes a file
 
-- `files/` — agent-managed files for scratchpads, todos, progress, preferences, notes, subagent outputs, and generated work.
-- `artifacts/` — runtime-managed tool output artifacts created by tool offloading and read back with artifact tools.
-
-There is no separate workspace-files backend: choose the workspace backend once, and both areas use that same local, S3, or R2 workspace.
-
----
-
-## Workspace Backends
-
-| Backend | Use Case | Benefits |
-|---------|----------|----------|
-| `local` | Development, single-server | Zero config, instant setup |
-| `s3` | Production, AWS infrastructure | Scalable, durable, global access |
-| `r2` | Production, edge computing | Zero egress fees, Cloudflare ecosystem |
-
----
-
-## Quick Setup
-
-Workspace files default to local disk. Choose S3 or R2 only when the whole workspace should live in cloud storage.
-
-```bash
-export OMNICOREAGENT_WORKSPACE_BACKEND=local
-export OMNICOREAGENT_WORKSPACE_DIR=./workspace
-```
+Workspace files are on by default; there is nothing to switch on.
 
 ```python
 import asyncio
+from pathlib import Path
 from omnicoreagent import OmniCoreAgent
 
 async def main():
     agent = OmniCoreAgent(
-        name="workspace_agent",
-        system_instruction=(
-            "Use workspace files for notes, progress, and final artifacts."
-        ),
-        model_config={"provider": "openai", "model": "gpt-5.4"},
-        agent_config={"enable_workspace_files": True},
+        name="planner",
+        system_instruction="Keep notes and plans in workspace files. Answer in plain text.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
     )
-
     result = await agent.run(
-        "Create a project note at notes/plan.md with three checklist items, "
-        "then read it back."
+        "Create notes/plan.md with a three-item checklist for launching a blog, "
+        "then read it back and tell me the three items in one line."
     )
     print(result["response"])
+
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    for step in trajectory["steps"]:
+        for call in step["tool_calls"]:
+            print("step", step["step"], "->", call["tool_name"], call["arguments"].get("path"), call["outcome"])
+
+    print(Path("workspace/files/notes/plan.md").read_text())
     await agent.cleanup()
 
 asyncio.run(main())
 ```
 
-With the local backend, workspace command tools write under:
-
 ```text
-./workspace/files/
+Choose a blog niche and target audience; set up the blogging platform and domain; draft and publish the first three posts.
+step 1 -> write_file notes/plan.md success
+step 2 -> read_file notes/plan.md success
+- [ ] Choose a blog niche and target audience
+- [ ] Set up the blogging platform and domain
+- [ ] Draft and publish the first three posts
 ```
 
-For example, the prompt above creates `./workspace/files/notes/plan.md`.
+The agent's `notes/plan.md` is `./workspace/files/notes/plan.md` on your disk.
+What it writes will differ on your run; where it lands will not.
+
+## Give the agent your files
 
 To give the agent existing files — a project to review, data to analyze — put
-them under that directory before the run: `./workspace/files/project/app.py` is
-`project/app.py` to the agent's tools, and is copied into its sandbox when it
-runs commands.
-
-Cloud workspace storage uses the S3/R2 extra:
-
-```bash
-pip install "omnicoreagent[s3]"
-```
-
----
-
-## Environment Variables
-
-### Local
-
-```bash
-OMNICOREAGENT_WORKSPACE_BACKEND=local
-OMNICOREAGENT_WORKSPACE_DIR=./workspace
-```
-
-### S3
-
-```bash
-OMNICOREAGENT_WORKSPACE_BACKEND=s3
-OMNICOREAGENT_WORKSPACE_PREFIX=workspace
-AWS_S3_BUCKET=my-agent-workspace
-AWS_ACCESS_KEY_ID=AKIA...
-AWS_SECRET_ACCESS_KEY=your-secret
-AWS_REGION=us-east-1  # optional
-```
-
-### R2
-
-```bash
-OMNICOREAGENT_WORKSPACE_BACKEND=r2
-OMNICOREAGENT_WORKSPACE_PREFIX=workspace
-R2_BUCKET_NAME=my-agent-workspace
-R2_ACCOUNT_ID=your-cloudflare-account-id
-R2_ACCESS_KEY_ID=your-r2-key
-R2_SECRET_ACCESS_KEY=your-r2-secret
-```
-
----
-
-## Workspace Command Tools
-
-OmniCoreAgent exposes these tools for the `files/` area:
-
-| Tool | Purpose |
-|------|---------|
-| `ls` | List files and directories |
-| `read_file` | Read file contents, like workspace-scoped `cat` |
-| `write_file` | Create, append, or overwrite files |
-| `edit_file` | Find and replace text within files |
-| `insert_file` | Insert text at specific line numbers |
-| `delete_file` | Delete files or directories |
-| `move_file` | Rename or move files |
-| `clear_files` | Clear the workspace files area |
-| `glob` | Find files by glob pattern |
-| `grep` | Search text inside workspace files |
-
-These are workspace tools, not host shell tools. They operate through the
-active workspace backend, so the same tool calls work on local disk, S3, and R2.
-When workspace files are enabled, these tool names are reserved for the harness.
-Use distinct names for application-owned local tools.
-
----
-
-## Backend Behavior
-
-| Feature | Local | S3 | R2 |
-|---------|-------|----|-----|
-| Persists across process restarts | Yes | Yes | Yes |
-| Works without cloud credentials | Yes | No | No |
-| Shared across multiple machines | No | Yes | Yes |
-| Fits single-server development | Yes | Yes | Yes |
-| Fits distributed deployments | Limited | Yes | Yes |
-| Uses the same workspace tools | Yes | Yes | Yes |
-
----
-
-## Use Cases
-
-| Use Case | Recommended Backend |
-|----------|---------------------|
-| Local development | `local` |
-| Single-server production | `local` or `s3` |
-| Multi-server / Kubernetes | `s3` or `r2` |
-| Edge computing / Workers | `r2` |
-| Cost-sensitive workloads | `r2` (zero egress) |
-
----
-
-## Example: Research Agent with Cloud Workspace
+them under the workspace's `files/` folder before the run. This example also
+moves the workspace to `./review-ws`:
 
 ```python
-import os
+import asyncio
+from pathlib import Path
+from omnicoreagent import OmniCoreAgent
 
-# Set environment for S3
-os.environ["OMNICOREAGENT_WORKSPACE_BACKEND"] = "s3"
-os.environ["AWS_S3_BUCKET"] = "research-agent-workspace"
-os.environ["AWS_ACCESS_KEY_ID"] = "AKIA..."
-os.environ["AWS_SECRET_ACCESS_KEY"] = "..."
-os.environ["AWS_REGION"] = "us-east-1"
-os.environ["AWS_ENDPOINT_URL"] = "https://s3.amazonaws.com"  # Optional
-
-agent = OmniCoreAgent(
-    name="workspace_agent",
-    system_instruction="Save durable notes, logs, task progress, and final output to workspace files.",
-    model_config={"provider": "openai", "model": "gpt-5.4"},
-    agent_config={
-        "max_steps": 50,
-    }
+# Seed the workspace with a file before the run.
+seed = Path("review-ws/files/project/app.py")
+seed.parent.mkdir(parents=True, exist_ok=True)
+seed.write_text(
+    "def average(numbers):\n"
+    "    return sum(numbers) / len(numbers)\n"
 )
 
-# Agent can now save research notes that persist across:
-# - Server restarts
-# - Multiple instances
-# - Different geographic locations
-result = await agent.run(
-    "Research recent AI developments and save a summary to /notes/ai_trends.md"
-)
+async def main():
+    agent = OmniCoreAgent(
+        name="reviewer",
+        system_instruction="You review code. Answer in plain text, in two sentences at most.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        agent_config={"workspace_config": {"workspace_dir": "./review-ws"}},
+    )
+    result = await agent.run("Review project/app.py. What input breaks it?")
+    print(result["response"])
+
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    for step in trajectory["steps"]:
+        for call in step["tool_calls"]:
+            print("step", step["step"], "->", call["tool_name"], call["arguments"], call["outcome"])
+    await agent.cleanup()
+
+asyncio.run(main())
 ```
 
-<Tip>
-Use `local` for development. Use `s3` or `r2` when the whole workspace should persist across server restarts, multiple agent instances, or production deployments.
-</Tip>
+```text
+`average([])` breaks it with a `ZeroDivisionError` because `len(numbers)` is 0.
+step 1 -> ls {'path': '.'} success
+step 2 -> read_file {'path': 'project/app.py'} success
+```
+
+`review-ws/files/project/app.py` on disk is `project/app.py` to the agent's
+tools. When the agent runs commands in a [sandbox](/docs/core-concepts/execution),
+its workspace files are copied in too.
+
+## How it works
+
+The workspace has three areas:
+
+| Folder | Holds | Written by |
+|---|---|---|
+| `files/` | The agent's files, and the ones you seed | The agent's file tools, and you |
+| `artifacts/` | Tool results too large for the model's context, saved for the agent to read back in parts ([context engineering](/docs/core-concepts/context-engineering)) | The runtime |
+| `telemetry/` | The record of every run ([observability](/docs/how-to-guides/observability)) | The runtime |
+
+The agent works in `files/` with these tools:
+
+| Tool | Arguments | What it does |
+|---|---|---|
+| `ls` | `path` (optional) | List a folder |
+| `read_file` | `path` | Read a file |
+| `write_file` | `path`, `content`, `mode` | `create` (default; refuses to replace an existing file), `append`, or `overwrite` |
+| `edit_file` | `path`, `old_str`, `new_str` | Replace every occurrence of a string |
+| `insert_file` | `path`, `insert_line`, `insert_text` | Insert text at a line (1-based) |
+| `delete_file` | `path` | Delete a file or folder |
+| `move_file` | `old_path`, `new_path` | Rename or move |
+| `clear_files` | — | Delete everything in `files/` |
+| `glob` | `pattern`, `path` (optional) | Find files by pattern, such as `**/*.md` |
+| `grep` | `pattern`, `path`, `include`, `case_sensitive`, `max_matches` | Search inside files; returns `path:line:content` |
+
+These are workspace tools, not a shell: every path is relative to `files/`,
+and a path that leads outside it is refused. They work the same on local disk,
+S3 and R2. Their names are reserved while workspace files are on, so give your
+own tools other names. Under governance each is a capability —
+`workspace.files.read`, `.write`, `.delete`, `.move`, `.clear` — that a policy
+can allow, ask about or deny ([security model](/docs/core-concepts/security-model)).
+
+## Where the workspace lives
+
+<Tabs>
+  <Tab title="Local disk (default)">
+    ```python
+    agent_config = {"workspace_config": {"workspace_dir": "./workspace"}}
+    ```
+
+    One machine. Files survive restarts; other machines cannot see them.
+  </Tab>
+  <Tab title="S3">
+    ```bash
+    pip install "omnicoreagent[s3]"
+    ```
+
+    ```python
+    agent_config = {
+        "workspace_config": {
+            "workspace_backend": "s3",
+            "s3_bucket": "my-agent-workspace",
+            "aws_region": "us-east-1",
+            "prefix": "workspace",  # files go under workspace/files/ in the bucket
+        }
+    }
+    ```
+
+    Credentials: `aws_access_key_id` and `aws_secret_access_key`, or, when
+    those are not given, boto3's usual chain (environment, profile, role).
+    `aws_endpoint_url` points it at any S3-compatible store.
+  </Tab>
+  <Tab title="R2">
+    ```bash
+    pip install "omnicoreagent[s3]"
+    ```
+
+    ```python
+    import os
+
+    agent_config = {
+        "workspace_config": {
+            "workspace_backend": "r2",
+            "r2_bucket_name": "my-agent-workspace",
+            "r2_account_id": os.environ["R2_ACCOUNT_ID"],
+            "r2_access_key_id": os.environ["R2_ACCESS_KEY_ID"],
+            "r2_secret_access_key": os.environ["R2_SECRET_ACCESS_KEY"],
+        }
+    }
+    ```
+
+    All four R2 settings are required.
+  </Tab>
+</Tabs>
+
+### Or from the environment
+
+With no `workspace_config` at all, the workspace is read from environment
+variables, so a deployment can choose it without code changes:
+
+| Variable | Default | For |
+|---|---|---|
+| `OMNICOREAGENT_WORKSPACE_BACKEND` | `local` | `local`, `s3` or `r2` |
+| `OMNICOREAGENT_WORKSPACE_DIR` | `./workspace` | local |
+| `OMNICOREAGENT_WORKSPACE_PREFIX` | `workspace` | S3 and R2: the key prefix in the bucket |
+| `AWS_S3_BUCKET`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL` | — | S3 |
+| `R2_BUCKET_NAME`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | — | R2 |
+
+<Warning>
+A `workspace_config` you pass replaces these variables entirely: none of them
+is read, so `{"workspace_backend": "s3"}` alone fails for want of a bucket even
+when `AWS_S3_BUCKET` is set. Pass everything the backend needs in the
+dictionary, or pass no `workspace_config` and set it all in the environment.
+(For S3, boto3 still finds credentials its own way when none are given.)
+</Warning>
+
+| | Local | S3 | R2 |
+|---|---|---|---|
+| Survives a restart | Yes | Yes | Yes |
+| Needs cloud credentials | No | Yes | Yes |
+| Shared by several machines | No | Yes | Yes |
+
+## Options
+
+| Setting (in `agent_config`) | Default | What it does |
+|---|---|---|
+| `enable_workspace_files` | `True` | Give the agent the file tools above. `False` removes them; the workspace still holds artifacts and telemetry |
+| `workspace_config` | `None` (from the environment, else `./workspace`) | Where the workspace lives: `workspace_backend`, `workspace_dir`, `prefix`, and the S3 / R2 settings above |
+
+Every setting is in the [agent settings reference](/docs/reference/agent-config).
+
+## When things go wrong
+
+<AccordionGroup>
+  <Accordion title="ValueError: Tool name conflict: built-in workspace tools reserve these names">
+    One of your tools has the name of a workspace tool. Raised by `run`:
+
+    ```text
+    ValueError: Tool name conflict: built-in workspace tools reserve these names when enable_workspace_files=True: read_file. Rename the app tool or disable workspace files for this agent.
+    ```
+
+    Rename your tool (`read_app_file`), or set `enable_workspace_files` to
+    `False`.
+  </Accordion>
+
+  <Accordion title="ValueError: S3 workspace backend requires AWS_S3_BUCKET">
+    Raised by `run` when the S3 or R2 settings are incomplete:
+
+    ```text
+    ValueError: S3 workspace backend requires AWS_S3_BUCKET
+    ValueError: R2 workspace backend requires environment variables: R2_BUCKET_NAME, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+    ValueError: workspace_backend must be one of: local, s3, r2
+    ```
+
+    With a `workspace_config` dictionary, the settings must be in it
+    (`s3_bucket`, `r2_bucket_name`, …): the environment is not read.
+  </Accordion>
+
+  <Accordion title="The agent cannot find the file I put there">
+    Seeded files belong under `files/`: `./workspace/files/project/app.py`,
+    not `./workspace/project/app.py`. And the workspace is relative to the
+    working directory the agent runs in unless `workspace_dir` is absolute.
+  </Accordion>
+
+  <Accordion title="What the model sees when a file call fails">
+    A failed file call is an answer to the model, not an exception; it usually
+    corrects itself. It is recorded as the tool call's `error` (outcome
+    `error` in the trajectory), with the same text. For example:
+
+    ```text
+    File not found: project/missing.py
+    Invalid path '../../../etc/passwd' resolved outside workspace namespace.
+    ```
+
+    `write_file` in `create` mode on an existing file answers with a preview
+    of it and `Use mode='append' or mode='overwrite'.`
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Context engineering" icon="brain-circuit" href="/docs/core-concepts/context-engineering">
+    Large tool results saved as artifacts, and context kept under the limit.
+  </Card>
+  <Card title="Execution" icon="terminal" href="/docs/core-concepts/execution">
+    Commands in a sandbox, with the workspace copied in and out.
+  </Card>
+  <Card title="Memory" icon="database" href="/docs/core-concepts/memory">
+    The conversation, kept across restarts.
+  </Card>
+  <Card title="Agent Skills" icon="graduation-cap" href="/docs/core-concepts/skills">
+    Instructions and scripts the agent uses when a task calls for them.
+  </Card>
+</CardGroup>

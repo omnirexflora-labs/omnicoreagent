@@ -1,174 +1,199 @@
 ---
 title: Configuration
-description: 'Environment variables, agent settings, and model configuration'
+description: 'Where every setting lives: the model, how the agent runs, its memory, workspace and record, and the environment variables for secrets and servers'
 icon: 'gear'
 ---
 
-# Configuration Guide
+# Configuration
 
-OmniCoreAgent supports configuration through environment variables, Python
-dictionaries, and specialized configuration objects.
+An agent is configured in a few layers, each with one job. You will know which
+layer a setting belongs in, what the defaults are, and how to see the settings an
+agent actually ended up with.
+
+| Layer | Where | It decides | Every option |
+|---|---|---|---|
+| Model | `model_config=` | which provider and model, how it samples | [Models](/docs/how-to-guides/models) |
+| Agent | `agent_config=` | steps and limits, workspace, memory window, context, guardrail, policy | [Agent settings](/docs/reference/agent-config) |
+| Memory store | `memory_router=` | where conversations and run records are kept | [Memory](/docs/core-concepts/memory) |
+| Record | `telemetry_config=`, `telemetry_exporters=` | what a trace keeps, where, for how long | [Telemetry settings](/docs/reference/telemetry-config) |
+| Tools | `local_tools=`, `mcp_tools=`, `sub_agents=` | what the agent may call | [OmniCoreAgent](/docs/reference/omnicoreagent) |
+| Environment | shell, `.env` | secrets and connection strings | [below](#1-environment-variables) |
+
+<Info>
+You need exactly one environment variable to start: `LLM_API_KEY`. Everything
+else has a local default: memory in the process, the workspace and traces in
+`./workspace`. Every output on this page is what the code printed when it was
+run; the model's wording will differ on yours.
+</Info>
+
+## All the layers in one agent
+
+```python
+import asyncio
+from pathlib import Path
+from omnicoreagent import OmniCoreAgent
+
+async def main():
+    agent = OmniCoreAgent(
+        name="configured",
+        system_instruction="You are a concise assistant. Answer in plain text.",
+        # Which model, and how it samples
+        model_config={"provider": "openai", "model": "gpt-5.4-mini", "max_tokens": 800},
+        # How the agent runs
+        agent_config={
+            "max_steps": 10,
+            "tool_call_timeout": 60,
+            "context_management": {"threshold_percent": 60},
+            "workspace_config": {"workspace_dir": "./agent_data"},
+        },
+        # What its record keeps, and for how long
+        telemetry_config={"capture": "default", "retention_days": 30},
+    )
+
+    # Settings you left out keep their defaults; nested ones are merged.
+    print("context_management:", agent.agent_config["context_management"])
+    print("tool_offload enabled:", agent.agent_config["tool_offload"]["enabled"])
+
+    result = await agent.run("Give me one word for happy.")
+    print(result["status"], "|", result["response"])
+
+    trace = await agent.get_trace(result["trace_id"])
+    call = next(e for e in trace["events"] if e["event_type"] == "model_call")
+    print("model prompt recorded:", call["input_capture"]["state"])
+
+    print("workspace:", sorted(p.name for p in Path("agent_data").iterdir()))
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+context_management: {'enabled': True, 'mode': 'token_budget', 'value': 100000, 'threshold_percent': 60, 'strategy': 'truncate', 'preserve_recent': 4}
+tool_offload enabled: True
+success | Joyful
+model prompt recorded: not_recorded
+workspace: ['artifacts', 'files', 'telemetry']
+```
+
+What each line shows:
+
+- **Nested settings merge.** Only `threshold_percent` was given; the other five
+  `context_management` keys kept their defaults. The same holds for
+  `tool_offload`, `privacy_config` and `governance_config`.
+- **`agent.agent_config`** is the full, checked configuration the agent will
+  run with. Print it when you are unsure what a default is.
+- **`capture: "default"`** is the privacy-first record: the trace marks the model
+  prompt `not_recorded` instead of keeping it. The default, `"full"`, keeps it.
+- **`workspace_dir`** moved the agent's files, its offloaded tool results and its
+  traces to `./agent_data`.
+
+## How it works
+
+- **Everything is checked when the agent is built.** An unknown key, a value out
+  of range or a setting for the wrong transport raises a `ValueError` from the
+  constructor, naming the setting. Nothing waits for a run to fail.
+- **Code beats the environment.** Environment variables supply secrets and
+  connection strings, and defaults when code says nothing. A `workspace_config`
+  in code replaces the workspace variables entirely.
+- **A dict or a typed object.** `agent_config` takes a dict, or an `AgentConfig`,
+  whose fields your editor completes:
+
+  ```python
+  from omnicoreagent import OmniCoreAgent
+  from omnicoreagent.core import AgentConfig
+
+  agent = OmniCoreAgent(
+      name="typed",
+      system_instruction="You are a helpful assistant.",
+      model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+      agent_config=AgentConfig(max_steps=20, enable_agent_skills=True),
+  )
+  ```
 
 ---
 
-## 1. Environment Variables
+## 1. Environment variables
 
-Environment variables are the best way to manage sensitive data like API keys and connection strings.
-
-For the first working agent, set only `LLM_API_KEY`. Memory and events default
-to in-memory storage, workspace files default to local disk, and OmniServe
-settings have server-side defaults. Add backend variables only when you are
-intentionally moving from local defaults to persistent or cloud infrastructure.
-
-### LLM API Key
-
-OmniCoreAgent uses one public environment variable for hosted model credentials:
+### The model key
 
 ```bash
 export LLM_API_KEY=your_provider_key
 ```
 
-Set `model_config["provider"]` to choose the provider. The runtime reads
-`LLM_API_KEY` and passes it to LiteLLM for the selected provider.
-Do not configure provider-specific key names in OmniCoreAgent examples.
+One variable, whichever provider you choose in `model_config`; the runtime hands
+it to that provider. It is read on the agent's first run. Ollama needs none. To
+take the key from somewhere else, such as a secrets manager, put it in
+`model_config["api_key"]` instead.
 
-### Optional Memory Backends
+The runtime does not load `.env` files. To use one, call `load_dotenv()` from
+`python-dotenv` at the top of your script.
 
-The default memory backend is in-memory and needs no environment variables.
-Set these only when conversation history must live outside the current process.
+### Memory
 
-| Backend | Variable | Example |
-|---------|----------|---------|
-| **Redis** | `REDIS_URL` | `redis://localhost:6379/0` |
-| **SQL Database** | `DATABASE_URL` | `postgresql://user:pass@localhost:5432/db` |
-| **MongoDB** | `MONGODB_URI` | `mongodb://localhost:27017` |
+Session history lives in the process unless you pass a `MemoryRouter`. The store
+is chosen in code; its connection string comes from the environment.
 
-Optional MongoDB memory variables:
-
-| Variable | Purpose |
-|----------|---------|
-| `MONGODB_DB_NAME` | MongoDB memory database name. Defaults to `omnicoreagent`. |
-| `MONGODB_COLLECTION` | MongoDB memory collection name. Defaults to `messages`. |
-
-### Workspace Storage
-Workspace storage is separate from memory storage. Memory stores conversation
-history. Workspace storage stores files, scratchpads, artifacts, subagent
-outputs, and tool offloads.
-
-| Backend | Variables |
-|---------|-----------|
-| **Local** | `OMNICOREAGENT_WORKSPACE_BACKEND=local`, `OMNICOREAGENT_WORKSPACE_DIR=./workspace` |
-| **S3** | `OMNICOREAGENT_WORKSPACE_BACKEND=s3`, `AWS_S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
-| **R2** | `OMNICOREAGENT_WORKSPACE_BACKEND=r2`, `R2_BUCKET_NAME`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` |
-
-Optional workspace variables:
-
-| Variable | Purpose |
-|----------|---------|
-| `OMNICOREAGENT_WORKSPACE_PREFIX` | Key prefix for S3/R2 workspace objects. |
-| `AWS_REGION` | AWS region for S3 workspaces. |
-| `AWS_ENDPOINT_URL` | Custom S3-compatible endpoint. |
-
-### Optional Telemetry Export
-
-Telemetry events and traces work in-process by default. Set exporter variables
-only when traces should leave the process for an OTLP-compatible backend.
-
-The built-in telemetry recorder does not require LangSmith, Opik, OpenTelemetry,
-or any other external service. Configure its recording and redaction policy
-directly on the agent when you need more or less evidence:
+| Store | In code | Variable | Extra |
+|---|---|---|---|
+| In process (default) | `MemoryRouter("in_memory")` | none | none |
+| Redis | `MemoryRouter("redis")` | `REDIS_URL`, e.g. `redis://localhost:6379/0` | `omnicoreagent[redis]` |
+| SQL (SQLite, PostgreSQL, or another SQLAlchemy database) | `MemoryRouter("sql")` | `DATABASE_URL`, e.g. `postgresql://user:pass@localhost:5432/db` | `omnicoreagent[postgres]` |
+| MongoDB | `MemoryRouter("mongodb")` | `MONGODB_URI`, e.g. `mongodb://localhost:27017`; optional `MONGODB_DB_NAME` (default `omnicoreagent`), `MONGODB_COLLECTION` (default `messages`) | `omnicoreagent[mongodb]` |
 
 ```python
+from omnicoreagent import MemoryRouter, OmniCoreAgent
+
 agent = OmniCoreAgent(
-    ...,
-    telemetry_config={
-        "storage": "auto", # auto (durable JSONL), jsonl, or memory
-        "capture": "full", # full (the default) or default (privacy-first)
-        "record_inputs": True,
-        "record_outputs": True,
-        "record_tool_results": True,
-        "record_model_prompts": False,
-        "record_model_responses": False,
-        "retention_days": 7, # use None to keep every trace
-        "payload_retention_days": 7,
-        "offload_large_payloads": False,
-        "offload_target": "workspace", # workspace or object_storage
-        "max_payload_bytes": 64_000,
-        "strict": False,
-    },
+    name="assistant",
+    system_instruction="You are a helpful assistant.",
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    memory_router=MemoryRouter("redis"),
 )
 ```
 
-The effective policy is recorded as a non-secret configuration fingerprint in
-each agent trace. Traces are durable by default: `storage: "auto"` writes JSONL
-to `storage_path` when set, otherwise to `telemetry/traces.jsonl` in the local
-workspace directory (`OMNICOREAGENT_WORKSPACE_DIR`, default `./workspace`). A
-cloud workspace does not move telemetry to the cloud; traces stay in that local
-file unless a path is configured. Every agent and background manager that
-resolves the same file shares one store. Set `storage: "memory"` to keep traces
-in process memory only (bounded by `memory_max_traces`).
+The same store keeps each run's durable record, so a paused run can be resumed
+in another process ([Durable runs](/docs/core-concepts/durable-runs)).
 
-The JSONL file holds the traces that are still running, so a crash loses
-nothing. When a trace ends it moves to an archive beside the file
-(`telemetry/traces-archive/`): one file per trace and a SQLite index of what
-each trace is. Memory holds only running traces, reading a trace reads one
-file, and listing by run, session or status is an index query. The log is
-compacted to the running traces once it grows past 16 MiB. An existing
-`traces.jsonl` is migrated on first start, which reads it once.
+<Warning>
+If the variable is missing, the store falls back to process memory and says so
+only in a log line: `Redis memory selected but REDIS_URL is not set; using
+in_memory (nothing survives a restart)`. Turn on logging
+(`logging.basicConfig(level=logging.WARNING)`) to see it.
+</Warning>
 
-Several processes can share one archive. `archive_index_url` puts the index in
-a database instead of that SQLite file (`postgresql://...`, or any SQLAlchemy
-URL), and the bodies go to a directory the processes share
-(`archive_bodies_path`) or to the deployment's bucket
-(`archive_target: "object_storage"`, which needs an S3 or R2 workspace). Each
-process still keeps its own running traces in its own JSONL file, and any of
-them can then read or list a trace another one finished. A shared index also
-hands out stream cursors, so two processes recording at the same time never
-give the same stream position to different events.
+### Workspace
 
-`capture: "full"` is the default: the whole trajectory is recorded, model
-input and output included, still redacted, truncated and offloaded under the
-same policy. A trace is worth keeping only if it holds what the model was
-sent, and an evaluator or a trainer cannot use one that does not.
-`capture: "default"` is the privacy-first preset for a deployment that must
-not record prompts: model prompts and responses are left out and the trace
-marks them `not_recorded`. Any `record_*` field you set explicitly overrides
-the preset.
+The workspace holds the agent's files, offloaded tool results and, by default,
+its traces. It is separate from memory.
 
-Finished traces older than `retention_days` and unreferenced payloads older
-than `payload_retention_days` are removed automatically once per agent before
-its first run; a payload referenced by a kept trace is never removed. Run
-`await agent.prune_telemetry()` to apply retention on demand and
-`agent.telemetry_retention_status()` (or `GET /telemetry/retention` in
-OmniServe) to see what was removed.
-An exporter is an optional outbound copy of a completed built-in trace and is
-not part of the runtime execution path.
+| Backend | Variables |
+|---|---|
+| **Local** (default) | `OMNICOREAGENT_WORKSPACE_BACKEND=local`, `OMNICOREAGENT_WORKSPACE_DIR` (default `./workspace`) |
+| **S3** | `OMNICOREAGENT_WORKSPACE_BACKEND=s3`, `AWS_S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`; optional `AWS_REGION`, `AWS_ENDPOINT_URL` for an S3-compatible service |
+| **R2** | `OMNICOREAGENT_WORKSPACE_BACKEND=r2`, `R2_BUCKET_NAME`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` |
 
-When `offload_large_payloads` is enabled, oversized redacted telemetry values
-are written to the built-in content-addressed payload store before their trace
-reference is persisted. `offload_target: "workspace"` uses the configured
-workspace backend; `"object_storage"` requires an S3 or R2 workspace. With an
-explicit `storage_path`, local payloads are stored beside it in a
-`<storage_path>.payloads` directory. The returned `telemetry://payload/...`
-reference can be read with `await agent.read_telemetry_payload(reference)` and
-cleaned with `await agent.prune_telemetry_payloads()`. Redacted payloads are
-kept by default when they are still referenced by stored traces.
+`OMNICOREAGENT_WORKSPACE_PREFIX` (default `workspace`) prefixes the object keys
+in S3 and R2. The same settings in code, which replace the variables:
+`agent_config={"workspace_config": {"workspace_backend": "s3", "s3_bucket": "..."}}`.
+S3 and R2 need `omnicoreagent[s3]`. More in [Workspace files](/docs/core-concepts/workspace-files).
 
-| Exporter | Variables |
-|----------|-----------|
-| **OTLP/HTTP** | `OTEL_EXPORTER_OTLP_ENDPOINT` or explicit exporter `endpoint` |
-| **LangSmith** | `LANGSMITH_API_KEY`, optional `LANGSMITH_PROJECT`, optional `LANGSMITH_OTEL_ENDPOINT` |
-| **Opik** | `OPIK_API_KEY`, `OPIK_WORKSPACE`, optional `OPIK_PROJECT_NAME`, optional `OPIK_OTEL_ENDPOINT` |
+### Trace exporters
 
-Install the matching extra before exporting:
+Traces are kept on local disk without any external service. To also send each
+finished trace to an OTLP-compatible backend, install the extra and name the
+exporter:
 
 ```bash
-pip install "omnicoreagent[otel]"
+pip install "omnicoreagent[otel]"       # any OTLP/HTTP collector
 pip install "omnicoreagent[langsmith]"
 pip install "omnicoreagent[opik]"
 ```
 
-Python configuration can pass exporters directly:
+| Exporter | Variables |
+|---|---|
+| **OTLP/HTTP** | `OTEL_EXPORTER_OTLP_ENDPOINT`, or `endpoint` in code |
+| **LangSmith** | `LANGSMITH_API_KEY`; optional `LANGSMITH_PROJECT`, `LANGSMITH_OTEL_ENDPOINT` |
+| **Opik** | `OPIK_API_KEY`, `OPIK_WORKSPACE`; optional `OPIK_PROJECT_NAME`, `OPIK_OTEL_ENDPOINT` |
 
 ```python
 from omnicoreagent import OmniCoreAgent
@@ -178,73 +203,72 @@ agent = OmniCoreAgent(
     system_instruction="You are a research assistant.",
     model_config={"provider": "openai", "model": "gpt-5.4-mini"},
     telemetry_exporters=[
-        {
-            "destination": "otlp",
-            "endpoint": "http://localhost:4318/v1/traces",
-            "service_name": "research-agent",
-        }
+        {"destination": "otlp", "endpoint": "http://localhost:4318/v1/traces", "service_name": "research-agent"}
     ],
 )
 ```
 
-### OmniServe
+`destination` is `otlp`, `langsmith`, `opik` or `jsonl`. An exporter is a copy
+sent after the run; it is never in the run's way
+([Observability](/docs/how-to-guides/observability)).
 
-OmniServe reads these variables through `OmniServeConfig`. Environment variables
-override values passed in code.
+### OmniServe and background runs
 
-You do not need any OmniServe environment variables to start. Defaults bind the
-server to port `8000`, enable the background API, start the background worker,
-and use an in-memory task store. Set only the values you want to override.
+You need none of these to start: the server binds `0.0.0.0:8000`, exposes the
+background API, starts its worker and keeps tasks in memory. A variable
+overrides the same value passed to `OmniServeConfig` in code.
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `OMNICOREAGENT_SERVE_HOST` | `0.0.0.0` | Server bind host. Must not be empty. |
-| `OMNICOREAGENT_SERVE_PORT` | `8000` | Server port. Must be `1`-`65535`. |
-| `OMNICOREAGENT_SERVE_WORKERS` | `1` | Direct OmniServe worker count. Must be `1`; run multiple processes behind a process manager for horizontal scaling. |
-| `OMNICOREAGENT_SERVE_API_PREFIX` | `""` | API route prefix, such as `/api/v1`. Normalized to a leading slash with no trailing slash; whitespace is invalid. |
-| `OMNICOREAGENT_SERVE_ENABLE_DOCS` | `true` | Enable Swagger UI. |
-| `OMNICOREAGENT_SERVE_ENABLE_REDOC` | `true` | Enable ReDoc. |
-| `OMNICOREAGENT_SERVE_CORS_ENABLED` | `true` | Enable CORS middleware. |
-| `OMNICOREAGENT_SERVE_CORS_ORIGINS` | `*` | Comma-separated allowed origins. |
-| `OMNICOREAGENT_SERVE_CORS_METHODS` | `*` | Comma-separated allowed methods. |
-| `OMNICOREAGENT_SERVE_CORS_HEADERS` | `*` | Comma-separated allowed headers. |
-| `OMNICOREAGENT_SERVE_CORS_CREDENTIALS` | `true` | Allow CORS credentials. |
-| `OMNICOREAGENT_SERVE_AUTH_ENABLED` | `false` | Enable Bearer token auth. Requires a non-empty `OMNICOREAGENT_SERVE_AUTH_TOKEN` value. |
-| `OMNICOREAGENT_SERVE_AUTH_TOKEN` | unset | Bearer token value used when auth is enabled. |
-| `OMNICOREAGENT_SERVE_REQUEST_LOGGING` | `true` | Log incoming requests. |
-| `OMNICOREAGENT_SERVE_LOG_LEVEL` | `INFO` | Server log level: `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG`, or `TRACE`. |
-| `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` | `300` | Request timeout in seconds. Set `0` to disable timeout middleware. |
-| `OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED` | `false` | Enable in-process rate limiting. |
-| `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per rate-limit window. Must be at least `1` when rate limiting is enabled. |
-| `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Rate-limit window in seconds. Must be at least `1` when rate limiting is enabled. |
-| `OMNICOREAGENT_BACKGROUND_ENABLED` | `true` | Expose background task endpoints. |
-| `OMNICOREAGENT_BACKGROUND_AGENT_ID` | `default` | Agent id used when OmniServe registers the served agent for background work. |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE` | `in_memory` | Background control-plane store: `in_memory`, `sql`, `redis`, or `mongodb`. |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URL` | unset | SQL or Redis URL. A URL with no backend selects SQL; use `OMNICOREAGENT_BACKGROUND_TASK_STORE=redis` for Redis URLs. |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URI` | unset | MongoDB URI. Setting this selects the MongoDB task store. |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE` | `omnicoreagent` | MongoDB database name. |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE_PREFIX` | unset | Redis key prefix. |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE_COLLECTION_PREFIX` | unset | MongoDB collection prefix. |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE_CONNECT_TIMEOUT` | unset | Optional backend connect timeout in seconds. |
-| `OMNICOREAGENT_BACKGROUND_START_WORKER` | `true` | Start the scheduler and worker loop during server lifespan. |
+<AccordionGroup>
+  <Accordion title="Server variables">
+    | Variable | Default | Purpose |
+    |---|---|---|
+    | `OMNICOREAGENT_SERVE_HOST` | `0.0.0.0` | Bind host. Must not be empty. |
+    | `OMNICOREAGENT_SERVE_PORT` | `8000` | Port, `1`-`65535`. |
+    | `OMNICOREAGENT_SERVE_WORKERS` | `1` | Must be `1`; scale by running more processes behind a process manager. |
+    | `OMNICOREAGENT_SERVE_API_PREFIX` | `""` | Route prefix, such as `/api/v1`; normalized to a leading slash and no trailing slash. |
+    | `OMNICOREAGENT_SERVE_ENABLE_DOCS` | `true` | Swagger UI. |
+    | `OMNICOREAGENT_SERVE_ENABLE_REDOC` | `true` | ReDoc. |
+    | `OMNICOREAGENT_SERVE_CORS_ENABLED` | `true` | CORS middleware. |
+    | `OMNICOREAGENT_SERVE_CORS_ORIGINS` | `*` | Comma-separated allowed origins. |
+    | `OMNICOREAGENT_SERVE_CORS_METHODS` | `*` | Comma-separated allowed methods. |
+    | `OMNICOREAGENT_SERVE_CORS_HEADERS` | `*` | Comma-separated allowed headers. |
+    | `OMNICOREAGENT_SERVE_CORS_CREDENTIALS` | `true` | Allow CORS credentials. |
+    | `OMNICOREAGENT_SERVE_AUTH_ENABLED` | `false` | Bearer token auth; needs `OMNICOREAGENT_SERVE_AUTH_TOKEN`. |
+    | `OMNICOREAGENT_SERVE_AUTH_TOKEN` | unset | The bearer token. |
+    | `OMNICOREAGENT_SERVE_REQUEST_LOGGING` | `true` | Log requests. |
+    | `OMNICOREAGENT_SERVE_LOG_LEVEL` | `INFO` | `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG` or `TRACE`. |
+    | `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` | `300` | Seconds; `0` turns the timeout off. |
+    | `OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED` | `false` | In-process rate limiting. |
+    | `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per window, at least `1`. |
+    | `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Window in seconds, at least `1`. |
+  </Accordion>
+  <Accordion title="Background task store variables">
+    | Variable | Default | Purpose |
+    |---|---|---|
+    | `OMNICOREAGENT_BACKGROUND_ENABLED` | `true` | Expose the background task endpoints. |
+    | `OMNICOREAGENT_BACKGROUND_AGENT_ID` | `default` | The id the served agent is registered under. |
+    | `OMNICOREAGENT_BACKGROUND_TASK_STORE` | `in_memory` | `in_memory`, `sql`, `redis` or `mongodb`. |
+    | `OMNICOREAGENT_BACKGROUND_TASK_STORE_URL` | unset | SQL or Redis URL. A URL with no store named selects SQL; set the store to `redis` for a Redis URL. |
+    | `OMNICOREAGENT_BACKGROUND_TASK_STORE_URI` | unset | MongoDB URI; selects the MongoDB store. |
+    | `OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE` | `omnicoreagent` | MongoDB database. |
+    | `OMNICOREAGENT_BACKGROUND_TASK_STORE_PREFIX` | unset | Redis key prefix. |
+    | `OMNICOREAGENT_BACKGROUND_TASK_STORE_COLLECTION_PREFIX` | unset | MongoDB collection prefix. |
+    | `OMNICOREAGENT_BACKGROUND_TASK_STORE_CONNECT_TIMEOUT` | unset | Connect timeout in seconds. |
+    | `OMNICOREAGENT_BACKGROUND_START_WORKER` | `true` | Start the scheduler and worker with the server. |
+  </Accordion>
+</AccordionGroup>
 
-The background task store is separate from `MemoryRouter`. `MemoryRouter` stores
-conversation/session history. The task store stores scheduler/runtime state:
-tasks, schedule cursors, runs, attempts, leases, heartbeats, retries, and
-cancellation flags. Defaults are intentionally light. Use `sql`, `redis`, or
-`mongodb` when background tasks must survive process restarts.
+The task store is not the memory store: it keeps tasks, schedules, runs,
+attempts, leases, heartbeats, retries and cancellations. Keep the in-memory
+default only while trying things out; a durable store keeps background tasks
+across restarts.
 
-Choose one durable backend per deployment. Use SQL for local durability with
-SQLite, or PostgreSQL or MySQL when several processes share one store; a SQL
-write costs what one row costs, whatever the store already holds.
+Use SQL for local durability with SQLite, or PostgreSQL or MySQL when several processes share one store.
 Use Redis when your deployment already operates Redis with persistence and no
 eviction for task-store keys. Use MongoDB when
-MongoDB is your durable operational store.
+MongoDB is your durable operational store; its writes use majority write concern.
 
-For Redis durability, enable Redis persistence and keep task-store keys out of
-eviction. MongoDB task-store writes use majority write concern.
-
-Durable background examples. Pick one backend:
+Pick one backend:
 
 ```bash
 # Local SQLite durability
@@ -265,132 +289,201 @@ export OMNICOREAGENT_BACKGROUND_TASK_STORE_URI=mongodb://localhost:27017
 export OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE=omnicoreagent
 ```
 
-## 2. Agent Configuration
-
-The `AgentConfig` handles the runtime behavior of the agent, such as reasoning steps and resource limits.
-
-```python
-agent_config = {
-    "tool_call_timeout": 180,        # Max seconds per tool execution
-    "subagent_timeout": None,        # Max seconds per delegation; None = the worker's own limits
-    "max_steps": 50,                 # Max reasoning loops per run()
-    "request_limit": 0,              # 0 = unlimited
-    "total_tokens_limit": 0,         # 0 = unlimited
-    "enable_subagents": True,        # Dynamic focused workers
-    "enable_workspace_files": True,  # Default: workspace files for notes/logs/scratchpads
-    "enable_agent_skills": True,     # Enable local skill discovery
-    "skill_script_env": [],          # Env vars host skill scripts receive (none beyond PATH/HOME/locale)
-    "enable_advanced_tool_use": True, # Enable BM25 tool retrieval
-    "context_management": {"enabled": True},
-    "tool_offload": {"enabled": True},
-    "governance_config": {
-        "enabled": True,
-        "profile": "interactive-dev",
-        "sandbox_config": {"provider": "none"},
-    },
-}
-
-agent = OmniCoreAgent(
-    name="assistant",
-    system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-5.6-terra"},
-    agent_config=agent_config,
-)
-```
-
-When `enable_subagents` is true, OmniCoreAgent automatically enables workspace
-files because spawned workers write output, todos, logs, and scratchpads into
-the active workspace. For full harness-style workloads, pair dynamic subagents
-with context management and tool offloading. Context management checks the prompt
-before each model call; tool offloading keeps large tool payloads in workspace
-artifacts instead of feeding the full payload back into the loop.
-
-`governance_config.sandbox_config` names the sandbox the agent's `execute`
-tool runs commands in: `docker`, `e2b`, `modal`, `daytona`, `vercel`, `http`
-(your own service), or `local` (the machine the agent runs on, not isolated),
-plus any provider you register. `none` gives no sandbox (policy only), and
-`local_test` runs registered handlers for tests. What each needs and enforces —
-including which ones can limit a sandbox's network to named hosts — is on
-[Sandbox providers](/docs/how-to-guides/sandbox-providers).
+More in [OmniServe](/docs/how-to-guides/omniserve) and
+[Background agents](/docs/core-concepts/background-agents).
 
 ---
 
-## 3. Model Configuration
+## 2. Agent configuration
 
-The `model_config` defines which LLM to use and its sampling parameters.
+The settings you are most likely to change. Each has a default; leave out what
+you do not need.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `max_steps` | `50` | Most model turns per run (1 to 1000). A run that reaches it ends with `status` `error`, `termination_reason` `max_steps` and the response `Agent reached its step limit.` |
+| `request_limit`, `total_tokens_limit` | `0` (no limit) | Most model calls, or tokens, per run; then `resource_limit`. For dollars, use budgets. |
+| `tool_call_timeout` | `180` | Seconds one tool call may take (2 to 1000). |
+| `workspace_config` | `./workspace` on disk | `{"workspace_dir": ...}`, or S3 / R2 settings. |
+| `enable_workspace_files` | `True` | The file tools over the workspace. |
+| `memory_config` | last 10,000 messages | How much history a run sees: `{"mode": "sliding_window" or "token_budget", "value": ..., "summary": {...}}` ([Memory](/docs/core-concepts/memory)). |
+| `context_management` | on, 100,000 tokens, at 75% | Truncates or summarizes older messages before a call would overflow ([Context engineering](/docs/core-concepts/context-engineering)). |
+| `tool_offload` | on, over 500 tokens or 2,000 bytes | Saves a large tool result to the workspace and gives the model a preview. |
+| `guardrail_mode` | `"full"` | `full` (input and tool results), `input_only`, or `off` ([Guardrails](/docs/core-concepts/guardrails)). |
+| `governance_config` | off | Policy, budgets, sandbox ([Security model](/docs/core-concepts/security-model), [Policy](/docs/reference/policy), [Budgets](/docs/reference/budgets)). |
+| `enable_subagents` | `False` | The `spawn_subagents` tool; turns the workspace, context management and offload on. |
+| `enable_agent_skills`, `skills_dir` | `False`, `./.agents/skills` | Skills the agent may load ([Skills](/docs/core-concepts/skills)). |
+| `code_mode` | off | A `run_code` tool ([Code mode](/docs/core-concepts/code-mode)). |
+| `run_retention_days` | `30` | Finished run records are removed after this; `None` keeps them. |
+
+The other settings, and every nested default, are in the
+[agent settings reference](/docs/reference/agent-config).
+
+`governance_config["sandbox_config"]` names where the `execute` tool runs
+commands: `docker`, `e2b`, `modal`, `daytona`, `vercel`, `http` (your own
+service), or `local` (the machine the agent runs on, not isolated), plus any
+provider you register. `none` gives a policy without a sandbox; `local_test` runs
+registered handlers for tests. What each needs, and which can limit a sandbox's
+network to named hosts, is on [Sandbox providers](/docs/how-to-guides/sandbox-providers).
+
+---
+
+## 3. Model configuration
 
 ```python
 model_config = {
-    "provider": "openai",
-    "model": "gpt-5.4",
+    "provider": "openai",        # required
+    "model": "gpt-5.4-mini",     # required
     "temperature": 0.5,
     "max_tokens": 4000,
     "top_p": 0.9,
+    "reasoning_effort": "low",
 }
 ```
 
-Supported provider values are: `openai`, `anthropic`, `groq`, `ollama`,
-`azure`, `gemini`, `deepseek`, `mistral`, and `openrouter`.
+| Key | What it does |
+|---|---|
+| `provider`, `model` | Required. `provider` is one of `openai`, `anthropic`, `gemini`, `groq`, `deepseek`, `mistral`, `openrouter`, `azure`, `ollama`. |
+| `temperature`, `top_p`, `max_tokens`, `reasoning_effort` | Sent to the provider as given; unset leaves the provider's default. A setting the model refuses is dropped, and the drop is recorded. |
+| `logprobs`, `top_logprobs` | Ask for the chosen tokens' probabilities, for training on the run. |
+| `api_key` | The key, when it does not come from `LLM_API_KEY`. |
+| `azure_endpoint`, `azure_api_version`, `azure_deployment` | Azure OpenAI. |
+| `ollama_host` | Where Ollama runs, e.g. `http://localhost:11434`. |
 
-Provider-specific runtime options currently supported by OmniCoreAgent are:
-
-- Azure: `azure_endpoint`, `azure_api_version`, `azure_deployment`
-- Ollama: `ollama_host`
+Providers, model names and reasoning models: [Models](/docs/how-to-guides/models).
 
 ---
 
-## 4. MCP Tool Configuration
+## 4. MCP tool configuration
 
-MCP tool servers are configured as a list of dictionaries. OmniCoreAgent only loads tools from MCP servers.
+Each MCP server is a dict in `mcp_tools`:
 
 ```python
 mcp_tools = [
     {
-        "name": "explorer",
+        "name": "files",
         "transport_type": "stdio",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
     },
     {
         "name": "remote_service",
         "transport_type": "streamable_http",
-        "url": "https://api.myapp.com/mcp",
-        "headers": {"Authorization": "Bearer token"}
-    }
+        "url": "https://api.example.com/mcp",
+        "headers": {"Authorization": "Bearer token"},
+    },
 ]
 ```
 
-Each `name` is the server's identity in tool routing, governance, and
-telemetry. Settings are checked per transport when the agent is created:
-`command`, `args`, `cwd`, and `env` apply to stdio; `url`, `headers`,
-`timeout`, `sse_read_timeout`, and `auth` apply to `sse` and
-`streamable_http`; `connect_timeout` (default 30 s) and `call_timeout` apply to
-all. An unknown or inapplicable setting raises a `ValueError` naming the server.
-See [MCP Tools](/docs/core-concepts/mcp) for every setting, OAuth, errors, and
-reconnects.
+`name` is the server's identity in tool routing, policy and traces. `command`,
+`args`, `cwd` and `env` apply to `stdio`; `url`, `headers`, `timeout`,
+`sse_read_timeout` and `auth` to `sse` and `streamable_http`; `connect_timeout`
+(30 seconds by default) and `call_timeout` to all. A setting that does not apply
+to the transport raises a `ValueError` naming the server. Every setting, OAuth
+and reconnects: [MCP](/docs/core-concepts/mcp).
 
 ---
 
-## 5. Persistence Configuration
+## 5. Telemetry configuration
 
-Pass a `MemoryRouter` to customize conversation memory. Runtime evidence is
-recorded through telemetry, which is stored durably in local JSONL by default.
+Every run's trace is kept without any setup. `telemetry_config` changes what it
+keeps and for how long:
 
-```python
-from omnicoreagent import MemoryRouter
+| Setting | Default | What it does |
+|---|---|---|
+| `storage` | `"auto"` | On local disk, in `telemetry/` under the workspace directory, even when the workspace is S3 or R2. `"memory"` keeps traces in the process only. |
+| `storage_path` | none | Another file for the trace log. |
+| `capture` | `"full"` | Keep the whole trajectory, model input and output included (redacted). `"default"` leaves model prompts and responses out. A `record_*` setting you give wins over either. |
+| `retention_days` | `7` | Finished traces older than this are removed, once per agent before its first run; `None` keeps all. |
+| `max_payload_bytes` | `64000` | A larger payload is truncated, or kept whole elsewhere with `offload_large_payloads`. |
+| `redact_keys` | `api_key`, `token`, `password`, ... | Keys whose values are replaced with `[REDACTED]`. |
 
-agent = OmniCoreAgent(
-    name="assistant",
-    system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-5.6-terra"},
-    memory_router=MemoryRouter("redis"),
-)
-```
+To share one archive of finished traces between several processes, set
+`archive_index_url` to a database and `archive_target` or `archive_bodies_path`
+for the bodies. All of it, with the rest of the settings, is in the
+[telemetry settings reference](/docs/reference/telemetry-config); reading a trace
+is on [Observability](/docs/how-to-guides/observability).
 
 ---
 
-## Best Practices
+## When things go wrong
 
-- **Use `.env`**: Use a library like `python-dotenv` to load your environment variables during development.
-- **Model Selection**: Use smaller models (`gpt-5.4-mini`) while building and testing your agent logic to save costs.
-- **Limit Steps**: Always set a reasonable `max_steps` to prevent the agent from entering infinite reasoning loops in case of tool failures.
+All of these are raised by the constructor, before any model call, unless noted.
+
+<AccordionGroup>
+  <Accordion title="ValueError: Unknown agent_config setting 'max_step'. Did you mean 'max_steps'?">
+    A misspelled or unknown key. The message ends with every valid setting. With
+    `AgentConfig(max_step=...)` the same mistake is a `TypeError: ... got an
+    unexpected keyword argument 'max_step'`.
+  </Accordion>
+  <Accordion title="ValueError: agent_config['memory_tool_backend'] was removed in 0.4">
+    A setting from 0.3. The message says what replaced it:
+
+    ```text
+    ValueError: agent_config['memory_tool_backend'] was removed in 0.4: the memory_* tools are gone: the agent's files live in its workspace, on by default (enable_workspace_files), on local disk or S3 / R2 through workspace_config. See https://docs-omnicoreagent.omnirexfloralabs.com/docs/upgrading
+    ```
+  </Accordion>
+  <Accordion title="ValueError: governance_config has unknown keys: enable">
+    Nested settings are checked too, and the message lists the allowed keys:
+
+    ```text
+    ValueError: governance_config has unknown keys: enable. Allowed keys: allow_static_high_risk_approvals, allow_test_sandbox_runtime, approval_mode, approval_resolver, budgets, enabled, policy, policy_path, profile, project_root, sandbox_config, sandbox_manifest, sandbox_runtime, workspace_bridge
+    ```
+  </Accordion>
+  <Accordion title="ValueError: max_steps must be between 1 and 1000, got 0">
+    A value out of range. Others you may meet:
+
+    ```text
+    ValueError: guardrail_mode must be one of: full, input_only, off; got 'strict'
+    ValueError: context_management.preserve_recent must be at least 4, got 2
+    ```
+  </Accordion>
+  <Accordion title="ValueError: Unsupported provider: openia">
+    ```text
+    ValueError: Unsupported provider: openia. Supported: openai, anthropic, groq, ollama, azure, gemini, deepseek, mistral, openrouter
+    ```
+
+    Without a model: `ValueError: model_config.model is required`.
+  </Accordion>
+  <Accordion title="ValueError: MCP server 'files': 'url' does not apply to stdio">
+    ```text
+    ValueError: MCP server 'files': 'url' does not apply to stdio (it applies to sse, streamable_http)
+    ```
+
+    A stdio server takes `command` and `args`; an HTTP server takes `url`.
+  </Accordion>
+  <Accordion title="ValueError: Invalid memory store type: postgres">
+    Raised by `MemoryRouter(...)`:
+
+    ```text
+    ValueError: Invalid memory store type: postgres. Use one of: in_memory, sql, redis, mongodb
+    ```
+
+    PostgreSQL is `MemoryRouter("sql")` with `DATABASE_URL` pointing at it.
+  </Accordion>
+  <Accordion title="ImportError: Redis memory requires optional dependency">
+    The store's extra is not installed. The message names it, for example
+    `Install it with: pip install 'omnicoreagent[redis]'`.
+  </Accordion>
+  <Accordion title="History is gone after a restart, though I chose Redis">
+    `REDIS_URL` (or `DATABASE_URL`, `MONGODB_URI`) was not set, so the store
+    fell back to process memory. See the warning under [Memory](#memory).
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Agent settings" icon="sliders" href="/docs/reference/agent-config">
+    Every `agent_config` key and its default, generated from the code.
+  </Card>
+  <Card title="Models" icon="microchip" href="/docs/how-to-guides/models">
+    Providers, model names, reasoning models.
+  </Card>
+  <Card title="Memory" icon="database" href="/docs/core-concepts/memory">
+    Durable stores, history windows and summaries.
+  </Card>
+  <Card title="Security model" icon="shield-halved" href="/docs/core-concepts/security-model">
+    Policy, sandboxes and budgets in `governance_config`.
+  </Card>
+</CardGroup>
