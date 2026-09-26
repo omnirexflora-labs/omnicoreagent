@@ -21,6 +21,7 @@
   <a href="https://docs-omnicoreagent.omnirexfloralabs.com/docs/getting-started/quickstart">Quickstart</a> ·
   <a href="./cookbook">Cookbook</a> ·
   <a href="./engineering/validation/production-proving.md">Proof</a> ·
+  <a href="https://docs-omnicoreagent.omnirexfloralabs.com/docs/comparison">How it compares</a> ·
   <a href="./AGENTS.md">For your coding agent</a> ·
   <a href="https://docs-omnicoreagent.omnirexfloralabs.com/docs/getting-started/use-docs-with-ai-tools">Ask AI</a>
 </p>
@@ -226,6 +227,10 @@ to go wrong, each checked by reading how the trial ended, not only its reward.
 What broke along the way — **54 findings**, each with what happened, why, and
 what fixed it — is the
 [production proving write-up](./engineering/validation/production-proving.md).
+
+How this compares with the OpenAI Agents SDK, LangGraph, Pydantic AI, the
+Claude Agent SDK and CrewAI — including where they are stronger — is
+[capability by capability, each cell sourced](https://docs-omnicoreagent.omnirexfloralabs.com/docs/comparison).
 
 ## Install only what you use
 
