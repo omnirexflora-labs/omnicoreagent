@@ -42,41 +42,56 @@
                         ]
                     },
                     {
-                        "group": "Core Concepts",
+                        "group": "Build",
                         "pages": [
                             "docs/core-concepts/overview",
-                            "docs/core-concepts/agent-harness",
-                            "docs/core-concepts/architecture",
-                            "docs/core-concepts/memory",
-                            "docs/core-concepts/context-engineering",
-                            "docs/core-concepts/events",
-                            "docs/core-concepts/mcp",
+                            "docs/how-to-guides/basic-usage",
                             "docs/core-concepts/local-tools",
+                            "docs/how-to-guides/advanced-tools",
+                            "docs/core-concepts/mcp",
                             "docs/core-concepts/skills",
-                            "docs/core-concepts/agents-md",
-                            "docs/core-concepts/workspace-files",
-                            "docs/core-concepts/guardrails",
-                            "docs/core-concepts/security-model",
-                            "docs/core-concepts/durable-runs",
                             "docs/core-concepts/code-mode",
-                            "docs/core-concepts/execution",
+                            "docs/core-concepts/agents-md",
+                            "docs/core-concepts/memory",
+                            "docs/core-concepts/workspace-files",
+                            "docs/core-concepts/context-engineering",
                             "docs/core-concepts/sub-agents",
-                            "docs/core-concepts/background-agents"
+                            "docs/core-concepts/events",
+                            "docs/how-to-guides/models",
+                            "docs/how-to-guides/configuration"
                         ]
                     },
                     {
-                        "group": "How-To Guides",
+                        "group": "Make It Safe",
                         "pages": [
-                            "docs/how-to-guides/basic-usage",
-                            "docs/how-to-guides/configuration",
-                            "docs/how-to-guides/advanced-tools",
-                            "docs/how-to-guides/observability",
-                            "docs/how-to-guides/models",
-                            "docs/how-to-guides/sandbox-providers",
-                            "docs/how-to-guides/agent-in-a-container",
+                            "docs/core-concepts/security-model",
+                            "docs/core-concepts/guardrails",
+                            "docs/core-concepts/execution",
+                            "docs/how-to-guides/sandbox-providers"
+                        ]
+                    },
+                    {
+                        "group": "Run It",
+                        "pages": [
+                            "docs/core-concepts/durable-runs",
+                            "docs/core-concepts/background-agents",
                             "docs/how-to-guides/omniserve",
+                            "docs/how-to-guides/agent-in-a-container"
+                        ]
+                    },
+                    {
+                        "group": "See and Improve",
+                        "pages": [
+                            "docs/how-to-guides/observability",
                             "docs/how-to-guides/headless-runs",
                             "docs/how-to-guides/harbor"
+                        ]
+                    },
+                    {
+                        "group": "How It Works",
+                        "pages": [
+                            "docs/core-concepts/agent-harness",
+                            "docs/core-concepts/architecture"
                         ]
                     },
                     {
