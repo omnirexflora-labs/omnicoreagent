@@ -94,9 +94,35 @@ Over OmniServe, the same flow is `POST /run/sync` (or `/run`), then
 `POST /runs/{run_id}/approvals/{approval_id}` and `POST /runs/{run_id}/resume`
 (see [OmniServe](/docs/how-to-guides/omniserve)).
 
-## How long run records are kept
+## How long a run's evidence is kept
 
-**Your choice.** `agent_config["run_retention_days"]` sets it:
+A run leaves two kinds of evidence, kept in different places for different
+lengths of time. Each window is yours to set, and `None` keeps everything:
+
+| Evidence | What it holds | Where | Kept | Setting |
+|---|---|---|---|---|
+| **Trace**, read as the **trajectory** | Every step: model calls with prompts and responses, tool calls with arguments and results, policy decisions, events | The telemetry store (`./workspace/telemetry/` by default) | 7 days | `telemetry_config["retention_days"]` |
+| **Offloaded payloads** | Large values a trace points to (`telemetry://payload/...`) | Next to the traces | 7 days, and never while a kept trace points to them | `telemetry_config["payload_retention_days"]` |
+| **Run record** | Status, step, approvals and who decided them, budget grants, token and cost usage, the calls' states and outcomes, the IDs of its traces | The memory store (in memory, SQLite, SQL, Redis, MongoDB) | 30 days | `agent_config["run_retention_days"]` |
+
+So with the defaults, from day 8 to day 30 you can still read **what a run
+did in summary** — `get_run(run_id)`: its status, approvals, usage — but not
+**step by step**: its traces are gone. `get_run_trajectory(run_id)` then
+marks each segment `trace_kept: False`, counts them in `traces_missing`, and
+leaves `totals` empty rather than reporting zero; the record's `usage` is
+still there.
+
+To keep the full step-by-step story as long as the record, set both:
+
+```python
+from omnicoreagent import OmniCoreAgent
+
+agent = OmniCoreAgent(
+    ...,
+    agent_config={"run_retention_days": 90},
+    telemetry_config={"retention_days": 90, "payload_retention_days": 90},
+)
+```
 
 ```python
 agent_config = {"run_retention_days": None}   # keep every run record forever
@@ -105,16 +131,16 @@ agent_config = {"run_retention_days": 365}    # a year
 ```
 
 A finished run's record (`completed`, `failed`, `blocked`, `cancelled`,
-`timeout`) is removed from the memory store that many days after the run
-started. A run still waiting for a person or a resume is never removed,
-however old. The window is applied once when the agent starts its first run;
-`await agent.prune_runs()` applies it now and returns what it removed, and
-`agent.telemetry_retention_status()["runs"]` reports the last cleanup.
+`timeout`) is removed that many days after the run started. A run still
+waiting for a person or a resume is never removed, however old. Each window
+is applied once when the agent starts its first run; `await agent.prune_runs()`
+and `await agent.prune_telemetry()` apply them now, and
+`agent.telemetry_retention_status()` reports each window and its last
+cleanup (`trace_store`, `payload_store`, `runs`).
 
-Only the memory store's records are removed. Traces have their own retention
-(`telemetry_config["retention_days"]`, 7 by default), and nothing you exported
-elsewhere is touched. An outcome recorded for a run whose record is gone
-raises `LookupError`: keep records as long as outcomes can arrive.
+Nothing you exported elsewhere (OpenTelemetry, JSONL) is touched. An outcome
+recorded for a run whose record is gone raises `LookupError`: keep records as
+long as outcomes can arrive.
 
 ## Recovering a run after a crash
 

@@ -13,9 +13,9 @@ Everything `OmniCoreAgent(agent_config={...})` takes. Each description is the co
 | Setting | Type | Default | What it does |
 |---|---|---|---|
 | `agent_version` | `str \| None` | `None` | Recorded as the trace's agent_version; a content hash of the harness (prompt, tools, model, and settings) is used when it is not set. |
-| `request_limit` | `int` | `0` | Most model calls one run may make; over it, the run ends with termination_reason resource_limit. 0 is no limit. For limits in dollars, use governance budgets. |
+| `request_limit` | `int` | `0` | Most model calls (LLM requests) one run may make; over it, the run ends with termination_reason resource_limit. 0 is no limit. max_steps is usually the limit you want; for dollars, or limits across runs, use governance budgets. |
 | `total_tokens_limit` | `int` | `0` | Most tokens (in and out) one run may use; over it, the run ends with termination_reason resource_limit. 0 is no limit. |
-| `max_steps` | `int` | `50` | Most model turns one run may take; then it ends with termination_reason max_steps. 1 to 1000. |
+| `max_steps` | `int` | `50` | Most turns of the agent loop one run may take (a turn is a model call and the tools it asked for); then it ends with termination_reason max_steps. 1 to 1000. |
 | `tool_call_timeout` | `int` | `180` | Seconds one tool call may take before it fails with a timeout. 2 to 1000. |
 | `subagent_timeout` | `int \| None` | `None` | Seconds a delegation (spawn_subagents) may take. None: a worker is bounded by its own step cap and the run's deadline, not by the timeout for one tool call. |
 | `mcp_enabled` | `bool` | `False` | Accepted for compatibility with 0.3.x and has no effect: MCP is on when mcp_tools are given. |
@@ -29,12 +29,12 @@ Everything `OmniCoreAgent(agent_config={...})` takes. Each description is the co
 | `run_retention_days` | `int \| None` | `30` | Finished run records (completed, failed, blocked, cancelled, timeout) are removed from the memory store this many days after the run started; None keeps every record forever. A run still waiting for a person or a resume is never removed. |
 | `code_mode` | `dict[str, Any]` | `{}` | Code mode: a run_code tool that runs Python in Monty (omnicoreagent[codemode]). |
 | `agents_md` | `dict[str, Any]` | `{}` | A project's own instructions for the agent (AGENTS.md), by path. |
-| `memory_config` | `dict[str, Any]` | see below | How much of a session's history a run is given: a sliding window of messages or tokens, and optional summaries of what falls out of it. |
+| `memory_config` | `dict[str, Any]` | see below | How much of a session's earlier history a new run is given. mode "sliding_window" keeps the last `value` messages; "token_budget" keeps the latest messages that fit in `value` tokens. The default (10,000 messages) gives the whole history in practice, and context_management keeps each model call under its token budget. summary.enabled replaces what falls out of the window with a summary; summary.retention_policy is whether the summarized messages stay in the store ("keep") or are deleted ("delete"). |
 | `enable_workspace_files` | `bool` | `True` | File tools over the agent's workspace (ls, read_file, write_file, edit_file, glob, grep, ...). The workspace itself is set by workspace_config. |
-| `guardrail_config` | `dict[str, Any]` | `{}` | The prompt-injection guardrail: guardrail_mode is full (input and tool results), input_only, or off; guardrail_config tunes its detection. |
-| `guardrail_mode` | `str` | `"full"` | The prompt-injection guardrail: guardrail_mode is full (input and tool results), input_only, or off; guardrail_config tunes its detection. |
-| `privacy_config` | `dict[str, Any]` | see below | Personal data (email, phone, SSN, card numbers) redacted per boundary. By default only the record (telemetry and its exports) is redacted; the model, memory, files, stream and answer see the real data. |
-| `context_management` | `dict[str, Any]` | see below | Keeps a run's context under a token budget before each model call: past threshold_percent of value, older messages are truncated or summarized, keeping the preserve_recent latest. |
+| `guardrail_config` | `dict[str, Any]` | `{}` | Tunes the prompt-injection guardrail's detection: strict_mode, sensitivity, allowlist_patterns, blocklist_patterns, and the rest of DetectionConfig. Empty uses its defaults. |
+| `guardrail_mode` | `str` | `"full"` | Where the prompt-injection guardrail screens: "full" (the request and every tool result), "input_only" (the request), or "off". |
+| `privacy_config` | `dict[str, Any]` | see below | Personal data (email, phone, SSN, card numbers) redacted per boundary. By default only the record (telemetry and its exports) is redacted; the model, memory, files, stream and answer see the real data. redact_public covers everything returned to the application: run()'s answer and errors, and OmniServe's responses. |
+| `context_management` | `dict[str, Any]` | see below | Keeps what one model call is sent under a budget, within a run: in mode "token_budget", `value` is tokens (100,000); in "sliding_window", it is messages. Past threshold_percent of it, older messages are truncated or summarized (strategy), keeping the preserve_recent latest. memory_config decides the history a run starts from; this keeps the run itself in bounds as it grows. |
 | `tool_offload` | `dict[str, Any]` | see below | A tool result over the thresholds is saved to the workspace, and the model gets a preview and an artifact it can read in full. |
 | `governance_config` | `dict[str, Any]` | see below | The policy (a profile, a policy, or a policy file), budgets, the sandbox provider and its manifest, and how unanswered approvals are handled. Off by default; see the security model. |
 | `workspace_config` | `WorkspaceConfig \| dict[str, Any] \| None` | `None` | Where the agent's workspace lives: workspace_dir on local disk (default ./workspace), or S3 / R2 storage. |
@@ -43,7 +43,7 @@ Everything `OmniCoreAgent(agent_config={...})` takes. Each description is the co
 
 ### `memory_config`
 
-How much of a session's history a run is given: a sliding window of messages or tokens, and optional summaries of what falls out of it.
+How much of a session's earlier history a new run is given. mode "sliding_window" keeps the last `value` messages; "token_budget" keeps the latest messages that fit in `value` tokens. The default (10,000 messages) gives the whole history in practice, and context_management keeps each model call under its token budget. summary.enabled replaces what falls out of the window with a summary; summary.retention_policy is whether the summarized messages stay in the store ("keep") or are deleted ("delete").
 
 ```json
 {
@@ -58,7 +58,7 @@ How much of a session's history a run is given: a sliding window of messages or 
 
 ### `privacy_config`
 
-Personal data (email, phone, SSN, card numbers) redacted per boundary. By default only the record (telemetry and its exports) is redacted; the model, memory, files, stream and answer see the real data.
+Personal data (email, phone, SSN, card numbers) redacted per boundary. By default only the record (telemetry and its exports) is redacted; the model, memory, files, stream and answer see the real data. redact_public covers everything returned to the application: run()'s answer and errors, and OmniServe's responses.
 
 ```json
 {
@@ -80,7 +80,7 @@ Personal data (email, phone, SSN, card numbers) redacted per boundary. By defaul
 
 ### `context_management`
 
-Keeps a run's context under a token budget before each model call: past threshold_percent of value, older messages are truncated or summarized, keeping the preserve_recent latest.
+Keeps what one model call is sent under a budget, within a run: in mode "token_budget", `value` is tokens (100,000); in "sliding_window", it is messages. Past threshold_percent of it, older messages are truncated or summarized (strategy), keeping the preserve_recent latest. memory_config decides the history a run starts from; this keeps the run itself in bounds as it grows.
 
 ```json
 {

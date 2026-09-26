@@ -22,7 +22,13 @@ waiting for a person or a resume is never removed. **To keep every record,
 set `agent_config["run_retention_days"] = None`.** Any other number of days
 works too; `await agent.prune_runs()` prunes on demand and reports what it
 removed, and the retention status has a `runs` section.
-[Durable runs](/docs/core-concepts/durable-runs)
+
+This is the run's record (status, approvals, usage), not its traces: the
+step-by-step trajectory lives in the traces, still kept 7 days by
+`telemetry_config["retention_days"]`. When a run's traces are gone and its
+record is not, `get_run_trajectory` now says so (`trace_kept: False`,
+`traces_missing`) instead of reporting zero tokens and no cost.
+[How long a run's evidence is kept](/docs/core-concepts/durable-runs#how-long-a-runs-evidence-is-kept)
 
 ### New
 
@@ -57,6 +63,13 @@ removed, and the retention status has a `runs` section.
   what a reader is trying to do.
 - [How OmniCoreAgent compares](/docs/comparison), each cell sourced.
 - Skills: `allowed-tools` is read and grants nothing; the policy decides.
+- Settings explained one by one: the telemetry `record_*` switches (which
+  are master switches and which narrow them), the guardrail, archive, offload
+  and timeout settings that shared one description, `memory_config`'s default
+  window, and [which limit to use](/docs/how-to-guides/configuration#which-limit-to-use)
+  among `max_steps`, `request_limit`, `total_tokens_limit` and budgets.
+- [How long a run's evidence is kept](/docs/core-concepts/durable-runs#how-long-a-runs-evidence-is-kept):
+  traces (7 days) and run records (30 days), side by side.
 
 ## 0.4.0
 

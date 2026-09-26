@@ -18,22 +18,22 @@ Everything `OmniCoreAgent(telemetry_config={...})` takes: what a trace records, 
 | `payload_retention_days` | `int \| None` | `7` | The same for offloaded payloads, on their own window; a payload a kept trace still refers to is never pruned. |
 | `memory_max_traces` | `int \| None` | `1000` | Upper bound on finished traces kept by an in-memory store. |
 | `capture` | `str` | `"full"` | A preset fills every `record_*` field left unset (`None`); a field set explicitly always wins. After construction all are booleans. `full` is the default (the maintainer's decision, 2026-09-22): a trace is worth keeping only if it holds what the model was sent, and a trainer or an evaluator cannot use one that does not. `default` is the privacy-first preset for a deployment that must not record prompts. |
-| `record_inputs` | `bool \| None` | `None` | What a trace keeps of each part of a run: inputs, outputs, what the model was sent and what it answered, and what tools returned. None takes the capture preset's value. |
-| `record_outputs` | `bool \| None` | `None` | What a trace keeps of each part of a run: inputs, outputs, what the model was sent and what it answered, and what tools returned. None takes the capture preset's value. |
-| `record_model_prompts` | `bool \| None` | `None` | What a trace keeps of each part of a run: inputs, outputs, what the model was sent and what it answered, and what tools returned. None takes the capture preset's value. |
-| `record_model_responses` | `bool \| None` | `None` | What a trace keeps of each part of a run: inputs, outputs, what the model was sent and what it answered, and what tools returned. None takes the capture preset's value. |
-| `record_tool_results` | `bool \| None` | `None` | What a trace keeps of each part of a run: inputs, outputs, what the model was sent and what it answered, and what tools returned. None takes the capture preset's value. |
+| `record_inputs` | `bool \| None` | `None` | Every input a trace holds: the request, tool arguments, and (with record_model_prompts) what the model was sent. Off, none is recorded, whatever the narrower settings say. None takes the capture preset's value. |
+| `record_outputs` | `bool \| None` | `None` | Every output a trace holds: the answer, and (with the two below) model responses and tool results. Off, none is recorded. None takes the capture preset's value. |
+| `record_model_prompts` | `bool \| None` | `None` | The messages and tool list sent to the model on each call, when record_inputs is on. None takes the capture preset's value. |
+| `record_model_responses` | `bool \| None` | `None` | What the model answered on each call, when record_outputs is on. None takes the capture preset's value. |
+| `record_tool_results` | `bool \| None` | `None` | What each tool, MCP tool, file operation and sandbox command returned, when record_outputs is on. None takes the capture preset's value. |
 | `record_token_details` | `bool` | `False` | The tokens a model chose and their probabilities, when the provider returns them (`logprobs`). Off: they are large, and only a trainer reusing the run needs them. |
 | `max_payload_bytes` | `int` | `64_000` | A recorded payload larger than this is replaced by a truncated marker with its size and checksum, unless offload_large_payloads keeps it whole. |
 | `redact_keys` | `list[str]` | see below | Keys whose values are replaced with [REDACTED] wherever they appear in a recorded payload, at any depth. |
-| `offload_large_payloads` | `bool` | `False` | Keep payloads over max_payload_bytes whole, in the workspace or object storage, referenced from the trace, instead of truncating them. |
-| `offload_target` | `str` | `"workspace"` | Keep payloads over max_payload_bytes whole, in the workspace or object storage, referenced from the trace, instead of truncating them. |
-| `archive_index_url` | `str \| None` | `None` | Where the archive of finished traces keeps its index and its bodies. Unset is a SQLite file and a directory beside the log, which is what one process needs. A database URL makes the index shared, and `archive_target="object_storage"` puts the bodies in the deployment's bucket, so several server processes can read one archive. |
-| `archive_target` | `str` | `"local"` | Where the archive of finished traces keeps its index and its bodies. Unset is a SQLite file and a directory beside the log, which is what one process needs. A database URL makes the index shared, and `archive_target="object_storage"` puts the bodies in the deployment's bucket, so several server processes can read one archive. |
+| `offload_large_payloads` | `bool` | `False` | Keep payloads over max_payload_bytes whole, referenced from the trace (telemetry://payload/...), instead of truncating them. |
+| `offload_target` | `str` | `"workspace"` | Where offloaded payloads are kept: "workspace" (the local workspace) or "object_storage" (the S3 or R2 bucket of the agent's workspace). |
+| `archive_index_url` | `str \| None` | `None` | The index of the archive of finished traces. Unset is a SQLite file beside the log, which is what one process needs; a database URL makes the index shared, so several server processes can read one archive. |
+| `archive_target` | `str` | `"local"` | Where the archive keeps trace bodies: "local" (a directory beside the log, or archive_bodies_path) or "object_storage" (the deployment's bucket). |
 | `archive_bodies_path` | `str \| None` | `None` | A directory the processes share, for a deployment that shares one host rather than a bucket. Ignored when `archive_target` is object storage. |
 | `strict` | `bool` | `False` | Raise when a record cannot be made safely (redaction or persistence failed) instead of recording a marker and carrying on. |
-| `persistence_timeout_seconds` | `float \| None` | `5.0` | Seconds a write to the trace store, or an export to an external exporter, may take before it is given up and reported. |
-| `export_timeout_seconds` | `float \| None` | `5.0` | Seconds a write to the trace store, or an export to an external exporter, may take before it is given up and reported. |
+| `persistence_timeout_seconds` | `float \| None` | `5.0` | Seconds a write to or read from the trace store may take before it is given up and reported. |
+| `export_timeout_seconds` | `float \| None` | `5.0` | Seconds an export to an external exporter (OpenTelemetry, JSONL) may take before it is given up and reported. |
 
 ## Defaults in full
 

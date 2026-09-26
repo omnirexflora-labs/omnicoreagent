@@ -88,3 +88,36 @@ async def test_retention_runs_once_by_itself_and_is_reported(tmp_path, monkeypat
 def test_the_window_must_be_a_number_of_days_or_none():
     with pytest.raises(ValueError, match="run_retention_days"):
         OmniCoreAgent(name="a", system_instruction="x", model_config=MODEL, agent_config={"run_retention_days": -1})
+
+
+@pytest.mark.asyncio
+async def test_a_run_whose_traces_were_removed_says_so_instead_of_reading_as_zero(
+    tmp_path, monkeypatch
+):
+    # Traces are kept 7 days, run records 30: in between, a run's story has
+    # its record but not its traces. It must not read as a run that used
+    # nothing; the record's usage is still there.
+    monkeypatch.chdir(tmp_path)
+    agent = await _agent()
+    result = await agent.run("go")
+    kept = await agent.get_run_trajectory(result["run_id"])
+    assert kept["traces_missing"] == 0
+    assert all(segment["trace_kept"] for segment in kept["segments"])
+
+    await agent.memory_router.save_run_state(
+        {
+            "run_id": "old",
+            "session_id": "s",
+            "status": "completed",
+            "step": 1,
+            "trace_ids": ["trace_removed_by_retention"],
+            "usage": {"total_tokens": 1200},
+        },
+        expected_version=None,
+    )
+    story = await agent.get_run_trajectory("old")
+
+    assert story["traces_missing"] == 1
+    assert story["segments"][0]["trace_kept"] is False
+    assert story["totals"] == {}  # unknown, not zero
+    assert story["usage"] == {"total_tokens": 1200}
