@@ -3,12 +3,37 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-import sys
 import unicodedata
 from datetime import datetime
 
 from omnicoreagent.core.guardrails.models import DetectionConfig, DetectionResult, ThreatLevel
 from omnicoreagent.core.guardrails.patterns import PatternManager
+
+
+class _LevelFloor:
+    """Logs to a shared logger, dropping records below one engine's level."""
+
+    def __init__(self, logger: logging.Logger, level: int):
+        self._logger, self.level = logger, level
+
+    def setLevel(self, level: int) -> None:
+        self.level = level
+
+    def _log(self, level: int, msg: str, *args, **kwargs) -> None:
+        if level >= self.level:
+            self._logger.log(level, msg, *args, **kwargs)
+
+    def debug(self, msg: str, *args, **kwargs) -> None:
+        self._log(logging.DEBUG, msg, *args, **kwargs)
+
+    def info(self, msg: str, *args, **kwargs) -> None:
+        self._log(logging.INFO, msg, *args, **kwargs)
+
+    def warning(self, msg: str, *args, **kwargs) -> None:
+        self._log(logging.WARNING, msg, *args, **kwargs)
+
+    def error(self, msg: str, *args, **kwargs) -> None:
+        self._log(logging.ERROR, msg, *args, **kwargs)
 
 
 class DetectionEngine:
@@ -19,18 +44,13 @@ class DetectionEngine:
         self.pattern_manager = PatternManager()
         self.logger = self._setup_logger()
 
-    def _setup_logger(self) -> logging.Logger:
-        """Setup logging"""
-        logger = logging.getLogger(f"PromptGuard_{id(self)}")
-        if not logger.handlers:
-            handler = logging.StreamHandler(sys.stdout)
-            formatter = logging.Formatter(
-                "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-            )
-            handler.setFormatter(formatter)
-            logger.addHandler(handler)
-        logger.setLevel(getattr(logging, self.config.log_level))
-        return logger
+    def _setup_logger(self) -> "_LevelFloor":
+        """The package's guardrail logger; the application's logging decides
+        where records go. config.log_level is the least severe level logged."""
+        return _LevelFloor(
+            logging.getLogger("omnicoreagent.guardrails"),
+            getattr(logging, self.config.log_level),
+        )
 
     def analyze(self, user_input: str) -> DetectionResult:
         """Main analysis pipeline"""

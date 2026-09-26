@@ -265,6 +265,9 @@ class LLMConnection:
         # Parameters this model has refused by name; not sent again.
         self._unsupported_params: set[str] = set()
         self.llm_api_key = api_key or self.model_config.get("api_key")
+        # The agent's PrivacyFilter; with redact_model_io on, what the
+        # provider is sent is redacted at the "model" boundary.
+        self.privacy_filter: Any = None
         self.llm_config = self._build_llm_config()
         self._set_llm_environment_variables()
 
@@ -538,6 +541,10 @@ class LLMConnection:
             "model": self.llm_config["model"],
             "messages": [self.to_dict(m) for m in messages],
         }
+        if self.privacy_filter is not None:
+            params["messages"] = self.privacy_filter.redact(
+                params["messages"], boundary="model"
+            )
 
         for key in _MODEL_SETTINGS:
             if self.llm_config.get(key) is not None and key not in self._unsupported_params:
