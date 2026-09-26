@@ -15,7 +15,7 @@ person in front of a delegation.
 | You write | `sub_agents=[researcher, coder]` | `agent_config={"enable_subagents": True}` |
 | The lead gets | one tool per child: `delegate_researcher`, `delegate_coder` | one tool: `spawn_subagents` |
 | Who the children are | agents you built, with their own instructions, tools and settings | workers the model describes on the spot: a name, a role, a task, an output file |
-| Results come back as | the child's answer, as the tool result | a file in the workspace, which the lead reads |
+| Results come back as | the child's answer, as the tool result | a file in the workspace, which the lead reads, and each worker's answer as a `summary` (up to 500 characters) in the tool result |
 | Use it when | the team is known and each member has its own tools | the split depends on the task, or parts can run in parallel |
 
 <Info>

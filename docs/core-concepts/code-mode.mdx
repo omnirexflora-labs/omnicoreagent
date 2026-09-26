@@ -117,7 +117,8 @@ when one call will do.
 
 - **What the model is told.** `run_code`'s description lists each tool the
   program may call as a Python signature with its description, and the
-  limits. Tools are called with keyword arguments; each returns the tool's
+  limits. Tools are called like Python functions, with keyword arguments or in the
+  order of their parameters; each returns the tool's
   result data, or raises an error the program can catch. The value of the last
   expression is returned, with everything printed.
 - **Where it runs.** Programs run in [Monty](https://github.com/pydantic/monty)

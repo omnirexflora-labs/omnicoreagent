@@ -259,7 +259,8 @@ Every setting is in the [agent settings reference](/docs/reference/agent-config)
 
   <Accordion title="What the model sees when a file call fails">
     A failed file call is an answer to the model, not an exception; it usually
-    corrects itself. For example:
+    corrects itself. It is recorded as the tool call's `error` (outcome
+    `error` in the trajectory), with the same text. For example:
 
     ```text
     File not found: project/missing.py

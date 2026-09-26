@@ -301,7 +301,7 @@ you do not need.
 
 | Setting | Default | What it does |
 |---|---|---|
-| `max_steps` | `50` | Most model turns per run (1 to 1000); then `termination_reason` `max_steps`. |
+| `max_steps` | `50` | Most model turns per run (1 to 1000). A run that reaches it ends with `status` `error`, `termination_reason` `max_steps` and the response `Agent reached its step limit.` |
 | `request_limit`, `total_tokens_limit` | `0` (no limit) | Most model calls, or tokens, per run; then `resource_limit`. For dollars, use budgets. |
 | `tool_call_timeout` | `180` | Seconds one tool call may take (2 to 1000). |
 | `workspace_config` | `./workspace` on disk | `{"workspace_dir": ...}`, or S3 / R2 settings. |

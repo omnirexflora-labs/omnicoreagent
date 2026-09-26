@@ -225,7 +225,8 @@ built-in development profiles allow both.
 <Warning>
 With governance off, a skill script runs on the host with no policy and no
 sandbox. The agent records the warning `ungoverned_host_scripts` in every run's
-header and logs it once at start-up. Only switch on skills you trust, or turn
+header (`trajectory["harness"]["security_warnings"]`) and logs it once at
+start-up. Only switch on skills you trust, or turn
 on governance with a sandbox ([security model](/docs/core-concepts/security-model)).
 </Warning>
 

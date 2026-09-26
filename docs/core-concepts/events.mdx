@@ -41,6 +41,8 @@ def get_weather(city: str) -> dict:
     return {"city": city, "temp": "22C", "condition": "Sunny"}
 
 def show(event):
+    # A sub-agent's text arrives here too, with its own agent_name: keep
+    # only the lead's (agent_name == "weather_agent") for a clean answer.
     if event["type"] == "text_delta":
         print(event["text"], end="", flush=True)
 
@@ -220,7 +222,7 @@ whether a tool's arguments are kept in full) follows your
 | `await agent.get_telemetry_events_after(cursor=None, run_id=result["run_id"])` | the run's events, as above; filter by `trace_id`, `session_id`, `task_id` or `event_types` too |
 | `await agent.get_trace(result["trace_id"])` | the exact trace |
 | `await agent.get_trace(run_id=result["run_id"])` | the latest trace of that run |
-| `await agent.get_latest_trace(result["session_id"])` | the latest trace in a session |
+| `await agent.get_latest_trace(result["session_id"])` | this agent's latest trace in a session (a sub-agent's traces are in the family) |
 | `await agent.get_trace(result["trace_id"], normalize=True)` | the trace in the normalized, exporter-ready shape |
 | `await agent.get_trajectory(result["trace_id"])` | the run read as steps — see [Observability](/docs/how-to-guides/observability) |
 | `await agent.get_trace_family(trace_id=result["trace_id"])` | the trace with every [sub-agent](/docs/core-concepts/sub-agents)'s trace |
