@@ -128,6 +128,10 @@ outcome
     inner = {c["tool_name"]: c for c in run_code["code_calls"]}
     assert inner["refund"]["outcome"] == "denied" and inner["price"]["outcome"] == "success"
     assert all(c["tool_call_id"].startswith("k1.") for c in run_code["code_calls"])
+    # Which order was refused and which product was priced: found missing by
+    # the stranger test (2026-09-26), every call from code had no arguments.
+    assert inner["refund"]["arguments"] == {"order": "o-1"}
+    assert inner["price"]["arguments"] == {"sku": "A"}
     record = await agent.get_run(result["run_id"])
     parents = {c["tool_call_id"]: c.get("parent_tool_call_id") for c in record["tool_calls"]}
     assert parents["k1.1"] == "k1" and parents["k1.2"] == "k1"

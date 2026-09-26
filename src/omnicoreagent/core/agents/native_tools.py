@@ -12,8 +12,9 @@ from omnicoreagent.core.credentials import scrub_credentials
 from omnicoreagent.core.agents.loop_detection import ToolInteraction
 from omnicoreagent.core.budgets import BudgetExhaustedForRun, RunAwaitingBudget
 from omnicoreagent.core.model_protocol import ModelTurn
-from omnicoreagent.core.runs import RunSuspended, current_run
+from omnicoreagent.core.runs import RunSuspended, current_run, waiting_for_approval
 from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
+from omnicoreagent.governance.calls import tool_call_metadata
 from omnicoreagent.governance.errors import PolicyDeniedError
 from omnicoreagent.core.tools.mcp_tool_handler import MCPToolHandler
 from omnicoreagent.core.tools.tool_executor import ToolExecutor
@@ -136,26 +137,24 @@ async def execute_native_turn(
                         )
 
                     child_tools = getattr(binding.agent, "local_tools", None)
-                    await agent.governance_engine.authorize_all(
-                        subagent_spawn_authority_requests(
-                            subagent_specs=[
-                                {
-                                    "name": binding.agent.name,
-                                    "task": params.get("query", ""),
-                                }
-                            ],
-                            tool_names=[
-                                tool["name"]
-                                for tool in child_tools.get_available_tools()
-                            ]
-                            if child_tools
-                            else [],
-                            mcp_servers=list(
-                                getattr(binding.agent, "mcp_tools", {}) or {}
-                            ),
-                            memory_scope=session_id,
-                        )
+                    requests = subagent_spawn_authority_requests(
+                        subagent_specs=[
+                            {"name": binding.agent.name, "task": params.get("query", "")}
+                        ],
+                        tool_names=[
+                            tool["name"] for tool in child_tools.get_available_tools()
+                        ]
+                        if child_tools
+                        else [],
+                        mcp_servers=list(getattr(binding.agent, "mcp_tools", {}) or {}),
+                        memory_scope=session_id,
                     )
+                    # An ask names this call, so the run pauses on it and a
+                    # resume runs it (without it the ask was an orphan and
+                    # the delegation just failed).
+                    for request in requests:
+                        request.metadata = {**tool_call_metadata(), **(request.metadata or {})}
+                    await agent.governance_engine.authorize_all(requests)
                 name, result = await agent.subagent_runner.run(
                     {"agent": binding.agent.name, "parameters": params},
                     [binding.agent],
@@ -749,18 +748,7 @@ def _belongs_to(tool_call_id: str | None, call_ids: set[str]) -> bool:
     return call_id in call_ids or any(call_id.startswith(f"{owner}.") for owner in call_ids)
 
 
-def _waiting_for_approval(tool_call_id: str) -> bool:
-    """Whether governance recorded a pending approval for this call, or for a
-    call a program made inside it (`run_code`)."""
-    run = current_run()
-    return run is not None and any(
-        approval["status"] == "pending"
-        and (
-            approval.get("tool_call_id") == tool_call_id
-            or str(approval.get("tool_call_id") or "").startswith(f"{tool_call_id}.")
-        )
-        for approval in run.record.get("approvals", [])
-    )
+_waiting_for_approval = waiting_for_approval
 
 
 def _is_governed(child: Any) -> bool:

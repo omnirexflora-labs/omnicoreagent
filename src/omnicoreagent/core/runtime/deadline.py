@@ -20,6 +20,11 @@ from omnicoreagent.core.logging import logger
 
 T = TypeVar("T")
 
+# How long an overdue run is given to stop once cancelled. A run records its
+# own stop in that time; work that ignores cancellation (a blocking call in a
+# thread) is left behind rather than allowed to hold the run past its deadline.
+CANCEL_GRACE_SECONDS = 15.0
+
 
 @dataclass
 class _StopReason:
@@ -71,8 +76,22 @@ async def run_with_timeout(awaitable: Awaitable[T], timeout: float | None) -> T:
         return task.result()
     box.reason = "timeout"
     task.cancel()
-    await asyncio.gather(task, return_exceptions=True)
+    stopped, _ = await asyncio.wait({task}, timeout=CANCEL_GRACE_SECONDS)
+    if not stopped:
+        logger.warning(
+            "A run overdue by its %s second deadline did not stop within %s seconds "
+            "of being cancelled; it is left to finish in the background",
+            timeout,
+            CANCEL_GRACE_SECONDS,
+        )
+        task.add_done_callback(_retrieve)
     raise asyncio.TimeoutError(f"Run exceeded its {timeout} second deadline")
+
+
+def _retrieve(task: asyncio.Task) -> None:
+    """Read an abandoned run's outcome so asyncio does not report it as lost."""
+    if not task.cancelled():
+        task.exception()
 
 
 @asynccontextmanager

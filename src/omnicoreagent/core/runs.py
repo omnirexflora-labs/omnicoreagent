@@ -508,3 +508,17 @@ def _add_usage(before: dict[str, Any], segment: dict[str, Any]) -> dict[str, Any
         elif value is not None:
             total[key] = value
     return total
+
+
+def waiting_for_approval(tool_call_id: str) -> bool:
+    """Whether governance recorded a pending approval for this call, or for a
+    call a program made inside it (`run_code`)."""
+    run = current_run()
+    return run is not None and any(
+        approval["status"] == "pending"
+        and (
+            approval.get("tool_call_id") == tool_call_id
+            or str(approval.get("tool_call_id") or "").startswith(f"{tool_call_id}.")
+        )
+        for approval in run.record.get("approvals", [])
+    )

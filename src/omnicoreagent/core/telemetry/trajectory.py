@@ -89,7 +89,11 @@ def build_trajectory(
 
     steps: list[dict[str, Any]] = [
         {
-            "step": index + 1,
+            # The run's own step number: a resumed segment continues the
+            # count of the segment it resumes.
+            "step": (span.attributes or {}).get("step", index + 1),
+            # The calls a person approved, run when the run resumed.
+            "resumed": bool((span.attributes or {}).get("resumed")),
             "span_id": span.span_id,
             "status": _value(span.status),
             "started_at": _iso(span.started_at),
@@ -113,7 +117,7 @@ def build_trajectory(
     calls_outside_steps: list[dict[str, Any]] = []
     built: dict[str, dict[str, Any]] = {}
     for call_id in call_order:
-        built[call_id] = _tool_call(calls[call_id], outcomes.get(call_id), children, take)
+        built[call_id] = _tool_call(calls[call_id], outcomes.get(call_id), children, take, spans)
     for call_id in call_order:
         call = built[call_id]
         parent = next(
@@ -193,6 +197,15 @@ def build_trajectory(
                 ),
                 "request": model_request,
                 "request_capture": model_request_capture,
+                # Every entry has every field. A call with no response was
+                # stopped before it was made (a budget), or the run ended
+                # while it was in flight.
+                "response_event_id": None,
+                "outcome": "no_response",
+                "facts": None,
+                "response": None,
+                "response_capture": None,
+                "error": None,
             }
             if response is not None:
                 entry.update(
@@ -305,6 +318,7 @@ def _tool_call(
     outcome: str | None,
     children: dict[str, dict[str, Any]],
     take,
+    spans: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     events: list[TelemetryEvent] = call["_events"]
     by_type: dict[str, list[TelemetryEvent]] = {}
@@ -335,6 +349,21 @@ def _tool_call(
         None,
     )
     requested_input = (requested.input or {}) if requested else {}
+    # A call a program made (run_code) was never requested by the model; its
+    # arguments are the ones recorded when it was authorized and executed.
+    tool_spans = [
+        (spans or {}).get(event.metadata.get("tool_span_id")) for event in events
+    ]
+    executed_arguments = next(
+        (
+            record.input["tool_args"]
+            for record in [*events, *tool_spans]
+            if record is not None
+            and isinstance(record.input, dict)
+            and "tool_args" in record.input
+        ),
+        None,
+    )
     record = {
         "tool_call_id": call["tool_call_id"],
         "tool_name": requested_input.get("tool_name")
@@ -347,7 +376,9 @@ def _tool_call(
         "outcome": outcome,
         "rejection_reason": requested.metadata.get("rejection_reason") if requested else None,
         "raw_arguments": requested_input.get("raw_arguments"),
-        "arguments": requested_input.get("arguments"),
+        "arguments": requested_input.get("arguments")
+        if requested
+        else executed_arguments,
         "requested_event_id": requested.event_id if requested else None,
         "tool_span_id": outcome_event.metadata.get("tool_span_id") if outcome_event else None,
         "result": outcome_event.output if outcome_event else None,
@@ -359,6 +390,8 @@ def _tool_call(
                 "effect": event.metadata.get("effect"),
                 "capability": event.metadata.get("capability"),
                 "reason_code": event.metadata.get("reason_code"),
+                "approval_id": event.metadata.get("approval_id"),
+                "approved_by": event.metadata.get("approved_by"),
             }
             for event in events
             if event.event_type.startswith("policy_decision_")

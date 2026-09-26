@@ -2,6 +2,7 @@ import asyncio
 from typing import Any
 
 from omnicoreagent.core.budgets import current_budgets
+from omnicoreagent.core.runs import waiting_for_approval
 from omnicoreagent.core.runtime.deadline import current_stop_reason, stop_after
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.telemetry.recorder import redacts_governed_arguments
@@ -184,9 +185,18 @@ class GovernedToolRunner:
                         output=guardrail_signal,
                         metadata={**relationship_metadata, "phase": "output_guardrail"},
                     )
-                if self.governance_engine is not None:
+                # The same rule as the call's recorded arguments: kept where
+                # the capture records what the model sent anyway.
+                if redacts_governed_arguments(
+                    telemetry_recorder, self.governance_engine is not None
+                ):
                     result = _redact_tool_result_args(result)
                 telemetry_result = result
+                # A tool that asked for authority while it ran (a sandbox's
+                # network) and failed waiting for it is waiting, not failing.
+                waiting = result.get("status") == "error" and waiting_for_approval(
+                    single_tool.tool_call_id
+                )
                 if result.get("status") == "error":
                     event_kwargs = {
                         "actor": telemetry_shape["actor"],
@@ -201,12 +211,15 @@ class GovernedToolRunner:
                     error_event = await telemetry_recorder.emit_event(
                         telemetry_shape["error_event"],
                         **event_kwargs,
-                        metadata={**relationship_metadata, "phase": "result"},
+                        metadata={
+                            **relationship_metadata,
+                            "phase": "approval" if waiting else "result",
+                        },
                     )
                     outcome["tool_result_event_id"] = error_event.event_id
                     await telemetry_recorder.end_span(
                         span.span_id,
-                        status=SpanStatus.ERROR,
+                        status=SpanStatus.SKIPPED if waiting else SpanStatus.ERROR,
                         output=telemetry_result,
                         error={
                             "type": "ToolError",
@@ -255,25 +268,35 @@ class GovernedToolRunner:
                     )
                 raise
             except Exception as exc:
+                # Authority a tool asks for while it runs (a sandbox's
+                # network) is decided like the call's own: an ask waits for a
+                # person and a refusal is a denial, not a tool failure.
+                phase = (
+                    "approval"
+                    if isinstance(exc, ApprovalRequiredError)
+                    else "authorization"
+                    if isinstance(exc, GovernanceError)
+                    else "exception"
+                )
                 if telemetry_shape["single_event"]:
                     exception_event = await telemetry_recorder.emit_event(
                         telemetry_shape["error_event"],
                         actor=telemetry_shape["actor"],
                         input=telemetry_input,
                         error={"type": exc.__class__.__name__, "message": str(exc)},
-                        metadata={**relationship_metadata, "phase": "exception"},
+                        metadata={**relationship_metadata, "phase": phase},
                     )
                 else:
                     exception_event = await telemetry_recorder.record_exception(
                         exc,
                         event_type=telemetry_shape["error_event"],
                         actor=telemetry_shape["actor"],
-                        metadata={**relationship_metadata, "phase": "exception"},
+                        metadata={**relationship_metadata, "phase": phase},
                     )
                 outcome["tool_result_event_id"] = exception_event.event_id
                 await telemetry_recorder.end_span(
                     span.span_id,
-                    status=SpanStatus.ERROR,
+                    status=SpanStatus.SKIPPED if phase == "approval" else SpanStatus.ERROR,
                     error={"type": exc.__class__.__name__, "message": str(exc)},
                 )
                 raise

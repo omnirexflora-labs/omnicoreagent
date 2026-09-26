@@ -34,6 +34,10 @@ SUPPORTED_MODELS_PROVIDERS = {
 GUARDRAIL_MODES = frozenset({"off", "input_only", "full"})
 
 
+# Providers that cannot restrict a sandbox's traffic to named hosts.
+_PROVIDERS_WITHOUT_HOST_ALLOWLIST = frozenset({"docker", "e2b", "vercel", "local"})
+
+
 def normalize_guardrail_mode(value: Any) -> str:
     """Normalize and validate the guardrail enforcement boundary."""
     if not isinstance(value, str):
@@ -690,7 +694,22 @@ def _validate_governance_config(value: dict[str, Any]):
     if value.get("sandbox_manifest") is not None:
         from omnicoreagent.sandbox.factory import sandbox_manifest_from_config
 
-        sandbox_manifest_from_config(value["sandbox_manifest"])
+        manifest = sandbox_manifest_from_config(value["sandbox_manifest"])
+        named = sandbox_config if isinstance(sandbox_config, str) else (
+            sandbox_config.get("provider") if isinstance(sandbox_config, dict) else None
+        )
+        if (
+            manifest is not None
+            and manifest.network_policy.allowed_hosts
+            and named in _PROVIDERS_WITHOUT_HOST_ALLOWLIST
+        ):
+            # Refused now, not after a person has been asked to turn the
+            # network on for a rule the provider cannot keep.
+            raise ValueError(
+                f"The {named} sandbox cannot enforce a network host allowlist "
+                "(allowed_hosts): use network_policy default 'deny' or 'allow', "
+                "or a provider that enforces one (daytona, modal, http)"
+            )
     bridge = value.get("workspace_bridge")
     if bridge is not None:
         if not isinstance(bridge, dict) or set(bridge) - {"include", "exclude"}:
