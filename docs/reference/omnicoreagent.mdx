@@ -124,7 +124,7 @@ Generate a new session ID for the session
 async def get_latest_trace(session_id: str, *, normalize: bool = False) -> Dict[str, Any] | None: ...
 ```
 
-_No description in the code yet._
+This agent's latest trace in a session. A sub-agent shares its lead's session; its traces are the lead's trace family, not this.
 
 ### `get_memory_store_type`
 

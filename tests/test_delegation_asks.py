@@ -93,3 +93,21 @@ async def test_a_delegate_tool_offers_the_model_only_the_task():
     (tool,) = [t for t in await lead.list_all_available_tools() if t["name"] == "delegate_researcher"]
     assert set(tool["inputSchema"]["properties"]) == {"query"}
     assert tool["inputSchema"]["required"] == ["query"]
+
+
+@pytest.mark.asyncio
+async def test_the_latest_trace_of_a_session_is_this_agents_own(tmp_path, monkeypatch):
+    """After a delegation, get_latest_trace(session) returned the child's
+    trace: the child shares the session (Build stranger test)."""
+    monkeypatch.chdir(tmp_path)
+    child = OmniCoreAgent(name="quizzer", system_instruction="Quiz.", model_config=MODEL, agent_config=CONFIG)
+    await child.initialize()
+    child.llm_connection = RecordingModel([], "three questions")
+    lead = OmniCoreAgent(name="buddy", system_instruction="Lead.", model_config=MODEL, sub_agents=[child], agent_config=CONFIG)
+    await lead.initialize()
+    lead.llm_connection = RecordingModel([("d1", "delegate_quizzer", '{"query": "quiz"}')], "done")
+
+    result = await lead.run("quiz me", session_id="study")
+    latest = await lead.get_latest_trace("study")
+
+    assert latest["trace_id"] == result["trace_id"]

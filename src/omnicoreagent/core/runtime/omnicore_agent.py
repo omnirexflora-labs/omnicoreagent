@@ -2057,8 +2057,11 @@ class OmniCoreAgent:
         *,
         normalize: bool = False,
     ) -> Dict[str, Any] | None:
+        """This agent's latest trace in a session. A sub-agent shares its
+        lead's session; its traces are the lead's trace family, not this."""
         traces = await self.list_telemetry_traces(
             session_id=session_id,
+            agent_id=self.name,
             normalize=normalize,
         )
         return traces[-1] if traces else None

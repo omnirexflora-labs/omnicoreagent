@@ -86,6 +86,14 @@ class ToolRegistry:
         self.tools[tool.name.lower()] = tool
         self._internal_tool_providers.pop(tool.name.lower(), None)
 
+    def copy(self) -> "ToolRegistry":
+        """A registry with the same tools (the same objects, so a stateful
+        tool keeps its state), to which one agent adds its own."""
+        copied = ToolRegistry()
+        copied.tools = dict(self.tools)
+        copied._internal_tool_providers = dict(self._internal_tool_providers)
+        return copied
+
     def merge(self, other_registry: "ToolRegistry"):
         """Merge tools from another registry into this one."""
         for tool in other_registry.list_tools():
