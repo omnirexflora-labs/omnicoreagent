@@ -212,6 +212,35 @@ class BudgetLedger:
 
         return await self._apply(key, change) or {}
 
+    async def record_many(
+        self, key: str, charges: list[tuple[str, float]]
+    ) -> dict[str, float]:
+        """Record what was already spent (a call's tokens, once it answered).
+
+        Never refused: the spend happened. Returns each meter's new total.
+        """
+        if not self.enabled:
+            return {}
+        wanted = [(meter, float(amount)) for meter, amount in charges if amount]
+        if not wanted:
+            return {}
+
+        def change(state: dict[str, Any]) -> dict[str, float]:
+            meters = state.setdefault("meters", {})
+            totals: dict[str, float] = {}
+            for meter, amount in wanted:
+                meters[meter] = float(meters.get(meter, 0.0)) + amount
+                totals[meter] = meters[meter]
+            return totals
+
+        return await self._apply(key, change) or {}
+
+    async def check(self, key: str, meter: str, amount: float, *, limit: float | None) -> None:
+        """Raise ``BudgetExhausted`` if ``amount`` does not fit; change nothing."""
+        if not self.enabled or limit is None:
+            return
+        _check(await self._state(key), key, meter, float(amount), limit)
+
     async def reserve(
         self,
         key: str,
@@ -281,6 +310,8 @@ class BudgetLedger:
         ``also`` charges other meters of the same key in the same write (the
         tokens a call used are counted as its cost is settled). Returns the
         new totals of the settled meter and of what ``also`` charged.
+        Settling is never refused: the spend already happened, so it is
+        recorded even past a limit, and the next spend is what is stopped.
         """
         if not self.enabled:
             return {}
@@ -288,8 +319,6 @@ class BudgetLedger:
         extra = [(m, float(a), lim) for m, a, lim in (also or []) if a]
 
         def change(state: dict[str, Any]) -> dict[str, float]:
-            for other, other_amount, other_limit in extra:
-                _check(state, reservation.key, other, other_amount, other_limit)
             meters = state.setdefault("meters", {})
             held = state.setdefault("reservations", {}).pop(reservation.reservation_id, None)
             if not (held is None and actual is None):
@@ -607,6 +636,33 @@ class RunBudgets:
             for scope, limit, _ in entries:
                 await self._warn_if_near(scope, limit, key, totals.get(limit.meter))
 
+    async def record_many(self, charges: list[tuple[str, float]]) -> None:
+        """Record what was already spent, on every budget that covers the run.
+
+        Never refused, even past a limit: the next spend is what is stopped
+        (``check_room``). Crossing a warning line is still reported.
+        """
+        by_key: dict[str, list[tuple[BudgetScope, Any, float]]] = {}
+        for meter, amount in charges:
+            for scope, key, limit in self.limits(meter):
+                by_key.setdefault(key, []).append((scope, limit, float(amount)))
+        for key, entries in by_key.items():
+            totals = await self.ledger.record_many(
+                key, [(limit.meter, amount) for _, limit, amount in entries]
+            )
+            for scope, limit, _ in entries:
+                await self._warn_if_near(scope, limit, key, totals.get(limit.meter))
+
+    async def check_room(self, meter: str, amount: float) -> None:
+        """Stop before a spend that cannot fit, on every budget that covers
+        the run: a model call's input tokens against a token budget, which is
+        otherwise counted only once the call has answered."""
+        for scope, key, limit in self.limits(meter):
+            try:
+                await self.ledger.check(key, meter, amount, limit=limit.limit)
+            except BudgetExhausted as exhausted:
+                raise await self._stop(scope, key, limit, exhausted) from None
+
     async def reserve(
         self, meter: str, amount: float, *, also: list[tuple[str, float]] | None = None
     ) -> list[Reservation]:
@@ -682,15 +738,11 @@ class RunBudgets:
         governing = {key: (scope, limit) for scope, key, limit in self.limits(held[0].meter)} if held else {}
         for reservation in held:
             extra = extra_by_key.pop(reservation.key, [])
-            try:
-                totals = await self.ledger.commit(
-                    reservation,
-                    actual=actual,
-                    also=[(lim.meter, a, lim.limit) for _, lim, a in extra],
-                )
-            except BudgetExhausted as exhausted:
-                scope, limit = next((s, lim) for s, lim, _ in extra if lim.meter == exhausted.meter)
-                raise await self._stop(scope, reservation.key, limit, exhausted) from None
+            totals = await self.ledger.commit(
+                reservation,
+                actual=actual,
+                also=[(lim.meter, a, lim.limit) for _, lim, a in extra],
+            )
             if reservation.key in governing:
                 scope, limit = governing[reservation.key]
                 await self._warn_if_near(scope, limit, reservation.key, totals.get(limit.meter))
@@ -699,13 +751,9 @@ class RunBudgets:
                     other_scope, other_limit, reservation.key, totals.get(other_limit.meter)
                 )
         for key, entries in extra_by_key.items():
-            try:
-                totals = await self.ledger.charge_many(
-                    key, [(lim.meter, a, lim.limit) for _, lim, a in entries]
-                )
-            except BudgetExhausted as exhausted:
-                scope, limit = next((s, lim) for s, lim, _ in entries if lim.meter == exhausted.meter)
-                raise await self._stop(scope, key, limit, exhausted) from None
+            totals = await self.ledger.record_many(
+                key, [(lim.meter, a) for _, lim, a in entries]
+            )
             for other_scope, other_limit, _ in entries:
                 await self._warn_if_near(
                     other_scope, other_limit, key, totals.get(other_limit.meter)

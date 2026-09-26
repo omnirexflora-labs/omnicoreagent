@@ -263,6 +263,7 @@ class OmniCoreAgent:
         self.agent = components.agent
         self.mcp_client = components.mcp_client
         self.llm_connection = components.llm_connection
+        self._bind_privacy_to_model()
         self.local_tools = components.local_tools
         self._subagent_factory = components.subagent_factory
 
@@ -415,7 +416,14 @@ class OmniCoreAgent:
         self.telemetry_config = getattr(recorder, "config", None)
         self.telemetry_payload_store = getattr(recorder, "payload_store", None)
         self.privacy_filter = getattr(recorder, "privacy_filter", self.privacy_filter)
+        self._bind_privacy_to_model()
         self._bind_telemetry_components()
+
+    def _bind_privacy_to_model(self) -> None:
+        """What the provider is sent passes the agent's privacy filter (it
+        redacts only with redact_model_io on)."""
+        if self.llm_connection is not None:
+            self.llm_connection.privacy_filter = self.privacy_filter
 
     def _adopt_telemetry_store(self, store: Any) -> None:
         """Record into a shared store while keeping this agent's policy.

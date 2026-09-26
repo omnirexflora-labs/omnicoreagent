@@ -249,7 +249,7 @@ async def test_governance_requires_policy_for_mcp_tool():
     )
     assert executor.calls == 0
     assert tools_results[0]["status"] == "error"
-    assert "Unknown capability denied" in tools_results[0].get("message", "")
+    assert "Denied by strict policy: no rule matches" in tools_results[0].get("message", "")
     assert tools_results[0]["governance_error_code"] == "unknown_capability"
 
 

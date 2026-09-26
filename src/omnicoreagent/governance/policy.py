@@ -151,7 +151,7 @@ def _read_policy_file(path: Path) -> dict[str, Any]:
             raise PolicyLoadError(f"Invalid JSON policy file: {path}") from exc
     elif suffix in {".yaml", ".yml"}:
         raise PolicyLoadError(
-            "YAML policy loading is not enabled in Phase 1. Use JSON or in-code policy."
+            "YAML policies are not supported. Use a JSON policy file or a policy in code."
         )
     else:
         raise PolicyLoadError(f"Unsupported policy file extension: {path.suffix}")
