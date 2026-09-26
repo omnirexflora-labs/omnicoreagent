@@ -1,0 +1,171 @@
+---
+title: How It Compares
+description: 'OmniCoreAgent next to the OpenAI Agents SDK, LangGraph, Pydantic AI, the Claude Agent SDK and CrewAI, capability by capability, each cell sourced'
+icon: 'scale-balanced'
+---
+
+# How It Compares
+
+Checked on **2026-09-26**, against each project's own documentation and
+repository. Every cell below links to its source in *Sources*. These projects
+move fast, so a cell can go stale. If one is wrong, please
+[open an issue](https://github.com/omnirexflora-labs/omnicoreagent/issues) and
+we will correct it.
+
+**Yes** means documented and built in. **Partial** means part of it, a
+separate package, or a paid product (the notes say which). **No** means the
+docs say or show it is not there. **Not documented** means we could not find
+it in the official docs, which is not the same as No.
+
+## The short version
+
+**What OmniCoreAgent does differently.** It puts one policy over every action
+an agent takes: each tool, each command, the network, each MCP server,
+delegation, background runs. When the policy asks, the run pauses for a person
+and can resume days later in another process. A budget prices each model call
+before making it, and when it runs out the run waits for a person instead of
+failing. Commands run in a sandbox whose network is off by default and
+*checked* to be off. Every run is recorded locally, with no service to sign up
+for. The same package also schedules runs and serves them over HTTP. All of
+this is opt-in: governance is off until you turn it on.
+
+**Where the others are stronger:**
+
+- **Explicit workflow graphs.** LangGraph is built around them, with
+  per-step checkpoints and "time travel" to earlier state. CrewAI has
+  Flows, and Pydantic AI has pydantic-graph. OmniCoreAgent has no graph API:
+  you compose runs in Python, or give an agent sub-agents.
+- **Sandbox breadth.** The OpenAI Agents SDK supports local, Docker and
+  seven hosted sandbox providers. OmniCoreAgent has five hosted providers,
+  Docker and local. The Claude Agent SDK isolates commands at the operating
+  system level with no container at all.
+- **Durable-execution engines.** Pydantic AI and the OpenAI Agents SDK
+  integrate with Temporal, DBOS, Restate and others. OmniCoreAgent keeps its
+  own durable run record instead.
+- **Hosted tracing and evaluation.** LangSmith, Logfire, OpenAI Traces and
+  CrewAI AMP each come from the same vendor as the framework. OmniCoreAgent
+  exports to OTLP, LangSmith, Opik and JSONL, but has no hosted product.
+- **TypeScript.** The OpenAI Agents SDK, LangGraph and the Claude Agent SDK
+  have TypeScript versions. OmniCoreAgent is Python only.
+- **Ecosystem size.** LangChain's integrations and community are far larger.
+
+## Capability by capability
+
+| | OmniCoreAgent 0.4 | OpenAI Agents SDK | LangGraph | Pydantic AI | Claude Agent SDK | CrewAI |
+|---|---|---|---|---|---|---|
+| **1. One policy that allows, asks or denies each action** | Yes (opt-in) | Partial: per-tool approval and guardrails | Partial: per-tool approval (`langchain` middleware) | Partial: a guard you write (Harness package) | Yes: rules, modes, hooks | Partial: hooks you write |
+| **2. A person's approval pauses the run; it resumes later, in another process** | Yes (durable store) | Yes: `RunState` | Yes: `interrupt()` + checkpointer | Yes: deferred tools | Yes: `defer` hook (one tool call per turn) | Yes: Flows `@human_feedback` |
+| **3. Dollar budget enforced before a model call** | Yes: holds the call's price first; pauses for a person | Not documented (tokens and turns) | No in open source; LangSmith gateway (paid, beta) | Yes: `cost_limit` ends the run once exceeded | Partial: `max_budget_usd` stops after the call that crosses it | No: paid Cost Limit only emails |
+| **4. Built-in sandboxed command execution** | Yes: Docker, E2B, Modal, Daytona, Vercel, your own, local | Yes: local, Docker, 7 hosted | Partial: Docker or Codex policy (`langchain`); providers via Deep Agents | Partial: Modal, Monty (Harness) | Yes: OS-level, opt-in | Partial: E2B and Daytona tools |
+| **5. Sandbox network off by default** | Yes, and checked on E2B and Daytona | No: Docker keeps its default network | Partial: yes for the Docker policy; the default runs on the host | Not documented | Partial: sandbox opt-in; new hosts are asked about | No (E2B tool) |
+| **6. A run survives a process crash and resumes** | Yes (durable store) | Partial: save state yourself, or Temporal and others | Yes: checkpoints | Yes: Temporal, DBOS, Prefect, Restate... | Partial: resumes the conversation | Yes: `checkpoint=True` |
+| **7. Every run recorded locally, no service needed** | Yes, on by default | Partial: default exporter sends to OpenAI | Partial: checkpoint history; tracing needs LangSmith | Partial: opt-in | Yes: JSONL transcripts | Partial: opt-in log files |
+| **8. OpenTelemetry export** | Yes (OTLP, LangSmith, Opik) | Not documented | Yes (via `langsmith`) | Yes | Yes (traces in beta) | Yes |
+| **9. MCP client, local and remote** | Yes (+ OAuth) | Yes | Yes (`langchain`) | Yes | Yes | Yes |
+| **10. Sub-agents / delegation** | Yes | Yes: handoffs, agents as tools | Yes | Yes | Yes | Yes |
+| **11. Scheduled / background runs built in** | Yes: cron, interval, durable task store | Not documented | Partial: LangSmith Deployment | Partial: via Prefect and others | Partial: session-scoped scheduling | Not documented |
+| **12. HTTP server built in** | Yes (OmniServe) | Not documented | Partial: dev server; production is LangSmith Deployment | Partial: dev web UI; adapters for your app | No | Partial: AG-UI package; paid hosted API |
+| **13. Model providers** | Many (LiteLLM) | Many (OpenAI default; adapters in beta) | Many | Many | Claude only, on several clouds | Many |
+| **14. Workflow graphs** | No: compose in Python | Partial: Python orchestration | Yes: the core of it | Yes: pydantic-graph | Partial: Workflow tool | Yes: Flows |
+| **15. Hosted tracing / evaluation from the same vendor** | No | Yes: OpenAI Traces | Yes: LangSmith | Yes: Logfire | Not documented | Yes: AMP |
+| **16. Languages** | Python | Python; TypeScript (separate) | Python, TypeScript | Python | Python, TypeScript | Python |
+| **17. License** | MIT | MIT | MIT (library) | MIT | Commercial terms (Python repo MIT) | MIT |
+
+## Sources
+
+Read on 2026-09-26: only each project's own docs and repository, no
+third-party comparisons. The method is in the repository, in
+`engineering/architecture/comparison-plan.md`.
+
+**OmniCoreAgent:** this documentation.
+[Policy](/docs/reference/policy) (1),
+[Durable runs](/docs/core-concepts/durable-runs) (2, 6),
+[Budgets](/docs/reference/budgets) (3),
+[Sandbox providers](/docs/how-to-guides/sandbox-providers) (4, 5),
+[Observability](/docs/how-to-guides/observability) (7, 8, 15),
+[MCP](/docs/core-concepts/mcp) (9),
+[Sub-agents](/docs/core-concepts/sub-agents) (10),
+[Background agents](/docs/core-concepts/background-agents) (11),
+[OmniServe](/docs/how-to-guides/omniserve) (12),
+[Models](/docs/how-to-guides/models) (13),
+[Upgrading](/docs/upgrading) (14).
+
+**OpenAI Agents SDK** (openai-agents 0.22.3):
+[guardrails](https://openai.github.io/openai-agents-python/guardrails/),
+[human in the loop](https://openai.github.io/openai-agents-python/human_in_the_loop/) (1, 2);
+[usage](https://openai.github.io/openai-agents-python/usage/) (3);
+[sandbox clients](https://openai.github.io/openai-agents-python/sandbox/clients/) (4, 5);
+[running agents](https://openai.github.io/openai-agents-python/running_agents/) (6, 12);
+[tracing](https://openai.github.io/openai-agents-python/tracing/) (7, 8, 11, 15);
+[MCP](https://openai.github.io/openai-agents-python/mcp/) (9);
+[handoffs](https://openai.github.io/openai-agents-python/handoffs/) (10);
+[models](https://openai.github.io/openai-agents-python/models/) (13);
+[multi-agent](https://openai.github.io/openai-agents-python/multi_agent/) (14);
+[repository](https://github.com/openai/openai-agents-python) (16, 17).
+
+**LangGraph:**
+[human in the loop](https://docs.langchain.com/oss/python/langchain/human-in-the-loop) (1);
+[interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts) (2);
+[built-in middleware](https://docs.langchain.com/oss/python/langchain/middleware/built-in),
+[LLM gateway spend policies](https://docs.langchain.com/langsmith/llm-gateway-spend-policies) (3, 4);
+[execution policies](https://github.com/langchain-ai/langchain/blob/master/libs/langchain_v1/langchain/agents/middleware/_execution.py) (5);
+[checkpointers](https://docs.langchain.com/oss/python/langgraph/checkpointers) (6, 7);
+[OpenTelemetry](https://docs.langchain.com/langsmith/trace-with-opentelemetry) (8);
+[MCP](https://docs.langchain.com/oss/python/langchain/mcp) (9);
+[subgraphs](https://docs.langchain.com/oss/python/langgraph/use-subgraphs) (10);
+[cron jobs](https://docs.langchain.com/langsmith/cron-jobs) (11);
+[local server](https://docs.langchain.com/oss/python/langgraph/local-server) (12);
+[models](https://docs.langchain.com/oss/python/langchain/models) (13);
+[graph API](https://docs.langchain.com/oss/python/langgraph/graph-api) (14);
+[observability](https://docs.langchain.com/oss/python/langgraph/observability) (15);
+[repository](https://github.com/langchain-ai/langgraph) (16, 17).
+
+**Pydantic AI:**
+[guardrails (Harness)](https://pydantic.dev/docs/ai/harness/guardrails/) (1);
+[deferred tools](https://pydantic.dev/docs/ai/tools-toolsets/deferred-tools/) (2);
+[agents: usage limits](https://pydantic.dev/docs/ai/core-concepts/agent/) (3);
+[Modal sandbox](https://pydantic.dev/docs/ai/harness/modal-sandbox/),
+[code mode](https://pydantic.dev/docs/ai/harness/code-mode/) (4, 5);
+[durable execution](https://pydantic.dev/docs/ai/capabilities/durable_execution/overview/) (6);
+[step persistence](https://pydantic.dev/docs/ai/harness/step-persistence/) (7);
+[Logfire and OpenTelemetry](https://pydantic.dev/docs/ai/integrations/logfire/) (8, 15);
+[MCP client](https://pydantic.dev/docs/ai/mcp/client/) (9);
+[multi-agent](https://pydantic.dev/docs/ai/guides/multi-agent-applications/) (10);
+[Prefect](https://pydantic.dev/docs/ai/capabilities/durable_execution/prefect/) (11);
+[web UI](https://pydantic.dev/docs/ai/guides/web/) (12);
+[models](https://pydantic.dev/docs/ai/models/overview/) (13);
+[graphs](https://pydantic.dev/docs/ai/graph/graph/) (14);
+[repository](https://github.com/pydantic/pydantic-ai) (16, 17).
+
+**Claude Agent SDK:**
+[permissions](https://code.claude.com/docs/en/agent-sdk/permissions) (1);
+[user input](https://code.claude.com/docs/en/agent-sdk/user-input) (2);
+[cost tracking](https://code.claude.com/docs/en/agent-sdk/cost-tracking) (3);
+[sandboxing](https://code.claude.com/docs/en/sandboxing) (4, 5);
+[sessions](https://code.claude.com/docs/en/agent-sdk/sessions) (6, 7);
+[observability](https://code.claude.com/docs/en/agent-sdk/observability) (8, 15);
+[MCP](https://code.claude.com/docs/en/agent-sdk/mcp) (9);
+[subagents](https://code.claude.com/docs/en/agent-sdk/subagents) (10);
+[scheduled tasks](https://code.claude.com/docs/en/scheduled-tasks) (11);
+[hosting](https://code.claude.com/docs/en/agent-sdk/hosting) (12);
+[quickstart](https://code.claude.com/docs/en/agent-sdk/quickstart) (13);
+[TypeScript reference](https://code.claude.com/docs/en/agent-sdk/typescript) (14);
+[overview and license](https://code.claude.com/docs/en/agent-sdk/overview) (16, 17).
+
+**CrewAI:**
+[tool hooks](https://docs.crewai.com/en/learn/tool-hooks) (1);
+[human feedback in Flows](https://docs.crewai.com/en/learn/human-feedback-in-flows) (2);
+[AMP policies](https://docs-platform.crewai.com/platform/en/features/agent-control-plane/policies) (3);
+[code execution](https://docs.crewai.com/en/tools/ai-ml/codeinterpretertool),
+[E2B tool](https://github.com/crewAIInc/crewAI/blob/main/lib/crewai-tools/src/crewai_tools/tools/e2b_sandbox_tool/README.md) (4, 5);
+[checkpointing](https://docs.crewai.com/en/concepts/checkpointing) (6);
+[crews](https://docs.crewai.com/en/concepts/crews) (7);
+[tracing](https://docs.crewai.com/en/observability/tracing) (8);
+[MCP](https://docs.crewai.com/en/mcp/overview) (9);
+[collaboration](https://docs.crewai.com/en/concepts/collaboration) (10);
+[automation triggers](https://docs-platform.crewai.com/platform/en/guides/automation-triggers) (11);
+[frontend](https://docs.crewai.com/en/guides/frontend/overview) (12);
+[LLMs](https://docs.crewai.com/en/concepts/llms) (13);
+[Flows](https://docs.crewai.com/en/concepts/flows) (14);
+[AMP traces](https://docs-platform.crewai.com/platform/en/features/traces) (15);
+[repository](https://github.com/crewAIInc/crewAI) (16, 17).
