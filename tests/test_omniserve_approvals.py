@@ -108,3 +108,27 @@ def test_a_paused_run_is_steered_over_http_and_hears_it_on_resume(tmp_path):
 
     model = agent.llm_connection
     assert "keep a backup" in json.dumps(model.calls[-1])
+
+
+def test_a_paused_and_resumed_run_is_one_story_over_http(tmp_path):
+    """`/telemetry/runs/{run_id}/trajectory` is the run's latest segment; a
+    client needs the whole run: every segment, and each call's final outcome."""
+    agent, server = _server(tmp_path, WRITE_AND_DELETE, DELETE, "cleaned up")
+    with TestClient(server.app) as client:
+        paused = _pause(client)
+        (approval,) = paused["approvals"]
+        client.post(
+            f"/runs/{paused['run_id']}/approvals/{approval['approval_id']}",
+            json={"decision": "approve", "approver": "alice"},
+        )
+        client.post(f"/runs/{paused['run_id']}/resume")
+
+        story = client.get(f"/runs/{paused['run_id']}/trajectory")
+        assert story.status_code == 200, story.text
+        body = story.json()
+        assert body["status"] == "completed"
+        assert [s["status"] for s in body["segments"]] == ["suspended", "completed"]
+        assert body["approvals"][0]["approver"] == "alice"
+        assert {c["tool_name"]: c["outcome"] for c in body["tool_calls"]}["delete_file"] == "success"
+
+        assert client.get("/runs/run_nope/trajectory").status_code == 404

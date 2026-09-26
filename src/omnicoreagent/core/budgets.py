@@ -428,9 +428,9 @@ class ModelCallEstimate:
 
     The input is counted from the messages that were just assembled, so it is
     exact. The output is not known, but it cannot exceed ``max_tokens``, so
-    that is what is priced: with ``max_tokens`` set, a hold is not an
-    under-count. Without it, DEFAULT_ASSUMED_OUTPUT_TOKENS is priced, and a
-    longer answer settles above the hold. ``cost_usd`` is
+    that is what is priced. Without ``max_tokens``, DEFAULT_ASSUMED_OUTPUT_TOKENS
+    is priced and sent as the call's ceiling (``OUTPUT_TOKEN_CEILING``), so
+    the output is never an under-count either way. ``cost_usd`` is
     ``None`` when the model has no published price, and then tokens and calls
     are what govern the run.
     """

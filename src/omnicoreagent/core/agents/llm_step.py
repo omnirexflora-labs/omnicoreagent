@@ -21,6 +21,7 @@ from omnicoreagent.core.telemetry import (
 )
 from omnicoreagent.core.system_prompts import FAST_CONVERSATION_SUMMARY_PROMPT
 from omnicoreagent.core.budgets import (
+    DEFAULT_ASSUMED_OUTPUT_TOKENS,
     BudgetExhaustedForRun,
     RunAwaitingBudget,
     current_budgets,
@@ -38,7 +39,7 @@ from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.telemetry.context_record import CONTEXT_REFERENCE_KEYS, digest_reference
 from omnicoreagent.core.interaction_history import context_evidence, message_record
-from omnicoreagent.core.llm import MODEL_RETRY_OBSERVER
+from omnicoreagent.core.llm import MODEL_RETRY_OBSERVER, OUTPUT_TOKEN_CEILING
 
 
 @dataclass
@@ -469,6 +470,14 @@ class AgentLlmStepRunner:
                     await budgets.charge("model_calls", 1)
             retries: list[dict[str, Any]] = []
             retry_token = MODEL_RETRY_OBSERVER.set(retries.append)
+            # A budgeted call is held to the output its hold priced.
+            ceiling_token = OUTPUT_TOKEN_CEILING.set(
+                DEFAULT_ASSUMED_OUTPUT_TOKENS
+                if budgets is not None
+                and budgets.enabled
+                and _max_output_tokens(llm_connection) is None
+                else None
+            )
             timing["started"] = time.perf_counter()
             try:
                 response = await request()
@@ -477,6 +486,7 @@ class AgentLlmStepRunner:
                     await budgets.release(held)  # nothing was spent
                 raise
             finally:
+                OUTPUT_TOKEN_CEILING.reset(ceiling_token)
                 MODEL_RETRY_OBSERVER.reset(retry_token)
             normalized = normalize_model_turn(response)
             model_facts = self._model_call_facts(

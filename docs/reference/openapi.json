@@ -4451,6 +4451,61 @@
         ]
       }
     },
+    "/runs/{run_id}/trajectory": {
+      "get": {
+        "description": "The whole run as one story: every trace segment in order (a run that paused and resumed has one per stretch), totals summed across them, each tool call once with its final outcome, and the approvals. `/telemetry/runs/{run_id}/trajectory` is the latest segment only.",
+        "operationId": "get_run_trajectory_runs__run_id__trajectory_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Run Trajectory Runs  Run Id  Trajectory Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get a run's whole trajectory",
+        "tags": [
+          "Runs"
+        ]
+      }
+    },
     "/sessions/{session_id}": {
       "delete": {
         "description": "Clear message history for a specific session.",

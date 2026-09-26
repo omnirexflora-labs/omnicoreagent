@@ -178,6 +178,25 @@ def create_runs_router() -> APIRouter:
             raise HTTPException(status_code=404, detail=f"No run {run_id}")
         return _public_run(agent, record)
 
+    @router.get(
+        "/runs/{run_id}/trajectory",
+        summary="Get a run's whole trajectory",
+        description=(
+            "The whole run as one story: every trace segment in order (a run "
+            "that paused and resumed has one per stretch), totals summed across "
+            "them, each tool call once with its final outcome, and the approvals. "
+            "`/telemetry/runs/{run_id}/trajectory` is the latest segment only."
+        ),
+        responses={404: {"model": ErrorResponse}},
+    )
+    async def get_run_trajectory(request: Request, run_id: str) -> dict:
+        agent = get_agent(request)
+        story = await agent.get_run_trajectory(run_id)
+        if story is None:
+            raise HTTPException(status_code=404, detail=f"No run {run_id}")
+        privacy_filter = getattr(agent, "privacy_filter", None)
+        return privacy_filter.redact(story, boundary="public") if privacy_filter else story
+
     @router.post(
         "/runs/{run_id}/approvals/{approval_id}",
         summary="Decide an approval",
