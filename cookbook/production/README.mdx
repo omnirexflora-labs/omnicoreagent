@@ -26,7 +26,7 @@ from omnicoreagent import OmniCoreAgent
 agent = OmniCoreAgent(
     name="monitored_agent",
     system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
+    model_config={"provider": "openai", "model": "gpt-5.4"},
     agent_config={
         "request_limit": 100,
         "total_tokens_limit": 50000,
@@ -57,7 +57,7 @@ Protect against prompt injection attacks:
 agent = OmniCoreAgent(
     name="protected_agent",
     system_instruction="You are a customer service agent.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
+    model_config={"provider": "openai", "model": "gpt-5.4"},
     agent_config={
         "guardrail_config": {
             "strict_mode": True,  # Block suspicious inputs

@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from omnicoreagent.core.runtime.deadline import run_with_timeout
+from omnicoreagent.core.telemetry.context import entry_surface
 from omnicoreagent.core.telemetry.models import TelemetryProvenance
 
 APPROVER = "omnicoreagent-cli"
@@ -234,8 +235,14 @@ async def execute_headless(agent: Any, request: HeadlessRequest) -> HeadlessOutc
 
     The deadline covers the whole run, pauses and resumes included. Telemetry
     and evidence collection never change the outcome: a failure to read the
-    trajectory is reported as ``evidence_error``.
+    trajectory is reported as ``evidence_error``. Every segment of the run is
+    recorded as entered ``headless``.
     """
+    with entry_surface("headless"):
+        return await _execute_headless(agent, request)
+
+
+async def _execute_headless(agent: Any, request: HeadlessRequest) -> HeadlessOutcome:
     started = time.monotonic()
     deadline = started + request.timeout if request.timeout and request.timeout > 0 else None
     run_id = request.run_id or agent.generate_run_id()

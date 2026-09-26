@@ -48,7 +48,7 @@ async def demo_anthropic():
             system_instruction="You are Claude, a helpful assistant.",
             model_config={
                 "provider": "anthropic",
-                "model": "claude-3-5-sonnet-20240620",
+                "model": "claude-sonnet-5",
                 "max_tokens": 1024,
                 "temperature": 0.7,
             },
@@ -74,7 +74,7 @@ async def demo_gemini():
             system_instruction="You are Gemini.",
             model_config={
                 "provider": "gemini",
-                "model": "gemini-1.5-flash",
+                "model": "gemini-3.8-flash",
                 "temperature": 0.5,
             },
         )
@@ -99,7 +99,7 @@ async def demo_groq():
             system_instruction="You are a super fast assistant.",
             model_config={
                 "provider": "groq",
-                "model": "llama3-70b-8192",
+                "model": "openai/gpt-oss-120b",
                 "max_tokens": 512,
             },
         )

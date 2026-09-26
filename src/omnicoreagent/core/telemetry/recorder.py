@@ -10,6 +10,7 @@ from omnicoreagent.core.continuation import mask_opaque
 from omnicoreagent.core.credentials import scrub_credentials
 from omnicoreagent.core.telemetry.context import (
     TelemetryContext,
+    current_entry_surface,
     current_telemetry_context,
     reset_telemetry_context,
     set_telemetry_context,
@@ -277,6 +278,7 @@ class TelemetryRecorder:
         execution_surface = (
             execution_surface
             or (inherited.execution_surface if inherited is not None else None)
+            or current_entry_surface()
             or "interactive"
         )
         actor = actor or TelemetryActor(type=ActorType.AGENT)

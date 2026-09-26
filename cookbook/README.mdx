@@ -22,7 +22,7 @@ from omnicoreagent import OmniCoreAgent
 agent = OmniCoreAgent(
     name="my_agent",
     system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-4o"}
+    model_config={"provider": "openai", "model": "gpt-5.4"}
 )
 
 result = await agent.run("Hello!")

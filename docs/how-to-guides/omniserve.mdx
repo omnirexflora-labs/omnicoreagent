@@ -27,7 +27,7 @@ from omnicoreagent import OmniCoreAgent
 agent = OmniCoreAgent(
     name="MyAgent",
     system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-4o-mini"},
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
 )
 ```
 
@@ -40,7 +40,7 @@ def create_agent():
     return OmniCoreAgent(
         name="MyAgent",
         system_instruction="You are a helpful assistant.",
-        model_config={"provider": "openai", "model": "gpt-4o-mini"},
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
     )
 ```
 
@@ -95,7 +95,7 @@ def calculate(expression: str) -> dict:
 agent = OmniCoreAgent(
     name="MyAgent",
     system_instruction="You are a helpful assistant with access to greeting and calculation tools.",
-    model_config={"provider": "openai", "model": "gpt-4o-mini"},
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
     local_tools=tools,
 )
 ```
@@ -189,26 +189,26 @@ Start a server instantly without writing any code:
 ```bash
 omniserve quickstart \
   --provider openai \
-  --model gpt-4o \
+  --model gpt-5.4 \
   --name QuickAgent \
   --instruction "You are..." \
   --port 8000
 ```
 
 Use the provider that matches your `LLM_API_KEY`. For an OpenAI key, run
-`omniserve quickstart --provider openai --model gpt-4o-mini`.
+`omniserve quickstart --provider openai --model gpt-5.4-mini`.
 
 **Examples:**
 
 ```bash
 # OpenAI
-omniserve quickstart --provider openai --model gpt-4o
+omniserve quickstart --provider openai --model gpt-5.4
 
 # Google Gemini
-omniserve quickstart --provider gemini --model gemini-2.0-flash
+omniserve quickstart --provider gemini --model gemini-3.8-flash
 
 # Anthropic Claude
-omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
+omniserve quickstart --provider anthropic --model claude-sonnet-5
 ```
 
 ---
@@ -562,7 +562,7 @@ def get_time() -> dict:
 agent = OmniCoreAgent(
     name="MyAgent",
     system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-4o-mini"},
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
     local_tools=tools,
 )
 

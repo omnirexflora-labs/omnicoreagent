@@ -29,7 +29,7 @@ async def main():
     agent = OmniCoreAgent(
         name="my_assistant",
         system_instruction="You are a helpful assistant.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config={"provider": "openai", "model": "gpt-5.4"},
     )
 
     result = await agent.run("Hello!")
@@ -121,7 +121,7 @@ tools = ToolRegistry()
 agent = OmniCoreAgent(
     name="production_agent",
     system_instruction="You are a production research agent.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
+    model_config={"provider": "openai", "model": "gpt-5.4"},
     local_tools=tools,
     mcp_tools=[...],
     memory_router=MemoryRouter("redis"),

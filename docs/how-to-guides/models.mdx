@@ -15,28 +15,28 @@ text-stream protocol:
 
 ```python
 # OpenAI
-model_config = {"provider": "openai", "model": "gpt-4o"}
+model_config = {"provider": "openai", "model": "gpt-5.4"}
 
 # Anthropic
-model_config = {"provider": "anthropic", "model": "claude-3-5-sonnet-20241022"}
+model_config = {"provider": "anthropic", "model": "claude-sonnet-5"}
 
 # Google Gemini
-model_config = {"provider": "gemini", "model": "gemini-2.0-flash-exp"}
+model_config = {"provider": "gemini", "model": "gemini-3.8-flash"}
 
 # Groq (Ultra-fast)
-model_config = {"provider": "groq", "model": "llama-3.1-8b-instant"}
+model_config = {"provider": "groq", "model": "openai/gpt-oss-120b"}
 
 # DeepSeek
 model_config = {"provider": "deepseek", "model": "deepseek-chat"}
 
 # Mistral AI
-model_config = {"provider": "mistral", "model": "mistral-7b-instruct"}
+model_config = {"provider": "mistral", "model": "mistral-small-latest"}
 
 # Azure OpenAI
-model_config = {"provider": "azure", "model": "gpt-4o"}
+model_config = {"provider": "azure", "model": "gpt-5.4"}
 
 # OpenRouter (200+ models)
-model_config = {"provider": "openrouter", "model": "anthropic/claude-3.5-sonnet"}
+model_config = {"provider": "openrouter", "model": "anthropic/claude-sonnet-5"}
 
 # Ollama (Local)
 model_config = {"provider": "ollama", "model": "llama3.1:8b", "ollama_host": "http://localhost:11434"}
@@ -112,7 +112,7 @@ itself is recorded only with `capture="full"`.
 ```python
 model_config = {
     "provider": "openai",
-    "model": "gpt-4o",
+    "model": "gpt-5.4",
     "temperature": 0.7,
     "max_tokens": 2000,
     "top_p": 0.95
@@ -126,7 +126,7 @@ model_config = {
 ```python
 model_config = {
     "provider": "azure",
-    "model": "gpt-4",
+    "model": "gpt-5.4",
     "azure_endpoint": "https://your-resource.openai.azure.com",
     "azure_api_version": "2024-02-01"
 }
@@ -163,13 +163,13 @@ OmniCoreAgent configuration.
 
 | Use Case | Recommended Provider |
 |----------|----------------------|
-| Complex reasoning | OpenAI (`gpt-4o`), Anthropic (`claude-3.5`) |
-| Fast inference | Groq (`llama-3.1-8b-instant`) |
+| Complex reasoning | OpenAI (`gpt-5.6-terra`), Anthropic (`claude-sonnet-5`) |
+| Fast inference | Groq (`openai/gpt-oss-120b`) |
 | Cost-effective | DeepSeek (`deepseek-chat`) |
 | Privacy-sensitive | Ollama (runs locally) |
 | Multi-model access | OpenRouter (200+ models) |
 | Enterprise / Azure | Azure OpenAI |
 
 <Tip>
-Switch providers based on your needs — use cheaper models (Groq, DeepSeek) for simple tasks, powerful models (GPT-4o, Claude) for complex reasoning, and local models (Ollama) for privacy-sensitive applications.
+Switch providers based on your needs — use cheaper models (Groq, DeepSeek) for simple tasks, powerful models (GPT-5.6, Claude) for complex reasoning, and local models (Ollama) for privacy-sensitive applications.
 </Tip>

@@ -28,7 +28,7 @@ async def main():
     agent = OmniCoreAgent(
         name="tool_agent",
         system_instruction="Use local tools when they help answer the user.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config={"provider": "openai", "model": "gpt-5.4"},
         local_tools=tools,
     )
 
@@ -131,7 +131,7 @@ def calculate_total(price: float, quantity: int) -> float:
 agent = OmniCoreAgent(
     name="local_tools_agent",
     system_instruction="Use local tools when they help answer the user.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
+    model_config={"provider": "openai", "model": "gpt-5.4"},
     local_tools=tools,
 )
 ```

@@ -32,7 +32,7 @@ from omnicoreagent import OmniCoreAgent
 agent = OmniCoreAgent(
     name="task_manager",
     system_instruction="You coordinate complex work and synthesize outputs.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
+    model_config={"provider": "openai", "model": "gpt-5.4"},
     agent_config={
         "enable_subagents": True,
     },
@@ -87,19 +87,19 @@ stable role or custom tool set.
 research_agent = OmniCoreAgent(
     name="researcher",
     system_instruction="You specialize in web research and summarization.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
+    model_config={"provider": "openai", "model": "gpt-5.4"},
 )
 
 code_agent = OmniCoreAgent(
     name="coder",
     system_instruction="You are an expert Python developer.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
+    model_config={"provider": "openai", "model": "gpt-5.4"},
 )
 
 parent_agent = OmniCoreAgent(
     name="manager",
     system_instruction="You manage a team of specialists.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
+    model_config={"provider": "openai", "model": "gpt-5.4"},
     sub_agents=[research_agent, code_agent],
 )
 ```

@@ -95,12 +95,12 @@ Example:
 Start a quick agent server without writing any code.
 
 Example:
-    omniserve quickstart --provider openai --model gpt-4o --port 8000
+    omniserve quickstart --provider openai --model gpt-5.4 --port 8000
 
 | Option | Takes | Default | What it does |
 |---|---|---|---|
-| `--provider, -p` | text | `gemini` | LLM provider (openai, gemini, anthropic) |
-| `--model, -m` | text | `gemini-2.0-flash` | Model name |
+| `--provider, -p` | text | `openai` | LLM provider (openai, gemini, anthropic) |
+| `--model, -m` | text | `gpt-5.4-mini` | Model name |
 | `--name, -n` | text | `QuickAgent` | Agent name |
 | `--instruction, -i` | text | `You are a helpful AI assistant.` | System instruction |
 | `--port` | integer | `8000` | Port to bind to |

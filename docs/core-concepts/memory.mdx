@@ -23,7 +23,7 @@ async def main():
     agent = OmniCoreAgent(
         name="memory_agent",
         system_instruction="Remember useful details inside the active session.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config={"provider": "openai", "model": "gpt-5.4"},
         memory_router=MemoryRouter("in_memory"),
     )
 
@@ -51,7 +51,7 @@ agent = OmniCoreAgent(
     name="my_agent",
     system_instruction="Remember useful details inside the active session.",
     memory_router=MemoryRouter("redis"),
-    model_config={"provider": "openai", "model": "gpt-4o"}
+    model_config={"provider": "openai", "model": "gpt-5.4"}
 )
 
 # Switch at runtime — no restart needed!
@@ -105,7 +105,7 @@ memory_config = {
 agent = OmniCoreAgent(
     name="summarizing_agent",
     memory_router=memory_router,
-    model_config={"provider": "openai", "model": "gpt-4o"},
+    model_config={"provider": "openai", "model": "gpt-5.4"},
     agent_config={"memory_config": memory_config},
 )
 ```

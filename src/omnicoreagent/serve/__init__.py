@@ -17,14 +17,14 @@ Usage:
     agent = OmniCoreAgent(
         name="MyAgent",
         system_instruction="You are helpful.",
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config={"provider": "openai", "model": "gpt-5.4"},
     )
 
     server = OmniServe(agent)
     server.start(host="0.0.0.0", port=8000)
 
 CLI Usage:
-    omniserve quickstart --provider gemini --model gemini-2.0-flash
+    omniserve quickstart --provider gemini --model gemini-3.8-flash
     omniserve run --agent my_agent.py --port 8000
 
 Extensibility:

@@ -46,7 +46,7 @@ async def main():
         system_instruction=(
             "Use workspace files for notes, progress, and final artifacts."
         ),
-        model_config={"provider": "openai", "model": "gpt-4o"},
+        model_config={"provider": "openai", "model": "gpt-5.4"},
         agent_config={"enable_workspace_files": True},
     )
 
@@ -174,7 +174,7 @@ os.environ["AWS_ENDPOINT_URL"] = "https://s3.amazonaws.com"  # Optional
 agent = OmniCoreAgent(
     name="workspace_agent",
     system_instruction="Save durable notes, logs, task progress, and final output to workspace files.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
+    model_config={"provider": "openai", "model": "gpt-5.4"},
     agent_config={
         "max_steps": 50,
     }

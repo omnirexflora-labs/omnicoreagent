@@ -41,7 +41,7 @@ from omnicoreagent import OmniCoreAgent
 agent = OmniCoreAgent(
     name="assistant",
     system_instruction="You are helpful.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
+    model_config={"provider": "openai", "model": "gpt-5.4"},
     agent_config={
         "memory_config": {
             "mode": "sliding_window",
@@ -162,7 +162,7 @@ agent = OmniCoreAgent(
         "Use workspace files and artifact references for long tasks. "
         "Read artifacts only when the full payload is needed."
     ),
-    model_config={"provider": "openai", "model": "gpt-4o"},
+    model_config={"provider": "openai", "model": "gpt-5.4"},
     agent_config={
         "memory_config": {
             "mode": "sliding_window",

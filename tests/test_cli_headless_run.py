@@ -115,6 +115,10 @@ async def test_a_plain_run_succeeds_with_its_trajectory_and_provenance(tmp_path)
     assert trace.provenance.adapter == "harbor"
     assert trace.provenance.external_ids == {"job": "nightly"}
     assert {"headless", "approval-mode:stop", "budget-mode:stop"} <= set(trace.metadata.tags)
+    # How the run was entered: the CLI, not a direct agent.run in someone's
+    # code (a stranger found its runs labelled "interactive", 2026-09-26).
+    assert trace.execution_surface == "headless"
+    assert outcome.trajectory["segments"][0]["trajectory"]["execution_surface"] == "headless"
 
 
 @pytest.mark.asyncio
@@ -148,6 +152,8 @@ async def test_allow_mode_approves_as_the_cli_and_the_run_finishes(tmp_path):
     assert record["approvals"][0]["approver"] == APPROVER
     assert record["approvals"][0]["note"] == "approval-mode=allow"
     assert len(outcome.trace_ids) == 2, "the pause and the resume are both in the story"
+    for trace_id in outcome.trace_ids:
+        assert (await agent.telemetry_store.get_trace(trace_id)).execution_surface == "headless"
 
 
 @pytest.mark.asyncio
