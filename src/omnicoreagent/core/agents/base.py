@@ -527,20 +527,36 @@ class BaseReactAgent:
                 current_steps = int(resume.get("step") or 0)
                 pending, unknown = _pending_calls(resume, catalog)
                 if pending:
-                    await execute_native_turn(
-                        self,
-                        turn=ModelTurn(tool_calls=tuple(pending), finish_reason="tool_calls"),
-                        unknown_outcome_ids=unknown,
-                        catalog=catalog,
-                        local_tools=runtime_local_tools,
-                        sessions=sessions,
-                        session_state=session_state,
-                        session_id=session_id,
-                        add_message_to_history=add_message_to_history,
-                        run_usage=run_usage,
-                        telemetry_recorder=telemetry_recorder,
-                        resuming=True,
-                    )
+                    resumed_span = None
+                    if telemetry_recorder is not None:
+                        # The approved calls finish the step that asked for them.
+                        resumed_span = await telemetry_recorder.start_span(
+                            name="agent.step",
+                            kind="agent.step",
+                            actor=TelemetryActor(type=ActorType.AGENT, name=self.agent_name),
+                            input={"step": current_steps, "resumed": True},
+                            attributes={"step": current_steps, "resumed": True},
+                        )
+                    status = SpanStatus.ERROR
+                    try:
+                        await execute_native_turn(
+                            self,
+                            turn=ModelTurn(tool_calls=tuple(pending), finish_reason="tool_calls"),
+                            unknown_outcome_ids=unknown,
+                            catalog=catalog,
+                            local_tools=runtime_local_tools,
+                            sessions=sessions,
+                            session_state=session_state,
+                            session_id=session_id,
+                            add_message_to_history=add_message_to_history,
+                            run_usage=run_usage,
+                            telemetry_recorder=telemetry_recorder,
+                            resuming=True,
+                        )
+                        status = SpanStatus.OK
+                    finally:
+                        if resumed_span is not None:
+                            await telemetry_recorder.end_span(resumed_span.span_id, status=status)
             if resume is not None and resume.get("sandbox_used"):
                 # After the paused step's results, never between a tool call
                 # and its result.
@@ -582,6 +598,7 @@ class BaseReactAgent:
                             type=ActorType.AGENT, name=self.agent_name
                         ),
                         input={"step": current_steps},
+                        attributes={"step": current_steps},
                     )
                     await telemetry_recorder.emit_event(
                         "agent_step",

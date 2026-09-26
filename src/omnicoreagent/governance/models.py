@@ -44,6 +44,8 @@ class ReasonCode(str, Enum):
     MATCHED_ALLOW = "matched_allow"
     MATCHED_DENY = "matched_deny"
     MATCHED_ASK = "matched_ask"
+    # An ask a person answered: allowed by them, not by a rule.
+    APPROVED = "approved"
     UNKNOWN_CAPABILITY = "unknown_capability"
     UNKNOWN_TARGET = "unknown_target"
     POLICY_ERROR = "policy_error"

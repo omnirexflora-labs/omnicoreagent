@@ -514,8 +514,10 @@ async def test_tool_output_guardrail_scrubs_before_result_telemetry():
 
 @pytest.mark.asyncio
 async def test_governed_successful_tool_telemetry_redacts_result_args():
+    """Under the default capture; full capture records the model's calls
+    anyway and keeps them (tests/test_full_capture_evidence.py)."""
     store = InMemoryTelemetryStore()
-    recorder = TelemetryRecorder(store)
+    recorder = TelemetryRecorder(store, TelemetryConfig(capture="default"))
     await recorder.start_trace(
         trace_id="trace-governance-success",
         session_id="governed-success-telemetry",

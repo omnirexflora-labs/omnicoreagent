@@ -1149,7 +1149,7 @@ class OmniCoreAgent:
         """
         from omnicoreagent.core.budgets import METERS, BudgetScope
 
-        record = await self.get_run(run_id)
+        record = await self._run_record(run_id)
         if record is None:
             raise LookupError(f"No run {run_id}")
         budgets = self._build_run_budgets(run_id=run_id, session_id=record.get("session_id"))
@@ -1182,8 +1182,26 @@ class OmniCoreAgent:
         """A run's durable record, or None if it has none.
 
         The record is kept in the agent's memory store: status, step, usage,
-        trace IDs, and each tool call's state (arguments as a digest).
+        trace IDs, each tool call's state (arguments as a digest), and each
+        approval with the arguments of the call it is for.
         """
+        if not self._initialized:
+            await self.initialize()
+        record = await self._run_record(run_id)
+        if record is None:
+            return None
+        # Each approval with the call as the model made it: an approver in
+        # another process has only this record, not the run's result.
+        return {
+            **record,
+            "approvals": [
+                {**approval, "arguments": _public_approval(approval, record)["arguments"]}
+                for approval in record.get("approvals") or []
+            ],
+        }
+
+    async def _run_record(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """The run's record exactly as stored, for the runtime's own use."""
         if not self._initialized:
             await self.initialize()
         if not supports_run_state(self.memory_router):
@@ -1198,7 +1216,7 @@ class OmniCoreAgent:
         decided (see ``resolve_approval``), or one whose process stopped
         (its heartbeat is older than ``run_lease_seconds``). Completed tool
         calls never run again."""
-        record = await self.get_run(run_id)
+        record = await self._run_record(run_id)
         if record is None:
             raise LookupError(f"No run {run_id}")
         problem = _not_resumable(record, run_id)
@@ -1222,7 +1240,7 @@ class OmniCoreAgent:
 
         if not isinstance(message, str) or not message.strip():
             raise ValueError("The steering message is empty")
-        record = await self.get_run(run_id)
+        record = await self._run_record(run_id)
         if record is None:
             raise LookupError(f"No run {run_id}")
         if record["status"] not in {"running", "awaiting_approval", "interrupted"}:
@@ -1281,7 +1299,7 @@ class OmniCoreAgent:
             if key in seen:
                 continue
             seen.add(key)
-            run = await self.get_run(trace.run_id) if trace.run_id else None
+            run = await self._run_record(trace.run_id) if trace.run_id else None
             if run is not None:
                 if run.get("status") not in _FINISHED_RUN_STATUSES:
                     continue
@@ -1329,7 +1347,7 @@ class OmniCoreAgent:
 
         if not str(source or "").strip():
             raise ValueError("record_outcome needs a source: who reports this outcome")
-        record = await self.get_run(run_id)
+        record = await self._run_record(run_id)
         if record is None:
             raise LookupError(f"No run {run_id}")
         outcome = {
@@ -1391,7 +1409,7 @@ class OmniCoreAgent:
 
         if status not in {"cancelled", "failed", "timeout"}:
             raise ValueError("status must be cancelled, failed or timeout")
-        record = await self.get_run(run_id)
+        record = await self._run_record(run_id)
         if record is None or record.get("status") in _ENDED_RUN_STATUSES:
             return record
         spent = None
@@ -1416,7 +1434,7 @@ class OmniCoreAgent:
         ``interrupted`` and ``resume`` continues it."""
         from omnicoreagent.core.runs import update_from_outside
 
-        record = await self.get_run(run_id)
+        record = await self._run_record(run_id)
         if record is None:
             raise LookupError(f"No run {run_id}")
         if record["status"] != "running":
@@ -1530,7 +1548,7 @@ class OmniCoreAgent:
             await self.initialize()
         if not supports_run_state(self.memory_router):
             raise LookupError(f"No run {run_id}: the memory store keeps no run state")
-        record = await self.get_run(run_id)
+        record = await self._run_record(run_id)
         if record is None:
             raise LookupError(f"No run {run_id}")
         pending = [
@@ -2242,7 +2260,7 @@ class OmniCoreAgent:
         pause, resume, recovery, or new attempt is a segment), with totals
         summed over the segments. The run's saved conversation is not
         included."""
-        record = await self.get_run(run_id)
+        record = await self._run_record(run_id)
         if record is None:
             return None
         segments = []
@@ -2256,10 +2274,23 @@ class OmniCoreAgent:
                 }
             )
         totals: Dict[str, Any] = {}
+        including: Dict[str, Any] = {}
         outcomes: Dict[str, Any] = {}
         for segment in segments:
             trajectory = segment["trajectory"] or {}
-            totals = _add_totals(totals, trajectory.get("totals") or {})
+            segment_totals = trajectory.get("totals") or {}
+            totals = _add_totals(totals, segment_totals)
+            # Only a finished segment carries its children's totals; any
+            # other counts its own, so no segment is left out of the sum.
+            including = _add_totals(
+                including,
+                segment_totals.get("including_subagents")
+                or {
+                    "tokens": segment_totals.get("tokens") or {},
+                    "estimated_cost_usd": segment_totals.get("estimated_cost_usd") or 0.0,
+                    "cost_complete": segment_totals.get("cost_complete", True),
+                },
+            )
             calls = [c for step in trajectory.get("steps") or [] for c in step["tool_calls"]]
             for call in [*calls, *(trajectory.get("tool_calls_outside_steps") or [])]:
                 # A call waiting for approval appears again when it runs on
@@ -2271,6 +2302,7 @@ class OmniCoreAgent:
                 if outcome is not None:
                     by_outcome[outcome] = by_outcome.get(outcome, 0) + 1
             totals["tool_calls"] = {"total": len(outcomes), "by_outcome": by_outcome}
+            totals["including_subagents"] = including
         return {
             "run_id": run_id,
             "session_id": record.get("session_id"),
@@ -2563,6 +2595,24 @@ def _training_steps(trajectory: Dict[str, Any]) -> List[Dict[str, Any]]:
     """The agent turns of one trace segment, each with the policy that served it."""
     steps = []
     for step in trajectory.get("steps") or []:
+        if step.get("resumed") and not step.get("model_calls"):
+            # The calls a person approved, run on resume: no model turn of
+            # their own, but what they did is part of the run.
+            steps.append(
+                {
+                    "step": step.get("step"),
+                    "resumed": True,
+                    "_policy_version": None,
+                    "messages": None,
+                    "tools": None,
+                    "response": None,
+                    "token_details": None,
+                    "finish_reason": None,
+                    "tokens": None,
+                    "tool_calls": _training_tool_calls(step),
+                }
+            )
+            continue
         for call in step.get("model_calls") or []:
             request = call.get("request") or {}
             if call.get("purpose", "agent_turn") != "agent_turn" or "messages" not in request:
@@ -2579,17 +2629,21 @@ def _training_steps(trajectory: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "token_details": response.get("token_details"),
                     "finish_reason": facts.get("finish_reason"),
                     "tokens": facts.get("tokens"),
-                    "tool_calls": [
-                        {
-                            "tool_call_id": tool.get("tool_call_id"),
-                            "name": tool.get("tool_name"),
-                            "arguments": tool.get("raw_arguments"),
-                            "outcome": tool.get("outcome"),
-                            "observation": ((tool.get("observation") or {}).get("content")),
-                            "error": tool.get("error"),
-                        }
-                        for tool in step.get("tool_calls") or []
-                    ],
+                    "tool_calls": _training_tool_calls(step),
                 }
             )
     return steps
+
+
+def _training_tool_calls(step: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "tool_call_id": tool.get("tool_call_id"),
+            "name": tool.get("tool_name"),
+            "arguments": tool.get("raw_arguments"),
+            "outcome": tool.get("outcome"),
+            "observation": ((tool.get("observation") or {}).get("content")),
+            "error": tool.get("error"),
+        }
+        for tool in step.get("tool_calls") or []
+    ]

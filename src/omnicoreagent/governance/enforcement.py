@@ -383,8 +383,9 @@ class GovernanceEngine:
             )
         decision.effect = PolicyEffect.ALLOW
         decision.approval_id = result.approval_id
-        decision.reason_code = ReasonCode.MATCHED_ALLOW
+        decision.reason_code = ReasonCode.APPROVED
         decision.reason = result.reason or "Approved by resolver."
+        decision.metadata["approved_by"] = result.resolved_by
         if emit_decision:
             await emit_policy_decision(
                 self.telemetry_recorder,
