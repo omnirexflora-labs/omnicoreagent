@@ -494,7 +494,7 @@ async def test_sandbox_execution_service_authorizes_manifest_scope_before_create
         allow_test_sandbox_runtime=True,
     )
 
-    with pytest.raises(UnknownCapabilityError, match="Unknown capability"):
+    with pytest.raises(UnknownCapabilityError, match="no rule matches"):
         await SandboxExecutionService(engine).execute(
             {
                 "command": ["ok"],

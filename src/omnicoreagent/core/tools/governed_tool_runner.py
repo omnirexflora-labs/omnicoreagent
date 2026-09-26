@@ -125,10 +125,13 @@ class GovernedToolRunner:
                         single_tool=single_tool,
                         governance_error=governance_error,
                     )
-                    # An ask waits for a person; it is not a refusal, and
-                    # the trace says which it was. Arguments that could not
-                    # be read were rejected, not refused by a rule.
-                    waiting = isinstance(governance_error, ApprovalRequiredError)
+                    # An ask waits for a person when one was recorded for
+                    # this call; with approval_mode "fail" nobody is asked,
+                    # and it is a refusal. Arguments that could not be read
+                    # were rejected, not refused by a rule.
+                    waiting = isinstance(
+                        governance_error, ApprovalRequiredError
+                    ) and waiting_for_approval(single_tool.tool_call_id)
                     unreadable = isinstance(governance_error, ToolArgumentsInvalid)
                     denied_event = await telemetry_recorder.emit_event(
                         telemetry_shape["error_event"],
@@ -281,6 +284,7 @@ class GovernedToolRunner:
                 phase = (
                     "approval"
                     if isinstance(exc, ApprovalRequiredError)
+                    and waiting_for_approval(single_tool.tool_call_id)
                     else "authorization"
                     if isinstance(exc, GovernanceError)
                     else "exception"
@@ -349,6 +353,9 @@ class GovernedToolRunner:
             "data": None,
             "message": (
                 f"Waiting for a person's approval: {governance_error}"
+                if isinstance(governance_error, ApprovalRequiredError)
+                and waiting_for_approval(single_tool.tool_call_id)
+                else f"Refused: this call needs a person's approval and none can be asked: {governance_error}"
                 if isinstance(governance_error, ApprovalRequiredError)
                 else f"Invalid arguments for {single_tool.tool_name}: {governance_error}"
                 if isinstance(governance_error, ToolArgumentsInvalid)

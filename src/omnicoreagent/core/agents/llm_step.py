@@ -461,6 +461,9 @@ class AgentLlmStepRunner:
                     messages,
                     max_output_tokens=_max_output_tokens(llm_connection),
                 )
+                # Tokens are counted once the call answers; a token budget
+                # already spent stops the call before it is made.
+                await budgets.check_room("model_tokens", estimate.input_tokens)
                 if estimate.cost_usd is not None:
                     # The hold and the call count go to the store together.
                     held = await budgets.reserve(
@@ -640,14 +643,16 @@ class AgentLlmStepRunner:
                 )
         total_tokens = int(tokens.get("total") or 0)
         counted = [("model_tokens", total_tokens)] if total_tokens else []
+        # The call was made: what it used is recorded even past a limit (the
+        # next call is what a spent budget stops).
         if cost is None:
             if counted:
-                await budgets.charge_many(counted)
+                await budgets.record_many(counted)
         elif held:
             # Settling the hold and counting the tokens go to the store together.
             await budgets.commit(held, actual=float(cost), also=counted)
         else:
-            await budgets.charge_many([("model_cost_usd", float(cost)), *counted])
+            await budgets.record_many([("model_cost_usd", float(cost)), *counted])
 
     @classmethod
     def _model_call_facts(

@@ -437,7 +437,7 @@ def test_yaml_policy_loading_is_not_enabled_in_phase_one(tmp_path):
     path = tmp_path / "policy.yaml"
     path.write_text("name: yaml-policy\nrules: {}\n", encoding="utf-8")
 
-    with pytest.raises(PolicyLoadError, match="YAML policy loading is not enabled"):
+    with pytest.raises(PolicyLoadError, match="YAML policies are not supported"):
         load_policy_file(path, project_root=tmp_path)
 
 
@@ -538,7 +538,7 @@ async def test_governance_engine_denies_unknown_capability_with_stable_error():
         await engine.authorize(AuthorityRequest(capability="unknown.call"))
 
     assert exc.value.code == "unknown_capability"
-    assert exc.value.message == "Unknown capability denied by strict policy: no rule covers unknown.call."
+    assert exc.value.message == "Denied by strict policy: no rule matches this unknown.call request."
     assert exc.value.metadata["reason_code"] == "unknown_capability"
 
 

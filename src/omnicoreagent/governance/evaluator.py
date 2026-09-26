@@ -103,7 +103,9 @@ class PolicyEvaluator:
             request,
             PolicyEffect.DENY,
             ReasonCode.UNKNOWN_CAPABILITY,
-            f"Unknown capability denied by strict policy: no rule covers {request.capability}.",
+            # Also when a rule names this capability for another target: say
+            # the request matched no rule, not that the capability is unknown.
+            f"Denied by strict policy: no rule matches this {request.capability} request.",
         )
 
 

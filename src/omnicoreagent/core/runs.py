@@ -468,7 +468,15 @@ def not_resumable(record: dict[str, Any], run_id: str) -> str | None:
     """
     status = record["status"]
     if status == "awaiting_approval":
-        pending = [a["approval_id"] for a in record.get("approvals", []) if a["status"] == "pending"]
+        # One past its expiry holds nothing: the resume records it expired
+        # and asks again.
+        now = datetime.now(timezone.utc)
+        pending = [
+            a["approval_id"]
+            for a in record.get("approvals", [])
+            if a["status"] == "pending"
+            and not (a.get("expires_at") and datetime.fromisoformat(a["expires_at"]) < now)
+        ]
         if pending:
             return f"Run {run_id} is still waiting for approval: {', '.join(pending)}"
         return None

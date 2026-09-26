@@ -165,7 +165,14 @@ async def decide(
         raise ValueError(f"Approval {approval_id} is already {approval['status']}")
     expires_at = _parse(approval.get("expires_at"))
     if expires_at is not None and utc_now() > expires_at:
-        raise ValueError(f"Approval {approval_id} expired at {approval['expires_at']}")
+        # Recorded, so the run is no longer held by it: a resume asks again.
+        approval.update(status="expired", decided_at=utc_now().isoformat())
+        version = record.pop("version")
+        await store.save_run_state(record, expected_version=version)
+        raise ValueError(
+            f"Approval {approval_id} expired at {approval['expires_at']}; "
+            f"resume the run to ask again"
+        )
     now = utc_now().isoformat()
     approval.update(
         status="approved" if decision == "approve" else "denied",
