@@ -1,8 +1,9 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/omnirexflora-labs/omnicoreagent/main/assets/IMG_5292.jpeg" alt="OmniCoreAgent" width="200"/>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/omnirexflora-labs/omnicoreagent/main/assets/brand/omnicoreagent-logo-dark.svg">
+    <img src="https://raw.githubusercontent.com/omnirexflora-labs/omnicoreagent/main/assets/brand/omnicoreagent-logo-light.svg" alt="OmniCoreAgent" width="420"/>
+  </picture>
 </p>
-
-<h1 align="center">OmniCoreAgent</h1>
 
 <p align="center">
   <strong>The open Python agent runtime and harness, with an SDK, for AI applications that have to hold up in production.</strong><br />

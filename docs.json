@@ -3,11 +3,15 @@
     "theme": "maple",
     "name": "OmniCoreAgent",
     "description": "The open Python agent runtime and harness, with an SDK, for production AI applications",
-    "favicon": "/docs/assets/logo_light.svg",
+    "favicon": "/assets/brand/omnicoreagent-mark.svg",
+    "logo": {
+        "light": "/assets/brand/omnicoreagent-logo-light.svg",
+        "dark": "/assets/brand/omnicoreagent-logo-dark.svg"
+    },
     "colors": {
-        "primary": "#0D9373",
-        "light": "#07C983",
-        "dark": "#0D9373"
+        "primary": "#8A45E6",
+        "light": "#A673F5",
+        "dark": "#7A36D6"
     },
     "navbar": {
         "links": [

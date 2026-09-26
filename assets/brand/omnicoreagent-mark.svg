@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="OmniCoreAgent">
+<defs><radialGradient id="core" cx="45%" cy="40%" r="60%"><stop offset="0" stop-color="#A9C4FF"/><stop offset="1" stop-color="#3E63DD"/></radialGradient></defs>
+<path d="M9.45 23.79 A24 24 0 0 1 55.64 36.17" fill="none" stroke="#9D5CF0" stroke-width="3.5" stroke-linecap="round"/>
+<path d="M54.55 40.21 A24 24 0 0 1 8.36 27.83" fill="none" stroke="#4FE0D6" stroke-width="3.5" stroke-linecap="round"/>
+<path d="M22.42 5.69 A28 28 0 0 1 56.25 18" fill="none" stroke="#4FE0D6" stroke-width="1.8" stroke-linecap="round"/>
+<path d="M41.58 58.31 A28 28 0 0 1 7.75 46" fill="none" stroke="#9D5CF0" stroke-width="1.8" stroke-linecap="round"/>
+<circle cx="55.64" cy="36.17" r="3.2" fill="#9D5CF0"/><circle cx="8.36" cy="27.83" r="3.2" fill="#4FE0D6"/>
+<circle cx="32" cy="32" r="12" fill="url(#core)"/>
+<path d="M22.5 32 h4.5 l2 -5 l3 10 l3 -8 l1.8 3 h4.7" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
