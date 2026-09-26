@@ -262,6 +262,14 @@ async def list_telemetry_traces(trace_filter: TraceFilter | None = None, *, trac
 
 _No description in the code yet._
 
+### `prune_runs`
+
+```python
+async def prune_runs() -> Dict[str, Any]: ...
+```
+
+Remove finished run records older than `run_retention_days` now (30 by default; `None` keeps every record). A run still waiting for a person or a resume is never removed. Returns what was removed.
+
 ### `prune_telemetry`
 
 ```python
@@ -356,7 +364,7 @@ Switch to a different memory store type.
 def telemetry_retention_status() -> Dict[str, Any]: ...
 ```
 
-Report the retention policy and the most recent cleanup results.
+Report the retention policy and the most recent cleanup results: traces, payloads, and run records (`runs`).
 
 ### `training_records`
 

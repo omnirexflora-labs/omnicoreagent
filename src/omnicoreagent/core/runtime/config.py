@@ -233,6 +233,11 @@ class AgentConfig:
     # A live run refreshes its heartbeat within this many seconds; a run whose
     # heartbeat is older can be recovered by another process.
     run_lease_seconds: int = 60
+    # Finished run records (completed, failed, blocked, cancelled, timeout)
+    # are removed from the memory store this many days after the run
+    # started; None keeps every record forever. A run still waiting for a
+    # person or a resume is never removed.
+    run_retention_days: int | None = 30
     # Code mode: a run_code tool that runs Python in Monty (omnicoreagent[codemode]).
     code_mode: dict[str, Any] = field(default_factory=dict)
     # A project's own instructions for the agent (AGENTS.md), by path.
@@ -336,6 +341,12 @@ class AgentConfig:
             self.workspace_config = resolve_workspace_config(self.workspace_config)
 
         _validate_range("max_steps", self.max_steps, minimum=1, maximum=1000)
+        if self.run_retention_days is not None and (
+            isinstance(self.run_retention_days, bool)
+            or not isinstance(self.run_retention_days, int)
+            or self.run_retention_days < 1
+        ):
+            raise ValueError("run_retention_days must be a whole number of days (1 or more), or None to keep every run")
         _validate_range("completion_review", self.completion_review, minimum=0, maximum=3)
         _validate_range(
             "tool_call_timeout", self.tool_call_timeout, minimum=2, maximum=1000

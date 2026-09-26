@@ -9,6 +9,17 @@ icon: 'clock-rotate-left'
 Every release, with its notes, is also on
 [GitHub Releases](https://github.com/omnirexflora-labs/omnicoreagent/releases).
 
+## Unreleased
+
+- **Run-record retention.** Finished run records are removed from the memory
+  store after `run_retention_days` (30 by default; `None` keeps every record
+  forever). Runs still waiting for a person are never removed.
+  `agent.prune_runs()`, and a `runs` section in the retention status.
+  [Durable runs](/docs/core-concepts/durable-runs)
+- **Fixed:** a tool parameter named like a secret (`api_key`) no longer has
+  its schema redacted, which marked the run's evidence partial.
+- **Docs:** [how OmniCoreAgent compares](/docs/comparison), each cell sourced.
+
 ## 0.4.0
 
 *September 2026 · Python 3.12+*

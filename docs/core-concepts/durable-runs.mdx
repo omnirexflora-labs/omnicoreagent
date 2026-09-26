@@ -94,6 +94,28 @@ Over OmniServe, the same flow is `POST /run/sync` (or `/run`), then
 `POST /runs/{run_id}/approvals/{approval_id}` and `POST /runs/{run_id}/resume`
 (see [OmniServe](/docs/how-to-guides/omniserve)).
 
+## How long run records are kept
+
+**Your choice.** `agent_config["run_retention_days"]` sets it:
+
+```python
+agent_config = {"run_retention_days": None}   # keep every run record forever
+agent_config = {"run_retention_days": 365}    # a year
+# unset: 30 days
+```
+
+A finished run's record (`completed`, `failed`, `blocked`, `cancelled`,
+`timeout`) is removed from the memory store that many days after the run
+started. A run still waiting for a person or a resume is never removed,
+however old. The window is applied once when the agent starts its first run;
+`await agent.prune_runs()` applies it now and returns what it removed, and
+`agent.telemetry_retention_status()["runs"]` reports the last cleanup.
+
+Only the memory store's records are removed. Traces have their own retention
+(`telemetry_config["retention_days"]`, 7 by default), and nothing you exported
+elsewhere is touched. An outcome recorded for a run whose record is gone
+raises `LookupError`: keep records as long as outcomes can arrive.
+
 ## Recovering a run after a crash
 
 A live run refreshes a heartbeat on its record. If its process dies (a crash,

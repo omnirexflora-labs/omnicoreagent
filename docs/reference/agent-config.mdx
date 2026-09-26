@@ -26,6 +26,7 @@ Everything `OmniCoreAgent(agent_config={...})` takes. Each description is the co
 | `completion_review` | `int` | `0` | How many times a final answer is reviewed before it is accepted: the model is asked for each requirement and the check that showed it, and the run goes on in the same trace. Off by default. |
 | `skill_script_env` | `list[str]` | `[]` | Environment variables host skill scripts receive beyond the minimal set (PATH, HOME, locale, TMPDIR, TERM); secrets are not passed by default. |
 | `run_lease_seconds` | `int` | `60` | A live run refreshes its heartbeat within this many seconds; a run whose heartbeat is older can be recovered by another process. |
+| `run_retention_days` | `int \| None` | `30` | Finished run records (completed, failed, blocked, cancelled, timeout) are removed from the memory store this many days after the run started; None keeps every record forever. A run still waiting for a person or a resume is never removed. |
 | `code_mode` | `dict[str, Any]` | `{}` | Code mode: a run_code tool that runs Python in Monty (omnicoreagent[codemode]). |
 | `agents_md` | `dict[str, Any]` | `{}` | A project's own instructions for the agent (AGENTS.md), by path. |
 | `memory_config` | `dict[str, Any]` | see below | How much of a session's history a run is given: a sliding window of messages or tokens, and optional summaries of what falls out of it. |

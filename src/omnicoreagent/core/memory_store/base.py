@@ -73,6 +73,13 @@ class AbstractMemoryStore(ABC):
 
         raise RunStateUnsupported(type(self).__name__)
 
+    async def delete_finished_run_states(self, *, before: str, statuses: tuple[str, ...]) -> int:
+        """Remove runs in one of ``statuses`` that started before ``before``
+        (an ISO 8601 UTC time), from every listing too. Returns how many."""
+        from omnicoreagent.core.runs import RunStateUnsupported
+
+        raise RunStateUnsupported(type(self).__name__)
+
     # --- budgets ---------------------------------------------------------
 
     async def delete_budget_state(self, key: str) -> None:

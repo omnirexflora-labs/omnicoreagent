@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 import uuid
 
@@ -194,6 +194,9 @@ class OmniCoreAgent:
         self._telemetry_retention_started = False
         self._telemetry_retention_last: dict[str, Any] | None = None
         self._telemetry_retention_automatic_runs = 0
+        self._run_retention_started = False
+        self._run_retention_last: Dict[str, Any] | None = None
+        self._run_retention_automatic_runs = 0
         # A caller-chosen store is never silently replaced by a background
         # manager's store; a derived default may be.
         self._telemetry_store_explicit = any(
@@ -692,6 +695,10 @@ class OmniCoreAgent:
             # its first trace, so disk use stays bounded without a manual call.
             self._telemetry_retention_started = True
             await self._apply_telemetry_retention(trigger="automatic")
+        if not self._run_retention_started:
+            # Finished run records past their window go the same way, once.
+            self._run_retention_started = True
+            await self._apply_run_retention(trigger="automatic")
 
         run_id = run_id or self.generate_run_id()
         trace_context = None
@@ -1065,8 +1072,48 @@ class OmniCoreAgent:
         self._ensure_telemetry()
         return await self._apply_telemetry_retention(trigger="explicit")
 
+    async def prune_runs(self) -> Dict[str, Any]:
+        """Remove finished run records older than ``run_retention_days`` now
+        (30 by default; ``None`` keeps every record). A run still waiting for
+        a person or a resume is never removed. Returns what was removed."""
+        return await self._apply_run_retention(trigger="explicit")
+
+    async def _apply_run_retention(self, *, trigger: str) -> Dict[str, Any]:
+        days = self.agent_config.get("run_retention_days", 30)
+        summary: Dict[str, Any] = {
+            "trigger": trigger,
+            "retention_days": days,
+            "runs_removed": 0,
+            "error": None,
+        }
+        if days is not None:
+            before = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            summary["before"] = before
+            if not self.memory_router:
+                self.memory_router = construction.default_memory_router()
+            try:
+                summary["runs_removed"] = await self.memory_router.delete_finished_run_states(
+                    before=before, statuses=tuple(sorted(_PRUNABLE_RUN_STATUSES))
+                )
+            except RunStateUnsupported:
+                summary["error"] = "This memory store keeps no run records"
+            except Exception as exc:
+                # Housekeeping never fails a run; the failure stays visible.
+                summary["error"] = f"{exc.__class__.__name__}: {exc}"
+                runtime_logger().warning(f"Run retention failed: {summary['error']}")
+        summary["at"] = datetime.now(timezone.utc).isoformat()
+        self._run_retention_last = summary
+        if trigger == "automatic":
+            self._run_retention_automatic_runs += 1
+        if summary["runs_removed"]:
+            runtime_logger().info(
+                f"Run retention ({trigger}) removed {summary['runs_removed']} finished run record(s)"
+            )
+        return summary
+
     def telemetry_retention_status(self) -> Dict[str, Any]:
-        """Report the retention policy and the most recent cleanup results."""
+        """Report the retention policy and the most recent cleanup results:
+        traces, payloads, and run records (``runs``)."""
         self._ensure_telemetry()
         trace_status = getattr(self.telemetry_store, "retention_status", None)
         payload_status = getattr(self.telemetry_payload_store, "retention_status", None)
@@ -1075,6 +1122,11 @@ class OmniCoreAgent:
             "payload_store": payload_status() if callable(payload_status) else None,
             "last_cleanup": self._telemetry_retention_last,
             "automatic_runs": self._telemetry_retention_automatic_runs,
+            "runs": {
+                "retention_days": self.agent_config.get("run_retention_days", 30),
+                "last_cleanup": self._run_retention_last,
+                "automatic_runs": self._run_retention_automatic_runs,
+            },
         }
 
     async def _apply_telemetry_retention(self, *, trigger: str) -> Dict[str, Any]:
@@ -2577,6 +2629,9 @@ def _add_totals(total: Any, segment: Any) -> Any:
 # A run in one of these is over; running, awaiting_approval and interrupted
 # runs continue, and are not yet anything to learn from.
 _FINISHED_RUN_STATUSES = frozenset({"completed", "blocked", "failed", "cancelled"})
+# What run retention may remove: every status a run ends in, including a run
+# ended from outside as timed out. Waiting and running runs are never listed.
+_PRUNABLE_RUN_STATUSES = frozenset({*_FINISHED_RUN_STATUSES, "timeout"})
 _UNFINISHED_TRACE_STATUSES = frozenset({"running", "suspended"})
 
 
