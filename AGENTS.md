@@ -1,8 +1,8 @@
 # AGENTS.md — a map of OmniCoreAgent for coding agents
 
-OmniCoreAgent is an open Python runtime for AI agents: the loop, tools, memory
-and workspace, plus the policy, sandbox, durable run record, budgets and the
-evidence of every run. This file tells an agent where things are and how to
+OmniCoreAgent is an open Python agent runtime and harness, used through a
+Python SDK: the loop, tools, memory and workspace, plus the policy, sandbox,
+durable run record, budgets and the evidence of every run. This file tells an agent where things are and how to
 work here. People are welcome too; the [README](./README.md) is the tour.
 
 ## Answer a question from the right place
