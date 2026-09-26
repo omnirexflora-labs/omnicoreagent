@@ -173,9 +173,12 @@ A **budget** caps what a run, a session, an agent or the whole application may
 spend. Before each model call, the runtime prices the call — the input it
 counts, and the output at `model_config["max_tokens"]` — and holds that
 amount. If the hold does not fit, the run waits for a person instead of
-making the call. Set `max_tokens` for a hold that is a true maximum: without
-it, 4,096 output tokens are assumed and a longer answer settles above the
-hold. The real cost is recorded either way. Here, a limit far too small:
+making the call. Without `max_tokens`, a budgeted call is priced at 4,096
+output tokens and held to them: an answer that reaches the limit ends the run
+with `termination_reason` `length`, so set `max_tokens` when answers are
+long. A provider that counts input tokens differently can still settle a
+little above the hold; the real cost is recorded either way. Here, a limit
+far too small:
 
 ```python
 agent = OmniCoreAgent(

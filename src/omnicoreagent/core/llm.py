@@ -67,6 +67,13 @@ def _notify_unsupported(name: str, error: Exception) -> None:
         )
 
 
+# The most output tokens a model call may produce when nothing in
+# model_config sets it: a budget prices a call's output at this ceiling, so
+# the call is held to it too, or a longer answer would settle above its hold.
+OUTPUT_TOKEN_CEILING: ContextVar[int | None] = ContextVar(
+    "omnicoreagent_output_token_ceiling", default=None
+)
+
 # Receives one record per retried provider failure, so telemetry can show
 # every attempt of a model call rather than only the final outcome.
 MODEL_RETRY_OBSERVER: ContextVar[Callable[[dict[str, Any]], None] | None] = ContextVar(
@@ -535,6 +542,14 @@ class LLMConnection:
 
         if tools:
             params["tools"] = tools
+
+        ceiling = OUTPUT_TOKEN_CEILING.get()
+        if (
+            ceiling is not None
+            and "max_tokens" not in params
+            and "max_tokens" not in self._unsupported_params
+        ):
+            params["max_tokens"] = ceiling
 
         if self.llm_config["provider"].lower() == "openai" and "max_tokens" in params:
             params["max_completion_tokens"] = params.pop("max_tokens")

@@ -47,7 +47,8 @@ no named slot are listed in `other_events` where they occurred, so nothing is
 hidden. Payloads appear only where the capture policy recorded them; each is
 paired with its capture state. OmniServe serves the same structure at
 `GET /telemetry/traces/{trace_id}/trajectory`, and
-`GET /telemetry/runs/{run_id}/trajectory` for a run's latest segment.
+`GET /telemetry/runs/{run_id}/trajectory` for a run's latest segment;
+`GET /runs/{run_id}/trajectory` serves the whole run (below).
 
 ### Run header
 
@@ -206,7 +207,8 @@ for call in story["tool_calls"]:
 print(story["totals"])
 ```
 
-Each segment carries its own full trajectory (`segment["trajectory"]`). The
+Each segment carries its own full trajectory (`segment["trajectory"]`).
+OmniServe serves it at `GET /runs/{run_id}/trajectory`. The
 [tour](/docs/getting-started/tour) shows a run that paused for a refund
 approval and resumed: two segments, one story.
 
