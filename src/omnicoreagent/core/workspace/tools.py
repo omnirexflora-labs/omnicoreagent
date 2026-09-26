@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.workspace.base import AbstractWorkspaceFilesBackend
 from omnicoreagent.core.workspace.config import WorkspaceConfig
+from omnicoreagent.core.workspace.files import FileOpFailed
 from omnicoreagent.core.workspace.factory import create_workspace_files_backend
 from omnicoreagent.core.privacy import PrivacyFilter
 
@@ -139,6 +141,7 @@ def _register_workspace_tool(
             "workspace files for this agent."
         )
 
+    function = _reporting_failures(function)
     setattr(function, WORKSPACE_TOOL_MARKER, True)
     registry.register_tool(
         name=name,
@@ -148,6 +151,20 @@ def _register_workspace_tool(
     registered = registry.get_tool(name)
     if registered is not None:
         registry.mark_internal_tool_provider(name, "workspace")
+
+
+def _reporting_failures(function: Callable[..., Any]) -> Callable[..., Any]:
+    """A file operation that failed (not found, already exists...) is the
+    tool's error, with the same text, not a success whose data says so."""
+
+    @functools.wraps(function)
+    def reported(*args: Any, **kwargs: Any) -> Any:
+        result = function(*args, **kwargs)
+        if isinstance(result, FileOpFailed):
+            return {"status": "error", "message": str(result)}
+        return result
+
+    return reported
 
 
 def build_tool_registry_workspace_files(

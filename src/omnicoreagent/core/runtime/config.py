@@ -322,7 +322,9 @@ class AgentConfig:
             _default_privacy_config(), self.privacy_config
         )
         PrivacyConfig(**self.privacy_config)
-        self.memory_config = self.memory_config or _default_memory_config()
+        # A partial memory_config keeps the other defaults (a bare
+        # {"mode": ...} failed later with KeyError: 'value').
+        self.memory_config = _merge_defaults(_default_memory_config(), self.memory_config)
         self.context_management = _merge_defaults(
             _default_context_management(), self.context_management
         )

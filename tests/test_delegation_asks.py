@@ -81,3 +81,33 @@ async def test_the_delegation_tools_are_listed_with_the_others():
     lead = OmniCoreAgent(name="lead", system_instruction="Lead.", model_config=MODEL, sub_agents=[child], agent_config=CONFIG)
     names = [tool["name"] for tool in await lead.list_all_available_tools()]
     assert "delegate_researcher" in names
+
+
+@pytest.mark.asyncio
+async def test_a_delegate_tool_offers_the_model_only_the_task():
+    """The delegate_<name> schema came from the child's run() signature, so
+    the model was offered tags, provenance and the private _resume, and
+    filled tags and provenance in on its own (docs pass, 2026-09-27)."""
+    child = OmniCoreAgent(name="researcher", system_instruction="Research.", model_config=MODEL, agent_config=CONFIG)
+    lead = OmniCoreAgent(name="lead", system_instruction="Lead.", model_config=MODEL, sub_agents=[child], agent_config=CONFIG)
+    (tool,) = [t for t in await lead.list_all_available_tools() if t["name"] == "delegate_researcher"]
+    assert set(tool["inputSchema"]["properties"]) == {"query"}
+    assert tool["inputSchema"]["required"] == ["query"]
+
+
+@pytest.mark.asyncio
+async def test_the_latest_trace_of_a_session_is_this_agents_own(tmp_path, monkeypatch):
+    """After a delegation, get_latest_trace(session) returned the child's
+    trace: the child shares the session (Build stranger test)."""
+    monkeypatch.chdir(tmp_path)
+    child = OmniCoreAgent(name="quizzer", system_instruction="Quiz.", model_config=MODEL, agent_config=CONFIG)
+    await child.initialize()
+    child.llm_connection = RecordingModel([], "three questions")
+    lead = OmniCoreAgent(name="buddy", system_instruction="Lead.", model_config=MODEL, sub_agents=[child], agent_config=CONFIG)
+    await lead.initialize()
+    lead.llm_connection = RecordingModel([("d1", "delegate_quizzer", '{"query": "quiz"}')], "done")
+
+    result = await lead.run("quiz me", session_id="study")
+    latest = await lead.get_latest_trace("study")
+
+    assert latest["trace_id"] == result["trace_id"]

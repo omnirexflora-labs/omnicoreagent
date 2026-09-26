@@ -1984,13 +1984,9 @@ class OmniCoreAgent:
         tools = harness_tools.available_tools(self.mcp_client, runtime_local_tools)
         for child in self.sub_agents or []:
             # The same definition the model is offered (native_catalog).
-            from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
+            from omnicoreagent.core.tools.native_catalog import delegate_tool_schema
 
-            schema = ToolRegistry()._infer_schema(child.run)
-            runtime_parameters = {"session_id", "run_id", "on_event"}
-            for parameter in runtime_parameters:
-                schema["properties"].pop(parameter, None)
-            schema["required"] = [n for n in schema["required"] if n not in runtime_parameters]
+            schema = delegate_tool_schema(child)
             tools.append(
                 {
                     "name": f"delegate_{child.name}",
@@ -2061,8 +2057,11 @@ class OmniCoreAgent:
         *,
         normalize: bool = False,
     ) -> Dict[str, Any] | None:
+        """This agent's latest trace in a session. A sub-agent shares its
+        lead's session; its traces are the lead's trace family, not this."""
         traces = await self.list_telemetry_traces(
             session_id=session_id,
+            agent_id=self.name,
             normalize=normalize,
         )
         return traces[-1] if traces else None

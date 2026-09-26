@@ -38,6 +38,26 @@ ALWAYS_VISIBLE_TOOL_NAMES = frozenset(
 )
 
 
+# What the runtime passes to a child's run() itself, never the model: the
+# delegate tool offers the task and nothing else.
+_RUNTIME_RUN_PARAMETERS = frozenset({"session_id", "run_id", "on_event", "tags", "provenance"})
+
+
+def delegate_tool_schema(agent: Any) -> dict:
+    """The input schema of a ``delegate_<name>`` tool: the child's ``run()``
+    parameters the model may fill, without the runtime's own or private ones."""
+    schema = ToolRegistry()._infer_schema(agent.run)
+    hidden = {
+        name
+        for name in schema["properties"]
+        if name in _RUNTIME_RUN_PARAMETERS or name.startswith("_")
+    }
+    for name in hidden:
+        schema["properties"].pop(name, None)
+    schema["required"] = [name for name in schema["required"] if name not in hidden]
+    return schema
+
+
 @dataclass(frozen=True)
 class ToolBinding:
     exposed_name: str
@@ -109,13 +129,7 @@ class NativeToolCatalog:
                 candidates.append((definition, "mcp", server, None))
                 idempotent[("mcp", server, definition["name"])] = _mcp_idempotent(tool)
         for agent in sub_agents or []:
-            schema = ToolRegistry()._infer_schema(agent.run)
-            runtime_parameters = {"session_id", "run_id", "on_event"}
-            for parameter in runtime_parameters:
-                schema["properties"].pop(parameter, None)
-            schema["required"] = [
-                name for name in schema["required"] if name not in runtime_parameters
-            ]
+            schema = delegate_tool_schema(agent)
             candidates.append(
                 (
                     {

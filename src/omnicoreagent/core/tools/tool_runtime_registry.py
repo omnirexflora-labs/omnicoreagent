@@ -104,7 +104,12 @@ class ToolRuntimeRegistry:
         return self.workspace
 
     async def prepare_tools(self, local_tools: Any = None):
-        registry = local_tools
+        # This agent's tools (files, artifacts, skills, execute, run_code) are
+        # bound to its own workspace: they go on its own copy of your
+        # registry, never on the registry itself, which other agents may
+        # share (a child's run rebound a lead's file tools to the child's
+        # workspace).
+        registry = local_tools.copy() if callable(getattr(local_tools, "copy", None)) else local_tools
         needs_internal_registry = (
             self.enable_advanced_tool_use
             or self.enable_subagents

@@ -104,8 +104,12 @@ async def test_a_program_pauses_for_approval_and_continues_where_it_stopped():
     assert paused["status"] == "awaiting_approval"
     (approval,) = paused["approvals"]
     assert approval["tool_name"] == "refund" and approval["tool_call_id"].startswith("k1.")
+    # Which order: a program's call is not in the conversation, and its
+    # approval carried no arguments (docs pass, 2026-09-27).
+    assert approval["arguments"] == {"order": "o-1"}
     assert ledger == ["price:A"], "the program stopped at the call that needs approval"
     record = await agent.get_run("run_cm")
+    assert record["approvals"][0]["arguments"] == {"order": "o-1"}
     assert record["code_programs"]["k1"]["paused_call_id"] == approval["tool_call_id"]
 
     await agent.resolve_approval("run_cm", approval["approval_id"], decision="approve", approver="alice")
