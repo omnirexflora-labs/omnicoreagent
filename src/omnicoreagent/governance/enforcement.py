@@ -386,6 +386,11 @@ class GovernanceEngine:
         decision.reason_code = ReasonCode.APPROVED
         decision.reason = result.reason or "Approved by resolver."
         decision.metadata["approved_by"] = result.resolved_by
+        # The approval the person decided: a resumed call asks again under a
+        # new id, and the answer is the recorded one's.
+        decision.metadata["decided_approval_id"] = (
+            (result.metadata or {}).get("recorded_approval_id") or result.approval_id
+        )
         if emit_decision:
             await emit_policy_decision(
                 self.telemetry_recorder,

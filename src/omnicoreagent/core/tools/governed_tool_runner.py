@@ -16,6 +16,7 @@ from omnicoreagent.governance.errors import (
     ApprovalRequiredError,
     GovernanceError,
     PolicyDeniedError,
+    ToolArgumentsInvalid,
 )
 
 
@@ -125,8 +126,10 @@ class GovernedToolRunner:
                         governance_error=governance_error,
                     )
                     # An ask waits for a person; it is not a refusal, and
-                    # the trace says which it was.
+                    # the trace says which it was. Arguments that could not
+                    # be read were rejected, not refused by a rule.
                     waiting = isinstance(governance_error, ApprovalRequiredError)
+                    unreadable = isinstance(governance_error, ToolArgumentsInvalid)
                     denied_event = await telemetry_recorder.emit_event(
                         telemetry_shape["error_event"],
                         actor=telemetry_shape["actor"],
@@ -138,7 +141,11 @@ class GovernedToolRunner:
                         },
                         metadata={
                             **relationship_metadata,
-                            "phase": "approval" if waiting else "authorization",
+                            "phase": "approval"
+                            if waiting
+                            else "rejected"
+                            if unreadable
+                            else "authorization",
                         },
                     )
                     outcome["tool_result_event_id"] = denied_event.event_id
@@ -329,7 +336,7 @@ class GovernedToolRunner:
         except (GovernanceError, ValueError) as exc:
             if isinstance(exc, GovernanceError):
                 return exc
-            return PolicyDeniedError(str(exc))
+            return ToolArgumentsInvalid(str(exc))
         return None
 
     def _governance_error_result(
@@ -343,6 +350,8 @@ class GovernedToolRunner:
             "message": (
                 f"Waiting for a person's approval: {governance_error}"
                 if isinstance(governance_error, ApprovalRequiredError)
+                else f"Invalid arguments for {single_tool.tool_name}: {governance_error}"
+                if isinstance(governance_error, ToolArgumentsInvalid)
                 else f"Governance denied tool execution: {governance_error}"
             ),
             "governance_error_code": getattr(

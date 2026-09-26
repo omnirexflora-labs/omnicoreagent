@@ -103,6 +103,34 @@ fixed; the reproductions are in each unit's test.
   - Left: model names vary across examples; the headless CLI's runs report
     `execution_surface: "interactive"`.
 
+## Round two (2026-09-26, on main after #285)
+
+Two more agents, new apps: an ops copilot served over HTTP (strict dict
+policy, SSE, approvals, budgets, background tasks, steering, evidence) and a
+code review bot (Docker, a skill, spawned workers, the headless CLI,
+outcomes and export, the upgrade guide). 12 of 12 features worked; 8 first
+try, none failed. Fixed, each verified first and tested:
+
+- A per-request grant vanished from `budget_status` when the run finished
+  (its counter was removed): `settle` keeps it on the record, in the same
+  read. `GET /runs/{id}/budget` returns the run's budget `requests`.
+- A policy refusing an operator's HTTP request (a background task) was a
+  500; it is a 403 with the reason.
+- The trajectory's decisions name their `matched_rule_ids`; an approved
+  call's `approval_id` is the approval the person decided.
+- Recording an outcome or reading a run needs no model key.
+- A removed 0.3 name (`SequentialAgent`, ...) says what replaced it.
+- `list_all_available_tools` lists the `delegate_<name>` tools.
+- Unreadable arguments (an empty path) are `rejected`, not `denied`.
+- E2B/Daytona's network isolation check is in the session event.
+- The skills catalog shows the tool calls, not the skill's host path (a
+  model shown the path ran the script with `execute`, in a sandbox without it).
+- Docs: a generated budgets reference; the sub-agents example's tool names
+  and the story's segment shape (both wrong); operators and the policy;
+  interval tasks' first run; waiting for `/ready`; exporting a run with
+  children; outcomes after a headless run; putting files in the workspace;
+  Docker's default image; what workers inherit.
+
 ## Release
 
 S1–S4 are about the evidence and the policy — what the release promises —

@@ -33,6 +33,10 @@ Two capabilities are decided when the agent connects, not during a run:
 an ask on them fails the connection with `ApprovalRequiredError`; allow the
 servers you trust.
 
+The served agent's policy also decides what an operator asks of OmniServe's
+background API: `background.task.*` and `background.run.*`. A refusal there is
+an HTTP `403`.
+
 ## Writing a rule
 
 ```python

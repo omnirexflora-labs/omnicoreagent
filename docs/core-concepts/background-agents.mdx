@@ -94,6 +94,9 @@ await manager.register_task(
 await manager.start()
 ```
 
+An interval task first runs one interval after it is registered (or after its
+`start_at`), not at once; call `run_now` for a run right away.
+
 The worker loop reads due schedules from the task store, creates a run exactly
 once for each occurrence, advances the schedule state, claims queued runs, and
 executes them with lease fencing.

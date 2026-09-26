@@ -6,6 +6,9 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+
+from omnicoreagent.governance.errors import GovernanceError
 
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.runtime import construction
@@ -59,6 +62,17 @@ def create_omniserve_app(
 
     setup_all_middleware(app, config)
     setup_metrics(app, config)
+
+    @app.exception_handler(GovernanceError)
+    async def policy_refused(request, exc: GovernanceError):
+        # The agent's policy also governs what an operator asks of it over
+        # HTTP (a background task is a capability too). A refusal, or an ask
+        # nobody can answer inside a request, is the caller's answer, not a
+        # server error.
+        return JSONResponse(
+            status_code=403,
+            content={"error": type(exc).__name__, "detail": str(exc)},
+        )
 
     app.include_router(create_agent_router(config), prefix=config.api_prefix)
     for router in routers or ():

@@ -7,6 +7,7 @@ only be touched when the corresponding runtime object is requested.
 """
 
 from importlib import import_module
+import sys
 from typing import Any
 
 __all__ = [
@@ -488,4 +489,42 @@ def __getattr__(name: str) -> Any:
         globals()[name] = value
         return value
 
+    if name in _REMOVED:
+        message = (
+            f"{name} was removed in OmniCoreAgent 0.4: {_REMOVED[name]}. "
+            "See https://docs-omnicoreagent.omnirexfloralabs.com/docs/upgrading"
+        )
+        # `from omnicoreagent import X` shows this message only if it is an
+        # ImportError (an AttributeError becomes a bare "cannot import
+        # name"); hasattr and getattr with a default need an AttributeError,
+        # or code that checks for the name crashes.
+        if _called_from_an_import(sys._getframe(1)):
+            raise ImportError(message)
+        raise AttributeError(message)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _called_from_an_import(frame: Any) -> bool:
+    """Whether the lookup is a ``from ... import`` statement (checked on
+    CPython 3.12, 3.13 and 3.14)."""
+    try:
+        import dis
+
+        return dis.opname[frame.f_code.co_code[frame.f_lasti]] == "IMPORT_FROM"
+    except Exception:
+        return False
+
+
+# Names 0.3 exported that 0.4 does not, and what replaced them.
+_REMOVED = {
+    "SequentialAgent": "run agents one after another with plain awaits, or give a lead agent sub_agents=[...]",
+    "ParallelAgent": "run agents at once with asyncio.gather(a.run(...), b.run(...))",
+    "RouterAgent": "give a lead agent sub_agents=[...]; each becomes a delegate_<name> tool it chooses",
+    "DeepAgent": "set agent_config enable_subagents=True (spawn_subagents) with workspace files",
+    "OmniAgent": "use OmniCoreAgent",
+    "EventRouter": "runs are recorded as telemetry; read them with get_trajectory, stream with on_event or agent.stream",
+    "BackgroundOmniCoreAgent": "use BackgroundAgentManager: register_agent, then register_task",
+    "BackgroundTaskScheduler": "use BackgroundAgentManager.start()",
+    "APSchedulerBackend": "use BackgroundAgentManager with a task store",
+    "TaskRegistry": "use BackgroundAgentManager's task store (memory, sql, redis, mongodb)",
+}

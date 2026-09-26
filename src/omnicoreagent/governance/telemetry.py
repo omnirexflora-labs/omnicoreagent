@@ -69,7 +69,8 @@ async def emit_policy_decision(
         "reason_code": getattr(decision.reason_code, "value", decision.reason_code),
         "policy_hash": decision.policy_hash,
         "matched_rule_ids": list(decision.matched_rule_ids),
-        "approval_id": decision.approval_id,
+        "approval_id": (decision.metadata or {}).get("decided_approval_id")
+        or decision.approval_id,
         "approved_by": (decision.metadata or {}).get("approved_by"),
     }
     if request is not None:

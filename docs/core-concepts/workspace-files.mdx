@@ -68,6 +68,11 @@ With the local backend, workspace command tools write under:
 
 For example, the prompt above creates `./workspace/files/notes/plan.md`.
 
+To give the agent existing files — a project to review, data to analyze — put
+them under that directory before the run: `./workspace/files/project/app.py` is
+`project/app.py` to the agent's tools, and is copied into its sandbox when it
+runs commands.
+
 Cloud workspace storage uses the S3/R2 extra:
 
 ```bash

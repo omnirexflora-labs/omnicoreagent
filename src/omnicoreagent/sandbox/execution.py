@@ -329,13 +329,18 @@ class SandboxExecutionService:
 
 def _session_facts(session: SandboxSession, runtime: SandboxRuntime) -> dict[str, Any]:
     metadata = session.metadata or {}
-    return {
+    facts = {
         "sandbox_session_id": session.session_id,
         "sandbox_provider": _value(getattr(runtime, "provider", session.provider)),
         "execution_surface": _surface(runtime),
         # The provider's own name for the sandbox, so a person can find it.
         "sandbox_ref": metadata.get("sandbox_id") or metadata.get("container_id"),
     }
+    # A provider that checks "no network" from inside the sandbox (E2B,
+    # Daytona) says what the check found: checked, unchecked, not required.
+    if metadata.get("network_isolation") is not None:
+        facts["network_isolation"] = metadata["network_isolation"]
+    return facts
 
 
 def _surface(runtime: SandboxRuntime) -> str:

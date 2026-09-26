@@ -86,6 +86,7 @@
                             "docs/reference/telemetry-config",
                             "docs/reference/policy",
                             "docs/reference/background",
+                            "docs/reference/budgets",
                             "docs/reference/cli"
                         ]
                     },

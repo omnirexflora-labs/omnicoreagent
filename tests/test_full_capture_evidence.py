@@ -7,6 +7,8 @@ A code runner built from the docs alone ran under governance with
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from omnicoreagent import OmniCoreAgent, ToolRegistry
@@ -123,3 +125,31 @@ async def test_a_call_that_asks_while_it_runs_is_awaiting_approval_not_an_error(
 
     (call,) = [c for step in trajectory["steps"] for c in step["tool_calls"]]
     assert call["outcome"] == "awaiting_approval"
+
+
+@pytest.mark.asyncio
+async def test_arguments_that_cannot_be_read_are_rejected_not_denied(tmp_path, monkeypatch):
+    """Round two: `glob` with `path: ""` came back as `denied`, "Governance
+    denied tool execution: path must be a non-empty string", though no rule
+    decided it."""
+    monkeypatch.chdir(tmp_path)
+    agent = OmniCoreAgent(
+        name="reader",
+        system_instruction="x",
+        model_config=MODEL,
+        telemetry_config={"capture": "full"},
+        agent_config={
+            "governance_config": {"enabled": True, "profile": "interactive-dev"},
+            "guardrail_mode": "off",
+        },
+    )
+    await agent.initialize()
+    agent.llm_connection = ScriptedModel(("c1", "glob", '{"pattern": "*.py", "path": ""}'))
+    result = await agent.run("list python files")
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    await agent.cleanup()
+
+    (call,) = [c for step in trajectory["steps"] for c in step["tool_calls"]]
+    assert call["outcome"] == "rejected"
+    assert "Governance denied" not in json.dumps(call["result"])
+    assert "Invalid arguments" in call["result"]["message"]

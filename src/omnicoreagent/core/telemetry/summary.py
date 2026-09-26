@@ -156,6 +156,8 @@ def tool_outcomes(trace: TelemetryTrace) -> dict[str, str]:
         phase = event.metadata.get("phase")
         if phase == "authorization":
             outcomes[call_id] = "denied"
+        elif phase == "rejected":
+            outcomes[call_id] = "rejected"
         elif phase == "approval":
             outcomes[call_id] = "awaiting_approval"
         elif phase == "timeout":

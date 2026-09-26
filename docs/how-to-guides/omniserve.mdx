@@ -112,6 +112,9 @@ export LLM_API_KEY=your_api_key_here
 omniserve run --agent my_agent.py
 ```
 
+Startup takes a few seconds. Wait for `GET /ready` to return `ready: true`
+before sending work.
+
 ### Step 4: Test the API
 
 ```bash
@@ -266,6 +269,14 @@ single failed server among several is visible.
 These routes are mounted when background execution is enabled. It is enabled by
 default and can be turned off with `OMNICOREAGENT_BACKGROUND_ENABLED=false` or
 `OmniServeConfig(background_enabled=False)`.
+
+Under governance, what an operator asks here is decided by the served agent's
+policy too: creating, changing, pausing, resuming or deleting a task is
+`background.task.<action>`, and starting or cancelling a run is
+`background.run.<action>`. A policy that does not allow them refuses the
+request with `403` and the reason (a `strict` policy refuses anything no rule
+covers). Allow them for the operators you trust — see the
+[policy reference](/docs/reference/policy).
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|

@@ -1168,6 +1168,10 @@ class OmniCoreAgent:
                 spent = usage.get(meter, 0.0)
                 if scope == BudgetScope.REQUEST and record.get("status") not in {"running"}:
                     spent = (settled.get(scope.value) or {}).get(meter, spent)
+                    # A finished run's grant was kept on its record.
+                    granted = granted or (
+                        (settled.get("granted") or {}).get(scope.value) or {}
+                    ).get(meter, 0.0)
                 entries.append(
                     {
                         "scope": scope.value,
@@ -1192,8 +1196,6 @@ class OmniCoreAgent:
         trace IDs, each tool call's state (arguments as a digest), and each
         approval with the arguments of the call it is for.
         """
-        if not self._initialized:
-            await self.initialize()
         record = await self._run_record(run_id)
         if record is None:
             return None
@@ -1208,9 +1210,13 @@ class OmniCoreAgent:
         }
 
     async def _run_record(self, run_id: str) -> Optional[Dict[str, Any]]:
-        """The run's record exactly as stored, for the runtime's own use."""
-        if not self._initialized:
-            await self.initialize()
+        """The run's record exactly as stored, for the runtime's own use.
+
+        Reading a record needs the memory store, not the model: a process
+        that only reads runs and records outcomes needs no model key.
+        """
+        if not self.memory_router:
+            self.memory_router = construction.default_memory_router()
         if not supports_run_state(self.memory_router):
             return None
         try:
@@ -1912,7 +1918,8 @@ class OmniCoreAgent:
         return built
 
     async def list_all_available_tools(self):
-        """List all available tools (MCP and local)"""
+        """Every tool the model is offered: MCP, local and built-in tools, and
+        a ``delegate_<name>`` tool for each of ``sub_agents``."""
         if not self._initialized:
             await self.initialize()
 
@@ -1922,7 +1929,25 @@ class OmniCoreAgent:
                 local_tools=self.local_tools
             )
 
-        return harness_tools.available_tools(self.mcp_client, runtime_local_tools)
+        tools = harness_tools.available_tools(self.mcp_client, runtime_local_tools)
+        for child in self.sub_agents or []:
+            # The same definition the model is offered (native_catalog).
+            from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
+
+            schema = ToolRegistry()._infer_schema(child.run)
+            runtime_parameters = {"session_id", "run_id", "on_event"}
+            for parameter in runtime_parameters:
+                schema["properties"].pop(parameter, None)
+            schema["required"] = [n for n in schema["required"] if n not in runtime_parameters]
+            tools.append(
+                {
+                    "name": f"delegate_{child.name}",
+                    "description": f"Delegate to {child.name}. {getattr(child, 'system_instruction', '')}",
+                    "inputSchema": schema,
+                    "type": "subagent",
+                }
+            )
+        return tools
 
     async def get_session_history(self, session_id: str) -> List[Dict[str, Any]]:
         """Get session history for a specific session ID"""

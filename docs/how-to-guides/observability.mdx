@@ -403,7 +403,9 @@ collector or an OTLP-compatible tracing backend:
 pip install "omnicoreagent[otel]"
 ```
 
-Export a specific trace manually:
+Export a specific trace manually. `export_trace` exports that one trace; a run
+that delegated has a trace per child, and `get_trace_family(trace_id=...)` lists
+them all to export each:
 
 ```python
 from omnicoreagent import build_telemetry_exporter

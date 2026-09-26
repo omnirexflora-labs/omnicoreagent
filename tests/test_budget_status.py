@@ -101,3 +101,35 @@ async def test_a_grant_shows_in_what_the_run_has_left():
     assert application["remaining"] == pytest.approx(
         0.000001 + 1.0 - application["spent"] - application["reserved"]
     )
+
+
+@pytest.mark.asyncio
+async def test_a_request_budget_grant_is_still_shown_after_the_run_finishes():
+    """Round two of the stranger test: a per-request grant showed while the
+    run waited, then vanished with the run's counter when it finished
+    (`granted 0.0, remaining 0.0` for a run that spent its grant)."""
+    agent = await _agent(PricedModel(), budgets={"request": [{"meter": "model_cost_usd", "limit": 0.000001}]})
+    paused = await agent.run("go", session_id="bill-3")
+    await agent.grant_budget(paused["run_id"], approver="alice", amount=1.0)
+    assert (await agent.resume(paused["run_id"]))["status"] == "success"
+
+    request = _by(await agent.budget_status(paused["run_id"]), "request", "model_cost_usd")
+    assert request["granted"] == pytest.approx(1.0)
+    assert request["spent"] == pytest.approx(CALL_COST)
+    assert request["remaining"] == pytest.approx(0.000001 + 1.0 - CALL_COST)
+
+
+@pytest.mark.asyncio
+async def test_a_waiting_runs_budget_request_is_readable_over_http():
+    """An operator reading `GET /runs/{id}/budget` while a run waits needs what
+    it is waiting for; the ops copilot found only the budgets there."""
+    agent = await _agent(PricedModel(), budgets={"request": [{"meter": "model_cost_usd", "limit": 0.000001}]})
+    server = OmniServe(agent, OmniServeConfig(auth_enabled=False))
+    with TestClient(server.app) as client:
+        paused = client.post("/run/sync", json={"query": "go", "session_id": "bill-5"}).json()
+        assert paused["status"] == "awaiting_budget"
+
+        body = client.get(f"/runs/{paused['run_id']}/budget").json()
+        (waiting,) = body["requests"]
+        assert waiting["status"] == "pending" and waiting["meter"] == "model_cost_usd"
+        assert waiting["shortfall"] > 0
