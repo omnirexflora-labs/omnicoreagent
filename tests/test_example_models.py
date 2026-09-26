@@ -20,8 +20,9 @@ PAGES = [
     *(ROOT / "cookbook").rglob("*.md*"),
     *(ROOT / "cookbook").rglob("*.py"),
 ]
-# Models run on your own machine (Ollama) or placeholders are not in the list.
-LOCAL = {"llama3.1:8b", "llama3", "..."}
+# Models run on your own machine (Ollama, or a server behind `base_url`) or
+# placeholders are not in the list.
+LOCAL = {"llama3.1:8b", "llama3", "qwen3-coder-30b", "..."}
 OLDER_OPENAI = re.compile(r"^(gpt-4|gpt-3\.5|gpt-4o)(-|$)")
 
 

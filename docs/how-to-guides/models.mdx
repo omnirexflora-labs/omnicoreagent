@@ -185,6 +185,33 @@ itself is recorded only with `capture="full"`.
   </Tab>
 </Tabs>
 
+## Your own endpoint (`base_url`)
+
+A server that speaks a provider's API — vLLM, LM Studio, llama.cpp's server, a
+company gateway or a proxy — is reached by naming the provider whose API it
+speaks and giving its URL:
+
+```python
+model_config = {
+    "provider": "openai",           # the API the server speaks
+    "model": "qwen3-coder-30b",     # the name the server knows the model by
+    "base_url": "http://localhost:8000/v1",
+}
+```
+
+- The URL is sent with each of this agent's calls, streamed or not. It does
+  not change the process environment, so two agents in one process can use
+  two endpoints.
+- The key is still `LLM_API_KEY`. A local server that checks no key accepts
+  any value: `export LLM_API_KEY=local`.
+- The URL is not recorded with the run's model settings (a URL can carry a
+  token).
+- A dollar budget needs a published price for the model name. A model with no
+  price is governed by the token and call limits: set a `model_tokens` or
+  `model_calls` budget, or `total_tokens_limit`, for it.
+- It works with any provider: `ollama` with `base_url` reaches Ollama on
+  another machine.
+
 ## Options
 
 | Key | What it does |
@@ -198,6 +225,7 @@ itself is recorded only with `capture="full"`.
 | `api_key` | This agent's key, instead of `LLM_API_KEY`. |
 | `azure_endpoint`, `azure_api_version`, `azure_deployment` | Azure OpenAI only. |
 | `ollama_host` | Ollama only: where the server listens. |
+| `base_url` | Another endpoint that speaks the provider's API (above). |
 
 Other keys are accepted and ignored. See also the
 [OmniCoreAgent reference](/docs/reference/omnicoreagent).

@@ -153,7 +153,7 @@ Only `SKILL.md` is required. Frontmatter fields:
 | `license` | no | Text |
 | `compatibility` | no | Environment requirements, at most 500 characters |
 | `metadata` | no | One level of `key: value` pairs, indented under `metadata:` |
-| `allowed-tools` | no | Space-separated tool names. Parsed and kept with the skill; it does not restrict what the agent may call (a [policy](/docs/core-concepts/security-model) does that) |
+| `allowed-tools` | no | Space-separated tool names. Parsed and kept with the skill; it neither restricts nor pre-approves anything. The specification calls it pre-approved tools, but a skill cannot approve its own actions: the [policy](/docs/core-concepts/security-model) decides every call, so write allow rules there ([rule syntax](/docs/reference/policy)) |
 
 ### Scripts in any language
 

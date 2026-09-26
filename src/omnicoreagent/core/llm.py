@@ -326,6 +326,9 @@ class LLMConnection:
             "logprobs": self.model_config.get("logprobs"),
             "top_logprobs": self.model_config.get("top_logprobs"),
             "reasoning_effort": self.model_config.get("reasoning_effort"),
+            # Another endpoint speaking the provider's API (a local server, a
+            # gateway); sent per call, so each agent keeps its own.
+            "base_url": self.model_config.get("base_url"),
         }
 
     def _set_llm_environment_variables(self):
@@ -539,6 +542,9 @@ class LLMConnection:
         for key in _MODEL_SETTINGS:
             if self.llm_config.get(key) is not None and key not in self._unsupported_params:
                 params[key] = self.llm_config[key]
+
+        if self.llm_config.get("base_url"):
+            params["api_base"] = self.llm_config["base_url"]
 
         if tools:
             params["tools"] = tools
