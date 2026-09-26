@@ -38,8 +38,8 @@ defaults that changed.
   session, agent or application.
 - **Sandboxed execution.** An `execute` tool whose commands run in Docker,
   E2B, Modal, Daytona or Vercel — or `local` where a container is already
-  the boundary — with no network unless the policy allows it and never your
-  credentials. [Sandbox providers](/docs/how-to-guides/sandbox-providers)
+  the boundary — with no network unless the policy allows it, and without
+  your process's keys and tokens. [Sandbox providers](/docs/how-to-guides/sandbox-providers)
 - **Code mode.** A `run_code` tool: the model writes a short Python program
   that calls your tools, run in Monty, every call inside it governed and
   traced. [Code mode](/docs/core-concepts/code-mode)
