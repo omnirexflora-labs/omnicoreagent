@@ -255,7 +255,7 @@ for profile in ("permissive-dev", "interactive-dev", "strict-production"):
 
     ```text
     I’m unable to cancel order 1042 because the system denied the action.
-    cancel_order denied {'type': 'UnknownCapabilityError', 'message': 'Unknown capability denied by strict policy: no rule covers tool.local.call.'}
+    cancel_order denied {'type': 'UnknownCapabilityError', 'message': 'Denied by strict policy: no rule matches this tool.local.call request.'}
        tool.local.call deny unknown_capability []
     ```
 
@@ -396,7 +396,7 @@ All settings: [agent settings reference](/docs/reference/agent-config).
     Only JSON policy files are read:
 
     ```text
-    PolicyLoadError: YAML policy loading is not enabled in Phase 1. Use JSON or in-code policy.
+    PolicyLoadError: YAML policies are not supported. Use a JSON policy file or a policy in code.
     ```
   </Accordion>
 

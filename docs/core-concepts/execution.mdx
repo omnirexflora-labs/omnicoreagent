@@ -291,6 +291,9 @@ agent_config = {
 ```
 
 Put nothing secret in `plain`: the model's commands can read it and print it.
+`environment.secret_refs` is refused when the agent is built, since no built-in
+provider delivers secrets to a command. Keep a secret in a tool that runs in your
+process, and let the model call the tool.
 
 ## What a command's record holds
 
@@ -386,7 +389,7 @@ every capability in the [policy reference](/docs/reference/policy).
     cannot keep it:
 
     ```text
-    ValueError: The docker sandbox cannot enforce a network host allowlist (allowed_hosts): use network_policy default 'deny' or 'allow', or a provider that enforces one (daytona, modal, http)
+    ValueError: The docker sandbox cannot enforce a network host allowlist (allowed_hosts): use network_policy default 'deny' or 'allow', or a provider that enforces one (modal, http)
     ```
 
     Use `"default": "allow"`, or [Modal](/docs/how-to-guides/sandbox-providers#modal)

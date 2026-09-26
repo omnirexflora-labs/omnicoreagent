@@ -143,7 +143,7 @@ agent_config = {
 |---|---|---|
 | `model_cost_usd` | Dollars, from the provider's published prices | before each call (held), settled after |
 | `model_calls` | Model calls | before each call |
-| `model_tokens` | Tokens in and out | after each call |
+| `model_tokens` | Tokens in and out | before each call (its input must fit), counted after |
 | `tool_calls` | Tool calls | as each is authorized |
 | `sandbox_seconds` | Seconds a sandbox session is open | before each command, and when the session closes |
 | `subagent_runs` | Workers started with `spawn_subagents` | as each starts |
@@ -152,10 +152,11 @@ A window resets a counter: `total` (never), `day` (00:00 UTC) or `month` (the
 1st, 00:00 UTC).
 
 <Note>
-`model_tokens` is only known when a call returns, so the call that crosses a
-token limit has already been made when the run stops. Leave a call's worth of
-headroom, or pair it with `model_calls` or `model_cost_usd`, which are checked
-before the call.
+A call's output is known only when it returns, so a call can cross a token
+limit: what it used is still counted in full, and the next call is stopped
+before it is made (its input would not fit). Leave a call's worth of headroom
+if the limit must never be passed. (In 0.4.1 the call that crossed the limit
+was not counted, and resuming made it again.)
 </Note>
 
 Every field, default and meter is in the [budgets reference](/docs/reference/budgets).

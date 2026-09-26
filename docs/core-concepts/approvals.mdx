@@ -241,9 +241,25 @@ tools and policy) can decide and resume it.
   </Step>
 </Steps>
 
-SQLite for one machine; PostgreSQL, Redis or MongoDB across machines
-([Memory](/docs/core-concepts/memory)). The default in-memory store dies with
-the process.
+The same two processes worked unchanged on each durable store; only the
+store in `agent_def.py` changes:
+
+| Store | In `agent_def.py` | Install |
+|---|---|---|
+| SQLite (one machine) | `DATABASE_URL=sqlite:///./runs.db`, `MemoryRouter("sql")` | core |
+| PostgreSQL | `DATABASE_URL=postgresql://user:pass@host/db`, `MemoryRouter("sql")` | `omnicoreagent[postgres]` |
+| Redis | `REDIS_URL=redis://host:6379/0`, `MemoryRouter("redis")` | `omnicoreagent[redis]` |
+| MongoDB | `MONGODB_URI=mongodb://host:27017`, `MemoryRouter("mongodb")` | `omnicoreagent[mongodb]` |
+
+On Redis, for example, process two printed:
+
+```text
+found: awaiting_approval ['pending']
+success | Refunded order 1042 for 42 dollars.
+```
+
+The default in-memory store dies with the process
+([Memory](/docs/core-concepts/memory)).
 
 ## Answer in the moment: `approval_resolver`
 
@@ -332,11 +348,12 @@ The same refund request then finished at once:
 
 ```text
 success | I can’t complete the refund without approval.
-issue_refund awaiting_approval {'type': 'ApprovalRequiredError', 'message': 'Matched ask policy rule.'} ask matched_ask None
+issue_refund denied {'type': 'ApprovalRequiredError', 'message': 'Matched ask policy rule.'} ask matched_ask None
 ```
 
-The tool did not run. The call's `outcome` still reads `awaiting_approval`,
-though nothing waits for it.
+The tool did not run, and its `outcome` is `denied`. The model was told the
+call was refused because it needs a person's approval and none can be asked.
+(0.4.1 reported it as `awaiting_approval` and told the model it was waiting.)
 
 ## Expiry
 
@@ -348,8 +365,10 @@ PolicyRule(rule_id="ask_before_refunds", effect=PolicyEffect.ASK,
            constraints={"approval_expires_seconds": 900})  # 15 minutes
 ```
 
-After `expires_at` the approval cannot be decided and the run cannot
-resume; end it with `abandon_run` ([below](#when-things-go-wrong)).
+After `expires_at` the approval can no longer be decided: nothing runs on
+it. `resume(run_id)` then asks again, with a new approval for a person to
+decide, or end the run with `abandon_run`. (In 0.4.1 an expired approval
+left its run unable to resume; `abandon_run` is the way out there.)
 
 ## Over HTTP, with OmniServe
 
@@ -465,11 +484,12 @@ run the same way; a worker's ask shows on its lead's run with
     The approval waited longer than its window:
 
     ```text
-    ValueError: Approval approval_b8f052bbfd504443a74345e7d3026860 expired at 2026-09-26T16:30:33.295381+00:00
+    ValueError: Approval approval_b8f052bbfd504443a74345e7d3026860 expired at 2026-09-26T16:30:33.295381+00:00; resume the run to ask again
     ```
 
-    It can no longer be decided, and the run then cannot resume either (it
-    is still waiting for that approval). End the run with `abandon_run`:
+    It is recorded as `expired` and nothing runs on it. `resume(run_id)` asks
+    again (the run returns `awaiting_approval` with a new approval), or end
+    the run:
 
     ```python
     ended = await agent.abandon_run(run_id, status="cancelled", reason="approval expired")

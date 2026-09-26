@@ -64,15 +64,16 @@ otherwise. What each provider can keep:
 |---|---|---|---|---|
 | `docker` | Yes, `network_mode="none"` | Yes, `bridge` | Refused when the agent is built | Not needed: Docker enforces it |
 | `e2b` | Asked of E2B | Yes | Refused when the agent is built | Yes |
-| `daytona` | Asked of Daytona | Yes | Fails at session start in this version (below) | Yes |
+| `daytona` | Asked of Daytona | Yes | Refused when the agent is built (below) | Yes |
 | `modal` | Yes, `block_network` | Yes | Yes, Modal's domain allowlist | No |
 | `vercel` | Yes, `deny-all` | Yes, `allow-all` | Refused when the agent is built | No |
 | `http` | Your service must keep it or refuse | ← | ← | Your service's job |
 | `local` | Refused: it cannot | Required | Refused | — |
 
-`denied_hosts` is sent to an `http` service and asked about as a policy
-question, but no built-in provider enforces it: with `"default": "allow"`, the
-rest of the internet stays open. Do not rely on it to block a host.
+`denied_hosts` is passed on to an `http` service, which must keep it or refuse
+the session. No other built-in provider can block named hosts, so there it is
+refused when the agent is built. To reach only some hosts, use
+`"default": "deny"` with `allowed_hosts` on a provider that keeps them.
 
 <Warning>
 **Hosted "no network" is checked, and free accounts fail the check.** E2B and
@@ -225,9 +226,9 @@ commands ran as root, and a sandbox took 48 to 84 seconds to start. Daytona
 returns a command's output as one stream: `stdout` holds everything and
 `stderr` is empty.
 
-`allowed_hosts` is accepted when the agent is built, but in this version the
-session fails to start: the Daytona SDK's allow list takes IPv4 CIDR ranges as
-one string, not host names. Use `"deny"` or `"allow"` on Daytona.
+`allowed_hosts` is refused when the agent is built: Daytona's allow list takes
+IP ranges, not host names. Use `"deny"` or `"allow"` on Daytona. (In 0.4.1 it
+was accepted and the session then failed to start.)
 
 | Option | Default | What it does |
 |---|---|---|
@@ -520,14 +521,15 @@ isolates commands.
   </Accordion>
 
   <Accordion title="ValueError: The docker sandbox cannot enforce a network host allowlist">
-    `allowed_hosts` on `docker`, `e2b`, `vercel` or `local`:
+    `allowed_hosts` on `docker`, `e2b`, `daytona`, `vercel` or `local`:
 
     ```text
-    ValueError: The docker sandbox cannot enforce a network host allowlist (allowed_hosts): use network_policy default 'deny' or 'allow', or a provider that enforces one (daytona, modal, http)
+    ValueError: The docker sandbox cannot enforce a network host allowlist (allowed_hosts): use network_policy default 'deny' or 'allow', or a provider that enforces one (modal, http)
     ```
 
-    Of the three it names, only `modal` and your `http` service keep it in this
-    version (see Daytona above).
+    The same check refuses `denied_hosts` on any built-in provider but `http`
+    ("cannot block named hosts"), and `environment.secret_refs` on every
+    built-in provider ("cannot deliver secrets").
   </Accordion>
 
   <Accordion title="The local sandbox cannot restrict the network">

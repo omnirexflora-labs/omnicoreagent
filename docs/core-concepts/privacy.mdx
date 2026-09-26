@@ -85,7 +85,7 @@ switch in `agent_config["privacy_config"]`:
 | Workspace | `redact_workspace` | off | Files the agent writes or edits with its file tools, files copied back from a sandbox, and offloaded tool results. |
 | Stream | `redact_stream` | off | The events streamed to your `on_event` callback. |
 | Public | `redact_public` | off | Everything returned to your application: `run()`'s answer and errors, and OmniServe's responses. |
-| Model I/O | `redact_model_io` | off | What is sent to the model provider. See the warning below. |
+| Model I/O | `redact_model_io` | off | What is sent to the model provider ([below](#keep-personal-data-from-the-model-provider)). |
 
 `enabled: False` turns every boundary off. The effective policy is fingerprinted
 in each trace's metadata as `privacy_config_version`, so a trace shows which
@@ -119,13 +119,48 @@ on disk: real email False | redacted True
 The model still saw the real values; the answer was redacted on its way out, and
 the history was redacted when it was stored.
 
-<Warning>
-`redact_model_io` is accepted and validated, but in 0.4.1 no model call applies
-it: with `{"redact_model_io": True}` the same run answered `Jane Doe’s email
-address is jane@example.com ...`. Do not rely on it to keep personal data from a
-provider. Until it is wired in, keep such data out of what reaches the model (a
-tool can return an identifier instead of the value).
-</Warning>
+### Keep personal data from the model provider
+
+`redact_model_io` redacts what is sent to the provider on every model call
+(turns and summaries). The model then works with the placeholders, so it cannot
+use the real values, and neither can anything it writes:
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
+
+@tools.register_tool("lookup_customer")
+def lookup_customer(name: str) -> str:
+    """Look up a customer's contact email by name."""
+    return "Jane Doe, email jane@example.com"
+
+async def main():
+    for on in (False, True):
+        agent = OmniCoreAgent(
+            name="support",
+            system_instruction="Use tools. Reply in plain text.",
+            model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+            local_tools=tools,
+            agent_config={"privacy_config": {"redact_model_io": on}},
+        )
+        result = await agent.run("What is Jane Doe's email? Quote it exactly.")
+        print("redact_model_io", on, "->", result["response"])
+        await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+redact_model_io False -> "jane@example.com"
+redact_model_io True -> [REDACTED_EMAIL]
+```
+
+<Note>
+Applied from the release after 0.4.1. In 0.4.1 the setting is accepted but has
+no effect.
+</Note>
 
 ### What counts as personal data
 
@@ -280,7 +315,7 @@ providers](/docs/how-to-guides/sandbox-providers).
 | `redact_workspace` | `False` | Redact files the agent writes, and offloaded results. |
 | `redact_stream` | `False` | Redact events sent to `on_event`. |
 | `redact_public` | `False` | Redact the answer, errors and OmniServe responses. |
-| `redact_model_io` | `False` | Accepted; not applied in 0.4.1 (see the warning above). |
+| `redact_model_io` | `False` | Redact what is sent to the model provider ([above](#keep-personal-data-from-the-model-provider)). |
 | `categories` | all four | Any of `email`, `phone`, `ssn`, `credit_card`. |
 
 `agent_config["skill_script_env"]` (default `[]`) names the environment variables
