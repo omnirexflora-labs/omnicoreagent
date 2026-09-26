@@ -72,6 +72,9 @@ class ModelConfig:
     top_logprobs: int | None = None
     top_k: int | str | None = "N/A"
     api_key: str | None = None
+    # Another endpoint speaking the provider's API: a local server (vLLM, LM
+    # Studio), a gateway or a proxy. Sent with each call, as LiteLLM's api_base.
+    base_url: str | None = None
     azure_endpoint: str | None = None
     azure_api_version: str | None = None
     azure_deployment: str | None = None

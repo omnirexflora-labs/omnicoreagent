@@ -11,6 +11,10 @@ Every release, with its notes, is also on
 
 ## Unreleased
 
+- **`base_url` in `model_config`.** Point any provider at another endpoint
+  that speaks its API: vLLM, LM Studio, a gateway, a proxy. Sent with each of
+  the agent's calls; two agents can use two endpoints.
+  [Models](/docs/how-to-guides/models)
 - **Run-record retention.** Finished run records are removed from the memory
   store after `run_retention_days` (30 by default; `None` keeps every record
   forever). Runs still waiting for a person are never removed.
