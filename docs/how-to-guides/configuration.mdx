@@ -322,7 +322,7 @@ The `model_config` defines which LLM to use and its sampling parameters.
 ```python
 model_config = {
     "provider": "openai",
-    "model": "gpt-4o",
+    "model": "gpt-5.4",
     "temperature": 0.5,
     "max_tokens": 4000,
     "top_p": 0.9,
@@ -392,5 +392,5 @@ agent = OmniCoreAgent(
 ## Best Practices
 
 - **Use `.env`**: Use a library like `python-dotenv` to load your environment variables during development.
-- **Model Selection**: Use smaller models (`gpt-4o-mini`) while building and testing your agent logic to save costs.
+- **Model Selection**: Use smaller models (`gpt-5.4-mini`) while building and testing your agent logic to save costs.
 - **Limit Steps**: Always set a reasonable `max_steps` to prevent the agent from entering infinite reasoning loops in case of tool failures.

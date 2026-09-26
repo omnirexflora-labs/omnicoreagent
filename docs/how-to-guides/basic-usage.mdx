@@ -22,7 +22,7 @@ async def main():
     agent = OmniCoreAgent(
         name="my_agent",
         system_instruction="You are a helpful assistant.",
-        model_config={"provider": "openai", "model": "gpt-4o"}
+        model_config={"provider": "openai", "model": "gpt-5.4"}
     )
 
     result = await agent.run("What is the capital of France?")
@@ -77,7 +77,7 @@ from omnicoreagent import OmniCoreAgent, MemoryRouter
 agent = OmniCoreAgent(
     name="persistent_agent",
     system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
+    model_config={"provider": "openai", "model": "gpt-5.4"},
     memory_router=MemoryRouter("redis")  # or "sql", "mongodb", "in_memory"
 )
 ```
@@ -101,7 +101,7 @@ Connect to any MCP-compatible tool server:
 agent = OmniCoreAgent(
     name="tool_agent",
     system_instruction="You can manage files and search the web.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
+    model_config={"provider": "openai", "model": "gpt-5.4"},
     mcp_tools=[
         {
             "name": "filesystem",
@@ -133,7 +133,7 @@ def get_weather(city: str) -> dict:
 agent = OmniCoreAgent(
     name="weather_agent",
     system_instruction="You help with weather queries.",
-    model_config={"provider": "openai", "model": "gpt-4o"},
+    model_config={"provider": "openai", "model": "gpt-5.4"},
     local_tools=tools
 )
 ```
@@ -193,7 +193,7 @@ multiple runs can share the same `session_id`.
 agent = OmniCoreAgent(
     name="streaming_agent",
     system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-4o"}
+    model_config={"provider": "openai", "model": "gpt-5.4"}
 )
 
 result = await agent.run("What can you do?")

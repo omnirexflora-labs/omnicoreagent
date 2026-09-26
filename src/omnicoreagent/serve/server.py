@@ -43,7 +43,7 @@ class OmniServe:
         agent = OmniCoreAgent(
             name="MyAgent",
             system_instruction="You are helpful.",
-            model_config={"provider": "openai", "model": "gpt-4o"},
+            model_config={"provider": "openai", "model": "gpt-5.4"},
         )
 
         server = OmniServe(agent)

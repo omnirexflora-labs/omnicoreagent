@@ -3,7 +3,7 @@ OmniServe CLI - Command-line interface for quick server deployment.
 
 Usage:
     omniserve run --agent path/to/agent.py --port 8000
-    omniserve quickstart --provider gemini --model gemini-2.0-flash
+    omniserve quickstart --provider gemini --model gemini-3.8-flash
     omniserve config --show
 """
 
@@ -211,10 +211,10 @@ def run(
 @click.option(
     "--provider",
     "-p",
-    default="gemini",
+    default="openai",
     help="LLM provider (openai, gemini, anthropic)",
 )
-@click.option("--model", "-m", default="gemini-2.0-flash", help="Model name")
+@click.option("--model", "-m", default="gpt-5.4-mini", help="Model name")
 @click.option("--name", "-n", default="QuickAgent", help="Agent name")
 @click.option(
     "--instruction",
@@ -235,7 +235,7 @@ def quickstart(
     """Start a quick agent server without writing any code.
 
     Example:
-        omniserve quickstart --provider openai --model gpt-4o --port 8000
+        omniserve quickstart --provider openai --model gpt-5.4 --port 8000
     """
     from omnicoreagent import OmniCoreAgent, OmniServe, OmniServeConfig
 

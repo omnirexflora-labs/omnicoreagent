@@ -193,8 +193,9 @@ event also carries `final_model_response_event_id`, the model response that
 produced the answer.
 
 `execution_surface` records how the run was entered: `interactive` for a direct
-`agent.run(...)`, `serve` through OmniServe, and `background` for background
-attempts. Label a run or attach external identity without changing execution:
+`agent.run(...)` in your code, `serve` through OmniServe, `background` for
+background attempts, and `headless` for `omnicoreagent run` (the CLI). It is a
+label for finding runs; the agent behaves the same in each. Label a run or attach external identity without changing execution:
 
 ```python
 result = await agent.run(
