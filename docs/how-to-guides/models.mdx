@@ -1,17 +1,17 @@
 ---
-title: Model Support
-description: 'Supported LLM providers — OpenAI, Anthropic, Gemini, Groq, DeepSeek, and more'
+title: Models
+description: 'Nine providers through one model_config and one key: OpenAI, Anthropic, Gemini, Groq, DeepSeek, Mistral, Azure OpenAI, OpenRouter and Ollama'
 icon: 'microchip'
 ---
 
-# Universal Model Support
+# Models
 
-All supported providers use LiteLLM and return the same native turn and
-text-stream protocol:
+The model is two lines of `model_config` — a provider and a model name — and
+the key is always `LLM_API_KEY`. By the end of this page your agent will run on
+the provider you choose, with the settings you choose, and you will have seen
+what was actually sent.
 
----
-
-## Supported Providers
+## Pick a provider
 
 ```python
 # OpenAI
@@ -23,7 +23,7 @@ model_config = {"provider": "anthropic", "model": "claude-sonnet-5"}
 # Google Gemini
 model_config = {"provider": "gemini", "model": "gemini-3.8-flash"}
 
-# Groq (Ultra-fast)
+# Groq
 model_config = {"provider": "groq", "model": "openai/gpt-oss-120b"}
 
 # DeepSeek
@@ -35,46 +35,95 @@ model_config = {"provider": "mistral", "model": "mistral-small-latest"}
 # Azure OpenAI
 model_config = {"provider": "azure", "model": "gpt-5.4"}
 
-# OpenRouter (200+ models)
+# OpenRouter: the provider's own name for the model
 model_config = {"provider": "openrouter", "model": "anthropic/claude-sonnet-5"}
 
-# Ollama (Local)
+# Ollama, on your machine: no key needed
 model_config = {"provider": "ollama", "model": "llama3.1:8b", "ollama_host": "http://localhost:11434"}
 ```
 
----
+```bash
+export LLM_API_KEY=your_api_key_here
+```
 
-## GPT-5.6 Validation Model
+<Note>
+Only the OpenAI configuration was run for this page. The others are shown as
+configuration; check the model name against your provider's current list.
+</Note>
 
-The shared cookbook default is `gpt-5.6-luna`. Select `gpt-5.6-terra` explicitly
-when you want that model instead:
+| If you want | Try |
+|---|---|
+| The strongest reasoning | OpenAI `gpt-5.6-terra`, Anthropic `claude-sonnet-5` |
+| Fast and cheap | OpenAI `gpt-5.4-mini`, Groq `openai/gpt-oss-120b`, Gemini `gemini-3.8-flash` |
+| Low cost | DeepSeek `deepseek-chat`, Mistral `mistral-small-latest` |
+| Data that stays on your machine | Ollama |
+| Many providers behind one key | OpenRouter |
+| Your company's Azure tenancy | Azure OpenAI |
+
+## Set the model's parameters
 
 ```python
-model_config = {"provider": "openai", "model": "gpt-5.6-luna", "max_tokens": 2500, "reasoning_effort": "none"}
+import asyncio
+from omnicoreagent import OmniCoreAgent
+
+async def main():
+    agent = OmniCoreAgent(
+        name="assistant",
+        system_instruction="Answer in plain text, in one sentence.",
+        model_config={
+            "provider": "openai",
+            "model": "gpt-5.4-mini",
+            "max_tokens": 300,
+            "temperature": 0.2,
+        },
+    )
+    result = await agent.run("What is LiteLLM, in one sentence?")
+    print(result["response"])
+
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    facts = trajectory["steps"][0]["model_calls"][0]["facts"]
+    print("served by:", facts["provider_model"])
+    print("settings sent:", facts["request_settings"])
+    print("tokens:", facts["tokens"], "| cost:", facts["estimated_cost_usd"])
+    await agent.cleanup()
+
+asyncio.run(main())
 ```
 
-For GPT-5.6 Luna, the provider requires `reasoning_effort="none"` when using
-function tools on Chat Completions. Reasoning-enabled function calls require the
-Responses API, which this runtime does not currently implement. The cookbook
-sets `none` for its GPT-5.6 Luna/Terra configurations; explicit overrides survive.
-
-`ModelConfig` and the shared cookbook leave sampling parameters unspecified by
-default. Set `temperature` or `top_p` only when the selected model supports them.
-Explicitly requested parameters are not silently dropped.
-
-To run the opt-in validation against your API key:
-
-```bash
-PYTHONPATH=src python engineering/validation/live_native_runtime.py --require-litellm --env-file .env
+```text
+LiteLLM is an open-source Python library and proxy that provides a unified API for calling many different LLM providers through a single OpenAI-compatible interface.
+served by: gpt-5.4-mini
+settings sent: {'model': 'openai/gpt-5.4-mini', 'temperature': 0.2, 'max_tokens': 300}
+tokens: {'input': 1447, 'output': 35, 'total': 1482, 'cached_input': 1024} | cost: 0.0005515499999999999
 ```
 
-Use `--scenario http_sse_live_delivery` to rerun one check and `--report /tmp/live.json`
-to save its outcome.
+Every model call's trace records the model the provider says served it, the
+settings that were sent, the tokens, and an estimated cost (from LiteLLM's
+price table, not your invoice).
 
-The validation makes paid model requests using synthetic tasks and tools. It does
-not print the API key. Override the model with `--model gpt-5.6-terra`.
+## How it works
 
-## Thinking and Reasoning Models
+- **One route: LiteLLM.** `provider` and `model` become LiteLLM's
+  `"<provider>/<model>"` (`openai/gpt-5.4-mini` above). Every provider returns
+  the same turns to the runtime, so tools, streaming, memory and traces work
+  the same on all of them.
+- **One key.** `LLM_API_KEY` is read when the agent starts (its first run)
+  and handed to the provider you named — whose own key variable you never set. An agent can carry its own instead — `"api_key": "..."`
+  in its `model_config` — for two providers in one process. Keys are never
+  written into a trace. Ollama needs none.
+- **Settings are sent as given.** Nothing is added for you: with no
+  `max_tokens`, the provider's own limit applies (with a
+  [budget](/docs/core-concepts/durable-runs), a call is held to 4,096 output
+  tokens). If a model refuses a setting by name — for example
+  `temperature` on a reasoning model — the call is retried once without it,
+  the setting is not sent again to that model, and the retry is recorded on
+  the model call (`facts["retries"]`, with the setting under `dropped`).
+- **Transient failures are retried** — rate limits, timeouts, connection
+  errors — up to three times with backoff. A wrong key, an empty account or an
+  unknown model is not retried: the run ends at once with the reason. A
+  streamed call is not retried, since its text was already delivered.
+
+## Thinking and reasoning models
 
 Thinking models return data with each turn that must be sent back unchanged on
 the next request, or a multi-step tool loop fails on its next step. OmniCoreAgent
@@ -92,7 +141,7 @@ providers receive exactly the fields they always did. Enable thinking with the
 provider's usual setting, for example:
 
 ```python
-model_config = {"provider": "anthropic", "model": "claude-sonnet-4-5", "reasoning_effort": "low"}
+model_config = {"provider": "anthropic", "model": "claude-sonnet-5", "reasoning_effort": "low"}
 ```
 
 Memory privacy redaction never alters signatures or encrypted reasoning. If
@@ -105,71 +154,97 @@ Traces record that continuation data was present (counts and a digest on each
 model call) and never store signatures or encrypted values; the thinking text
 itself is recorded only with `capture="full"`.
 
----
+## Azure OpenAI and Ollama
 
-## Model Configuration Options
+<Tabs>
+  <Tab title="Azure OpenAI">
+    ```python
+    model_config = {
+        "provider": "azure",
+        "model": "gpt-5.4",
+        "azure_endpoint": "https://your-resource.openai.azure.com",
+        "azure_api_version": "2024-02-01",
+        "azure_deployment": "my-gpt-deployment",  # optional: calls this deployment instead of `model`
+    }
+    ```
 
-```python
-model_config = {
-    "provider": "openai",
-    "model": "gpt-5.4",
-    "temperature": 0.7,
-    "max_tokens": 2000,
-    "top_p": 0.95
-}
-```
+    The key is your Azure OpenAI key, in `LLM_API_KEY`.
+  </Tab>
+  <Tab title="Ollama">
+    ```python
+    model_config = {
+        "provider": "ollama",
+        "model": "llama3.1:8b",
+        "ollama_host": "http://localhost:11434",
+    }
+    ```
 
----
+    Pull the model first (`ollama pull llama3.1:8b`). No `LLM_API_KEY` is
+    needed. Pick a model that supports tool calling: the agent offers tools on
+    every call.
+  </Tab>
+</Tabs>
 
-## Azure OpenAI Configuration
+## Options
 
-```python
-model_config = {
-    "provider": "azure",
-    "model": "gpt-5.4",
-    "azure_endpoint": "https://your-resource.openai.azure.com",
-    "azure_api_version": "2024-02-01"
-}
-```
+| Key | What it does |
+|---|---|
+| `provider` | Required. One of `openai`, `anthropic`, `gemini`, `groq`, `deepseek`, `mistral`, `azure`, `openrouter`, `ollama` — lowercase. |
+| `model` | Required. The provider's name for the model. |
+| `max_tokens` | Most output tokens per call (sent to OpenAI as `max_completion_tokens`). |
+| `temperature`, `top_p` | Sampling; set them only if the model supports them. |
+| `reasoning_effort` | For reasoning models, e.g. `"low"`, `"medium"`, `"high"`, or `"none"` where the model allows it. |
+| `logprobs`, `top_logprobs` | Ask for token probabilities, recorded for training use. |
+| `api_key` | This agent's key, instead of `LLM_API_KEY`. |
+| `azure_endpoint`, `azure_api_version`, `azure_deployment` | Azure OpenAI only. |
+| `ollama_host` | Ollama only: where the server listens. |
 
----
+Other keys are accepted and ignored. See also the
+[OmniCoreAgent reference](/docs/reference/omnicoreagent).
 
-## Ollama Configuration (Local Models)
+## When things go wrong
 
-```python
-model_config = {
-    "provider": "ollama",
-    "model": "llama3.1:8b",
-    "ollama_host": "http://localhost:11434"
-}
-```
+<AccordionGroup>
+  <Accordion title="ValueError: LLM_API_KEY not found in environment variables">
+    Raised by the first `run()` when the key is not set in the shell that runs
+    the script: `export LLM_API_KEY=...`. The runtime does not read `.env`
+    files itself; call `load_dotenv()` from `python-dotenv` at the top of your
+    script if your key is in one.
+  </Accordion>
+  <Accordion title="ValueError: Unsupported provider: OpenAI. Supported: openai, anthropic, groq, ollama, azure, gemini, deepseek, mistral, openrouter">
+    The provider name is lowercase and one of these nine. For another
+    OpenAI-compatible service, use `openrouter` if it is listed there.
+  </Accordion>
+  <Accordion title="ValueError: model_config.model is required">
+    Name the model as well as the provider. (`model_config.provider is required`
+    is the same message for the provider.)
+  </Accordion>
+  <Accordion title="The model call was refused: the provider rejected the API key (invalid_api_key). Fix the account; retrying will not help.">
+    The run ends with `status` `"error"` and this `response`. The key is
+    wrong, or it belongs to a different provider than `model_config["provider"]`.
+    An account out of credits reads `the provider account has no credits left
+    (insufficient_quota)` in the same place.
+  </Accordion>
+  <Accordion title="The model call was refused: the provider does not serve the model … to this account">
+    The model name is misspelled, retired, or not available to your account.
+    Check it against the provider's model list, and that `provider` is the one
+    that serves it.
+  </Accordion>
+</AccordionGroup>
 
----
+## Next
 
-## Environment Variables
-
-```bash
-# Hosted providers use this single OmniCoreAgent key
-export LLM_API_KEY=your_api_key
-```
-
-OmniCoreAgent reads `LLM_API_KEY`. Select the provider through
-`model_config["provider"]`; do not set provider-specific API-key variables in
-OmniCoreAgent configuration.
-
----
-
-## Provider Selection Guide
-
-| Use Case | Recommended Provider |
-|----------|----------------------|
-| Complex reasoning | OpenAI (`gpt-5.6-terra`), Anthropic (`claude-sonnet-5`) |
-| Fast inference | Groq (`openai/gpt-oss-120b`) |
-| Cost-effective | DeepSeek (`deepseek-chat`) |
-| Privacy-sensitive | Ollama (runs locally) |
-| Multi-model access | OpenRouter (200+ models) |
-| Enterprise / Azure | Azure OpenAI |
-
-<Tip>
-Switch providers based on your needs — use cheaper models (Groq, DeepSeek) for simple tasks, powerful models (GPT-5.6, Claude) for complex reasoning, and local models (Ollama) for privacy-sensitive applications.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/docs/getting-started/quickstart">
+    A tool, a memory and a trace, in five minutes.
+  </Card>
+  <Card title="Budgets and durable runs" icon="rotate" href="/docs/core-concepts/durable-runs">
+    Put a price on runs, checked before every model call.
+  </Card>
+  <Card title="Streaming and events" icon="signal-stream" href="/docs/core-concepts/events">
+    Show the answer as the model writes it.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/docs/how-to-guides/configuration">
+    Every setting of an agent in one place.
+  </Card>
+</CardGroup>

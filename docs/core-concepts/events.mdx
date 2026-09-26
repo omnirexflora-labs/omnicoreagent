@@ -1,147 +1,328 @@
 ---
-title: Telemetry Events
-description: 'Real-time telemetry events for streaming, debugging, and future trace surfaces'
+title: Streaming and Events
+description: 'Show the answer as the model writes it, and follow every step of a run as typed telemetry events — live or afterwards'
 icon: 'signal-stream'
 ---
 
-# Telemetry Events
+# Streaming and Events
 
-OmniCoreAgent records typed telemetry events for user messages, model calls,
-tool batches, tool calls, observation handling, subagents, final answers, and
-background run lifecycle changes.
+A run gives you two streams. By the end of this page you will have printed an
+answer **as the model writes it**, and followed the run's **telemetry events** —
+the model calls, tool calls and results, the final answer — while it ran and
+after it ended.
 
-Telemetry is available by default. Simple apps use the in-memory telemetry
-store automatically. Serving integrations can replay stored telemetry and follow
-new events through Server-Sent Events.
+| | Text deltas | Telemetry events |
+|---|---|---|
+| What | the model's text, piece by piece | every step of the run, typed: `model_call`, `tool_result`, `final_answer`, … |
+| How | `run(..., on_event=...)` or `agent.stream(...)` | `get_telemetry_events_after`, `stream_telemetry_after`, traces |
+| Kept | no — only the finished answer is stored | yes — in the run's trace |
+| For | a chat UI | a progress view, debugging, auditing |
 
----
+<Info>
+Every output on this page is what the code printed when it was run with
+`gpt-5.4-mini`. The model's wording, and so the number of text deltas, will
+differ on your run.
+</Info>
 
-## Quick Start
+## Stream the answer
 
-```python
-result = await agent.run("Research three AI agent runtimes.", session_id="user_1")
-
-events = await agent.get_telemetry_events_after(
-    cursor=None,
-    session_id=result["session_id"],
-    run_id=result["run_id"],
-)
-
-for event in events:
-    print(event.event_type, event.model_dump())
-
-exact_trace = await agent.get_trace(result["trace_id"])
-latest_session_trace = await agent.get_latest_trace(result["session_id"])
-run_correlated_trace = await agent.get_trace(run_id=result["run_id"])
-normalized_trace = await agent.get_trace(result["trace_id"], normalize=True)
-```
-
----
-
-## Common Event Types
-
-| Event | Description |
-|-------|-------------|
-| `user_message` | User input received |
-| `model_call` | Model request started |
-| `model_response` | Model returned content and usage |
-| `model_error` | Model call failed |
-| `agent_step` | ReAct loop step started |
-| `tool_batch_start` | Parallel tool batch started |
-| `tool_call` | Individual tool execution started |
-| `tool_result` | Individual tool returned successfully |
-| `tool_error` | Tool validation or execution failed |
-| `observation_pipeline_end` | Tool output was parsed, cleaned, and formatted |
-| `subagent_spawn` | One or more subagents were delegated work |
-| `subagent_result` | Subagent returned output |
-| `subagent_error` | Subagent execution failed |
-| `guardrail_violation` | Guardrail blocked unsafe input |
-| `final_answer` | Agent produced final response |
-| `runtime_error` | Runtime failed: the error's type and message; with `capture: "full"`, its traceback too |
-
----
-
-## Streaming
+Pass `on_event` to `run()`. It is called with each piece of text the model
+writes; a plain function works, and so does a coroutine.
 
 ```python
-session_id = "user_1"
-run_id = "run_ui_1"
-cursor = await agent.get_telemetry_stream_cursor(session_id=session_id)
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
 
-task = asyncio.create_task(
-    agent.run("Use tools if needed.", session_id=session_id, run_id=run_id)
-)
+tools = ToolRegistry()
 
-async for event in agent.stream_telemetry_after(
-    cursor=cursor,
-    session_id=session_id,
-    run_id=run_id,
-):
-    print(event.event_type)
-    if event.event_type == "final_answer":
-        break
+@tools.register_tool("get_weather")
+def get_weather(city: str) -> dict:
+    """Get current weather for a city."""
+    return {"city": city, "temp": "22C", "condition": "Sunny"}
 
-await task
+def show(event):
+    if event["type"] == "text_delta":
+        print(event["text"], end="", flush=True)
+
+async def main():
+    agent = OmniCoreAgent(
+        name="weather_agent",
+        system_instruction="Use tools when they help. Answer in plain text, in two short sentences.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        local_tools=tools,
+    )
+    result = await agent.run("What's the weather in Tokyo, and should I bring a jacket?", on_event=show)
+    print()
+    print("status:", result["status"])
+
+    events = await agent.get_telemetry_events_after(cursor=None, run_id=result["run_id"])
+    print(len(events), "telemetry events:")
+    print(", ".join(event.event_type for event in events))
+    await agent.cleanup()
+
+asyncio.run(main())
 ```
 
-OmniServe uses the same telemetry stream:
+```text
+Tokyo is 22°C and sunny. A light jacket is optional, but probably not necessary unless you get cold easily.
+status: success
+31 telemetry events:
+user_message, guardrail_check, memory_read, run_configuration, runtime_message, memory_write, agent_step, context_assembly, context_message, context_message, context_tools, model_call, model_response, memory_write, tool_batch_start, tool_requested, tool_resolved, tool_call, tool_result, tool_observation, memory_write, observation_pipeline_end, tool_batch_end, agent_step, context_assembly, context_message, context_message, model_call, model_response, memory_write, final_answer
+```
 
-- `POST /run` streams telemetry for the run it starts and finishes with
-  `complete`.
-- `GET /telemetry/events` returns stored telemetry events as JSON. Filter by
-  `trace_id`, `run_id`, `session_id`, `task_id`, or `event_type`. The default
-  event limit is `200`.
-- `GET /telemetry/events/stream?session_id=...` replays stored telemetry for a
-  session and follows new telemetry. Add `run_id` to isolate one run.
-- `GET /telemetry/traces/{trace_id}` returns one exact trace.
-- `GET /telemetry/runs/{run_id}/trace` returns the latest trace correlated to
-  one run.
-- `GET /telemetry/sessions/{session_id}/trace` returns the latest trace for a
-  session.
+The first line appeared piece by piece. `run()` still returns the whole result
+when the run ends. The last line is the other stream: every event the run
+recorded, in order — two `agent_step`s, the tool call between them, the
+`final_answer`.
 
-The older `/events/{session_id}`, `/events/{session_id}/list`, and
-`/events/{session_id}/trace` routes remain as compact session-oriented aliases.
-Use `?run_id=...` on those aliases to isolate one run inside a shared session.
+### Or iterate over the run
 
-Trace detail routes return `404` when the requested exact trace, run trace, or
-session trace does not exist. The trace list route defaults to `limit=100`.
+`agent.stream()` gives the same deltas as an async iterator, then one
+`complete` event carrying the whole result (or one `error` event):
 
-Every telemetry event includes its `trace_id`. Runtime-created events also carry
-correlation metadata such as `run_id`, `session_id`, and `agent_id` when that
-context exists.
+```python
+import asyncio
+from contextlib import aclosing
+from omnicoreagent import OmniCoreAgent
 
-Use `trace_id` for exact trace lookup. Use `run_id` to filter or correlate one
-runtime execution inside a session. If several traces share one `run_id`, the
-run lookup returns the latest matching trace.
+async def main():
+    agent = OmniCoreAgent(
+        name="poet",
+        system_instruction="Answer in plain text, without markdown.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    )
+    async with aclosing(agent.stream("Write a haiku about rivers.")) as events:
+        async for event in events:
+            if event["type"] == "text_delta":
+                print(event["text"], end="", flush=True)
+            elif event["type"] == "complete":
+                print("\n--- complete:", event["status"], "| trace", event["trace_id"][:14])
+            elif event["type"] == "error":
+                print("\n--- error:", event["error"])
+    await agent.cleanup()
 
-Telemetry traces can also be exported. The exporter layer maps normalized
-OmniCoreAgent traces to OpenTelemetry span records, then sends them through
-OTLP/HTTP or vendor presets such as LangSmith and Opik.
+asyncio.run(main())
+```
 
----
+```text
+Silver ribbons glide
+Through quiet stones and green reeds
+Earth hums in their song
+--- complete: success | trace trace_04c440c9
+```
 
-## Background Run Events
+The `complete` event has every key `run()` returns (`response`, `status`,
+`run_id`, `trace_id`, …). Leaving the loop early — or closing the iterator —
+cancels the run; `aclosing` makes sure that happens as soon as you stop.
 
-Background agents expose run-local lifecycle events through
-`get_run_events(run_id)` and OmniServe's `/background/runs/{run_id}/events`.
-These events are emitted into telemetry, stored in the manager cache, and
-mirrored to workspace `events.jsonl` when the task workspace policy allows it.
+### What a delta carries
 
-Common background lifecycle names include:
+| Key | What |
+|---|---|
+| `type` | `text_delta` |
+| `text` | the new piece of text |
+| `run_id` | the run you started |
+| `actor_run_id`, `agent_name` | which run and agent wrote it — a sub-agent's text arrives on the lead's callback with its own |
+| `session_id`, `trace_id` | where to find the run |
+| `sequence`, `event_id` | the delta's order within the run, and a unique ID |
+| `phase` | `intermediate` |
 
-| Lifecycle Event | Meaning |
-|-----------------|---------|
+Text is streamed for every model turn, including what the model says before it
+calls a tool. `resume(run_id, on_event=...)` streams a resumed run the same way.
+
+## Follow the run's events live
+
+Take a cursor before the run starts, then read events after it as they are
+recorded. `event_types` narrows the stream:
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
+
+@tools.register_tool("get_weather")
+def get_weather(city: str) -> dict:
+    """Get current weather for a city."""
+    return {"city": city, "temp": "22C", "condition": "Sunny"}
+
+async def main():
+    agent = OmniCoreAgent(
+        name="weather_agent",
+        system_instruction="Use tools when they help. Answer in plain text, in one sentence.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        local_tools=tools,
+    )
+    session_id, run_id = "user_1", "run_ui_1"
+    deltas = []
+
+    async def collect(event):  # a coroutine works as well as a plain function
+        deltas.append(event["text"])
+
+    cursor = await agent.get_telemetry_stream_cursor(session_id=session_id)
+    task = asyncio.create_task(
+        agent.run("Weather in Oslo?", session_id=session_id, run_id=run_id, on_event=collect)
+    )
+    async for event in agent.stream_telemetry_after(
+        cursor=cursor,
+        session_id=session_id,
+        run_id=run_id,
+        event_types=("model_call", "tool_call", "tool_result", "final_answer"),
+    ):
+        print(event.event_type, event.output if event.event_type == "tool_result" else "")
+        if event.event_type == "final_answer":
+            break
+
+    result = await task
+    print(result["response"])
+    print(len(deltas), "text deltas")
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+model_call
+tool_call
+tool_result {'tool_name': 'get_weather', 'args': {'city': 'Oslo'}, 'status': 'success', 'data': {'city': 'Oslo', 'temp': '22C', 'condition': 'Sunny'}, 'message': None}
+model_call
+final_answer
+Oslo is 22°C and sunny.
+9 text deltas
+```
+
+`stream_telemetry_after` keeps waiting for new events, so stop it yourself —
+here at `final_answer`. Each event is a `TelemetryEvent` with `event_type`,
+`event_id`, `trace_id`, `timestamp`, `actor`, `input`, `output`, `error`,
+`token_usage`, `estimated_cost_usd` and `metadata`; runtime events carry
+`run_id`, `session_id` and `agent_id` in their metadata.
+
+## The events
+
+These are the ones you will use most. What an event records (for example,
+whether a tool's arguments are kept in full) follows your
+[telemetry settings](/docs/reference/telemetry-config).
+
+| Group | Events |
+|---|---|
+| The run | `user_message`, `run_configuration`, `agent_step`, `final_answer`, `runtime_error` (the error's type and message; with `capture: "full"`, its traceback too) |
+| The model | `model_call`, `model_response`, `model_error` |
+| Context | `context_assembly`, `context_message`, `context_tools`, `context_compression` (history was [trimmed or summarized](/docs/core-concepts/context-engineering)), `memory_read`, `memory_write` |
+| Tools | `tool_batch_start`, `tool_requested`, `tool_resolved`, `tool_call`, `tool_result`, `tool_error`, `tool_observation`, `observation_pipeline_end`, `tool_batch_end`, `workspace_offload` |
+| Sub-agents | `subagent_spawn`, `subagent_result`, `subagent_error` |
+| Safety and policy | `guardrail_check`, `guardrail_violation`, `policy_decision_allow`, `policy_decision_ask`, `policy_decision_deny` |
+| Pauses and budgets | `run_suspended`, `run_resumed`, `run_interrupted`, `run_steered`, `budget_granted`, `budget_denied` |
+
+## Look up a finished run
+
+| Call | Returns |
+|---|---|
+| `await agent.get_telemetry_events_after(cursor=None, run_id=result["run_id"])` | the run's events, as above; filter by `trace_id`, `session_id`, `task_id` or `event_types` too |
+| `await agent.get_trace(result["trace_id"])` | the exact trace |
+| `await agent.get_trace(run_id=result["run_id"])` | the latest trace of that run |
+| `await agent.get_latest_trace(result["session_id"])` | the latest trace in a session |
+| `await agent.get_trace(result["trace_id"], normalize=True)` | the trace in the normalized, exporter-ready shape |
+| `await agent.get_trajectory(result["trace_id"])` | the run read as steps — see [Observability](/docs/how-to-guides/observability) |
+| `await agent.get_trace_family(trace_id=result["trace_id"])` | the trace with every [sub-agent](/docs/core-concepts/sub-agents)'s trace |
+
+Use `trace_id` for one exact trace; use `run_id` to find a run inside a
+session. A run that paused and resumed has one trace per segment, and the
+`run_id` lookup returns the latest. Traces can also be exported to OTLP,
+LangSmith or Opik ([Observability](/docs/how-to-guides/observability)).
+
+## Over HTTP
+
+[OmniServe](/docs/how-to-guides/omniserve) serves the same streams:
+
+- `POST /run` runs the agent and streams its text deltas and telemetry events
+  as Server-Sent Events, ending with `complete`.
+- `GET /telemetry/events` returns stored events as JSON, filtered by
+  `trace_id`, `run_id`, `session_id`, `task_id` or `event_type`; 200 events by
+  default.
+- `GET /telemetry/events/stream?session_id=...` replays a session's stored
+  events and follows new ones; add `run_id` for one run.
+- `GET /telemetry/traces/{trace_id}`, `GET /telemetry/runs/{run_id}/trace` and
+  `GET /telemetry/sessions/{session_id}/trace` return one trace, or `404`.
+  `GET /telemetry/traces` lists traces, 100 by default.
+
+The older `/events/{session_id}`, `/events/{session_id}/list` and
+`/events/{session_id}/trace` routes remain as compact session aliases; add
+`?run_id=...` to isolate one run.
+
+## Background run events
+
+[Background agents](/docs/core-concepts/background-agents) add run lifecycle
+events, read with `get_run_events(run_id)` or
+`GET /background/runs/{run_id}/events`. They are recorded in telemetry, kept by
+the manager, and mirrored to the task workspace's `events.jsonl` when its
+workspace policy allows.
+
+| Lifecycle event | Meaning |
+|---|---|
 | `background_task_scheduled` | A scheduled occurrence created a run. |
 | `background_run_queued` | A run was created and queued. |
 | `background_run_claimed` | A worker claimed the run with a lease. |
 | `background_run_started` | Agent execution started. |
-| `background_run_heartbeat` | Active worker refreshed the run lease. |
-| `background_run_retrying` | Failed attempt entered retry state. |
-| `background_run_recovered` | Expired lease was recovered and requeued; `resumed: true` when the next attempt continues the run from its checkpoint instead of starting over. |
+| `background_run_heartbeat` | The active worker refreshed the run's lease. |
+| `background_run_retrying` | A failed attempt entered retry. |
+| `background_run_recovered` | An expired lease was recovered and the run requeued; `resumed: true` when the next attempt continues from its checkpoint instead of starting over. |
 | `background_run_awaiting_approval` | The agent paused for a person's approval; the run waits, holding its task's slot, until it is resumed. |
 | `background_run_awaiting_budget` | The agent paused because a budget ran out; the run waits for a top-up, then a resume. |
-| `background_run_completed` | Run completed successfully. |
-| `background_run_failed` | Run failed terminally. |
-| `background_run_timeout` | Run exceeded its timeout. |
-| `background_run_cancelled` | Run was cancelled. |
-| `background_run_skipped` | Overlap policy skipped a scheduled run. |
+| `background_run_completed` | The run completed. |
+| `background_run_failed` | The run failed for good. |
+| `background_run_timeout` | The run exceeded its timeout. |
+| `background_run_cancelled` | The run was cancelled. |
+| `background_run_skipped` | The overlap policy skipped a scheduled run. |
+
+## Options
+
+| Where | Option | What it does |
+|---|---|---|
+| `run()`, `resume()` | `on_event` | A function or coroutine called with each text delta. |
+| `run()`, `stream()` | `session_id`, `run_id` | Choose the IDs up front, to filter events by them before the run starts. |
+| event methods | `trace_id`, `run_id`, `session_id`, `task_id`, `event_types` | Narrow what is returned or followed. |
+| constructor | `telemetry_config` | What events record, where traces are kept, and for how long ([reference](/docs/reference/telemetry-config)). |
+
+The full signatures are in the [OmniCoreAgent reference](/docs/reference/omnicoreagent).
+
+## When things go wrong
+
+<AccordionGroup>
+  <Accordion title="TypeError: object async_generator can't be used in 'await' expression">
+    `agent.stream(...)` is iterated, not awaited: `async for event in agent.stream(...)`.
+  </Accordion>
+  <Accordion title="TypeError: get_trace() requires trace_id or session_id">
+    Pass what to look up: `get_trace(result["trace_id"])`, or
+    `get_trace(run_id=...)` / `get_trace(session_id=...)`.
+  </Accordion>
+  <Accordion title="ValueError: Use only one of trace_id, run_id, or session_id">
+    Trace lookups take one key at a time.
+  </Accordion>
+  <Accordion title="stream_telemetry_after never ends">
+    It follows new events until you stop it. Break on `final_answer` (or
+    `runtime_error`), or `await` the run's task and stop then.
+  </Accordion>
+  <Accordion title="No text deltas arrive">
+    Deltas go only to the `on_event` of the run you started (or `stream()`),
+    and are not stored: they cannot be replayed from telemetry afterwards.
+    The telemetry events are stored, and the finished answer is in
+    `final_answer` and the run's result.
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Observability" icon="magnifying-glass-chart" href="/docs/how-to-guides/observability">
+    Read a run as a trajectory; export traces.
+  </Card>
+  <Card title="OmniServe" icon="server" href="/docs/how-to-guides/omniserve">
+    The same streams over REST and SSE.
+  </Card>
+  <Card title="Background agents" icon="clock" href="/docs/core-concepts/background-agents">
+    Scheduled and queued runs, and their lifecycle events.
+  </Card>
+  <Card title="Sub-agents" icon="users" href="/docs/core-concepts/sub-agents">
+    Child runs, linked traces, and their events.
+  </Card>
+</CardGroup>

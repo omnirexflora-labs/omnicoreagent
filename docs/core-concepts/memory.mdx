@@ -1,136 +1,284 @@
 ---
-title: Multi-Tier Memory
-description: 'MemoryRouter backends with runtime switching — in-memory, Redis, MongoDB, and SQL database storage'
+title: Memory
+description: 'Session history that survives restarts: in memory, SQLite, PostgreSQL, Redis or MongoDB, with windows and summaries'
 icon: 'database'
 ---
 
-# Multi-Tier Memory System
+# Memory
 
-**Runtime-switchable memory backends** — start in memory, switch to Redis,
-MongoDB, or SQL database storage when the application needs persistence.
+Runs with the same `session_id` share a conversation. By the end of this page
+that conversation survives a restart, lives in the database you choose, and
+stays small however long it grows.
 
----
+## A conversation the agent remembers
 
-## Quick Start
-
-The default `in_memory` backend is enough for local development and tests:
+Every agent has memory; with no `memory_router`, it is kept in the process:
 
 ```python
 import asyncio
-from omnicoreagent import OmniCoreAgent, MemoryRouter
+from omnicoreagent import OmniCoreAgent
 
 async def main():
     agent = OmniCoreAgent(
-        name="memory_agent",
-        system_instruction="Remember useful details inside the active session.",
-        model_config={"provider": "openai", "model": "gpt-5.4"},
-        memory_router=MemoryRouter("in_memory"),
+        name="assistant",
+        system_instruction="You are a helpful assistant. Answer in plain text, briefly.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
     )
-
     await agent.run("My project is called Atlas.", session_id="user_123")
     result = await agent.run("What is my project called?", session_id="user_123")
     print(result["response"])
+
+    for message in await agent.get_session_history("user_123"):
+        print(message["role"], "|", message["content"][:60])
     await agent.cleanup()
 
 asyncio.run(main())
 ```
 
-Install the backend extra before using a durable store:
+```text
+Atlas
+user | My project is called Atlas.
+assistant | Got it — your project is Atlas.
+user | What is my project called?
+assistant | Atlas
+```
+
+A different `session_id` starts with an empty history. Leave `session_id` out
+and each run gets a new one (it is in `result["session_id"]`).
+
+## Keep it across restarts
+
+In memory, the history ends with the process. To keep it, give the agent a
+`MemoryRouter` backed by a database. SQLite needs no server:
 
 ```bash
-pip install "omnicoreagent[redis]"
-pip install "omnicoreagent[mongodb]"
 pip install "omnicoreagent[postgres]"
 ```
 
-```python
-from omnicoreagent import OmniCoreAgent, MemoryRouter
-
-# Start with Redis
-agent = OmniCoreAgent(
-    name="my_agent",
-    system_instruction="Remember useful details inside the active session.",
-    memory_router=MemoryRouter("redis"),
-    model_config={"provider": "openai", "model": "gpt-5.4"}
-)
-
-# Switch at runtime — no restart needed!
-await agent.switch_memory_store("mongodb")     # Switch to MongoDB
-await agent.switch_memory_store("sql")         # Switch to SQL database storage
-await agent.switch_memory_store("in_memory")   # Switch to in-memory
-await agent.switch_memory_store("redis")       # Back to Redis
-```
-
----
-
-## Available Backends
-
-| Backend | Use Case | Environment Variable | Install |
-|---------|----------|---------------------|---------|
-| `in_memory` | Development; gone when the process ends | — | — |
-| `sql` | SQLite on one machine, PostgreSQL or MySQL when processes share it | `DATABASE_URL`, e.g. `sqlite:///./memory.db` or `postgresql://...` | `omnicoreagent[postgres]` (SQLAlchemy; also used for SQLite) |
-| `redis` | Production persistence | `REDIS_URL` | `omnicoreagent[redis]` |
-| `mongodb` | Document storage | `MONGODB_URI` | `omnicoreagent[mongodb]` |
-
-A run's durable record lives in the memory store too, so pausing a run in one
-process and resuming it in another needs a store both can reach: `sql`,
-`redis` or `mongodb` ([durable runs](/docs/core-concepts/durable-runs)).
+The `postgres` extra installs SQLAlchemy, which the SQL backend uses for
+SQLite too. Save this as `remember.py`:
 
 ```python
+import asyncio
 import os
-os.environ["DATABASE_URL"] = "sqlite:///./memory.db"
-memory_router = MemoryRouter("sql")
+import sys
+
+os.environ.setdefault("DATABASE_URL", "sqlite:///./memory.db")
+
+from omnicoreagent import MemoryRouter, OmniCoreAgent
+
+async def main(message: str):
+    agent = OmniCoreAgent(
+        name="assistant",
+        system_instruction="You are a helpful assistant. Answer in plain text, briefly.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        memory_router=MemoryRouter("sql"),
+    )
+    result = await agent.run(message, session_id="user_123")
+    print(result["response"])
+    await agent.cleanup()
+
+asyncio.run(main(sys.argv[1]))
 ```
 
----
+Run it twice — two separate processes:
 
-## Conversation Summarization
+```bash
+python remember.py "My project is called Atlas and it ships on Friday."
+python remember.py "When does my project ship, and what is it called?"
+```
 
-OmniCoreAgent includes **automatic conversation summarization** to manage long conversation histories efficiently. When enabled, older messages are condensed into summaries, keeping context while reducing token usage.
+```text
+Got it — Atlas ships on Friday.
+Your project is called Atlas, and it ships on Friday.
+```
+
+The second process had never seen the first message: it read it from
+`memory.db`. The model's wording will differ on your run.
+
+## The backends
+
+| `MemoryRouter(...)` | Keeps history | Set | Install |
+|---|---|---|---|
+| `"in_memory"` (default) | In this process; gone when it ends | — | — |
+| `"sql"` | In a SQL database: SQLite on one machine, PostgreSQL when processes share it | `DATABASE_URL`, e.g. `sqlite:///./memory.db` or `postgresql://user:pass@host/db` | `omnicoreagent[postgres]` |
+| `"redis"` | In Redis | `REDIS_URL`, e.g. `redis://localhost:6379/0` | `omnicoreagent[redis]` |
+| `"mongodb"` | In MongoDB | `MONGODB_URI`; optional `MONGODB_DB_NAME` (default `omnicoreagent`) and `MONGODB_COLLECTION` (default `messages`) | `omnicoreagent[mongodb]` |
+
+`DATABASE_URL` is a SQLAlchemy URL. The `postgres` extra brings SQLAlchemy and
+the PostgreSQL driver; another database SQLAlchemy supports needs its own
+driver installed.
+
+<Note>
+**The memory store also holds your runs.** A run that pauses for an approval or
+a budget is saved in the memory store, and resumed from it. To pause in one
+process and resume in another, both need a store they can reach: `sql`,
+`redis` or `mongodb` ([durable runs](/docs/core-concepts/durable-runs)).
+Finished run records are removed after `run_retention_days` (30 by default).
+</Note>
+
+### Read, clear, switch
 
 ```python
-from omnicoreagent import OmniCoreAgent, MemoryRouter
-
-memory_router = MemoryRouter("redis")
-
-memory_config = {
-    "mode": "sliding_window",  # or "token_budget"
-    "value": 10,  # Keep last 10 messages, or max tokens in token_budget mode
-    "summary": {
-        "enabled": True,
-        "retention_policy": "keep"  # Options: "keep" or "delete"
-    }
-}
-
-agent = OmniCoreAgent(
-    name="summarizing_agent",
-    memory_router=memory_router,
-    model_config={"provider": "openai", "model": "gpt-5.4"},
-    agent_config={"memory_config": memory_config},
-)
+history = await agent.get_session_history("user_123")  # the active messages
+await agent.clear_session_history("user_123")          # forget one session
+await agent.clear_session_history()                    # forget every session of this agent
+print(await agent.get_memory_store_type())              # "sql"
+await agent.switch_memory_store("redis")                # use another backend from now on
 ```
 
-### Summarization Modes
+History is kept per agent: two agents with different `name`s sharing one store
+and one `session_id` each see only their own messages. Switching backends does
+not copy anything: the new store starts with what it already holds.
 
-| Mode | Description | Best For |
-|------|-------------|----------|
-| `sliding_window` | Keep last N messages, summarize older ones | Predictable memory size |
-| `token_budget` | Keep messages within token limit | Cost optimization |
+## Long conversations: windows and summaries
 
-### Retention Policies
+A session's full history is kept; `memory_config` decides how much of it each
+run is given. By default a run gets the last 10,000 messages. A smaller window,
+with the part that falls out of it summarized:
 
-| Policy | Behavior |
-|--------|----------|
-| `keep` | Mark summarized messages as inactive (recoverable) |
-| `delete` | Permanently remove summarized messages |
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent
 
-### How It Works
+async def main():
+    agent = OmniCoreAgent(
+        name="assistant",
+        system_instruction="You are a helpful assistant. Answer in plain text, in one short sentence.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        agent_config={
+            "memory_config": {
+                "mode": "sliding_window",
+                "value": 4,  # the run sees at most 4 messages of history
+                "summary": {"enabled": True, "retention_policy": "keep"},
+            }
+        },
+    )
+    for message in [
+        "My project is called Atlas.",
+        "It ships on Friday.",
+        "The team is Ada, Grace and Linus.",
+        "Who is on the team, and what is the project called?",
+    ]:
+        result = await agent.run(message, session_id="user_123")
+    print(result["response"])
 
-1. When conversation exceeds configured limit → summarization triggers
-2. Older messages are sent to LLM for summary generation
-3. Summary replaces older messages in active context
-4. Original messages are retained (with `"keep"`) or deleted per policy
+    await asyncio.sleep(1)  # the summary is saved in the background
+    for message in await agent.get_session_history("user_123"):
+        print(message["role"], "|", message["content"][:90].replace("\n", " "))
+    await agent.cleanup()
 
-<Tip>
-Enable summarization for long-running conversations (support bots, research assistants) to maintain context while controlling costs. Use `sliding_window` for predictable behavior, `token_budget` for strict cost control.
-</Tip>
+asyncio.run(main())
+```
+
+```text
+The team is Ada, Grace, and Linus, and the project is Atlas.
+user | [CONVERSATION SUMMARY] The conversation established the project’s basic details and timeli
+assistant | Noted — the team is Ada, Grace, and Linus.
+user | Who is on the team, and what is the project called?
+assistant | The team is Ada, Grace, and Linus, and the project is Atlas.
+```
+
+The project's name had left the window by the last question, and the agent
+still knew it: the older messages became one `[CONVERSATION SUMMARY]` message.
+
+How it works: when a run loads a session whose history is larger than the
+window, the older messages are summarized by the agent's own model (one extra
+model call), the summary takes one slot of the window, and the most recent
+messages fill the rest. A tool call and its result are kept together. Without
+`summary`, the older messages are simply left out of the run.
+
+| `memory_config` key | Values | What it does |
+|---|---|---|
+| `mode` | `"sliding_window"` (default), `"token_budget"` | Count the window in messages, or in tokens |
+| `value` | a number; default `10000` | The most messages (`sliding_window`) or tokens (`token_budget`) of history a run is given |
+| `summary.enabled` | `False` (default), `True` | Summarize what falls out of the window instead of dropping it |
+| `summary.retention_policy` | `"keep"` (default), `"delete"` | After summarizing: keep the originals in the store, marked inactive, or delete them |
+
+Give `mode` and `value` together: `memory_config` replaces the default as a
+whole. Within one run, the context is kept under the model's limit separately,
+by `context_management` ([context engineering](/docs/core-concepts/context-engineering)).
+
+## Options
+
+| Where | Option | Default | What it does |
+|---|---|---|---|
+| constructor | `memory_router` | `MemoryRouter("in_memory")` | Where history and run records are kept |
+| `agent_config` | `memory_config` | `sliding_window`, `10000`, no summary | How much history a run is given |
+| `agent_config` | `run_retention_days` | `30` | Days finished run records are kept; `None` keeps them all |
+| `run(...)` | `session_id` | a new one per run | Which conversation the run continues |
+
+The full lists: [agent settings](/docs/reference/agent-config) and the
+[OmniCoreAgent reference](/docs/reference/omnicoreagent).
+
+## When things go wrong
+
+The agent logs to the `omnicoreagent` logger and prints nothing on its own.
+To see warnings, turn logging on:
+
+```python
+import logging
+
+logging.basicConfig(level=logging.WARNING)
+```
+
+<AccordionGroup>
+  <Accordion title="The history is gone after a restart, with no error">
+    The URL variable was not set when the `MemoryRouter` was created, so it
+    fell back to memory. With logging on:
+
+    ```text
+    WARNING omnicoreagent: SQL memory selected but DATABASE_URL is not set; using in_memory (nothing survives a restart)
+    ```
+
+    Set `DATABASE_URL`, `REDIS_URL` or `MONGODB_URI` before building the
+    router. `print(router)` shows the store it chose:
+    `MemoryRouter(type=sql, store=InMemoryStore)` means the fallback.
+  </Accordion>
+
+  <Accordion title="ImportError: SQL database memory requires optional dependency 'sqlalchemy'">
+    ```text
+    ImportError: SQL database memory requires optional dependency 'sqlalchemy'. Install it with: pip install 'omnicoreagent[postgres]'
+    ```
+
+    Install the extra the message names. Redis and MongoDB name theirs the
+    same way.
+  </Accordion>
+
+  <Accordion title="ValueError: Invalid memory store type">
+    ```text
+    ValueError: Invalid memory store type: postgres. Use one of: in_memory, sql, redis, mongodb
+    ```
+
+    PostgreSQL, MySQL and SQLite are all `"sql"`; the URL picks the database.
+  </Accordion>
+
+  <Accordion title="KeyError: 'value' / Invalid memory mode">
+    Raised when the agent starts, from a `memory_config` without a `value`, or
+    with an unknown `mode`:
+
+    ```text
+    KeyError: 'value'
+    ValueError: Invalid memory mode: window. Must be one of {'sliding_window', 'token_budget'}.
+    ```
+
+    Give both: `{"mode": "token_budget", "value": 8000}`.
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Durable runs" icon="rotate" href="/docs/core-concepts/durable-runs">
+    Pause a run, resume it later — in another process — from the memory store.
+  </Card>
+  <Card title="Context engineering" icon="brain-circuit" href="/docs/core-concepts/context-engineering">
+    Keeping one run's context under the model's limit.
+  </Card>
+  <Card title="Workspace files" icon="folder-open" href="/docs/core-concepts/workspace-files">
+    The agent's files: notes, plans, generated work.
+  </Card>
+  <Card title="Serve it" icon="server" href="/docs/how-to-guides/omniserve">
+    Sessions over REST and SSE.
+  </Card>
+</CardGroup>
