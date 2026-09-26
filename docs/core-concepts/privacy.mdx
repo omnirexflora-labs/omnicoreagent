@@ -1,0 +1,352 @@
+---
+title: Privacy and Credentials
+description: 'Personal data redacted where it is kept about a run, and the keys you configure kept out of the model, the trace and the commands it runs'
+icon: 'user-shield'
+---
+
+# Privacy and Credentials
+
+An agent works with real data: asked for a customer's email, it has to be able
+to give it. What the runtime keeps *about* a run is another matter. By default,
+personal data (emails, phone numbers, Social Security numbers, card numbers) is
+redacted from the trace, and every trajectory and export made from it. The
+credentials the agent holds, such as its model key, are removed from everything a
+tool returns before the model sees it, and from everything the trace records.
+
+By the end of this page you will have watched one fake email pass through a tool
+(real for the model and the answer, redacted in the stored trace) and a key
+printed by a tool arrive as `[REDACTED:credential]`, and you will know which
+boundary to turn on when your deployment needs more.
+
+<Info>
+Every output on this page is what the code printed when it was run. The model's
+wording will differ on your run; what is redacted where will not.
+</Info>
+
+## One email, two views
+
+```python
+import asyncio
+from pathlib import Path
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
+
+@tools.register_tool("lookup_customer")
+def lookup_customer(name: str) -> dict:
+    """Look up a customer's contact details by name."""
+    return {"name": name, "email": "jane@example.com", "phone": "+1 555 010 0100"}
+
+async def main():
+    agent = OmniCoreAgent(
+        name="support",
+        system_instruction="Use tools to answer. Answer in plain text, in one sentence.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        local_tools=tools,
+    )
+    result = await agent.run("What is Jane Doe's email address and phone number?")
+    print("answer:  ", result["response"])
+
+    history = await agent.get_session_history(result["session_id"])
+    print("memory:  ", [m["content"] for m in history if m["role"] == "tool"][0])
+
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    print("trace:   ", trajectory["steps"][0]["tool_calls"][0]["result"]["data"])
+    await agent.cleanup()
+
+    log = Path("workspace/telemetry/traces.jsonl").read_text()
+    print("on disk: real email", "jane@example.com" in log, "| redacted", "[REDACTED_EMAIL]" in log)
+
+asyncio.run(main())
+```
+
+```text
+answer:   Jane Doe’s email address is jane@example.com and her phone number is +1 555 010 0100.
+memory:   {"tool_name": "lookup_customer", "args": {"name": "Jane Doe"}, "status": "success", "data": {"name": "Jane Doe", "email": "jane@example.com", "phone": "+1 555 010 0100"}, "message": null}
+trace:    {'name': 'Jane Doe', 'email': '[REDACTED_EMAIL]', 'phone': '[REDACTED_PHONE]'}
+on disk: real email False | redacted True
+```
+
+The model read the real values and the answer carries them. The conversation
+memory kept them as written, so a later turn can use them. The trace, which
+holds the model's prompts, the tool results and the answer, holds neither: the
+trace file on disk (`workspace/telemetry/traces.jsonl` by default) has the
+markers and not the address.
+
+## How it works
+
+Each place data leaves the run's working context is a **boundary**, with its own
+switch in `agent_config["privacy_config"]`:
+
+| Boundary | Switch | Default | What it covers |
+|---|---|---|---|
+| Telemetry | `redact_telemetry` | on | Everything a trace records: events, spans, model prompts and responses, tool arguments and results, errors. So also every trajectory, export and OmniServe trace view made from it. |
+| Memory | `redact_memory` | off | The conversation history the agent stores and later turns (and resumed runs) read back. |
+| Workspace | `redact_workspace` | off | Files the agent writes or edits with its file tools, files copied back from a sandbox, and offloaded tool results. |
+| Stream | `redact_stream` | off | The events streamed to your `on_event` callback. |
+| Public | `redact_public` | off | Everything returned to your application: `run()`'s answer and errors, and OmniServe's responses. |
+| Model I/O | `redact_model_io` | off | What is sent to the model provider. See the warning below. |
+
+`enabled: False` turns every boundary off. The effective policy is fingerprinted
+in each trace's metadata as `privacy_config_version`, so a trace shows which
+policy produced it.
+
+### Why working state is not redacted by default
+
+Memory and the workspace are the agent's own work, not a record of it. Redacted,
+they corrupt that work: the agent writes a `pyproject.toml` whose author email
+has become `[REDACTED_EMAIL]`, or a run resumed after an approval rebuilds its
+call from redacted history and sends the marker instead of the address. Both
+happened before these defaults were chosen. Turn them on only where the stored
+state must hold no personal data at rest, knowing that the agent will then work
+from the redacted text.
+
+The stream and the answer are your application's own output, so they carry real
+values unless you say otherwise.
+
+### Turning a boundary on
+
+The same program, with one line added to the agent,
+`agent_config={"privacy_config": {"redact_public": True, "redact_memory": True}}`:
+
+```text
+answer:   Jane Doe’s email address is [REDACTED_EMAIL] and her phone number is [REDACTED_PHONE].
+memory:   {"tool_name": "lookup_customer", "args": {"name": "Jane Doe"}, "status": "success", "data": {"name": "Jane Doe", "email": "[REDACTED_EMAIL]", "phone": "[REDACTED_PHONE]"}, "message": null}
+trace:    {'name': 'Jane Doe', 'email': '[REDACTED_EMAIL]', 'phone': '[REDACTED_PHONE]'}
+on disk: real email False | redacted True
+```
+
+The model still saw the real values; the answer was redacted on its way out, and
+the history was redacted when it was stored.
+
+<Warning>
+`redact_model_io` is accepted and validated, but in 0.4.1 no model call applies
+it: with `{"redact_model_io": True}` the same run answered `Jane Doe’s email
+address is jane@example.com ...`. Do not rely on it to keep personal data from a
+provider. Until it is wired in, keep such data out of what reaches the model (a
+tool can return an identifier instead of the value).
+</Warning>
+
+### What counts as personal data
+
+`categories` chooses among four, all on by default:
+
+```python
+from omnicoreagent.core.privacy import PrivacyFilter
+
+privacy = PrivacyFilter()  # the defaults an agent uses
+text = (
+    "Jane: jane@example.com, +1 555 010 0100, desk 555-0100, "
+    "SSN 123-45-6789, card 4111 1111 1111 1111, order 4111 1111 1111 1112"
+)
+print(privacy.redact_text(text, boundary="telemetry"))
+print(privacy.redact_text(text, boundary="public"))
+```
+
+```text
+Jane: [REDACTED_EMAIL], [REDACTED_PHONE], desk 555-0100, SSN [REDACTED_SSN], card [REDACTED_CREDIT_CARD], order 4111 1111 1111 1112
+Jane: jane@example.com, +1 555 010 0100, desk 555-0100, SSN 123-45-6789, card 4111 1111 1111 1111, order 4111 1111 1111 1112
+```
+
+The first line is the telemetry boundary, on by default; the second is the public
+boundary, off by default, so nothing changed.
+
+| Category | Marker | Matches |
+|---|---|---|
+| `email` | `[REDACTED_EMAIL]` | an address such as `jane@example.com` |
+| `phone` | `[REDACTED_PHONE]` | 10 to 15 digits, with optional `+`, spaces, dots, dashes or brackets (at most 12 when written as bare digits); a seven-digit `555-0100` is not matched |
+| `ssn` | `[REDACTED_SSN]` | `123-45-6789` |
+| `credit_card` | `[REDACTED_CREDIT_CARD]` | 13 to 19 digits that pass the Luhn check, so an order number of the same length is kept |
+
+Dates, decimals, UUIDs and identifier fields (`trace_id`, `run_id`,
+`tool_call_id` and the like) are never rewritten, so a redacted trace can still
+be followed.
+
+
+## The telemetry side
+
+What a trace records at all is set by `telemetry_config`, separately from what is
+redacted in it. A trace records the full trajectory by default, so that a run can
+be read from request to answer, evaluated, or reused:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `capture` | `"full"` | A preset for the `record_*` settings. `"full"` records the model's prompts and responses; `"default"` is the privacy-first preset that does not. Other values are refused. |
+| `record_model_prompts` | from `capture` | The messages and tool list sent to the model on each call. |
+| `record_model_responses` | from `capture` | What the model answered on each call. |
+| `record_tool_results` | from `capture` | What each tool, MCP tool, file operation and sandbox command returned. |
+| `record_inputs`, `record_outputs` | `True` | Off, no input (or output) is recorded, whatever the narrower settings say. |
+| `redact_keys` | `api_key`, `token`, `password`, `secret`, `authorization`, `cookie` and others | Keys whose values become `[REDACTED]` anywhere in a recorded payload, at any depth, including inside JSON-encoded tool arguments. `key=value` pairs and `Bearer ...` tokens in error text are redacted too. |
+
+```python
+from omnicoreagent import OmniCoreAgent
+
+agent = OmniCoreAgent(
+    name="support",
+    system_instruction="Answer in plain text.",
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    telemetry_config={
+        "capture": "default",  # no model prompts or responses in the trace
+        "redact_keys": ["api_key", "token", "password", "customer_ref"],
+    },
+)
+```
+
+A `redact_keys` list you pass replaces the default one, so keep the defaults you
+still want. Every setting is in the [telemetry settings
+reference](/docs/reference/telemetry-config), and reading traces is covered in
+[Observability](/docs/how-to-guides/observability).
+
+## Credentials
+
+When an agent is built, the runtime remembers the credentials it holds:
+
+- every value in `model_config` or the `mcp_tools` configuration under a key
+  named like a credential (`api_key`, `token`, `secret`, `password`,
+  `access_key`, `private_key`, `credential`, at any depth), and the token of an
+  `Authorization` header;
+- every environment variable named like one (`LLM_API_KEY`,
+  `GITHUB_TOKEN`, ...) whose value looks like a key: at least 12 characters,
+  one word, not a path or a number.
+
+Wherever one of these values appears literally, it becomes
+`[REDACTED:credential]`: in every tool result before the model sees it (and so
+before it reaches memory, the workspace or the trace), in everything telemetry
+records, and in model error messages. The list is process-wide: a key one agent
+holds is removed from what every agent in the process hands a model.
+
+```python
+import asyncio
+import os
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+os.environ["PAYMENTS_API_TOKEN"] = "pay_test_4f9a2c7e1b8d"  # a fake key, for the demo
+
+tools = ToolRegistry()
+
+@tools.register_tool("show_settings")
+def show_settings() -> str:
+    """Show the payment service's settings."""
+    return f"region=eu-west-1\ntimeout=30\ntoken={os.environ['PAYMENTS_API_TOKEN']}"
+
+async def main():
+    agent = OmniCoreAgent(
+        name="ops",
+        system_instruction="Use tools to answer. Answer in plain text.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        local_tools=tools,
+    )
+    result = await agent.run("Show me the payment service settings exactly as the tool returned them.")
+    print(result["response"])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+region=eu-west-1
+timeout=30
+token=[REDACTED:credential]
+```
+
+The tool printed the key; the model never received it, so it could not repeat
+it.
+
+### Kept out of commands and scripts
+
+Removing a key from output cannot stop a command from *sending* it somewhere. So
+the runtime also keeps keys out of the environments that commands run in:
+
+| Where code runs | What it receives from your environment |
+|---|---|
+| A skill script on the host | `PATH`, `HOME`, the locale, `TMPDIR` and `TERM` only, plus the variables you name in `skill_script_env`. It cannot read `LLM_API_KEY`. See [Agent skills](/docs/core-concepts/skills). |
+| The `local` command backend | `PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_ALL`, `TERM`, `TMPDIR`, `TZ`, plus its `environment_passthrough` option; all of it only with `inherit_environment: True`. |
+| A container or remote sandbox | Only the environment its manifest declares, never your host's. |
+
+A command on the host can still read files your user can, including a `.env`
+file. If that matters, run commands in a sandbox: see
+[Execution](/docs/core-concepts/execution) and [sandbox
+providers](/docs/how-to-guides/sandbox-providers).
+
+## Options
+
+`agent_config["privacy_config"]`:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `enabled` | `True` | `False` turns every boundary off. |
+| `redact_telemetry` | `True` | Redact the trace and everything made from it. |
+| `redact_memory` | `False` | Redact the stored conversation. |
+| `redact_workspace` | `False` | Redact files the agent writes, and offloaded results. |
+| `redact_stream` | `False` | Redact events sent to `on_event`. |
+| `redact_public` | `False` | Redact the answer, errors and OmniServe responses. |
+| `redact_model_io` | `False` | Accepted; not applied in 0.4.1 (see the warning above). |
+| `categories` | all four | Any of `email`, `phone`, `ssn`, `credit_card`. |
+
+`agent_config["skill_script_env"]` (default `[]`) names the environment variables
+a host skill script may receive. Every agent setting is in the [agent settings
+reference](/docs/reference/agent-config).
+
+## When things go wrong
+
+<AccordionGroup>
+  <Accordion title="A file the agent wrote says [REDACTED_EMAIL]">
+    `redact_workspace` is on, so the agent's own writes were redacted. Turn it
+    off unless the workspace must hold no personal data at rest; the trace is
+    redacted either way.
+  </Accordion>
+
+  <Accordion title="A value the agent needs shows as [REDACTED:credential]">
+    The value is registered as a credential: it sits under a credential-named
+    key in `model_config` or `mcp_tools`, or in an environment variable named
+    like one (`..._TOKEN`, `..._SECRET`, `..._API_KEY`). Give non-secret
+    settings names that do not look like credentials.
+  </Accordion>
+
+  <Accordion title="A phone number was not redacted">
+    Only 10 to 15 digits count as a phone number, so a local number like
+    `555-0100` is kept. Numbers with fewer digits than that are not matched.
+  </Accordion>
+
+  <Accordion title="ValueError: categories[0] must be one of: credit_card, email, phone, ssn">
+    ```text
+    ValueError: categories[0] must be one of: credit_card, email, phone, ssn
+    ```
+
+    Only these four categories exist.
+  </Accordion>
+
+  <Accordion title="TypeError: PrivacyConfig.__init__() got an unexpected keyword argument">
+    A key that is not a setting, or a value that is not a bool:
+
+    ```text
+    TypeError: PrivacyConfig.__init__() got an unexpected keyword argument 'redact_emails'
+    ValueError: redact_memory must be a bool
+    ```
+  </Accordion>
+
+  <Accordion title="ValueError: telemetry capture must be one of: default, full">
+    ```text
+    ValueError: telemetry capture must be one of: default, full
+    ```
+
+    To record less, use `"default"` or set the `record_*` settings one by one.
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Guardrails" icon="shield-halved" href="/docs/core-concepts/guardrails">
+    The prompt-injection screen on requests and tool results.
+  </Card>
+  <Card title="Security model" icon="lock" href="/docs/core-concepts/security-model">
+    What each layer protects against, and what it does not.
+  </Card>
+  <Card title="Execution" icon="terminal" href="/docs/core-concepts/execution">
+    Where commands run, and what a sandbox isolates.
+  </Card>
+  <Card title="Sandbox providers" icon="box" href="/docs/how-to-guides/sandbox-providers">
+    Docker, E2B, Daytona, Modal and more.
+  </Card>
+</CardGroup>

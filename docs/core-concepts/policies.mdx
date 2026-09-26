@@ -1,0 +1,481 @@
+---
+title: "Policies"
+description: "Write the rules that allow, ask about or deny everything an agent does, test them, and read each decision"
+icon: "scale-balanced"
+---
+
+# Policies
+
+A policy decides every request an agent makes: `allow`, `ask` or `deny`.
+Here: write one, test it without a model, and read its decisions.
+
+<Info>
+Every output on this page is what the code printed when it was run. The
+model's wording will differ on your run; the decisions will not.
+</Info>
+
+## Start from a profile, add a rule
+
+A built-in profile plus the one rule you need:
+
+```python
+from omnicoreagent import OmniCoreAgent
+from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy
+
+policy = build_default_policy("interactive-dev")
+policy.rules.ask.append(
+    PolicyRule(
+        rule_id="ask_before_refunds",
+        effect=PolicyEffect.ASK,
+        capability="tool.local.call",
+        target={"tool_name": "issue_refund"},
+        reason="Refunds need a person.",
+    )
+)
+
+agent = OmniCoreAgent(
+    name="support",
+    system_instruction="You help with orders.",
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    agent_config={"governance_config": {"enabled": True, "policy": policy}},
+)
+```
+
+Every `issue_refund` call now pauses for a person
+([Approvals](/docs/core-concepts/approvals)).
+
+Or set `"profile": "..."` alone. The three profiles on the same four calls
+(the script is [below](#test-a-rule-before-you-run)):
+
+```text
+permissive-dev
+  lookup_order  allow ['allow_local_tools']
+  write_file    allow ['allow_local_dev_workspace']
+  delete_file   allow ['allow_local_dev_workspace']
+  search        allow matched_allow
+interactive-dev
+  lookup_order  allow ['allow_local_tools']
+  write_file    allow ['allow_workspace']
+  delete_file   ask   ['ask_high_risk']
+  search        ask   ['ask_mcp_tool_call']
+strict-production
+  lookup_order  deny  unknown_capability
+  write_file    deny  unknown_capability
+  delete_file   deny  unknown_capability
+  search        deny  unknown_capability
+```
+
+`lookup_order` is your tool, `search` an MCP tool. A delete is high-risk,
+so `interactive-dev`'s `ask_high_risk` asks. Every profile rule:
+[policy reference](/docs/reference/policy).
+
+## A rule
+
+A rule:
+
+```python
+{
+    "rule_id": "no_prod_deletes",          # recorded with every decision it makes
+    "capability": "workspace.files.delete", # or a glob: "workspace.files.*", "*"
+    "target": {"path": "prod/*"},           # optional: tool_name, mcp_server, path, host, resource
+    "conditions": {"risk_level": ["high", "critical"]},  # optional
+    "reason": "Nothing under prod/ is deleted by an agent.",  # optional
+}
+```
+
+| Field | Matches |
+|---|---|
+| `capability` | `tool.local.call`, `workspace.files.write`, ... or a glob ([all](/docs/reference/policy#capabilities)) |
+| `target` | `tool_name`, `mcp_server`, `path`, `host`, `resource` (globs) |
+| `conditions` | `risk_level`, `provider`, `execution_surface`, `exclude_execution_surface`, `exclude_capability`, `mcp_server`, `method`, `host` |
+| `constraints` | `approval_expires_seconds`, `sandbox_required`, `audit_required` |
+| `reason` | shown to the approver, recorded with the decision |
+
+Its effect is the list it is in: `deny`, `ask` or `allow`.
+
+## How a request is decided
+
+<Steps>
+  <Step title="A deny rule matches: denied">
+    Deny wins over everything. The model is told the call was refused and why.
+  </Step>
+  <Step title="Otherwise an ask rule matches: a person decides">
+    An ask outranks an allow. Adding an allow rule to a profile does not lift
+    that profile's asks; remove the ask rule, or write your own policy.
+  </Step>
+  <Step title="Otherwise an allow rule matches: allowed">
+  </Step>
+  <Step title="Otherwise the mode decides">
+    `permissive` allows, `interactive` asks, `strict` denies. The decision's
+    `reason_code` is `unknown_capability` and `matched_rule_ids` is empty.
+  </Step>
+</Steps>
+
+`matched_rule_ids` lists every matching rule in the winning list.
+
+## Test a rule before you run
+
+Build the request a tool call makes and ask the evaluator the agent uses.
+No model needed:
+
+```python
+from omnicoreagent.governance import (
+    PolicyEvaluator,
+    policy_from_mapping,
+    tool_authority_requests,
+)
+
+policy = policy_from_mapping({
+    "name": "support-desk",
+    "mode": "strict",
+    "rules": {
+        "deny": [
+            {"rule_id": "no_bulk_refunds", "capability": "tool.local.call",
+             "target": {"tool_name": "refund_all"}},
+        ],
+        "ask": [
+            {"rule_id": "ask_before_refunds", "capability": "tool.local.call",
+             "target": {"tool_name": "issue_refund"},
+             "reason": "Refunds need a person."},
+        ],
+        "allow": [
+            {"rule_id": "my_tools", "capability": "tool.local.call"},
+            {"rule_id": "read_workspace", "capability": "workspace.files.read"},
+        ],
+    },
+})
+
+evaluator = PolicyEvaluator()
+calls = [
+    ("lookup_order", "local", {"order_id": "1042"}),
+    ("issue_refund", "local", {"order_id": "1042", "amount": 42.0}),
+    ("refund_all", "local", {}),
+    ("read_file", "workspace", {"path": "notes.md"}),
+    ("write_file", "workspace", {"path": "notes.md", "content": "hi"}),
+]
+for name, provider, args in calls:
+    for request in tool_authority_requests(tool_name=name, tool_args=args, tool_provider=provider):
+        decision = evaluator.evaluate(policy, request)
+        print(f"{name:13} {request.capability:22} {decision.effect.value:5} "
+              f"{decision.reason_code.value:19} {decision.matched_rule_ids}")
+```
+
+```text
+lookup_order  tool.local.call        allow matched_allow       ['my_tools']
+issue_refund  tool.local.call        ask   matched_ask         ['ask_before_refunds']
+refund_all    tool.local.call        deny  matched_deny        ['no_bulk_refunds']
+read_file     workspace.files.read   allow matched_allow       ['read_workspace']
+write_file    workspace.files.write  deny  unknown_capability  []
+```
+
+`tool_provider`: `local`, `workspace`, `artifact`, `mcp` (with
+`tool_server`), `skill`, `sandbox` or `code`. `write_file` fell through to
+strict mode. Put checks like these in your tests.
+
+The profile comparison above:
+
+```python
+from omnicoreagent.governance import PolicyEvaluator, build_default_policy, tool_authority_requests
+
+calls = [
+    ("lookup_order", "local", {"order_id": "1042"}),
+    ("write_file", "workspace", {"path": "notes.md", "content": "hi"}),
+    ("delete_file", "workspace", {"path": "notes.md"}),
+    ("search", "mcp", {"q": "refunds"}),
+]
+evaluator = PolicyEvaluator()
+for profile in ("permissive-dev", "interactive-dev", "strict-production"):
+    policy = build_default_policy(profile)
+    print(profile)
+    for name, provider, args in calls:
+        request = tool_authority_requests(
+            tool_name=name, tool_args=args, tool_provider=provider,
+            tool_server="docs" if provider == "mcp" else None,
+        )[0]
+        decision = evaluator.evaluate(policy, request)
+        print(f"  {name:13} {decision.effect.value:5} {decision.matched_rule_ids or decision.reason_code.value}")
+```
+
+## Three ways to give the policy
+
+<Tabs>
+  <Tab title="A dict">
+    The whole policy in your code. Here, a strict policy that allows one tool
+    and nothing else:
+
+    ```python
+    import asyncio
+    from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+    tools = ToolRegistry()
+
+    @tools.register_tool("lookup_order")
+    def lookup_order(order_id: str) -> dict:
+        """Look an order up."""
+        return {"order_id": order_id, "status": "processing", "total": 42.0}
+
+    @tools.register_tool("cancel_order")
+    def cancel_order(order_id: str) -> dict:
+        """Cancel an order."""
+        return {"order_id": order_id, "cancelled": True}
+
+    policy = {
+        "name": "support-desk",
+        "mode": "strict",  # anything no rule covers is denied
+        "rules": {
+            "allow": [
+                {"rule_id": "lookups", "capability": "tool.local.call",
+                 "target": {"tool_name": "lookup_order"}},
+            ],
+        },
+    }
+
+    async def main():
+        agent = OmniCoreAgent(
+            name="support",
+            system_instruction="You help with orders. Answer in plain text, in one sentence.",
+            model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+            local_tools=tools,
+            agent_config={"governance_config": {"enabled": True, "policy": policy}},
+        )
+        result = await agent.run("Cancel order 1042.")
+        print(result["response"])
+
+        trajectory = await agent.get_trajectory(result["trace_id"])
+        for step in trajectory["steps"]:
+            for call in step["tool_calls"]:
+                print(call["tool_name"], call["outcome"], call["error"])
+                for decision in call["governance"]:
+                    print("  ", decision["capability"], decision["effect"],
+                          decision["reason_code"], decision["matched_rule_ids"])
+        await agent.cleanup()
+
+    asyncio.run(main())
+    ```
+
+    ```text
+    I’m unable to cancel order 1042 because the system denied the action.
+    cancel_order denied {'type': 'UnknownCapabilityError', 'message': 'Unknown capability denied by strict policy: no rule covers tool.local.call.'}
+       tool.local.call deny unknown_capability []
+    ```
+
+    The tool never ran; the model was told why. ("No rule covers" means no
+    rule matched this call: `lookups` only matches `lookup_order`.)
+  </Tab>
+  <Tab title="Objects">
+    `build_default_policy(name)` returns a `PolicyEnvelope`; append
+    `PolicyRule`s to `rules.deny`, `rules.ask`, `rules.allow` and pass it as
+    `"policy"`. `policy_from_mapping(dict)` builds one from a dict.
+  </Tab>
+  <Tab title="A policy file">
+    JSON only:
+
+    ```json
+    {
+      "name": "support-desk",
+      "mode": "strict",
+      "rules": {
+        "ask": [
+          {"rule_id": "ask_before_refunds", "capability": "tool.local.call",
+           "target": {"tool_name": "issue_refund"}}
+        ],
+        "allow": [
+          {"rule_id": "my_tools", "capability": "tool.local.call"}
+        ]
+      }
+    }
+    ```
+
+    ```python
+    agent_config = {
+        "governance_config": {
+            "enabled": True,
+            "policy_path": "policies/support.json",
+        }
+    }
+    ```
+
+    Read on the first run. To test it, load it the way the agent does:
+
+    ```python
+    from omnicoreagent.governance import PolicyEvaluator, load_policy_file, tool_authority_requests
+
+    policy = load_policy_file("policies/support.json", project_root=".")
+    print(policy.name, policy.mode.value, policy.provenance.source.value, policy.provenance.policy_hash[:16])
+
+    request = tool_authority_requests(tool_name="issue_refund", tool_args={"order_id": "1042", "amount": 42.0})[0]
+    decision = PolicyEvaluator().evaluate(policy, request)
+    print(decision.effect.value, decision.matched_rule_ids)
+    ```
+
+    ```text
+    support-desk strict file f86919474a7abb3a
+    ask ['ask_before_refunds']
+    ```
+
+    The agent records the same hash in every trace.
+
+    The file must be inside `project_root` (default: current directory), and
+    not in the workspace or under a directory named `workspace(s)`,
+    `artifact(s)`, `output(s)`, `tmp` or `temp`.
+  </Tab>
+</Tabs>
+
+<Note>
+**Auto-discovery.** With neither `policy` nor `policy_path`, an
+`omnicoreagent.policy.json` or `.omnicoreagent/policy.json` in the project
+root is merged onto the profile. It can only **narrow**: its deny and ask
+rules are added, the stricter mode wins, and a wider allow is refused.
+</Note>
+
+## Read the decision
+
+Each tool call in a trajectory has a `governance` list:
+
+| Key | What |
+|---|---|
+| `capability` | What was requested |
+| `effect` | `allow`, `ask` or `deny` |
+| `reason_code` | `matched_*`, `unknown_capability` (mode decided), `approved` (a person) |
+| `matched_rule_ids` | the rules behind it |
+| `approval_id`, `approved_by` | set when a person approved |
+
+`trajectory["harness"]["governance"]` has the `policy_hash`. An approved
+ask shows two entries: `ask`, then `allow` with `approved`.
+
+## Options
+
+In `agent_config["governance_config"]`:
+
+| Key | Default | What it does |
+|---|---|---|
+| `enabled` | `False` | Turns governance on |
+| `profile` | `"interactive-dev"` | Built-in profile |
+| `policy` | `None` | Dict or `PolicyEnvelope` |
+| `policy_path` | `None` | JSON policy file |
+| `project_root` | current directory | Where policy files may live |
+| `approval_mode`, `approval_resolver` | `"suspend"`, `None` | [Approvals](/docs/core-concepts/approvals) |
+| `budgets` | `None` | [Budgets](/docs/core-concepts/budgets) |
+| `sandbox_config`, `sandbox_manifest` | `None` | [Sandbox providers](/docs/how-to-guides/sandbox-providers) |
+
+All settings: [agent settings reference](/docs/reference/agent-config).
+
+## When things go wrong
+
+<AccordionGroup>
+  <Accordion title="ValueError: governance_config cannot set both policy and policy_path">
+    Raised by `OmniCoreAgent(...)`. Pick one: the policy in code, or the file.
+  </Accordion>
+
+  <Accordion title="PolicyLoadError: Policy file is inside an agent-writable directory">
+    Raised on the first run. The file is in the workspace, or under a
+    directory with one of the names the agent may write to (paths shortened
+    here):
+
+    ```text
+    PolicyLoadError: Policy file is inside an agent-writable directory: /srv/app/workspace/policy.json
+    ```
+
+    Move it, for example to `policies/`.
+  </Accordion>
+
+  <Accordion title="PolicyLoadError: Policy file escapes trusted project root">
+    The file is outside `project_root`, which is the current directory unless
+    you set it (path shortened here):
+
+    ```text
+    PolicyLoadError: Policy file escapes trusted project root: /srv/outside-policy.json
+    ```
+
+    Set `project_root` to a directory that contains the file, or move it.
+    `Policy file not found: ...` means the path is wrong; a relative path is
+    read from the current directory.
+  </Accordion>
+
+  <Accordion title="PolicyLoadError: YAML policy loading is not enabled">
+    Only JSON policy files are read:
+
+    ```text
+    PolicyLoadError: YAML policy loading is not enabled in Phase 1. Use JSON or in-code policy.
+    ```
+  </Accordion>
+
+  <Accordion title="PolicyLoadError: Auto-discovered policy allow rule broadens the default baseline">
+    An `omnicoreagent.policy.json` that the agent found on its own tried to
+    allow something the profile does not:
+
+    ```text
+    PolicyLoadError: Auto-discovered policy allow rule broadens the default baseline: web
+    ```
+
+    A discovered file can only narrow. To widen what is allowed, pass the file
+    explicitly with `policy_path`.
+  </Accordion>
+
+  <Accordion title="A rule is rejected when the policy is built">
+    A rule's shape is checked when the policy is built:
+
+    ```text
+    ValueError: Rule 'r' declares effect 'deny' but is stored in the allow bucket
+    ValueError: Duplicate policy rule_id: r
+    TypeError: PolicyRule.__init__() got an unexpected keyword argument 'targets'
+    TypeError: TargetMatcher.__init__() got an unexpected keyword argument 'tool'
+    ValueError: 'ask' is not a valid PolicyMode
+    ```
+
+    Each `rule_id` must be unique across the policy; the fields are those in
+    [A rule](#a-rule); the mode is `permissive`, `interactive` or `strict`.
+  </Accordion>
+
+  <Accordion title="ApprovalRequiredError when the agent connects to an MCP server">
+    `mcp.server.start` and `mcp.server.connect` are decided when the agent
+    connects, outside any run, so there is nothing to pause. An ask there
+    (as in `interactive-dev`) fails the connection:
+
+    ```text
+    ApprovalRequiredError: Matched ask policy rule.
+    ```
+
+    Allow the servers you trust, by the `name` you gave them in `mcp_tools`:
+    `{"rule_id": "docs_server", "capability": "mcp.server.*", "target": {"mcp_server": "docs"}}`.
+    An allow does not lift a profile's ask, so with a profile, also remove
+    its ask rule:
+
+    ```python
+    from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy
+
+    policy = build_default_policy("interactive-dev")
+    policy.rules.ask = [r for r in policy.rules.ask if r.rule_id != "ask_mcp_server_start"]
+    policy.rules.allow.append(
+        PolicyRule(rule_id="docs_server", effect=PolicyEffect.ALLOW,
+                   capability="mcp.server.*", target={"mcp_server": "docs"})
+    )
+    ```
+
+    The `docs` server now connects; any other server is still asked about,
+    and so still fails to connect.
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Approvals" icon="user-check" href="/docs/core-concepts/approvals">
+    What happens at an ask: pause, decide, resume.
+  </Card>
+  <Card title="Policy reference" icon="book" href="/docs/reference/policy">
+    Every capability, and every rule of each profile.
+  </Card>
+  <Card title="Security model" icon="shield-halved" href="/docs/core-concepts/security-model">
+    How the policy fits with the sandbox, budgets and the rest.
+  </Card>
+  <Card title="Execution" icon="terminal" href="/docs/core-concepts/execution">
+    Commands, skill scripts and code mode, and the capabilities they use.
+  </Card>
+  <Card title="Budgets" icon="coins" href="/docs/core-concepts/budgets">
+    Limits that live next to the policy.
+  </Card>
+  <Card title="Sandbox providers" icon="box" href="/docs/how-to-guides/sandbox-providers">
+    Where the agent's commands run.
+  </Card>
+</CardGroup>

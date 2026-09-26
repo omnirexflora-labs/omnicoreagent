@@ -95,4 +95,20 @@ D5–D8 continue after the release; the docs site updates without one.
   stranger test (a study-buddy app using all 11 Build features) passed
   11/11 first try; what it found is fixed (#292: a shared ToolRegistry, file
   failures recorded as successes, get_latest_trace; plus the docs).
-- D6–D8 next: Make It Safe, Run It, See and Improve.
+- D6 Make It Safe (started 2026-09-26). The section had four pages; approvals
+  lived inside durable runs and budgets only in the generated reference.
+  Eight pages, in the shape:
+  - Security model — how safety works, the defaults (governance is off),
+    turning it on (rewrite)
+  - Policies — profiles, rules, targets, conditions, precedence, policy files
+    (new)
+  - Approvals — ask, pause, decide, resume; in process and over HTTP; expiry;
+    who decided, in the evidence (new)
+  - Sandboxes and execution — the execute tool, network, secrets (rewrite)
+  - Sandbox providers — setup per provider (rewrite)
+  - Budgets — dollars, tokens, calls, scopes, pause and grant (new)
+  - Guardrails — prompt injection (rewrite)
+  - Privacy and credentials — redaction per boundary, keys kept out of
+    sandboxes and traces (new, from the guardrails page)
+  Closed by its stranger test.
+- D7 Run It, D8 See and Improve: after D6.
