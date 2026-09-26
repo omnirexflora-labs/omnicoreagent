@@ -167,11 +167,12 @@ An agent built the 0.3 way behaves differently in these ways:
 | `enable_workspace_files` | — | on, in `./workspace` | The agent has files to work in. |
 | Telemetry | — | on, in `./workspace/telemetry/` | Every run is recorded, prompts included, kept 7 days. |
 | Privacy | — | the record is redacted | Emails, phone numbers, SSNs and card numbers are replaced in telemetry; the model, memory, files, stream and answer see the real data. |
+| `run_retention_days` | — | 30 (from 0.4.1) | A finished run's record is removed 30 days after it started; a run waiting for a person never is. `None` keeps every record. |
 
-To keep 0.3's step limit and timeout, set them:
+To keep 0.3's step limit and timeout, and every run record, set them:
 
 ```python
-agent_config = {"max_steps": 15, "tool_call_timeout": 30}
+agent_config = {"max_steps": 15, "tool_call_timeout": 30, "run_retention_days": None}
 ```
 
 Telemetry writes to your disk from the first run. To leave model prompts and

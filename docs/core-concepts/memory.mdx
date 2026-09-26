@@ -134,7 +134,10 @@ not copy anything: the new store starts with what it already holds.
 ## Long conversations: windows and summaries
 
 A session's full history is kept; `memory_config` decides how much of it each
-run is given. By default a run gets the last 10,000 messages. A smaller window,
+run is given. By default a run gets the last 10,000 messages, which in
+practice is the whole history; `context_management` then keeps each model call
+under its token budget ([Context engineering](/docs/core-concepts/context-engineering)).
+A long-lived session is better served by a window of its own. A smaller window,
 with the part that falls out of it summarized:
 
 ```python

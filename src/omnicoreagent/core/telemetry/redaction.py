@@ -62,13 +62,22 @@ class TelemetryConfig:
     # trainer or an evaluator cannot use one that does not. ``default`` is
     # the privacy-first preset for a deployment that must not record prompts.
     capture: str = "full"
-    # What a trace keeps of each part of a run: inputs, outputs, what the model
-    # was sent and what it answered, and what tools returned. None takes the
-    # capture preset's value.
+    # Every input a trace holds: the request, tool arguments, and (with
+    # record_model_prompts) what the model was sent. Off, none is recorded,
+    # whatever the narrower settings say. None takes the capture preset's value.
     record_inputs: bool | None = None
+    # Every output a trace holds: the answer, and (with the two below) model
+    # responses and tool results. Off, none is recorded. None takes the
+    # capture preset's value.
     record_outputs: bool | None = None
+    # The messages and tool list sent to the model on each call, when
+    # record_inputs is on. None takes the capture preset's value.
     record_model_prompts: bool | None = None
+    # What the model answered on each call, when record_outputs is on. None
+    # takes the capture preset's value.
     record_model_responses: bool | None = None
+    # What each tool, MCP tool, file operation and sandbox command returned,
+    # when record_outputs is on. None takes the capture preset's value.
     record_tool_results: bool | None = None
     # The tokens a model chose and their probabilities, when the provider
     # returns them (``logprobs``). Off: they are large, and only a trainer
@@ -94,16 +103,19 @@ class TelemetryConfig:
             "token",
         ]
     )
-    # Keep payloads over max_payload_bytes whole, in the workspace or object
-    # storage, referenced from the trace, instead of truncating them.
+    # Keep payloads over max_payload_bytes whole, referenced from the trace
+    # (telemetry://payload/...), instead of truncating them.
     offload_large_payloads: bool = False
+    # Where offloaded payloads are kept: "workspace" (the local workspace) or
+    # "object_storage" (the S3 or R2 bucket of the agent's workspace).
     offload_target: str = "workspace"
-    # Where the archive of finished traces keeps its index and its bodies.
-    # Unset is a SQLite file and a directory beside the log, which is what one
-    # process needs. A database URL makes the index shared, and
-    # ``archive_target="object_storage"`` puts the bodies in the deployment's
-    # bucket, so several server processes can read one archive.
+    # The index of the archive of finished traces. Unset is a SQLite file
+    # beside the log, which is what one process needs; a database URL makes
+    # the index shared, so several server processes can read one archive.
     archive_index_url: str | None = None
+    # Where the archive keeps trace bodies: "local" (a directory beside the
+    # log, or archive_bodies_path) or "object_storage" (the deployment's
+    # bucket).
     archive_target: str = "local"
     # A directory the processes share, for a deployment that shares one host
     # rather than a bucket. Ignored when ``archive_target`` is object storage.
@@ -111,9 +123,11 @@ class TelemetryConfig:
     # Raise when a record cannot be made safely (redaction or persistence
     # failed) instead of recording a marker and carrying on.
     strict: bool = False
-    # Seconds a write to the trace store, or an export to an external
-    # exporter, may take before it is given up and reported.
+    # Seconds a write to or read from the trace store may take before it is
+    # given up and reported.
     persistence_timeout_seconds: float | None = 5.0
+    # Seconds an export to an external exporter (OpenTelemetry, JSONL) may
+    # take before it is given up and reported.
     export_timeout_seconds: float | None = 5.0
 
     def __post_init__(self) -> None:

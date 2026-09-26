@@ -2346,7 +2346,14 @@ class OmniCoreAgent:
         """One durable run as a single story across its trace segments (each
         pause, resume, recovery, or new attempt is a segment), with totals
         summed over the segments. The run's saved conversation is not
-        included."""
+        included.
+
+        A segment whose trace is no longer stored (traces are pruned after
+        ``telemetry_config["retention_days"]``, run records after
+        ``run_retention_days``) has ``trace_kept: False``; ``traces_missing``
+        counts them, and totals cover only the traces still kept, so they are
+        empty rather than zero when none is. The record's ``usage`` remains.
+        """
         record = await self._run_record(run_id)
         if record is None:
             return None
@@ -2358,13 +2365,15 @@ class OmniCoreAgent:
                     "trace_id": trace_id,
                     "status": (trajectory or {}).get("status"),
                     "trajectory": trajectory,
+                    "trace_kept": trajectory is not None,
                 }
             )
+        kept = [segment for segment in segments if segment["trace_kept"]]
         totals: Dict[str, Any] = {}
         including: Dict[str, Any] = {}
         outcomes: Dict[str, Any] = {}
-        for segment in segments:
-            trajectory = segment["trajectory"] or {}
+        for segment in kept:
+            trajectory = segment["trajectory"]
             segment_totals = trajectory.get("totals") or {}
             totals = _add_totals(totals, segment_totals)
             # Only a finished segment carries its children's totals; any
@@ -2383,7 +2392,7 @@ class OmniCoreAgent:
                 # A call waiting for approval appears again when it runs on
                 # resume: count it once, with its latest outcome.
                 outcomes[call["tool_call_id"]] = call.get("outcome")
-        if segments:
+        if kept:
             by_outcome = {key: 0 for key in (totals.get("tool_calls") or {}).get("by_outcome", {})}
             for outcome in outcomes.values():
                 if outcome is not None:
@@ -2398,6 +2407,7 @@ class OmniCoreAgent:
             "attempt": record.get("attempt"),
             "previous_attempts": record.get("previous_attempts") or [],
             "segments": segments,
+            "traces_missing": len(segments) - len(kept),
             "totals": totals,
             "tool_calls": record.get("tool_calls") or [],
             "approvals": record.get("approvals") or [],

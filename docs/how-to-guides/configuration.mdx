@@ -301,12 +301,12 @@ you do not need.
 
 | Setting | Default | What it does |
 |---|---|---|
-| `max_steps` | `50` | Most model turns per run (1 to 1000). A run that reaches it ends with `status` `error`, `termination_reason` `max_steps` and the response `Agent reached its step limit.` |
-| `request_limit`, `total_tokens_limit` | `0` (no limit) | Most model calls, or tokens, per run; then `resource_limit`. For dollars, use budgets. |
+| `max_steps` | `50` | Most turns of the agent loop per run (1 to 1000); a turn is a model call and the tools it asked for. A run that reaches it ends with `status` `error`, `termination_reason` `max_steps` and the response `Agent reached its step limit.` |
+| `request_limit`, `total_tokens_limit` | `0` (no limit) | Most model calls, or tokens, per run; then `resource_limit`. See [which limit to use](#which-limit-to-use). |
 | `tool_call_timeout` | `180` | Seconds one tool call may take (2 to 1000). |
 | `workspace_config` | `./workspace` on disk | `{"workspace_dir": ...}`, or S3 / R2 settings. |
 | `enable_workspace_files` | `True` | The file tools over the workspace. |
-| `memory_config` | last 10,000 messages | How much history a run sees: `{"mode": "sliding_window" or "token_budget", "value": ..., "summary": {...}}` ([Memory](/docs/core-concepts/memory)). |
+| `memory_config` | last 10,000 messages (the whole history, in practice) | How much of the session's earlier history a run starts from: `{"mode": "sliding_window" or "token_budget", "value": ..., "summary": {...}}` ([Memory](/docs/core-concepts/memory)). |
 | `context_management` | on, 100,000 tokens, at 75% | Truncates or summarizes older messages before a call would overflow ([Context engineering](/docs/core-concepts/context-engineering)). |
 | `tool_offload` | on, over 500 tokens or 2,000 bytes | Saves a large tool result to the workspace and gives the model a preview. |
 | `guardrail_mode` | `"full"` | `full` (input and tool results), `input_only`, or `off` ([Guardrails](/docs/core-concepts/guardrails)). |
@@ -314,10 +314,25 @@ you do not need.
 | `enable_subagents` | `False` | The `spawn_subagents` tool; turns the workspace, context management and offload on. |
 | `enable_agent_skills`, `skills_dir` | `False`, `./.agents/skills` | Skills the agent may load ([Skills](/docs/core-concepts/skills)). |
 | `code_mode` | off | A `run_code` tool ([Code mode](/docs/core-concepts/code-mode)). |
-| `run_retention_days` | `30` | Finished run records are removed after this; `None` keeps them. |
+| `run_retention_days` | `30` | Days a finished run's record (status, approvals, usage) is kept; `None` keeps them. Its traces have their own window, `telemetry_config["retention_days"]` (7) ([what is kept](/docs/core-concepts/durable-runs#how-long-a-runs-evidence-is-kept)). |
 
 The other settings, and every nested default, are in the
 [agent settings reference](/docs/reference/agent-config).
+
+### Which limit to use
+
+Several settings stop a run; they count different things.
+
+| You want to stop | Use | When it is reached |
+|---|---|---|
+| A run that goes round in circles | `max_steps` (on, 50) | The run ends: `termination_reason` `max_steps` |
+| One run's model calls or tokens | `request_limit`, `total_tokens_limit` (off) | The run ends: `resource_limit` |
+| Spending: dollars, tokens, calls, sandbox time, for a run, a session, an agent or the application | Budgets, in `governance_config` ([Budgets](/docs/reference/budgets)) | Checked before each call; the run pauses (`awaiting_budget`) until a grant, or ends |
+| One slow tool call | `tool_call_timeout` (180 s) | That call fails; the run goes on |
+| A whole run taking too long | A background task's `timeout_seconds`, OmniServe's `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` (300 s), the headless CLI's `--timeout` | The run is stopped at the deadline |
+
+`max_steps` is the one to set first. Budgets are the only limit in dollars,
+and the only one across runs.
 
 `governance_config["sandbox_config"]` names where the `execute` tool runs
 commands: `docker`, `e2b`, `modal`, `daytona`, `vercel`, `http` (your own

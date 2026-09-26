@@ -196,14 +196,16 @@ class AgentConfig:
     # Recorded as the trace's agent_version; a content hash of the harness
     # (prompt, tools, model, and settings) is used when it is not set.
     agent_version: str | None = None
-    # Most model calls one run may make; over it, the run ends with
-    # termination_reason resource_limit. 0 is no limit. For limits in
-    # dollars, use governance budgets.
+    # Most model calls (LLM requests) one run may make; over it, the run ends
+    # with termination_reason resource_limit. 0 is no limit. max_steps is
+    # usually the limit you want; for dollars, or limits across runs, use
+    # governance budgets.
     request_limit: int = 0
     # Most tokens (in and out) one run may use; over it, the run ends with
     # termination_reason resource_limit. 0 is no limit.
     total_tokens_limit: int = 0
-    # Most model turns one run may take; then it ends with termination_reason
+    # Most turns of the agent loop one run may take (a turn is a model call
+    # and the tools it asked for); then it ends with termination_reason
     # max_steps. 1 to 1000.
     max_steps: int = 50
     # Seconds one tool call may take before it fails with a timeout. 2 to 1000.
@@ -245,23 +247,37 @@ class AgentConfig:
     code_mode: dict[str, Any] = field(default_factory=dict)
     # A project's own instructions for the agent (AGENTS.md), by path.
     agents_md: dict[str, Any] = field(default_factory=dict)
-    # How much of a session's history a run is given: a sliding window of
-    # messages or tokens, and optional summaries of what falls out of it.
+    # How much of a session's earlier history a new run is given. mode
+    # "sliding_window" keeps the last `value` messages; "token_budget" keeps
+    # the latest messages that fit in `value` tokens. The default (10,000
+    # messages) gives the whole history in practice, and context_management
+    # keeps each model call under its token budget. summary.enabled replaces
+    # what falls out of the window with a summary; summary.retention_policy
+    # is whether the summarized messages stay in the store ("keep") or are
+    # deleted ("delete").
     memory_config: dict[str, Any] = field(default_factory=_default_memory_config)
     # File tools over the agent's workspace (ls, read_file, write_file, edit_file,
     # glob, grep, ...). The workspace itself is set by workspace_config.
     enable_workspace_files: bool = True
-    # The prompt-injection guardrail: guardrail_mode is full (input and tool
-    # results), input_only, or off; guardrail_config tunes its detection.
+    # Tunes the prompt-injection guardrail's detection: strict_mode,
+    # sensitivity, allowlist_patterns, blocklist_patterns, and the rest of
+    # DetectionConfig. Empty uses its defaults.
     guardrail_config: dict[str, Any] = field(default_factory=dict)
+    # Where the prompt-injection guardrail screens: "full" (the request and
+    # every tool result), "input_only" (the request), or "off".
     guardrail_mode: str = "full"
     # Personal data (email, phone, SSN, card numbers) redacted per boundary.
     # By default only the record (telemetry and its exports) is redacted; the
     # model, memory, files, stream and answer see the real data.
+    # redact_public covers everything returned to the application: run()'s
+    # answer and errors, and OmniServe's responses.
     privacy_config: dict[str, Any] = field(default_factory=_default_privacy_config)
-    # Keeps a run's context under a token budget before each model call:
-    # past threshold_percent of value, older messages are truncated or
-    # summarized, keeping the preserve_recent latest.
+    # Keeps what one model call is sent under a budget, within a run: in mode
+    # "token_budget", `value` is tokens (100,000); in "sliding_window", it is
+    # messages. Past threshold_percent of it, older messages are truncated or
+    # summarized (strategy), keeping the preserve_recent latest. memory_config
+    # decides the history a run starts from; this keeps the run itself in
+    # bounds as it grows.
     context_management: dict[str, Any] = field(
         default_factory=_default_context_management
     )

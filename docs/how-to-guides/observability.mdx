@@ -489,6 +489,13 @@ automatically once per agent; `agent.prune_telemetry()` applies it on demand and
 `agent.telemetry_retention_status()` reports what was removed. A payload
 referenced by a kept trace is never removed.
 
+Traces, and so trajectories, are kept 7 days by default
+(`telemetry_config["retention_days"]`; `None` keeps them all). A run's record
+is kept separately, 30 days by default: after its traces are gone,
+`get_run_trajectory` marks the missing segments `trace_kept: False` instead
+of reporting zero. See [how long a run's evidence is
+kept](/docs/core-concepts/durable-runs#how-long-a-runs-evidence-is-kept).
+
 <Tip>
 Use metrics for cost and performance monitoring, events for live UI streaming,
 traces for debugging, and exporters when traces need to leave the process.
