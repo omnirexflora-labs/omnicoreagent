@@ -256,7 +256,9 @@ def _redact(value: Any, redact_keys: set[str] | tuple[str, ...]) -> Any:
         redact_keys = tuple(sorted(redact_keys))
     if isinstance(value, dict):
         return {
-            key: REDACTION_MARKER
+            key: _redact_schema_properties(item, redact_keys)
+            if key == "properties" and value.get("type") == "object" and isinstance(item, dict)
+            else REDACTION_MARKER
             if _should_redact_key(str(key), redact_keys)
             else item
             if key in _VERBATIM_KEYS
@@ -270,6 +272,13 @@ def _redact(value: Any, redact_keys: set[str] | tuple[str, ...]) -> Any:
     if isinstance(value, str):
         return _redact_encoded(value, redact_keys)
     return value
+
+
+def _redact_schema_properties(properties: dict[str, Any], redact_keys: tuple[str, ...]) -> dict[str, Any]:
+    """A JSON Schema's ``properties``: each key names a parameter (a tool's
+    ``api_key``), not a secret, so it is kept; each parameter's schema is
+    still redacted like any other value."""
+    return {name: _redact(schema, redact_keys) for name, schema in properties.items()}
 
 
 def _redact_encoded(value: str, redact_keys: tuple[str, ...]) -> str:

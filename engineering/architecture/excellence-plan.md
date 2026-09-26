@@ -69,6 +69,9 @@ three tasks of our own, which must keep passing.
   secret (`api_key`) has that parameter's schema (`{"type": "string"}`)
   redacted in the `context_tools` event by `redact_keys`, which marks the run
   partial. Fix: redact values, not JSON-schema property definitions.
+  *Done 2026-09-27:* inside a JSON Schema's `properties` (under
+  `"type": "object"`), parameter names are kept and each parameter's schema is
+  redacted as a value; a run with such a tool now reports `complete`.
 
 ## Cost
 
