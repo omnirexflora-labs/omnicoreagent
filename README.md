@@ -5,7 +5,7 @@
 <h1 align="center">OmniCoreAgent</h1>
 
 <p align="center">
-  <strong>The open Python runtime for AI agents that have to hold up in production.</strong><br />
+  <strong>The open Python agent runtime and harness, with an SDK, for AI applications that have to hold up in production.</strong><br />
   <em>Governed, sandboxed, durable, budgeted — and every run kept as evidence you can read, evaluate and train on.</em>
 </p>
 
@@ -33,8 +33,18 @@ the agent can do real things — the policy that says what it may do, the
 sandbox its code runs in, the record that survives a crash, the budget that
 stops it spending, and the evidence a person can read afterwards.
 
-OmniCoreAgent is that runtime. One agent object, from a first script to a
-governed background worker on a server — and onto a benchmark.
+OmniCoreAgent is that runtime and harness, used through a Python SDK. One
+agent object, from a first script to a governed background worker on a
+server — and onto a benchmark.
+
+| | What it means here |
+|---|---|
+| **Runtime** | What executes and keeps the work: runs and their state, the durable record, workers, sandboxes, persistence. |
+| **Harness** | What surrounds the model and controls each step: the loop, context, tool execution, approvals, budgets, recovery, telemetry. |
+| **SDK** | What you write against: `OmniCoreAgent`, `ToolRegistry`, the configuration, the methods, the CLI and the HTTP API. |
+
+The words overlap, and "agent framework" is fair too; they are three views of
+one thing.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/omnirexflora-labs/omnicoreagent/main/assets/how-a-run-works.svg" alt="How a run works: your app calls OmniCoreAgent, which governs every action with a policy, a budget and a sandbox, talks to the model and to tools, and keeps the evidence of the run — the trajectory, outcomes and training records — exported to OTLP, LangSmith, Opik, JSONL and Harbor." width="900"/>
