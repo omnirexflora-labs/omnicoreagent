@@ -9,20 +9,54 @@ icon: 'clock-rotate-left'
 Every release, with its notes, is also on
 [GitHub Releases](https://github.com/omnirexflora-labs/omnicoreagent/releases).
 
-## Unreleased
+## 0.4.1
+
+*September 2026 · Python 3.12+*
+
+### Changed: finished run records are removed after 30 days
+
+Every run keeps a record in the memory store; until now they were kept
+forever. From 0.4.1 a finished run's record (completed, failed, blocked,
+cancelled, timed out) is removed 30 days after the run started. A run
+waiting for a person or a resume is never removed. **To keep every record,
+set `agent_config["run_retention_days"] = None`.** Any other number of days
+works too; `await agent.prune_runs()` prunes on demand and reports what it
+removed, and the retention status has a `runs` section.
+[Durable runs](/docs/core-concepts/durable-runs)
+
+### New
 
 - **`base_url` in `model_config`.** Point any provider at another endpoint
   that speaks its API: vLLM, LM Studio, a gateway, a proxy. Sent with each of
   the agent's calls; two agents can use two endpoints.
   [Models](/docs/how-to-guides/models)
-- **Run-record retention.** Finished run records are removed from the memory
-  store after `run_retention_days` (30 by default; `None` keeps every record
-  forever). Runs still waiting for a person are never removed.
-  `agent.prune_runs()`, and a `runs` section in the retention status.
-  [Durable runs](/docs/core-concepts/durable-runs)
-- **Fixed:** a tool parameter named like a secret (`api_key`) no longer has
-  its schema redacted, which marked the run's evidence partial.
-- **Docs:** [how OmniCoreAgent compares](/docs/comparison), each cell sourced.
+
+### Fixed
+
+- Agents sharing one `ToolRegistry` rebound each other's file tools, so a
+  lead could read a child's workspace ("File not found" on a file it had
+  listed). Each agent adds its tools to its own copy; your registry is not
+  changed.
+- A file tool that failed ("File not found", "File already exists") was
+  recorded as a success; it is the tool's error now, with the same text.
+- `get_latest_trace(session)` returned a delegated child's trace; it returns
+  the agent's own.
+- A `delegate_<name>` tool offered the model the child's `tags`,
+  `provenance` and private parameters; it offers the task only.
+- An approval for a call made inside a `run_code` program carried no
+  arguments; the run's approval record has them.
+- A partial `memory_config` (`{"mode": ...}`) failed with `KeyError`; it
+  keeps the other defaults. `switch_memory_store` keeps the window and
+  summary settings.
+- A tool parameter named like a secret (`api_key`) had its schema redacted,
+  which marked the run's evidence partial.
+
+### Docs
+
+- The Build section rewritten page by page, every example run; navigation by
+  what a reader is trying to do.
+- [How OmniCoreAgent compares](/docs/comparison), each cell sourced.
+- Skills: `allowed-tools` is read and grants nothing; the policy decides.
 
 ## 0.4.0
 
