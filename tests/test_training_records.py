@@ -101,3 +101,26 @@ async def test_a_paused_and_resumed_run_is_one_record_with_every_segment_and_its
     assert record["steps"][-1]["response"]["content"] == "invoice sent"
     assert record["request"] == "draft and send the invoice"
     assert [(o["reward"], o["label"]) for o in record["outcomes"]] == [(1.0, "paid")]
+
+
+@pytest.mark.asyncio
+async def test_an_evaluator_records_outcomes_without_a_model_key(monkeypatch, tmp_path):
+    """Round two: an evaluator process that only reads runs and reports
+    rewards raised `LLM_API_KEY not found`, though it calls no model."""
+    from omnicoreagent import OmniCoreAgent
+
+    ran = await _agent(ScriptedModel(("call_1", "lookup", '{"key": "a"}')))
+    result = await ran.run("go", session_id="eval")
+
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    evaluator = OmniCoreAgent(
+        name="tool-agent",
+        system_instruction="x",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        memory_router=ran.memory_router,
+        telemetry_store=ran.telemetry_store,
+    )
+    assert (await evaluator.get_run(result["run_id"]))["status"] == "completed"
+    await evaluator.record_outcome(result["run_id"], reward=1.0, source="ci")
+    (record,) = await evaluator.training_records(run_id=result["run_id"])
+    assert [o["reward"] for o in record["outcomes"]] == [1.0]

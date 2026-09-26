@@ -71,3 +71,13 @@ def test_a_host_allowlist_a_provider_cannot_enforce_is_refused_when_the_agent_is
                 },
             },
         )
+
+
+@pytest.mark.asyncio
+async def test_the_delegation_tools_are_listed_with_the_others():
+    """Round two: an agent with sub_agents listed no delegate_* tool, so the
+    names could not be checked without a model run."""
+    child = OmniCoreAgent(name="researcher", system_instruction="Research.", model_config=MODEL, agent_config=CONFIG)
+    lead = OmniCoreAgent(name="lead", system_instruction="Lead.", model_config=MODEL, sub_agents=[child], agent_config=CONFIG)
+    names = [tool["name"] for tool in await lead.list_all_available_tools()]
+    assert "delegate_researcher" in names

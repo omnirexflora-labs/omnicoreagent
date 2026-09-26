@@ -330,14 +330,14 @@ def _tool_call(
         event
         for event in events
         if event.metadata.get("phase")
-        in {"execution", "result", "exception", "timeout", "authorization", "approval"}
+        in {"execution", "result", "exception", "timeout", "authorization", "approval", "rejected"}
     ]
     outcome_event = next(
         (
             event
             for event in reversed(execution)
             if event.metadata.get("phase")
-            in {"result", "exception", "timeout", "authorization", "approval"}
+            in {"result", "exception", "timeout", "authorization", "approval", "rejected"}
         ),
         None,
     )
@@ -390,6 +390,7 @@ def _tool_call(
                 "effect": event.metadata.get("effect"),
                 "capability": event.metadata.get("capability"),
                 "reason_code": event.metadata.get("reason_code"),
+                "matched_rule_ids": event.metadata.get("matched_rule_ids") or [],
                 "approval_id": event.metadata.get("approval_id"),
                 "approved_by": event.metadata.get("approved_by"),
             }

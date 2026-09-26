@@ -42,6 +42,21 @@ METERS = (
     "subagent_runs",
 )
 WINDOWS = ("total", "day", "month")
+# What each meter counts; the budgets reference is generated from this.
+METER_DESCRIPTIONS = {
+    "model_cost_usd": "Dollars spent on model calls, priced from the provider's published rates. Each call's price is held before it is made.",
+    "model_tokens": "Tokens in and out of model calls.",
+    "model_calls": "Model calls.",
+    "tool_calls": "Tool calls, counted as each is authorized.",
+    "sandbox_seconds": "Seconds sandbox sessions were open.",
+    "subagent_runs": "Workers started with spawn_subagents.",
+}
+# What each window means: its counter starts again at each UTC day or month.
+WINDOW_DESCRIPTIONS = {
+    "total": "Never resets: the whole life of the scope (a request, a session...).",
+    "day": "Resets at 00:00 UTC.",
+    "month": "Resets on the first of the month, 00:00 UTC.",
+}
 # What a call could return when the model config sets no ceiling of its own.
 DEFAULT_ASSUMED_OUTPUT_TOKENS = 4096
 # A change that loses the race to another worker is tried again, backing off
@@ -142,6 +157,11 @@ class BudgetLedger:
         """What has been spent against this budget."""
         state = await self._state(key)
         return dict(state.get("meters") or {})
+
+    async def usage_and_grants(self, key: str) -> tuple[dict[str, float], dict[str, float]]:
+        """What has been spent and what a person granted, from one read."""
+        state = await self._state(key)
+        return dict(state.get("meters") or {}), dict(state.get("grants") or {})
 
     async def reserved(self, key: str) -> dict[str, float]:
         """What is held by reservations that have not been committed."""
@@ -723,14 +743,27 @@ class RunBudgets:
         application counters are shared and stay. A run that is only paused
         must not settle: a top-up lands on its counter.
         """
-        spent = await self.spent()
+        totals: dict[str, Any] = {}
+        granted: dict[str, float] = {}
         seen: set[str] = set()
         for meter in METERS:
             for scope, key, _ in self.limits(meter):
-                if scope is BudgetScope.REQUEST and key not in seen:
-                    seen.add(key)
+                if key in seen:
+                    continue
+                seen.add(key)
+                # One read per counter, as ``spent`` does.
+                usage, grants = await self.ledger.usage_and_grants(key)
+                if usage:
+                    totals[scope.value] = usage
+                if scope is BudgetScope.REQUEST:
+                    # What a person granted this run goes on its record with
+                    # what it spent: the counter that held it is removed.
+                    for grant_meter, amount in grants.items():
+                        granted[grant_meter] = granted.get(grant_meter, 0.0) + amount
                     await self.ledger.delete(key)
-        return spent
+        if granted:
+            totals["granted"] = {BudgetScope.REQUEST.value: granted}
+        return totals
 
     async def spent(self) -> dict[str, dict[str, float]]:
         """What this run has spent, per scope, for the run's totals."""

@@ -135,6 +135,11 @@ Test skill body.
         assert "instructions:" in context
         assert "SKILL.md" in context
         assert "<available_skills>" not in context
+        # The host path is not where a sandboxed command can reach the skill:
+        # a model shown it tried `execute` on it (stranger test, round two).
+        assert str(self.skills_root) not in context
+        assert 'read_skill_file(skill_name="test-skill", file_path="SKILL.md")' in context
+        assert "run_skill_script" in context
 
     def test_parse_yaml_complex(self):
         """Test parsing more complex frontmatter with metadata and allowed-tools."""

@@ -120,16 +120,21 @@ class SkillManager:
         if not self.skills:
             return ""
 
+        # Tool calls, not host paths: a skill's folder is on the host, and a
+        # model shown its path tried to run the script there with `execute`.
         lines = []
         for skill in self.skills.values():
             lines.extend(
                 [
                     f"- name: {skill.name}",
                     f"  description: {skill.description}",
-                    f"  instructions: {skill.path}/SKILL.md",
+                    f'  instructions: read_skill_file(skill_name="{skill.name}", file_path="SKILL.md")',
                 ]
             )
-
+        lines.append(
+            "Run a skill's scripts with run_skill_script(skill_name, script_name, args), "
+            "not execute: the skill's files are not in the sandbox's working directory."
+        )
         return "\n".join(lines)
 
     def _load_skill_metadata(self, skill_dir: Path) -> Optional[SkillMetadata]:

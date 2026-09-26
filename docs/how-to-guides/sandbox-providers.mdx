@@ -45,8 +45,8 @@ command opens a fresh sandbox. The trace records the session closed as
 
 ## A sandbox with no network is checked, not trusted
 
-A sandbox that must have no network is checked from the inside, once, when it
-is created: it tries one outbound connection, and a sandbox that reaches the
+A hosted sandbox (E2B, Daytona) that must have no network is checked from the
+inside, once, when it is created: it tries one outbound connection, and a sandbox that reaches the
 internet is destroyed and refused with an error. This is not hypothetical —
 E2B and Daytona both accept "no internet", report it back, and on the accounts
 this was tested against still hand back a sandbox that reaches the internet. A
@@ -65,8 +65,16 @@ sandbox_config = {
 }
 ```
 
-The session then records `network_isolation: "unchecked"` instead of
-`"checked"`, and a manifest that allows the network records `"not required"`.
+The `sandbox_session_created` event then records `network_isolation:
+"unchecked"` instead of `"checked"`, and a manifest that allows the network
+records `"not required"`. Docker is not checked this way: a container started
+with no network has none, which Docker itself enforces, so its event has no
+`network_isolation` and says `"network": "deny"`.
+
+Docker's default image is `python:3.12-slim`: Python and the standard library,
+nothing else, and with no network a command cannot `pip install`. Build an image
+with what your tasks need and name it in the manifest (`"image": "..."`) or in
+the provider options.
 
 Common options: `image`, `max_output_bytes`, and `timeout_seconds`. Docker
 adds `user`, `workdir_size`, `pids_limit`, `runtime` (`"runsc"` for gVisor)

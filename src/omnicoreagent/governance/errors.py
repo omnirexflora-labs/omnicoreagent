@@ -76,3 +76,10 @@ class UngovernedCapabilityError(GovernanceError):
     """Raised when a runtime surface is not governed in the current phase."""
 
     code = "ungoverned_capability"
+
+
+class ToolArgumentsInvalid(GovernanceError):
+    """A call whose arguments cannot be read into an authority request (an
+    empty path): rejected before any rule could decide it, not denied."""
+
+    code = "invalid_arguments"

@@ -79,3 +79,9 @@ With `--output-dir`, the command writes:
 
 The answer is printed to stdout (or the whole `result.json` with `--json`); a
 one-line status summary goes to stderr.
+
+To record an outcome for the run later (`agent.record_outcome(run_id, ...)`,
+say from CI once tests pass), the agent must keep its runs where another
+process can read them: a durable memory store (`sql`, `redis` or `mongodb`) and
+the same workspace directory. With the default in-memory store, the run is gone
+when the command exits. Recording an outcome needs no model key.

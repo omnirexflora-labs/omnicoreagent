@@ -49,10 +49,24 @@ async def test_the_decision_names_the_person_who_approved(tmp_path):
     agent = await _approved_and_resumed(tmp_path)
     story = await agent.get_run_trajectory("run_s1")
     (call,) = story["segments"][1]["trajectory"]["steps"][0]["tool_calls"]
+    (approval,) = story["approvals"]
 
     decision = call["governance"][-1]
     assert decision["effect"] == "allow" and decision["reason_code"] == "approved"
-    assert decision["approved_by"] == "alice" and decision["approval_id"]
+    # The approval the person decided, not an id of the runtime's own
+    # (round two found the two linked only by used_for_approval_id).
+    assert decision["approved_by"] == "alice"
+    assert decision["approval_id"] == approval["approval_id"]
+
+
+@pytest.mark.asyncio
+async def test_each_decision_names_the_rules_that_made_it(tmp_path):
+    agent = await _approved_and_resumed(tmp_path)
+    story = await agent.get_run_trajectory("run_s1")
+    paused = story["segments"][0]["trajectory"]["steps"][0]["tool_calls"]
+    ask = next(d for c in paused for d in c["governance"] if d["effect"] == "ask")
+
+    assert ask["matched_rule_ids"] == ["ask_before_sending"]
 
 
 @pytest.mark.asyncio

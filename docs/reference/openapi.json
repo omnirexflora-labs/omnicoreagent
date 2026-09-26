@@ -4057,7 +4057,7 @@
     },
     "/runs/{run_id}/budget": {
       "get": {
-        "description": "Every budget covering the run \u2014 its own, its session's, its agent's, the application's \u2014 with the limit, what is spent and reserved, and the ledger key. Empty when nothing is budgeted.",
+        "description": "Every budget covering the run \u2014 its own, its session's, its agent's, the application's \u2014 with the limit, what a person granted, what is spent and reserved, and the ledger key; and `requests`, each time the run ran out (pending while it waits, then granted or denied).",
         "operationId": "read_budgets_runs__run_id__budget_get",
         "parameters": [
           {

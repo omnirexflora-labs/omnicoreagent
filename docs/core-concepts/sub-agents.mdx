@@ -70,11 +70,12 @@ many items for parallel workers. The model calls it like this:
 ]}
 ```
 
-Spawned workers inherit the parent's model, MCP tools, user local tools,
-workspace files, context management, and tool offloading. Context management is
-enabled automatically for a parent with dynamic subagents. They do not inherit
-the lead agent's `spawn_subagents` tool, which keeps delegation controlled by
-the lead agent.
+Spawned workers inherit the parent's model, MCP tools, user local tools, and
+its whole `agent_config` — workspace files, skills, the sandbox, context
+management and tool offloading — with at most 50 steps each. Under governance,
+each worker runs under the lead's policy plus one rule: it cannot spawn workers
+of its own. Context management is enabled automatically for a parent with
+dynamic subagents.
 
 ---
 
@@ -109,7 +110,7 @@ named after it:
 
 | Tool | Action |
 |------|--------|
-| `delegate_<name>` | Send a task to the child named `<name>` (`delegate_research_agent`, `delegate_code_agent` above) and wait for its result. |
+| `delegate_<name>` | Send a task to the child named `<name>` (`delegate_researcher` and `delegate_coder` above) and wait for its result. |
 
 Each child runs with its own trace, linked to the parent's: `await
 agent.get_trace_family(trace_id=result["trace_id"])` returns the parent and

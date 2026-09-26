@@ -96,6 +96,14 @@ def test_every_background_manager_method_is_in_the_reference(rendered):
     assert "_No description in the code yet._" not in page
 
 
+def test_every_budget_meter_and_window_is_in_the_reference(rendered):
+    from omnicoreagent.core.budgets import METER_DESCRIPTIONS, METERS, WINDOW_DESCRIPTIONS, WINDOWS
+
+    assert set(METER_DESCRIPTIONS) == set(METERS) and set(WINDOW_DESCRIPTIONS) == set(WINDOWS)
+    page = rendered[ROOT / "docs/reference/budgets.mdx"]
+    assert all(f"| `{name}` |" in page for name in [*METERS, *WINDOWS])
+
+
 def test_every_cli_command_is_in_the_reference(rendered):
     from omnicoreagent.cli import cli as omnicoreagent_cli
     from omnicoreagent.serve.cli import cli as omniserve_cli

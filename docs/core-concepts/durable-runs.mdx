@@ -194,6 +194,7 @@ run at once:
 
 ```python
 story = await agent.get_run_trajectory(run_id)
-# story["segments"]: each segment's trajectory, in order
+# story["segments"]: in order, each {"trace_id", "status", "trajectory"}
+#   (a segment's steps are in segment["trajectory"]["steps"])
 # story["totals"]: summed across segments (each tool call counted once)
 ```
