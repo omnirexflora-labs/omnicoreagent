@@ -193,10 +193,12 @@ class AgentConfig:
     # Recorded as the trace's agent_version; a content hash of the harness
     # (prompt, tools, model, and settings) is used when it is not set.
     agent_version: str | None = None
-    # Most model calls one run may make, and most tokens (in and out) it may
-    # use; over either, the run ends with termination_reason resource_limit.
-    # 0 is no limit. For limits in dollars, use governance budgets.
+    # Most model calls one run may make; over it, the run ends with
+    # termination_reason resource_limit. 0 is no limit. For limits in
+    # dollars, use governance budgets.
     request_limit: int = 0
+    # Most tokens (in and out) one run may use; over it, the run ends with
+    # termination_reason resource_limit. 0 is no limit.
     total_tokens_limit: int = 0
     # Most model turns one run may take; then it ends with termination_reason
     # max_steps. 1 to 1000.

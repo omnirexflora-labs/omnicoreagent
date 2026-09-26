@@ -132,6 +132,8 @@ class BackgroundAgentManager:
     async def register_agent(
         self, agent_id: str, agent: Any, replace: bool = False
     ) -> BackgroundAgentSpec:
+        """Register an agent under ``agent_id`` so tasks can run it; ``replace``
+        swaps an existing one."""
         existing = await self.task_store.get_agent(agent_id)
         if existing and not replace:
             raise AgentAlreadyRegisteredError(f"Agent already registered: {agent_id}")
@@ -149,6 +151,8 @@ class BackgroundAgentManager:
     async def register_agent_spec(
         self, spec: BackgroundAgentSpec | dict[str, Any], replace: bool = False
     ) -> BackgroundAgentSpec:
+        """Register an agent from a spec (its model, tools and settings) that the
+        store keeps, so a new process can rebuild it."""
         agent_spec = coerce_model(BackgroundAgentSpec, spec)
         existing = await self.task_store.get_agent(agent_spec.agent_id)
         if existing and not replace:
@@ -160,6 +164,7 @@ class BackgroundAgentManager:
         return agent_spec
 
     async def unregister_agent(self, agent_id: str, force: bool = False) -> None:
+        """Remove an agent. Refused while it has active runs, unless ``force``."""
         active = await self.task_store.list_active_runs()
         if not force and any(run.agent_id == agent_id for run in active):
             raise AgentAlreadyRegisteredError(f"Agent has active runs: {agent_id}")
@@ -167,9 +172,11 @@ class BackgroundAgentManager:
         await self.task_store.delete_agent(agent_id)
 
     async def get_agent(self, agent_id: str) -> BackgroundAgentSpec | None:
+        """The registered agent's spec, or None."""
         return await self.task_store.get_agent(agent_id)
 
     async def list_agents(self) -> list[BackgroundAgentSpec]:
+        """Every registered agent's spec."""
         return await self.task_store.list_agents()
 
     async def register_task(
@@ -189,6 +196,9 @@ class BackgroundAgentManager:
         metadata: dict[str, Any] | None = None,
         replace: bool = False,
     ) -> BackgroundTaskSpec:
+        """Create a task: which agent runs which query, on what schedule (manual,
+        once, interval or cron), with its timeout, retries, overlap, session and
+        workspace policies. ``replace`` overwrites an existing one."""
         if spec is not None and any([task_id, agent_id, query, schedule]):
             raise ValueError("Pass either spec or task keyword fields, not both")
 
@@ -241,6 +251,8 @@ class BackgroundAgentManager:
     async def update_task(
         self, task_id: str, patch: dict[str, Any]
     ) -> BackgroundTaskSpec:
+        """Change a task: ``patch`` holds the fields to change (query, schedule,
+        enabled, timeout_seconds, retry_policy, overlap_policy, ...)."""
         existing = await self.task_store.get_task(task_id)
         if not existing:
             raise TaskNotFoundError(f"Task not found: {task_id}")
@@ -272,6 +284,7 @@ class BackgroundAgentManager:
         return updated
 
     async def delete_task(self, task_id: str, delete_runs: bool = False) -> None:
+        """Delete a task; ``delete_runs`` deletes its runs too."""
         existing = await self.task_store.get_task(task_id)
         if self.governance_engine is not None and existing is not None:
             # Removing a task is authorized by the policy in force now, and
@@ -286,12 +299,16 @@ class BackgroundAgentManager:
             await self.task_store.delete_runs_for_task(task_id)
 
     async def get_task(self, task_id: str) -> BackgroundTaskSpec | None:
+        """The task, or None."""
         return await self.task_store.get_task(task_id)
 
     async def list_tasks(self, agent_id: str | None = None) -> list[BackgroundTaskSpec]:
+        """Every task, or one agent's."""
         return await self.task_store.list_tasks(agent_id=agent_id)
 
     async def start(self) -> None:
+        """Start the worker loop: it runs due schedules and queued runs until
+        ``shutdown``."""
         if self._running:
             return
         await self.initialize()
@@ -306,12 +323,15 @@ class BackgroundAgentManager:
         self._worker_task = asyncio.create_task(self._worker_loop())
 
     async def initialize(self) -> None:
+        """Prepare the task store. ``start`` and the first use call it for you."""
         if self._initialized:
             return
         await self.task_store.initialize()
         self._initialized = True
 
     async def shutdown(self) -> None:
+        """Stop the worker loop and cancel the runs it is executing; their attempts
+        are recorded."""
         if self._running:
             self._running = False
             self._stop_event.set()
@@ -329,6 +349,7 @@ class BackgroundAgentManager:
         self._initialized = False
 
     async def pause_task(self, task_id: str) -> None:
+        """Stop scheduling a task; runs already queued or running continue."""
         task = await self.task_store.get_task(task_id)
         if self.governance_engine is not None and task is not None:
             # Pausing, like deleting, is the safe direction under a newer
@@ -339,6 +360,7 @@ class BackgroundAgentManager:
         await self.task_store.set_schedule_paused(task_id, True)
 
     async def resume_task(self, task_id: str) -> None:
+        """Schedule a paused task again."""
         task = await self.task_store.get_task(task_id)
         if self.governance_engine is not None and task is not None:
             require_current_policy_snapshot(
@@ -359,6 +381,10 @@ class BackgroundAgentManager:
         wait: bool = False,
         timeout_seconds: float | None = None,
     ) -> BackgroundRun:
+        """Queue one run of a task now, optionally with another ``query``. With
+        ``wait``, return when it ends (or at ``timeout_seconds``). Under the
+        task's overlap policy, a run can come back ``skipped`` (another run
+        holds the task) instead of ``queued``."""
         task = await self.task_store.get_task(task_id)
         if not task or not task.enabled:
             raise TaskNotFoundError(f"Task not found: {task_id}")
@@ -419,6 +445,8 @@ class BackgroundAgentManager:
         timeout_seconds: float | None = None,
         poll_interval_seconds: float = 0.05,
     ) -> BackgroundRun:
+        """Execute a queued run in this process and return it when it ends, or at
+        ``timeout_seconds``."""
         self._sync_services_config()
         return await self._supervisor.run_until_terminal(
             run_id,
@@ -465,6 +493,7 @@ class BackgroundAgentManager:
             await asyncio.sleep(max(sleep_seconds, 0.001))
 
     async def cancel_run(self, run_id: str) -> None:
+        """Cancel a queued, running or waiting run."""
         self._sync_services_config()
         run = await self.task_store.get_run(run_id)
         if run is not None:
@@ -517,6 +546,8 @@ class BackgroundAgentManager:
         return queued
 
     async def recover_expired_runs(self) -> None:
+        """Take back runs whose worker stopped renewing its lease (a process that
+        died), so they retry or fail."""
         self._sync_services_config()
         await self._supervisor.recover_expired_runs()
 
@@ -525,18 +556,23 @@ class BackgroundAgentManager:
         await self._supervisor.recover_expired_run(run)
 
     async def get_run(self, run_id: str) -> BackgroundRun | None:
+        """The run: its status, attempts count, timings, result preview and error."""
         return await self.task_store.get_run(run_id)
 
     async def list_runs(
         self, task_id: str | None = None, status: str | RunStatus | None = None
     ) -> list[BackgroundRun]:
+        """Runs, optionally one task's, optionally in one status."""
         run_status = RunStatus(status) if isinstance(status, str) else status
         return await self.task_store.list_runs(task_id=task_id, status=run_status)
 
     async def list_attempts(self, run_id: str) -> list[BackgroundAttempt]:
+        """Every attempt of a run, with how each ended."""
         return await self.task_store.list_attempts(run_id)
 
     async def get_task_status(self, task_id: str) -> dict[str, Any]:
+        """A task with its schedule state, active runs and a count of its runs by
+        status."""
         task = await self.task_store.get_task(task_id)
         if not task:
             raise TaskNotFoundError(f"Task not found: {task_id}")
@@ -562,6 +598,8 @@ class BackgroundAgentManager:
         }
 
     async def get_manager_status(self) -> dict[str, Any]:
+        """Agents, tasks, active runs and run counts by status, for this manager's
+        store."""
         agents = await self.task_store.list_agents()
         tasks = await self.task_store.list_tasks()
         runs = await self.task_store.list_runs()
@@ -582,6 +620,8 @@ class BackgroundAgentManager:
         }
 
     async def get_run_events(self, run_id: str) -> list[dict[str, Any]]:
+        """The run's lifecycle events (queued, claimed, started, completed, ...),
+        in order."""
         run = await self.task_store.get_run(run_id)
         if not run:
             return []

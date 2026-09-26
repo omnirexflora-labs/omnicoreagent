@@ -76,6 +76,26 @@ def test_every_setting_is_in_the_reference(rendered, page, config):
     assert not missing
 
 
+def test_every_capability_and_profile_is_in_the_policy_reference(rendered):
+    from omnicoreagent.governance.capabilities import CAPABILITIES
+    from omnicoreagent.governance.models import PolicyProfile
+
+    page = rendered[ROOT / "docs/reference/policy.mdx"]
+    assert not [name for name in CAPABILITIES if f"| `{name}` |" not in page]
+    assert all(f"### `{profile.value}`" in page for profile in PolicyProfile)
+
+
+def test_every_background_manager_method_is_in_the_reference(rendered):
+    import inspect
+
+    from omnicoreagent import BackgroundAgentManager
+
+    page = rendered[ROOT / "docs/reference/background.mdx"]
+    names = [n for n, _ in inspect.getmembers(BackgroundAgentManager, inspect.isfunction) if not n.startswith("_")]
+    assert not [n for n in names if f"### `{n}`" not in page]
+    assert "_No description in the code yet._" not in page
+
+
 def test_every_cli_command_is_in_the_reference(rendered):
     from omnicoreagent.cli import cli as omnicoreagent_cli
     from omnicoreagent.serve.cli import cli as omniserve_cli
@@ -104,3 +124,16 @@ def test_the_api_document_is_in_the_navigation():
     nav = json.dumps(json.loads((ROOT / "docs.json").read_text()))
     assert '"openapi": "/docs/reference/openapi.json"' in nav
 
+
+
+def test_every_http_route_is_on_the_omniserve_page(rendered):
+    """The refund desk found eight live routes missing from the page's tables."""
+    spec = json.loads(rendered[ROOT / "docs/reference/openapi.json"])
+    page = (ROOT / "docs/how-to-guides/omniserve.mdx").read_text()
+    missing = [
+        f"{method.upper()} {path}"
+        for path, methods in spec["paths"].items()
+        for method in methods
+        if f"| `{method.upper()}` | `{path}` |" not in page
+    ]
+    assert not missing, missing

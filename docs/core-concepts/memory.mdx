@@ -65,12 +65,22 @@ await agent.switch_memory_store("redis")       # Back to Redis
 
 ## Available Backends
 
-| Backend | Use Case | Environment Variable |
-|---------|----------|---------------------|
-| `in_memory` | Fast development | — |
-| `redis` | Production persistence | `REDIS_URL` |
-| `sql` | SQLAlchemy database storage | `DATABASE_URL` |
-| `mongodb` | Document storage | `MONGODB_URI` |
+| Backend | Use Case | Environment Variable | Install |
+|---------|----------|---------------------|---------|
+| `in_memory` | Development; gone when the process ends | — | — |
+| `sql` | SQLite on one machine, PostgreSQL or MySQL when processes share it | `DATABASE_URL`, e.g. `sqlite:///./memory.db` or `postgresql://...` | `omnicoreagent[postgres]` (SQLAlchemy; also used for SQLite) |
+| `redis` | Production persistence | `REDIS_URL` | `omnicoreagent[redis]` |
+| `mongodb` | Document storage | `MONGODB_URI` | `omnicoreagent[mongodb]` |
+
+A run's durable record lives in the memory store too, so pausing a run in one
+process and resuming it in another needs a store both can reach: `sql`,
+`redis` or `mongodb` ([durable runs](/docs/core-concepts/durable-runs)).
+
+```python
+import os
+os.environ["DATABASE_URL"] = "sqlite:///./memory.db"
+memory_router = MemoryRouter("sql")
+```
 
 ---
 

@@ -142,7 +142,7 @@ class OmniCoreAgent:
             local_tools: Your Python functions as tools: a ``ToolRegistry``, or
                 a list of functions.
             sub_agents: Other ``OmniCoreAgent`` instances this one may hand a
-                task to, by name, through a ``call_sub_agent`` tool.
+                task to: each becomes a ``delegate_<name>`` tool.
             agent_config: The agent's settings (see Agent settings).
             memory_router: Where session history is kept:
                 ``MemoryRouter("in_memory" | "redis" | "sql" | "mongodb")``;
@@ -1141,7 +1141,8 @@ class OmniCoreAgent:
             )
 
     async def budget_status(self, run_id: str) -> List[Dict[str, Any]]:
-        """Every budget covering a run, with its limit and what it has spent.
+        """Every budget covering a run: its limit, what a person granted on
+        top of it, what is spent and held, and what remains.
 
         The application's, session's and agent's counters are read from the
         ledger (they are shared, and live on); a finished run's own counter is
@@ -1161,6 +1162,9 @@ class OmniCoreAgent:
             for scope, key, limit in budgets.limits(meter):
                 usage = await budgets.ledger.usage(key)
                 reserved = await budgets.ledger.reserved(key)
+                # A person's grant raises what this budget allows, exactly as
+                # enforcement counts it.
+                granted = (await budgets.ledger.granted(key)).get(meter, 0.0)
                 spent = usage.get(meter, 0.0)
                 if scope == BudgetScope.REQUEST and record.get("status") not in {"running"}:
                     spent = (settled.get(scope.value) or {}).get(meter, spent)
@@ -1171,9 +1175,12 @@ class OmniCoreAgent:
                         "window": limit.window,
                         "key": key,
                         "limit": limit.limit,
+                        "granted": granted,
                         "spent": spent,
                         "reserved": reserved.get(meter, 0.0),
-                        "remaining": max(0.0, limit.limit - spent - reserved.get(meter, 0.0)),
+                        "remaining": max(
+                            0.0, limit.limit + granted - spent - reserved.get(meter, 0.0)
+                        ),
                     }
                 )
         return entries

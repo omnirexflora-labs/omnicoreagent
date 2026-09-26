@@ -50,11 +50,11 @@ synthesizing.
 
 ### `spawn_subagents`
 
-`spawn_subagents` accepts one JSON array. Use one item for one worker, or many
-items for parallel workers.
+`spawn_subagents` takes a `subagents` list. Use one item for one worker, or
+many items for parallel workers. The model calls it like this:
 
 ```json
-[
+{"subagents": [
   {
     "name": "api",
     "role": "API reviewer",
@@ -67,7 +67,7 @@ items for parallel workers.
     "task": "Review coverage gaps and write recommended test cases.",
     "output_path": "/workspace/product_audit/subagent_tests/output.md"
   }
-]
+]}
 ```
 
 Spawned workers inherit the parent's model, MCP tools, user local tools,
@@ -104,12 +104,16 @@ parent_agent = OmniCoreAgent(
 )
 ```
 
-When a parent agent has explicit subagents, it is given tools to communicate
-with them:
+When a parent agent has explicit subagents, it is given one tool per child,
+named after it:
 
 | Tool | Action |
 |------|--------|
-| `call_sub_agent` | Send a specific task to a child agent and wait for the result. |
+| `delegate_<name>` | Send a task to the child named `<name>` (`delegate_research_agent`, `delegate_code_agent` above) and wait for its result. |
+
+Each child runs with its own trace, linked to the parent's: `await
+agent.get_trace_family(trace_id=result["trace_id"])` returns the parent and
+every child (`parent_trace_id` on each child names the parent).
 
 ---
 

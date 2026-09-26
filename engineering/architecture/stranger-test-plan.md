@@ -80,6 +80,29 @@ fixed; the reproductions are in each unit's test.
   1.102). Noted: ResourceWarnings at cleanup (trace file, a transport),
   visible only with warnings enabled.
 
+- S6 done (docs, stacked on S1-S5):
+  - Generated references: `reference/policy` (every capability from the new
+    `CAPABILITIES` registry, how a request is decided, rule syntax, every
+    built-in profile's rules) and `reference/background` (every
+    `BackgroundAgentManager` method, now documented, run statuses and
+    overlap policies). Tests keep both complete.
+  - OmniServe's route tables list every route; a test checks them against
+    the API document.
+  - Corrected: `delegate_<name>` (not `call_sub_agent`),
+    `get_session_history`, the `spawn_subagents` shape, the sandbox provider
+    list, the `request_limit` / `total_tokens_limit` descriptions.
+  - Added: `run()` and record status vocabularies; cross-process resume needs
+    the same workspace; the trajectory's fields at a glance (and a loop that
+    survives a call with no response); SQLite and its extra; the network
+    allowlist syntax and which providers enforce it; `grant_budget`'s default
+    amount; skill authoring; a Python MCP server and trusting a server under
+    governance; the JSONL exporter; the first Docker run pulling its image.
+  - Found while documenting: `budget_status` ignored grants that enforcement
+    counts; fixed with a test. The offload cookbook example used private
+    attributes; it reads the run's trajectory now.
+  - Left: model names vary across examples; the headless CLI's runs report
+    `execution_surface: "interactive"`.
+
 ## Release
 
 S1–S4 are about the evidence and the policy — what the release promises —

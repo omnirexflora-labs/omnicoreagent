@@ -227,6 +227,11 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 | `POST` | `/runs/{run_id}/resume` | Yes* | Continue a paused run once its approvals are decided |
 | `POST` | `/runs/{run_id}/steer` | Yes* | Send a running, waiting, or interrupted run a message for its next step: `{"message", "sender"?}` (422 if the guardrail blocks it) |
 | `POST` | `/runs/{run_id}/interrupt` | Yes* | Stop a running run at its next step boundary; resume continues it |
+| `GET` | `/runs/{run_id}/budget` | Yes* | Every budget covering the run, with its limit, what is spent, and any pending request |
+| `POST` | `/runs/{run_id}/budget` | Yes* | Grant or refuse the budget a waiting run ran out of: `{"decision": "grant" \| "deny", "approver", "amount"?, "note"?}` |
+| `POST` | `/runs/{run_id}/outcome` | Yes* | Record what the run turned out to be worth: `{"source", "reward"?, "label"?, "detail"?}` |
+| `GET` | `/sessions/{session_id}/history` | Yes* | A session's message history |
+| `DELETE` | `/sessions/{session_id}` | Yes* | Clear a session's message history |
 | `GET` | `/health` | No | Health check |
 | `GET` | `/ready` | No | Readiness check |
 | `GET` | `/prometheus` | No | Prometheus metrics |
@@ -241,6 +246,10 @@ omniserve quickstart --provider anthropic --model claude-3-5-sonnet-20241022
 | `GET` | `/telemetry/traces/{trace_id}/family` | Yes* | Return all traces linked to one execution boundary |
 | `GET` | `/telemetry/traces/{trace_id}` | Yes* | Return one exact trace |
 | `GET` | `/telemetry/runs/{run_id}/trace` | Yes* | Return the latest trace correlated to one run |
+| `GET` | `/telemetry/runs/{run_id}/family` | Yes* | Every trace linked to one run by parent trace links |
+| `GET` | `/telemetry/runs/{run_id}/trajectory` | Yes* | The run's latest trace segment as a trajectory; `/runs/{run_id}/trajectory` is the whole run |
+| `GET` | `/telemetry/traces/{trace_id}/trajectory` | Yes* | One trace as a trajectory |
+| `GET` | `/telemetry/retention` | Yes* | The trace and payload retention policy and the latest cleanup results |
 | `GET` | `/telemetry/sessions/{session_id}/trace` | Yes* | Return the latest trace for one session |
 | `GET` | `/docs` | No | Swagger UI |
 | `GET` | `/redoc` | No | ReDoc UI |
