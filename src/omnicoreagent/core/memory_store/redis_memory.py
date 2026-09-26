@@ -551,6 +551,27 @@ class RedisMemoryStore(AbstractMemoryStore):
                 records.append(record)
         return sorted(records, key=lambda r: r.get("created_at") or "")[:limit]
 
+    async def delete_finished_run_states(self, *, before: str, statuses: tuple[str, ...]) -> int:
+        client = await self._get_client()
+        removed = 0
+        # SSCAN, not SMEMBERS: a long-lived store holds many runs.
+        async for run_id in client.sscan_iter("omnicoreagent_runs:all"):
+            key = f"omnicoreagent_run:{run_id}"
+            status, session_id, data = await client.hmget(key, "status", "session_id", "data")
+            if data is None:
+                await client.srem("omnicoreagent_runs:all", run_id)
+                continue
+            if status not in statuses:
+                continue
+            if (json.loads(data).get("created_at") or "") >= before:
+                continue
+            await client.delete(key)
+            await client.srem("omnicoreagent_runs:all", run_id)
+            if session_id:
+                await client.srem(f"omnicoreagent_runs:session:{session_id}", run_id)
+            removed += 1
+        return removed
+
     # --- budgets -----------------------------------------------------------
     # One hash per budget (version, data); saves are compare-and-swap in Lua,
     # so concurrent workers cannot both spend the last of a budget.

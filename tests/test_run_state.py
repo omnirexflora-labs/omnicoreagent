@@ -420,3 +420,40 @@ async def test_a_runs_context_is_stored_as_redacted_as_the_history():
 
     assert "someone@example.com" not in str(record)
     assert record["context"]["messages"][0]["content"] == stored[0]["content"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", sorted(BACKENDS))
+async def test_every_store_deletes_only_finished_runs_started_before_a_time(backend, tmp_path):
+    """Run retention (RR1): a store removes finished runs that started before
+    the cutoff, in one call, and never a run still waiting or running."""
+    from datetime import datetime, timedelta, timezone
+
+    store = BACKENDS[backend](tmp_path)
+    tag = os.urandom(4).hex()
+    now = datetime.now(timezone.utc)
+    old = (now - timedelta(days=60)).isoformat()
+    new = now.isoformat()
+    runs = {
+        f"old_done_{tag}": ("completed", old),
+        f"old_failed_{tag}": ("failed", old),
+        f"old_waiting_{tag}": ("awaiting_approval", old),
+        f"new_done_{tag}": ("completed", new),
+    }
+    for run_id, (status, created) in runs.items():
+        await store.save_run_state(
+            {**_record(run_id, f"s_{tag}", status), "created_at": created}, expected_version=None
+        )
+
+    removed = await store.delete_finished_run_states(
+        before=(now - timedelta(days=30)).isoformat(),
+        statuses=("completed", "failed", "blocked", "cancelled", "timeout"),
+    )
+
+    assert removed == 2
+    assert await store.get_run_state(f"old_done_{tag}") is None
+    assert await store.get_run_state(f"old_failed_{tag}") is None
+    assert await store.get_run_state(f"old_waiting_{tag}") is not None, "still waiting for a person"
+    assert await store.get_run_state(f"new_done_{tag}") is not None
+    listed = {r["run_id"] for r in await store.list_run_states(session_id=f"s_{tag}")}
+    assert listed == {f"old_waiting_{tag}", f"new_done_{tag}"}, "gone from the listings too"

@@ -9,6 +9,7 @@ from sqlalchemy import (
     Integer,
     String,
     update,
+    delete,
     Text,
     DateTime,
     create_engine,
@@ -650,6 +651,23 @@ class DatabaseMessageStore(AbstractMemoryStore):
                 self._release_session(session)
 
         return await asyncio.to_thread(_list)
+
+    async def delete_finished_run_states(self, *, before: str, statuses: tuple[str, ...]) -> int:
+        def _delete() -> int:
+            session = self._get_session()
+            try:
+                result = session.execute(
+                    delete(StorageRunState).where(
+                        StorageRunState.status.in_(list(statuses)),
+                        StorageRunState.created_at < before,
+                    )
+                )
+                session.commit()
+                return int(result.rowcount or 0)
+            finally:
+                self._release_session(session)
+
+        return await asyncio.to_thread(_delete)
 
     # --- budgets -----------------------------------------------------------
 

@@ -250,6 +250,17 @@ class InMemoryStore(AbstractMemoryStore):
             ]
         return sorted(records, key=lambda r: r.get("created_at") or "")[:limit]
 
+    async def delete_finished_run_states(self, *, before: str, statuses: tuple[str, ...]) -> int:
+        with self._lock:
+            expired = [
+                run_id
+                for run_id, record in self.run_states.items()
+                if record.get("status") in statuses and (record.get("created_at") or "") < before
+            ]
+            for run_id in expired:
+                del self.run_states[run_id]
+        return len(expired)
+
     async def delete_budget_state(self, key: str) -> None:
         self.budget_states.pop(key, None)
 

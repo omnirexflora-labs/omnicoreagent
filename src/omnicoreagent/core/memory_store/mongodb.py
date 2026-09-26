@@ -288,6 +288,13 @@ class MongoDb(AbstractMemoryStore):
             records.append(document)
         return records
 
+    async def delete_finished_run_states(self, *, before: str, statuses: tuple[str, ...]) -> int:
+        await self._ensure_connected()
+        result = await self.run_states.delete_many(
+            {"status": {"$in": list(statuses)}, "created_at": {"$lt": before}}
+        )
+        return int(result.deleted_count)
+
     # --- budgets -----------------------------------------------------------
 
     async def delete_budget_state(self, key: str) -> None:
