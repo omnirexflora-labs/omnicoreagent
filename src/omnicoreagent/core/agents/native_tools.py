@@ -312,7 +312,19 @@ async def execute_native_turn(
                     result = {"status": "error", "message": str(exc)}
                 if _waiting_for_approval(call_id):
                     # A person has to decide this call: pause the program here.
-                    await current_run().tool_finished(
+                    run = current_run()
+                    # A program's call is not in the conversation, so the
+                    # approver would not see what it asks for: keep its
+                    # arguments on the approval (the run's own record only;
+                    # the trace keeps them under the capture policy).
+                    for approval in list(run.record.get("approvals", [])):
+                        if (
+                            approval.get("status") == "pending"
+                            and approval.get("tool_call_id") == call_id
+                            and approval.get("arguments") is None
+                        ):
+                            await run.update_approval(approval["approval_id"], arguments=arguments)
+                    await run.tool_finished(
                         tool_call_id=call_id, outcome=None, state="awaiting_approval"
                     )
                     raise _PauseHere(call_id, number)

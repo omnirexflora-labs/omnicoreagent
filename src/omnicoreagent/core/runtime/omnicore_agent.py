@@ -1984,13 +1984,9 @@ class OmniCoreAgent:
         tools = harness_tools.available_tools(self.mcp_client, runtime_local_tools)
         for child in self.sub_agents or []:
             # The same definition the model is offered (native_catalog).
-            from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
+            from omnicoreagent.core.tools.native_catalog import delegate_tool_schema
 
-            schema = ToolRegistry()._infer_schema(child.run)
-            runtime_parameters = {"session_id", "run_id", "on_event"}
-            for parameter in runtime_parameters:
-                schema["properties"].pop(parameter, None)
-            schema["required"] = [n for n in schema["required"] if n not in runtime_parameters]
+            schema = delegate_tool_schema(child)
             tools.append(
                 {
                     "name": f"delegate_{child.name}",

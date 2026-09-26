@@ -13,6 +13,8 @@ class MemoryRouter:
     def __init__(self, memory_store_type: str):
         self.memory_store_type = memory_store_type
         self.memory_store: Optional[AbstractMemoryStore] = None
+        # The memory settings, applied again to a store that replaces this one.
+        self._memory_config: tuple | None = None
         self.initialize_memory_store()
 
     def __str__(self):
@@ -30,6 +32,7 @@ class MemoryRouter:
         summary_config: dict = None,
         summarize_fn: Callable = None,
     ) -> None:
+        self._memory_config = (mode, value, summary_config, summarize_fn)
         self.memory_store.set_memory_config(mode, value, summary_config, summarize_fn)
 
     def initialize_memory_store(self):
@@ -94,6 +97,9 @@ class MemoryRouter:
         if memory_store_type != self.memory_store_type:
             self.memory_store_type = memory_store_type
             self.initialize_memory_store()
+            # The new store keeps the window and summary settings.
+            if self._memory_config is not None:
+                self.memory_store.set_memory_config(*self._memory_config)
             logger.info(f"Switched memory store to {memory_store_type}")
         else:
             logger.info(f"Memory store already set to {memory_store_type}")

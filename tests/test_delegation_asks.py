@@ -81,3 +81,15 @@ async def test_the_delegation_tools_are_listed_with_the_others():
     lead = OmniCoreAgent(name="lead", system_instruction="Lead.", model_config=MODEL, sub_agents=[child], agent_config=CONFIG)
     names = [tool["name"] for tool in await lead.list_all_available_tools()]
     assert "delegate_researcher" in names
+
+
+@pytest.mark.asyncio
+async def test_a_delegate_tool_offers_the_model_only_the_task():
+    """The delegate_<name> schema came from the child's run() signature, so
+    the model was offered tags, provenance and the private _resume, and
+    filled tags and provenance in on its own (docs pass, 2026-09-27)."""
+    child = OmniCoreAgent(name="researcher", system_instruction="Research.", model_config=MODEL, agent_config=CONFIG)
+    lead = OmniCoreAgent(name="lead", system_instruction="Lead.", model_config=MODEL, sub_agents=[child], agent_config=CONFIG)
+    (tool,) = [t for t in await lead.list_all_available_tools() if t["name"] == "delegate_researcher"]
+    assert set(tool["inputSchema"]["properties"]) == {"query"}
+    assert tool["inputSchema"]["required"] == ["query"]
