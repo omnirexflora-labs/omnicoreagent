@@ -134,7 +134,7 @@ Use the read_artifact tool if you need to see the full content.""",
     print("-" * 60)
 
     # This query triggers two independent large tool calls so offloading is visible.
-    response = await agent.run(
+    result = await agent.run(
         query=(
             "Search for 'artificial intelligence trends 2024' and fetch document "
             "'ai-trends-report'. Use both tools together, then summarize the top 3 points."
@@ -145,23 +145,21 @@ Use the read_artifact tool if you need to see the full content.""",
     print("\n" + "=" * 60)
     print("📝 Agent Response:")
     print("=" * 60)
-    response = response_text(response)
+    response = response_text(result)
     print(response[:1000] if len(response) > 1000 else response)
 
-    # Show offloading stats
-    print("\n📊 Offloading Statistics:")
-    print("-" * 60)
-    stats = agent.agent.tool_offloader.get_stats()
-    print(f"  • Artifacts created: {stats['offload_count']}")
-    print(f"  • Tokens saved: {stats['tokens_saved']}")
-
-    # List artifacts
-    artifacts = agent.agent.tool_offloader.list_artifacts()
-    if artifacts:
-        print("\n📁 Offloaded Artifacts:")
-        for a in artifacts:
-            print(f"  • {a['id']}")
-            print(f"    Tool: {a['tool']}, Tokens saved: {a['tokens_saved']}")
+    # What was offloaded, from the run's own record
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    offloaded = trajectory["totals"]["offloaded_results"]
+    print(f"\n📁 Offloaded results: {len(offloaded)}")
+    for item in offloaded:
+        # The reference is what the model was given: a preview and the
+        # artifact it can read in full.
+        artifact = next(
+            (line for line in str(item["reference"]).splitlines() if line.startswith("Artifact ID")),
+            "",
+        )
+        print(f"  • {item['tool_call_id']}  {artifact}")
 
     print("\n✅ Demo complete!")
     print("=" * 60)

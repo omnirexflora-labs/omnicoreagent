@@ -21,7 +21,7 @@ from omnicoreagent import OmniCoreAgent
 | `model_config` | `required` | The model: `{"provider": "openai", "model": "..."}`, with optional `temperature`, `max_tokens`, `base_url` and others (see Models). The key comes from `LLM_API_KEY`. |
 | `mcp_tools` | `None` | MCP servers whose tools the agent may use: a list of dicts with `name`, `transport_type` (`stdio`, `sse` or `streamable_http`), and `command`/`args` or `url`. |
 | `local_tools` | `None` | Your Python functions as tools: a `ToolRegistry`, or a list of functions. |
-| `sub_agents` | `None` | Other `OmniCoreAgent` instances this one may hand a task to, by name, through a `call_sub_agent` tool. |
+| `sub_agents` | `None` | Other `OmniCoreAgent` instances this one may hand a task to: each becomes a `delegate_<name>` tool. |
 | `agent_config` | `None` | The agent's settings (see Agent settings). |
 | `memory_router` | `None` | Where session history is kept: `MemoryRouter("in_memory" | "redis" | "sql" | "mongodb")`; in memory by default. |
 | `telemetry_store` | `None` | A trace store to use instead of the built-in one, for example one shared by several agents. |
@@ -52,7 +52,7 @@ Close a run this agent did not finish itself.
 async def budget_status(run_id: str) -> List[Dict[str, Any]]: ...
 ```
 
-Every budget covering a run, with its limit and what it has spent.
+Every budget covering a run: its limit, what a person granted on top of it, what is spent and held, and what remains.
 
 ### `cleanup`
 

@@ -217,13 +217,19 @@ The run stopped **before** spending anything and waited. `grant_budget` is a
 recorded, one-off exception with a name on it — the policy itself is unchanged —
 and `resume` carried on. To end the run instead, `deny_budget`.
 
+Without `amount`, a grant covers the shortfall of the one call that stopped:
+the run can stop again at its next call. To give it headroom, grant more,
+e.g. `grant_budget(run_id, approver="alice", amount=0.50)`. A grant adds to
+what the budget allows; `budget_status(run_id)` shows each budget's `limit`,
+what was `granted`, what is `spent`, and what `remaining`.
+
 ## What you have now
 
 An agent that can act, and a record that says what it did and why it was
 allowed to. From here:
 
 <CardGroup cols={2}>
-  <Card title="Security model" icon="shield-halved" href="/docs/core-concepts/security-model">
+  <Card title="Policy reference" icon="shield-halved" href="/docs/reference/policy">
     Profiles, rules, targets, and what every capability means.
   </Card>
   <Card title="Durable runs" icon="rotate" href="/docs/core-concepts/durable-runs">

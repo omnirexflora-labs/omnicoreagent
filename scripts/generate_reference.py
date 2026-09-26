@@ -164,6 +164,90 @@ def _args_section(doc: str) -> dict[str, str]:
     return found
 
 
+def _methods(cls: Any) -> list[str]:
+    """Every public method: its signature as Python, and its docstring's first paragraph."""
+    lines: list[str] = []
+    for name, function in sorted(inspect.getmembers(cls, predicate=inspect.isfunction)):
+        if name.startswith("_"):
+            continue
+        signature = str(inspect.signature(function)).replace("self, ", "").replace("(self)", "()")
+        # Annotations are strings here (``from __future__ import annotations``).
+        signature = re.sub(r"(: |-> )'([^']*)'", r"\1\2", signature)
+        kind = "async " if inspect.iscoroutinefunction(function) else ""
+        lines += [
+            f"### `{name}`",
+            "",
+            "```python",
+            f"{kind}def {name}{signature}: ...",
+            "```",
+            "",
+            md(first_paragraph(function.__doc__)) or "_No description in the code yet._",
+            "",
+        ]
+    return lines
+
+
+def background_page() -> str:
+    from omnicoreagent import BackgroundAgentManager
+    from omnicoreagent.background.models import (
+        TERMINAL_RUN_STATUSES,
+        WAITING_RUN_STATUSES,
+        OverlapPolicy,
+        RunStatus,
+    )
+
+    return "\n".join(
+        [
+            "---",
+            "title: BackgroundAgentManager",
+            "description: 'Background tasks and runs: every method, run status and overlap policy'",
+            "icon: 'clock'",
+            "---",
+            "",
+            NOTICE,
+            "",
+            "# BackgroundAgentManager",
+            "",
+            "```python",
+            "from omnicoreagent import BackgroundAgentManager",
+            "",
+            "manager = BackgroundAgentManager()                    # tasks kept in memory",
+            "manager = BackgroundAgentManager(task_store=\"sql\")   # SQLite, or DATABASE_URL; needs omnicoreagent[postgres]",
+            "```",
+            "",
+            "The guide is [Background agents](/docs/core-concepts/background-agents).",
+            "",
+            "## Run statuses",
+            "",
+            "A run is `queued`, then `claimed` by a worker, `running`, and `retrying` between",
+            "attempts. It **ends** in a terminal status, or **pauses** in a waiting one until",
+            "`resume_run`; `run_now(wait=True)` and `wait_for_run` return at either.",
+            "",
+            "| Status | |",
+            "|---|---|",
+            *[
+                f"| {code(status.value)} | "
+                + ("ends" if status in TERMINAL_RUN_STATUSES else "waits" if status in WAITING_RUN_STATUSES else "active")
+                + " |"
+                for status in RunStatus
+            ],
+            "",
+            "## Overlap policies",
+            "",
+            "What a task does when it is due while one of its runs is still active",
+            "(`overlap_policy`; the default is `skip_if_running`):",
+            "",
+            "| Policy |",
+            "|---|",
+            *[f"| {code(policy.value)} |" for policy in OverlapPolicy],
+            "",
+            "## Methods",
+            "",
+            *_methods(BackgroundAgentManager),
+        ]
+    )
+
+
 def agent_page() -> str:
     from omnicoreagent import OmniCoreAgent
 
@@ -176,24 +260,7 @@ def agent_page() -> str:
         default = "required" if parameter.default is inspect._empty else repr(parameter.default)
         rows.append(f"| {code(name)} | {code(default)} | {md(args.get(name, ''))} |")
 
-    methods = []
-    for name, function in sorted(inspect.getmembers(OmniCoreAgent, predicate=inspect.isfunction)):
-        if name.startswith("_"):
-            continue
-        signature = str(inspect.signature(function)).replace("self, ", "").replace("(self)", "()")
-        # Annotations are strings here (``from __future__ import annotations``).
-        signature = re.sub(r"(: |-> )'([^']*)'", r"\1\2", signature)
-        kind = "async " if inspect.iscoroutinefunction(function) else ""
-        methods += [
-            f"### `{name}`",
-            "",
-            "```python",
-            f"{kind}def {name}{signature}: ...",
-            "```",
-            "",
-            md(first_paragraph(function.__doc__)) or "_No description in the code yet._",
-            "",
-        ]
+    methods = _methods(OmniCoreAgent)
     return "\n".join(
         [
             "---",
@@ -222,6 +289,141 @@ def agent_page() -> str:
             "## Methods",
             "",
             *methods,
+        ]
+    )
+
+
+# --- Policy -------------------------------------------------------------------
+
+
+def _compact(value: Any) -> str:
+    """A target or conditions object as the dict a rule is written with."""
+    if value is None:
+        return ""
+    data = value if isinstance(value, dict) else {
+        key: getattr(value, key) for key in getattr(value, "__dataclass_fields__", {})
+    }
+    shown = {key: getattr(item, "value", item) for key, item in data.items() if item not in (None, [], {}, False)}
+    return code(repr(shown)) if shown else ""
+
+
+def policy_page() -> str:
+    from omnicoreagent.governance import build_default_policy
+    from omnicoreagent.governance.capabilities import CAPABILITIES
+    from omnicoreagent.governance.models import PolicyProfile
+
+    capability_rows = [f"| {code(name)} | {md(text)} |" for name, text in sorted(CAPABILITIES.items())]
+    profiles = []
+    for profile in PolicyProfile:
+        policy = build_default_policy(profile.value)
+        mode = getattr(policy.mode, "value", policy.mode)
+        profiles += [f"### `{profile.value}`", "", f"Mode `{mode}`.", "", "| Effect | Rule | Capability | Target | Conditions |", "|---|---|---|---|---|"]
+        for effect in ("deny", "ask", "allow"):
+            for rule in getattr(policy.rules, effect):
+                profiles.append(
+                    f"| {effect} | {code(rule.rule_id)} | {code(rule.capability)} | "
+                    f"{_compact(rule.target)} | {_compact(rule.conditions)} |"
+                )
+        profiles.append("")
+    return "\n".join(
+        [
+            "---",
+            "title: Policy",
+            "description: 'Every capability, how a request is decided, how to write a rule, and what each built-in profile allows'",
+            "icon: 'shield-halved'",
+            "---",
+            "",
+            NOTICE,
+            "",
+            "# Policy",
+            "",
+            "Every action an agent takes is a **request** for a **capability**, with a",
+            "**target** (the tool, the path, the host, the server). The policy decides each",
+            "request: **allow** it, **deny** it, or **ask** a person. An ask pauses the run",
+            "until someone decides ([durable runs](/docs/core-concepts/durable-runs)); the",
+            "[security model](/docs/core-concepts/security-model) explains the design.",
+            "",
+            "## How a request is decided",
+            "",
+            "1. A **deny** rule that matches wins.",
+            "2. Otherwise an **ask** rule that matches: a person decides. An ask outranks",
+            "   an allow, so adding an allow rule to a profile does not lift that profile's",
+            "   asks; remove the ask rule, or write your own policy.",
+            "3. Otherwise an **allow** rule that matches.",
+            "4. Otherwise the policy's **mode** decides: `permissive` allows,",
+            "   `interactive` asks (reason `unknown_capability`), `strict` denies.",
+            "",
+            "A decision is recorded in the run's trace with its `effect` and `reason_code`",
+            "(`matched_allow`, `matched_ask`, `matched_deny`, `unknown_capability`,",
+            "`approved` when a person allowed an ask, and others).",
+            "",
+            "Two capabilities are decided when the agent connects, not during a run:",
+            "`mcp.server.start` and `mcp.server.connect`. There is no run to pause then, so",
+            "an ask on them fails the connection with `ApprovalRequiredError`; allow the",
+            "servers you trust.",
+            "",
+            "## Writing a rule",
+            "",
+            "```python",
+            "from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy",
+            "",
+            "policy = build_default_policy(\"interactive-dev\")",
+            "policy.rules.ask.append(",
+            "    PolicyRule(",
+            "        rule_id=\"ask_before_refunds\",",
+            "        effect=PolicyEffect.ASK,",
+            "        capability=\"tool.local.call\",",
+            "        target={\"tool_name\": \"issue_refund\"},",
+            "    )",
+            ")",
+            "agent_config = {\"governance_config\": {\"enabled\": True, \"policy\": policy}}",
+            "```",
+            "",
+            "Or the whole policy as a dict:",
+            "",
+            "```python",
+            "agent_config = {",
+            "    \"governance_config\": {",
+            "        \"enabled\": True,",
+            "        \"policy\": {",
+            "            \"name\": \"support-desk\",",
+            "            \"mode\": \"strict\",  # anything no rule covers is denied",
+            "            \"rules\": {",
+            "                \"allow\": [{\"rule_id\": \"tools\", \"capability\": \"tool.local.call\"}],",
+            "                \"ask\": [",
+            "                    {",
+            "                        \"rule_id\": \"refunds\",",
+            "                        \"capability\": \"tool.local.call\",",
+            "                        \"target\": {\"tool_name\": \"issue_refund\"},",
+            "                    }",
+            "                ],",
+            "            },",
+            "        },",
+            "    }",
+            "}",
+            "```",
+            "",
+            "| Field | What it is |",
+            "|---|---|",
+            "| `rule_id` | Your name for the rule; it is recorded with every decision it makes. |",
+            "| `effect` | `allow`, `ask` or `deny` (the list it is in, for a dict policy). |",
+            "| `capability` | A capability below, or a glob: `workspace.files.*`, `network.http.*`, `*`. |",
+            "| `target` | Optional. Any of `tool_name`, `mcp_server`, `path`, `host`, `resource`; each a glob the request's target must match. |",
+            "| `conditions` | Optional. `risk_level` (list), `provider`, `execution_surface`, `exclude_execution_surface` (list), `exclude_capability` (list of globs), `mcp_server`, `method`, `host`. |",
+            "| `constraints` | Optional. `approval_expires_seconds` (how long a person's decision stays valid), `sandbox_required`, `audit_required`. |",
+            "",
+            "## Capabilities",
+            "",
+            "| Capability | Allowing it lets the agent |",
+            "|---|---|",
+            *capability_rows,
+            "",
+            "## Built-in profiles",
+            "",
+            "Each profile below is `build_default_policy(name)`. Start from one and add",
+            "rules, or write your own policy.",
+            "",
+            *profiles,
         ]
     )
 
@@ -350,6 +552,8 @@ def render_all() -> dict[Path, str]:
             "TelemetryConfig",
             TelemetryConfig(),
         ),
+        OUT / "policy.mdx": policy_page(),
+        OUT / "background.mdx": background_page(),
         OUT / "cli.mdx": cli_page(),
         OUT / "openapi.json": openapi_document(),
     }

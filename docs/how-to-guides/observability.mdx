@@ -29,7 +29,7 @@ trajectory = await agent.get_trajectory(run_id=result["run_id"])
 
 for step in trajectory["steps"]:
     for call in step["model_calls"]:
-        print(step["step"], call["purpose"], call["facts"]["tokens"], call["response"])
+        print(step["step"], call["purpose"], call["outcome"], (call["facts"] or {}).get("tokens"))
     for tool in step["tool_calls"]:
         print(tool["tool_name"], tool["raw_arguments"], tool["outcome"], tool["observation"])
 print(trajectory["final"], trajectory["totals"])
@@ -49,6 +49,24 @@ paired with its capture state. OmniServe serves the same structure at
 `GET /telemetry/traces/{trace_id}/trajectory`, and
 `GET /telemetry/runs/{run_id}/trajectory` for a run's latest segment;
 `GET /runs/{run_id}/trajectory` serves the whole run (below).
+
+### Fields at a glance
+
+| Where | Field | What it holds |
+|---|---|---|
+| each step | `step` | The run's step number; a resumed segment continues the count. |
+| each step | `resumed` | `true` for the step that ran the calls a person approved, when the run resumed. |
+| each model call | `outcome` | `ok`, `error`, or `no_response` (stopped before it was made, e.g. by a budget, or cut off in flight). |
+| each model call | `facts` | Tokens, cost, latency, finish reason, the model served. `None` when there was no response. |
+| each tool call | `outcome` | `success`, `error`, `denied`, `awaiting_approval`, `timeout`, `cancelled`, or `rejected` (invalid arguments or an unknown tool). |
+| each tool call | `arguments`, `raw_arguments` | The parsed arguments and the model's exact text (redacted under governance at the default capture). |
+| each tool call | `governance` | Every policy decision about the call: `effect`, `capability`, `reason_code`, and for a person's decision `approval_id` and `approved_by` (reason `approved`). |
+| each tool call | `code_calls` | For `run_code`: every call the program made, each with its own arguments, outcome and decisions. |
+| each tool call | `executions`, `workspace_sync` | For `execute` and skill scripts: each command with its exit code and provider, and the files copied in and out. |
+| the trajectory | `tool_calls_outside_steps` | Calls recorded outside any step; kept so nothing is dropped, and normally empty. |
+
+To walk a run that paused and resumed, read its [story](#a-run-that-paused-one-story):
+each segment's `steps` together hold every step and every call.
 
 ### Run header
 
@@ -421,6 +439,13 @@ agent = OmniCoreAgent(
         }
     ],
 )
+```
+
+To a local JSONL file, one trace per line — no service needed:
+
+```python
+jsonl = build_telemetry_exporter("jsonl", path="exports/traces.jsonl")
+await agent.export_trace(result["trace_id"], exporters=[jsonl])
 ```
 
 Vendor presets use the same OTLP exporter path:

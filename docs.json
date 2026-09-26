@@ -84,6 +84,8 @@
                             "docs/reference/omnicoreagent",
                             "docs/reference/agent-config",
                             "docs/reference/telemetry-config",
+                            "docs/reference/policy",
+                            "docs/reference/background",
                             "docs/reference/cli"
                         ]
                     },

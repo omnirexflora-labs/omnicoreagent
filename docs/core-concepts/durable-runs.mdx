@@ -18,11 +18,30 @@ run = await agent.get_run(result["run_id"])
 runs = await agent.list_runs(session_id="s1")
 ```
 
-A record holds the run's status (`running`, `awaiting_approval`, `completed`,
-`failed`, `blocked`, `cancelled`), step, token usage, trace IDs, approvals,
-and every tool call with its state: `started` before it runs, then
-`completed`, or `interrupted` when it was cancelled or timed out (its effect is
-unknown). Tool arguments are recorded as a digest.
+A record holds the run's status, step, token usage, trace IDs, approvals
+(each with the arguments of the call it is for, so an approver in another
+process sees what it approves), and every tool call with its state: `started`
+before it runs, then `completed`, or `interrupted` when it was cancelled or
+timed out (its effect is unknown). Tool arguments are recorded as a digest.
+
+The record's status and the `status` that `run()` and `resume()` return name
+the same moments in two vocabularies:
+
+| `run()` returns | The record says | Meaning |
+|---|---|---|
+| `success` | `completed` | The run finished. |
+| `error` | `failed` | It stopped on an error, a limit or a truncated answer; `termination_reason` says which. |
+| `awaiting_approval` | `awaiting_approval` | It waits for a person to decide (`resolve_approval`, then `resume`). |
+| `awaiting_budget` | `awaiting_budget` | It ran out of budget (`grant_budget` or `deny_budget`, then `resume`). |
+| `interrupted` | `interrupted` | Someone called `interrupt`; `resume` continues it. |
+| `blocked` | `blocked` | The guardrail refused the input. |
+| — | `running` | Still running, or its process died (see *Recovering a run after a crash*). |
+| — | `cancelled`, `timeout` | Ended from outside with `abandon_run` (a background run cancelled while it waited, or out of time). |
+
+To resume a run in **another process**, give that process the same memory
+store (the record) and the same workspace directory: the run's traces are kept
+under the workspace (`./workspace/telemetry/` unless configured), not in the
+memory store.
 
 A record belongs to one request. Requests in the same session keep separate
 records, and each run keeps its own working context (the history it started

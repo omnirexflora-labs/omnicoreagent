@@ -31,6 +31,44 @@ FILESYSTEM_ACTIONS = frozenset({"read", "write", "delete"})
 HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete", "head"})
 
 
+# Every capability the runtime asks the policy about, and what allowing it
+# lets the agent do. The policy reference (docs/reference/policy.mdx) is
+# generated from this; a test fails when code asks about one not listed.
+CAPABILITIES: dict[str, str] = {
+    "tool.local.call": "Call one of your Python tools (local_tools), or a sub-agent's delegate_<name> tool. Target: tool_name.",
+    "tool.mcp.call": "Call a tool on an MCP server. Target: mcp_server, tool_name.",
+    "mcp.server.start": "Start a stdio MCP server process. Decided when the agent connects, outside any run: an ask cannot pause there, so it fails the connection. Target: mcp_server.",
+    "mcp.server.connect": "Connect to a remote (SSE or streamable HTTP) MCP server. Decided when the agent connects, like mcp.server.start. Target: mcp_server.",
+    "workspace.files.read": "Read the workspace: ls, read_file, glob, grep. Target: path.",
+    "workspace.files.write": "Write in the workspace: write_file, edit_file, insert_file. Target: path.",
+    "workspace.files.delete": "Delete a workspace file (delete_file). Target: path.",
+    "workspace.files.move": "Move or rename a workspace file (move_file). Target: path.",
+    "workspace.files.clear": "Delete every file in the workspace (clear_files).",
+    "workspace.files.call": "Any other workspace file tool.",
+    "workspace.artifacts.read": "Read a saved tool result: read_artifact, tail_artifact, search_artifact, list_artifacts.",
+    "workspace.artifacts.call": "Any other artifact tool.",
+    "skill.files.read": "Read a skill's instructions and files.",
+    "skill.script.run": "Run a skill's script (run_skill_script): code runs.",
+    "code.run": "Run a program with run_code (code mode). Each tool it calls is decided on its own.",
+    "sandbox.execute": "Call the execute tool. Each command it runs is then decided as process.exec.",
+    "process.exec": "Run a command: in the sandbox (execution surface sandbox), or on the host with the local provider (surface host). Target: resource (the command's name).",
+    "sandbox.image.use": "Start the sandbox from an image named in the manifest. Target: resource (the image).",
+    "sandbox.filesystem.mount": "Mount a host directory into the sandbox. Target: path, resource (the source).",
+    "sandbox.filesystem.cwd": "Run a command in a working directory the manifest or call names. Target: path.",
+    "sandbox.filesystem.configure": "Give the sandbox read, write or deny path rules. Target: path.",
+    "sandbox.network.configure": "Turn the sandbox's network on, or allow or deny a host in it. Target: host.",
+    "sandbox.environment.set": "Set plain environment variables in the sandbox (their names are in the request, not the target).",
+    "sandbox.resources.set": "Set the sandbox's CPU, memory, disk or time limits.",
+    "secret.read": "Read a secret's value.",
+    "secret.use": "Use a secret without reading it: brokered into a command, never shown to the model.",
+    "package.install": "Install a package. Target: resource (the package), host (the index).",
+    "subagent.spawn": "Start a sub-agent: delegate_<name> to an agent in sub_agents, or spawn_subagents. Target: resource (the agent's name).",
+    **{f"network.http.{method}": f"Make an HTTP {method.upper()} request. Target: host." for method in sorted(HTTP_METHODS)},
+    **{f"filesystem.{action}": f"{action.capitalize()} a file on the host, outside the workspace. Target: path." for action in sorted(FILESYSTEM_ACTIONS)},
+    **{f"background.task.{action}": f"{action.capitalize()} a background task." for action in sorted(BACKGROUND_TASK_ACTIONS)},
+    **{f"background.run.{action}": f"{action.capitalize()} a background run." for action in sorted(BACKGROUND_RUN_ACTIONS)},
+}
+
 def tool_capability_descriptor(
     *,
     tool_name: str,

@@ -83,3 +83,21 @@ async def test_budgets_are_readable_over_http():
         entries = response.json()["budgets"]
         assert _by(entries, "application", "model_cost_usd")["spent"] == pytest.approx(CALL_COST)
         assert client.get("/runs/run_nope/budget").status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_grant_shows_in_what_the_run_has_left():
+    """A code runner granted a budget and read it back: `remaining 0.0`, no
+    sign of the grant, while enforcement counted it (stranger test)."""
+    budgets = {"application_id": "steward", "application": [{"meter": "model_cost_usd", "limit": 0.000001}]}
+    agent = await _agent(PricedModel(), budgets=budgets)
+    paused = await agent.run("go", session_id="bill-2")
+    assert paused["status"] == "awaiting_budget"
+
+    await agent.grant_budget(paused["run_id"], approver="alice", amount=1.0)
+    application = _by(await agent.budget_status(paused["run_id"]), "application", "model_cost_usd")
+
+    assert application["granted"] == pytest.approx(1.0)
+    assert application["remaining"] == pytest.approx(
+        0.000001 + 1.0 - application["spent"] - application["reserved"]
+    )

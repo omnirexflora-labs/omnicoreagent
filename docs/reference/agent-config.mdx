@@ -13,8 +13,8 @@ Everything `OmniCoreAgent(agent_config={...})` takes. Each description is the co
 | Setting | Type | Default | What it does |
 |---|---|---|---|
 | `agent_version` | `str \| None` | `None` | Recorded as the trace's agent_version; a content hash of the harness (prompt, tools, model, and settings) is used when it is not set. |
-| `request_limit` | `int` | `0` | Most model calls one run may make, and most tokens (in and out) it may use; over either, the run ends with termination_reason resource_limit. 0 is no limit. For limits in dollars, use governance budgets. |
-| `total_tokens_limit` | `int` | `0` | Most model calls one run may make, and most tokens (in and out) it may use; over either, the run ends with termination_reason resource_limit. 0 is no limit. For limits in dollars, use governance budgets. |
+| `request_limit` | `int` | `0` | Most model calls one run may make; over it, the run ends with termination_reason resource_limit. 0 is no limit. For limits in dollars, use governance budgets. |
+| `total_tokens_limit` | `int` | `0` | Most tokens (in and out) one run may use; over it, the run ends with termination_reason resource_limit. 0 is no limit. |
 | `max_steps` | `int` | `50` | Most model turns one run may take; then it ends with termination_reason max_steps. 1 to 1000. |
 | `tool_call_timeout` | `int` | `180` | Seconds one tool call may take before it fails with a timeout. 2 to 1000. |
 | `subagent_timeout` | `int \| None` | `None` | Seconds a delegation (spawn_subagents) may take. None: a worker is bounded by its own step cap and the run's deadline, not by the timeout for one tool call. |

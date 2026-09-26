@@ -19,9 +19,11 @@ Background execution is part of the core package:
 pip install omnicoreagent
 ```
 
-Redis and MongoDB task stores use optional backend drivers:
+The durable task stores use optional drivers; the SQL store needs SQLAlchemy,
+which the `postgres` extra installs, for SQLite as well:
 
 ```bash
+pip install "omnicoreagent[postgres]"   # task_store="sql": SQLite or PostgreSQL
 pip install "omnicoreagent[redis]"
 pip install "omnicoreagent[mongodb]"
 ```
@@ -35,6 +37,9 @@ process restarts.
 The task store is separate from agent memory. `MemoryRouter` stores
 conversation/session history. The task store stores operational background
 state and owns the atomic claim, lease, retry, and schedule-cursor guarantees.
+
+Every method, run status and overlap policy is in the
+[BackgroundAgentManager reference](/docs/reference/background).
 
 ## Quick Start
 

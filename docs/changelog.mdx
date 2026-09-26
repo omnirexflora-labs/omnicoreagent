@@ -89,6 +89,21 @@ defaults that changed.
 
 ### Fixed
 
+Found by four agents that built applications from these docs alone, before
+the release:
+
+- A resumed run's evidence is whole: the call a person approved appears in
+  its own step, as approved by them; the run's totals and its training
+  record include every segment; `get_run()` shows what each approval is for.
+- An ask on delegation (`delegate_<name>`) pauses the lead, as documented; it
+  was a tool error.
+- Full capture keeps governed tool arguments, and the calls a `run_code`
+  program makes have theirs.
+- `budget_status` counts a person's grant, as enforcement does.
+- A run's deadline holds when the work does not stop when told.
+- A host allowlist a sandbox provider cannot enforce is refused when the
+  agent is built.
+
 - 0.3.9 was published without `omnicoreagent.core.workspace`, so
   `OmniCoreAgent(...)` failed on import. A test now fails if any source file
   of the package is left out of the wheel.

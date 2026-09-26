@@ -54,7 +54,7 @@ result = await agent.run("What's my name?", session_id="user_42")
 ### Retrieving History
 
 ```python
-history = await agent.get_history(session_id="user_42")
+history = await agent.get_session_history(session_id="user_42")
 for message in history:
     print(f"{message['role']}: {message['content'][:80]}")
 ```

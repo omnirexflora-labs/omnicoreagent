@@ -24,12 +24,14 @@ agent_config = {
 | `modal` | `omnicoreagent[modal]` | Modal | Off, on, or a host allowlist |
 | `e2b` | `omnicoreagent[e2b]` | E2B | Off or on; a host allowlist is refused |
 | `daytona` | `omnicoreagent[daytona]` | Daytona | Off, on, or a host allow list |
-| `vercel` | `omnicoreagent[vercel]` | Vercel Sandbox | Off or on |
+| `vercel` | `omnicoreagent[vercel]` | Vercel Sandbox | Off or on; a host allowlist is refused |
 | `http` | built in | A service you run | Whatever your service enforces |
 | `local` | built in | **This machine, not isolated** | Always on; asking for less is refused |
 
 Each hosted provider needs its own credentials in the environment (for
 example `modal token new`, `E2B_API_KEY`, `DAYTONA_API_KEY`, `VERCEL_TOKEN`).
+The first `docker` run pulls its image, which can take a few minutes; later
+runs start in seconds.
 Those credentials stay in your process: they are never put inside a sandbox.
 
 ## A sandbox that dies is reported, not retried blindly
@@ -97,7 +99,27 @@ person before the network goes on (the run pauses on that approval like any
 other, see [Durable Runs](/docs/core-concepts/durable-runs)), and
 `strict-production` allows none of them without a rule. A manifest that
 cannot be read — an unknown field, a provider or session of its own — is
-refused when the agent is built.
+refused when the agent is built, and so is a host allowlist on a provider that
+cannot enforce one (docker, e2b, vercel, local).
+
+`network_policy` takes `default` (`"deny"`, the default, or `"allow"`),
+`allowed_hosts` and `denied_hosts`. To let a sandbox reach only named hosts,
+on a provider that enforces it (modal, daytona, or your `http` service):
+
+```python
+agent_config = {
+    "governance_config": {
+        "enabled": True,
+        "sandbox_config": {"provider": "modal"},
+        "sandbox_manifest": {
+            "network_policy": {"default": "deny", "allowed_hosts": ["pypi.org", "*.github.com"]},
+        },
+    },
+}
+```
+
+Each allowed host is asked about as `sandbox.network.configure` with that host
+as its target, so a policy can allow some hosts and ask about the rest.
 
 ## Your own sandbox service (`http`)
 

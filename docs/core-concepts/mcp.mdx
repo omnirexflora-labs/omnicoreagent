@@ -163,7 +163,8 @@ server an explicit name is clearer.
 OmniServe does this during startup. A server that fails to connect, or does not
 finish within `connect_timeout`, does not stop the others; its reason is
 recorded and reported (see Readiness and Telemetry below).
-A governance denial is raised.
+A governance denial is raised, and so is an ask (`ApprovalRequiredError`):
+connecting happens outside any run, so there is nothing to pause.
 
 Each connection is opened and closed by its own task, and
 `await agent.cleanup_mcp_servers()` (or `agent.cleanup()`) closes every
@@ -229,6 +230,64 @@ name before any process starts or network connection opens
 call is authorized as `tool.mcp.call` with the configured `mcp_server` and
 `tool_name`. Governance is enabled with `governance_config` (see
 [Agent Configuration](/docs/how-to-guides/configuration#2-agent-configuration)).
+
+The development profiles *ask* before starting a server and before each MCP
+tool call, and an ask outranks an allow rule you add. For a server you trust,
+remove those asks and allow it by name:
+
+```python
+from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy
+
+policy = build_default_policy("interactive-dev")
+policy.rules.ask = [
+    rule for rule in policy.rules.ask
+    if rule.rule_id not in {"ask_mcp_server_start", "ask_mcp_tool_call"}
+]
+policy.rules.allow += [
+    PolicyRule(rule_id="start_notes", effect=PolicyEffect.ALLOW,
+               capability="mcp.server.*", target={"mcp_server": "notes"}),
+    PolicyRule(rule_id="call_notes", effect=PolicyEffect.ALLOW,
+               capability="tool.mcp.call", target={"mcp_server": "notes"}),
+]
+```
+
+Every capability and each profile's rules are in the
+[policy reference](/docs/reference/policy).
+
+---
+
+## Your own MCP server, in Python
+
+The `mcp` package (2.x) comes with OmniCoreAgent. A stdio server is one file:
+
+```python
+# notes_server.py
+from mcp.server.mcpserver import MCPServer
+
+server = MCPServer("notes")
+
+NOTES = {"wind": "Offshore wind capacity grew 20% in 2025."}
+
+
+@server.tool()
+def search_notes(query: str) -> str:
+    """Return the notes whose topic appears in the query."""
+    return "\n".join(text for topic, text in NOTES.items() if topic in query.lower()) or "No notes."
+
+
+if __name__ == "__main__":
+    server.run()
+```
+
+```python
+import sys
+
+mcp_tools = [
+    {"name": "notes", "transport_type": "stdio", "command": sys.executable, "args": ["notes_server.py"]}
+]
+```
+
+In `mcp` 2.x the server class is `MCPServer`; 1.x called it `FastMCP`.
 
 ---
 

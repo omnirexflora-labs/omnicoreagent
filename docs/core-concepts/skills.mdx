@@ -98,7 +98,39 @@ the `host` (or `sandbox`) surface, so a policy can allow, ask for, or deny it.
 
 ## Creating Your Own Skills
 
-To learn how to create your own agent skills and follow the official specification, visit [agentskills.io](https://agentskills.io/).
+A skill is a folder under the skills directory (`.agents/skills/` in the
+working directory, or `agent_config["skills_dir"]`), named after the skill:
+
+```text
+.agents/skills/citation-formatter/
+├── SKILL.md
+└── scripts/
+    └── format_sources.py
+```
+
+`SKILL.md` starts with YAML frontmatter. `name` and `description` are
+required, and `name` must equal the folder's name, or the skill is skipped
+with a warning. The rest of the file is the instructions the agent reads.
+
+```markdown
+---
+name: citation-formatter
+description: Formats a list of sources as numbered citations.
+---
+
+# Citation formatter
+
+Run `format_sources.py` with one argument per source, then paste its output
+under a "Sources" heading.
+```
+
+The agent reads a skill's files with `read_skill_file` and runs a script
+with `run_skill_script(skill_name, script_name, args=[...], timeout=30)`:
+`script_name` is relative to the skill's `scripts/` folder
+(`"format_sources.py"`), and `args` is a list of strings. Optional
+frontmatter fields: `license`, `compatibility`, `metadata`, and
+`allowed-tools` (space-separated). The format follows
+[agentskills.io](https://agentskills.io/).
 
 ### Tips for Skill Authors
 
