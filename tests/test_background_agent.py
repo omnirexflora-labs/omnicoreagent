@@ -443,7 +443,14 @@ class CancelOnStartedManager(BackgroundAgentManager):
             await self.cancel_run(run.run_id)
 
 
-async def wait_for(predicate, timeout=1.0):
+async def wait_for(predicate, timeout=10.0):
+    """Wait until predicate() is truthy, and return it.
+
+    It returns as soon as the condition holds, so a long timeout costs a
+    passing test nothing. It was 0.5 s in places: on a loaded machine the
+    scheduler's first dispatch took longer, and the test failed six times in
+    eight while the scheduler was right (2026-09-27).
+    """
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
         result = predicate()
@@ -1417,7 +1424,7 @@ async def test_terminal_background_event_waits_for_pending_event_write():
     }
     await event_log.emit("background_run_queued", **payload)
     await event_log.emit("background_run_started", **payload)
-    await asyncio.wait_for(pending_started.wait(), timeout=1)
+    await asyncio.wait_for(pending_started.wait(), timeout=10)
 
     terminal_task = asyncio.create_task(
         event_log.emit(
@@ -1429,7 +1436,7 @@ async def test_terminal_background_event_waits_for_pending_event_write():
     assert not terminal_task.done()
 
     release_started.set()
-    await asyncio.wait_for(terminal_task, timeout=1)
+    await asyncio.wait_for(terminal_task, timeout=10)
 
     assert workspace_io.written_events == [
         "background_run_queued",
@@ -1479,7 +1486,7 @@ async def test_terminal_background_event_does_not_write_gap_after_drain_timeout(
     }
     await event_log.emit("background_run_queued", **payload)
     await event_log.emit("background_run_started", **payload)
-    await asyncio.wait_for(pending_started.wait(), timeout=1)
+    await asyncio.wait_for(pending_started.wait(), timeout=10)
 
     await event_log.emit(
         "background_run_completed",
@@ -1688,7 +1695,6 @@ async def test_manager_run_now_wait_timeout_does_not_block_on_running_agent():
     release_agent.set()
     completed = await wait_for(
         lambda: manager.list_runs(status=RunStatus.COMPLETED),
-        timeout=1.5,
     )
     assert completed[0].run_id == run.run_id
 
@@ -1707,7 +1713,7 @@ async def test_inline_timeout_shutdown_honors_retry_policy():
     )
 
     run = await manager.run_now("task", wait=True, timeout_seconds=0.01)
-    await wait_for(lambda: manager.list_attempts(run.run_id), timeout=0.5)
+    await wait_for(lambda: manager.list_attempts(run.run_id))
     await manager.shutdown()
 
     latest = await store.get_run(run.run_id)
@@ -1732,7 +1738,7 @@ async def test_inline_timeout_shutdown_requeues_retryable_run():
     )
 
     run = await manager.run_now("task", wait=True, timeout_seconds=0.01)
-    await wait_for(lambda: manager.list_attempts(run.run_id), timeout=0.5)
+    await wait_for(lambda: manager.list_attempts(run.run_id))
     await manager.shutdown()
 
     latest = await store.get_run(run.run_id)
@@ -1768,7 +1774,7 @@ async def test_shutdown_during_attempt_start_records_the_interrupted_run():
     )
 
     run = await manager.run_now("task", wait=True, timeout_seconds=0.01)
-    await wait_for(lambda: manager.list_attempts(run.run_id), timeout=0.5)
+    await wait_for(lambda: manager.list_attempts(run.run_id))
     await manager.shutdown()
 
     latest = await store.get_run(run.run_id)
@@ -1875,7 +1881,6 @@ async def test_manager_dispatches_due_schedule_from_worker_loop():
     await manager.start()
     completed = await wait_for(
         lambda: manager.list_runs(status=RunStatus.COMPLETED),
-        timeout=0.5,
     )
     await manager.shutdown()
 
@@ -1988,7 +1993,6 @@ async def test_cancel_running_same_worker_stops_active_agent_task():
         queued = await manager.run_now("task")
         running = await wait_for(
             lambda: manager.get_run(queued.run_id),
-            timeout=1.0,
         )
         while running.status != RunStatus.RUNNING:
             await asyncio.sleep(0.01)
@@ -2452,7 +2456,7 @@ async def test_running_cancel_finishes_cancelled_not_completed():
 
     await manager.start()
     run = await manager.run_now("task")
-    await wait_for(lambda: agent.calls, timeout=0.5)
+    await wait_for(lambda: agent.calls)
     await manager.cancel_run(run.run_id)
 
     async def terminal_run():
@@ -2466,7 +2470,7 @@ async def test_running_cancel_finishes_cancelled_not_completed():
             return latest
         return None
 
-    terminal = await wait_for(terminal_run, timeout=1.0)
+    terminal = await wait_for(terminal_run)
     await manager.shutdown()
 
     assert terminal.status == RunStatus.CANCELLED

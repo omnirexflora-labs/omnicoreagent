@@ -31,6 +31,10 @@ Every release, with its notes, is also on
   allowlist on Daytona.
 - The prompt-injection guardrail logs to the `omnicoreagent.guardrails`
   logger instead of printing to stdout.
+- The MongoDB memory store closes its connections: `await store.close()`
+  and `await memory_router.close()`, and a failed connection attempt closes
+  what it opened. A store built per request leaked a connection pool each
+  time.
 - Clearer messages: a strict-policy denial says no rule matched the request;
   a YAML policy says YAML is not supported.
 

@@ -109,6 +109,19 @@ The second process had never seen the first message: it read it from
 the PostgreSQL driver; another database SQLAlchemy supports needs its own
 driver installed.
 
+A router you create keeps its connections open until you close it. Build one
+per process and share it across agents; if you build one per request, close it
+when the request is done:
+
+```python
+router = MemoryRouter("mongodb")
+try:
+    agent = OmniCoreAgent(..., memory_router=router)
+    result = await agent.run("hello")
+finally:
+    await router.close()
+```
+
 <Note>
 **The memory store also holds your runs.** A run that pauses for an approval or
 a budget is saved in the memory store, and resumed from it. To pause in one
