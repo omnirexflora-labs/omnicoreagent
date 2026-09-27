@@ -55,3 +55,30 @@ def _isolated_default_workspace(monkeypatch, tmp_path_factory):
     monkeypatch.setenv(
         "OMNICOREAGENT_WORKSPACE_DIR", str(tmp_path_factory.mktemp("workspace"))
     )
+
+
+@pytest.fixture(autouse=True)
+def _close_mongodb_stores(monkeypatch):
+    """Close every MongoDB memory store a test opened.
+
+    Tests build stores freely; each open client keeps a connection pool and
+    monitors until the process exits, and a full run exhausted the test
+    server's MongoDB ("Too many open files", 2026-09-26).
+    """
+    try:
+        from omnicoreagent.core.memory_store.mongodb import MongoDb
+    except ImportError:  # the mongodb extra is not installed
+        yield
+        return
+    opened: list = []
+    original = MongoDb.__init__
+
+    def recording_init(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        opened.append(self)
+
+    monkeypatch.setattr(MongoDb, "__init__", recording_init)
+    yield
+    for store in opened:
+        if store.client is not None:
+            store.client.close()

@@ -1,3 +1,4 @@
+import inspect
 from typing import Any, Optional, Callable
 import os
 
@@ -92,6 +93,17 @@ class MemoryRouter:
                 "Invalid memory store type: "
                 f"{self.memory_store_type}. Use one of: in_memory, sql, redis, mongodb"
             )
+
+    async def close(self) -> None:
+        """Close the store's connections (MongoDB, Redis, SQL). Call it when
+        the router is no longer needed; whoever created it owns it."""
+        store = self.memory_store
+        close = getattr(store, "close", None) or getattr(store, "close_all", None)
+        if close is None:
+            return
+        result = close()
+        if inspect.isawaitable(result):
+            await result
 
     def switch_memory_store(self, memory_store_type: str):
         if memory_store_type != self.memory_store_type:

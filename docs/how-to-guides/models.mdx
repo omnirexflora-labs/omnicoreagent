@@ -233,6 +233,12 @@ Other keys are accepted and ignored. See also the
 ## When things go wrong
 
 <AccordionGroup>
+  <Accordion title="The first run in a process is slower than the rest">
+    The first model call loads the model client (LiteLLM), about 2 seconds on
+    a typical server and longer on a slow machine or a cold start. Later calls
+    in the same process do not pay it. OmniServe and the background manager
+    load it while they start, so no request pays it there.
+  </Accordion>
   <Accordion title="ValueError: LLM_API_KEY not found in environment variables">
     Raised by the first `run()` when the key is not set in the shell that runs
     the script: `export LLM_API_KEY=...`. The runtime does not read `.env`

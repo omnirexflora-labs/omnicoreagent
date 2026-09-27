@@ -61,9 +61,23 @@ class MongoDb(AbstractMemoryStore):
             self._initialized = True
             logger.debug("Connected to MongoDB")
 
-        except errors.ConnectionFailure as e:
-            logger.error(f"Failed to connect to MongoDB: {e}")
-            raise RuntimeError(f"Could not connect to MongoDB at {self.uri}.")
+        except BaseException as e:
+            # Close what this attempt opened: a client left open keeps its
+            # pool and monitors, and the next attempt opens another.
+            await self.close()
+            if isinstance(e, errors.ConnectionFailure):
+                logger.error(f"Failed to connect to MongoDB: {e}")
+                raise RuntimeError(f"Could not connect to MongoDB at {self.uri}.") from e
+            raise
+
+    async def close(self) -> None:
+        """Close the client and its connections. Used again, the store
+        connects anew."""
+        client, self.client = self.client, None
+        self._initialized = False
+        self.db = self.collection = None
+        if client is not None:
+            client.close()
 
     def set_memory_config(
         self,
