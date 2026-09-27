@@ -2,9 +2,10 @@
 
 Found writing the Approvals page (D6):
 - An approval past its expiry could neither be decided ("expired at ...")
-  nor let the run resume ("still waiting for approval"): the expiry was
-  only recorded during a resume, which it blocked. Deciding it now records
-  it as expired, and a resume asks again with a fresh approval.
+  nor let the run resume ("still waiting for approval"). An expired
+  approval now ends that request: the call is refused as expired, the model
+  is told, and the run finishes. A decision made in time still stands when
+  the resume comes after the expiry.
 - With approval_mode="fail", a call that needed a person was refused, but
   the model was told it was "waiting for a person's approval" and the
   trajectory said awaiting_approval, though nobody would ever be asked.
@@ -29,9 +30,16 @@ async def _expire(agent, run_id):
     await agent.memory_router.save_run_state(record, expected_version=version)
 
 
+def _refusal_for(model, call_id):
+    """What the model was told about one call, on its last turn."""
+    return json.dumps(
+        next(m for m in _tool_messages(model.calls[-1]) if m["tool_call_id"] == call_id)
+    ).lower()
+
+
 @pytest.mark.asyncio
-async def test_an_expired_approval_is_recorded_and_the_run_asks_again(tmp_path):
-    model = RecordingModel(WRITE_AND_DELETE, DELETE, "cleaned up")
+async def test_an_expired_approval_ends_the_request_and_the_run_finishes(tmp_path):
+    model = RecordingModel(WRITE_AND_DELETE, DELETE, "could not delete it")
     agent = await _agent(tmp_path, model)
     paused = await agent.run("tidy up", session_id="exp-1")
     (approval,) = paused["approvals"]
@@ -44,12 +52,16 @@ async def test_an_expired_approval_is_recorded_and_the_run_asks_again(tmp_path):
     record = await agent.get_run(paused["run_id"])
     assert [a["status"] for a in record["approvals"]] == ["expired"]
 
-    again = await agent.resume(paused["run_id"])
+    finished = await agent.resume(paused["run_id"])
 
-    assert again["status"] == "awaiting_approval"
-    (fresh,) = again["approvals"]
-    assert fresh["approval_id"] != approval["approval_id"]
+    assert finished["status"] == "success"
+    assert finished["response"] == "could not delete it"
     assert _file(tmp_path, "old.txt").exists(), "nothing ran on an expired approval"
+    told = _refusal_for(model, "d1")
+    assert "expired" in told
+    assert "waiting for a person" not in told
+    record = await agent.get_run(paused["run_id"])
+    assert [a["status"] for a in record["approvals"]] == ["expired"], "no new ask"
 
 
 @pytest.mark.asyncio
@@ -68,14 +80,62 @@ async def test_fail_mode_tells_the_model_the_call_was_refused(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_run_can_resume_past_an_approval_nobody_decided_in_time(tmp_path):
-    model = RecordingModel(WRITE_AND_DELETE, DELETE, "cleaned up")
+async def test_a_run_resumes_past_an_approval_nobody_decided_in_time(tmp_path):
+    model = RecordingModel(WRITE_AND_DELETE, DELETE, "could not delete it")
     agent = await _agent(tmp_path, model)
     paused = await agent.run("tidy up", session_id="exp-2")
     await _expire(agent, paused["run_id"])
 
-    again = await agent.resume(paused["run_id"])
+    finished = await agent.resume(paused["run_id"])
 
-    assert again["status"] == "awaiting_approval"
+    assert finished["status"] == "success"
+    assert _file(tmp_path, "old.txt").exists()
+    assert "expired" in _refusal_for(model, "d1")
     record = await agent.get_run(paused["run_id"])
-    assert [a["status"] for a in record["approvals"]][0] == "expired"
+    assert [a["status"] for a in record["approvals"]] == ["expired"]
+    # The trajectory's last word on the call: refused, not an error.
+    story = await agent.get_run_trajectory(paused["run_id"])
+    outcomes = [
+        call["outcome"]
+        for segment in story["segments"]
+        for step in (segment["trajectory"] or {}).get("steps", [])
+        for call in step["tool_calls"]
+        if call["tool_call_id"] == "d1"
+    ]
+    assert outcomes[-1] == "denied"
+
+
+@pytest.mark.asyncio
+async def test_a_decision_made_in_time_stands_after_the_expiry(tmp_path):
+    model = RecordingModel(WRITE_AND_DELETE, DELETE, "deleted")
+    agent = await _agent(tmp_path, model)
+    paused = await agent.run("tidy up", session_id="exp-3")
+    (approval,) = paused["approvals"]
+    await agent.resolve_approval(
+        paused["run_id"], approval["approval_id"], decision="approve", approver="alice"
+    )
+    await _expire(agent, paused["run_id"])  # the resume comes late
+
+    finished = await agent.resume(paused["run_id"])
+
+    assert finished["status"] == "success"
+    assert not _file(tmp_path, "old.txt").exists(), "the approved delete ran"
+
+
+@pytest.mark.asyncio
+async def test_a_person_s_denial_reaches_the_model_as_theirs(tmp_path):
+    model = RecordingModel(WRITE_AND_DELETE, DELETE, "archived instead")
+    agent = await _agent(tmp_path, model)
+    paused = await agent.run("tidy up", session_id="deny-1")
+    (approval,) = paused["approvals"]
+    await agent.resolve_approval(
+        paused["run_id"], approval["approval_id"], decision="deny",
+        approver="bob", note="archive it instead",
+    )
+
+    await agent.resume(paused["run_id"])
+
+    told = _refusal_for(model, "d1")
+    assert "archive it instead" in told and "bob" in told
+    assert "none can be asked" not in told
+    assert "waiting for a person" not in told

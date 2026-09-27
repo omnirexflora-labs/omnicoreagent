@@ -365,10 +365,11 @@ PolicyRule(rule_id="ask_before_refunds", effect=PolicyEffect.ASK,
            constraints={"approval_expires_seconds": 900})  # 15 minutes
 ```
 
-After `expires_at` the approval can no longer be decided: nothing runs on
-it. `resume(run_id)` then asks again, with a new approval for a person to
-decide, or end the run with `abandon_run`. (In 0.4.1 an expired approval
-left its run unable to resume; `abandon_run` is the way out there.)
+The window is how long a person has to decide. A decision made in time
+stands, however late the run resumes. An approval nobody decides in time is a
+no: `resume(run_id)` refuses the call, tells the model the approval expired,
+and the run goes on to finish. (In 0.4.1 an expired approval left its run
+unable to resume; `abandon_run` is the way out there.)
 
 ## Over HTTP, with OmniServe
 
@@ -484,12 +485,12 @@ run the same way; a worker's ask shows on its lead's run with
     The approval waited longer than its window:
 
     ```text
-    ValueError: Approval approval_b8f052bbfd504443a74345e7d3026860 expired at 2026-09-26T16:30:33.295381+00:00; resume the run to ask again
+    ValueError: Approval approval_b8f052bbfd504443a74345e7d3026860 expired at 2026-09-26T16:30:33.295381+00:00; resuming the run refuses the call
     ```
 
-    It is recorded as `expired` and nothing runs on it. `resume(run_id)` asks
-    again (the run returns `awaiting_approval` with a new approval), or end
-    the run:
+    It is recorded as `expired` and nothing runs on it. `resume(run_id)`
+    refuses the call (the model is told the approval expired) and the run
+    finishes, or end the run instead:
 
     ```python
     ended = await agent.abandon_run(run_id, status="cancelled", reason="approval expired")

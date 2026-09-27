@@ -9,7 +9,7 @@ expires.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -150,21 +150,42 @@ async def test_a_denial_carries_the_approvers_note():
 
 
 @pytest.mark.asyncio
-async def test_an_expired_approval_is_not_honoured(monkeypatch):
+async def test_a_decision_made_in_time_is_honoured_after_the_window():
+    """The expiry limits how long a person has to decide, not how long a
+    decision lasts (the maintainer's decision, 2026-09-26)."""
     agent, tracker, engine = await _setup(expires_seconds=60)
     with pytest.raises(ApprovalRequiredError):
         await _ask(engine, tracker, _delete("a.txt"))
     (pending,) = (await agent.get_run("run_approve"))["approvals"]
     await agent.resolve_approval("run_approve", pending["approval_id"], decision="approve", approver="alice")
+    await _past_the_window(agent)
     await tracker.reload()
 
-    import omnicoreagent.core.run_approvals as module
+    decision = await _ask(engine, tracker, _delete("a.txt"))
 
-    later = module.utc_now() + timedelta(minutes=5)
-    monkeypatch.setattr(module, "utc_now", lambda: later)
+    assert decision.effect.value == "allow"
 
+
+@pytest.mark.asyncio
+async def test_an_approval_nobody_decided_in_time_is_a_refusal():
+    agent, tracker, engine = await _setup(expires_seconds=60)
     with pytest.raises(ApprovalRequiredError):
         await _ask(engine, tracker, _delete("a.txt"))
+    await _past_the_window(agent)
+    await tracker.reload()
+
+    with pytest.raises(ApprovalRequiredError, match="expired"):
+        await _ask(engine, tracker, _delete("a.txt"))
+    (approval,) = (await agent.get_run("run_approve"))["approvals"]
+    assert approval["status"] == "expired" and approval["decision"] == "deny"
+
+
+async def _past_the_window(agent):
+    record = await agent.memory_router.get_run_state("run_approve")
+    for approval in record["approvals"]:
+        approval["expires_at"] = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    version = record.pop("version")
+    await agent.memory_router.save_run_state(record, expected_version=version)
 
 
 @pytest.mark.asyncio

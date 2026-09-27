@@ -73,15 +73,9 @@ class RunApprovalResolver:
         for recorded in run.record.get("approvals", []):
             if recorded["request_digest"] != digest:
                 continue
-            expires_at = _parse(recorded.get("expires_at"))
-            if expires_at is not None and now > expires_at and recorded["status"] in {
-                "pending",
-                "approved",
-                "denied",
-            }:
-                await run.update_approval(recorded["approval_id"], status="expired")
-                continue
             if recorded["status"] in {"approved", "denied"}:
+                # A decision made in time stands, however late the resume:
+                # the expiry limits how long a person has to decide.
                 # Read the decision before marking it used (same dict).
                 approved = recorded["status"] == "approved"
                 reason = _decision_reason(recorded)
@@ -97,6 +91,30 @@ class RunApprovalResolver:
                     approval_id=approval.approval_id,
                     resolved_by=recorded["approver"],
                     reason=reason,
+                    resolved_at=now,
+                    metadata={"recorded_approval_id": recorded["approval_id"]},
+                )
+            expires_at = _parse(recorded.get("expires_at"))
+            undecided_too_long = recorded["status"] == "pending" and (
+                expires_at is not None and now > expires_at
+            )
+            if undecided_too_long or (
+                recorded["status"] == "expired" and not recorded.get("used_at")
+            ):
+                # Nobody decided in time: that is a no. The call is refused,
+                # the model is told why, and the run goes on to finish.
+                await run.update_approval(
+                    recorded["approval_id"],
+                    status="expired",
+                    decision="deny",
+                    used_at=now.isoformat(),
+                    used_for_approval_id=approval.approval_id,
+                )
+                return ApprovalResult(
+                    approved=False,
+                    approval_id=approval.approval_id,
+                    resolved_by="system",
+                    reason=f"Approval expired at {recorded.get('expires_at')} without a decision",
                     resolved_at=now,
                     metadata={"recorded_approval_id": recorded["approval_id"]},
                 )
@@ -165,13 +183,14 @@ async def decide(
         raise ValueError(f"Approval {approval_id} is already {approval['status']}")
     expires_at = _parse(approval.get("expires_at"))
     if expires_at is not None and utc_now() > expires_at:
-        # Recorded, so the run is no longer held by it: a resume asks again.
+        # Recorded, so the run is no longer held by it: a resume refuses
+        # the call as expired and the run finishes.
         approval.update(status="expired", decided_at=utc_now().isoformat())
         version = record.pop("version")
         await store.save_run_state(record, expected_version=version)
         raise ValueError(
             f"Approval {approval_id} expired at {approval['expires_at']}; "
-            f"resume the run to ask again"
+            f"resuming the run refuses the call"
         )
     now = utc_now().isoformat()
     approval.update(
