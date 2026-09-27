@@ -62,6 +62,9 @@ on a server, and onto a benchmark.
     ```bash
     pip install omnicoreagent
     ```
+
+    Requires **Python 3.12–3.14**; check with `python --version`. On 3.10 or
+    3.11, pip quietly installs an old release instead.
   </Step>
   <Step title="Set your model key">
     ```bash
@@ -121,6 +124,13 @@ Order 1042 has shipped via DHL.
 
 The second line is the run's **trajectory**: the step, the tool the model
 chose, its arguments, and exactly what the model received back.
+
+<Note>
+This agent runs with **governance off**, the default: no policy, approvals,
+budgets or sandbox, so every tool it has may be called. The guardrail, privacy
+redaction and the trace are on already. Turning governance on is one setting;
+see [the defaults](/docs/core-concepts/security-model#the-defaults).
+</Note>
 
 ## Find your way
 

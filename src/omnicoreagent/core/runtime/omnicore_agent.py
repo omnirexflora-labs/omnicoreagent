@@ -2084,6 +2084,15 @@ class OmniCoreAgent:
         *,
         normalize: bool = False,
     ) -> Dict[str, Any] | None:
+        """The raw trace of one trace segment, as a dict: its spans and
+        events as recorded, or ``None`` if it is not stored (never recorded,
+        or pruned after ``telemetry_config["retention_days"]``).
+
+        ``normalize=True`` sorts spans by start and events by sequence, and
+        marks capture gaps and missing references. For a readable story use
+        ``get_trajectory`` (one segment) or ``get_run_trajectory`` (a whole
+        run, across pauses and resumes).
+        """
         self._ensure_telemetry()
         trace = await self.telemetry_store.get_trace(trace_id)
         if trace and normalize:
@@ -2207,6 +2216,13 @@ class OmniCoreAgent:
         status: TraceStatus | str | None = None,
         normalize: bool = False,
     ) -> list[Dict[str, Any]]:
+        """Stored traces matching every filter given, oldest first (by start
+        time, then trace ID), as dicts.
+
+        Filter with keywords or one ``TraceFilter``, not both. A run that
+        paused and resumed has one trace per segment; ``run_id=`` lists them
+        all. ``normalize`` is as in ``get_telemetry_trace``.
+        """
         self._ensure_telemetry()
         if trace_filter is not None and any(
             value is not None
@@ -2310,11 +2326,13 @@ class OmniCoreAgent:
         include_children: bool = True,
         max_depth: int = 5,
     ) -> Dict[str, Any] | None:
-        """Return one run as an ordered trajectory, from request to final answer.
+        """One trace segment as an ordered trajectory: steps, model calls, tool
+        calls and their observations, from request to answer or pause.
 
-        Look up by ``trace_id`` (exact) or ``run_id`` (the latest agent run with
-        that ID; other traces for the run are listed in
-        ``other_trace_ids_for_run``). Delegated child runs are nested under the
+        A run that paused and resumed has one segment per stretch of work;
+        ``get_run_trajectory(run_id)`` gives the whole run. Look up by
+        ``trace_id`` (exact) or ``run_id`` (the latest segment of that run;
+        the others are listed in ``other_trace_ids_for_run``). Delegated child runs are nested under the
         tool call that started them. See ``build_trajectory`` for the shape.
         """
         if identifier is not None and (trace_id is not None or run_id is not None):
@@ -2455,6 +2473,13 @@ class OmniCoreAgent:
         task_id: str | None = None,
         event_types: tuple[str, ...] | None = None,
     ) -> str | None:
+        """The store's position now: a cursor to pass to
+        ``stream_telemetry_after`` or ``get_telemetry_events_after`` to get
+        only events recorded from here on.
+
+        Take it before starting a run to follow that run from its first
+        event. Cursors are opaque strings that increase with every event.
+        """
         self._ensure_telemetry()
         return await self.telemetry_stream.get_stream_cursor(
             self._telemetry_scope(
@@ -2476,6 +2501,16 @@ class OmniCoreAgent:
         task_id: str | None = None,
         event_types: tuple[str, ...] | None = None,
     ):
+        """Yield telemetry events after ``cursor``, then keep yielding new
+        ones as they are recorded; it does not end on its own.
+
+        Events come in the order they were recorded, each once, filtered to
+        the trace, run, session or task and the ``event_types`` given.
+        ``cursor=None`` starts from the first stored event. Each event
+        carries its ``stream_cursor``: keep the last one to resume after a
+        disconnect. A reader that falls 1,000 events behind is stopped with
+        an error rather than silently skipping events.
+        """
         self._ensure_telemetry()
         scope = self._telemetry_scope(
             trace_id=trace_id,
@@ -2497,6 +2532,13 @@ class OmniCoreAgent:
         task_id: str | None = None,
         event_types: tuple[str, ...] | None = None,
     ):
+        """The telemetry events stored after ``cursor``, as a list, in the
+        order they were recorded, filtered like ``stream_telemetry_after``;
+        it returns at once instead of waiting for more.
+
+        ``cursor=None`` returns every stored event in scope. Poll with the
+        last event's ``stream_cursor`` to get only what is new.
+        """
         self._ensure_telemetry()
         return await self.telemetry_stream.get_events_after(
             self._telemetry_scope(

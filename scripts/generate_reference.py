@@ -52,6 +52,28 @@ def first_paragraph(doc: str | None) -> str:
     return " ".join(doc.split("\n\n")[0].split()) if doc else ""
 
 
+_SECTION = re.compile(r"^(Args|Arguments|Returns|Raises|Yields|Example|Examples):")
+
+
+def description(doc: str | None) -> str:
+    """A docstring's prose, every paragraph, up to its Args/Returns/Raises
+    sections: the first paragraph alone left out what a method returns for a
+    resumed run and how its cursor works (a review of the reference,
+    2026-09-27). A paragraph of bullets keeps its lines."""
+    paragraphs = []
+    for paragraph in inspect.cleandoc(doc or "").split("\n\n"):
+        lines = [line.strip() for line in paragraph.splitlines() if line.strip()]
+        if not lines:
+            continue
+        if _SECTION.match(lines[0]):
+            break
+        if any(line.startswith(("- ", "* ")) for line in lines):
+            paragraphs.append("\n".join(lines))
+        else:
+            paragraphs.append(" ".join(lines))
+    return "\n\n".join(paragraphs)
+
+
 # --- settings -----------------------------------------------------------------
 
 
@@ -165,7 +187,7 @@ def _args_section(doc: str) -> dict[str, str]:
 
 
 def _methods(cls: Any) -> list[str]:
-    """Every public method: its signature as Python, and its docstring's first paragraph."""
+    """Every public method: its signature as Python, and its docstring's prose."""
     lines: list[str] = []
     for name, function in sorted(inspect.getmembers(cls, predicate=inspect.isfunction)):
         if name.startswith("_"):
@@ -181,7 +203,7 @@ def _methods(cls: Any) -> list[str]:
             f"{kind}def {name}{signature}: ...",
             "```",
             "",
-            md(first_paragraph(function.__doc__)) or "_No description in the code yet._",
+            md(description(function.__doc__)) or "_No description in the code yet._",
             "",
         ]
     return lines
