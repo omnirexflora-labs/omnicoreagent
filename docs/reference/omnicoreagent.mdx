@@ -46,6 +46,8 @@ async def abandon_run(run_id: str, *, status: str, reason: str) -> Dict[str, Any
 
 Close a run this agent did not finish itself.
 
+For whoever ended it from outside: a background run cancelled while it waited, or failed because its worker died. The record says `status` (`cancelled`, `failed` or `timeout`) and why, and the request's own budget counters are released, keeping what it spent on the record. A run that already ended is left as it is. Found on the steward's server: such runs stayed "running" or "awaiting_budget" for good, each with its counter still in the ledger.
+
 ### `budget_status`
 
 ```python
@@ -53,6 +55,8 @@ async def budget_status(run_id: str) -> List[Dict[str, Any]]: ...
 ```
 
 Every budget covering a run: its limit, what a person granted on top of it, what is spent and held, and what remains.
+
+The application's, session's and agent's counters are read from the ledger (they are shared, and live on); a finished run's own counter is the one settled on its record. Empty when nothing is budgeted.
 
 ### `cleanup`
 
@@ -150,6 +154,8 @@ async def get_run(run_id: str) -> Optional[Dict[str, Any]]: ...
 
 A run's durable record, or None if it has none.
 
+The record is kept in the agent's memory store: status, step, usage, trace IDs, each tool call's state (arguments as a digest), and each approval with the arguments of the call it is for.
+
 ### `get_run_trajectory`
 
 ```python
@@ -157,6 +163,8 @@ async def get_run_trajectory(run_id: str) -> Dict[str, Any] | None: ...
 ```
 
 One durable run as a single story across its trace segments (each pause, resume, recovery, or new attempt is a segment), with totals summed over the segments. The run's saved conversation is not included.
+
+A segment whose trace is no longer stored (traces are pruned after `telemetry_config["retention_days"]`, run records after `run_retention_days`) has `trace_kept: False`; `traces_missing` counts them, and totals cover only the traces still kept, so they are empty rather than zero when none is. The record's `usage` remains.
 
 ### `get_session_history`
 
@@ -172,7 +180,9 @@ Get session history for a specific session ID
 async def get_telemetry_events_after(*, cursor: str | None, trace_id: str | None = None, run_id: str | None = None, session_id: str | None = None, task_id: str | None = None, event_types: tuple[str, ...] | None = None): ...
 ```
 
-_No description in the code yet._
+The telemetry events stored after `cursor`, as a list, in the order they were recorded, filtered like `stream_telemetry_after`; it returns at once instead of waiting for more.
+
+`cursor=None` returns every stored event in scope. Poll with the last event's `stream_cursor` to get only what is new.
 
 ### `get_telemetry_stream_cursor`
 
@@ -180,7 +190,9 @@ _No description in the code yet._
 async def get_telemetry_stream_cursor(*, trace_id: str | None = None, run_id: str | None = None, session_id: str | None = None, task_id: str | None = None, event_types: tuple[str, ...] | None = None) -> str | None: ...
 ```
 
-_No description in the code yet._
+The store's position now: a cursor to pass to `stream_telemetry_after` or `get_telemetry_events_after` to get only events recorded from here on.
+
+Take it before starting a run to follow that run from its first event. Cursors are opaque strings that increase with every event.
 
 ### `get_telemetry_trace`
 
@@ -188,7 +200,9 @@ _No description in the code yet._
 async def get_telemetry_trace(trace_id: str, *, normalize: bool = False) -> Dict[str, Any] | None: ...
 ```
 
-_No description in the code yet._
+The raw trace of one trace segment, as a dict: its spans and events as recorded, or `None` if it is not stored (never recorded, or pruned after `telemetry_config["retention_days"]`).
+
+`normalize=True` sorts spans by start and events by sequence, and marks capture gaps and missing references. For a readable story use `get_trajectory` (one segment) or `get_run_trajectory` (a whole run, across pauses and resumes).
 
 ### `get_trace`
 
@@ -206,13 +220,17 @@ async def get_trace_family(identifier: str | None = None, *, trace_id: str | Non
 
 Return all locally stored traces linked to one execution boundary.
 
+A family follows explicit parent links in both directions. For a `run_id` seed, every trace carrying that run id is included before linked ancestors and descendants are added. This avoids treating the latest trace for a session as the complete execution history.
+
 ### `get_trajectory`
 
 ```python
 async def get_trajectory(identifier: str | None = None, *, trace_id: str | None = None, run_id: str | None = None, include_children: bool = True, max_depth: int = 5) -> Dict[str, Any] | None: ...
 ```
 
-Return one run as an ordered trajectory, from request to final answer.
+One trace segment as an ordered trajectory: steps, model calls, tool calls and their observations, from request to answer or pause.
+
+A run that paused and resumed has one segment per stretch of work; `get_run_trajectory(run_id)` gives the whole run. Look up by `trace_id` (exact) or `run_id` (the latest segment of that run; the others are listed in `other_trace_ids_for_run`). Delegated child runs are nested under the tool call that started them. See `build_trajectory` for the shape.
 
 ### `grant_budget`
 
@@ -221,6 +239,8 @@ async def grant_budget(run_id: str, *, amount: Optional[float] = None, approver:
 ```
 
 Add to the budget a waiting run ran out of, so it can carry on.
+
+The policy is not changed: this is a recorded exception to one budget, with the name of whoever made it. `amount` defaults to what the run said it was short of. `resume(run_id)` then continues the work.
 
 ### `initialize`
 
@@ -260,7 +280,9 @@ Run records, oldest first, optionally for one session or status.
 async def list_telemetry_traces(trace_filter: TraceFilter | None = None, *, trace_id: str | None = None, run_id: str | None = None, session_id: str | None = None, task_id: str | None = None, agent_id: str | None = None, workflow_id: str | None = None, model: str | None = None, status: TraceStatus | str | None = None, normalize: bool = False) -> list[Dict[str, Any]]: ...
 ```
 
-_No description in the code yet._
+Stored traces matching every filter given, oldest first (by start time, then trace ID), as dicts.
+
+Filter with keywords or one `TraceFilter`, not both. A run that paused and resumed has one trace per segment; `run_id=` lists them all. `normalize` is as in `get_telemetry_trace`.
 
 ### `prune_runs`
 
@@ -277,6 +299,8 @@ async def prune_telemetry() -> Dict[str, Any]: ...
 ```
 
 Apply the configured trace and payload retention now.
+
+Expired finished traces are removed first; payloads are then pruned by their own retention window, except any payload still referenced by a kept trace. Returns what was removed.
 
 ### `prune_telemetry_payloads`
 
@@ -302,6 +326,8 @@ async def record_outcome(run_id: str, *, source: str, reward: float | None = Non
 
 Record what a run turned out to be worth, whenever that is known.
 
+A run's own result is not its outcome: a pull request is merged an hour later, a customer accepts an answer the next day, CI runs the tests afterwards. `source` says who is reporting it (`github`, `reviewer`, an evaluator's name), `reward` is the number a trainer or an evaluator uses, `label` is what it is called, and `detail` is anything else worth keeping. A run may gather several. The outcome goes on the run's record and into its trace.
+
 ### `resolve_approval`
 
 ```python
@@ -309,6 +335,8 @@ async def resolve_approval(run_id: str, approval_id: str, *, decision: str, appr
 ```
 
 Decide an approval a run is waiting for.
+
+`decision` is `"approve"` or `"deny"`. A denial's `note` reaches the model. `arguments` approves an edited call instead of the one asked for. The decision applies once, to that exact request.
 
 ### `resume`
 
@@ -334,6 +362,8 @@ async def steer(run_id: str, message: str, *, sender: Optional[str] = None) -> D
 
 Send a message to a run; it arrives as a user message at the run's next step boundary (or when a waiting or interrupted run resumes).
 
+The message is user input: the injection guardrail checks it first, and a blocked message is never queued.
+
 ### `stream`
 
 ```python
@@ -342,13 +372,17 @@ def stream(query: str, session_id: str | None = None, run_id: str | None = None)
 
 Stream live intermediate text and one terminal result from the same run loop.
 
+Use `contextlib.aclosing` when stopping iteration early. Deltas are not replayed from telemetry; the completed answer is persisted normally.
+
 ### `stream_telemetry_after`
 
 ```python
 def stream_telemetry_after(*, cursor: str | None, trace_id: str | None = None, run_id: str | None = None, session_id: str | None = None, task_id: str | None = None, event_types: tuple[str, ...] | None = None): ...
 ```
 
-_No description in the code yet._
+Yield telemetry events after `cursor`, then keep yielding new ones as they are recorded; it does not end on its own.
+
+Events come in the order they were recorded, each once, filtered to the trace, run, session or task and the `event_types` given. `cursor=None` starts from the first stored event. Each event carries its `stream_cursor`: keep the last one to resume after a disconnect. A reader that falls 1,000 events behind is stopped with an error rather than silently skipping events.
 
 ### `switch_memory_store`
 
@@ -373,3 +407,5 @@ async def training_records(*, run_id: str | None = None, session_id: str | None 
 ```
 
 Finished runs as one record each, for a trainer or an evaluator.
+
+Each record holds what the model was sent at every step, what it produced (its token details when they were recorded), what the tools answered, the policy that served it, the run's totals, and the outcomes attached to it. A run that paused and resumed is one record with the steps of every trace segment. A run still running or waiting, or one recorded without model prompts, is left out.
