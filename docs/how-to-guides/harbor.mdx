@@ -1,140 +1,552 @@
 ---
-title: Harbor and Terminal-Bench
-description: 'Run OmniCoreAgent on Harbor tasks and datasets, and read what each trial did'
-icon: 'flask'
+title: "Harbor and Terminal-Bench"
+description: "Run OmniCoreAgent on Harbor tasks and Terminal-Bench, and read what each trial did: reward, cost, steps and the agent's trajectory"
+icon: "flask"
 ---
 
 # Harbor and Terminal-Bench
 
-[Harbor](https://github.com/laude-institute/harbor) runs an agent on tasks: each
-task is a container, the agent is installed into it and solves the task by
-running commands there, and a verifier then decides the reward. Terminal-Bench
-is run on it. `omnicoreagent harbor` is Harbor's own command line with this
-runtime as the agent.
+[Harbor](https://github.com/laude-institute/harbor) is an open-source harness
+for evaluating agents: each task is a container, the agent is installed into
+it and solves the task by running commands there, and a verifier decides the
+reward. Terminal-Bench runs on it. By the end of this page you will have run
+this agent on a task of your own, read its reward, cost and trajectory, and
+know how to point it at Terminal-Bench.
+
+<Info>
+Every output on this page is what the commands printed when they were run,
+with `openai/gpt-5.4-mini`. The model's wording, the ids, the times and the
+costs will differ on your run.
+</Info>
+
+`omnicoreagent harbor` is Harbor's own command line with this runtime as the
+agent. Every Harbor command passes through (`run`, `view`, `job resume`,
+`trial start`, `dataset`, `download` and the rest), plus two of this
+runtime's own: `doctor` and `results`.
+
+## Install and check
 
 ```bash
 pip install 'omnicoreagent[harbor]'
-export LLM_API_KEY=...
+export LLM_API_KEY=...        # or put it in ./.env
+omnicoreagent harbor doctor -m gpt-5.4-mini
+```
 
-omnicoreagent harbor doctor -m gpt-5.6-terra
-omnicoreagent harbor run -p ./my-task -m gpt-5.6-terra
-omnicoreagent harbor run -d terminal-bench@2.0 -m gpt-5.6-terra -n 4
+```text
+omnicoreagent harbor doctor
+  ok    python     3.12.13 (/home/you/project/.venv/bin/python3)
+  ok    harbor     0.23.0
+  ok    docker     daemon 29.1.3 answers
+  ok    model      openai/gpt-5.4-mini: key present (LLM_API_KEY, handed on as <OpenAI's key variable>)
+  ok    runtime    0.4.1.dev13+5ebddc2 (development); the container installs a wheel built from /home/you/omnicoreagent
+  ready for a trial
+```
+
+(The real line names OpenAI's own key variable where `<...>` is.) Each line
+is one thing a trial needs: Python, Harbor, a Docker daemon that
+answers `docker info`, a key for the model's provider (it says where the key
+is, never what it is), and what the task container will install. It exits 1
+if any check fails.
+
+To also install the agent into a real, throwaway task container, the way a
+trial does, add `--container`. It took almost seven minutes here, most of it
+building the image and installing the runtime:
+
+```bash
+omnicoreagent harbor doctor -m gpt-5.4-mini --container
+```
+
+```text
+  ...
+  ok    container  the agent installed into a task container
+  ready for a trial
+```
+
+## Run a task
+
+A Harbor task is a directory. This one has a bug to fix and a verifier that
+writes the reward:
+
+```text
+fix-average/
+  task.toml
+  instruction.md
+  environment/Dockerfile
+  environment/stats.py
+  tests/test.sh
+```
+
+```toml task.toml
+schema_version = "1.4"
+
+[task]
+name = "my-org/fix-average"
+version = "1.0.0"
+description = "A mean that divides by the wrong number."
+
+[verifier]
+timeout_sec = 120.0
+
+[agent]
+timeout_sec = 600.0
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 600.0
+os = "linux"
+```
+
+```markdown instruction.md
+`average()` in `/app/stats.py` returns the wrong value. Fix it so that
+`average([2, 4, 6])` is `4.0` and `average([])` raises `ValueError`.
+```
+
+```dockerfile environment/Dockerfile
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-pip python3-venv ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY stats.py /app/stats.py
+```
+
+```python environment/stats.py
+def average(values):
+    return sum(values) / (len(values) - 1)
+```
+
+```bash tests/test.sh
+#!/bin/bash
+# The verifier: writes the reward Harbor reads.
+cd /app
+if python3 -c '
+from stats import average
+assert average([2, 4, 6]) == 4.0
+try:
+    average([])
+except ValueError:
+    pass
+else:
+    raise SystemExit("average([]) did not raise ValueError")
+'; then echo 1 > /logs/verifier/reward.txt; else echo 0 > /logs/verifier/reward.txt; fi
+```
+
+Run it (`-n 1`: one trial at a time; `--ak` passes an option to the agent):
+
+```bash
+omnicoreagent harbor run -p ./fix-average -m gpt-5.4-mini -n 1 --ak run_timeout=540
+```
+
+Harbor's own summary, at the end:
+
+```text
+  1/1 Mean: 1.000 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 0:05:17 0:00:00
+adhoc • omnicoreagent • gpt-5.4-mini
+┏━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━┓
+┃ Trials ┃ Exceptions ┃  Mean ┃
+┡━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━┩
+│      1 │          0 │ 1.000 │
+└────────┴────────────┴───────┘
+
+Job Info
+Total runtime: 5m 17s
+Results written to jobs/2026-09-28__06-36-29/result.json
+Inspect results by running `harbor view jobs`
+```
+
+Of the five minutes, the agent's run took 18 seconds; the rest was building
+the image and installing the runtime into it.
+
+## Read what the trial did
+
+```bash
 omnicoreagent harbor results jobs
 ```
 
-Every Harbor command works — `view`, `job resume`, `trial start`, `init`,
-`dataset`, `download`, and the rest pass through unchanged. Four things are done
-around them:
-
-- **This runtime is the default agent.** `run`, `exec`, `job start`, `trial start`
-  and the `init` scaffolders use it unless you pass `-a` or a config file that
-  names another agent.
-- **One key.** `LLM_API_KEY` — from the environment or from `./.env` — is handed
-  to the model's provider in Harbor's environment. It is never put in a
-  command's arguments, which other users of the machine can see, and never in
-  the job's files. A key you set under the provider's own name is left alone.
-- **Model names.** `gpt-5.6-terra`, `o3`, `claude-sonnet-5`, `gemini-2.5-pro` and
-  `deepseek-chat` get their provider prefix; any other model is named as
-  `provider/model` (for example `openrouter/meta/llama-4`), because guessing
-  a provider wrong fails a trial late.
-- **Plain errors.** No Docker, or no Harbor, is a sentence saying what to do.
-
-## Before the first trial
-
-```bash
-omnicoreagent harbor doctor -m gpt-5.6-terra --container
+```text
+job jobs/2026-09-28__06-36-29
+  passed    reward 1    fix-average__bEZvQ8m                     status success              steps 10   cost $0.0090
+  1/1 passed, 0 failed, 0 errored, 0 running; cost $0.0090
 ```
 
-`doctor` checks Python, Harbor, a Docker daemon that answers, that the model's
-provider has a key (it never prints it), and what the task container will
-install. `--container` installs the agent into a throwaway task container, the
-same way a trial does.
+`results` takes one job directory or a directory of jobs (newest first).
+For each trial it prints the outcome (`passed`, `partial`, `failed`,
+`errored`, `no reward` or `running`), the reward, the run's own status (with
+why it ended when it did not succeed, such as `error (max_steps)`), steps and
+cost; under it, the line of an error that says what went wrong, and any MCP
+server the run could not use. `--json` gives every field:
 
-## What the container runs
+```text
+{
+  "job": "jobs/2026-09-28__06-42-25",
+  "trials": [
+    {
+      "trial": "fix-average__8MH5kRs",
+      "task": "my-org/fix-average",
+      "outcome": "passed",
+      "reward": 1.0,
+      "status": "success",
+      "termination_reason": "stop",
+      "detail": null,
+      "exit_code": 0,
+      "cost_usd": 0.00442275,
+      "input_tokens": 15545,
+      "output_tokens": 312,
+      "cache_tokens": 12800,
+      "steps": 8,
+      "duration_s": 289.1,
+      "error": null,
+      "mcp_failed": [
+        "notes: [Errno 2] No such file or directory: 'notes-server'"
+      ],
+      "note": null,
+      "trajectory": "jobs/2026-09-28__06-42-25/fix-average__8MH5kRs/agent/trajectory.json"
+    }
+  ],
+  "totals": {"trials": 1, "passed": 1, "partial": 0, "failed": 0, "errored": 0,
+             "running": 0, "no reward": 0, "pass_rate": 1.0, "cost_usd": 0.00442275}
+}
+```
 
-The container gets **this** runtime: the same release when you run a release,
-and otherwise a wheel built from your checkout, uploaded and installed. It lives
-in a virtual environment of its own under `/installed-agent`, so the task's own
-Python is left as the task set it up, and its files stay outside the task's
-directory, which the verifier checks.
+<Warning>
+Harbor exits 0 even when every trial errored. Read the results, not the exit
+code.
+</Warning>
 
-Commands run in the task's directory through the `local` sandbox provider: the
-container is the boundary. Policy still governs every command, and the run's
-trace records each one with the rule that allowed it.
+### Where everything is
 
-## Options
+```text
+jobs/2026-09-28__06-36-29/
+  config.json, result.json, job.log          the job
+  fix-average__bEZvQ8m/
+    result.json                              Harbor's verdict: reward, tokens, cost, the run's status
+    trial.log
+    verifier/reward.txt, test-stdout.txt     what the verifier wrote
+    agent/trajectory.json                    the trajectory, in Harbor's format (ATIF)
+    agent/omnicoreagent/result.json          the run's own result (omnicoreagent run)
+    agent/omnicoreagent/trajectory.json      the run's own trajectory
+    agent/omnicoreagent/omnicoreagent.txt    what the run printed
+```
 
-Pass them with `--ak name=value` (Harbor's `--agent-kwarg`):
+In the trial's `result.json`, `agent_result` holds the tokens, the cost
+(also per model under `model_usage`) and this runtime's own facts:
 
-| Option | Default | What it does |
-|---|---|---|
-| `max_steps` | `60` | Model turns the agent may take. |
-| `command_timeout` | `300` | Seconds any one command may run. |
-| `run_timeout` | none | Seconds the run gives itself. Set it a little under the task's agent timeout: a run stopped from outside leaves no result behind, one that stops itself does. |
-| `approval_mode` | `deny` | How an approval nobody is there to give is answered: `stop`, `allow` or `deny`. |
-| `budget_mode` | `stop` | How an exhausted budget is answered: `stop` or `deny`. |
-| `capture` | `full` | What the trace keeps. `full` keeps what the model was sent. |
-| `record_token_details` | `false` | Keep the chosen tokens' logprobs. |
-| `completion_review` | `0` | Rounds of review before a final answer is accepted: the agent is asked for each requirement and the check that showed it, and keeps working where it has none. Its report is more thorough; on a hard task it did not raise the score and doubled the cost. |
-| `install_spec` | this runtime | Install something else: a requirement, a path in the container, or a VCS URL. |
-| `wheel` | this runtime | A wheel on this machine to upload and install. |
+```text
+"metadata": {
+  "omnicoreagent_status": "success",
+  "omnicoreagent_exit_code": 0,
+  "omnicoreagent_run_id": "run_51e8c10ad1484b6297f39899c67805ae",
+  "omnicoreagent_termination_reason": "stop"
+}
+```
+
+`omnicoreagent_detail` is added when the run did not succeed (its error, or
+its last answer), and `omnicoreagent_mcp_failed` when an MCP server was
+unusable.
+
+### The trajectory
+
+`agent/trajectory.json` is in Harbor's trajectory format (`ATIF-v1.8`), so a
+trial of this agent reads like a trial of any other, and
+`omnicoreagent harbor view jobs` shows it. Step 1 is the instruction; then one
+step per model call, with what the model said, the tools it called with their
+arguments, what they returned, and what the call cost. Each command's result
+also says how it ran (abridged):
+
+```text
+{
+  "step_id": 6,
+  "source": "agent",
+  "message": "",
+  "model_name": "openai/gpt-5.4-mini",
+  "tool_calls": [
+    {"function_name": "execute",
+     "arguments": {"command": "sed -n '1,200p' /app/stats.py", "timeout": 30}}
+  ],
+  "observation": {"results": [{
+    "content": "{... \"stdout\": \"def average(values):\\n    return sum(values) / (len(values) - 1)\\n\" ...}",
+    "extra": {"outcome": "success", "exit_code": 0, "sandbox_provider": "local",
+              "matched_rule_ids": ["allow_host_commands"]}
+  }]},
+  "metrics": {"prompt_tokens": 2291, "completion_tokens": 34, "cached_tokens": 2048,
+              "cost_usd": 0.00048885,
+              "extra": {"provider_model": "gpt-5.4-mini", "finish_reason": "tool_calls",
+                        "cost_source": "provider_response", "latency_ms": 1064.425}}
+}
+```
+
+The document's `extra` names the run (`run_id`, `trace_ids`), whether
+anything was left out of the record (`evidence_status`), each MCP server's
+state, and security warnings. Both trials here showed `host_execution_not_contained`:
+commands run directly in the task container, which is the boundary (see
+[How it works](#how-it-works)).
+
+The run's own record, in `agent/omnicoreagent/`, is the same as any headless
+run's ([Headless runs](/docs/how-to-guides/headless-runs),
+[Read a run](/docs/how-to-guides/read-a-run)).
+
+## Terminal-Bench
+
+A dataset is named `name@version`; `-i` picks tasks by name (globs work),
+`-l` caps how many, `-n` runs that many at once (Harbor's default is 4):
+
+```bash
+omnicoreagent harbor run -d terminal-bench@2.0 -m gpt-5.4-mini -i fix-git
+omnicoreagent harbor run -d terminal-bench@2.0 -m gpt-5.4-mini -n 4
+```
+
+`--dry-run` checks the configuration and the task list without running
+anything:
+
+```bash
+omnicoreagent harbor run -d terminal-bench@2.0 -m gpt-5.4-mini --dry-run
+```
+
+```text
+Skipped: Git task contents and paths (metadata-only check).
+Skipped: Pinned Git commit existence (unadvertised commits require fetching).
+Dry run OK — 89 trial(s); nothing was run.
+```
+
+Each task builds its own image, and each trial installs the runtime into it,
+so start with one task and read its result before running all 89.
+
+## MCP servers in a trial
+
+A task's MCP servers (`[[environment.mcp_servers]]` in `task.toml`) and those
+you add with `--mcp-config` are connected for the run, over stdio, SSE or
+streamable HTTP. Harbor passes on each server's name, transport, URL,
+command and arguments; other fields in the file, such as `env`, are dropped.
+
+A server that cannot start does not stop the run: the agent carries on
+without its tools, and may still earn the reward. That is not the result the
+task meant to measure, so the trial's record says so. With a server whose
+command does not exist:
+
+```json broken-mcp.json
+{"mcpServers": {"notes": {"command": "notes-server", "args": ["--stdio"]}}}
+```
+
+```bash
+omnicoreagent harbor run -p ./fix-average -m gpt-5.4-mini -n 1 --mcp-config broken-mcp.json
+omnicoreagent harbor results jobs/2026-09-28__06-42-25
+```
+
+```text
+job jobs/2026-09-28__06-42-25
+  passed    reward 1    fix-average__8MH5kRs                     status success              steps 8    cost $0.0044
+            MCP server unusable: notes: [Errno 2] No such file or directory: 'notes-server'
+  1/1 passed, 0 failed, 0 errored, 0 running; cost $0.0044
+```
+
+The same appears in `trial.log` (`MCP servers the run could not use: ...`),
+in `agent_result.metadata.omnicoreagent_mcp_failed`, and in the trajectory:
+
+```text
+"mcp_servers": [
+  {"name": "notes", "transport_type": "stdio", "status": "failed", "tool_count": 0,
+   "error": "[Errno 2] No such file or directory: 'notes-server'"}
+]
+```
+
+The trial's MCP servers are allowed by policy without asking, since nobody is
+there to answer. Skills a task provides (`environment.skills_dir`) or that you
+add with `--skill` are loaded too.
 
 ## Tasks that restrict the network
 
-A task can let the agent reach only the hosts it names (`[agent] network_mode =
-"allowlist"`). The agent still has to reach its model, so allow the model's
-host for the run:
+A task can let the agent reach only the hosts it names (`[agent]
+network_mode = "allowlist"`). The agent still has to reach its model, so
+allow the model's host for the run:
 
 ```bash
-omnicoreagent harbor run -p ./task -m gpt-5.6-terra --allow-agent-host api.openai.com
+omnicoreagent harbor run -p ./task -m gpt-5.4-mini --allow-agent-host api.openai.com
 ```
 
 Everything else the agent needs is fetched when it is installed, while the
 network is open. If the model's host is not allowed, the run ends saying it
 could not connect to it.
 
-## MCP servers and skills
+## How it works
 
-A task's MCP servers (`[[environment.mcp_servers]]`) and those you add with
-`--mcp-config` are connected for the run, over stdio or HTTP. Skills a task
-provides (`environment.skills_dir`) or that you add with `--skill` are found
-where Harbor puts them. If an MCP server cannot be used, the trial's record
-says so — a task can sometimes be passed without its tools, and that is not the
-result it was meant to measure.
+- **This runtime is the default agent.** `run`, `exec`, `job start`,
+  `trial start`, `job init` and `trial init` get
+  `--agent omnicoreagent.harbor.agent:OmniCoreAgentHarbor` unless you pass
+  `-a` or a config file (`-c`).
+- **Model names.** A bare name starting `gpt-`, `chatgpt-`, `o1`, `o3` or
+  `o4` becomes `openai/...`; `claude-` becomes `anthropic/...`, `gemini-`
+  `gemini/...`, `deepseek-` `deepseek/...`. Anything else must be named
+  `provider/model` (for example `openrouter/meta/llama-4`): a wrong guess
+  fails a trial late.
+- **One key.** `LLM_API_KEY`, from the environment or read from `./.env`, is
+  put in Harbor's environment under the name the provider reads, which
+  `doctor` prints. It never goes in a command's arguments, which
+  other users of the machine can see and Harbor writes into the job's
+  `config.json`. A key you set under the provider's own name is left alone.
+- **The same runtime in the container.** A release installs
+  `omnicoreagent==<version>`; a development build uploads a wheel built from
+  its checkout. It goes in a virtual environment of its own under
+  `/installed-agent`, so the task's Python stays as the task set it up, and
+  the agent's workspace is there too, outside the task's directory the
+  verifier checks.
+- **The container is the boundary.** Commands run in the task's directory
+  through the `local` sandbox provider. Policy still decides each one (a rule
+  `allow_host_commands` allows commands on the host; approvals nobody can
+  give are answered by `approval_mode`), and the trajectory records the rule
+  that allowed each command.
+- **One headless run.** The agent runs `omnicoreagent run` once with the
+  task's instruction ([Headless runs](/docs/how-to-guides/headless-runs)),
+  then converts its trajectory to ATIF for Harbor.
+- **What the model never sees.** The runtime's credentials (the model's key,
+  and environment variables that hold credentials) are replaced with
+  `[REDACTED:credential]` in everything a tool returns and everything
+  recorded. Commands see only named variables (`PATH`, `HOME`, `LANG`, ... and
+  those you add with `--ae NAME=value`, except credentials). This cannot stop
+  a command from sending a key it can read, so run trials with a key meant
+  for them, with a spending limit.
 
-Names you set with `--ae NAME=value` reach the commands the agent runs, except
-credentials, which stay with the runtime.
+## Options
 
-## Reading a job
+Agent options, with `--ak name=value` (Harbor's `--agent-kwarg`):
 
-```bash
-omnicoreagent harbor results jobs/2026-09-25__06-07-24
-omnicoreagent harbor results jobs --json
-```
+| Option | Default | What it does |
+|---|---|---|
+| `max_steps` | `60` | Model turns the agent may take. |
+| `command_timeout` | `300` | Seconds any one command may run. |
+| `run_timeout` | none | Seconds the run gives itself. Harbor stops an agent at the task's `[agent] timeout_sec` without telling it, and a run stopped from outside leaves no result or trajectory. Set this a little under it. |
+| `approval_mode` | `deny` | How an approval nobody is there to give is answered: `stop`, `allow` or `deny`. |
+| `budget_mode` | `stop` | How an exhausted budget is answered: `stop` or `deny`. |
+| `capture` | `full` | What the trace keeps. `full` keeps what the model was sent. |
+| `record_token_details` | `false` | Keep the chosen tokens and their logprobs (they appear in the ATIF step metrics). |
+| `completion_review` | `0` | Rounds (up to 3) of review before a final answer is accepted: the agent is asked for each requirement and the check that showed it, and keeps working where it has none. Its report is more thorough; on a hard task, five trials each way showed no gain in score for twice the cost. |
+| `install_spec` | this runtime | Install something else: a pip requirement, a path in the container, or a VCS URL (for example `git+https://github.com/omnirexflora-labs/omnicoreagent@<branch>`). |
+| `wheel` | this runtime | A wheel on this machine to upload and install. |
 
-For each trial: passed, failed, errored or still running; the reward; the
-run's own status and, when it did not succeed, why it ended (`max_steps`,
-`provider_error`, …); cost, tokens and steps; the line of an error that says
-what went wrong; MCP servers the run could not use; and where its trajectory
-is. Harbor exits 0 even when every trial errored, so read the results.
+Harbor flags used on this page: `-p` (a task or dataset directory), `-d`
+(a registry dataset), `-i`/`-x`/`-l` (pick tasks), `-m`, `-n`, `-o` (jobs
+directory, default `jobs`), `--mcp-config`, `--skill`, `--ae`,
+`--allow-agent-host`, `--dry-run`. `omnicoreagent harbor run --help` lists
+all of them; `doctor` and `results` are in the
+[CLI reference](/docs/reference/cli).
 
-```
-  passed    reward 1    agent-network-allowlist__yDMGhKr    status success               steps 6    cost $0.0140
-  failed    reward 0    receipts-subtotal__ttHF2WG          status error (max_steps)     steps 3    cost $0.0030
-            Agent reached its step limit.
-```
+## When things go wrong
 
-## What the agent never sees
+<AccordionGroup>
+  <Accordion title="Error: Cannot tell which provider serves ...">
+    A bare model name outside the families above:
 
-The runtime replaces its own credentials — the model's key, and values of
-environment variables that hold credentials — in everything a tool returns,
-before the model sees it, and in everything it records. A command that prints
-the agent's environment shows `[REDACTED:credential]`. This keeps the key out of
-the model's context and out of the trajectory; it cannot stop a command from
-sending a key it can read, so run trials with a key meant for them, with a
-spending limit.
+    ```text
+    Error: Cannot tell which provider serves 'llama-4'. Name it as provider/model, for example openai/gpt-5.6-terra or anthropic/claude-sonnet-5.
+    ```
 
-Each trial's `agent/trajectory.json` is in Harbor's trajectory format (ATIF): the
-instruction, then one step per model call with what the model said, the tools
-it called with their arguments, what they returned and how each command ran,
-and what each call cost. `harbor view jobs` shows it next to any other agent's.
+    Name it `provider/model`. `doctor -m` reports the same as a `FAIL model` line.
+  </Accordion>
+
+  <Accordion title="FAIL model ...: no key">
+    ```text
+      FAIL  model      openai/gpt-5.4-mini: no key; set LLM_API_KEY (or <OpenAI's key variable>)
+    ```
+
+    The real line names OpenAI's own variable. Set `LLM_API_KEY` in the
+    environment, or in `./.env` in the directory you run from.
+  </Accordion>
+
+  <Accordion title="Error: Docker is required to run a Harbor trial">
+    ```text
+    Error: Docker is required to run a Harbor trial, and `docker` is not on PATH. Install Docker, or start it, and try again.
+    ```
+
+    Commands that start containers (`run`, `exec`, `job start`,
+    `trial start`, `job resume` and others) need Docker. If `docker` is
+    installed but its daemon is down, `doctor` says so:
+
+    ```text
+      FAIL  docker     no Docker daemon answers `docker info`; install or start Docker
+    ```
+  </Accordion>
+
+  <Accordion title="Error: Harbor is not installed">
+    ```text
+    Error: Harbor is not installed. Install it with: pip install 'omnicoreagent[harbor]'
+    ```
+  </Accordion>
+
+  <Accordion title="Every trial errored, and Harbor exited 0">
+    `results` gives the reason. A wheel that does not exist:
+
+    ```text
+    job badjobs/2026-09-28__06-48-07
+      errored   reward -    fix-average__YBsb7F8                     status -                    steps -    cost -
+                RuntimeError: Agent install failed: There is no such wheel: ./dist/omnicoreagent.whl
+      0/1 passed, 0 failed, 1 errored, 0 running; cost -
+    ```
+  </Accordion>
+
+  <Accordion title="RuntimeError: Could not build a wheel of ...">
+    A development build builds a wheel of its checkout with `uv`, or with
+    `pip` when `uv` is not on `PATH`. In a virtual environment made by `uv`,
+    which has no `pip`, the trial errors:
+
+    ```text
+    RuntimeError: Could not build a wheel of /home/you/omnicoreagent: /home/you/omnicoreagent/.venv/bin/python3: No module named pip
+    ```
+
+    Put `uv` on `PATH`, or pass `--ak install_spec=...` or `--ak wheel=...`.
+    `doctor --container` finds this before a real trial does.
+  </Accordion>
+
+  <Accordion title="This runtime is a development build ... with no source to build a wheel from">
+    A development version installed without its checkout:
+
+    ```text
+    This runtime is a development build (0.4.2.dev25) with no source to build a wheel from, so the container cannot be given the same one. Pass --agent-kwarg install_spec=<requirement or URL> or wheel=<path>.
+    ```
+
+    The container never silently falls back to whatever PyPI has.
+  </Accordion>
+
+  <Accordion title="Dry run failed: No tasks matched the filter(s)">
+    ```text
+    Dry run failed: No tasks matched the filter(s) ['hello*']. There are 89 tasks available in this dataset. Example task names: ['adaptive-rejection-sampler',
+    'bn-fit-modify', 'break-filter-js-from-html', 'build-cython-ext', 'build-pmars']
+    ```
+
+    `-i` matches task names in the dataset; use `--dry-run` to check a filter.
+  </Accordion>
+
+  <Accordion title="The agent wrote no result">
+    `results` prints this under a trial whose run reported no status: it
+    was stopped from outside (Harbor's agent timeout) before it wrote
+    `result.json`, so there is no trajectory either. Set `run_timeout` a little
+    under the task's `[agent] timeout_sec`; a run that stops itself ends as
+    `timeout` and leaves its evidence.
+  </Accordion>
+
+  <Accordion title="status error (max_steps)">
+    The run used every step (`max_steps`, 60 by default) before answering.
+    Raise it with `--ak max_steps=...`, and read the trajectory to see where
+    the steps went.
+  </Accordion>
+
+  <Accordion title="Error: There is no Harbor job in ...">
+    `results` was given a directory with no job in it. Pass the jobs
+    directory (`jobs`, or what you gave `-o`) or one job inside it.
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Read a run" icon="magnifying-glass" href="/docs/how-to-guides/read-a-run">
+    Everything a run recorded, step by step.
+  </Card>
+  <Card title="Observability" icon="chart-line" href="/docs/how-to-guides/observability">
+    Traces, stores and exporters.
+  </Card>
+  <Card title="Outcomes and training" icon="graduation-cap" href="/docs/how-to-guides/outcomes-and-training">
+    Score runs and turn trajectories into training data.
+  </Card>
+  <Card title="Headless runs" icon="terminal" href="/docs/how-to-guides/headless-runs">
+    The `omnicoreagent run` each trial is built on.
+  </Card>
+</CardGroup>

@@ -1,0 +1,620 @@
+---
+title: "Read a run"
+description: "Read any run back as its evidence: what the model was sent, what it chose, what each tool returned, what the policy decided, and what it cost"
+icon: "route"
+---
+
+# Read a run
+
+Every run keeps its evidence. By the end of this page you will have read one
+back step by step with `get_trajectory`, read a run that paused for a person
+as one story with `get_run_trajectory`, found a sub-agent's run nested under
+the call that started it, and seen exactly what the record does not hold.
+
+<Info>
+Every output on this page is what the code printed when it was run with
+`gpt-5.4-mini`. The model's wording, the token counts, the prices and the IDs
+will differ on your run.
+</Info>
+
+Two words first. A **trace** is the record of one uninterrupted stretch of a
+run. A run that never paused is one trace; a run that paused for an approval
+or a budget and was resumed is several, one per **segment**. A
+**trajectory** is a trace read in order, from the request to the answer.
+
+| You want | Call | Returns |
+|---|---|---|
+| One segment, step by step | `await agent.get_trajectory(trace_id)` or `get_trajectory(run_id=...)` (the run's latest segment) | the trajectory, or `None` |
+| A whole run, across pauses and resumes | `await agent.get_run_trajectory(run_id)` | every segment in order, totals summed, or `None` |
+
+## One run, step by step
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
+
+@tools.register_tool("get_weather")
+def get_weather(city: str) -> dict:
+    """Get the current weather for a city."""
+    return {"city": city, "temperature_c": 25, "sky": "clear"}
+
+async def main():
+    agent = OmniCoreAgent(
+        name="weather",
+        system_instruction="Use get_weather for each city. Answer in plain text, in one sentence.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        local_tools=tools,
+        agent_config={"governance_config": {"enabled": True}},
+    )
+    result = await agent.run("What is the weather in Lagos?")
+    print(result["response"])
+
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    print(trajectory["trajectory_version"], "|", trajectory["status"], "|", trajectory["evidence_status"])
+    print("request:", trajectory["request"]["message"])
+    harness = trajectory["harness"]
+    print("harness:", harness["model"]["model"], "|", harness["tools"]["count"], "tools |",
+          "governance", harness["governance"]["enabled"], "| privacy", harness["privacy"])
+
+    for step in trajectory["steps"]:
+        for call in step["model_calls"]:
+            facts = call["facts"]
+            print(f"step {step['step']} model: {call['outcome']}, {facts['tokens']}, "
+                  f"${facts['estimated_cost_usd']:.6f}, finish {facts['finish_reason']}")
+        for tool in step["tool_calls"]:
+            print(f"step {step['step']} tool:  {tool['tool_name']} {tool['arguments']} -> {tool['outcome']}")
+            print("  observation:", tool["observation"]["content"])
+            for decision in tool["governance"]:
+                print("  policy:", decision["effect"], decision["reason_code"], decision["matched_rule_ids"])
+
+    print("final:", trajectory["final"]["type"], trajectory["final"]["output"])
+    totals = trajectory["totals"]
+    print("totals:", totals["steps"], "steps,", totals["model_calls"]["total"], "model calls,",
+          totals["tool_calls"]["total"], "tool call,", totals["tokens"]["total"], "tokens,",
+          f"${totals['estimated_cost_usd']:.6f}", "| cost_complete", totals["cost_complete"])
+    print("capture gaps:", trajectory["capture_gaps"])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+The weather in Lagos is clear and 25°C.
+omnicoreagent.trajectory/v1 | completed | complete
+request: What is the weather in Lagos?
+harness: gpt-5.4-mini | 15 tools | governance True | privacy {'enabled': True, 'redacted': ['telemetry'], 'categories': ['credit_card', 'email', 'phone', 'ssn']}
+step 1 model: ok, {'input': 1473, 'output': 19, 'total': 1492, 'cached_input': 1024}, $0.000499, finish tool_calls
+step 1 tool:  get_weather {'city': 'Lagos'} -> success
+  observation: {"tool_name": "get_weather", "args": {"city": "Lagos"}, "status": "success", "data": {"city": "Lagos", "temperature_c": 25, "sky": "clear"}, "message": null}
+  policy: allow matched_allow ['allow_local_tools']
+step 2 model: ok, {'input': 1555, 'output': 15, 'total': 1570, 'cached_input': 1024}, $0.000543, finish stop
+final: final_answer {'response': 'The weather in Lagos is clear and 25°C.', 'status': 'success', 'termination_reason': 'stop'}
+totals: 2 steps, 2 model calls, 1 tool call, 3062 tokens, $0.001042 | cost_complete True
+capture gaps: []
+```
+
+Read top to bottom, that is the whole run:
+
+- The **harness** is what the model ran with: the model, the 15 tools it was
+  offered (`get_weather` and the built-in workspace file tools, on by
+  default), governance on, and `privacy` saying the trace is redacted for
+  credit cards, emails, phone numbers and SSNs.
+- **Step 1**: the model asked for `get_weather`; the default policy allowed
+  it by its rule `allow_local_tools`; the observation is the exact text the
+  model got back.
+- **Step 2**: the model answered, and the run ended with `final_answer`.
+- **Totals** add it up. `evidence_status` is `complete` and `capture_gaps`
+  is empty: nothing in this record is missing, redacted, or cut short.
+
+## A run that paused: one story
+
+A run that waited for an approval or a budget top-up, or was recovered after
+a crash, continues in a new trace segment. `get_run_trajectory` reads every
+segment in order. Here a refund waits for a person:
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy
+
+tools = ToolRegistry()
+
+@tools.register_tool("issue_refund")
+def issue_refund(order_id: str, amount: float) -> dict:
+    """Refund an order."""
+    return {"order_id": order_id, "refunded": amount}
+
+policy = build_default_policy("interactive-dev")
+policy.rules.ask.append(
+    PolicyRule(
+        rule_id="ask_before_refunds",
+        effect=PolicyEffect.ASK,
+        capability="tool.local.call",
+        target={"tool_name": "issue_refund"},
+        reason="Refunds need a person.",
+    )
+)
+
+async def main():
+    agent = OmniCoreAgent(
+        name="support",
+        system_instruction="You help with orders. Refund when asked. Answer in plain text, in one sentence.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        local_tools=tools,
+        agent_config={"governance_config": {"enabled": True, "policy": policy}},
+    )
+    result = await agent.run("Please refund order 1042 in full: 42 dollars.")
+    approval = result["approvals"][0]
+    await agent.resolve_approval(result["run_id"], approval["approval_id"],
+                                 decision="approve", approver="alice")
+    result = await agent.resume(result["run_id"])
+    print(result["response"])
+
+    story = await agent.get_run_trajectory(result["run_id"])
+    print("run:", story["status"], "| segments:", len(story["segments"]),
+          "| traces_missing:", story["traces_missing"])
+    for segment in story["segments"]:
+        trajectory = segment["trajectory"]
+        print(" segment", segment["trace_id"][:14], segment["status"], "trace_kept:", segment["trace_kept"])
+        for step in trajectory["steps"]:
+            for call in step["tool_calls"]:
+                print(f"   step {step['step']} resumed={step['resumed']} {call['tool_name']} -> {call['outcome']}")
+                for d in call["governance"]:
+                    print(f"     {d['effect']:5} {d['reason_code']:12} rules={d['matched_rule_ids']} "
+                          f"approved_by={d['approved_by']}")
+    totals = story["totals"]
+    print("totals:", totals["steps"], "steps |", totals["tool_calls"]["total"], "tool call |",
+          "$", round(totals["estimated_cost_usd"], 6))
+    print("approvals:", [(a["tool_name"], a["status"], a["approver"]) for a in story["approvals"]])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+Refunded order 1042 for 42 dollars.
+run: completed | segments: 2 | traces_missing: 0
+ segment trace_ce00e6f6 suspended trace_kept: True
+   step 1 resumed=False issue_refund -> awaiting_approval
+     ask   matched_ask  rules=['ask_before_refunds'] approved_by=None
+ segment trace_5d794b8a completed trace_kept: True
+   step 1 resumed=True issue_refund -> success
+     ask   matched_ask  rules=['ask_before_refunds'] approved_by=None
+     allow approved     rules=['ask_before_refunds'] approved_by=alice
+totals: 2 steps | 1 tool call | $ 0.001782
+approvals: [('issue_refund', 'used', 'alice')]
+```
+
+- The first segment ended `suspended`, with the call `awaiting_approval`
+  and the rule that asked.
+- The second segment picks up at the same step number, marked
+  `resumed=True`: the call is asked again, and allowed because `alice`
+  approved it.
+- The story's `totals` are summed over the segments, with each step and each
+  tool call counted once, by how it finally ended. `approvals` and
+  `tool_calls` come from the run's record ([Durable
+  runs](/docs/core-concepts/durable-runs)).
+
+`get_trajectory(run_id=...)` would have returned only the second segment; it
+lists the others in `other_trace_ids_for_run`.
+
+## A sub-agent's run, nested
+
+A delegated run has its own trace. The lead's trajectory nests it under the
+tool call that started it, in `call["subagent"]["child_trajectory"]`, down to
+`max_depth=5` levels:
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
+
+@tools.register_tool("country_facts")
+def country_facts(country: str) -> dict:
+    """Look up facts about a country."""
+    return {"country": country, "capital": "Lisbon"}
+
+MODEL = {"provider": "openai", "model": "gpt-5.4-mini"}
+researcher = OmniCoreAgent(
+    name="researcher",
+    system_instruction="Look facts up with your tools. Answer in plain text.",
+    model_config=MODEL,
+    local_tools=tools,
+)
+lead = OmniCoreAgent(
+    name="lead",
+    system_instruction="Ask the researcher, then answer in plain text, in one sentence.",
+    model_config=MODEL,
+    sub_agents=[researcher],
+)
+
+def walk(trajectory, depth=0):
+    pad = "  " * depth
+    print(f"{pad}{trajectory['agent_id']}: {len(trajectory['steps'])} steps, "
+          f"${trajectory['totals']['estimated_cost_usd']:.6f}")
+    for step in trajectory["steps"]:
+        for call in step["tool_calls"]:
+            print(f"{pad}  step {step['step']}: {call['tool_name']} -> {call['outcome']}")
+            child = (call["subagent"] or {}).get("child_trajectory")
+            if child:
+                walk(child, depth + 2)
+
+async def main():
+    result = await lead.run("What is the capital of Portugal?")
+    print(result["response"])
+    trajectory = await lead.get_trajectory(result["trace_id"])
+    walk(trajectory)
+    print("with the child:", trajectory["totals"]["including_subagents"]["estimated_cost_usd"])
+    for agent in (lead, researcher):
+        await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+The capital of Portugal is Lisbon.
+lead: 2 steps, $0.001950
+  step 1: delegate_researcher -> success
+    researcher: 2 steps, $0.001704
+      step 1: country_facts -> success
+with the child: 0.00365385
+```
+
+A trajectory's own `totals` are its own run's; `including_subagents` adds its
+children's tokens and cost. Pass `include_children=False` to leave the
+children out; `get_trace_family(trace_id=...)` lists the raw traces of the
+lead and every child ([Sub-agents](/docs/core-concepts/sub-agents)).
+
+## What the record does not hold
+
+A trace records the full trajectory by default (`capture: "full"`). A
+deployment that must not keep prompts sets `capture: "default"`, and the
+trajectory says exactly what is missing:
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
+
+@tools.register_tool("get_weather")
+def get_weather(city: str) -> dict:
+    """Get the current weather for a city."""
+    return {"city": city, "temperature_c": 25}
+
+async def main():
+    agent = OmniCoreAgent(
+        name="private",
+        system_instruction="Use get_weather. Answer in plain text, in one sentence.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        local_tools=tools,
+        agent_config={"governance_config": {"enabled": True}},
+        telemetry_config={"capture": "default"},
+    )
+    result = await agent.run("What is the weather in Accra?")
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    print("evidence_status:", trajectory["evidence_status"])
+    step = trajectory["steps"][0]
+    call = step["model_calls"][0]
+    print("model request:", call["request_capture"]["state"], "| tokens still:", call["facts"]["tokens"])
+    print("model response:", call["response_capture"])
+    tool = step["tool_calls"][0]
+    print("tool arguments:", tool["arguments"], "| result:", tool["result_capture"]["state"])
+    print("  ", tool["result"], tool["result_capture"])
+    gaps = trajectory["capture_gaps"]
+    print(len(gaps), "capture gaps, e.g.", gaps[0])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+evidence_status: partial
+model request: not_recorded | tokens still: {'input': 1471, 'output': 19, 'total': 1490, 'cached_input': 1024}
+model response: {'state': 'not_recorded', 'reason': 'model response capture disabled by telemetry policy', 'reference': None}
+tool arguments: {'city': '[REDACTED]'} | result: redacted
+   {'tool_name': 'get_weather', 'args': '[REDACTED]', 'status': 'success', 'data': {'city': 'Accra', 'temperature_c': 25}, 'message': None} {'state': 'redacted', 'reason': None, 'reference': None}
+15 capture gaps, e.g. {'type': 'span_input', 'id': 'span_bff68a036d464dbc8089d7a07f271027', 'state': 'not_recorded'}
+```
+
+- The prompts and responses were not recorded, but the **facts** were:
+  tokens, cost, finish reason and latency are metadata, kept under every
+  capture setting.
+- Under governance, with a capture that records neither prompts nor
+  responses, tool arguments are recorded as `[REDACTED]`: the record shows
+  which arguments a call used, not their values. With `capture: "full"` the
+  model's own call already holds them, so they are recorded as written,
+  through the privacy filter and `redact_keys`.
+- Every payload has a capture state: `available`, `redacted`, `truncated`,
+  `offloaded`, `not_recorded`, `missing` or `inferred`. `capture_gaps`
+  lists every record whose payload is not all there, and any gap makes
+  `evidence_status` `partial`.
+
+What is recorded, and how to change it, is on [Telemetry and
+exporters](/docs/how-to-guides/observability#what-a-trace-records); what is
+redacted is on [Privacy](/docs/core-concepts/privacy).
+
+## Over HTTP
+
+[OmniServe](/docs/how-to-guides/omniserve) serves the same structures. A
+server on port 8123:
+
+```python
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+from omnicoreagent.serve import OmniServe, OmniServeConfig
+
+tools = ToolRegistry()
+
+@tools.register_tool("get_weather")
+def get_weather(city: str) -> dict:
+    """Get the current weather for a city."""
+    return {"city": city, "temperature_c": 25}
+
+agent = OmniCoreAgent(
+    name="weather",
+    system_instruction="Use get_weather. Answer in plain text, in one sentence.",
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    local_tools=tools,
+)
+
+if __name__ == "__main__":
+    OmniServe(agent, config=OmniServeConfig(port=8123)).start()
+```
+
+Run once, then read the run and its segment, with the `run_id` and
+`trace_id` the run returned:
+
+```bash
+curl -s localhost:8123/run/sync -H 'content-type: application/json' \
+  -d '{"query": "What is the weather in Lagos?", "session_id": "demo"}'
+
+curl -s localhost:8123/runs/$RUN_ID/trajectory | python3 -c "
+import json, sys
+story = json.load(sys.stdin)
+print(story['status'], len(story['segments']), 'segment(s)', story['totals']['tool_calls'])"
+
+curl -s localhost:8123/telemetry/traces/$TRACE_ID/trajectory | python3 -c "
+import json, sys
+t = json.load(sys.stdin)
+for step in t['steps']:
+    for call in step['tool_calls']:
+        print(step['step'], call['tool_name'], call['arguments'], call['outcome'])
+print(t['final']['output']['response'])"
+```
+
+```text
+completed 1 segment(s) {'total': 1, 'by_outcome': {'success': 1, 'error': 0, 'rejected': 0, 'timeout': 0, 'cancelled': 0, 'denied': 0, 'awaiting_approval': 0}}
+1 get_weather {'city': 'Lagos'} success
+The weather in Lagos is 25°C.
+```
+
+| Route | Returns |
+|---|---|
+| `GET /runs/{run_id}/trajectory` | The whole run, as `get_run_trajectory`, through the privacy filter's `public` boundary |
+| `GET /telemetry/traces/{trace_id}/trajectory` | One segment, as `get_trajectory(trace_id)` |
+| `GET /telemetry/runs/{run_id}/trajectory` | The run's latest segment, as `get_trajectory(run_id=...)` |
+
+An unknown run is a `404` with `{"detail":"No run nope"}`; an unknown or
+pruned trace, `{"detail":"Trajectory not found"}`.
+
+## How it works
+
+<Steps>
+  <Step title="Every run records typed events and spans">
+    As the run goes, the runtime records a span for each piece of work (the
+    run, each step, each model call, each tool call) and an event for each
+    thing that happened in it, into the trace store.
+  </Step>
+  <Step title="Facts are metadata; payloads follow the capture policy">
+    IDs, links between records, tokens, cost, outcomes and policy decisions
+    are event metadata, kept under every setting. Prompts, responses, tool
+    arguments and results are payloads, recorded as `capture` and the
+    `record_*` settings say, redacted, and truncated or offloaded when large.
+  </Step>
+  <Step title="The trajectory is built from the stored trace">
+    `get_trajectory` reads the trace and places every event exactly once: in
+    the request, a step, a model call, a tool call, the final section, or an
+    `other_events` list where it occurred. Nothing is hidden, and nothing is
+    stored twice: the trajectory is computed when you ask for it.
+  </Step>
+  <Step title="A run is its segments">
+    The run's record keeps the IDs of its traces. `get_run_trajectory` reads
+    each one and sums them.
+  </Step>
+</Steps>
+
+## The shape at a glance
+
+A trajectory (`omnicoreagent.trajectory/v1`) is a plain dict. Every entry of
+a list has every field, `None` when it does not apply.
+
+| Field | What it holds |
+|---|---|
+| `trace_id`, `run_id`, `session_id`, `agent_id`, `parent_trace_id` | Identity; a child run names its parent. |
+| `status` | The segment: `completed`, `failed`, `cancelled`, `timeout`, `suspended` (paused for a person or a budget), `running`, and others. |
+| `evidence_status`, `incomplete` | `complete`; `partial` when there is a capture gap or a write was lost (`incomplete` is then `True`); `unknown` for a trace recorded before this was kept. |
+| `execution_surface` | How the run was entered: `interactive` (your code), `serve`, `background`, `headless` (the CLI). |
+| `versions` | Content hashes of the agent, prompt, tool schemas, memory, telemetry and privacy settings: any change to them changes these. |
+| `tags`, `provenance` | What you passed to `agent.run(..., tags=[...], provenance={...})`. |
+| `request` | The user message and its capture state. |
+| `harness` | The run's header (below). |
+| `steps` | Each step (below). |
+| `final` | The terminal event: `type` (`final_answer`, `runtime_error` or `final_state`), `output`, `error`, and `final_model_response_event_id`. |
+| `totals` | The run's totals (below). |
+| `outcomes` | What the run turned out to be worth, attached later ([Outcomes and training](/docs/how-to-guides/outcomes-and-training)). |
+| `capture_gaps` | Each record whose payload is not all there: `type`, `id`, `state`. |
+| `runtime_messages`, `other_events`, `tool_calls_outside_steps` | Text the runtime added outside a step, events that fit no named slot, and calls recorded outside any step (normally empty). |
+
+### The harness
+
+The run's `run_configuration` event, recorded before the first step under
+every capture setting. Never credentials.
+
+| Field | What it holds |
+|---|---|
+| `agent`, `model` | The agent's name and version (yours, from `agent_config["agent_version"]`, or a content hash), the provider, model and generation settings. |
+| `limits`, `context_management`, `memory`, `tool_offload`, `features` | The settings the loop ran with. |
+| `tools` | The tool catalog the model was offered: `count`, sorted `names`, `by_provider`, `schema_digest`. |
+| `system_prompt`, `system_prompt_text` | Its digest and size; the text itself only when model prompts are recorded. |
+| `mcp_servers` | Each MCP server's `status`, `server_info`, `protocol_version`, `tool_count`, `reconnects` and `error`; never its command, URL, environment or headers. |
+| `governance` | `enabled` and the policy's `policy_hash`. |
+| `privacy` | Whether the privacy filter is on, which boundaries it `redacted` (`telemetry`, `memory`, `workspace`, `stream`, `public`, `model_io`), and the `categories`. It is in words because a reader cannot tell from the trace whether it was redacted. |
+| `security_warnings` | Each with a `code` and message: `ungoverned_host_scripts`, `sandbox_unused_without_governance`, `host_scripts_not_contained`, `host_execution_not_contained`, `tool_offload_refused_by_policy`. |
+| `fingerprints` | Of the privacy, telemetry and guardrail settings. |
+| `project_instructions` | When [`AGENTS.md`](/docs/core-concepts/agents-md) is configured: each file used (path, size, digest), and each skipped, with why. |
+
+### Each step
+
+| Field | What it holds |
+|---|---|
+| `step` | The run's step number; a resumed segment continues the count. |
+| `resumed` | `True` for the step that ran the calls a person approved. |
+| `status`, `started_at`, `ended_at`, `duration_ms` | The step's span. |
+| `context` | Each `context_assembly` (message and tool counts, `observation_event_ids` in context, `new_observation_event_ids` delivered for the first time) and `context_compression`. |
+| `model_calls`, `tool_calls` | Below. |
+| `runtime_messages` | Text the runtime added (the current date, an empty-response retry, loop recovery). |
+
+### Each model call
+
+| Field | What it holds |
+|---|---|
+| `purpose` | `agent_turn`, or `context_summary` for internal summarization. |
+| `outcome` | `ok`, `error`, or `no_response`: stopped before it was made (a budget) or cut off in flight. |
+| `request`, `request_capture` | The messages and tools sent, when model prompts are recorded. |
+| `response`, `response_capture` | What the model answered, including its raw tool-call argument text, when responses are recorded. |
+| `facts` | `None` when there was no response; otherwise the facts below. |
+| `new_observation_event_ids` | The tool observations this call saw for the first time: the link from a result to the decision it informed. |
+
+`facts` holds `tokens` (`input`, `output`, `total`, and `cached_input` and
+`reasoning` when the provider reports them), `estimated_cost_usd` with
+`cost_source` (`provider_response` when the response came with its cost,
+as LiteLLM attaches for models it knows, or `price_table` when it was
+computed from LiteLLM's prices afterwards; either way an estimate, not an
+invoice),
+`latency_ms`, `time_to_first_delta_ms` for streamed text, `finish_reason`,
+`refused`, `provider_model` and `provider_response_id`, `request_settings`,
+`policy_version` (the model the provider served, with its fingerprint when
+reported), `attempts` and `retries` (each failed attempt, its message
+redacted), and, for a thinking model, `continuation` (counts and a digest;
+signatures and encrypted values are never recorded).
+
+### Each tool call
+
+| Field | What it holds |
+|---|---|
+| `tool_name`, `provider`, `server` | The tool; `server` is the MCP server for an MCP tool. |
+| `outcome` | `success`, `error`, `denied`, `awaiting_approval`, `timeout`, `cancelled`, or `rejected` (invalid arguments, unknown tool). |
+| `rejection_reason` | For a rejected call: `invalid_arguments`, `unknown_tool` or `arguments_rejected`. |
+| `raw_arguments`, `arguments` | The model's exact text (even invalid JSON), and the parsed arguments. |
+| `result`, `result_capture`, `error` | What the tool returned, or its error. |
+| `observation` | The exact message returned to the model: `content`, `capture`, `tool_result_event_id`. |
+| `governance` | Every policy decision about the call (below). |
+| `subagent` | For a delegation: `child_trace_id`, `child_run_id`, `child_trajectory`. |
+| `code_calls` | For `run_code`: every call the program made, each shaped like this. |
+| `executions`, `workspace_sync` | For `execute` and skill scripts: each sandboxed command (provider, exit code, duration, output sizes, the command and output when tool results are recorded), and the files copied in, written back, or skipped. |
+| `reconnects` | For an MCP call: each reconnect of a dropped session, with its outcome and reason. |
+
+Each `governance` entry has `effect` (`allow`, `ask`, `deny`), `capability`,
+`reason_code` (`matched_allow`, `matched_ask`, `approved`, `denied`,
+`expired_policy`, …), `matched_rule_ids`, and for a person's decision
+`approval_id` and `approved_by` or `denied_by` (`system` when nobody decided
+in time; [Approvals](/docs/core-concepts/approvals#who-decided-in-the-evidence)).
+
+### Totals
+
+`steps`; `model_calls` (`total`, `agent_turn`, `context_summary`, `failed`);
+`tokens`; `estimated_cost_usd` and `cost_complete` (`False` when any call
+had no known price); `model_latency_ms`; `model_retries`; `tool_calls`
+(`total` and `by_outcome`); `compressions`; `runtime_messages` by kind;
+`subagents` (`count`, `child_trace_ids`); `executions` (sandbox `sessions`,
+`commands`, `failed`, `timed_out`); `workspace_changes`, each `via` a tool
+or the sandbox; `offloaded_results`; `duration_ms`; and
+`including_subagents` (tokens, cost, `cost_complete` with the children).
+
+### A whole run
+
+`get_run_trajectory(run_id)` returns `run_id`, `session_id`, `agent_name`,
+`status` (the run's), `attempt` and `previous_attempts`, `segments` (each
+with `trace_id`, `status`, `trajectory` and `trace_kept`), `traces_missing`,
+`totals`, `tool_calls` and `approvals` (from the run's record), and `usage`.
+The run's saved conversation is not included.
+
+Traces are kept 7 days by default and run records 30. After a segment's trace
+is pruned, it stays in the story with `trace_kept: False` and `trajectory:
+None`; `traces_missing` counts them, and `totals` cover only the traces still
+kept (empty, not zero, when none is). The record's `usage` remains. See [how
+long a run's evidence is
+kept](/docs/core-concepts/durable-runs#how-long-a-runs-evidence-is-kept).
+
+## Options
+
+| Call | Parameters |
+|---|---|
+| `get_trajectory` | `trace_id` (or first positional), or `run_id` for the run's latest segment; `include_children=True`; `max_depth=5` |
+| `get_run_trajectory` | `run_id` |
+| `get_trace`, `get_trace_family`, `list_telemetry_traces` | The raw trace, a lead with its children, or every trace matching filters ([Telemetry and exporters](/docs/how-to-guides/observability#read-the-raw-trace)) |
+
+What is recorded is set by `telemetry_config`: `capture` (`"full"` by
+default, or `"default"`), the `record_*` switches, and `retention_days`
+([telemetry settings](/docs/reference/telemetry-config)). Every method is in
+the [OmniCoreAgent reference](/docs/reference/omnicoreagent).
+
+## When things go wrong
+
+<AccordionGroup>
+  <Accordion title="get_trajectory returns None">
+    No stored trace has that ID: a typo, a trace from another store (another
+    workspace, or `storage: "memory"` in another process), or one pruned
+    after `retention_days` (7 by default). `get_run_trajectory` returns
+    `None` when no run record has that ID; a record whose traces are gone
+    has `trace_kept: False` segments instead.
+  </Accordion>
+
+  <Accordion title="TypeError: get_trajectory() requires trace_id or run_id">
+    Pass one of them:
+
+    ```text
+    TypeError: get_trajectory() requires trace_id or run_id
+    ValueError: Use either identifier or trace_id/run_id
+    ```
+
+    The second is a positional ID together with `run_id=`.
+  </Accordion>
+
+  <Accordion title="The trajectory has only half the run">
+    The run paused and resumed: `get_trajectory(run_id=...)` is its latest
+    segment only (the others are in `other_trace_ids_for_run`). Read the
+    whole run with `get_run_trajectory(run_id)`.
+  </Accordion>
+
+  <Accordion title="request and response are None, arguments are [REDACTED]">
+    The agent records with `capture: "default"`, or a `record_*` switch is
+    off. Check `request_capture` and `response_capture`: `not_recorded` says
+    why. Tokens, cost and outcomes are still there.
+  </Accordion>
+
+  <Accordion title="estimated_cost_usd is 0.0 and cost_complete is False">
+    The model has no published price (a model behind `base_url`, for
+    example). The tokens are right; the cost is unknown, not zero.
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Telemetry and exporters" icon="magnifying-glass-chart" href="/docs/how-to-guides/observability">
+    What is recorded, where it is kept, the live stream, and exporting to OTLP, LangSmith, Opik and JSONL.
+  </Card>
+  <Card title="Outcomes and training" icon="graduation-cap" href="/docs/how-to-guides/outcomes-and-training">
+    Attach what a run turned out to be worth, and read runs back as training records.
+  </Card>
+  <Card title="Headless runs" icon="terminal" href="/docs/how-to-guides/headless-runs">
+    Run from the command line and keep the evidence.
+  </Card>
+  <Card title="Harbor" icon="flask" href="/docs/how-to-guides/harbor">
+    Run the agent on benchmarks, with each trial's trajectory.
+  </Card>
+</CardGroup>

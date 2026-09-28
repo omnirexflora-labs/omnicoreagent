@@ -128,4 +128,22 @@ D5–D8 continue after the release; the docs site updates without one.
     auth, configuration (rewrite)
   - Agent in a container — the image, keys, stores, health (rewrite)
   Closed by its stranger test.
-- D8 See and Improve: after D7.
+  Done (#303-#305): the writers' findings fixed first (traces reload
+  complete, run timeouts name the run, SQL stores close, listed approvals
+  carry arguments), and four settings made to do what their names say
+  (store URLs required, misfire default run_once, cancel_previous
+  interrupts, abandoned traces pruned). Its stranger test runs on the next
+  build (an ops desk: durable runs, a crash, background tasks, OmniServe, a
+  container).
+- D8 See and Improve (started 2026-09-28). Five pages, in the shape:
+  - Read a run (new) — get_trajectory and get_run_trajectory, segments,
+    steps, model and tool calls, decisions, totals, capture gaps; moved out
+    of the observability page
+  - Telemetry and exporters (rewrite of observability) — capture presets,
+    storage, the event stream and cursors, metrics, OTLP / LangSmith / Opik /
+    JSONL exporters, payloads, retention
+  - Outcomes and training records (new) — record_outcome, training
+    records, exporting runs for evaluation
+  - Headless runs in CI (rewrite)
+  - Harbor and Terminal-Bench (rewrite)
+  Closed by its stranger test.

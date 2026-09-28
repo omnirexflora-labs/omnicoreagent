@@ -91,7 +91,9 @@
                     {
                         "group": "See and Improve",
                         "pages": [
+                            "docs/how-to-guides/read-a-run",
                             "docs/how-to-guides/observability",
+                            "docs/how-to-guides/outcomes-and-training",
                             "docs/how-to-guides/headless-runs",
                             "docs/how-to-guides/harbor"
                         ]
