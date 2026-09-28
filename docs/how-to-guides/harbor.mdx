@@ -507,7 +507,14 @@ all of them; `doctor` and `results` are in the
     This runtime is a development build (0.4.2.dev25) with no source to build a wheel from, so the container cannot be given the same one. Pass --agent-kwarg install_spec=<requirement or URL> or wheel=<path>.
     ```
 
-    The container never silently falls back to whatever PyPI has.
+    The container never silently falls back to whatever PyPI has. Give the
+    doctor the same `--ak` you give `run`, and it checks what the container
+    will install:
+
+    ```bash
+    omnicoreagent harbor doctor -m gpt-5.4-mini --ak wheel=./omnicoreagent-0.4.2.dev25-py3-none-any.whl
+    omnicoreagent harbor run -p ./fix-average -m gpt-5.4-mini --ak wheel=./omnicoreagent-0.4.2.dev25-py3-none-any.whl
+    ```
   </Accordion>
 
   <Accordion title="Dry run failed: No tasks matched the filter(s)">

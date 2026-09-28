@@ -85,7 +85,9 @@ def _docker_server_version() -> str | None:
     return found if completed.returncode == 0 and found else None
 
 
-def _install_only_trial(model: str, environment: dict[str, str]) -> str | None:
+def _install_only_trial(
+    model: str, environment: dict[str, str], agent_kwargs: tuple[str, ...] = ()
+) -> str | None:
     """Install the agent into a throwaway task container; the error, or None."""
     from omnicoreagent.cli.harbor_results import summarize_job
 
@@ -103,6 +105,7 @@ def _install_only_trial(model: str, environment: dict[str, str]) -> str | None:
                 sys.executable, "-m", "harbor.cli.main", "run",
                 "-p", str(task), "-a", DEFAULT_AGENT, "-m", model,
                 "-o", str(jobs), "-n", "1", "-y", "-q", "--install-only",
+                *(item for kwarg in agent_kwargs for item in ("--ak", kwarg)),
             ],
             env=environment,
             capture_output=True,
@@ -155,17 +158,26 @@ def _check_model(report: _Report, model: str | None) -> str | None:
     return routed
 
 
-def _check_runtime(report: _Report) -> None:
+def _check_runtime(
+    report: _Report, *, spec: str | None = None, wheel: str | None = None
+) -> None:
     version, root = host_runtime()
     try:
         kind, source = install_source(
-            version=version, source_root=root, build=lambda path: f"a wheel built from {path}"
+            version=version,
+            source_root=root,
+            spec=spec,
+            wheel=wheel,
+            build=lambda path: f"a wheel built from {path}",
         )
     except ValueError as exc:
         report.line("FAIL", "runtime", str(exc))
         return
     if kind == "spec":
         report.line("ok", "runtime", f"{version}; the container installs {source}")
+        return
+    if wheel:
+        report.line("ok", "runtime", f"{version}; the container installs the wheel {source}")
         return
     # A development runtime is built into a wheel with uv, or else with this
     # Python's pip; a venv made by uv has no pip, and the doctor said "ok"
@@ -188,7 +200,14 @@ def _check_runtime(report: _Report) -> None:
     is_flag=True,
     help="Also install the agent into a throwaway task container (takes a few minutes).",
 )
-def doctor_command(model: str | None, container: bool) -> None:
+@click.option(
+    "--ak",
+    "--agent-kwarg",
+    "agent_kwargs",
+    multiple=True,
+    help="As for `run`: install_spec=<requirement or URL> or wheel=<path> is what the container installs.",
+)
+def doctor_command(model: str | None, container: bool, agent_kwargs: tuple[str, ...]) -> None:
     """Check that a Harbor trial of this agent can run on this machine."""
     report = _Report()
     click.echo("omnicoreagent harbor doctor")
@@ -204,7 +223,10 @@ def doctor_command(model: str | None, container: bool) -> None:
     else:
         report.line("FAIL", "docker", "no Docker daemon answers `docker info`; install or start Docker")
     routed = _check_model(report, model)
-    _check_runtime(report)
+    # The same --ak a trial would get: a development build with no source
+    # could never pass without it (the See and Improve stranger test).
+    chosen = dict(item.split("=", 1) for item in agent_kwargs if "=" in item)
+    _check_runtime(report, spec=chosen.get("install_spec"), wheel=chosen.get("wheel"))
     if container:
         if report.failed or not routed:
             report.line("skip", "container", "fix the checks above (and pass -m) first")
@@ -213,7 +235,7 @@ def doctor_command(model: str | None, container: bool) -> None:
             environment.update(
                 credential_environment(environment, ["-m", routed], dotenv=Path.cwd() / ".env")
             )
-            error = _install_only_trial(routed, environment)
+            error = _install_only_trial(routed, environment, agent_kwargs)
             if error:
                 report.line("FAIL", "container", error)
             else:

@@ -36,6 +36,12 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- `omnicoreagent harbor doctor` takes `--ak install_spec=...` or
+  `--ak wheel=...`, as `run` does: a development build with no source could
+  never pass it.
+- A run with nothing priced says `None` for its cost everywhere; the total
+  including sub-agents said `0.0`.
+- Every training-record step has `resumed` (it was only on resumed steps).
 - Pruned traces stay pruned: they came back on the next start while their
   records were still in the log, and `prune()` reported 0 when it removed
   archived traces.

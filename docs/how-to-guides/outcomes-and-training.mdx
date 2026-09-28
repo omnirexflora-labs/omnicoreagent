@@ -210,22 +210,23 @@ the other two can find it, and the traces live in the default place,
 | `totals` | `tokens`, `estimated_cost_usd`, `duration_ms`, summed over segments |
 | `evidence_status` | Whether the trace is complete |
 | `steps` | One entry per model turn, below |
-| `final_answer` | The run's answer. (In 0.4.1 it is always `null`: read the last step's `response["content"]`, as above, which works in every release) |
+| `final_answer` | The run's answer. (Only in 0.4.1 it is `null`; the last step's `response["content"]`, as above, works in every release) |
 
 Each step:
 
 | Field | What |
 |---|---|
 | `step`, `segment` | The step number, and which trace segment it came from |
-| `messages` | Every message the model was sent at this step, as sent |
+| `messages` | Every message the model was sent at this step, as sent: with the session's earlier turns when the run continued a session (a trainer wanting one exchange per record gives each run its own `session_id`) |
 | `tools` | The tool definitions it was offered |
 | `response` | What it produced: `content`, `tool_calls`, `finish_reason`, `refusal`, `usage` |
 | `finish_reason`, `tokens` | Why it stopped; its tokens in and out |
 | `token_details` | The tokens it chose and their probabilities, when recorded (below); otherwise `null` |
 | `tool_calls` | Each call the step made: `name`, `arguments` (as the model wrote them), `outcome`, `observation` (what the tool answered), `error` |
 
-A step that only ran calls a person approved, on resume, has
-`"resumed": True`, no messages, and those calls in `tool_calls`.
+Every step has `resumed`: `False` for a model turn; `True` for a step that
+only ran calls a person approved, on resume, with no messages and those calls
+in `tool_calls`.
 
 ### An outcome
 

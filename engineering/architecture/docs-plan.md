@@ -146,4 +146,9 @@ D5–D8 continue after the release; the docs site updates without one.
     records, exporting runs for evaluation
   - Headless runs in CI (rewrite)
   - Harbor and Terminal-Bench (rewrite)
-  Closed by its stranger test.
+  Done (#306-#309): its stranger test built an evaluation loop from the
+  pages alone, 5 of 5 features working (read runs, live telemetry and OTLP,
+  outcomes and training records, headless CI, a Harbor trial whose file tools
+  saw the task's files). Its findings fixed in #309.
+- The docs rewrite (D1-D8) is complete: every section written page by page,
+  every example run, each closed by a stranger test.

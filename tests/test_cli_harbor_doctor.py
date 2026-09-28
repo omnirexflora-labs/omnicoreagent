@@ -129,7 +129,7 @@ def test_the_container_check_runs_an_install_only_trial(healthy, monkeypatch):
     """What it hands Harbor: this agent, the model, and --install-only."""
     handed = {}
 
-    def fake_install_only(model, environment):
+    def fake_install_only(model, environment, agent_kwargs=()):
         handed["model"] = model
         handed["key_in_env"] = environment.get("OPENAI_API_KEY") == KEY
         return None  # no error
@@ -145,7 +145,7 @@ def test_the_container_check_runs_an_install_only_trial(healthy, monkeypatch):
 
 def test_a_failed_container_install_is_reported_with_its_reason(healthy, monkeypatch):
     monkeypatch.setattr(
-        healthy, "_install_only_trial", lambda model, env: "NonZeroAgentExitCodeError: No matching distribution"
+        healthy, "_install_only_trial", lambda model, env, agent_kwargs=(): "NonZeroAgentExitCodeError: No matching distribution"
     )
 
     result = _doctor(["-m", "gpt-5.6-terra", "--container"], env={"LLM_API_KEY": KEY})
@@ -153,3 +153,25 @@ def test_a_failed_container_install_is_reported_with_its_reason(healthy, monkeyp
     assert result.exit_code == 1
     assert "FAIL  container" in result.output
     assert "No matching distribution" in result.output
+
+
+def test_a_development_build_passes_with_the_wheel_run_would_use(healthy, monkeypatch, tmp_path):
+    # The See and Improve stranger test (2026-09-28): a development build with
+    # no source could never pass the doctor, whose error said to pass
+    # --agent-kwarg wheel=..., an option only `run` had.
+    monkeypatch.setattr(healthy, "host_runtime", lambda: ("0.4.2.dev32", None))
+    wheel = tmp_path / "omnicoreagent-0.4.2.dev32-py3-none-any.whl"
+    wheel.write_bytes(b"")
+
+    without = _doctor(["-m", "gpt-5.6-terra"], env={"LLM_API_KEY": KEY})
+    assert without.exit_code == 1 and "FAIL  runtime" in without.output
+
+    with_wheel = _doctor(["-m", "gpt-5.6-terra", "--ak", f"wheel={wheel}"], env={"LLM_API_KEY": KEY})
+    assert with_wheel.exit_code == 0, with_wheel.output
+    assert "ok    runtime" in with_wheel.output and wheel.name in with_wheel.output
+
+
+def test_an_install_spec_is_what_the_container_installs(healthy, monkeypatch):
+    monkeypatch.setattr(healthy, "host_runtime", lambda: ("0.4.2.dev32", None))
+    result = _doctor(["--ak", "install_spec=omnicoreagent==0.4.1"], env={"LLM_API_KEY": KEY})
+    assert "omnicoreagent==0.4.1" in result.output and "FAIL  runtime" not in result.output
