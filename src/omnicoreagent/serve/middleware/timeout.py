@@ -53,8 +53,17 @@ def add_timeout_middleware(app: FastAPI, config: OmniServeConfig) -> None:
 
 
 def _route_manages_timeout(path: str) -> bool:
-    """Return true for routes that produce their own structured timeout response."""
+    """Return true for routes that produce their own structured timeout response.
+
+    A run route's deadline cancels the run cleanly (recorded as a timeout)
+    and names the run in its 504; the middleware's equal deadline used to
+    win the race, with no run_id and the run recorded as cancelled.
+    """
     parts = [part for part in path.strip("/").split("/") if part]
+    if parts[-2:] == ["run", "sync"]:
+        return True
+    if len(parts) >= 3 and parts[-3] == "runs" and parts[-1] == "resume":
+        return True
     for index, part in enumerate(parts):
         if part != "background":
             continue

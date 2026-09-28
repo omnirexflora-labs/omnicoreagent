@@ -20,6 +20,19 @@ Every release, with its notes, is also on
 - A resumed run's totals count a step once, not once per segment.
 - The run header says which boundaries redact personal data
   (`harness.privacy`), since the trace is redacted either way.
+- A finished trace read back by a new process was marked incomplete, its
+  evidence partial: the log's records of a trace already restored from the
+  archive counted as damage. It reads back complete.
+- A timed-out `/run/sync` (or resume) names its run in the 504 (`run_id`),
+  and the run's record says `timeout`, as its trace does.
+- `await memory_router.close()` closes a SQL store's share of its pool; the
+  last store using a database's pool closes it.
+- A durable memory store selected without its URL (`DATABASE_URL`,
+  `REDIS_URL`, `MONGODB_URI`) falls back to memory with a `RuntimeWarning`,
+  not only a log line nobody saw.
+- `list_runs()` approvals carry the call's `arguments`, as `get_run()`'s do.
+- `omniserve run` with a Redis or MongoDB task store and no URL is a clean
+  config error, not a traceback.
 - `privacy_config["redact_model_io"]` now keeps personal data from the model
   provider. It was accepted but never applied.
 - A call that crosses a `model_tokens` budget is recorded in full, and the

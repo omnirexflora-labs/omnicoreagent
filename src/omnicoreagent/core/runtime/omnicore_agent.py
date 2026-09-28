@@ -1042,7 +1042,17 @@ class OmniCoreAgent:
                 boundary="public",
             )
         except asyncio.CancelledError as exc:
-            await self._finish_run_record(run_tracker, "cancelled", exc, budgets=run_budgets)
+            # A deadline (run_with_timeout) cancels the run too; the record
+            # says which, as the trace does.
+            if current_stop_reason() == "timeout":
+                await self._finish_run_record(
+                    run_tracker,
+                    "timeout",
+                    TimeoutError("The run's deadline passed"),
+                    budgets=run_budgets,
+                )
+            else:
+                await self._finish_run_record(run_tracker, "cancelled", exc, budgets=run_budgets)
             if trace_context is not None and not trace_finalizing:
                 stopped_status = (
                     TraceStatus.TIMEOUT
@@ -1266,15 +1276,7 @@ class OmniCoreAgent:
         record = await self._run_record(run_id)
         if record is None:
             return None
-        # Each approval with the call as the model made it: an approver in
-        # another process has only this record, not the run's result.
-        return {
-            **record,
-            "approvals": [
-                {**approval, "arguments": _public_approval(approval, record)["arguments"]}
-                for approval in record.get("approvals") or []
-            ],
-        }
+        return _with_approval_arguments(record)
 
     async def _run_record(self, run_id: str) -> Optional[Dict[str, Any]]:
         """The run's record exactly as stored, for the runtime's own use.
@@ -1686,9 +1688,11 @@ class OmniCoreAgent:
         if not supports_run_state(self.memory_router):
             return []
         try:
-            return await self.memory_router.list_run_states(session_id, status, limit)
+            records = await self.memory_router.list_run_states(session_id, status, limit)
         except RunStateUnsupported:
             return []
+        # As get_run: an approver deciding from the list sees each call.
+        return [_with_approval_arguments(record) for record in records]
 
     async def _end_trace_after_failure(
         self,
@@ -2695,6 +2699,18 @@ def _privacy_summary(config: Any) -> Dict[str, Any]:
             name for name in boundaries if config.enabled and getattr(config, f"redact_{name}")
         ],
         "categories": list(config.categories),
+    }
+
+
+def _with_approval_arguments(record: Dict[str, Any]) -> Dict[str, Any]:
+    """A run record with each approval's call as the model made it: an
+    approver in another process has only this record, not the run's result."""
+    return {
+        **record,
+        "approvals": [
+            {**approval, "arguments": _public_approval(approval, record)["arguments"]}
+            for approval in record.get("approvals") or []
+        ],
     }
 
 

@@ -1,4 +1,5 @@
 import inspect
+import warnings
 from typing import Any, Optional, Callable
 import os
 
@@ -8,6 +9,18 @@ from omnicoreagent.core.logging import logger
 from omnicoreagent.core.memory_store.utils import normalize_metadata
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
 from omnicoreagent.core.memory_store.utils import normalize_content
+
+
+def _warn_fallback(backend: str, variable: str) -> None:
+    # A warning Python shows, not only a log line: the library's logger has
+    # no handler by default, and a durable store that quietly is not one
+    # loses every run at the next restart.
+    message = (
+        f"{backend} memory selected but {variable} is not set; using in_memory "
+        "(nothing survives a restart)"
+    )
+    logger.warning(message)  # where an application's logging is set up
+    warnings.warn(message, RuntimeWarning, stacklevel=3)
 
 
 class MemoryRouter:
@@ -42,7 +55,7 @@ class MemoryRouter:
         elif self.memory_store_type == "sql":
             db_url = os.environ.get("DATABASE_URL")
             if db_url is None:
-                logger.warning("SQL memory selected but DATABASE_URL is not set; using in_memory (nothing survives a restart)")
+                _warn_fallback("SQL", "DATABASE_URL")
                 self.memory_store = InMemoryStore()
             else:
                 DatabaseMessageStore = load_optional(
@@ -57,7 +70,7 @@ class MemoryRouter:
         elif self.memory_store_type == "redis":
             redis_url = os.environ.get("REDIS_URL")
             if redis_url is None:
-                logger.warning("Redis memory selected but REDIS_URL is not set; using in_memory (nothing survives a restart)")
+                _warn_fallback("Redis", "REDIS_URL")
                 self.memory_store = InMemoryStore()
             else:
                 RedisMemoryStore = load_optional(
@@ -72,7 +85,7 @@ class MemoryRouter:
         elif self.memory_store_type == "mongodb":
             uri = os.environ.get("MONGODB_URI")
             if uri is None:
-                logger.warning("MongoDB memory selected but MONGODB_URI is not set; using in_memory (nothing survives a restart)")
+                _warn_fallback("MongoDB", "MONGODB_URI")
                 self.memory_store = InMemoryStore()
             else:
                 db_name = os.environ.get("MONGODB_DB_NAME", "omnicoreagent")
