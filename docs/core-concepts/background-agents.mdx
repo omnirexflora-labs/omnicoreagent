@@ -165,8 +165,9 @@ only while a manager is **started**: `start()` runs the worker loop until
 Every schedule but `manual` also takes `start_at`, `end_at`,
 `jitter_seconds` (a fixed offset, the same for every worker) and
 `misfire_policy`: what happens to times missed while no manager was running.
-`skip_missed` (the default) and `run_once` queue one run for the missed
-times, then continue from now; `queue_all` queues a run for each one missed.
+`run_once` (the default) queues one run for the missed times, then continues
+from now; `skip_missed` runs nothing for a time missed by more than a minute
+and waits for the next; `queue_all` queues a run for each one missed.
 
 Want an interval task to run at once too? Call `run_now` after registering.
 `pause_task` stops a schedule (runs already queued go on) and `resume_task`
@@ -215,7 +216,7 @@ first: completed | Hello!
 |---|---|
 | `skip_if_running` (default) | is recorded as `skipped` and never runs |
 | `queue_next` | waits in the queue until the earlier run ends |
-| `cancel_previous` | runs; the earlier one is asked to cancel: a queued run never starts, a running one is recorded `cancelled` when its attempt ends |
+| `cancel_previous` | runs; the earlier one is cancelled: a queued run never starts, a running one is interrupted within a heartbeat (a quarter of the lease) and recorded `cancelled` |
 | `allow_parallel` | runs as soon as a worker is free |
 
 A run waiting for a person (below) still holds its task: under

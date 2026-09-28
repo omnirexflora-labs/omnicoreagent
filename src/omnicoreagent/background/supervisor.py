@@ -851,6 +851,17 @@ class BackgroundSupervisor:
                 self.fence_lost_run(run_id)
                 return
             try:
+                if await self.task_store.is_cancel_requested(run_id):
+                    # A newer run replaced it (cancel_previous), or someone
+                    # cancelled it from another process: stop it now, not
+                    # after it has spent and acted for its whole attempt.
+                    task = self.active_agent_tasks.get(run_id)
+                    if task is not None and not task.done():
+                        task.cancel()
+                    return
+            except Exception:
+                pass
+            try:
                 latest = await self.task_store.get_run(run_id)
                 if latest and latest.status in {RunStatus.RUNNING, RunStatus.RETRYING}:
                     await self.emit_run("background_run_heartbeat", latest)

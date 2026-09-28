@@ -246,6 +246,19 @@ class InMemoryTelemetryStore(AbstractTelemetryStore):
         async with self._lock:
             return self._traces.get(trace_id)
 
+    async def trace_ids_abandoned_before(self, cutoff: datetime) -> set[str]:
+        """Running traces with no activity since ``cutoff``: their process is
+        gone (it stopped mid-run), so nothing will ever end them. A trace
+        waiting for a person is suspended, not running, and never listed."""
+        async with self._lock:
+            return {
+                trace.trace_id
+                for trace in self._traces.values()
+                if trace.status == TraceStatus.RUNNING
+                and trace.ended_at is None
+                and _last_activity(trace) < cutoff
+            }
+
     async def trace_ids_ended_before(self, cutoff: datetime) -> set[str]:
         """The finished traces older than ``cutoff``, without copying any."""
         async with self._lock:
@@ -840,6 +853,10 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             raise ValueError("retention_days must be non-negative or None")
         cutoff = utc_now() - timedelta(days=retention_days)
         expired = await self._inner.trace_ids_ended_before(cutoff)
+        # Judged by last activity, not start: a long run still working is
+        # never touched (the maintainer's decision, 2026-09-28).
+        abandoned = await self._inner.trace_ids_abandoned_before(cutoff) - expired
+        expired |= abandoned
         if self.archive is not None:
             archived = await self.archive.ended_before(cutoff)
             if archived:
@@ -858,6 +875,7 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             "trigger": trigger,
             "retention_days": retention_days,
             "removed": removed,
+            "abandoned": len(abandoned),
         }
         self.removed_total += removed
         if expired:
@@ -1196,6 +1214,15 @@ def _copy_trace(trace: TelemetryTrace) -> TelemetryTrace:
 
 def _trace_sort_key(trace: TelemetryTrace) -> tuple[Any, str]:
     return (trace.started_at, trace.trace_id)
+
+
+def _last_activity(trace: TelemetryTrace) -> datetime:
+    """When anything last happened in a trace: its start, a span, an event."""
+    moments = [trace.started_at]
+    moments += [span.started_at for span in trace.spans if span.started_at]
+    moments += [span.ended_at for span in trace.spans if span.ended_at]
+    moments += [event.timestamp for event in trace.events if event.timestamp]
+    return max(moment for moment in moments if moment is not None)
 
 
 def _sort_traces(traces: list[TelemetryTrace]) -> list[TelemetryTrace]:
