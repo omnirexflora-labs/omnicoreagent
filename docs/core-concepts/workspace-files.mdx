@@ -103,6 +103,54 @@ step 2 -> read_file {'path': 'project/app.py'} success
 tools. When the agent runs commands in a [sandbox](/docs/core-concepts/execution),
 its workspace files are copied in too.
 
+### Work in a directory you already have
+
+To have the file tools work in an existing directory instead of copying files
+in, name it `files_dir`. The runtime's own files (traces, offloaded results)
+stay in `workspace_dir`, out of your directory:
+
+```python
+import asyncio
+from pathlib import Path
+from omnicoreagent import OmniCoreAgent
+
+async def main():
+    agent = OmniCoreAgent(
+        name="reviewer",
+        system_instruction="You review code. Answer in plain text, in two sentences at most.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        agent_config={
+            "workspace_config": {
+                "workspace_dir": "./agent-ws",  # the runtime's own files
+                "files_dir": "./myproject",     # where the file tools work
+            }
+        },
+    )
+    result = await agent.run("Review app.py. What input breaks it?")
+    print(result["response"])
+
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    for step in trajectory["steps"]:
+        for call in step["tool_calls"]:
+            print("step", step["step"], "->", call["tool_name"], call["arguments"], call["outcome"])
+    await agent.cleanup()
+    print(sorted(p.name for p in Path("myproject").iterdir()))
+
+asyncio.run(main())
+```
+
+```text
+`average([])` breaks it with a `ZeroDivisionError` because `len(numbers)` is 0.
+step 1 -> ls {'path': '.'} success
+step 2 -> read_file {'path': 'app.py'} success
+['app.py']
+```
+
+`myproject/app.py` is `app.py` to the tools, and nothing of the runtime's was
+written into `myproject`. `files_dir` is for a local workspace; with S3 or R2
+it is refused. The Harbor integration uses it to put the agent's files in the
+task's own directory.
+
 ## How it works
 
 The workspace has three areas:
@@ -220,7 +268,7 @@ dictionary, or pass no `workspace_config` and set it all in the environment.
 | Setting (in `agent_config`) | Default | What it does |
 |---|---|---|
 | `enable_workspace_files` | `True` | Give the agent the file tools above. `False` removes them; the workspace still holds artifacts and telemetry |
-| `workspace_config` | `None` (from the environment, else `./workspace`) | Where the workspace lives: `workspace_backend`, `workspace_dir`, `prefix`, and the S3 / R2 settings above |
+| `workspace_config` | `None` (from the environment, else `./workspace`) | Where the workspace lives: `workspace_backend`, `workspace_dir`, `files_dir` (where the file tools work, if not `<workspace_dir>/files`), `prefix`, and the S3 / R2 settings above |
 
 Every setting is in the [agent settings reference](/docs/reference/agent-config).
 

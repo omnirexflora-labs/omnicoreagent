@@ -13,6 +13,12 @@ Every release, with its notes, is also on
 
 ### Changed
 
+- **Harbor trials: the agent's files are the task's.** The file tools work in
+  the directory the task's commands run in, whatever the task set; the
+  runtime's own files stay outside it. They pointed at the agent's own
+  workspace, and a model spent steps on "Path not found". New
+  `workspace_config["files_dir"]` puts the file tools in any directory you
+  already have.
 - **A durable memory store needs its URL.** `MemoryRouter("sql")` without
   `DATABASE_URL` (and `redis` without `REDIS_URL`, `mongodb` without
   `MONGODB_URI`) raises a `ValueError` naming the variable. It fell back to

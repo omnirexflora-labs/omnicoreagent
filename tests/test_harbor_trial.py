@@ -785,3 +785,19 @@ def test_the_final_answer_is_not_reviewed_unless_asked():
     assert _agent_namespace(_source())["COMPLETION_REVIEW"] == 0
     assert _agent_namespace(_source(completion_review=1))["COMPLETION_REVIEW"] == 1
     assert '"completion_review": COMPLETION_REVIEW' in _source()
+
+def test_the_file_tools_work_in_the_tasks_own_directory(tmp_path, monkeypatch):
+    """Whatever directory the task runs in, the agent's files are there; its
+    own files (traces) stay in the workspace, outside the task. (The model
+    spent three steps on "Path not found: /app" when the file tools pointed at
+    the agent's workspace, D8.)"""
+    task = tmp_path / "srv" / "project"
+    task.mkdir(parents=True)
+    source = _source(task_dir=str(task), workspace_dir=str(tmp_path / "agent-ws"))
+
+    assert '"files_dir": TASK_DIR' in source
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    namespace: dict = {}
+    exec(compile(source, "trial_agent.py", "exec"), namespace)
+    workspace = namespace["agent"].agent_config["workspace_config"]
+    assert (workspace["workspace_dir"], workspace["files_dir"]) == (str(tmp_path / "agent-ws"), str(task))
