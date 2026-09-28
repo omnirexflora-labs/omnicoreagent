@@ -607,10 +607,20 @@ def tool_risk_level(*, tool_name: str, tool_provider: str) -> str:
     return "low"
 
 
+# Listing and search read a scope; their root ("." or "/", or no path) is
+# the whole workspace. A model's first call is often ls("."), and it was
+# refused as invalid arguments (the Harbor trial, D8).
+_WORKSPACE_SCOPE_TOOLS = frozenset({"ls", "glob", "grep"})
+
+
 def _workspace_target_path(tool_name: str, tool_args: dict[str, Any]) -> str | None:
-    if tool_name in {"grep", "glob"}:
-        return _normalize_workspace_target(tool_args.get("path") or "")
-    return _normalize_workspace_target(tool_args.get("path"))
+    path = tool_args.get("path")
+    if tool_name in _WORKSPACE_SCOPE_TOOLS:
+        normalized = _normalize_workspace_target(path if path is not None else "")
+        # The root, given or implied: no path restriction (glob and grep
+        # without a path were refused the same way).
+        return normalized or None
+    return _normalize_workspace_target(path)
 
 
 def _normalize_workspace_target(path: Any) -> str | None:

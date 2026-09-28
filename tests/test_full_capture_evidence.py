@@ -131,7 +131,8 @@ async def test_a_call_that_asks_while_it_runs_is_awaiting_approval_not_an_error(
 async def test_arguments_that_cannot_be_read_are_rejected_not_denied(tmp_path, monkeypatch):
     """Round two: `glob` with `path: ""` came back as `denied`, "Governance
     denied tool execution: path must be a non-empty string", though no rule
-    decided it."""
+    decided it. (An empty `glob` path now means the whole workspace, D8;
+    reading a file with no path is still unreadable.)"""
     monkeypatch.chdir(tmp_path)
     agent = OmniCoreAgent(
         name="reader",
@@ -144,7 +145,7 @@ async def test_arguments_that_cannot_be_read_are_rejected_not_denied(tmp_path, m
         },
     )
     await agent.initialize()
-    agent.llm_connection = ScriptedModel(("c1", "glob", '{"pattern": "*.py", "path": ""}'))
+    agent.llm_connection = ScriptedModel(("c1", "read_file", '{"path": ""}'))
     result = await agent.run("list python files")
     trajectory = await agent.get_trajectory(result["trace_id"])
     await agent.cleanup()

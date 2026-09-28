@@ -371,6 +371,11 @@ async def _execute_headless(agent: Any, request: HeadlessRequest) -> HeadlessOut
             if trajectory is not None and trajectory.get("trace_id"):
                 outcome.trace_ids = [trajectory["trace_id"]]
         outcome.trajectory = trajectory
+        if trajectory is not None and trajectory.get("usage"):
+            # The run's own record counts every segment; a result counts only
+            # the last run() or resume() (a paused and resumed run read as
+            # one request).
+            outcome.usage = trajectory["usage"]
     except Exception as exc:
         outcome.evidence_error = f"{exc.__class__.__name__}: {exc}"
     if not outcome.trace_ids and result.get("trace_id"):

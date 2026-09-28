@@ -362,3 +362,20 @@ def test_outputs_are_written_even_without_a_trajectory(tmp_path):
 
     written = write_outputs(HeadlessOutcome(status="error", exit_code=1, run_id="r", session_id=None), tmp_path)
     assert [p.name for p in written] == ["result.json"]
+
+
+@pytest.mark.asyncio
+async def test_the_result_counts_the_whole_runs_usage(tmp_path):
+    # Found writing Headless runs in CI (D8): a run that paused and resumed
+    # reported only the last segment's usage (1 request for a 3-call run).
+    ledger = tmp_path / "ledger"
+    model = RecordingModel(SEND, "sent")
+    agent = await _agent(model, ledger)
+
+    outcome = await execute_headless(
+        agent, HeadlessRequest(instruction="send it", approvals=ApprovalPolicy(mode="allow"))
+    )
+
+    record = await agent.get_run(outcome.run_id)
+    assert outcome.usage == record["usage"]
+    assert outcome.usage["requests"] == len(model.calls) >= 2

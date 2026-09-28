@@ -2770,7 +2770,8 @@ def _training_record(
         "ended_at": last.get("ended_at"),
         "policy_version": policy_version,
         "request": (first.get("request") or {}).get("message"),
-        "final_answer": (last.get("final") or {}).get("response"),
+        # The trajectory keeps the answer in its final event's output.
+        "final_answer": ((last.get("final") or {}).get("output") or {}).get("response"),
         "outcomes": list(outcomes),
         "totals": {
             "tokens": totals.get("tokens"),

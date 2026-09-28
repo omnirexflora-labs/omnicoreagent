@@ -56,6 +56,9 @@ FROM python:3.12-slim
 RUN useradd --create-home --uid 10001 agent \
     && mkdir /data && chown agent:agent /data
 RUN pip install --no-cache-dir "omnicoreagent[serve,postgres]"
+# A local or pre-release build instead: copy the wheel in and install it.
+# COPY omnicoreagent-*.whl /tmp/
+# RUN pip install --no-cache-dir "$(ls /tmp/omnicoreagent-*.whl)[serve,postgres]"
 
 WORKDIR /app
 COPY --chown=agent:agent agent.py /app/

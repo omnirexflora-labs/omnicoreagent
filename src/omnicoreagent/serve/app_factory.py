@@ -69,9 +69,18 @@ def create_omniserve_app(
         # HTTP (a background task is a capability too). A refusal, or an ask
         # nobody can answer inside a request, is the caller's answer, not a
         # server error.
+        metadata = getattr(exc, "metadata", None) or {}
+        # What was refused and by which rules: "Matched ask policy rule."
+        # alone left the caller guessing what to change.
         return JSONResponse(
             status_code=403,
-            content={"error": type(exc).__name__, "detail": str(exc)},
+            content={
+                "error": type(exc).__name__,
+                "detail": str(exc),
+                "capability": metadata.get("capability"),
+                "reason_code": metadata.get("reason_code"),
+                "matched_rule_ids": metadata.get("matched_rule_ids") or [],
+            },
         )
 
     app.include_router(create_agent_router(config), prefix=config.api_prefix)

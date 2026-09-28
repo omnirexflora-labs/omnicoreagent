@@ -786,8 +786,31 @@ store for runs and readiness checks are on
     ```
 
     Add an allow rule for the capability named (`background.task.delete`),
-    for the operators you trust. An `ask` that nobody can answer inside the
-    request is refused the same way.
+    for the operators you trust.
+
+    An `ask` nobody can answer inside the request is refused the same way,
+    and the body names the capability and the rule. Under `interactive-dev`,
+    every background request asks:
+
+    ```text
+    {"error":"ApprovalRequiredError","detail":"Matched ask policy rule.","capability":"background.task.create","reason_code":"approval_required","matched_rule_ids":["ask_background_execution"]}
+    ```
+
+    An ask outranks an allow, and `interactive-dev` asks about anything no
+    rule matches: for an agent served to operators you trust, take the ask
+    rule out and allow the capability.
+
+    ```python
+    from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy
+
+    policy = build_default_policy("interactive-dev")
+    policy.rules.ask = [r for r in policy.rules.ask if r.rule_id != "ask_background_execution"]
+    policy.rules.allow.append(
+        PolicyRule(rule_id="operators_run_background", effect=PolicyEffect.ALLOW, capability="background.*")
+    )
+    ```
+
+    With both, `POST /background/tasks` returns `200`.
   </Accordion>
 
   <Accordion title="404 No run / Task not found">

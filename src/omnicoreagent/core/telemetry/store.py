@@ -866,7 +866,10 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             expired_count_archived = 0
         if expired:
             await self._inner.remove_traces(expired)
-            # Only now, with something to remove, is the store read in full.
+        if expired or expired_count_archived:
+            # Rewrite the log with what is left. A pruned archived trace's
+            # records stay in the log until compaction, and the next process
+            # replayed them: the trace came back.
             survivors = await self._inner.list_traces()
             await self._rewrite_records_unlocked(survivors)
         removed = len(expired) + expired_count_archived
@@ -878,14 +881,16 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             "abandoned": len(abandoned),
         }
         self.removed_total += removed
-        if expired:
+        if removed:
             logger.info(
                 "Telemetry retention removed %d trace(s) older than %d day(s) from %s",
-                len(expired),
+                removed,
                 retention_days,
                 self.path,
             )
-        return len(expired)
+        # Archived traces count too: finished traces live in the archive, and
+        # returning only the log's read 0 when every trace was removed.
+        return removed
 
     async def _replay_record_unlocked(self, record: dict[str, Any]) -> None:
         record_type = record["record_type"]

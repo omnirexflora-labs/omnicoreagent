@@ -11,6 +11,7 @@ agent into a real, throwaway task container with Harbor's ``--install-only``.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import platform
 import shutil
@@ -165,8 +166,19 @@ def _check_runtime(report: _Report) -> None:
         return
     if kind == "spec":
         report.line("ok", "runtime", f"{version}; the container installs {source}")
-    else:
-        report.line("ok", "runtime", f"{version} (development); the container installs {source}")
+        return
+    # A development runtime is built into a wheel with uv, or else with this
+    # Python's pip; a venv made by uv has no pip, and the doctor said "ok"
+    # while every trial then failed with "No module named pip".
+    if shutil.which("uv") is None and importlib.util.find_spec("pip") is None:
+        report.line(
+            "FAIL",
+            "runtime",
+            f"{version} (development) must be built into a wheel, and neither uv "
+            "is on PATH nor pip in this Python: install uv, or pip",
+        )
+        return
+    report.line("ok", "runtime", f"{version} (development); the container installs {source}")
 
 
 @click.command("doctor")

@@ -309,10 +309,15 @@ class GovernanceEngine:
             decision.approval_id = approval.approval_id
             raise ApprovalRequiredError(
                 decision.reason or "Approval required.",
-                metadata=_decision_metadata(
-                    decision,
-                    reason_code=ReasonCode.APPROVAL_REQUIRED,
-                ),
+                metadata={
+                    **_decision_metadata(
+                        decision,
+                        reason_code=ReasonCode.APPROVAL_REQUIRED,
+                    ),
+                    # Which request asked: a caller refused outside a run
+                    # (an HTTP request) must know what to allow.
+                    "capability": request.capability,
+                },
             )
         if (
             request.risk_level in {"high", "critical"}
@@ -332,10 +337,13 @@ class GovernanceEngine:
             decision.approval_id = approval.approval_id
             raise ApprovalRequiredError(
                 decision.reason or "Approval required.",
-                metadata=_decision_metadata(
-                    decision,
-                    reason_code=ReasonCode.APPROVAL_REQUIRED,
-                ),
+                metadata={
+                    **_decision_metadata(
+                        decision,
+                        reason_code=ReasonCode.APPROVAL_REQUIRED,
+                    ),
+                    "capability": request.capability,
+                },
             )
         if not isinstance(result, ApprovalResult):
             raise ApprovalInvalidError(

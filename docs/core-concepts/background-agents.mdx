@@ -600,8 +600,11 @@ asyncio.run(main())
 [('worker-b', 'completed', '23:11:12', '23:11:13')] completed Où se trouve la station ? None
 ```
 
-Each worker took two runs, side by side. (The model's wording varies: one
-run asked for the text instead of translating it.) If a worker dies, its
+Each worker took two runs, side by side. One run asked for the text instead
+of translating it: runs of one task share a memory session by default
+(`session_policy` `{"mode": "task"}`), so parallel runs read each other's
+turns. For runs that must not see each other, give the task
+`session_policy={"mode": "run"}`. If a worker dies, its
 lease runs out and another worker takes the run back, continuing from the
 agent's checkpoint; `list_attempts` shows that attempt's reason as
 `recovery`. More in [Stores and scale](/docs/how-to-guides/stores-and-scale).
