@@ -125,9 +125,34 @@ async def test_a_finished_call_whose_result_was_not_saved_is_not_run_again(tmp_p
     # whole batch of a turn finishes, so a call that completed while a sibling
     # was still running had its state saved but not its result. Recovery took
     # "no result" to mean "never ran" and charged the card a second time.
+    from omnicoreagent.core.runs import current_run
+
     ledger = tmp_path / "ledger"
+    tools = ToolRegistry()
+    crashed_once = {"yes": False}
+
+    @tools.register_tool("charge", description="Charges the card (not idempotent).")
+    def charge(amount: int) -> dict:
+        with ledger.open("a") as f:
+            f.write(f"charge {amount}\n")
+        return {"status": "success", "data": {"charged": amount}}
+
+    @tools.register_tool("report", description="Builds a report.")
+    async def report() -> dict:
+        # Die only once the charge is recorded as finished, so the crash lands
+        # in the window between a call's state and its result being saved.
+        if not crashed_once["yes"]:
+            crashed_once["yes"] = True
+            for _ in range(500):
+                calls = current_run().record["tool_calls"]
+                if any(c["tool_call_id"] == "c1" and c["state"] == "completed" for c in calls):
+                    break
+                await asyncio.sleep(0.01)
+            raise ProcessDied()
+        return {"status": "success", "data": {"report": "ready"}}
+
     model = RecordingModel([("c1", "charge", '{"amount": 5}'), ("r1", "report", "{}")], "recovered")
-    agent = await _agent(model, _tools(ledger))
+    agent = await _agent(model, tools)
     crashed = await _crash(agent)
     assert {c["tool_call_id"]: c["state"] for c in crashed["tool_calls"]}["c1"] == "completed"
     await asyncio.sleep(1.2)
