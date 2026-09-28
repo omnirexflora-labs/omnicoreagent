@@ -59,7 +59,7 @@ pip install omnicoreagent            # Python 3.12–3.14; check with python --v
 export LLM_API_KEY=your_api_key      # the key for the provider in model_config
 ```
 
-On Python 3.10 or 3.11, pip quietly installs an old release instead.
+On Python 3.10 or 3.11, the install stops and says so.
 
 ## Quick start
 

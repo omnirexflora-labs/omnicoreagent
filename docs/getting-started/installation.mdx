@@ -6,6 +6,13 @@ icon: 'download'
 
 # Installation
 
+<Warning>
+**OmniCoreAgent needs Python 3.12, 3.13 or 3.14.** Check with `python --version`
+before you install. On Python 3.10 or 3.11 the install stops with a message
+saying so; releases before 0.4.3 instead installed an old version that cannot
+build an agent (see *An older version was installed* below).
+</Warning>
+
 ## Prerequisites
 
 Before installing OmniCoreAgent, ensure you have the following:
@@ -131,8 +138,9 @@ installed* below.
 
 <AccordionGroup>
   <Accordion title="An older version was installed">
-    OmniCoreAgent 0.4.0 needs Python 3.12 or later. On Python 3.10 or 3.11, pip does not
-    fail: it quietly installs **0.3.9**, the last release that supported 3.11 —
+    OmniCoreAgent 0.4.0 needs Python 3.12 or later. Until the guard release
+    (0.3.10, published with 0.4.3), pip on Python 3.10 or 3.11 did not fail: it
+    quietly installed **0.3.9**, the last release that supported 3.11 —
     which cannot even build an agent (its package was published without one of
     its own modules, so `OmniCoreAgent(...)` raises `ModuleNotFoundError: No
     module named 'omnicoreagent.core.workspace'`).
