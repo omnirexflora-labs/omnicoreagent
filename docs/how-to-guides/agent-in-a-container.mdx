@@ -1,71 +1,332 @@
 ---
 title: "Running the Agent in a Container"
-description: "Deploying the whole agent inside a container (the other sandbox model)"
+description: "Package an agent (a script or an OmniServe server) as an image: the model key from the environment, its state on a volume, a store for runs that survives restarts, health checks, and sandboxes from inside a container"
+icon: "docker"
 ---
 
 # Running the Agent in a Container
 
-OmniCoreAgent's built-in containment puts **the code an agent runs** in a
-sandbox, while the harness — governance, memory, telemetry, your credentials —
-stays in your process ([execution](/docs/core-concepts/execution)).
+By the end of this page you will have an agent served by
+[OmniServe](/docs/how-to-guides/omniserve) in a container that runs as a
+non-root user on a read-only filesystem, reads its model key from the
+environment, keeps everything it must remember on one volume, and reports
+itself healthy only when it can take work. Replace the container, and its
+runs, sessions, traces and scheduled tasks are still there.
 
-The other approach is to put **the whole agent** in a container: your process,
-its tools, and everything it touches. The two combine: run the agent in a
-container, and still give it a sandbox for the code it writes.
+<Info>
+Every output on this page is what the commands printed when they were run,
+with `omnicoreagent` 0.4.1 from PyPI in the image.
+</Info>
 
-This is a deployment pattern, not a feature: no OmniCoreAgent setting turns it
-on. What follows is what it takes to do it well.
+This is a deployment pattern, not a setting: nothing in OmniCoreAgent turns
+it on. It is also a different boundary from the [sandbox](/docs/core-concepts/execution),
+which contains the **commands the agent runs** while the harness (policy,
+memory, telemetry, your credentials) stays in your process. A container
+contains **the whole process**. The two combine; see
+[Sandboxes from inside a container](#sandboxes-from-inside-a-container).
 
-## A starting point
+## Build the image
+
+An agent file, `agent.py`, with its memory in SQL so its runs survive:
+
+```python
+from omnicoreagent import MemoryRouter, OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
+
+@tools.register_tool("get_order")
+def get_order(order_id: str) -> dict:
+    """Look up an order by its id."""
+    return {"order_id": order_id, "status": "shipped", "total": 42.0}
+
+agent = OmniCoreAgent(
+    name="support",
+    system_instruction="You answer questions about orders. Answer in plain text, in one sentence.",
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    local_tools=tools,
+    memory_router=MemoryRouter("sql"),  # reads DATABASE_URL
+)
+```
+
+Beside it, a `Dockerfile`:
 
 ```dockerfile
 FROM python:3.12-slim
-RUN useradd --create-home --uid 10001 agent
+
+RUN useradd --create-home --uid 10001 agent \
+    && mkdir /data && chown agent:agent /data
+RUN pip install --no-cache-dir "omnicoreagent[serve,postgres]"
+
 WORKDIR /app
-COPY pyproject.toml /app/
-RUN pip install --no-cache-dir "omnicoreagent[redis]"
-COPY --chown=agent:agent . /app
+COPY --chown=agent:agent agent.py /app/
 USER agent
-ENV OMNICOREAGENT_WORKSPACE_DIR=/data/workspace
-CMD ["python", "-m", "your_app"]
+
+# Everything the agent keeps goes under /data: mount a volume there.
+ENV OMNICOREAGENT_WORKSPACE_DIR=/data/workspace \
+    DATABASE_URL=sqlite:////data/memory.db \
+    OMNICOREAGENT_BACKGROUND_TASK_STORE=sql \
+    OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=sqlite:////data/background.db \
+    PYTHONUNBUFFERED=1
+
+EXPOSE 8000
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import json, urllib.request; r = urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=4); raise SystemExit(0 if json.load(r)['ready'] else 1)"
+
+CMD ["omniserve", "run", "--agent", "/app/agent.py"]
 ```
 
-Run it with the container hardened:
+- `postgres` is the SQL extra: SQLAlchemy, used for SQLite too.
+- The image holds no secret. The model key arrives at run time.
+- The health check asks `/ready`, which is `true` only once the agent is
+  initialized and its MCP servers are connected (`/health` is up as soon as
+  the process is). The slim image has no `curl`, so it uses Python.
 
 ```bash
-docker run --rm \
+docker build -t support-agent .
+```
+
+## Run it
+
+```bash
+export LLM_API_KEY=...   # your model provider's key
+docker run -d --name support -p 8000:8000 \
   --read-only --tmpfs /tmp \
   --cap-drop ALL --security-opt no-new-privileges \
   --memory 1g --pids-limit 256 \
-  -v agent-data:/data \
-  -e LLM_API_KEY -e REDIS_URL \
-  your-image
+  -v support-data:/data \
+  -e LLM_API_KEY \
+  support-agent
 ```
 
-## What to get right
+`-e LLM_API_KEY` with no `=value` passes the variable through from your
+shell, so the key is not in your shell history or in `docker inspect`'s
+command line. In production, inject it the same way from your platform's
+secret store. `LLM_API_KEY` is the only model key variable the runtime reads.
 
-- **Keep the state outside the container.** Durable runs, memory, and
-  telemetry must survive a restart, so point them at a database you run
-  (`REDIS_URL`, `DATABASE_URL`, `MONGODB_URI`) and mount the workspace as a
-  volume. A crashed container's runs can then be recovered by the next one
-  ([durable runs](/docs/core-concepts/durable-runs)).
-- **Pass credentials as environment variables or mounted secrets**, never
-  baked into the image. They stay in the agent's process; they never enter a
-  sandbox.
-- **Keep governance on inside the container.** A container limits what the
-  agent's process can reach; it does not decide which tools may run. The
-  policy still does that.
-- **Keep the policy file outside the agent's reach**, mounted read-only. A
-  policy inside the workspace is refused.
-- **Give the agent a sandbox of its own** for code it runs. Inside a
-  container, a hosted provider (Modal, E2B, Daytona, Vercel) is usually
-  simpler than Docker-in-Docker; never mount the Docker socket, which the
-  sandbox backend refuses anyway
-  ([security model](/docs/core-concepts/security-model)).
-- **Run as a non-root user** with a read-only root filesystem, dropped
-  capabilities, and memory and process limits, as above.
-- **Scale by running more containers**, not more agents per container: each
-  run belongs to one process at a time, and a run whose process dies is picked
-  up by another once its lease expires — continuing from its checkpoint when
-  the agent keeps run state, so a restart mid-run costs the step in flight,
-  not the run.
+```bash
+curl -s localhost:8000/ready
+docker ps --filter name=support --format '{{.Names}}  {{.Status}}'
+```
+
+```text
+{"ready":true,"agent_name":"support","initialized":true,"mcp_connected":true,"mcp_servers":{}}
+support  Up 16 seconds (healthy)
+```
+
+The flags harden the container: a read-only root filesystem (only `/tmp`
+and the `/data` volume are writable), no Linux capabilities, no privilege
+escalation, memory and process limits. The agent needed nothing else.
+Ask it something as on the [OmniServe](/docs/how-to-guides/omniserve) page:
+
+```bash
+curl -s -X POST localhost:8000/run/sync -H "Content-Type: application/json" \
+  -d '{"query": "Where is order 1042?", "session_id": "alice"}'
+```
+
+## What is on the volume
+
+After a run and a scheduled task:
+
+```bash
+docker exec support sh -c 'cd /data && ls && find workspace -maxdepth 2'
+```
+
+```text
+background.db
+background.db-shm
+background.db-wal
+memory.db
+workspace
+workspace
+workspace/telemetry
+workspace/telemetry/traces-archive
+workspace/telemetry/traces.jsonl
+workspace/artifacts
+workspace/files
+```
+
+| Path | Holds | Set by |
+|---|---|---|
+| `memory.db` | Session history and every run's record (status, approvals, budgets) | `MemoryRouter("sql")` and `DATABASE_URL` |
+| `background.db` | Background tasks, runs, attempts, leases | `OMNICOREAGENT_BACKGROUND_TASK_STORE` and `..._URL` |
+| `workspace/files/` | The agent's files | `OMNICOREAGENT_WORKSPACE_DIR` |
+| `workspace/telemetry/` | Traces (`traces.jsonl`), read by `/runs/{run_id}/trajectory` | under the workspace |
+| `workspace/artifacts/` | Large tool results kept out of the context | under the workspace |
+
+Without the volume, all of it is lost with the container. Without
+`OMNICOREAGENT_WORKSPACE_DIR` the workspace is `./workspace`, relative to the
+working directory (`/app` here, which is read-only).
+
+## Replace the container, keep the state
+
+A task created before, then the container removed and a new one started on
+the same volume:
+
+```bash
+curl -s -X POST localhost:8000/background/tasks -H "Content-Type: application/json" \
+  -d '{"task_id": "nightly", "query": "Summarise the day in one sentence.", "schedule": {"type": "cron", "expression": "0 2 * * *"}}'
+docker rm -f support
+docker run -d --name support ...same flags... support-agent
+curl -s localhost:8000/background/tasks/nightly/status
+```
+
+The new container's answer, reduced to `task_id`, `schedule.expression` and
+`schedule_state.next_due_at`:
+
+```text
+nightly 0 2 * * * 2026-09-28T02:00:00Z
+```
+
+The run from before the restart was there too: `GET /runs/{run_id}` returned
+its record, and `GET /runs/{run_id}/trajectory` its trace (`traces_missing`
+`0`). A run that was paused for an approval can be decided and resumed on the
+new container.
+
+## Scale beyond one container
+
+SQLite on a volume is for one container. For several, each one a single
+OmniServe process, share a database server instead of the volume:
+`MemoryRouter("sql")` with a PostgreSQL `DATABASE_URL`, or `"redis"` with
+`REDIS_URL`, or `"mongodb"` with `MONGODB_URI`; and a task store to match.
+Each run belongs to one process at a time; a run whose process dies is picked
+up by another once its lease expires. Traces are written to each container's
+workspace, so keep the workspace on shared storage
+(`OMNICOREAGENT_WORKSPACE_BACKEND=s3` or `r2`) or export traces
+([Observability](/docs/how-to-guides/observability)).
+[Stores and scale](/docs/how-to-guides/stores-and-scale) covers this.
+
+## Sandboxes from inside a container
+
+If the agent runs commands (the `execute` tool, code mode), give it a
+[sandbox](/docs/how-to-guides/sandbox-providers). From inside a container:
+
+**A hosted provider** (E2B, Modal, Daytona, Vercel, or your own `http`
+service) needs only its extra, its key in the environment, and outbound
+network. This is the simple choice.
+
+**The Docker sandbox** starts containers through a Docker engine, found as
+the Docker SDK finds one (`DOCKER_HOST`, else `/var/run/docker.sock`). A
+container has neither. With `omnicoreagent[docker]` in the image, the
+engine's ping from inside it:
+
+```bash
+docker run --rm support-agent-docker python -c "import docker; print(docker.from_env().ping())"
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  support-agent-docker python -c "import docker; print(docker.from_env().ping())"
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  --group-add $(stat -c %g /var/run/docker.sock) \
+  support-agent-docker python -c "import docker; print(docker.from_env().ping())"
+```
+
+```text
+docker.errors.DockerException: Error while fetching server API version: ('Connection aborted.', FileNotFoundError(2, 'No such file or directory'))
+docker.errors.DockerException: Error while fetching server API version: ('Connection aborted.', PermissionError(13, 'Permission denied'))
+True
+```
+
+The non-root user needs the socket's group as well. It works, but know what
+it means:
+
+<Warning>
+Whoever can use the Docker socket controls the host: it can start a
+privileged container that mounts `/`. Mounting it into the agent's container
+gives the agent's **process** that power (the sandboxes it starts never get
+the socket: the Docker sandbox refuses to mount an engine socket, system
+directories or credential folders into them). Prefer a hosted provider, or
+point `DOCKER_HOST` at a Docker engine dedicated to sandboxes (another VM or
+a Docker-in-Docker service) rather than the host's own.
+</Warning>
+
+The Docker sandbox copies files into its containers rather than
+bind-mounting them, so it works against a remote engine. A
+`workspace_mount`, if you configure one, is a path on the **engine's** host,
+not in the agent's container.
+
+## Options
+
+| What | Where | Note |
+|---|---|---|
+| Model key | `-e LLM_API_KEY` | The only model key variable; never in the image |
+| Workspace | `OMNICOREAGENT_WORKSPACE_DIR` | Default `./workspace`; `OMNICOREAGENT_WORKSPACE_BACKEND=s3` or `r2` for object storage |
+| Memory and run records | `MemoryRouter("sql" \| "redis" \| "mongodb")` | Reads `DATABASE_URL`, `REDIS_URL` or `MONGODB_URI` ([Memory](/docs/core-concepts/memory)) |
+| Background task store | `OMNICOREAGENT_BACKGROUND_TASK_STORE`, `..._URL`, `..._URI` | Default in memory ([OmniServe](/docs/how-to-guides/omniserve#configuration)) |
+| Server | `OMNICOREAGENT_SERVE_*` | Port, token, rate limit, timeout |
+| Readiness | `GET /ready` | Liveness: `GET /health` |
+| Policy file | a read-only mount | Keep it outside the workspace: a sandbox cannot mount it read-write |
+
+`omniserve generate-dockerfile --file agent.py` writes a starting
+Dockerfile ([OmniServe](/docs/how-to-guides/omniserve#deploy-with-docker));
+it installs only `[serve]`, checks `/health`, and keeps the workspace in
+`/tmp/workspace`, so add a volume and the extras you use.
+
+A script instead of a server works the same way: `CMD ["python", "my_job.py"]`,
+with the same variables and volume.
+
+## When things go wrong
+
+<AccordionGroup>
+  <Accordion title="Application startup failed: LLM_API_KEY not found">
+    The container was started without the key (or `-e LLM_API_KEY` with the
+    variable unset in your shell). It exits:
+
+    ```text
+    ValueError: LLM_API_KEY not found in environment variables
+
+    ERROR:    Application startup failed. Exiting.
+    ```
+
+    Export `LLM_API_KEY` in the shell that runs `docker run`, or set it in
+    your platform's secrets.
+  </Accordion>
+
+  <Accordion title="Runs end with provider_error: the provider rejected the API key">
+    The container is healthy, but the key is wrong:
+
+    ```text
+    {"status":"error","termination_reason":"provider_error","guardrail_result":null,"response":"The model call was refused: the provider rejected the API key (invalid_api_key). Fix the account; retrying will not help.",...}
+    ```
+
+    Check which provider the key belongs to and `model_config["provider"]`.
+  </Accordion>
+
+  <Accordion title="Everything is gone after a restart">
+    State was in memory or in the container's filesystem. Mount a volume
+    (or use a database server), set `DATABASE_URL` with
+    `MemoryRouter("sql")`, a durable task store, and
+    `OMNICOREAGENT_WORKSPACE_DIR` on the volume. If `DATABASE_URL` is unset,
+    the log says `SQL memory selected but DATABASE_URL is not set; using
+    in_memory (nothing survives a restart)`.
+  </Accordion>
+
+  <Accordion title="Read-only file system">
+    With `--read-only`, only `/tmp` and mounted volumes are writable. Point
+    the workspace and SQLite files at the volume, as above.
+  </Accordion>
+
+  <Accordion title="Docker sandbox: FileNotFoundError or PermissionError">
+    `FileNotFoundError(2, ...)`: no Docker engine is reachable from the
+    container. `PermissionError(13, ...)`: the socket is mounted, but the
+    container's user is not in its group (`--group-add`). Read the warning
+    above before doing either; a hosted provider avoids both.
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="OmniServe" icon="server" href="/docs/how-to-guides/omniserve">
+    Every route, the configuration, the errors.
+  </Card>
+  <Card title="Stores and scale" icon="database" href="/docs/how-to-guides/stores-and-scale">
+    Choosing stores, and several containers sharing them.
+  </Card>
+  <Card title="Durable runs" icon="rotate" href="/docs/core-concepts/durable-runs">
+    What a run's record holds, and recovery after a crash.
+  </Card>
+  <Card title="Background agents" icon="clock" href="/docs/core-concepts/background-agents">
+    Scheduled work, retries and leases.
+  </Card>
+  <Card title="Sandbox providers" icon="box" href="/docs/how-to-guides/sandbox-providers">
+    Docker, E2B, Modal, Daytona, Vercel, your own.
+  </Card>
+</CardGroup>

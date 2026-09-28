@@ -82,6 +82,7 @@
                         "group": "Run It",
                         "pages": [
                             "docs/core-concepts/durable-runs",
+                            "docs/how-to-guides/stores-and-scale",
                             "docs/core-concepts/background-agents",
                             "docs/how-to-guides/omniserve",
                             "docs/how-to-guides/agent-in-a-container"

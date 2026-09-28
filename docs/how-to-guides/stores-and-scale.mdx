@@ -1,0 +1,449 @@
+---
+title: "Stores and Scale"
+description: "Which store keeps session memory, run records, traces, payloads and background tasks; what one process needs and what several servers need; retention; and closing what you open"
+icon: "database"
+---
+
+# Stores and Scale
+
+An agent keeps its state in a few stores, each with its own job. By the end of
+this page you will have a run that pauses in one process and is resumed by
+another, over one SQLite file, and you will know which store to change when
+one process becomes several, and several become several servers.
+
+<Info>
+Every output on this page is what the code printed when it was run. The
+model's wording and the ids will differ on your run.
+</Info>
+
+## Pause in one process, resume in another
+
+Three files: the agent's definition, a process that runs until a policy asks
+for approval, and a process that finds the waiting run, approves it and
+resumes it.
+
+<Steps>
+  <Step title="One definition, shared">
+    ```python
+    # agent_def.py: the agent, built the same way in every process.
+    import os
+
+    os.environ.setdefault("DATABASE_URL", "sqlite:///./agent.db")
+
+    from omnicoreagent import MemoryRouter, OmniCoreAgent, ToolRegistry
+    from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy
+
+    tools = ToolRegistry()
+
+    @tools.register_tool("delete_report")
+    def delete_report(name: str) -> dict:
+        """Delete a saved report."""
+        return {"deleted": name}
+
+    policy = build_default_policy("interactive-dev")
+    policy.rules.ask.append(
+        PolicyRule(rule_id="ask_before_deleting", effect=PolicyEffect.ASK,
+                   capability="tool.local.call", target={"tool_name": "delete_report"})
+    )
+
+    def build_agent(router: MemoryRouter) -> OmniCoreAgent:
+        return OmniCoreAgent(
+            name="reports",
+            system_instruction="You manage saved reports. Answer in plain text, in one sentence.",
+            model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+            local_tools=tools,
+            memory_router=router,
+            agent_config={"governance_config": {"enabled": True, "policy": policy}},
+        )
+    ```
+
+    SQLite goes through SQLAlchemy: `pip install "omnicoreagent[postgres]"`.
+  </Step>
+  <Step title="Process one: run until it pauses, then exit">
+    ```python
+    # ask.py
+    import asyncio
+    from omnicoreagent import MemoryRouter
+    from agent_def import build_agent
+
+    async def main():
+        router = MemoryRouter("sql")
+        try:
+            agent = build_agent(router)
+            result = await agent.run("Delete the report called q2-draft.", session_id="team-7")
+            print(result["status"], result["run_id"])
+            await agent.cleanup()
+        finally:
+            await router.close()
+
+    asyncio.run(main())
+    ```
+
+    ```text
+    awaiting_approval run_b2949687af8645f8a64b42d09a1bd9f5
+    ```
+  </Step>
+  <Step title="Process two: find waiting runs, approve, resume">
+    ```python
+    # approve.py
+    import asyncio
+    from omnicoreagent import MemoryRouter
+    from agent_def import build_agent
+
+    async def main():
+        router = MemoryRouter("sql")
+        try:
+            agent = build_agent(router)
+            for waiting in await agent.list_runs(status="awaiting_approval"):
+                run = await agent.get_run(waiting["run_id"])  # approvals with their arguments
+                for approval in run["approvals"]:
+                    if approval["status"] == "pending":
+                        print("approving:", approval["tool_name"], approval["arguments"])
+                        await agent.resolve_approval(
+                            run["run_id"], approval["approval_id"], decision="approve", approver="dana"
+                        )
+                result = await agent.resume(run["run_id"])
+                print(result["status"], "|", result["response"])
+
+                story = await agent.get_run_trajectory(run["run_id"])
+                print("segments:", [segment["status"] for segment in story["segments"]])
+            await agent.cleanup()
+        finally:
+            await router.close()
+
+    asyncio.run(main())
+    ```
+
+    ```text
+    approving: delete_report {'name': 'q2-draft'}
+    success | Deleted the report q2-draft.
+    segments: ['suspended', 'completed']
+    ```
+  </Step>
+</Steps>
+
+Process two never saw the request; it found the run in the store, with the
+call's arguments, and finished it. `get_run_trajectory` joined the first
+process's trace (`suspended`) and its own (`completed`), because both ran in
+the same directory and so shared `./workspace/telemetry/`. What was left on
+disk:
+
+```text
+./agent.db
+./workspace/telemetry/traces-archive/.bodies.locks/9155934a567bf748a841190093541d14.lock
+./workspace/telemetry/traces-archive/.bodies.locks/b29a3de7565d810cf27591313f407969.lock
+./workspace/telemetry/traces-archive/bodies/trace_c111931bb26f42618f2ff7d1015d36e7.json
+./workspace/telemetry/traces-archive/bodies/trace_e1cf65fb2f68422490ebb404e055808e.json
+./workspace/telemetry/traces-archive/index.sqlite
+./workspace/telemetry/traces.jsonl
+```
+
+`agent.db` holds three tables: `messages` (session history), `run_states`
+(run records) and `budget_states` (budget counters). The traces are the
+`workspace/telemetry/` files.
+
+<Note>
+`list_runs` returns the records as stored; `get_run` adds each approval's
+`arguments`, the call as the model made it. Read the approvals from `get_run`.
+</Note>
+
+## Which store holds what
+
+| What | Kept in | Chosen with | Default |
+|---|---|---|---|
+| Session history | The memory store | `memory_router=MemoryRouter(...)` | In this process |
+| Run records (status, calls, approvals, usage) | The memory store | the same | In this process |
+| Budget counters | The memory store | the same | In this process |
+| Traces (the trajectory of each run) | The telemetry log and its archive | `telemetry_config` | `./workspace/telemetry/` on disk |
+| Offloaded payloads (large trace values) | Beside the traces, or the bucket | `telemetry_config["offload_target"]` | Off |
+| Background tasks, schedules and their runs | The task store | `BackgroundAgentManager(task_store=...)` | In this process |
+| The agent's files | The workspace | `workspace_config` | `./workspace/` ([Workspace files](/docs/core-concepts/workspace-files)) |
+
+### The memory store
+
+Session memory, run records and budget counters share one store:
+
+| `MemoryRouter(...)` | Set | Install | Reaches |
+|---|---|---|---|
+| `"in_memory"` (default) | — | — | This process only; gone when it ends |
+| `"sql"` | `DATABASE_URL`: `sqlite:///./agent.db` or `postgresql://user:pass@host/db` | `omnicoreagent[postgres]` | SQLite: processes on one machine. PostgreSQL: every server that can reach it |
+| `"redis"` | `REDIS_URL`, e.g. `redis://host:6379/0` | `omnicoreagent[redis]` | Every server |
+| `"mongodb"` | `MONGODB_URI`; optional `MONGODB_DB_NAME`, `MONGODB_COLLECTION` | `omnicoreagent[mongodb]` | Every server |
+
+Records and counters are saved with compare-and-swap on every backend, so two
+processes cannot both take over one run or both spend the last of a budget.
+Build one router per process and share it between agents: an agent built
+without one gets its own in-memory store, which no other agent sees.
+History windows and summaries: [Memory](/docs/core-concepts/memory).
+
+### Traces
+
+Each finished run's trace moves from a write-ahead log to an **archive**: one
+body per trace, and an index to find them.
+
+| `telemetry_config` | Default | What it does |
+|---|---|---|
+| `storage` | `"auto"` | `auto` or `jsonl`: the log on disk. `memory`: this process only (up to `memory_max_traces`, 1000) |
+| `storage_path` | `workspace/telemetry/traces.jsonl` | The log. The archive sits beside it, in `traces-archive/` |
+| `archive_index_url` | none: `index.sqlite` in the archive | A database URL, so several processes share one index |
+| `archive_bodies_path` | none: `bodies/` in the archive | A directory the processes share (one host, or a shared volume) |
+| `archive_target` | `"local"` | `"object_storage"`: bodies in the S3 or R2 bucket of the agent's workspace |
+
+The trace log stays on local disk even when the workspace is S3 or R2. A
+process that reads another's run needs its traces: run both in one directory
+(as above), or share the archive.
+
+Processes that run **at the same time** each keep their own log and share the
+archive: every process then answers for every finished trace, and stream
+positions stay unique across them.
+
+```python
+import os
+from omnicoreagent import OmniCoreAgent
+
+agent = OmniCoreAgent(
+    name="reports",
+    system_instruction="You manage saved reports. Answer in plain text.",
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    telemetry_config={
+        "storage_path": f"/var/lib/agent/{os.environ['HOSTNAME']}/traces.jsonl",  # this process's own
+        "archive_index_url": os.environ["DATABASE_URL"],                         # shared
+        "archive_target": "object_storage",                                      # shared bucket
+    },
+)
+```
+
+To try it on one machine, stand in a SQLite file for the database and a
+directory for the bucket, and start two servers at once:
+
+```python
+# worker.py: one of two servers; its own log, one shared archive.
+import asyncio, sys
+from omnicoreagent import OmniCoreAgent
+
+async def main(name: str, question: str):
+    agent = OmniCoreAgent(
+        name="reports",
+        system_instruction="You manage saved reports. Answer in plain text, in one sentence.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        telemetry_config={
+            "storage_path": f"./{name}/traces.jsonl",           # this process's own
+            "archive_index_url": "sqlite:///./shared/index.db",  # shared
+            "archive_bodies_path": "./shared/bodies",            # shared
+        },
+    )
+    result = await agent.run(question, session_id=name)
+    print(name, "ran", result["run_id"])
+    await asyncio.sleep(3)  # let the other server finish its run too
+    for trace in await agent.list_telemetry_traces():
+        print(name, "sees", trace["run_id"], trace["status"], "from", trace["session_id"])
+    await agent.cleanup()
+
+asyncio.run(main(sys.argv[1], sys.argv[2]))
+```
+
+```bash
+python worker.py server-a "Name one good title for a quarterly report." &
+python worker.py server-b "Name one good title for a yearly report."
+wait
+```
+
+```text
+server-a ran run_0ecde1bcc4a240b68d1c446e9fb35c0f
+server-a sees run_0ecde1bcc4a240b68d1c446e9fb35c0f completed from server-a
+server-a sees run_320d5a7eb32c4a50b4347554bcb537ad completed from server-b
+server-b ran run_320d5a7eb32c4a50b4347554bcb537ad
+server-b sees run_0ecde1bcc4a240b68d1c446e9fb35c0f completed from server-a
+server-b sees run_320d5a7eb32c4a50b4347554bcb537ad completed from server-b
+```
+
+Each server lists both runs, its own from its log and the other's from the
+shared archive. What was left on disk:
+
+```text
+./server-a/traces.jsonl
+./server-b/traces.jsonl
+./shared/.bodies.locks/6f8deb7b26402ae6206e06ebeb8a45fa.lock
+./shared/.bodies.locks/b18851d4ddc6caf465f7b958e73ebd79.lock
+./shared/bodies/trace_0b117c9bcaa04202a194a5354f717e8b.json
+./shared/bodies/trace_91c25e3c8d9a43eaa6ad0c70caac8da4.json
+./shared/index.db
+```
+
+An archive that
+cannot be written to never fails a run: the trace stays in the log, and the
+store counts it in `archive_failures` with `last_archive_error`.
+
+### Offloaded payloads
+
+A trace value larger than `max_payload_bytes` (64,000) is truncated, unless
+`offload_large_payloads` is `True`: then it is kept whole and the trace points
+to it (`telemetry://payload/...`). It is kept in the workspace's
+`telemetry/payloads` (or beside `storage_path`), or with
+`offload_target: "object_storage"` in the workspace's bucket, where every
+server can read it. `await agent.read_telemetry_payload(reference)` reads one.
+
+### Background tasks
+
+`BackgroundAgentManager(task_store=...)` keeps tasks, schedules, runs, attempts
+and leases:
+
+| `task_store` | Reads | Install |
+|---|---|---|
+| `"in_memory"` (default) | — | — |
+| `"sql"` | `DATABASE_URL`, or a SQLite file at `.omnicoreagent/background.db` | `omnicoreagent[postgres]` |
+| `"redis"` | `REDIS_URL` | `omnicoreagent[redis]` |
+| `"mongodb"` | `MONGODB_URI`, `OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE` | `omnicoreagent[mongodb]` |
+
+Or a dict, such as `{"backend": "sql", "url": "postgresql://..."}`. Several
+managers on one durable store divide the runs between them, and a run a dead
+worker held is taken over when its lease lapses. More in [Background
+agents](/docs/core-concepts/background-agents).
+
+## One process, several processes, several servers
+
+| | One process | Several processes, one machine | Several servers |
+|---|---|---|---|
+| Memory store | `in_memory` (lost at exit) or anything durable | `sql` with SQLite | `sql` with PostgreSQL, `redis` or `mongodb` |
+| Traces | The default | One after the other: the same working directory. At the same time: a `storage_path` each, `archive_index_url` and `archive_bodies_path` shared | A `storage_path` each, `archive_index_url` on the shared database, `archive_target: "object_storage"` (or a shared `archive_bodies_path`) |
+| Payloads, if offloaded | The default | The default | `offload_target: "object_storage"` |
+| Background tasks | `in_memory` | `sql` with SQLite | `sql` with PostgreSQL, `redis` or `mongodb` |
+| Workspace files | Local | Local, one directory | S3 or R2 |
+
+Why more processes: one process runs the runtime's own work on one core, so
+it tops out near 15 runs a second of that work. Concurrent runs in one process
+mostly wait on the model, so it serves many at once; past that ceiling, add
+processes. A resumed or recovered run can land on any of them, provided they
+share the stores above.
+
+## Retention
+
+| Setting | Default | Removes |
+|---|---|---|
+| `agent_config["run_retention_days"]` | `30` | Finished run records (`completed`, `failed`, `blocked`, `cancelled`, `timeout`), counted from the run's start. Waiting, interrupted and running runs are never removed |
+| `telemetry_config["retention_days"]` | `7` | Finished traces, from the log and the archive |
+| `telemetry_config["payload_retention_days"]` | `7` | Offloaded payloads no kept trace points to |
+
+`None` keeps everything. Each window is applied once, when an agent starts its
+first run; `await agent.prune_runs()` and `await agent.prune_telemetry()` apply
+it now. Session history is not pruned by age (windows and summaries keep it
+short), and neither is background run history. Details:
+[how long a run's evidence is kept](/docs/core-concepts/durable-runs#how-long-a-runs-evidence-is-kept).
+
+## Close what you open
+
+| You opened | Close it with | Closes |
+|---|---|---|
+| `MemoryRouter(...)` | `await router.close()` | Redis and MongoDB connections |
+| `OmniCoreAgent(...)` | `await agent.cleanup()` | MCP connections and sub-agents; not the memory router you passed |
+| `BackgroundAgentManager(...)` | `await manager.shutdown()` | The worker loop, the runs it is executing (their attempts are recorded), the task store |
+
+Whoever creates a router owns it: `agent.cleanup()` leaves it open, because
+other agents may share it. Build one per process and close it at shutdown, or
+close it in a `finally`, as `ask.py` does. For a `sql` router, `close()`
+currently does nothing: the connection pool is shared per database URL and
+lasts as long as the process.
+
+## Options
+
+| Where | Key | Default | What it does |
+|---|---|---|---|
+| `MemoryRouter(...)` | store type | `"in_memory"` | `in_memory`, `sql`, `redis`, `mongodb` |
+| `agent_config` | `run_lease_seconds` | `60` | How stale a running run's heartbeat must be before another process may recover it |
+| `agent_config` | `run_retention_days` | `30` | Days a finished run record is kept |
+| `telemetry_config` | `storage`, `storage_path` | `"auto"`, the workspace | Where the trace log is |
+| `telemetry_config` | `archive_index_url`, `archive_bodies_path`, `archive_target` | local | A shared archive |
+| `telemetry_config` | `offload_large_payloads`, `offload_target` | `False`, `"workspace"` | Keep large values whole, and where |
+| `BackgroundAgentManager` | `task_store`, `lease_seconds` | `"in_memory"`, `30` | The task store; how long a worker's claim lasts |
+
+Every telemetry key: [Telemetry settings](/docs/reference/telemetry-config).
+Every agent key: [Agent settings](/docs/reference/agent-config). The manager:
+[BackgroundAgentManager](/docs/reference/background).
+
+## When things go wrong
+
+<AccordionGroup>
+  <Accordion title="Process two cannot find the run: LookupError: No run …">
+    The two processes do not share a memory store. Most often the store is
+    in memory, sometimes without you asking for it: `MemoryRouter("sql")`
+    with no `DATABASE_URL` set falls back to an in-memory store, and says so
+    only in a warning on the `omnicoreagent` logger. Print the router to
+    check:
+
+    ```text
+    MemoryRouter(type=sql, store=InMemoryStore)
+    ```
+
+    With `DATABASE_URL` set it says `store=DatabaseMessageStore`. The same
+    holds for `redis` without `REDIS_URL` and `mongodb` without `MONGODB_URI`.
+  </Accordion>
+
+  <Accordion title="ImportError: SQL database memory requires optional dependency 'sqlalchemy'">
+    ```text
+    ImportError: SQL database memory requires optional dependency 'sqlalchemy'. Install it with: pip install 'omnicoreagent[postgres]'
+    ```
+
+    Every `sql` store needs SQLAlchemy, SQLite included.
+  </Accordion>
+
+  <Accordion title="ValueError: Invalid memory store type">
+    ```text
+    ValueError: Invalid memory store type: postgres. Use one of: in_memory, sql, redis, mongodb
+    ```
+
+    PostgreSQL, MySQL and SQLite are all `"sql"`; `DATABASE_URL` picks the
+    database. A background task store says the same in its own words:
+    `InvalidTaskStoreError: task_store must be 'in_memory', 'sql', 'redis', or 'mongodb'`.
+  </Accordion>
+
+  <Accordion title="ValueError: telemetry archive_target must be local or object_storage">
+    ```text
+    ValueError: telemetry archive_target must be local or object_storage
+    ```
+
+    `"s3"` or `"r2"` is not a target: set `"object_storage"` and give the
+    agent an S3 or R2 workspace.
+  </Accordion>
+
+  <Accordion title="The bodies never reach the bucket">
+    `archive_target: "object_storage"` with a local workspace keeps the bodies
+    on local disk, without an error. With `telemetry_config["strict"] = True`
+    it is refused:
+
+    ```text
+    ValueError: telemetry archive_target='object_storage' requires an S3 or R2 workspace
+    ```
+
+    `offload_target: "object_storage"` behaves the same way.
+  </Accordion>
+
+  <Accordion title="The run is found, but its trajectory is empty">
+    `get_run_trajectory` shows `trace_kept: False` for a segment whose trace
+    this process cannot read: another process wrote it to a different
+    directory and nothing shares the archive, or it was pruned
+    (`retention_days`). Share the archive, or run in the same directory.
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Durable runs" icon="rotate" href="/docs/core-concepts/durable-runs">
+    Records, recovery after a crash, steering, and statuses.
+  </Card>
+  <Card title="Background agents" icon="clock" href="/docs/core-concepts/background-agents">
+    Tasks and schedules on a durable task store.
+  </Card>
+  <Card title="OmniServe" icon="server" href="/docs/how-to-guides/omniserve">
+    Serve the agent over HTTP, with the same stores.
+  </Card>
+  <Card title="Agent in a container" icon="docker" href="/docs/how-to-guides/agent-in-a-container">
+    Package the agent with its keys and stores.
+  </Card>
+  <Card title="Memory" icon="brain" href="/docs/core-concepts/memory">
+    Session history, windows and summaries.
+  </Card>
+  <Card title="Telemetry settings" icon="sliders" href="/docs/reference/telemetry-config">
+    Every trace, archive and retention key.
+  </Card>
+</CardGroup>
