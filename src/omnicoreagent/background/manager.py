@@ -382,9 +382,12 @@ class BackgroundAgentManager:
         timeout_seconds: float | None = None,
     ) -> BackgroundRun:
         """Queue one run of a task now, optionally with another ``query``. With
-        ``wait``, return when it ends (or at ``timeout_seconds``). Under the
-        task's overlap policy, a run can come back ``skipped`` (another run
-        holds the task) instead of ``queued``."""
+        ``wait``, return when it ends, at ``timeout_seconds``, or when an
+        attempt failed and its retry is scheduled for later: then the run
+        comes back ``queued`` with its ``queued_at``, and a started manager
+        runs the retry when it is due (waiting would hold the caller for the
+        whole backoff). Under the task's overlap policy, a run can come back
+        ``skipped`` (another run holds the task) instead of ``queued``."""
         task = await self.task_store.get_task(task_id)
         if not task or not task.enabled:
             raise TaskNotFoundError(f"Task not found: {task_id}")

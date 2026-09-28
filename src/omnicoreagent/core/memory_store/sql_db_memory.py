@@ -57,6 +57,8 @@ class SQLConnectionManager:
         self._engine = None
         self._session_factory = None
         self._session_count = 0
+        # Stores using this pool; the last to close disposes it.
+        self.users = 0
         logger.debug("SQLConnectionManager initialized")
 
     def initialize(self, db_url: str, **kwargs):
@@ -145,6 +147,22 @@ def get_sql_manager(db_url: str) -> SQLConnectionManager:
         return manager
 
 
+def release_sql_manager(db_url: str) -> None:
+    """One store is done with a database's pool; the last one closes it.
+
+    Stores that name the same database share its pool, so closing one must
+    not close it under another.
+    """
+    with _sql_managers_lock:
+        manager = _sql_managers.get(db_url)
+        if manager is None:
+            return
+        manager.users = max(0, manager.users - 1)
+        if manager.users == 0:
+            manager.close_all()
+            del _sql_managers[db_url]
+
+
 def close_all_sql_managers() -> None:
     """Close every SQL connection pool (for shutdown and tests)."""
     with _sql_managers_lock:
@@ -230,15 +248,26 @@ class DatabaseMessageStore(AbstractMemoryStore):
     Database-backed message store for storing, retrieving, and clearing messages by session.
     """
 
+    async def close(self) -> None:
+        """Release this store's share of the database's connection pool; the
+        last store using it closes it. Closing twice does nothing more."""
+        if self._closed or not self.db_url:
+            return
+        self._closed = True
+        release_sql_manager(self.db_url)
+
     def __init__(self, db_url: str = None, **kwargs: Any):
         self.db_url = db_url
         self.memory_config: dict[str, Any] = {}
         self.summary_config: dict[str, Any] = {}
         self.summarize_fn: Callable = None
 
+        self._closed = False
         if db_url:
             self._sql_manager = get_sql_manager(db_url)
             self._sql_manager.initialize(db_url, **kwargs)
+            with _sql_managers_lock:
+                self._sql_manager.users += 1
 
             db_engine = self._sql_manager.get_engine()
 

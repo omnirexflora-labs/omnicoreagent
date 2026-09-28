@@ -889,6 +889,13 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             await self._inner.update_trace(payload["trace_id"], payload["patch"])
         elif record_type == "span_start":
             span = TelemetrySpan.from_dict(payload)
+            live = self._inner._traces.get(span.trace_id)
+            if live is not None and _find_span(live, span.span_id) is not None:
+                # Already there: the trace came back whole from the archive,
+                # and the log still holds its records until it is compacted.
+                # Applied once; not damage (it once marked every reloaded
+                # trace partial).
+                return
             await self._inner.start_span(span.trace_id, span)
         elif record_type == "span_end":
             await self._inner.end_span(

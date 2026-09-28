@@ -1946,7 +1946,7 @@ class TestEndpoints:
         resp = client.post("/run/sync", json={"query": "slow"})
 
         assert resp.status_code == 504
-        assert "timed out" in resp.json()["detail"]
+        assert "timed out" in resp.json()["detail"]["message"]
 
     def test_unhandled_route_errors_return_stable_json(self):
         agent = MagicMock(spec=OmniCoreAgent)

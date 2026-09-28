@@ -155,6 +155,10 @@ def run(
             rate_limit_requests=rate_limit if rate_limit is not None else 100,
             rate_limit_window=60,
         )
+        if config.background_enabled:
+            # Checked now, with the rest of the config: it was checked only
+            # when the server built its task store, as a raw traceback.
+            config.background_task_store_config()
     except Exception as exc:
         raise click.ClickException(f"Invalid OmniServe config: {exc}") from exc
 

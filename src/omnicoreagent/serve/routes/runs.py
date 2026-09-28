@@ -145,9 +145,15 @@ def create_runs_router() -> APIRouter:
                 status=TraceStatus.TIMEOUT,
                 error={"type": "TimeoutError", "message": "Request timed out"},
             )
+            # The run keeps its record: name it, so the caller can look it up.
             raise HTTPException(
                 status_code=504,
-                detail=f"Request timed out after {config.request_timeout} seconds",
+                detail={
+                    "message": f"Request timed out after {config.request_timeout} seconds",
+                    "run_id": run_id,
+                    "session_id": session_id,
+                    "request_timeout_seconds": config.request_timeout,
+                },
             )
         except Exception as exc:
             logger.error(f"OmniServe: Run error - {exc}")
@@ -356,7 +362,11 @@ def create_runs_router() -> APIRouter:
         except asyncio.TimeoutError:
             raise HTTPException(
                 status_code=504,
-                detail=f"Request timed out after {config.request_timeout} seconds",
+                detail={
+                    "message": f"Request timed out after {config.request_timeout} seconds",
+                    "run_id": run_id,
+                    "request_timeout_seconds": config.request_timeout,
+                },
             ) from None
         normalized = normalize_run_result(
             result,
