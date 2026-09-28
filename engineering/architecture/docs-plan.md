@@ -110,5 +110,22 @@ D5–D8 continue after the release; the docs site updates without one.
   - Guardrails — prompt injection (rewrite)
   - Privacy and credentials — redaction per boundary, keys kept out of
     sandboxes and traces (new, from the guardrails page)
+  Done (#296-#301): every example run; the code bugs the writers found
+  fixed first (redact_model_io applied, token budgets settled, approval
+  expiry is a refusal and a timely decision stands, unkept sandbox settings
+  refused at build, the guardrail logging through logging). Its stranger
+  test runs on the next build (a refunds desk using all eight pages).
+- D7 Run It (started 2026-09-27). Five pages, in the shape:
+  - Durable runs — pause and resume, recovery after a crash, idempotency,
+    heartbeats, interrupt and steer, what is kept and for how long; the
+    approvals walkthrough moves to a pointer to Approvals (rewrite)
+  - Stores and scale — which store for memory and runs, traces, the
+    archive, background tasks; one process vs several; closing what you
+    open (new)
+  - Background agents — tasks, schedules, overlap, retries, timeouts,
+    runs and their statuses, approvals in a background run (rewrite)
+  - OmniServe — the server, routes, SSE, approvals and budgets over HTTP,
+    auth, configuration (rewrite)
+  - Agent in a container — the image, keys, stores, health (rewrite)
   Closed by its stranger test.
-- D7 Run It, D8 See and Improve: after D6.
+- D8 See and Improve: after D7.

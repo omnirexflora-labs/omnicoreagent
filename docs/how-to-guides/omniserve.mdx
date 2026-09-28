@@ -1,55 +1,506 @@
 ---
-title: OmniServe
-description: 'Production REST and SSE API server for OmniCoreAgent'
-icon: 'server'
+title: "OmniServe"
+description: "Serve an agent over HTTP: runs as JSON or a live SSE stream, approvals, budgets, run records, telemetry and background tasks, with one command or a few lines of Python"
+icon: "server"
 ---
 
-# OmniServe — Production API Server
+# OmniServe
 
-**Turn any agent into a production-ready REST/SSE API with a single command.**
+OmniServe puts one agent behind an HTTP API: a run as JSON or as a live
+stream, the run's record and trajectory afterwards, a person's approval
+mid-run, and background tasks, with auth, rate limits and a request timeout.
+One command, `omniserve run --agent my_agent.py`, or `OmniServe(agent).start()`
+in your own script.
 
-OmniServe is an optional production extra:
+<Info>
+Every output on this page is what the server returned when it was run. The
+model's wording, the ids and the timings will differ on your run. Each
+route's fields are in the generated [HTTP API reference](/docs/reference/openapi.json),
+under **HTTP API (OmniServe)** in the navigation.
+</Info>
 
 ```bash
 pip install "omnicoreagent[serve]"
+export LLM_API_KEY=...   # your model provider's key
 ```
 
----
+## Serve an agent
 
-## Agent File Requirements
-
-Your Python file must define **one of the following**:
+Save this as `my_agent.py`. OmniServe takes the module's `agent`, or calls
+its `create_agent()` when there is no `agent`:
 
 ```python
-# Option 1: Define an `agent` variable
-from omnicoreagent import OmniCoreAgent
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
+
+@tools.register_tool("get_order")
+def get_order(order_id: str) -> dict:
+    """Look up an order by its id."""
+    return {"order_id": order_id, "status": "shipped", "total": 42.0}
 
 agent = OmniCoreAgent(
-    name="MyAgent",
-    system_instruction="You are a helpful assistant.",
+    name="support",
+    system_instruction="You answer questions about orders. Answer in plain text, in one sentence.",
     model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    local_tools=tools,
 )
 ```
 
-```python
-# Option 2: Define a `create_agent()` function
-from omnicoreagent import OmniCoreAgent
+Serve it (on port 8771 here; the default is 8000):
 
-def create_agent():
-    """Factory function that returns an agent instance."""
-    return OmniCoreAgent(
-        name="MyAgent",
-        system_instruction="You are a helpful assistant.",
-        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
-    )
+```bash
+omniserve run --agent my_agent.py --port 8771
 ```
 
-<Info>
-OmniServe looks for `agent` variable first, then `create_agent()` function. Your file must export one of these.
+```text
+📦 Loading agent from: my_agent.py
+✅ Loaded agent: support
 
-The file may also define its own routes — an application's pages, its own
-endpoints — mounted beside the agent's API on the same origin, behind the same
-middleware:
+==================================================
+OmniServe
+OmniCoreAgent 0.4.1.dev13+5ebddc2
+==================================================
+Agent: support
+Server: http://0.0.0.0:8771
+Docs: http://0.0.0.0:8771/docs
+Metrics: http://0.0.0.0:8771/prometheus
+
+Features Enabled:
+  • Auth: ✗ (use --auth-token to enable)
+  • Rate Limit: ✗ (use --rate-limit N to enable)
+  • CORS: ['*']
+  • Background API: ✓, task store: in_memory
+
+💡 Available options: --auth-token, --rate-limit, --cors-origins, --no-docs
+   Run 'omniserve run --help' for all options
+==================================================
+
+INFO:     Started server process [476363]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8771 (Press CTRL+C to quit)
+```
+
+Wait for `/ready`, then ask:
+
+```bash
+curl -s localhost:8771/ready
+curl -s -X POST localhost:8771/run/sync -H "Content-Type: application/json" \
+  -d '{"query": "Where is order 1042?", "session_id": "alice"}'
+```
+
+```text
+{"ready":true,"agent_name":"support","initialized":true,"mcp_connected":true,"mcp_servers":{}}
+{
+    "status": "success",
+    "termination_reason": "stop",
+    "guardrail_result": null,
+    "response": "Order 1042 has been shipped.",
+    "approvals": null,
+    "budget_request": null,
+    "session_id": "alice",
+    "agent_name": "support",
+    "metric": {
+        "requests": 2,
+        "request_tokens": 3033,
+        "response_tokens": 32,
+        "total_tokens": 3065,
+        "total_time": 4.4021726670034695,
+        "details": {
+            "cached_input_tokens": 1024
+        }
+    },
+    "trace_id": "trace_2bd35e0e39a44391ad1b7c8e5424cafd",
+    "run_id": "run_3520195e399d490089a6098759efbf03"
+}
+```
+
+Two model calls: one to call `get_order`, one to answer. `session_id` is the
+conversation: the next request with `"session_id": "alice"` remembers this
+one. Leave it out and each request starts a new session (its id is in the
+response). Keep `run_id`: everything about this run is under
+`/runs/{run_id}`.
+
+Interactive docs for your server are at `/docs` (Swagger) and `/redoc`.
+
+<Tip>
+No agent file yet? `omniserve quickstart` serves a plain agent, by default
+`--provider openai --model gpt-5.4-mini`. Asked to "Say hello in five words,
+in plain text", it answered `success | Hello there, hope you’re well.`
+</Tip>
+
+## Stream a run
+
+`POST /run` takes the same body and answers with Server-Sent Events: the
+run's telemetry as it happens, the answer as it is written (`text_delta`),
+and a final `complete` with the same fields as `/run/sync`. A small client:
+
+```python
+import json
+import httpx
+
+body = {"query": "Where is order 1042, and what did it cost?", "session_id": "dave"}
+with httpx.stream("POST", "http://localhost:8771/run", json=body, timeout=None) as response:
+    event = None
+    for line in response.iter_lines():
+        if line.startswith("event: "):
+            event = line.removeprefix("event: ")
+        elif line.startswith("data: "):
+            data = json.loads(line.removeprefix("data: "))
+            if event == "text_delta":
+                print(data["text"], end="", flush=True)
+            elif event == "tool_call":
+                print(f"[tool_call] {data['input']['tool_name']} {data['input']['tool_args']}")
+            elif event == "tool_result":
+                print(f"[tool_result] {data['output']['status']} {data['output']['data']}")
+            elif event == "complete":
+                print(f"\n[complete] {data['status']} {data['run_id']}")
+            elif event == "error":
+                print(f"[error] {data['error']}")
+```
+
+```text
+[tool_call] get_order {'order_id': '1042'}
+[tool_result] success {'order_id': '1042', 'status': 'shipped', 'total': 42.0}
+Order 1042 is shipped and it cost $42.00.
+[complete] success run_9de2453cbf3747789ea3ad6fc7915edb
+```
+
+A stream always opens with `event: session` (`"status": "started"`) and
+closes with `event: session` (`"status": "ended"`). In between, for a run
+with no tool call, `curl -N` saw these events, in order:
+
+```text
+session user_message guardrail_check memory_read run_configuration runtime_message
+memory_write agent_step context_assembly context_message (x6) context_tools model_call
+text_delta (x10) model_response memory_write final_answer complete session
+```
+
+- `text_delta` is live only: it is never stored, so a replay does not have it.
+- Check `status` on `complete` before treating the run as a success
+  (it can be `error`, `awaiting_approval` or `awaiting_budget`).
+- A failure arrives as `event: error` with `error`, `session_id` and `run_id`.
+- Closing the connection cancels the run.
+
+## Look at a run afterwards
+
+```bash
+curl -s localhost:8771/runs/$RUN_ID
+```
+
+```text
+{
+    "run_id": "run_3520195e399d490089a6098759efbf03",
+    "session_id": "alice",
+    "agent_name": "support",
+    "agent_version": null,
+    "status": "completed",
+    "step": 2,
+    "trace_ids": [
+        "trace_2bd35e0e39a44391ad1b7c8e5424cafd"
+    ],
+    "tool_calls": [
+        {
+            "tool_call_id": "call_6qfkMsa5VnxwbLmJJsKrnnH7",
+            "parent_tool_call_id": null,
+            "tool_name": "get_order",
+            "provider": "local",
+            "arguments_digest": "2b634eada53fcdec22125302b610d2f5a639d45b86bab3b66bd6667818cba6e5",
+            "step": 1,
+            "state": "completed",
+            "outcome": "success",
+            "started_at": "2026-09-27T23:02:06.514575+00:00",
+            "ended_at": "2026-09-27T23:02:06.538787+00:00"
+        }
+    ],
+    "usage": {
+        "requests": 2,
+        "request_tokens": 3033,
+        "response_tokens": 32,
+        "total_tokens": 3065
+    },
+    "error": null,
+    "created_at": "2026-09-27T23:02:03.632040+00:00",
+    "updated_at": "2026-09-27T23:02:08.056437+00:00",
+    "approvals": [],
+    "budget_requests": [],
+    "outcomes": []
+}
+```
+
+The record never includes the saved conversation. For the whole story,
+`GET /runs/{run_id}/trajectory` returns `segments` (one per stretch of a run
+that paused and resumed), `tool_calls`, `approvals` and `totals`; here,
+among the totals:
+
+```text
+"model_calls": {"total": 2, "agent_turn": 2, "context_summary": 0, "failed": 0}
+"tokens": {"input": 3033, "output": 32, "total": 3065, "cached_input": 1024, "reasoning": 0}
+"estimated_cost_usd": 0.00172755
+"cost_complete": true
+"tool_calls": {"total": 1, "by_outcome": {"success": 1, "error": 0, ...}}
+```
+
+The stored events of one run, inside a shared session, as JSON, as a
+compact trace, or replayed and followed over SSE:
+
+```bash
+curl -s "localhost:8771/events/dave/list?run_id=$RUN_ID"     # {"session_id", "events", "count"}: 33 events
+curl -s "localhost:8771/events/dave/trace?run_id=$RUN_ID"    # {"session_id", "summary", "steps"}
+curl -sN "localhost:8771/events/dave?run_id=$RUN_ID"         # SSE; resume with ?cursor= or Last-Event-ID
+curl -s "localhost:8771/telemetry/events?run_id=$RUN_ID&event_type=tool_result"
+curl -s "localhost:8771/telemetry/traces?session_id=alice&limit=20"
+```
+
+Use `trace_id` for one exact trace, `run_id` for everything one execution
+did. `/telemetry/events` returns at most 200 events by default and
+`/telemetry/traces` 100; ask for fewer with `limit`. More in
+[Observability](/docs/how-to-guides/observability).
+
+## A person in the loop
+
+With [governance](/docs/core-concepts/policies) on, a rule that says `ask`
+pauses the run and `/run/sync` returns `awaiting_approval`. This agent
+(`refund_agent.py`) asks before any refund, and has a slow report tool:
+
+```python
+import asyncio
+
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
+
+@tools.register_tool("get_order")
+def get_order(order_id: str) -> dict:
+    """Look up an order by its id."""
+    return {"order_id": order_id, "status": "shipped", "total": 42.0}
+
+@tools.register_tool("issue_refund")
+def issue_refund(order_id: str, amount: float) -> dict:
+    """Refund an order."""
+    return {"order_id": order_id, "refunded": amount}
+
+@tools.register_tool("build_report")
+async def build_report() -> str:
+    """Build the daily orders report. It is slow."""
+    await asyncio.sleep(30)
+    return "12 orders shipped, 1 refunded."
+
+policy = {
+    "name": "support-desk",
+    "mode": "strict",
+    "rules": {
+        "allow": [
+            {"rule_id": "tools", "capability": "tool.local.call"},
+            {"rule_id": "tasks", "capability": "background.task.create"},
+            {"rule_id": "runs", "capability": "background.run.start"},
+        ],
+        "ask": [
+            {
+                "rule_id": "refunds",
+                "capability": "tool.local.call",
+                "target": {"tool_name": "issue_refund"},
+                "reason": "Refunds need a person.",
+            }
+        ],
+    },
+}
+
+agent = OmniCoreAgent(
+    name="support",
+    system_instruction="You answer questions about orders and refund when asked. Answer in plain text, in one sentence.",
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    local_tools=tools,
+    agent_config={"governance_config": {"enabled": True, "policy": policy}},
+)
+```
+
+```bash
+OMNICOREAGENT_SERVE_REQUEST_TIMEOUT=20 omniserve run --agent refund_agent.py --port 8773
+
+curl -s -X POST localhost:8773/run/sync -H "Content-Type: application/json" \
+  -d '{"query": "Please refund order 1042 in full: 42 dollars.", "session_id": "bob"}'
+```
+
+```text
+{
+    "status": "awaiting_approval",
+    "termination_reason": null,
+    "guardrail_result": null,
+    "response": null,
+    "approvals": [
+        {
+            "approval_id": "approval_1db56482b7db412b96e07776776d86b4",
+            "tool_call_id": "call_LLR9crHj6dOvLFSdlwvzRJKl",
+            "tool_name": "issue_refund",
+            "capability": "tool.local.call",
+            "target": {"path": null, "host": null, "resource": null, "tool_name": "issue_refund", "mcp_server": null},
+            "arguments": {"order_id": "1042", "amount": 42},
+            "risk_level": "low",
+            "reason": "Refunds need a person.",
+            "expires_at": "2026-09-28T23:03:40.248649+00:00",
+            "delegated_run_id": null,
+            "delegated_name": null
+        }
+    ],
+    "budget_request": null,
+    "session_id": "bob",
+    "agent_name": "support",
+    "metric": null,
+    "trace_id": "trace_10a82531b7534851a7e7e24091de6815",
+    "run_id": "run_192cf4b607f641cd9f7431befc89b93f"
+}
+```
+
+Nothing was refunded. A person decides, then the run resumes:
+
+```bash
+curl -s -X POST localhost:8773/runs/$RUN_ID/approvals/$APPROVAL_ID \
+  -H "Content-Type: application/json" \
+  -d '{"decision": "approve", "approver": "alice", "note": "Customer called."}'
+curl -s -X POST localhost:8773/runs/$RUN_ID/resume
+```
+
+```text
+{"approval_id":"approval_1db56482b7db412b96e07776776d86b4","status":"approved","tool_call_id":"call_LLR9crHj6dOvLFSdlwvzRJKl","tool_name":"issue_refund","capability":"tool.local.call","target":{"path":null,"host":null,"resource":null,"tool_name":"issue_refund","mcp_server":null},"risk_level":"low","reason":"Refunds need a person.","created_at":"2026-09-27T23:03:40.248649+00:00","expires_at":"2026-09-28T23:03:40.248649+00:00","approver":"alice","note":"Customer called.","decided_at":"2026-09-27T23:03:49.543763+00:00","edited_arguments":null,"delegated_run_id":null,"delegated_name":null}
+{"status":"success","termination_reason":"stop","guardrail_result":null,"response":"Refunded order 1042 for $42.","approvals":null,"budget_request":null,"session_id":"bob","agent_name":"support","metric":{"requests":1,"request_tokens":1321,"response_tokens":14,"total_tokens":1335,"total_time":1.2692612289974932,"details":{"cached_input_tokens":1024}},"trace_id":"trace_144287d009e34dacbda7f2eed7db7a97","run_id":"run_192cf4b607f641cd9f7431befc89b93f"}
+```
+
+Send `"decision": "deny"` with a `note` the model will read, or approve with
+`"arguments": {...}` to run an edited call. Everything else about approvals
+is on [Approvals](/docs/core-concepts/approvals).
+
+A run that ran out of [budget](/docs/core-concepts/budgets) pauses the same
+way with `awaiting_budget`: read it with `GET /runs/{run_id}/budget`, decide
+with `POST /runs/{run_id}/budget` (`{"decision": "grant", "approver": "alice", "amount": 5}`),
+then resume. A running run can be steered (`POST /runs/{run_id}/steer`,
+`{"message": "..."}`) or stopped at its next step (`POST /runs/{run_id}/interrupt`,
+then resume); see [Durable runs](/docs/core-concepts/durable-runs).
+
+## Background tasks
+
+The served agent is registered for [background runs](/docs/core-concepts/background-agents)
+at startup, as agent `default`. On the same server:
+
+```bash
+curl -s -X POST localhost:8773/background/tasks -H "Content-Type: application/json" \
+  -d '{"task_id": "order_check", "query": "Look up order 1042 and say its status.",
+       "schedule": {"type": "manual"}, "timeout_seconds": 120}'
+curl -s -X POST localhost:8773/background/tasks/order_check/run \
+  -H "Content-Type: application/json" -d '{"wait": true}'
+```
+
+The second call waited for the run and returned it (abridged):
+
+```text
+{"run_id":"run_03ff6252cd7a40fba069ee9f1af2ef7f","task_id":"order_check","agent_id":"default","status":"completed","attempt":1,"max_attempts":1,"query_snapshot":"Look up order 1042 and say its status.","trigger_type":"manual",...,"session_id":"background:default:order_check","workspace_path":"background/default/order_check/run_03ff6252cd7a40fba069ee9f1af2ef7f",...,"error":null,"result_preview":"Order 1042 is shipped.",...}
+```
+
+With `{"wait": false}` (the default) it returns the queued run at once. A
+schedule is `manual`, `once`, `interval` or `cron`. Then:
+
+```bash
+curl -s localhost:8773/background/status
+curl -s localhost:8773/background/tasks/order_check/status
+curl -s localhost:8773/background/runs/$RUN_ID
+curl -s localhost:8773/background/runs/$RUN_ID/events
+curl -s localhost:8773/background/runs/$RUN_ID/workspace
+```
+
+```text
+{"running":true,"initialized":true,"worker_id":"worker_e8ad38bf0ef340cba2b7150683e4c681","lease_seconds":30.0,"agents":1,"tasks":1,"runs":1,"active_runs":0,"status_counts":{"queued":0,"claimed":0,"running":0,"retrying":0,"completed":1,"failed":0,"cancelled":0,"timeout":0,"skipped":0,"awaiting_approval":0,"awaiting_budget":0}}
+```
+
+The run's events were `background_run_queued`, `background_run_claimed`,
+`background_run_started`, `background_run_completed`, and its workspace held
+`run.json` and `events.jsonl`.
+
+Under governance the agent's policy also decides what an operator asks here:
+creating, changing, pausing, resuming or deleting a task is
+`background.task.<action>`, starting or cancelling a run is
+`background.run.<action>`. The policy above allows `create` and `start` only,
+so a `DELETE` is refused with a `403` (below). Allow them for the operators
+you trust ([policy reference](/docs/reference/policy)).
+
+### A task store that survives restarts
+
+Tasks, runs, attempts, leases and retries live in the background task
+store, which is not conversation memory (that stays in the agent's
+`MemoryRouter`). The default is in-memory: fine for development, gone on
+restart. Pick one backend for a deployment:
+
+- Use SQL for local durability with SQLite, or PostgreSQL or MySQL when several processes share one store.
+- Use Redis when your deployment already operates Redis with persistence and no eviction for task-store keys.
+- Use MongoDB when MongoDB is your durable operational store (it writes with majority concern).
+
+With a durable store, a queued run survives: OmniServe can queue a run, stop,
+start again with the same task store, and the new worker claims and
+completes it. The server in the next section kept a cron task across a
+restart.
+
+## Serve from your own code
+
+`OmniServe(agent, config=...)` gives you the same server from a script.
+`server.py`, with a path prefix, a token and a SQLite task store:
+
+```python
+from omnicoreagent import OmniCoreAgent, OmniServe, OmniServeConfig
+
+agent = OmniCoreAgent(
+    name="support",
+    system_instruction="You answer questions about orders. Answer in plain text, in one sentence.",
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+)
+
+config = OmniServeConfig(
+    port=8776,
+    api_prefix="/api/v1",
+    auth_enabled=True,
+    auth_token="change-me",
+    background_task_store="sql",
+    background_task_store_url="sqlite:///background.db",
+)
+
+if __name__ == "__main__":
+    OmniServe(agent, config=config).start()
+```
+
+```bash
+python server.py
+curl -s localhost:8776/api/v1/ready
+curl -s localhost:8776/ready
+curl -s -X POST localhost:8776/api/v1/background/tasks -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"task_id": "nightly", "query": "Summarise the day in one sentence.", "schedule": {"type": "cron", "expression": "0 2 * * *"}}'
+# stop the server, start it again, then:
+curl -s localhost:8776/api/v1/background/tasks/nightly/status -H "Authorization: Bearer change-me"
+```
+
+```text
+{"ready":true,"agent_name":"support","initialized":true,"mcp_connected":true,"mcp_servers":{}}
+{"detail":"Not Found"}
+nightly 0 2 * * * 2026-09-28T02:00:00Z
+```
+
+(The last line is the status's `task_id`, `schedule.expression` and
+`schedule_state.next_due_at`, after the restart.) The prefix moves the
+agent's routes; `/docs`, `/redoc`, `/openapi.json` and `/prometheus` stay at
+the root. `server.start()` blocks; `await server.start_async()` runs inside
+your event loop, and `server.get_app()` returns the FastAPI app to mount
+elsewhere or test.
+
+<Warning>
+`OMNICOREAGENT_SERVE_*` and `OMNICOREAGENT_BACKGROUND_*` environment
+variables always override what the code or the CLI flags set. A stray
+`OMNICOREAGENT_SERVE_PORT` in the environment wins over `port=8776`.
+</Warning>
+
+### Your own routes beside the agent's
+
+The agent file (or `OmniServe(..., routers=[...], public_paths=[...])`) can
+add an application's own pages and endpoints, served on the same origin
+behind the same middleware:
 
 ```python
 from fastapi import APIRouter
@@ -64,424 +515,204 @@ async def page() -> str:
 public_paths = ["/steward/"]    # served without a token; "/steward/*" for a directory
 ```
 
-Everything else the router serves still needs the bearer token when auth is
-on. In code, the same are `OmniServe(agent, config, routers=[...],
-public_paths=[...])`.
-</Info>
+Everything else these routers serve needs the bearer token when auth is on.
+[apps/steward](https://github.com/omnirexflora-labs/omnicoreagent/tree/main/apps/steward)
+is a complete application served this way.
 
----
+## How it works
 
-## Quick Start
+<Steps>
+  <Step title="Startup">
+    The server connects the agent's MCP servers, warms the model client,
+    starts the background manager (registering the agent as `default`) and
+    its worker. Only then does `/ready` say `true`. `/health` answers as soon
+    as the process is up.
+  </Step>
+  <Step title="Each request">
+    Middleware, outermost first: CORS, request logging, the rate limit, the
+    bearer token, the request timeout, and a last catch that turns an
+    uncaught error into a JSON `500`. A policy refusal becomes a `403`.
+  </Step>
+  <Step title="A run">
+    `/run/sync` and `/run` call `agent.run(...)` with the session and a new
+    `run_id`, and record a request trace next to the agent's own. The run
+    is durable like any other: its record lives in the agent's memory store
+    and its traces under the workspace (`./workspace/telemetry/`).
+  </Step>
+  <Step title="Shutdown">
+    The background manager stops, then `agent.cleanup()` closes its
+    connections.
+  </Step>
+</Steps>
 
-### Step 1: Create your agent file (`my_agent.py`)
+One server process serves one agent instance, so `workers` must be `1`.
+To scale, run several processes (or containers) behind a load balancer,
+sharing a durable memory store and task store; the rate limit is counted per
+process. [Stores and scale](/docs/how-to-guides/stores-and-scale) has the
+details.
 
-```python
-from omnicoreagent import OmniCoreAgent, ToolRegistry
+## Routes
 
-tools = ToolRegistry()
+Every route, its body and its response fields are in the
+[HTTP API reference](/docs/reference/openapi.json). Paths below are relative
+to `api_prefix` (empty by default).
 
-@tools.register_tool("greet")
-def greet(name: str) -> str:
-    """Greet someone by name."""
-    return f"Hello, {name}!"
+### Runs
 
-@tools.register_tool("calculate")
-def calculate(expression: str) -> dict:
-    """Evaluate a math expression."""
-    import math
-    result = eval(expression, {"__builtins__": {}}, {"sqrt": math.sqrt, "pi": math.pi})
-    return {"expression": expression, "result": result}
+| Method | Route | What it does |
+|--------|-------|--------------|
+| `POST` | `/run/sync` | Run and wait; the result as JSON |
+| `POST` | `/run` | Run and stream SSE events, ending with `complete` |
+| `GET` | `/runs/{run_id}` | The run's record: status, step, usage, tool call states, approvals (never its conversation) |
+| `GET` | `/runs/{run_id}/trajectory` | The whole run as one story: every trace segment, totals, each tool call once, the approvals |
+| `POST` | `/runs/{run_id}/approvals/{approval_id}` | Decide an approval: `{"decision": "approve" \| "deny", "approver", "note"?, "arguments"?}` |
+| `POST` | `/runs/{run_id}/resume` | Continue a paused or interrupted run once it is decided |
+| `GET` | `/runs/{run_id}/budget` | Every budget covering the run, and each time it ran out |
+| `POST` | `/runs/{run_id}/budget` | Grant or refuse: `{"decision": "grant" \| "deny", "approver", "amount"?, "note"?}` |
+| `POST` | `/runs/{run_id}/steer` | A message for the run's next step: `{"message", "sender"?}` |
+| `POST` | `/runs/{run_id}/interrupt` | Stop the run at its next step boundary; resume continues it |
+| `POST` | `/runs/{run_id}/outcome` | What the run turned out to be worth: `{"source", "reward"?, "label"?, "detail"?}` |
 
-agent = OmniCoreAgent(
-    name="MyAgent",
-    system_instruction="You are a helpful assistant with access to greeting and calculation tools.",
-    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
-    local_tools=tools,
-)
-```
+### Sessions and events
 
-### Step 2: Set environment variables
+| Method | Route | What it does |
+|--------|-------|--------------|
+| `GET` | `/sessions/{session_id}/history` | The session's messages |
+| `DELETE` | `/sessions/{session_id}` | Clear the session's messages |
+| `GET` | `/events/{session_id}` | Replay the session's stored events, then follow live ones (SSE); `?run_id=` for one run, `?cursor=` or `Last-Event-ID` to resume |
+| `GET` | `/events/{session_id}/list` | The stored events as JSON; `?run_id=` for one run |
+| `GET` | `/events/{session_id}/trace` | A compact trace of the session's latest run, or `?run_id=` |
 
-```bash
-export LLM_API_KEY=your_api_key_here
-```
+### Telemetry
 
-### Step 3: Run the server
+| Method | Route | What it does |
+|--------|-------|--------------|
+| `GET` | `/telemetry/events` | Events filtered by `trace_id`, `run_id`, `session_id`, `task_id` or `event_type` (`limit` 200) |
+| `GET` | `/telemetry/events/stream` | Replay and follow events over SSE for a `session_id`, optionally one `run_id` |
+| `GET` | `/telemetry/traces` | Traces filtered by trace, run, session, task, agent, workflow, model or status (`limit` 100) |
+| `GET` | `/telemetry/traces/{trace_id}` | One exact trace |
+| `GET` | `/telemetry/traces/{trace_id}/family` | Every trace linked to it |
+| `GET` | `/telemetry/traces/{trace_id}/trajectory` | One trace as a trajectory |
+| `GET` | `/telemetry/runs/{run_id}/trace` | The run's latest trace |
+| `GET` | `/telemetry/runs/{run_id}/family` | Every trace linked to the run |
+| `GET` | `/telemetry/runs/{run_id}/trajectory` | The run's latest segment as a trajectory (`/runs/{run_id}/trajectory` is the whole run) |
+| `GET` | `/telemetry/sessions/{session_id}/trace` | The session's latest trace |
+| `GET` | `/telemetry/retention` | The retention policy and the latest cleanup results |
 
-```bash
-omniserve run --agent my_agent.py
-```
+The trace detail routes return `404` when no trace matches.
 
-Startup takes a few seconds. Wait for `GET /ready` to return `ready: true`
-before sending work.
+### Health and operations
 
-### Step 4: Test the API
+| Method | Route | Token | What it does |
+|--------|-------|-------|--------------|
+| `GET` | `/health` | No | The process is up: `status`, `agent_name`, `uptime`, `version` |
+| `GET` | `/ready` | No | Ready for work: startup done, agent initialized, every MCP server connected |
+| `GET` | `/prometheus` | No | Request counters in Prometheus text format |
+| `GET` | `/metrics` | Yes | The agent's token and time totals |
+| `GET` | `/tools` | Yes | The agent's tools, with their input schemas |
+| `GET` | `/docs` | No | Swagger UI (`OMNICOREAGENT_SERVE_ENABLE_DOCS`) |
+| `GET` | `/redoc` | No | ReDoc (`OMNICOREAGENT_SERVE_ENABLE_REDOC`) |
 
-```bash
-# Health check
-curl http://localhost:8000/health
+`/ready`'s `mcp_servers` gives each configured MCP server's `status`
+(`connected`, `disconnected`, `failed`, `not_connected`) and last `error`, so
+one failed server among several is visible. An agent without MCP servers
+does not need one to be ready.
 
-# Run a query (sync)
-curl -X POST http://localhost:8000/run/sync \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Greet Alice and calculate 2+2"}'
+### Background
 
-# Run a query (streaming SSE)
-curl -X POST http://localhost:8000/run \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is sqrt(144)?"}'
+Mounted unless background is turned off (`OMNICOREAGENT_BACKGROUND_ENABLED=false`).
 
-# Open interactive docs
-open http://localhost:8000/docs
-```
+| Method | Route | What it does |
+|--------|-------|--------------|
+| `GET` | `/background/status` | The manager: worker, counts, run status totals |
+| `POST` | `/background/agents` | Register the served agent (again) or an agent spec |
+| `GET` | `/background/agents` | List registered agents |
+| `GET` | `/background/agents/{agent_id}` | One agent spec |
+| `DELETE` | `/background/agents/{agent_id}` | Delete an agent spec |
+| `POST` | `/background/tasks` | Create a task: `task_id`, `query`, `schedule`, and optionally `timeout_seconds`, `retry_policy`, `overlap_policy`, `session_policy`, `workspace_policy` |
+| `GET` | `/background/tasks` | List tasks |
+| `GET` | `/background/tasks/{task_id}` | One task |
+| `GET` | `/background/tasks/{task_id}/status` | Schedule state, run counts, latest run |
+| `PATCH` | `/background/tasks/{task_id}` | Change a task |
+| `POST` | `/background/tasks/{task_id}/run` | Queue a run now: `{"query"?, "wait"?}` |
+| `POST` | `/background/tasks/{task_id}/pause` | Pause its schedule |
+| `POST` | `/background/tasks/{task_id}/resume` | Resume its schedule |
+| `DELETE` | `/background/tasks/{task_id}` | Delete a task |
+| `GET` | `/background/runs` | List runs |
+| `GET` | `/background/runs/{run_id}` | One run's status |
+| `GET` | `/background/runs/{run_id}/attempts` | Its attempts |
+| `GET` | `/background/runs/{run_id}/events` | Its lifecycle events |
+| `GET` | `/background/runs/{run_id}/workspace` | Its workspace files |
+| `POST` | `/background/runs/{run_id}/cancel` | Cancel a queued or running run |
+| `POST` | `/background/runs/{run_id}/resume` | Queue a run that waited for approval, once decided |
 
----
+## Authentication
 
-## CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `omniserve run` | Run your agent file as API server |
-| `omniserve quickstart` | Zero-code server with defaults |
-| `omniserve config` | View or generate configuration |
-| `omniserve generate-dockerfile` | Generate production Dockerfile |
-
----
-
-## CLI Options: `omniserve run`
-
-```bash
-omniserve run \
-  --agent my_agent.py \
-  --host 0.0.0.0 \
-  --port 8000 \
-  --workers 1 \
-  --auth-token YOUR_TOKEN \
-  --rate-limit 100 \
-  --cors-origins "*" \
-  --no-docs
-```
-
-**Examples:**
-
-```bash
-# Basic run
-omniserve run --agent my_agent.py
-
-# With authentication
-omniserve run --agent my_agent.py --auth-token secret123
-
-# With rate limiting
-omniserve run --agent my_agent.py --rate-limit 100
-
-# Production settings
-omniserve run --agent my_agent.py \
-  --port 8000 \
-  --auth-token $AUTH_TOKEN \
-  --rate-limit 100 \
-  --cors-origins "https://myapp.com,https://api.myapp.com"
-
-```
-
----
-
-## CLI Options: `omniserve quickstart`
-
-Start a server instantly without writing any code:
-
-```bash
-omniserve quickstart \
-  --provider openai \
-  --model gpt-5.4 \
-  --name QuickAgent \
-  --instruction "You are..." \
-  --port 8000
-```
-
-Use the provider that matches your `LLM_API_KEY`. For an OpenAI key, run
-`omniserve quickstart --provider openai --model gpt-5.4-mini`.
-
-**Examples:**
+Off by default. Turn it on with a token:
 
 ```bash
-# OpenAI
-omniserve quickstart --provider openai --model gpt-5.4
-
-# Google Gemini
-omniserve quickstart --provider gemini --model gemini-3.8-flash
-
-# Anthropic Claude
-omniserve quickstart --provider anthropic --model claude-sonnet-5
+omniserve run --agent my_agent.py --auth-token s3cret-token
+# or
+export OMNICOREAGENT_SERVE_AUTH_ENABLED=true
+export OMNICOREAGENT_SERVE_AUTH_TOKEN=s3cret-token
 ```
 
----
-
-## API Endpoints
-
-### Core Endpoints
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `POST` | `/run` | Yes* | SSE streaming response |
-| `POST` | `/run/sync` | Yes* | JSON response (blocking) |
-| `GET` | `/runs/{run_id}` | Yes* | A run's durable record: status, step, usage, tool call states, approvals (never its saved conversation) |
-| `GET` | `/runs/{run_id}/trajectory` | Yes* | The whole run as one story: every trace segment in order, totals across them, each tool call once with its final outcome, the approvals |
-| `POST` | `/runs/{run_id}/approvals/{approval_id}` | Yes* | Decide an approval a paused run waits for: `{"decision": "approve" \| "deny", "approver", "note"?, "arguments"?}` |
-| `POST` | `/runs/{run_id}/resume` | Yes* | Continue a paused run once its approvals are decided |
-| `POST` | `/runs/{run_id}/steer` | Yes* | Send a running, waiting, or interrupted run a message for its next step: `{"message", "sender"?}` (422 if the guardrail blocks it) |
-| `POST` | `/runs/{run_id}/interrupt` | Yes* | Stop a running run at its next step boundary; resume continues it |
-| `GET` | `/runs/{run_id}/budget` | Yes* | Every budget covering the run, with its limit, what is spent, and any pending request |
-| `POST` | `/runs/{run_id}/budget` | Yes* | Grant or refuse the budget a waiting run ran out of: `{"decision": "grant" \| "deny", "approver", "amount"?, "note"?}` |
-| `POST` | `/runs/{run_id}/outcome` | Yes* | Record what the run turned out to be worth: `{"source", "reward"?, "label"?, "detail"?}` |
-| `GET` | `/sessions/{session_id}/history` | Yes* | A session's message history |
-| `DELETE` | `/sessions/{session_id}` | Yes* | Clear a session's message history |
-| `GET` | `/health` | No | Health check |
-| `GET` | `/ready` | No | Readiness check |
-| `GET` | `/prometheus` | No | Prometheus metrics |
-| `GET` | `/tools` | Yes* | List available tools |
-| `GET` | `/metrics` | Yes* | Agent usage metrics |
-| `GET` | `/events/{session_id}` | Yes* | Replay stored telemetry events, then follow live telemetry events over SSE; add `?run_id=...` to isolate one run |
-| `GET` | `/events/{session_id}/list` | Yes* | Return stored telemetry events as JSON; add `?run_id=...` to isolate one run |
-| `GET` | `/events/{session_id}/trace` | Yes* | Compact telemetry trace summary for the latest session trace, or `?run_id=...` for one run |
-| `GET` | `/telemetry/events` | Yes* | Return stored telemetry events filtered by `trace_id`, `run_id`, `session_id`, `task_id`, or `event_type` |
-| `GET` | `/telemetry/events/stream` | Yes* | Replay and follow telemetry events over SSE for `session_id`; add `run_id` to isolate one run |
-| `GET` | `/telemetry/traces` | Yes* | List traces filtered by trace, run, session, task, agent, workflow, model, or status |
-| `GET` | `/telemetry/traces/{trace_id}/family` | Yes* | Return all traces linked to one execution boundary |
-| `GET` | `/telemetry/traces/{trace_id}` | Yes* | Return one exact trace |
-| `GET` | `/telemetry/runs/{run_id}/trace` | Yes* | Return the latest trace correlated to one run |
-| `GET` | `/telemetry/runs/{run_id}/family` | Yes* | Every trace linked to one run by parent trace links |
-| `GET` | `/telemetry/runs/{run_id}/trajectory` | Yes* | The run's latest trace segment as a trajectory; `/runs/{run_id}/trajectory` is the whole run |
-| `GET` | `/telemetry/traces/{trace_id}/trajectory` | Yes* | One trace as a trajectory |
-| `GET` | `/telemetry/retention` | Yes* | The trace and payload retention policy and the latest cleanup results |
-| `GET` | `/telemetry/sessions/{session_id}/trace` | Yes* | Return the latest trace for one session |
-| `GET` | `/docs` | No | Swagger UI |
-| `GET` | `/redoc` | No | ReDoc UI |
-
-`/ready` returns `ready: true` only after the FastAPI lifespan has completed
-startup, the served agent is initialized, and any configured MCP servers are
-connected. Agents without MCP servers do not need an MCP client to pass
-readiness. The response's `mcp_servers` gives each configured server's status
-(`connected`, `disconnected`, `failed`, `not_connected`) and last error, so a
-single failed server among several is visible.
-
-### Background Task Endpoints
-
-These routes are mounted when background execution is enabled. It is enabled by
-default and can be turned off with `OMNICOREAGENT_BACKGROUND_ENABLED=false` or
-`OmniServeConfig(background_enabled=False)`.
-
-Under governance, what an operator asks here is decided by the served agent's
-policy too: creating, changing, pausing, resuming or deleting a task is
-`background.task.<action>`, and starting or cancelling a run is
-`background.run.<action>`. A policy that does not allow them refuses the
-request with `403` and the reason (a `strict` policy refuses anything no rule
-covers). Allow them for the operators you trust — see the
-[policy reference](/docs/reference/policy).
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `GET` | `/background/status` | Yes* | Inspect background manager counts and run status totals |
-| `POST` | `/background/agents` | Yes* | Register the served agent or an agent spec for background execution |
-| `GET` | `/background/agents` | Yes* | List registered background agents |
-| `GET` | `/background/agents/{agent_id}` | Yes* | Inspect a background agent spec |
-| `DELETE` | `/background/agents/{agent_id}` | Yes* | Delete a background agent spec |
-| `POST` | `/background/tasks` | Yes* | Create a background task |
-| `GET` | `/background/tasks` | Yes* | List background tasks |
-| `GET` | `/background/tasks/{task_id}` | Yes* | Inspect a background task |
-| `GET` | `/background/tasks/{task_id}/status` | Yes* | Inspect schedule state, run counts, and latest run |
-| `PATCH` | `/background/tasks/{task_id}` | Yes* | Patch a background task |
-| `POST` | `/background/tasks/{task_id}/run` | Yes* | Queue a manual background run, optionally waiting for terminal state |
-| `POST` | `/background/tasks/{task_id}/pause` | Yes* | Pause scheduled dispatch |
-| `POST` | `/background/tasks/{task_id}/resume` | Yes* | Resume scheduled dispatch |
-| `DELETE` | `/background/tasks/{task_id}` | Yes* | Delete a background task |
-| `POST` | `/background/runs/{run_id}/cancel` | Yes* | Cancel a queued or running run |
-| `POST` | `/background/runs/{run_id}/resume` | Yes* | Queue a background run that was waiting for approval, once its approvals are decided |
-| `GET` | `/background/runs` | Yes* | List background runs |
-| `GET` | `/background/runs/{run_id}` | Yes* | Inspect run status |
-| `GET` | `/background/runs/{run_id}/attempts` | Yes* | List run attempts |
-| `GET` | `/background/runs/{run_id}/events` | Yes* | Replay lifecycle events |
-| `GET` | `/background/runs/{run_id}/workspace` | Yes* | Inspect run workspace files |
-
-*Auth required only if `--auth-token` is set or `OMNICOREAGENT_SERVE_AUTH_ENABLED=true`
-with `OMNICOREAGENT_SERVE_AUTH_TOKEN`.
-
-### Request/Response Examples
+Then every route but `/health`, `/ready`, `/prometheus`, `/docs`, `/redoc`,
+`/openapi.json` and your `public_paths` needs the header:
 
 ```bash
-# Sync request (with auth)
-curl -X POST http://localhost:8000/run/sync \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -d '{"query": "What is 2+2?", "session_id": "user123"}'
-
-# Response:
-# {"response": "2+2 equals 4", "session_id": "user123", ...}
-
-# Streaming SSE request
-curl -X POST http://localhost:8000/run \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Explain quantum computing"}'
-
-# Replay and follow one session's events
-curl -N http://localhost:8000/events/user123
-
-# Replay one run inside a shared session
-curl -N "http://localhost:8000/events/user123?run_id=RUN_ID"
-curl "http://localhost:8000/events/user123/list?run_id=RUN_ID"
-curl "http://localhost:8000/events/user123/trace?run_id=RUN_ID"
-
-# Production telemetry API
-curl "http://localhost:8000/telemetry/events?session_id=user123&run_id=RUN_ID"
-curl "http://localhost:8000/telemetry/events?run_id=RUN_ID&event_type=tool_result&limit=100"
-curl "http://localhost:8000/telemetry/traces?session_id=user123&limit=20"
-curl "http://localhost:8000/telemetry/traces/TRACE_ID"
-curl "http://localhost:8000/telemetry/runs/RUN_ID/trace"
-curl "http://localhost:8000/telemetry/sessions/user123/trace"
-curl -N "http://localhost:8000/telemetry/events/stream?session_id=user123&run_id=RUN_ID"
-
-# List tools
-curl http://localhost:8000/tools \
-  -H "Authorization: Bearer YOUR_TOKEN"
+curl -s localhost:8774/tools -H "Authorization: Bearer s3cret-token"
 ```
 
-For telemetry traces, `trace_id` is the exact lookup handle returned by the
-agent runtime. `run_id` is the serving/runtime correlation handle returned from
-`/run/sync` and SSE completion payloads. Use `trace_id` when you need one exact
-trace. Use `run_id` when your UI or application needs all telemetry for one
-execution inside a shared session.
+There is one token per server; for per-user identity, put OmniServe behind a
+gateway that authenticates users. CORS is open (`*`) by default; set
+`OMNICOREAGENT_SERVE_CORS_ORIGINS` to your front end's origin.
 
-`/telemetry/events` defaults to `limit=200`; `/telemetry/traces` defaults to
-`limit=100`. Both accept lower limits per request. Exact trace, run trace, and
-session trace detail endpoints return `404` when no matching trace exists or an
-accessor returns a trace that does not match the requested selector.
+## Configuration
 
-### Background Task Example
+Flags on `omniserve run`: `--agent`, `--host`, `--port`, `--workers` (must
+be 1), `--auth-token`, `--rate-limit N` (requests per minute per client IP),
+`--cors-origins`, `--no-docs`. Everything else is an environment variable
+or an `OmniServeConfig` field of the same name, lower-cased without the
+prefix (`OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` is `request_timeout`). With
+none set, the defaults serve on `0.0.0.0:8000` with no auth, and the
+background API and its worker run with an in-memory task store.
 
-OmniServe registers the served agent as a background-capable agent during server
-startup. The default background agent id is `default`; override it with
-`OMNICOREAGENT_BACKGROUND_AGENT_ID` or `OmniServeConfig(background_agent_id="...")`.
-
-```bash
-curl -X POST http://localhost:8000/background/tasks \
-  -H "Content-Type: application/json" \
-  -d '{
-    "task_id": "daily_report",
-    "query": "Write today'\''s operations report and save the output.",
-    "schedule": {"type": "manual"},
-    "timeout_seconds": 120,
-    "retry_policy": {"max_retries": 1, "initial_delay_seconds": 30}
-  }'
-
-curl -X POST http://localhost:8000/background/tasks/daily_report/run \
-  -H "Content-Type: application/json" \
-  -d '{"wait": false}'
-```
-
-Set `{"wait": true}` when the response should wait for terminal run state. If
-the run does not finish before the background wait budget, OmniServe returns
-`504` with the `run_id`, latest `status`, `wait_timeout_seconds`, and
-`request_timeout_seconds` in `detail`; use the `run_id` with
-`/background/runs/{run_id}` to inspect the run later.
-
-If auth is enabled with `--auth-token` or
-`OMNICOREAGENT_SERVE_AUTH_ENABLED=true`, add
-`-H "Authorization: Bearer YOUR_TOKEN"` to protected requests.
-
-Each run stores operational state in the task store and writes lifecycle files
-into the configured workspace namespace. Use the default in-memory task store
-for local development, or choose `sql`, `redis`, or `mongodb` when runs must
-survive restarts. Durable stores preserve queued runs across server restarts:
-OmniServe can queue a run, stop, start again with the same task store, and the
-new manager can claim and complete that run.
-
-Choose one durable backend per deployment. Use SQL for local durability with
-SQLite, or PostgreSQL or MySQL when several processes share one store; a SQL
-write costs what one row costs, whatever the store already holds.
-Use Redis when your deployment already operates Redis with persistence and no
-eviction for task-store keys. Use MongoDB when
-MongoDB is your durable operational store.
-
-Common inspection endpoints:
-
-```bash
-curl http://localhost:8000/background/status
-curl http://localhost:8000/background/tasks/daily_report/status
-curl http://localhost:8000/background/runs/$RUN_ID
-curl http://localhost:8000/background/runs/$RUN_ID/events
-curl http://localhost:8000/background/runs/$RUN_ID/workspace
-```
-
----
-
-## Environment Variables
-
-Server settings use the `OMNICOREAGENT_SERVE_*` prefix. Background task settings
-use the `OMNICOREAGENT_BACKGROUND_*` prefix. **Environment variables always
-override code values.**
-
-You can run OmniServe without adding any `OMNICOREAGENT_SERVE_*` variables. The defaults
-enable the background API, start the worker, and use in-memory background task
-state. Add variables only when you want to change server behavior,
-authentication, rate limits, or background storage.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OMNICOREAGENT_SERVE_HOST` | `0.0.0.0` | Server host. Must not be empty |
-| `OMNICOREAGENT_SERVE_PORT` | `8000` | Server port. Must be `1`-`65535` |
-| `OMNICOREAGENT_SERVE_WORKERS` | `1` | Direct OmniServe worker count. Must be `1`; scale by running multiple processes |
-| `OMNICOREAGENT_SERVE_API_PREFIX` | `""` | API path prefix (e.g., `/api/v1`). Normalized to a leading slash with no trailing slash; whitespace is invalid |
+| Variable | Default | What it does |
+|----------|---------|--------------|
+| `OMNICOREAGENT_SERVE_HOST` | `0.0.0.0` | Host to bind; must not be empty |
+| `OMNICOREAGENT_SERVE_PORT` | `8000` | Port, `1`-`65535` |
+| `OMNICOREAGENT_SERVE_WORKERS` | `1` | Must be `1`; scale with more processes |
+| `OMNICOREAGENT_SERVE_API_PREFIX` | `""` | Prefix for the agent's routes, e.g. `/api/v1` (a leading slash is added, a trailing one removed; no whitespace) |
 | `OMNICOREAGENT_SERVE_ENABLE_DOCS` | `true` | Swagger UI at `/docs` |
 | `OMNICOREAGENT_SERVE_ENABLE_REDOC` | `true` | ReDoc at `/redoc` |
-| `OMNICOREAGENT_SERVE_CORS_ENABLED` | `true` | Enable CORS |
-| `OMNICOREAGENT_SERVE_CORS_ORIGINS` | `*` | Allowed origins (comma-separated) |
-| `OMNICOREAGENT_SERVE_CORS_METHODS` | `*` | Allowed methods (comma-separated) |
-| `OMNICOREAGENT_SERVE_CORS_HEADERS` | `*` | Allowed headers (comma-separated) |
+| `OMNICOREAGENT_SERVE_CORS_ENABLED` | `true` | CORS middleware |
+| `OMNICOREAGENT_SERVE_CORS_ORIGINS` | `*` | Allowed origins, comma-separated |
+| `OMNICOREAGENT_SERVE_CORS_METHODS` | `*` | Allowed methods, comma-separated |
+| `OMNICOREAGENT_SERVE_CORS_HEADERS` | `*` | Allowed headers, comma-separated |
 | `OMNICOREAGENT_SERVE_CORS_CREDENTIALS` | `true` | Allow credentials |
-| `OMNICOREAGENT_SERVE_AUTH_ENABLED` | `false` | Enable Bearer token auth. Requires a non-empty auth token |
-| `OMNICOREAGENT_SERVE_AUTH_TOKEN` | — | Bearer token value used when auth is enabled |
-| `OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED` | `false` | Enable rate limiting |
-| `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per window. Must be at least `1` when enabled |
-| `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Window in seconds. Must be at least `1` when enabled |
-| `OMNICOREAGENT_SERVE_REQUEST_LOGGING` | `true` | Log requests |
-| `OMNICOREAGENT_SERVE_LOG_LEVEL` | `INFO` | Log level: `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG`, or `TRACE` |
-| `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` | `300` | Request timeout in seconds |
-| `OMNICOREAGENT_BACKGROUND_ENABLED` | `true` | Expose background task endpoints |
-| `OMNICOREAGENT_BACKGROUND_AGENT_ID` | `default` | Agent id for the served agent in background tasks |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE` | `in_memory` | Background control-plane store: `in_memory`, `sql`, `redis`, or `mongodb` |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URL` | — | SQL or Redis URL. Use `OMNICOREAGENT_BACKGROUND_TASK_STORE=redis` for Redis URLs |
+| `OMNICOREAGENT_SERVE_AUTH_ENABLED` | `false` | Bearer-token auth; needs a token |
+| `OMNICOREAGENT_SERVE_AUTH_TOKEN` | — | The token |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED` | `false` | Rate limit per client IP (`X-Forwarded-For` first) |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per window, at least `1` |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Window in seconds, at least `1` |
+| `OMNICOREAGENT_SERVE_REQUEST_LOGGING` | `true` | Log each request; adds `X-Process-Time` |
+| `OMNICOREAGENT_SERVE_LOG_LEVEL` | `INFO` | `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG` or `TRACE` |
+| `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` | `300` | Seconds a request may take; `0` turns it off |
+| `OMNICOREAGENT_BACKGROUND_ENABLED` | `true` | Mount the background routes |
+| `OMNICOREAGENT_BACKGROUND_AGENT_ID` | `default` | The served agent's background id |
+| `OMNICOREAGENT_BACKGROUND_START_WORKER` | `true` | Run the scheduler and worker in this process |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE` | `in_memory` | `in_memory`, `sql`, `redis` or `mongodb` |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_URL` | — | SQL or Redis URL (a URL alone means SQL) |
 | `OMNICOREAGENT_BACKGROUND_TASK_STORE_URI` | — | MongoDB URI |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE` | `omnicoreagent` | MongoDB database name |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE` | `omnicoreagent` | MongoDB database |
 | `OMNICOREAGENT_BACKGROUND_TASK_STORE_PREFIX` | — | Redis key prefix |
 | `OMNICOREAGENT_BACKGROUND_TASK_STORE_COLLECTION_PREFIX` | — | MongoDB collection prefix |
-| `OMNICOREAGENT_BACKGROUND_TASK_STORE_CONNECT_TIMEOUT` | — | Backend connect timeout in seconds |
-| `OMNICOREAGENT_BACKGROUND_START_WORKER` | `true` | Start scheduler and worker loop during server lifespan |
+| `OMNICOREAGENT_BACKGROUND_TASK_STORE_CONNECT_TIMEOUT` | — | Seconds to connect to the store |
 
-<Info>
-The background task store is not conversation memory. Memory stays in
-`MemoryRouter`. The task store is the control plane for schedules, runs,
-attempts, leases, retries, and cancellation. Leave it at the in-memory default
-to start; choose `sql`, `redis`, or `mongodb` when that state must survive
-restarts. Redis durable deployments need persistence enabled and a no-eviction
-policy for task-store keys. MongoDB durable deployments use majority writes.
-</Info>
-
-**Example shell environment:**
+A durable task store; pick one backend:
 
 ```bash
-# Model credential
-export LLM_API_KEY=your_api_key_here
-
-# Optional OmniServe overrides
-export OMNICOREAGENT_SERVE_PORT=8000
-export OMNICOREAGENT_SERVE_AUTH_ENABLED=true
-export OMNICOREAGENT_SERVE_AUTH_TOKEN=my-secret-token
-export OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED=true
-export OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS=100
-export OMNICOREAGENT_SERVE_CORS_ORIGINS=https://myapp.com,https://api.myapp.com
-export OMNICOREAGENT_SERVE_CORS_METHODS=GET,POST,OPTIONS
-export OMNICOREAGENT_SERVE_CORS_HEADERS=Authorization,Content-Type
-
-# Optional durable background task store. Pick one backend.
 export OMNICOREAGENT_BACKGROUND_TASK_STORE=sql
 export OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=sqlite:///.omnicoreagent/background.db
 ```
@@ -497,138 +728,202 @@ export OMNICOREAGENT_BACKGROUND_TASK_STORE_URI=mongodb://localhost:27017
 export OMNICOREAGENT_BACKGROUND_TASK_STORE_DATABASE=omnicoreagent
 ```
 
----
+SQL needs `omnicoreagent[postgres]` (SQLAlchemy, for SQLite too), Redis
+`omnicoreagent[redis]`, MongoDB `omnicoreagent[mongodb]`. `omniserve config
+--show` prints the configuration the environment gives;
+`omniserve config --env-example` prints a template. Every option is in the
+[CLI reference](/docs/reference/cli) and [configuration](/docs/how-to-guides/configuration).
 
-## Docker Deployment
+### The request timeout
 
-### Generate a Dockerfile
+`OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` (300 seconds) bounds each request:
+
+- `/run/sync` and `/runs/{run_id}/resume` answer `504` when the run takes
+  longer. The run is stopped; its record and trace remain.
+- `/run` (SSE) sends `event: error` with `"error": "Request timed out"`
+  and closes the stream.
+- `/background/tasks/{task_id}/run` with `"wait": true` waits a little less
+  than the timeout, then answers `504` with the `run_id`. The run is **not**
+  stopped: it carries on in the background.
+
+For work longer than a request should last, use a background task.
+
+## Deploy with Docker
 
 ```bash
 omniserve generate-dockerfile --file my_agent.py
-```
-
-### Build and run
-
-```bash
 docker build -t omnicoreagent-serve .
-docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omnicoreagent-serve
+docker run -p 8000:8000 -e LLM_API_KEY omnicoreagent-serve
 ```
 
-The generator creates a Dockerfile for the current project directory and stores
-only non-sensitive defaults in the image:
+The generated Dockerfile installs `omnicoreagent[serve]` on
+`python:3.12-slim`, copies the build context to `/app`, runs as a non-root
+user, checks `/health`, and keeps the workspace in `/tmp/workspace` (gone
+with the container unless you mount a volume). Add the extras your agent
+needs (`[serve,postgres]` for a SQL memory store). A persistent volume, a
+store for runs and readiness checks are on
+[Running the agent in a container](/docs/how-to-guides/agent-in-a-container).
 
-| Setting | Value |
-|---------|-------|
-| `AGENT_PATH` | In-container path to the selected agent file |
-| `OMNICOREAGENT_WORKSPACE_BACKEND` | `local` |
-| `OMNICOREAGENT_WORKSPACE_DIR` | `/tmp/workspace` |
+## When things go wrong
 
-The agent file must be inside the current Docker build context. The generator
-does not import or execute the agent file. S3/R2 workspace credentials are
-passed at runtime with `-e`, never baked into the image.
+<AccordionGroup>
+  <Accordion title="401 Missing or invalid Authorization header">
+    Auth is on and the request had no `Authorization: Bearer ...` header, or
+    the wrong token:
 
-### Cloud deployment examples
+    ```text
+    {"error":"Unauthorized","message":"Missing or invalid Authorization header"}
+    {"error":"Unauthorized","message":"Invalid authentication token"}
+    ```
+  </Accordion>
 
-```bash
-# Local workspace (ephemeral)
-docker run -p 8000:8000 -e LLM_API_KEY=$LLM_API_KEY omnicoreagent-serve
+  <Accordion title="403 Denied by strict policy">
+    The agent's policy refused what the request asked, here a task `DELETE`
+    the policy does not allow:
 
-# AWS S3 workspace (persistent)
-docker run -p 8000:8000 \
-  -e LLM_API_KEY=$LLM_API_KEY \
-  -e OMNICOREAGENT_WORKSPACE_BACKEND=s3 \
-  -e AWS_S3_BUCKET=my-bucket \
-  -e AWS_ACCESS_KEY_ID=... \
-  -e AWS_SECRET_ACCESS_KEY=... \
-  -e AWS_REGION=us-east-1 \
-  omnicoreagent-serve
+    ```text
+    {"error":"UnknownCapabilityError","detail":"Denied by strict policy: no rule matches this background.task.delete request."}
+    ```
 
-# Cloudflare R2 workspace (persistent)
-docker run -p 8000:8000 \
-  -e LLM_API_KEY=$LLM_API_KEY \
-  -e OMNICOREAGENT_WORKSPACE_BACKEND=r2 \
-  -e R2_BUCKET_NAME=my-bucket \
-  -e R2_ACCOUNT_ID=... \
-  -e R2_ACCESS_KEY_ID=... \
-  -e R2_SECRET_ACCESS_KEY=... \
-  omnicoreagent-serve
-```
+    Add an allow rule for the capability named (`background.task.delete`),
+    for the operators you trust. An `ask` that nobody can answer inside the
+    request is refused the same way.
+  </Accordion>
 
----
+  <Accordion title="404 No run / Task not found">
+    ```text
+    {"detail":"No run run_nope"}
+    {"detail":"No approval approval_nope on run run_192cf4b607f641cd9f7431befc89b93f"}
+    {"detail":"Task not found: nope"}
+    ```
 
-## Python API (Programmatic Control)
+    A run's record lives in the agent's memory store: with the default
+    in-memory store, a restart forgets every run. Use a durable
+    [memory store](/docs/core-concepts/memory).
+  </Accordion>
 
-For full programmatic control, use `OmniServe` directly in your Python script:
+  <Accordion title="409 still waiting, already decided, already finished">
+    The request does not fit the run's state:
 
-```python
-from omnicoreagent import OmniCoreAgent, OmniServe, OmniServeConfig, ToolRegistry
+    ```text
+    {"detail":"Run run_192cf4b607f641cd9f7431befc89b93f is still waiting for approval: approval_1db56482b7db412b96e07776776d86b4"}
+    {"detail":"Approval approval_1db56482b7db412b96e07776776d86b4 is already approved"}
+    {"detail":"Run run_192cf4b607f641cd9f7431befc89b93f is completed; only a waiting or stopped run can resume"}
+    {"detail":"Task already registered: order_check"}
+    ```
 
-tools = ToolRegistry()
+    Decide every approval before resuming; send `"replace": true` to
+    overwrite a task.
+  </Accordion>
 
-@tools.register_tool("get_time")
-def get_time() -> dict:
-    from datetime import datetime
-    return {"time": datetime.now().isoformat()}
+  <Accordion title="422 a body that does not validate">
+    ```text
+    {"detail":[{"type":"literal_error","loc":["body","decision"],"msg":"Input should be 'approve' or 'deny'","input":"maybe","ctx":{"expected":"'approve' or 'deny'"}}]}
+    ```
 
-agent = OmniCoreAgent(
-    name="MyAgent",
-    system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
-    local_tools=tools,
-)
+    `/runs/{run_id}/steer` also answers `422` when the injection guardrail
+    blocks the message.
+  </Accordion>
 
-config = OmniServeConfig(
-    host="0.0.0.0",
-    port=8000,
-    auth_enabled=True,
-    auth_token="my-secret-token",
-    rate_limit_enabled=True,
-    rate_limit_requests=100,
-    rate_limit_window=60,
-    cors_origins=["*"],
-    enable_docs=True,
-)
+  <Accordion title="429 Rate limit exceeded">
+    With `--rate-limit 3`, the fourth request in a minute:
 
-if __name__ == "__main__":
-    server = OmniServe(agent, config=config)
-    server.start()
-```
+    ```text
+    HTTP/1.1 429 Too Many Requests
+    x-ratelimit-limit: 3
+    x-ratelimit-remaining: 0
+    x-ratelimit-reset: 1790550444
+    retry-after: 59
+    {"error":"TooManyRequests","message":"Rate limit exceeded. Max 3 requests per 60 seconds.","retry_after":59}
+    ```
 
-Run with Python directly:
+    Every request but the public paths counts, rejected ones (a `401`)
+    included.
+  </Accordion>
 
-```bash
-export LLM_API_KEY=your_api_key
-python server.py
-```
+  <Accordion title="504 Request timed out">
+    A `/run/sync` under a 1-second timeout, with a model slower than that:
 
-<Info>
-**CLI vs Python API:**
-- `omniserve run --agent my_agent.py` — CLI loads your agent file and applies CLI flags
-- `python server.py` — You control everything programmatically via `OmniServeConfig`
-</Info>
+    ```text
+    {"detail":{"message":"Request timed out after 1 seconds","run_id":"run_bb48117c442e48c0b63efaa7beee4b4a","session_id":"omni_core_agent_slow_ceb1792e","request_timeout_seconds":1}}
+    ```
 
-<Warning>
-**Environment Variable Precedence:** environment variables **always override** values set in `OmniServeConfig`.
-</Warning>
+    The run is stopped and its record says `timeout`
+    (`GET /runs/{run_id}`); the `run_id` finds its trajectory. `POST
+    /runs/{run_id}/resume` answers a timeout the same way.
 
----
+    A background run waited on with `"wait": true`:
 
-<Tip>
-OmniServe is perfect for deploying agents as microservices, webhooks, chatbots, or any HTTP-accessible AI capability.
-</Tip>
+    ```text
+    {"detail":{"message":"Background run did not finish within 18.0 seconds","run_id":"run_9d9ac5f1f756447e856c90b93ebb5e2f","task_id":"daily_report","status":"running","wait_timeout_seconds":18.0,"request_timeout_seconds":20}}
+    ```
 
----
+    That run finished later (`GET /background/runs/{run_id}` said
+    `completed`). Raise `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT`, or queue long
+    work without waiting.
+  </Accordion>
 
-**Learn More**: See [OmniServe Cookbook](https://github.com/omnirexflora-labs/omnicoreagent/tree/main/cookbook/omniserve) for more examples.
+  <Accordion title="The server will not start: Invalid OmniServe config">
+    The configuration is checked before the agent is loaded:
 
+    ```text
+    Error: Invalid OmniServe config: 1 validation error for OmniServeConfig
+      Value error, OMNICOREAGENT_SERVE_AUTH_TOKEN is required when OMNICOREAGENT_SERVE_AUTH_ENABLED=true [type=value_error, ...]
+    Error: Invalid OmniServe config: 1 validation error for OmniServeConfig
+      Value error, OMNICOREAGENT_SERVE_WORKERS must be 1 for direct OmniServe. Run multiple OmniServe processes behind a process manager for horizontal scaling. [type=value_error, ...]
+    ```
 
-## Native Text Deltas
+    A Redis or MongoDB task store without its address is refused the same
+    way: `Error: Invalid OmniServe config: Redis background task store
+    requires OMNICOREAGENT_BACKGROUND_TASK_STORE_URL` (`..._URI` for
+    MongoDB).
+  </Accordion>
 
-The SSE `/run` endpoint emits `text_delta` while the provider response is still in
-progress, in addition to lifecycle events and terminal `complete` results. Each
-delta is intermediate and includes actor identity and a sequence number. Deltas
-are delivered even when raw model-response trace recording is disabled. They are
-live-only; the session event endpoint replays persisted lifecycle/final-answer
-records, subject to recording configuration. A disconnect cancels the active run.
-Check the final payload's `status` and `termination_reason` before treating a run
-as successful. See [basic usage](/docs/how-to-guides/basic-usage) for the Python contract.
+  <Accordion title="Agent file must define an 'agent' variable or 'create_agent()' function">
+    ```text
+    Error: Agent file must define an 'agent' variable or 'create_agent()' function
+    Error: Invalid value for '--agent' / '-a': Path 'missing.py' does not exist.
+    ```
+
+    An exception while importing the file is reported as
+    `Error loading agent file: ...`.
+  </Accordion>
+
+  <Accordion title="Application startup failed: LLM_API_KEY not found">
+    The model key is read when the agent is built; without it the server
+    exits:
+
+    ```text
+    ValueError: LLM_API_KEY not found in environment variables
+
+    ERROR:    Application startup failed. Exiting.
+    ```
+
+    Set `LLM_API_KEY` in the server's environment. A key the provider
+    rejects starts fine, and each run ends with `status` `error`,
+    `termination_reason` `provider_error`.
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Running the agent in a container" icon="docker" href="/docs/how-to-guides/agent-in-a-container">
+    An image, a volume, a store for runs, health checks.
+  </Card>
+  <Card title="Durable runs" icon="rotate" href="/docs/core-concepts/durable-runs">
+    Run records, pause and resume, recovery after a crash.
+  </Card>
+  <Card title="Stores and scale" icon="database" href="/docs/how-to-guides/stores-and-scale">
+    Memory and task stores, and many processes sharing them.
+  </Card>
+  <Card title="Background agents" icon="clock" href="/docs/core-concepts/background-agents">
+    Schedules, retries, leases and the task store.
+  </Card>
+  <Card title="Approvals" icon="user-check" href="/docs/core-concepts/approvals">
+    Everything about a person in the loop.
+  </Card>
+  <Card title="HTTP API reference" icon="code" href="/docs/reference/openapi.json">
+    Every route, body and response field.
+  </Card>
+</CardGroup>

@@ -1,263 +1,773 @@
 ---
-title: Background Agents
-description: 'Run tracked OmniCoreAgent tasks outside the foreground request path'
-icon: 'clock'
+title: "Background Agents"
+description: "Run agents on a schedule or on demand, outside the request: tasks, runs, retries, overlap, pauses for a person, and a task store several workers share"
+icon: "clock"
 ---
 
 # Background Agents
 
-Background agents run tracked OmniCoreAgent tasks outside the foreground request
-path. Use the default in-memory store for local development, or choose `sql`,
-`redis`, or `mongodb` when tasks, runs, attempts, leases, retries, and
-cancellation state must survive process restarts. A task can run manually, once
-at a fixed time, on an interval, or from a five-field cron expression. Each run
-is tracked through queued, claimed, running, retrying, and terminal states.
+`BackgroundAgentManager` runs your agents away from any request: on demand,
+once at a set time, every N seconds, or on a cron schedule. Every run is
+recorded (its status, attempts, events and answer) in a **task store**, and
+with a durable store a run queued by one process is finished by another.
 
-Background execution is part of the core package:
+<Info>
+Every output on this page is what the code printed when it was run. The
+model's wording, the ids and the times will differ on your run.
+</Info>
 
-```bash
-pip install omnicoreagent
+```mermaid
+flowchart LR
+    T[Task: agent + query + schedule] -->|run_now, or due| Q[queued]
+    Q -->|a worker claims it| R[running]
+    R --> C[completed]
+    R -->|error or timeout, retries left| Q
+    R --> F[failed / timeout]
+    R -->|asks a person| W[awaiting_approval / awaiting_budget]
+    W -->|decide, then resume_run| Q
 ```
 
-The durable task stores use optional drivers; the SQL store needs SQLAlchemy,
-which the `postgres` extra installs, for SQLite as well:
-
-```bash
-pip install "omnicoreagent[postgres]"   # task_store="sql": SQLite or PostgreSQL
-pip install "omnicoreagent[redis]"
-pip install "omnicoreagent[mongodb]"
-```
-
-No storage configuration is required to start. `BackgroundAgentManager()` uses an
-in-memory task store by default so the first run has no database requirement.
-Use `task_store="sql"`, `task_store="redis"`, or `task_store="mongodb"` when
-tasks, runs, attempts, leases, retries, and cancellation state must survive
-process restarts.
-
-The task store is separate from agent memory. `MemoryRouter` stores
-conversation/session history. The task store stores operational background
-state and owns the atomic claim, lease, retry, and schedule-cursor guarantees.
-
-Every method, run status and overlap policy is in the
-[BackgroundAgentManager reference](/docs/reference/background).
-
-## Quick Start
-
-Set `LLM_API_KEY` first, then run the example; no task-store configuration is
-required.
+## A first background run
 
 ```python
 import asyncio
-
 from omnicoreagent import BackgroundAgentManager, OmniCoreAgent
 
 
 async def main():
     agent = OmniCoreAgent(
-        name="system_monitor",
-        system_instruction="Check system health and write concise reports.",
+        name="reporter",
+        system_instruction="You write short status notes. Answer in plain text.",
         model_config={"provider": "openai", "model": "gpt-5.4-mini"},
     )
-
     manager = BackgroundAgentManager()
-    await manager.register_agent("system_monitor", agent)
+    await manager.register_agent("reporter", agent)
     await manager.register_task(
-        task_id="health_report",
-        agent_id="system_monitor",
-        query="Check system health and summarize anything that needs attention.",
+        task_id="daily_note",
+        agent_id="reporter",
+        query="In one sentence, remind the team to review open pull requests.",
         schedule={"type": "manual"},
-        timeout_seconds=60,
-        retry_policy={"max_retries": 1, "initial_delay_seconds": 0},
+        timeout_seconds=120,
     )
 
-    run = await manager.run_now("health_report", wait=True)
-    print(run.status)
-    print(run.result_preview)
+    run = await manager.run_now("daily_note", wait=True)
+    print(run.status.value, "| attempt", run.attempt, "| answer:", run.result_preview)
+
+    workspace = await manager.get_run_workspace(run.run_id)
+    for item in workspace["files"]:
+        print("file:", item["path"])
+
+    for event in await manager.get_run_events(run.run_id):
+        print(event["sequence"], event["event"])
+
+    story = await agent.get_run_trajectory(run.run_id)
+    for step in story["segments"][0]["trajectory"]["steps"]:
+        for call in step["tool_calls"]:
+            print("tool:", call["tool_name"], call["outcome"])
+    await manager.shutdown()
 
 
 asyncio.run(main())
 ```
 
-## Scheduled Runs
+```text
+completed | attempt 1 | answer: Please review the open pull requests.
+file: background/reporter/daily_note/run_77ca668e7bb440e3a62909c70679d46f/output.md
+file: background/reporter/daily_note/run_77ca668e7bb440e3a62909c70679d46f/run.json
+file: background/reporter/daily_note/run_77ca668e7bb440e3a62909c70679d46f/events.jsonl
+1 background_run_queued
+2 background_run_claimed
+3 background_run_started
+4 background_run_heartbeat
+5 background_run_completed
+tool: write_file success
+```
 
-Start the manager when you want it to dispatch due schedules:
+- `register_agent` names an agent; `register_task` says which agent runs
+  which query, and when.
+- `run_now(..., wait=True)` queued the run and, as no worker was started,
+  ran it here and returned it finished.
+- Each run gets its own folder in the [workspace](/docs/core-concepts/workspace-files):
+  the query reaches the agent with the folder's path and asks for the final
+  result in `output.md`, notes in `scratchpad/`, logs in `logs/`. The manager
+  writes `run.json` (the run) and `events.jsonl` (its events) beside it. The
+  model chose to call `write_file` here; ask for "no files" in the
+  instruction if you only want the answer.
+- `result_preview` is the agent's answer, cut at 1,000 characters.
+- The agent's run id **is** the background run id, so
+  `agent.get_run_trajectory(run_id)` shows what the model did, step by step
+  ([Durable runs](/docs/core-concepts/durable-runs)).
+
+## Schedules
 
 ```python
-await manager.register_task(
-    task_id="hourly_report",
-    agent_id="system_monitor",
-    query="Write the hourly operational report.",
-    schedule={"type": "interval", "seconds": 3600},
-    overlap_policy="queue_next",
+import asyncio
+from datetime import datetime, timezone
+from omnicoreagent import BackgroundAgentManager, OmniCoreAgent
+
+
+async def main():
+    agent = OmniCoreAgent(
+        name="ticker",
+        system_instruction="Answer in plain text, in a few words. Do not write files.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    )
+    manager = BackgroundAgentManager()
+    await manager.register_agent("ticker", agent)
+
+    registered = datetime.now(timezone.utc)
+    await manager.register_task(
+        task_id="every_20s",
+        agent_id="ticker",
+        query="Say hello.",
+        schedule={"type": "interval", "seconds": 20},
+    )
+    await manager.register_task(
+        task_id="weekday_morning",
+        agent_id="ticker",
+        query="Write the morning summary.",
+        schedule={"type": "cron", "expression": "0 9 * * 1-5", "timezone": "Africa/Lagos"},
+    )
+    for task_id in ("every_20s", "weekday_morning"):
+        status = await manager.get_task_status(task_id)
+        print(task_id, "next due:", status["schedule_state"]["next_due_at"])
+
+    await manager.start()
+    await asyncio.sleep(50)
+    await manager.shutdown()
+
+    for run in await manager.list_runs(task_id="every_20s"):
+        due = (run.due_at - registered).total_seconds()
+        print(run.trigger_type.value, run.status.value, f"due {due:.0f}s after registering", "|", run.result_preview)
+
+
+asyncio.run(main())
+```
+
+```text
+every_20s next due: 2026-09-27T23:03:45.097687Z
+weekday_morning next due: 2026-09-28T08:00:00Z
+interval completed due 20s after registering | Hello!
+interval completed due 40s after registering | Hello!
+```
+
+It was 23:03:25 UTC; 09:00 on Monday in Lagos is 08:00 UTC. Schedules run
+only while a manager is **started**: `start()` runs the worker loop until
+`shutdown()`.
+
+| `schedule` | Fields | First run |
+|---|---|---|
+| `{"type": "manual"}` | none | only when you call `run_now` |
+| `{"type": "once", "run_at": ...}` | `run_at` (a `datetime`; no time zone means UTC) | at `run_at` |
+| `{"type": "interval", "seconds": 3600}` | `seconds` > 0 | **one interval after registering** (or after `start_at`), not at once |
+| `{"type": "cron", "expression": "0 9 * * 1-5"}` | five fields; `timezone` (default `UTC`) | the next matching minute |
+
+Every schedule but `manual` also takes `start_at`, `end_at`,
+`jitter_seconds` (a fixed offset, the same for every worker) and
+`misfire_policy`: what happens to times missed while no manager was running.
+`skip_missed` (the default) and `run_once` queue one run for the missed
+times, then continue from now; `queue_all` queues a run for each one missed.
+
+Want an interval task to run at once too? Call `run_now` after registering.
+`pause_task` stops a schedule (runs already queued go on) and `resume_task`
+starts it again; `run_now` still works on a paused task.
+
+## Overlap: a task that is due while it is running
+
+```python
+import asyncio
+from omnicoreagent import BackgroundAgentManager, OmniCoreAgent
+
+
+async def main():
+    agent = OmniCoreAgent(
+        name="ticker",
+        system_instruction="Answer in plain text, in a few words. Do not write files.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    )
+    manager = BackgroundAgentManager()
+    await manager.register_agent("ticker", agent)
+    await manager.register_task(
+        task_id="hello",
+        agent_id="ticker",
+        query="Say hello.",
+        schedule={"type": "manual"},
+        overlap_policy="skip_if_running",  # the default
+    )
+    await manager.start()
+    first = await manager.run_now("hello")
+    second = await manager.run_now("hello")
+    print("first:", first.status.value, "| second:", second.status.value)
+    first = await manager.wait_for_run(first.run_id, timeout_seconds=60)
+    print("first:", first.status.value, "|", first.result_preview)
+    await manager.shutdown()
+
+
+asyncio.run(main())
+```
+
+```text
+first: queued | second: skipped
+first: completed | Hello!
+```
+
+| `overlap_policy` | The new run, while one is active |
+|---|---|
+| `skip_if_running` (default) | is recorded as `skipped` and never runs |
+| `queue_next` | waits in the queue until the earlier run ends |
+| `cancel_previous` | runs; the earlier one is asked to cancel: a queued run never starts, a running one is recorded `cancelled` when its attempt ends |
+| `allow_parallel` | runs as soon as a worker is free |
+
+A run waiting for a person (below) still holds its task: under
+`skip_if_running`, new runs are skipped until it is decided.
+
+<Note>
+One manager runs **one run at a time**. `allow_parallel` lets a task's runs
+go side by side only when several workers share the store
+([below](#several-workers-one-store)).
+</Note>
+
+## Retries and timeouts
+
+```python
+import asyncio
+from omnicoreagent import BackgroundAgentManager, OmniCoreAgent
+
+
+async def main():
+    agent = OmniCoreAgent(
+        name="writer",
+        system_instruction="Answer in plain text. Do not write files.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    )
+    manager = BackgroundAgentManager()
+    await manager.register_agent("writer", agent)
+    await manager.register_task(
+        task_id="long_essay",
+        agent_id="writer",
+        query="Write a 1500-word essay on the history of the printing press.",
+        schedule={"type": "manual"},
+        timeout_seconds=3,
+        retry_policy={"max_retries": 1, "initial_delay_seconds": 2},
+    )
+    run = await manager.run_now("long_essay", wait=True, timeout_seconds=60)
+    print(run.status.value, "| attempts:", run.attempt, "| error:", run.error)
+    for attempt in await manager.list_attempts(run.run_id):
+        print(" ", attempt.attempt_number, attempt.reason.value, attempt.status.value, attempt.retry_delay_seconds)
+    await manager.shutdown()
+
+
+asyncio.run(main())
+```
+
+```text
+timeout | attempts: 2 | error: Run exceeded its 3 second deadline
+  1 initial timeout 2
+  2 retry timeout None
+```
+
+- `timeout_seconds` on the task is each attempt's deadline (none by
+  default). An attempt past it ends `timeout`.
+- `timeout_seconds` on `run_now` (and `wait_for_run`,
+  `run_until_terminal`) is only how long **you** wait; the run is returned as
+  it is then.
+- An attempt that raises, or whose agent run ends with an error, or that
+  times out, is retried while retries are left: the run goes `retrying`, then
+  `queued` again after the delay. When none are left it ends `failed` or
+  `timeout`, with the `error`.
+
+| `retry_policy` key | Default | |
+|---|---|---|
+| `max_retries` | `0` | retries after the first attempt |
+| `initial_delay_seconds` | `30` | wait before a retry |
+| `backoff` | `"fixed"` | `"exponential"` doubles the delay each retry |
+| `max_delay_seconds` | `300` | the longest delay |
+| `retry_on` | `["exception", "timeout"]` | which failures are retried |
+
+<Note>
+`run_now(wait=True)` returns when the run ends, at `timeout_seconds`, or when
+an attempt failed and its retry is scheduled for later: the run comes back
+`queued`, with its `queued_at`, rather than holding you through the whole
+backoff. A started manager runs the retry when it is due; on a manager that
+is not started, nothing does, so `start()` it when a task retries with a
+delay.
+</Note>
+
+## A run that waits for a person
+
+A background agent under [governance](/docs/core-concepts/policies) can pause
+for an [approval](/docs/core-concepts/approvals) or a
+[budget](/docs/core-concepts/budgets). The run then waits, holding no worker,
+until someone decides on the **agent** and `resume_run` queues it again. Its
+next attempt continues the same run; it does not start over.
+
+```python
+import asyncio
+from omnicoreagent import BackgroundAgentManager, OmniCoreAgent, ToolRegistry
+from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy
+
+tools = ToolRegistry()
+
+
+@tools.register_tool("issue_refund")
+def issue_refund(order_id: str, amount: float) -> dict:
+    """Refund an order."""
+    return {"order_id": order_id, "refunded": amount}
+
+
+policy = build_default_policy("interactive-dev")
+policy.rules.ask.append(
+    PolicyRule(rule_id="ask_before_refunds", effect=PolicyEffect.ASK,
+               capability="tool.local.call", target={"tool_name": "issue_refund"})
 )
 
-await manager.start()
+
+async def main():
+    agent = OmniCoreAgent(
+        name="support",
+        system_instruction="You help with orders. Refund when asked. Answer in plain text, in one sentence. Do not write files.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        local_tools=tools,
+        agent_config={"governance_config": {"enabled": True, "policy": policy}},
+    )
+    manager = BackgroundAgentManager()
+    await manager.register_agent("support", agent)
+    await manager.register_task(
+        task_id="refund_1042",
+        agent_id="support",
+        query="Please refund order 1042 in full: 42 dollars.",
+        schedule={"type": "manual"},
+    )
+
+    run = await manager.run_now("refund_1042", wait=True, timeout_seconds=120)
+    print(run.status.value, "|", run.result_preview)
+
+    # A person decides, from the agent's run record.
+    for approval in (await agent.get_run(run.run_id))["approvals"]:
+        print("asks:", approval["tool_name"], approval["arguments"])
+        await agent.resolve_approval(run.run_id, approval["approval_id"],
+                                     decision="approve", approver="alice")
+
+    await manager.resume_run(run.run_id)  # queued again, same run_id
+    run = await manager.run_until_terminal(run.run_id, timeout_seconds=120)
+    print(run.status.value, "| attempt", run.attempt, "|", run.result_preview)
+
+    story = await agent.get_run_trajectory(run.run_id)
+    print("segments:", [segment["status"] for segment in story["segments"]])
+    print("events:", [e["event"] for e in await manager.get_run_events(run.run_id)])
+    await manager.shutdown()
+
+
+asyncio.run(main())
 ```
 
-An interval task first runs one interval after it is registered (or after its
-`start_at`), not at once; call `run_now` for a run right away.
+```text
+awaiting_approval | Waiting for approval: issue_refund
+asks: issue_refund {'order_id': '1042', 'amount': 42}
+completed | attempt 2 | Refunded order 1042 in full for $42.
+segments: ['suspended', 'completed']
+events: ['background_run_queued', 'background_run_claimed', 'background_run_started', 'background_run_heartbeat', 'background_run_awaiting_approval', 'background_run_queued', 'background_run_claimed', 'background_run_started', 'background_run_completed']
+```
 
-The worker loop reads due schedules from the task store, creates a run exactly
-once for each occurrence, advances the schedule state, claims queued runs, and
-executes them with lease fencing.
-
-## Runtime Controls
+A budget works the same way. With
+`"budgets": {"request": [{"meter": "model_cost_usd", "limit": 0.0005}]}` and
+`max_tokens` 300, a one-line tagline task printed:
 
 ```python
-run = await manager.run_now("health_report")
-latest = await manager.get_run(run.run_id)
-attempts = await manager.list_attempts(run.run_id)
-events = await manager.get_run_events(run.run_id)
+run = await manager.run_now("tagline", wait=True, timeout_seconds=120)
+print(run.status.value, "|", run.result_preview)
 
-await manager.cancel_run(run.run_id)
-await manager.pause_task("hourly_report")
-await manager.resume_task("hourly_report")
-await manager.delete_task("hourly_report", delete_runs=True)
+await agent.grant_budget(run.run_id, approver="alice", amount=0.01, note="one tagline")
+await manager.resume_run(run.run_id)
+run = await manager.run_until_terminal(run.run_id, timeout_seconds=120)
+print(run.status.value, "|", run.result_preview)
 ```
 
-## Run Event Replay
+```text
+awaiting_budget | Waiting for budget: request model_cost_usd (needs 0.001336 more)
+completed | Freshly baked warmth in every bite.
+```
 
-Each run emits ordered lifecycle events with a run-local `sequence` number.
-`get_run_events(run_id)` returns the most complete trace it can read from:
+- Decide with the agent: `resolve_approval`, `grant_budget` or
+  `deny_budget`. After a denial, `resume_run` lets the run end cleanly.
+- `cancel_run(run_id)` ends a waiting run instead: it is `cancelled`, and so
+  is the agent's own record of it.
+- With the manager started, `resume_run` is enough: a worker picks the run
+  up. `run_until_terminal` runs it here, for a manager that is not started.
+- In another process, build the agent with the same memory store to decide
+  ([Approvals: from another process](/docs/core-concepts/approvals)).
 
-- the current process cache
-- the run workspace `events.jsonl` mirror, when workspace event mirroring is enabled
+## Reading a run
 
-If more than one source is available, OmniCoreAgent returns a complete terminal
-trace first. If no source has reached a terminal event yet, it prefers the
-process cache, then the workspace mirror. Sources with malformed or duplicate
-run-local sequence numbers are ignored during replay selection. A valid source
-uses contiguous integer sequence numbers starting at `1`.
+| You want | Call |
+|---|---|
+| status, attempt count, times, answer, error | `get_run(run_id)` |
+| every attempt: worker, reason (`initial`, `retry`, `recovery`), how it ended | `list_attempts(run_id)` |
+| lifecycle events, numbered from 1 | `get_run_events(run_id)` |
+| the run's folder and files | `get_run_workspace(run_id)` |
+| what the model did: steps, calls, tokens, cost, across pauses and attempts | `agent.get_run_trajectory(run_id)` |
+| one task: schedule state, next due time, run counts by status | `get_task_status(task_id)` |
+| the whole manager | `get_manager_status()`, `list_runs(task_id=..., status=...)` |
 
-Run-scoped lifecycle events include schedule dispatch, queueing, claiming,
-start, heartbeat, retry, terminal status, and recovery transitions when those
-transitions occur.
+Events come from the manager process that emitted them, or from the run's
+`events.jsonl` in the workspace, so a finished run's events can still be read
+after a restart. A run's statuses are `queued`, `claimed`, `running`,
+`retrying`; it ends `completed`, `failed`, `cancelled`, `timeout` or
+`skipped`, or waits in `awaiting_approval` or `awaiting_budget`. The
+[events page](/docs/core-concepts/events) lists every event name.
 
-Durable restart replay needs workspace event mirroring enabled. If a process
-exits with only in-memory events and no workspace mirror, the task store still
-preserves run status, attempts, leases, and results, but old event history may
-not be replayable.
+## Task stores
 
-## OmniServe API
+The task store keeps agents' specs, tasks, schedule state, runs, attempts,
+leases and cancel flags. It is not the agent's memory: conversations and run
+records stay in the agent's [memory store](/docs/core-concepts/memory).
 
-When an agent is served through OmniServe, the server registers that agent with
-the background manager during startup and exposes task control over HTTP:
+| `task_store=` | Keeps state | Install |
+|---|---|---|
+| none (`"in_memory"`) | the in-memory store: while the process lives | core |
+| `"sql"` | SQLite at `.omnicoreagent/background.db`, or `DATABASE_URL` when set | `omnicoreagent[postgres]` |
+| `{"backend": "sql", "url": "postgresql://user:pass@host/db"}` | PostgreSQL (or `mysql+pymysql://...`) | `omnicoreagent[postgres]` |
+| `"redis"` or `{"backend": "redis", "url": "redis://localhost:6379/0"}` | Redis (`"redis"` reads `REDIS_URL`) | `omnicoreagent[redis]` |
+| `"mongodb"` or `{"backend": "mongodb", "uri": "mongodb://localhost:27017", "database": "omnicoreagent"}` | MongoDB (`"mongodb"` reads `MONGODB_URI`) | `omnicoreagent[mongodb]` |
+
+Use SQL for local durability with SQLite, or
+PostgreSQL or MySQL when several processes share one store. Use Redis when your deployment already operates
+Redis, with persistence on and no eviction of task-store keys. Use MongoDB
+when MongoDB is your durable operational store. A dict also takes `prefix`
+(tables or keys, so deployments can share one database) and
+`connect_timeout`. Background run history is not pruned.
+
+### A queued run survives the process
+
+With a durable store, a queued run left by one process is finished by another
+over the same task store. Two scripts share one definition:
+
+```python
+# jobs.py
+from omnicoreagent import BackgroundAgentManager, OmniCoreAgent
+
+
+def build_agent() -> OmniCoreAgent:
+    return OmniCoreAgent(
+        name="reporter",
+        system_instruction="You write short status notes. Answer in plain text. Do not write files.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    )
+
+
+def build_manager() -> BackgroundAgentManager:
+    return BackgroundAgentManager(
+        task_store={"backend": "sql", "url": "sqlite:///./background.db"}
+    )
+```
+
+<Steps>
+  <Step title="Process one queues a run and exits">
+    ```python
+    # enqueue.py
+    import asyncio
+    from jobs import build_agent, build_manager
+
+
+    async def main():
+        manager = build_manager()
+        await manager.register_agent("reporter", build_agent())
+        await manager.register_task(
+            task_id="release_note", agent_id="reporter",
+            query="In one sentence, announce that version 2 is out.",
+            schedule={"type": "manual"},
+        )
+        run = await manager.run_now("release_note")  # queued; no worker here
+        print(run.run_id, run.status.value)
+        await manager.shutdown()
+
+
+    asyncio.run(main())
+    ```
+
+    ```text
+    run_abfd26183727401e919e69c6cdf9d983 queued
+    ```
+  </Step>
+  <Step title="Process two finds it and runs it">
+    ```python
+    # worker.py
+    import asyncio
+    from jobs import build_agent, build_manager
+
+
+    async def main():
+        manager = build_manager()
+        await manager.register_agent("reporter", build_agent(), replace=True)
+        (queued,) = await manager.list_runs(status="queued")
+        print("found:", queued.run_id, queued.status.value)
+
+        await manager.start()
+        run = await manager.wait_for_run(queued.run_id, timeout_seconds=120)
+        print(run.status.value, "|", run.result_preview)
+        await manager.shutdown()
+
+
+    asyncio.run(main())
+    ```
+
+    ```text
+    found: run_abfd26183727401e919e69c6cdf9d983 queued
+    completed | Version 2 is out.
+    ```
+  </Step>
+</Steps>
+
+The store keeps the agent's spec (model, instruction, settings, MCP
+servers), so `replace=True` is needed to register it again; a worker that
+never registers it rebuilds the agent from that spec, without local tools.
+Register in every process an agent that has local tools.
+
+### Several workers, one store
+
+Each started manager is a worker. Workers on one store claim runs with a
+lease (30 seconds, renewed as the run goes), so no run is taken twice. Here
+four runs of an `allow_parallel` task, queued into Redis, then two worker
+processes started side by side:
+
+```python
+# jobs.py
+from omnicoreagent import BackgroundAgentManager, OmniCoreAgent
+
+
+def build_agent() -> OmniCoreAgent:
+    return OmniCoreAgent(
+        name="translator",
+        system_instruction="Translate into French. Answer in plain text only. Do not write files.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    )
+
+
+def build_manager(worker_id: str | None = None) -> BackgroundAgentManager:
+    return BackgroundAgentManager(
+        task_store={"backend": "redis", "url": "redis://localhost:6379/0"},
+        worker_id=worker_id,  # a name for this worker; a random one otherwise
+    )
+```
+
+```python
+# enqueue.py: register, then queue four runs, each with its own query
+for text in ["Good morning.", "Thank you.", "See you tomorrow.", "Where is the station?"]:
+    await manager.run_now("translate", query=text)
+```
+
+```python
+# worker.py: run as `python worker.py worker-a` and `python worker.py worker-b`
+import asyncio, sys
+from jobs import build_agent, build_manager
+
+
+async def main(worker_id: str):
+    manager = build_manager(worker_id)
+    await manager.register_agent("translator", build_agent(), replace=True)
+    await manager.start()
+    await asyncio.sleep(40)
+    await manager.shutdown()
+
+
+asyncio.run(main(sys.argv[1]))
+```
+
+```python
+# report.py
+import asyncio
+from jobs import build_manager
+
+
+async def main():
+    m = build_manager()
+    for run in await m.list_runs(task_id="translate"):
+        at = await m.list_attempts(run.run_id)
+        print([(a.worker_id, a.status.value, a.started_at.strftime('%H:%M:%S'),
+                a.finished_at and a.finished_at.strftime('%H:%M:%S')) for a in at],
+              run.status.value, run.result_preview, run.error)
+    await m.shutdown()
+
+
+asyncio.run(main())
+```
+
+```text
+[('worker-a', 'completed', '23:10:52', '23:11:11')] completed Bonjour. None
+[('worker-b', 'completed', '23:10:53', '23:11:11')] completed Veuillez fournir le texte à traduire en français. None
+[('worker-a', 'completed', '23:11:11', '23:11:13')] completed À demain. None
+[('worker-b', 'completed', '23:11:12', '23:11:13')] completed Où se trouve la station ? None
+```
+
+Each worker took two runs, side by side. (The model's wording varies: one
+run asked for the text instead of translating it.) If a worker dies, its
+lease runs out and another worker takes the run back, continuing from the
+agent's checkpoint; `list_attempts` shows that attempt's reason as
+`recovery`. More in [Stores and scale](/docs/how-to-guides/stores-and-scale).
+
+## Starting and shutting down
+
+- `start()` prepares the store, loads each registered agent's model client
+  (so the first run does not pay for that import), and starts the worker loop.
+  Each turn it takes back runs whose lease ran out, queues due schedules, and
+  runs one queued run.
+- Without `start()`, nothing is scheduled; `run_now(wait=True)` and
+  `run_until_terminal` run a queued run in your process.
+- `shutdown()` stops the loop, cancels the runs it is executing (each
+  interrupted attempt is recorded, and retried if the task retries), and
+  closes the store. Call it before the process exits.
+
+With a `governance_engine` on the manager, a task is bound to the policy it
+was created under. When the policy changes, the task can still be paused or
+deleted but not run: at its next due time its schedule is paused, and
+`get_task_status` shows why in `schedule_state.paused_reason`. Delete the task
+and create it again under the new policy.
+
+## Over HTTP
+
+[OmniServe](/docs/how-to-guides/omniserve) registers the served agent with a
+background manager and exposes it under `/background/tasks/`:
 
 ```bash
 curl -X POST http://localhost:8000/background/tasks \
   -H "Content-Type: application/json" \
-  -d '{
-    "task_id": "health_report",
-    "query": "Check system health and write the report.",
-    "schedule": {"type": "manual"},
-    "timeout_seconds": 60
-  }'
-
+  -d '{"task_id": "health_report", "query": "Check system health and write the report.",
+       "schedule": {"type": "manual"}, "timeout_seconds": 60}'
 curl -X POST http://localhost:8000/background/tasks/health_report/run \
-  -H "Content-Type: application/json" \
-  -d '{"wait": false}'
-```
+  -H "Content-Type: application/json" -d '{"wait": false}'
 
-Use `{"wait": true}` when the HTTP request should wait for terminal run state.
-If the OmniServe worker is running, the API waits for that worker-owned run. If
-the worker is disabled, the API queues the run through the background manager
-and drives that run inline through the same execution contract. If the run does
-not finish before the background wait budget, OmniServe returns `504` and the
-run remains inspectable through the background run endpoints. The wait budget is
-derived from the configured request timeout and leaves a small margin for
-OmniServe to return the structured response before the outer HTTP timeout. The
-`504` response includes the `run_id`, `task_id`, latest `status`,
-`wait_timeout_seconds`, and `request_timeout_seconds` in `detail`.
-
-The background API includes manager status, task creation, task status, task
-listing, pause, resume, delete, manual run, cancellation, run status, attempt
-history, event replay, and workspace inspection.
-
-```bash
 curl http://localhost:8000/background/status
-curl http://localhost:8000/background/tasks/health_report/status
 curl http://localhost:8000/background/runs/$RUN_ID
 curl http://localhost:8000/background/runs/$RUN_ID/events
 curl http://localhost:8000/background/runs/$RUN_ID/workspace
 ```
 
-## Task Configuration
+Every route, and the task-store environment variables, are on the OmniServe
+page.
 
-| Field | Purpose |
-|-------|---------|
-| `task_id` | Stable task identifier. |
-| `agent_id` | Registered agent that executes the task. |
-| `query` | Instruction passed to the agent for each run. |
-| `schedule` | `manual`, `interval`, `cron`, or `once`. |
-| `timeout_seconds` | Optional per-run timeout. |
-| `retry_policy` | Retry count, delay, backoff, and retryable error types. |
-| `overlap_policy` | `skip_if_running`, `queue_next`, `cancel_previous`, or `allow_parallel`. |
-| `session_policy` | `task`, `run`, or `fixed` memory-session behavior. |
-| `workspace_policy` | Workspace namespace used for run output. |
+## Options
 
-Under governance a task is bound to the policy it was created under. When the
-policy changes, the task can still be paused or deleted, but not run: at its
-next due time its schedule is paused, the task's status shows
-`schedule_state.paused_reason`, and the log says why. Delete the task and
-create it again under the new policy to schedule it.
+`register_task` takes:
 
-## Persistent State
+| Option | Default | What it does |
+|---|---|---|
+| `task_id`, `agent_id` | required | letters, numbers, `_`, `-`, `.` |
+| `query` | required | what the agent is asked; `run_now(query=...)` overrides it once |
+| `schedule` | required | manual, once, interval or cron ([above](#schedules)) |
+| `timeout_seconds` | none | each attempt's deadline |
+| `retry_policy` | no retries | [above](#retries-and-timeouts) |
+| `overlap_policy` | `"skip_if_running"` | [above](#overlap-a-task-that-is-due-while-it-is-running) |
+| `session_policy` | `{"mode": "task"}` | the memory session: `task` (one per task, runs remember each other), `run` (a new one per run), or `fixed` with a `session_id` |
+| `workspace_policy` | `background/{agent_id}/{task_id}/{run_id}` | the run folder's `namespace_template`; `write_run_json`, `write_events_jsonl` |
+| `enabled` | `True` | `False` stops the schedule and `run_now` |
+| `replace` | `False` | overwrite a task with the same id |
 
-The task store is the source of truth for:
+`BackgroundAgentManager(...)` takes `task_store`, `memory_router`,
+`workspace`, `telemetry_store`, `governance_engine`, `worker_id` and
+`lease_seconds` (30). Change a task later with `update_task(task_id, patch)`.
+Every method is in the [BackgroundAgentManager reference](/docs/reference/background).
 
-- registered agent specs
-- task definitions
-- schedule state and occurrence IDs
-- runs and attempts
-- leases, heartbeats, and cancellation flags
+## When things go wrong
 
-The current runtime includes the tracked run model, in-memory, SQL, Redis, and
-MongoDB task stores, schedule dispatch, manual runs, retries with delay/backoff,
-lease fencing, expired-lease recovery, cancellation, workspace lifecycle files,
-and run event replay. Task, schedule, run, attempt, lease, retry, and
-cancellation state is restart-persistent when the task store is SQL, Redis, or
-MongoDB. Event history follows the replay rules above through the manager
-process cache and workspace `events.jsonl` mirror.
+<AccordionGroup>
+  <Accordion title="AgentNotFoundError: Agent not found">
+    The task names an agent not registered in this store:
 
-Durable stores are tested at the manager boundary. A queued run can be created,
-the manager can shut down, and a new manager over the same SQL, Redis, or
-MongoDB task store can claim and complete that run. The in-memory store is only
-for local development, tests, and single-process experiments.
+    ```text
+    AgentNotFoundError: Agent not found: nobody
+    ```
 
-Choose one durable backend per deployment. Use SQL for local durability with
-SQLite, or PostgreSQL or MySQL when several processes share one store; a SQL
-write costs what one row costs, whatever the store already holds.
-Use Redis when your deployment already operates Redis with persistence and no
-eviction for task-store keys. Use MongoDB when
-MongoDB is your durable operational store.
+    Call `register_agent` first, with the same id.
+  </Accordion>
 
-The SQL store keeps a row per agent, task, schedule, run and attempt.
-`task_store="sql"` reads `DATABASE_URL`, the same variable the SQL memory store
-uses, and falls back to a local SQLite file.
+  <Accordion title="AgentAlreadyRegisteredError / TaskAlreadyRegisteredError">
+    The id is already in the store; with a durable store, from an earlier
+    process:
 
-A write costs what one row costs, not what the store holds: with two thousand
-runs kept, one run write takes about 3 ms on SQLite and 7 ms on PostgreSQL,
-against 49 ms for the older whole-state SQL store and 104 ms on Redis. Run
-history is not pruned, so a long-lived deployment on Redis or MongoDB gets
-slower; on SQL it does not.
+    ```text
+    AgentAlreadyRegisteredError: Agent already registered: a
+    TaskAlreadyRegisteredError: Task already registered: t
+    ```
 
-Redis durable deployments need persistence enabled and a no-eviction policy for
-task-store keys. MongoDB task-store writes use majority write concern.
+    Pass `replace=True` to overwrite it.
+  </Accordion>
 
-```python
-BackgroundAgentManager(task_store="sql")  # SQLite, or DATABASE_URL if set
-BackgroundAgentManager(
-    task_store={
-        "backend": "sql",
-        "url": "postgresql://user:pass@localhost:5432/omnicoreagent",
-    }
-)
-BackgroundAgentManager(task_store={"backend": "redis", "url": "redis://localhost:6379/0"})
-BackgroundAgentManager(
-    task_store={
-        "backend": "mongodb",
-        "uri": "mongodb://localhost:27017",
-        "database": "omnicoreagent",
-    }
-)
-```
+  <Accordion title="TaskNotFoundError: Task not found">
+    `run_now` on a task that does not exist, or has `enabled=False`:
+
+    ```text
+    TaskNotFoundError: Task not found: nope
+    ```
+  </Accordion>
+
+  <Accordion title="ValidationError: a schedule that cannot run">
+    Each schedule type checks its fields:
+
+    ```text
+    Value error, interval schedule requires seconds > 0
+    Value error, cron expression must have five fields
+    Value error, once schedule requires run_at
+    Value error, unknown schedule timezone: Lagos
+    ```
+
+    Time zones are IANA names: `Africa/Lagos`, not `Lagos`. Ids are checked
+    too: `task_id must contain only letters, numbers, '_', '-', and '.'`.
+  </Accordion>
+
+  <Accordion title="ValueError: only a run in awaiting_approval or awaiting_budget can be resumed">
+    `resume_run` is for a waiting run:
+
+    ```text
+    ValueError: Run run_dc1ac333fd374fbb80b46ef6292ac5d3 is completed; only a run in awaiting_approval or awaiting_budget can be resumed
+    ```
+
+    To run a finished task again, call `run_now`.
+  </Accordion>
+
+  <Accordion title="InvalidTaskStoreError">
+    An unknown backend, or one missing its address:
+
+    ```text
+    InvalidTaskStoreError: task_store must be 'in_memory', 'sql', 'redis', or 'mongodb'
+    Value error, redis task store requires url
+    Value error, mongodb task store requires uri and database
+    ```
+
+    PostgreSQL is `"sql"` with a `postgresql://` URL.
+  </Accordion>
+
+  <Accordion title="My second run came back skipped">
+    The default `overlap_policy` is `skip_if_running`, and a run of the task
+    was still active, or waiting for a person. Use `queue_next`, or decide
+    the waiting run.
+  </Accordion>
+
+  <Accordion title="An interval task has not run yet">
+    Its first run is one interval after it was registered, and only while a
+    manager is started. `get_task_status(task_id)["schedule_state"]["next_due_at"]`
+    says when.
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="BackgroundAgentManager reference" icon="book" href="/docs/reference/background">
+    Every method, run status and overlap policy.
+  </Card>
+  <Card title="Durable runs" icon="rotate" href="/docs/core-concepts/durable-runs">
+    Run records, trajectories, resuming after a crash.
+  </Card>
+  <Card title="Stores and scale" icon="database" href="/docs/how-to-guides/stores-and-scale">
+    Choosing stores and running several workers.
+  </Card>
+  <Card title="OmniServe" icon="server" href="/docs/how-to-guides/omniserve">
+    Background tasks over HTTP.
+  </Card>
+  <Card title="Agent in a container" icon="box" href="/docs/how-to-guides/agent-in-a-container">
+    Package the agent and its worker.
+  </Card>
+  <Card title="Approvals" icon="user-check" href="/docs/core-concepts/approvals">
+    Deciding what a paused run asked for.
+  </Card>
+</CardGroup>
