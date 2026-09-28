@@ -395,20 +395,40 @@ async def execute_native_turn(
             # or waits for a person, and nothing is recorded against the tool.
             raise
         except _UnknownOutcome:
+            run = current_run()
+            finished = next(
+                (
+                    call
+                    for call in (run.record["tool_calls"] if run is not None else [])
+                    if call["tool_call_id"] == request.id
+                    and call["state"] == "completed"
+                    and call["outcome"] in {"success", "error"}
+                ),
+                None,
+            )
+            if finished is not None:
+                # It ran to the end; only its result was lost with the process.
+                # Its recorded outcome stands, and it is not run again.
+                message = (
+                    f"This call finished (it reported {finished['outcome']}), but its "
+                    "result was lost when the process running it stopped. It has "
+                    "taken effect: do not call it again without checking."
+                )
+            else:
+                message = (
+                    "This call was interrupted before it finished (the process "
+                    "running it stopped), so its outcome is unknown: it may or "
+                    "may not have taken effect. Check before calling it again."
+                )
             result = {
                 "tool_name": request.name,
                 "args": {},
                 "status": "error",
                 "data": None,
-                "message": (
-                    "This call was interrupted before it finished (the process "
-                    "running it stopped), so its outcome is unknown: it may or "
-                    "may not have taken effect. Check before calling it again."
-                ),
+                "message": message,
                 "error_type": "unknown_outcome",
             }
-            run = current_run()
-            if run is not None:
+            if run is not None and finished is None:
                 await run.tool_finished(tool_call_id=request.id, outcome="unknown")
         except asyncio.CancelledError:
             result = {

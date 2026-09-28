@@ -302,7 +302,7 @@ result per call.
 | `register_tool` | `name` | the function's name | The name the model calls. Letters, digits, `_` and `-`, up to 64 characters, or the runtime exposes it under a safe alias. |
 | `register_tool` | `description` | the docstring | What the model reads to decide when to call it. |
 | `register_tool` | `inputSchema` | inferred from type hints | A JSON Schema object for the arguments. |
-| `register_tool`, `Tool` | `idempotent` | `False` | Running it twice with the same arguments does no harm. A run [recovered](/docs/core-concepts/durable-runs) after a crash re-runs an interrupted idempotent call; any other call is reported to the model as having an unknown outcome. |
+| `register_tool`, `Tool` | `idempotent` | `False` | Running it twice with the same arguments does no harm. A run [recovered](/docs/core-concepts/durable-runs) after a crash re-runs an idempotent call whose result was not saved; any other such call is not run again, and the model is told its outcome is unknown. |
 | `agent_config` | `tool_call_timeout` | `180` | Seconds one call may take (2 to 1000). |
 | `agent_config` | `tool_offload` | on | When a large result is saved as an artifact instead. |
 

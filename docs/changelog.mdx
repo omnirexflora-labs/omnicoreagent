@@ -9,6 +9,48 @@ icon: 'clock-rotate-left'
 Every release, with its notes, is also on
 [GitHub Releases](https://github.com/omnirexflora-labs/omnicoreagent/releases).
 
+## 0.4.3
+
+*September 2026 · Python 3.12+*
+
+An outside review read these docs and asked the question every durable
+runtime must answer exactly: what happens when the process dies halfway
+through a tool that has side effects? Answering it, we found one case where
+the answer was wrong, and fixed it.
+
+### Fixed
+
+- **A call that finished while another call of the same turn was still
+  running is no longer run again after a crash.** Results of a turn's calls
+  are saved once every call of the turn has finished. A call that completed
+  while a sibling was still running, when the process died, had its state
+  saved but not its result, and recovery ran it again whatever its
+  idempotency: a card could be charged twice. Now it runs again only if its
+  tool is idempotent; otherwise the model is told *"This call finished (it
+  reported success), but its result was lost … do not call it again without
+  checking."*
+
+### New
+
+- **On Python 3.10 or 3.11, installing fails loudly.** A guard release,
+  0.3.10, exists for exactly those Pythons: pip and uv choose it over 0.3.9
+  (which cannot build an agent) and stop with a message saying how to get
+  Python 3.12. It never shows as the latest release.
+
+### Docs
+
+- **[What is guaranteed](/docs/core-concepts/durable-runs#what-is-guaranteed):**
+  what a recovered run repeats and what it never does, per call and model-call
+  state (exactly once, at most once, at least once), one owner, how budgets
+  count across a crash, sub-agents and background retries. Four places that
+  claimed more than the code are corrected, and the recovery sample now also
+  catches `RunStateConflict`.
+- **The navigation leads with what is different:** Make It Safe, Run It and
+  See and Improve now come before Build.
+- **Short paths work:** `/docs/quickstart`, `/docs/install` and others redirect
+  instead of returning 404.
+- **One tagline:** *The governed runtime for Python agents you can let act.*
+
 ## 0.4.2
 
 *September 2026 · Python 3.12+*

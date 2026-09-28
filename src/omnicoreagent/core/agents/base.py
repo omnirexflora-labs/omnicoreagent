@@ -824,6 +824,12 @@ def _pending_calls(record: dict[str, Any], catalog: Any) -> tuple[list, set[str]
     the approver changed them). A call that started but never finished (the
     process stopped) runs again only if its tool is idempotent; otherwise its
     outcome is unknown and the model is told so instead.
+
+    A call can also be recorded as completed with no result: results are saved
+    once every call of the turn has finished, so a call that finished while a
+    sibling was still running, when the process stopped, took effect but its
+    result was lost. It too runs again only if its tool is idempotent (found by
+    the durability audit of 2026-09-28: recovery charged a card twice).
     """
     from omnicoreagent.core.model_protocol import ToolRequest
 
@@ -857,7 +863,7 @@ def _pending_calls(record: dict[str, Any], catalog: Any) -> tuple[list, set[str]
         if call["id"] in edited:
             arguments = json.dumps(edited[call["id"]])
         pending.append(ToolRequest(call["id"], function.get("name"), arguments))
-        if states.get(call["id"]) in {"started", "interrupted"}:
+        if states.get(call["id"]) in {"started", "interrupted", "completed"}:
             binding = catalog.bindings.get(str(function.get("name")).lower())
             if binding is None or not binding.idempotent:
                 unknown.add(call["id"])

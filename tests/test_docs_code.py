@@ -159,3 +159,43 @@ def test_every_command_a_shell_block_runs_exists(body):
             known = _subcommands(entry)
             if known:
                 assert used in known, f"`{entry} {used}` is not a command ({sorted(known)})"
+
+
+def _nav_groups():
+    config = json.loads((ROOT / "docs.json").read_text())
+    return config, config["navigation"]["dropdowns"][0]["groups"]
+
+
+def test_short_paths_redirect_to_real_pages():
+    # An outside review (2026-09-28) found /docs/quickstart was a 404: people guess
+    # short paths, and posts link them. Each redirect must land on a page in the nav.
+    config, groups = _nav_groups()
+    pages = {f"/{page}" for page in re.findall(r'"(docs/[^"#]+)"', json.dumps(groups))}
+    redirects = {r["source"]: r["destination"] for r in config.get("redirects", [])}
+    assert {"/docs/quickstart", "/quickstart", "/docs/install", "/docs/installation"} <= set(redirects)
+    assert not [d for d in redirects.values() if d not in pages]
+    assert not [s for s in redirects if s in pages]
+
+
+TAGLINE = "The governed runtime for Python agents you can let act."
+
+
+def test_the_tagline_is_the_same_everywhere_it_is_shown():
+    # One line, not three nouns and a qualifier (the same review).
+    config, _ = _nav_groups()
+    index = (ROOT / "docs" / "index.mdx").read_text()
+    assert TAGLINE in (ROOT / "README.md").read_text()
+    assert f"description: '{TAGLINE}'" in index
+    assert config["description"] == TAGLINE
+
+
+def test_the_navigation_leads_with_what_is_different():
+    # Governance, durable runs and the evidence come before the parts every
+    # framework has; the reorder moves groups, never pages between groups.
+    _, groups = _nav_groups()
+    assert [g["group"] for g in groups] == [
+        "Get Started", "Make It Safe", "Run It", "See and Improve", "Build", "How It Works",
+        "Reference", "HTTP API (OmniServe)", "Releases",
+    ]
+    build = next(g for g in groups if g["group"] == "Build")
+    assert "docs/core-concepts/memory" in build["pages"]

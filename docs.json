@@ -2,7 +2,7 @@
     "$schema": "https://mintlify.com/docs.json",
     "theme": "maple",
     "name": "OmniCoreAgent",
-    "description": "The open Python agent runtime and harness, with an SDK, for production AI applications",
+    "description": "The governed runtime for Python agents you can let act.",
     "favicon": "/assets/brand/omnicoreagent-mark.svg",
     "logo": {
         "light": "/assets/brand/omnicoreagent-logo-light.svg",
@@ -46,26 +46,6 @@
                         ]
                     },
                     {
-                        "group": "Build",
-                        "pages": [
-                            "docs/core-concepts/overview",
-                            "docs/how-to-guides/basic-usage",
-                            "docs/core-concepts/local-tools",
-                            "docs/how-to-guides/advanced-tools",
-                            "docs/core-concepts/mcp",
-                            "docs/core-concepts/skills",
-                            "docs/core-concepts/code-mode",
-                            "docs/core-concepts/agents-md",
-                            "docs/core-concepts/memory",
-                            "docs/core-concepts/workspace-files",
-                            "docs/core-concepts/context-engineering",
-                            "docs/core-concepts/sub-agents",
-                            "docs/core-concepts/events",
-                            "docs/how-to-guides/models",
-                            "docs/how-to-guides/configuration"
-                        ]
-                    },
-                    {
                         "group": "Make It Safe",
                         "pages": [
                             "docs/core-concepts/security-model",
@@ -96,6 +76,26 @@
                             "docs/how-to-guides/outcomes-and-training",
                             "docs/how-to-guides/headless-runs",
                             "docs/how-to-guides/harbor"
+                        ]
+                    },
+                    {
+                        "group": "Build",
+                        "pages": [
+                            "docs/core-concepts/overview",
+                            "docs/how-to-guides/basic-usage",
+                            "docs/core-concepts/local-tools",
+                            "docs/how-to-guides/advanced-tools",
+                            "docs/core-concepts/mcp",
+                            "docs/core-concepts/skills",
+                            "docs/core-concepts/code-mode",
+                            "docs/core-concepts/agents-md",
+                            "docs/core-concepts/memory",
+                            "docs/core-concepts/workspace-files",
+                            "docs/core-concepts/context-engineering",
+                            "docs/core-concepts/sub-agents",
+                            "docs/core-concepts/events",
+                            "docs/how-to-guides/models",
+                            "docs/how-to-guides/configuration"
                         ]
                     },
                     {
@@ -151,6 +151,68 @@
             }
         ]
     },
+    "redirects": [
+        {
+            "source": "/quickstart",
+            "destination": "/docs/getting-started/quickstart"
+        },
+        {
+            "source": "/docs/quickstart",
+            "destination": "/docs/getting-started/quickstart"
+        },
+        {
+            "source": "/install",
+            "destination": "/docs/getting-started/installation"
+        },
+        {
+            "source": "/installation",
+            "destination": "/docs/getting-started/installation"
+        },
+        {
+            "source": "/docs/install",
+            "destination": "/docs/getting-started/installation"
+        },
+        {
+            "source": "/docs/installation",
+            "destination": "/docs/getting-started/installation"
+        },
+        {
+            "source": "/tour",
+            "destination": "/docs/getting-started/tour"
+        },
+        {
+            "source": "/docs/tour",
+            "destination": "/docs/getting-started/tour"
+        },
+        {
+            "source": "/comparison",
+            "destination": "/docs/comparison"
+        },
+        {
+            "source": "/docs/policies",
+            "destination": "/docs/core-concepts/policies"
+        },
+        {
+            "source": "/docs/approvals",
+            "destination": "/docs/core-concepts/approvals"
+        },
+        {
+            "source": "/docs/budgets",
+            "destination": "/docs/core-concepts/budgets"
+        },
+        {
+            "source": "/docs/durable-runs",
+            "destination": "/docs/core-concepts/durable-runs"
+        },
+        {
+            "source": "/docs/read-a-run",
+            "destination": "/docs/how-to-guides/read-a-run"
+        },
+        {
+            "source": "/docs/harbor",
+            "destination": "/docs/how-to-guides/harbor"
+        }
+    ],
     "footer": {
         "socials": {
             "x": "https://x.com/abiorhmangana",

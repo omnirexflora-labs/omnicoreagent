@@ -1,0 +1,15 @@
+# The guard release. OmniCoreAgent 0.4 needs Python 3.12; on 3.10 or 3.11 pip
+# used to install 0.3.9 without a word, and 0.3.9 cannot build an agent. This
+# source-only 0.3.10 exists for exactly those Pythons, and its build fails with
+# one message saying what to do. See README.md here for how it is released.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omnicoreagent"
+version = "0.3.10"
+description = "OmniCoreAgent needs Python 3.12 or later: this release only says so."
+requires-python = ">=3.10,<3.12"
+readme = "README.md"
+license = { text = "MIT" }

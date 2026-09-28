@@ -226,3 +226,14 @@ Finished run records and traces are kept as before; traces whose process
 died are now removed by trace retention as well. The [changelog](/docs/changelog)
 lists every fix.
 
+## From 0.4.2 to 0.4.3
+
+Code that runs on 0.4.2 runs on 0.4.3. One behaviour changed, and only after a
+crash:
+
+| If | 0.4.2 | 0.4.3 | Do |
+|---|---|---|---|
+| A run is recovered after its process died while a turn's calls were still running, and one of them had already finished | That call ran again, even if its tool was not idempotent | It runs again only if its tool is idempotent; otherwise the model is told it finished and its result was lost | Nothing; mark tools that are safe to repeat `idempotent=True` so they are re-run instead |
+
+See [what is guaranteed](/docs/core-concepts/durable-runs#what-is-guaranteed)
+for the whole contract.
