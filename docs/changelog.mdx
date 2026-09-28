@@ -30,6 +30,20 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- Pruned traces stay pruned: they came back on the next start while their
+  records were still in the log, and `prune()` reported 0 when it removed
+  archived traces.
+- `training_records()` carries the run's `final_answer` (it was always
+  `None`).
+- A headless run's `result.json` counts the whole run's usage, not only the
+  last segment's.
+- `ls(".")`, and `glob` or `grep` with no path, list the whole workspace; they
+  were refused as invalid arguments.
+- A refused ask over HTTP names the capability and the rule
+  (`capability`, `matched_rule_ids` in the 403).
+- An exporter's failure keeps its reason in the trace.
+- `omnicoreagent harbor doctor` fails a development runtime that neither
+  `uv` nor `pip` can build into a wheel.
 - A person's denial, and an approval nobody decided in time, are decisions
   in the evidence: a `deny` with `denied_by` (the person, or `system`) and
   the reason `denied` or `expired_policy`, like an approval's `allow` with

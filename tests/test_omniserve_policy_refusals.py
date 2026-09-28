@@ -48,3 +48,31 @@ def test_a_background_task_the_policy_refuses_is_forbidden_and_says_why(server):
 
     assert response.status_code == 403, response.text
     assert "background.task.create" in response.json()["detail"]
+
+
+def test_an_ask_nobody_can_answer_names_the_capability_and_the_rule(tmp_path, monkeypatch):
+    # The Run It stranger test (2026-09-28): under interactive-dev every
+    # background request was a 403 reading only "Matched ask policy rule.",
+    # with nothing saying which capability or which rule to change.
+    monkeypatch.chdir(tmp_path)
+    agent = OmniCoreAgent(
+        name="ops",
+        system_instruction="x",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini", "api_key": "k"},
+        agent_config={
+            "guardrail_mode": "off",
+            "enable_workspace_files": False,
+            "governance_config": {"enabled": True, "profile": "interactive-dev"},
+        },
+    )
+    asyncio.run(agent.initialize())
+    with TestClient(OmniServe(agent, OmniServeConfig(auth_enabled=False)).app) as client:
+        response = client.post(
+            "/background/tasks",
+            json={"task_id": "health", "query": "check health", "schedule": {"type": "manual"}},
+        )
+
+    assert response.status_code == 403, response.text
+    body = response.json()
+    assert body["capability"].startswith("background.")
+    assert "ask_background_execution" in body["matched_rule_ids"]

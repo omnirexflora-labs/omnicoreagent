@@ -224,6 +224,11 @@ the run over without charging twice.
 - `list_charges`, completed before the crash, was not run again: its result
   was already in the run's context. (The second `list_charges` is the model's
   own check.)
+- The runtime never repeats a call whose outcome is unknown, but the model
+  decides what to do next: told the outcome is unknown, a model can choose to
+  call the tool again. That is a new call it made, recorded as one. Give
+  tools that must not run twice a way to check (here `list_charges`), or
+  make them idempotent (below).
 
 ## How it works
 
@@ -425,7 +430,7 @@ the same moments in two vocabularies:
 | `awaiting_budget` | `awaiting_budget` | Waiting for a budget top-up. |
 | `interrupted` | `interrupted` | Stopped by `interrupt`; `resume` continues it. |
 | (raises) | `cancelled` | The task running it was cancelled, or `abandon_run(status="cancelled")`. |
-| — | `timeout` | `abandon_run(status="timeout")`: a background run out of time. |
+| — | `timeout` | A deadline passed: OmniServe's request timeout, a background task's `timeout_seconds`, the headless CLI's `--timeout`, or `abandon_run(status="timeout")`. The record's error is `The run's deadline passed`. |
 | — | `running` | Running now, or its process died (the heartbeat says which). |
 
 ## One story per run
@@ -449,7 +454,10 @@ tool calls: {'total': 3, 'by_outcome': {'success': 2, 'error': 0, 'rejected': 0,
 ```
 
 The first segment stays `running`: its process died before it could end its
-trace. Each segment's steps are in `segment["trajectory"]["steps"]`; `totals`
+trace. The two views count the interrupted call differently, on purpose: the
+run record says what is known of its effect (`unknown`: it started and no
+result came back), and the trajectory's totals say how its span ended
+(`cancelled`, or `timeout` when a deadline stopped it). Each segment's steps are in `segment["trajectory"]["steps"]`; `totals`
 are summed across segments, each tool call counted once. The traces live in
 the workspace directory (`./workspace/telemetry/` by default), not in the
 memory store: a process that reads another's run needs the same workspace
@@ -543,7 +551,7 @@ In `agent_config`:
 | Key | Default | What it does |
 |---|---|---|
 | `run_lease_seconds` | `60` | How stale a `running` record's heartbeat must be before another process may take it over. The heartbeat is refreshed every third of it. |
-| `run_retention_days` | `30` | Days a finished run record is kept; `None` keeps them all. |
+| `run_retention_days` | `30` | Days a finished run record is kept: a whole number, 1 or more; `None` keeps them all. |
 
 And `memory_router=MemoryRouter(...)`, the store that holds the records
 ([Stores and scale](/docs/how-to-guides/stores-and-scale)). The trace windows

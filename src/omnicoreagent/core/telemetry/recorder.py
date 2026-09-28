@@ -1064,19 +1064,33 @@ class TelemetryRecorder:
             if isinstance(failure, dict)
             else getattr(failure, "exporter", "telemetry")
         )
-        error = (
-            failure
-            if isinstance(failure, dict)
-            else failure.model_dump()
-            if hasattr(failure, "model_dump")
-            else {"error": str(failure)}
-        )
+        error_type, message = export_failure_details(failure)
         await self.emit_event(
             "telemetry_error",
             metadata={"component": "exporter", "exporter": str(exporter)},
             error={
-                "type": str(error.get("error_type", "TelemetryExportError")),
-                "message": str(error.get("error", "telemetry export failed")),
+                "type": error_type,
+                "message": message,
                 "metadata": {"exporter": str(exporter)},
             },
         )
+
+
+def export_failure_details(failure: Any) -> tuple[str, str]:
+    """An export failure's error type and reason, wherever the result keeps
+    them: an exporter's result puts them in ``metadata``, which the trace once
+    missed (every failure read "telemetry export failed")."""
+    if isinstance(failure, BaseException):
+        return failure.__class__.__name__, str(failure)
+    error = (
+        failure
+        if isinstance(failure, dict)
+        else failure.model_dump()
+        if hasattr(failure, "model_dump")
+        else {"error": str(failure)}
+    )
+    details = {**(error.get("metadata") or {}), **{k: v for k, v in error.items() if k in ("error", "error_type") and v}}
+    return (
+        str(details.get("error_type") or "TelemetryExportError"),
+        str(details.get("error") or "telemetry export failed"),
+    )
