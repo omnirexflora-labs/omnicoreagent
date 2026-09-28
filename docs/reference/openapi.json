@@ -1807,7 +1807,7 @@
           },
           "misfire_policy": {
             "$ref": "#/components/schemas/MisfirePolicy",
-            "default": "skip_missed"
+            "default": "run_once"
           },
           "run_at": {
             "anyOf": [

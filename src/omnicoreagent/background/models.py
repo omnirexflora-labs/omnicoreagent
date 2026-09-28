@@ -60,6 +60,11 @@ class ScheduleType(str, Enum):
     ONCE = "once"
 
 
+# How late an occurrence may be dispatched and still count as on time: a
+# scheduler that polls every few seconds is always a little late.
+MISFIRE_GRACE_SECONDS = 60
+
+
 class MisfirePolicy(str, Enum):
     SKIP_MISSED = "skip_missed"
     RUN_ONCE = "run_once"
@@ -212,7 +217,9 @@ class ScheduleSpec(StrictModel):
     start_at: datetime | None = None
     end_at: datetime | None = None
     jitter_seconds: int | None = None
-    misfire_policy: MisfirePolicy = MisfirePolicy.SKIP_MISSED
+    # After downtime: run_once runs one run for the missed time (the default),
+    # skip_missed waits for the next occurrence, queue_all runs every one.
+    misfire_policy: MisfirePolicy = MisfirePolicy.RUN_ONCE
 
     @field_validator("run_at", "start_at", "end_at")
     @classmethod
@@ -370,6 +377,12 @@ def schedule_due_occurrences(
     if schedule.type in {ScheduleType.MANUAL, ScheduleType.ONCE}:
         return occurrences, None
 
+    if (
+        schedule.misfire_policy == MisfirePolicy.SKIP_MISSED
+        and (reference - current_due).total_seconds() > MISFIRE_GRACE_SECONDS
+    ):
+        # Missed, not late: nothing runs for it; the next occurrence will.
+        return [], next_schedule_due(schedule, current_due, reference)
     if schedule.misfire_policy != MisfirePolicy.QUEUE_ALL:
         return occurrences, next_schedule_due(schedule, current_due, reference)
 

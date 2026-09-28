@@ -235,16 +235,14 @@ async def test_a_custom_memory_store_without_run_state_still_runs():
     assert await agent.get_run(result["run_id"]) is None
 
 
-def test_a_configured_but_unreachable_durable_store_is_a_warning(monkeypatch, caplog):
-    import logging
-
+def test_a_durable_store_without_its_url_is_an_error(monkeypatch):
+    # It fell back to memory with a warning; a durable store that quietly is
+    # not one loses every run at the next restart (decided 2026-09-28).
     from omnicoreagent.core.memory_store.memory_router import MemoryRouter
 
     monkeypatch.delenv("REDIS_URL", raising=False)
-    with caplog.at_level(logging.WARNING):
+    with pytest.raises(ValueError, match="REDIS_URL"):
         MemoryRouter("redis")
-
-    assert "REDIS_URL" in caplog.text and "in_memory" in caplog.text
 
 
 # --- stores with different addresses stay separate --------------------------

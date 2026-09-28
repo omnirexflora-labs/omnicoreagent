@@ -321,7 +321,7 @@ share the stores above.
 | Setting | Default | Removes |
 |---|---|---|
 | `agent_config["run_retention_days"]` | `30` | Finished run records (`completed`, `failed`, `blocked`, `cancelled`, `timeout`), counted from the run's start. Waiting, interrupted and running runs are never removed |
-| `telemetry_config["retention_days"]` | `7` | Finished traces, from the log and the archive |
+| `telemetry_config["retention_days"]` | `7` | Finished traces, from the log and the archive; and a trace still `running` with no activity for that long, whose process died (reported as `abandoned`) |
 | `telemetry_config["payload_retention_days"]` | `7` | Offloaded payloads no kept trace points to |
 
 `None` keeps everything. Each window is applied once, when an agent starts its
@@ -364,18 +364,19 @@ Every agent key: [Agent settings](/docs/reference/agent-config). The manager:
 
 <AccordionGroup>
   <Accordion title="Process two cannot find the run: LookupError: No run …">
-    The two processes do not share a memory store. Most often the store is
-    in memory, sometimes without you asking for it: `MemoryRouter("sql")`
-    with no `DATABASE_URL` set falls back to an in-memory store, with a
-    `RuntimeWarning` (`SQL memory selected but DATABASE_URL is not set; using
-    in_memory (nothing survives a restart)`). Print the router to check:
+    The two processes do not share a memory store: one of them uses
+    `MemoryRouter("in_memory")` (the default), or the two name different
+    databases. Print each router to check:
 
     ```text
-    MemoryRouter(type=sql, store=InMemoryStore)
+    MemoryRouter(type=sql, store=DatabaseMessageStore)
     ```
 
-    With `DATABASE_URL` set it says `store=DatabaseMessageStore`. The same
-    holds for `redis` without `REDIS_URL` and `mongodb` without `MONGODB_URI`.
+    A durable store without its address is an error, not memory:
+    `MemoryRouter("sql")` with no `DATABASE_URL` raises `ValueError:
+    MemoryRouter("sql") needs DATABASE_URL (e.g. sqlite:///./memory.db)`,
+    and so do `redis` without `REDIS_URL` and `mongodb` without
+    `MONGODB_URI`.
   </Accordion>
 
   <Accordion title="ImportError: SQL database memory requires optional dependency 'sqlalchemy'">

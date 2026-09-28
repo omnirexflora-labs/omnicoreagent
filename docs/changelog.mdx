@@ -11,6 +11,23 @@ Every release, with its notes, is also on
 
 ## Unreleased
 
+### Changed
+
+- **A durable memory store needs its URL.** `MemoryRouter("sql")` without
+  `DATABASE_URL` (and `redis` without `REDIS_URL`, `mongodb` without
+  `MONGODB_URI`) raises a `ValueError` naming the variable. It fell back to
+  memory, so runs silently did not survive a restart or resume elsewhere.
+  `MemoryRouter("in_memory")` is unchanged.
+- **The default `misfire_policy` is `run_once`**, which is what the old
+  default did (one run for time missed while no manager ran).
+  `skip_missed` now skips: nothing runs for a time missed by more than a
+  minute.
+- **`cancel_previous` interrupts the run it replaces**, within a heartbeat,
+  instead of letting it finish its attempt and then discarding it.
+- **Trace retention removes abandoned traces**: a trace still `running`
+  with no activity for longer than `retention_days`, whose process died.
+  A trace waiting for a person is never removed.
+
 ### Fixed
 
 - A person's denial, and an approval nobody decided in time, are decisions
@@ -27,9 +44,6 @@ Every release, with its notes, is also on
   and the run's record says `timeout`, as its trace does.
 - `await memory_router.close()` closes a SQL store's share of its pool; the
   last store using a database's pool closes it.
-- A durable memory store selected without its URL (`DATABASE_URL`,
-  `REDIS_URL`, `MONGODB_URI`) falls back to memory with a `RuntimeWarning`,
-  not only a log line nobody saw.
 - `list_runs()` approvals carry the call's `arguments`, as `get_run()`'s do.
 - `omniserve run` with a Redis or MongoDB task store and no URL is a clean
   config error, not a traceback.

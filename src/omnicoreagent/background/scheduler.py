@@ -64,6 +64,21 @@ class BackgroundScheduleDispatcher:
                 limit=remaining,
             )
             if not occurrences:
+                if final_next_due_at != state.next_due_at:
+                    # skip_missed: the missed occurrence runs nothing; move
+                    # the schedule on to the next one.
+                    await self.task_store.advance_schedule(
+                        task.task_id,
+                        state.schedule_revision,
+                        occurrence_id,
+                        final_next_due_at,
+                    )
+                    logger.info(
+                        f"Background task {task.task_id!r} skipped the occurrence "
+                        f"due at {state.next_due_at.isoformat()} (misfire_policy "
+                        "skip_missed); next due "
+                        f"{final_next_due_at.isoformat() if final_next_due_at else 'never'}"
+                    )
                 continue
             for index, due_at in enumerate(occurrences):
                 occurrence_for_due = (

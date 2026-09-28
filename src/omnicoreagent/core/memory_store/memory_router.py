@@ -1,5 +1,4 @@
 import inspect
-import warnings
 from typing import Any, Optional, Callable
 import os
 
@@ -11,16 +10,15 @@ from omnicoreagent.core.memory_store.base import AbstractMemoryStore
 from omnicoreagent.core.memory_store.utils import normalize_content
 
 
-def _warn_fallback(backend: str, variable: str) -> None:
-    # A warning Python shows, not only a log line: the library's logger has
-    # no handler by default, and a durable store that quietly is not one
-    # loses every run at the next restart.
-    message = (
-        f"{backend} memory selected but {variable} is not set; using in_memory "
-        "(nothing survives a restart)"
+def _missing_url(backend: str, variable: str, example: str) -> ValueError:
+    # An error, not a fallback to memory: a durable store that quietly is not
+    # one loses every run at the next restart (the maintainer's decision,
+    # 2026-09-28).
+    return ValueError(
+        f'MemoryRouter("{backend}") needs {variable} (e.g. {example}). '
+        'Set it, or use MemoryRouter("in_memory") for a store that lasts only as '
+        "long as this process."
     )
-    logger.warning(message)  # where an application's logging is set up
-    warnings.warn(message, RuntimeWarning, stacklevel=3)
 
 
 class MemoryRouter:
@@ -55,8 +53,7 @@ class MemoryRouter:
         elif self.memory_store_type == "sql":
             db_url = os.environ.get("DATABASE_URL")
             if db_url is None:
-                _warn_fallback("SQL", "DATABASE_URL")
-                self.memory_store = InMemoryStore()
+                raise _missing_url("sql", "DATABASE_URL", "sqlite:///./memory.db")
             else:
                 DatabaseMessageStore = load_optional(
                     "SQL database memory",
@@ -70,8 +67,7 @@ class MemoryRouter:
         elif self.memory_store_type == "redis":
             redis_url = os.environ.get("REDIS_URL")
             if redis_url is None:
-                _warn_fallback("Redis", "REDIS_URL")
-                self.memory_store = InMemoryStore()
+                raise _missing_url("redis", "REDIS_URL", "redis://localhost:6379/0")
             else:
                 RedisMemoryStore = load_optional(
                     "Redis memory",
@@ -85,8 +81,7 @@ class MemoryRouter:
         elif self.memory_store_type == "mongodb":
             uri = os.environ.get("MONGODB_URI")
             if uri is None:
-                _warn_fallback("MongoDB", "MONGODB_URI")
-                self.memory_store = InMemoryStore()
+                raise _missing_url("mongodb", "MONGODB_URI", "mongodb://localhost:27017")
             else:
                 db_name = os.environ.get("MONGODB_DB_NAME", "omnicoreagent")
                 collection = os.environ.get("MONGODB_COLLECTION", "messages")
@@ -120,8 +115,15 @@ class MemoryRouter:
 
     def switch_memory_store(self, memory_store_type: str):
         if memory_store_type != self.memory_store_type:
+            previous_type, previous_store = self.memory_store_type, self.memory_store
             self.memory_store_type = memory_store_type
-            self.initialize_memory_store()
+            try:
+                self.initialize_memory_store()
+            except Exception:
+                # A store that cannot be built (no URL, no driver) leaves the
+                # router as it was, not naming a store it does not have.
+                self.memory_store_type, self.memory_store = previous_type, previous_store
+                raise
             # The new store keeps the window and summary settings.
             if self._memory_config is not None:
                 self.memory_store.set_memory_config(*self._memory_config)

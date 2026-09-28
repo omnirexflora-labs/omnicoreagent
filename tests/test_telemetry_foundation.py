@@ -414,6 +414,16 @@ async def test_jsonl_store_prunes_old_ended_traces_and_keeps_active_traces(tmp_p
     await writer.upsert_trace(old)
     await writer.upsert_trace(recent)
     await writer.upsert_trace(active)
+    # A long run that is still working: it recorded something just now. (A
+    # running trace silent for longer than retention is abandoned and pruned.)
+    await writer.append_event(
+        "trace-active",
+        TelemetryEvent(
+            trace_id="trace-active",
+            event_type="agent_step",
+            actor=TelemetryActor(type=ActorType.AGENT),
+        ),
+    )
     await writer.flush()  # written in batches: on disk before another store reads it
 
     reloaded = JsonlTelemetryStore(path)

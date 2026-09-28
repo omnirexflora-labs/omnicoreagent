@@ -47,8 +47,9 @@ class TelemetryConfig:
     storage: str = "auto"
     # Where the jsonl store writes; None is telemetry/traces.jsonl in the workspace.
     storage_path: str | None = None
-    # Finished traces older than this are pruned automatically; ``None`` keeps
-    # every trace.
+    # Finished traces older than this are pruned automatically, and so is a
+    # trace still running with no activity for this long (its process died;
+    # reported as abandoned). ``None`` keeps every trace.
     retention_days: int | None = 7
     # The same for offloaded payloads, on their own window; a payload a kept
     # trace still refers to is never pruned.

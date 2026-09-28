@@ -4,6 +4,8 @@ window and summary settings."""
 
 from __future__ import annotations
 
+import pytest
+
 from omnicoreagent import OmniCoreAgent
 from omnicoreagent.core.memory_store.memory_router import MemoryRouter
 
@@ -19,9 +21,12 @@ def test_a_partial_memory_config_keeps_the_other_defaults():
     assert memory["mode"] == "token_budget" and memory["value"] == 10000
 
 
-def test_switching_the_store_keeps_the_memory_settings():
+def test_switching_the_store_keeps_the_memory_settings(tmp_path, monkeypatch):
+    pytest.importorskip("sqlalchemy")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'memory.db'}")
     router = MemoryRouter("in_memory")
     router.set_memory_config("sliding_window", 4, {"enabled": False, "retention_policy": "keep"})
-    router.switch_memory_store("sql")  # no DATABASE_URL: falls back to a fresh in-memory store
+    router.switch_memory_store("sql")
+    assert router.memory_store.memory_config["value"] == 4
     router.switch_memory_store("in_memory")
     assert router.memory_store.memory_config["value"] == 4
