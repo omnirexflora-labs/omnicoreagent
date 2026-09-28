@@ -208,3 +208,21 @@ Nothing here needs to change for the upgrade; it is what 0.4 adds.
 </CardGroup>
 
 Every setting, method and command is in the [reference](/docs/reference/omnicoreagent).
+
+## From 0.4.0 or 0.4.1 to 0.4.2
+
+Code that runs on 0.4.1 runs on 0.4.2, with these exceptions, each a setting
+that now does what its name says:
+
+| If you | 0.4.1 | 0.4.2 | Do |
+|---|---|---|---|
+| Build `MemoryRouter("sql")`, `"redis"` or `"mongodb"` without its URL | Fell back to memory, silently | `ValueError` naming the variable | Set `DATABASE_URL`, `REDIS_URL` or `MONGODB_URI`, or use `MemoryRouter("in_memory")` |
+| Set `denied_hosts`, `environment.secret_refs`, or `allowed_hosts` on Daytona | Accepted, not enforced | Refused when the agent is built | Remove them; see [sandbox providers](/docs/how-to-guides/sandbox-providers) for what each provider enforces |
+| Use `overlap_policy="cancel_previous"` | The earlier run finished, then was marked cancelled | The earlier run is interrupted | Nothing, unless you relied on it finishing |
+| Use `misfire_policy="skip_missed"` | Ran once for missed time | Skips it | Use `run_once`, now the default, to keep the old behaviour |
+| Read OmniServe's `504` `detail` as a string | A string | An object with `message` and `run_id` | Read `detail["message"]` |
+
+Finished run records and traces are kept as before; traces whose process
+died are now removed by trace retention as well. The [changelog](/docs/changelog)
+lists every fix.
+
