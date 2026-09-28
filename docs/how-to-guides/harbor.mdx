@@ -386,9 +386,14 @@ could not connect to it.
 - **The same runtime in the container.** A release installs
   `omnicoreagent==<version>`; a development build uploads a wheel built from
   its checkout. It goes in a virtual environment of its own under
-  `/installed-agent`, so the task's Python stays as the task set it up, and
-  the agent's workspace is there too, outside the task's directory the
-  verifier checks.
+  `/installed-agent`, so the task's Python stays as the task set it up. The
+  runtime's own files (traces, offloaded results) are there too, outside the
+  task's directory the verifier checks.
+- **The agent's files are the task's.** The file tools (`ls`, `read_file`,
+  `write_file`, `edit_file`, ...) work in the directory the task's commands
+  run in, whatever the task set: `ls(".")` lists it. (Before, they pointed
+  at the agent's own workspace, and a model spent steps on "Path not found"
+  before falling back to commands.)
 - **The container is the boundary.** Commands run in the task's directory
   through the `local` sandbox provider. Policy still decides each one (a rule
   `allow_host_commands` allows commands on the host; approvals nobody can

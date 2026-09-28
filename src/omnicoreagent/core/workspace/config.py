@@ -25,6 +25,10 @@ class WorkspaceConfig:
     r2_account_id: str | None = None
     r2_access_key_id: str | None = None
     r2_secret_access_key: str | None = None
+    # Where the file tools work, if not <workspace_dir>/files: a directory you
+    # already have, such as an evaluation task's. The runtime's own files
+    # (traces, offloaded results) stay in workspace_dir. Local only.
+    files_dir: str | Path | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -35,6 +39,13 @@ class WorkspaceConfig:
         object.__setattr__(self, "prefix", self.prefix.strip("/"))
         if self.workspace_dir is not None:
             object.__setattr__(self, "workspace_dir", str(self.workspace_dir))
+        if self.files_dir is not None:
+            if self.workspace_backend != "local":
+                raise ValueError(
+                    "files_dir is a directory on this machine: use it with the local "
+                    f"workspace backend, not {self.workspace_backend!r}"
+                )
+            object.__setattr__(self, "files_dir", str(self.files_dir))
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "WorkspaceConfig":
@@ -80,8 +91,10 @@ class WorkspaceConfig:
         return clean_namespace or self.prefix
 
     def local_namespace_path(self, namespace: str | None = None) -> Path:
-        root = Path(self.workspace_dir or DEFAULT_WORKSPACE_DIR)
         clean_namespace = (namespace or "").strip("/")
+        if clean_namespace == "files" and self.files_dir is not None:
+            return Path(self.files_dir)
+        root = Path(self.workspace_dir or DEFAULT_WORKSPACE_DIR)
         return root / clean_namespace if clean_namespace else root
 
     def cache_key(self, namespace: str | None = None) -> tuple:

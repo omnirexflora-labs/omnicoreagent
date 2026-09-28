@@ -9,8 +9,9 @@ Four things a harness has to get right, learned by running one
 (``engineering/validation/harbor_trial``), are decided here rather than left to
 whoever writes the configuration:
 
-- the agent's workspace goes **outside** the task directory, or it appears among
-  the files the verifier checks;
+- the agent's file tools work in the task's own directory, while the runtime's
+  own files (traces, offloaded results) go **outside** it, or they would appear
+  among the files the verifier checks;
 - host commands are allowed by an explicit rule, because every built-in profile
   denies or asks about them;
 - the environment is passed through **by name**, so the task gets what it needs
@@ -176,9 +177,12 @@ agent = OmniCoreAgent(
         "completion_review": COMPLETION_REVIEW,
         "enable_agent_skills": bool(SKILLS_DIR),
         "skills_dir": SKILLS_DIR,
-        # Outside the task's directory: the workspace would otherwise appear
-        # among the files the verifier checks.
-        "workspace_config": {{"workspace_dir": WORKSPACE_DIR}},
+        # The file tools work in the task's own directory, whatever the task
+        # set (they pointed at the agent's workspace, and the model tried
+        # "Path not found: /app" three times). The runtime's own files stay
+        # in the workspace, outside it: they would otherwise appear among the
+        # files the verifier checks.
+        "workspace_config": {{"workspace_dir": WORKSPACE_DIR, "files_dir": TASK_DIR}},
         "governance_config": {{
             "enabled": True,
             "policy": _policy(),
