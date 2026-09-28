@@ -176,3 +176,15 @@ def test_short_paths_redirect_to_real_pages():
     assert not [d for d in redirects.values() if d not in pages]
     assert not [s for s in redirects if s in pages]
 
+
+TAGLINE = "The governed runtime for Python agents you can let act."
+
+
+def test_the_tagline_is_the_same_everywhere_it_is_shown():
+    # One line, not three nouns and a qualifier (the same review).
+    config, _ = _nav_groups()
+    index = (ROOT / "docs" / "index.mdx").read_text()
+    assert TAGLINE in (ROOT / "README.md").read_text()
+    assert f"description: '{TAGLINE}'" in index
+    assert config["description"] == TAGLINE
+

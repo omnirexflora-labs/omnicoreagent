@@ -2,7 +2,7 @@
     "$schema": "https://mintlify.com/docs.json",
     "theme": "maple",
     "name": "OmniCoreAgent",
-    "description": "The open Python agent runtime and harness, with an SDK, for production AI applications",
+    "description": "The governed runtime for Python agents you can let act.",
     "favicon": "/assets/brand/omnicoreagent-mark.svg",
     "logo": {
         "light": "/assets/brand/omnicoreagent-logo-light.svg",

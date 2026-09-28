@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <strong>The open Python agent runtime and harness, with an SDK, for AI applications that have to hold up in production.</strong><br />
+  <strong>The governed runtime for Python agents you can let act.</strong><br />
   <em>Governed, sandboxed, durable, budgeted — and every run kept as evidence you can read, evaluate and train on.</em>
 </p>
 
