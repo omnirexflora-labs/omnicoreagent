@@ -171,6 +171,7 @@ the run over without charging twice.
     # recover.py
     import asyncio
     from agent_def import build_agent
+    from omnicoreagent.core.runs import RunStateConflict
 
     RUN_ID = "run_order_1042"
 
@@ -185,7 +186,7 @@ the run over without charging twice.
             try:
                 result = await agent.resume(RUN_ID)
                 break
-            except ValueError as still_live:
+            except (ValueError, RunStateConflict) as still_live:
                 print(still_live)
                 await asyncio.sleep(5)
 
@@ -236,8 +237,9 @@ the run over without charging twice.
   <Step title="Saved as it goes">
     The record is written when the run starts, at each step, before each tool
     call (`started`, a write-ahead) and after it (`completed`), at every
-    approval or budget request, and when the run ends. A tool's result is
-    saved with it, so a resumed run never needs to call it again.
+    approval or budget request, and when the run ends. The results of a turn's
+    calls are saved once every call of that turn has finished; a call whose
+    result is saved is never called again.
   </Step>
   <Step title="A heartbeat, and a lease">
     While a run is live it refreshes `heartbeat_at` every third of
@@ -249,15 +251,20 @@ the run over without charging twice.
   <Step title="One owner at a time">
     Saves are versioned: a save names the version it read, and a stale one is
     refused. Two processes that both try to take a run over cannot both
-    advance it; the one that lost stops writing.
+    advance it; the one that lost stops writing (its save raises
+    `RunStateConflict`).
   </Step>
   <Step title="The stopped step, finished carefully">
-    On resume, the calls of the step that stopped are sorted out: a completed
-    call is not run again; a call that never started runs; a call that started
-    and never finished (or was cancelled or timed out) runs again **only if its
-    tool is idempotent**. Otherwise the model receives an `unknown_outcome`
-    error: *"its outcome is unknown: it may or may not have taken effect. Check
-    before calling it again."*
+    On resume, the calls of the step that stopped are sorted out: a call whose
+    result was saved is not run again; a call that never started runs; any
+    other call runs again **only if its tool is idempotent**. That covers a
+    call that started and never finished (or was cancelled or timed out), and
+    one that finished while a sibling call was still running, so its result
+    was lost. Otherwise the model receives an `unknown_outcome` error: *"its
+    outcome is unknown: it may or may not have taken effect. Check before
+    calling it again."*, or, for a call that finished, *"This call finished
+    (it reported success), but its result was lost … It has taken effect: do
+    not call it again without checking."*
   </Step>
 </Steps>
 
@@ -277,6 +284,46 @@ Tools are not idempotent unless they say so. The built-in reads (workspace
 files, artifacts, `read_skill_file`) are. An MCP tool is when its server marks
 it `readOnlyHint` or `idempotentHint`. For a tool with side effects, give the
 model a way to check, as `list_charges` did above.
+
+## What is guaranteed
+
+What a run does after its process dies, stated exactly. "Resume" means
+`resume(run_id)`, or `run(..., run_id=)` on a run that can resume.
+
+| When the process stopped, the call or step was… | On resume | Guarantee |
+|---|---|---|
+| A tool call whose result was saved | Never run again | exactly once |
+| A tool call not marked idempotent, started or finished but its result not saved | Never run again by the runtime; the model is told its outcome is unknown, or that it finished and its result was lost | **at most once** |
+| An idempotent tool call, same | Run again | at least once |
+| A call that never started | Runs | once |
+| An approved call | Runs once; if the process stops during it, the rows above apply, and an idempotent one asks for approval again | at most once without a new approval |
+| A model call whose reply was saved | Never sent again | exactly once |
+| A model call whose reply was not yet saved | Sent again: the step is redone | at least once |
+
+- **One owner.** Saves are versioned, so two processes cannot both advance a run;
+  the one that lost gets `RunStateConflict`. A live run refreshes its heartbeat
+  even during a long call. If a process stops refreshing it without dying (its
+  store unreachable, say), another may take the run over while that process's
+  tool is still running.
+- **Budgets.** A model call's worst case is held before it is sent and its real
+  cost committed after. If the process stops in between, the hold stands until
+  the run is resumed or ended, and is then released: that one call is counted as
+  a call, but its tokens and cost are not. A tool call is counted each time it
+  is dispatched, including once more when an approved call runs.
+- **Usage in the record** (`get_run(...)["usage"]`) is written when a run ends;
+  a segment whose process stopped adds none. The spend itself is in the budget
+  counters.
+- **Sub-agents.** A delegation is a tool call that is not idempotent, so the
+  rows above apply to it. A child run left behind by a parent that stopped is
+  not resumed, except a worker waiting for an approval.
+- **Background retries** after a failure, a timeout or a cancellation are new
+  attempts from the first step; only a worker that died is resumed.
+
+These come from `_pending_calls` (`core/agents/base.py`), the call recording in
+`core/agents/native_tools.py` and `core/runs.py`, and `RunBudgets.release_stale`
+(`core/budgets.py`); the tests that hold them are `tests/test_run_recovery.py`,
+`tests/test_durable_runs_end_to_end.py`, `tests/test_run_suspend.py` and
+`tests/test_budget_stale_holds.py`.
 
 ## Pause and resume
 
@@ -482,6 +529,10 @@ worker lease, and keeps its task's slot. Decide, then queue it again with
 `POST /background/runs/{run_id}/resume`); the next attempt continues the same
 run.
 
+A background task that **fails, times out or is cancelled** and is retried
+starts a new attempt from the first step (see *Run again with the same run ID*):
+the calls of the earlier attempt are not remembered, so its tools can run again.
+
 A background worker that dies is recovered with the same run ID once its
 worker lease (`BackgroundAgentManager(lease_seconds=30)`) lapses. The run
 record's own lease must have lapsed by then too, or the recovery is refused as
@@ -621,8 +672,9 @@ Methods, each in the [OmniCoreAgent reference](/docs/reference/omnicoreagent):
   </Accordion>
 
   <Accordion title="The model says a call's outcome is unknown">
-    That call started and its process stopped before it finished, and its
-    tool is not idempotent, so it was not run again. This is on purpose. If
+    That call started and its process stopped before its result was saved,
+    and its tool is not idempotent, so it was not run again. This is on
+    purpose. If
     running it twice is harmless, register the tool with `idempotent=True`;
     if not, give the model a way to check, like `list_charges` above.
   </Accordion>

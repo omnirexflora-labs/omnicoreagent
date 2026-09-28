@@ -8,9 +8,10 @@ workers cannot both spend the last dollar.
 
 Spending that is only known afterwards (a model call) is **reserved** first
 and **committed** at its real cost. A process that dies in between leaves the
-reservation standing: budgets over-count rather than lose a spend, and what
-the dead attempt held is released when its run is resumed, recovered, retried
-or ended from outside (``RunBudgets.release_stale``).
+reservation standing, so budgets over-count until what the dead attempt held
+is released when its run is resumed, recovered, retried or ended from outside
+(``RunBudgets.release_stale``). Released, that call's real cost was never
+known, so it is not recorded: the call is counted, its tokens and cost are not.
 
 A memory store without the budget methods leaves budgets off: the agent runs
 as before, and nothing is counted.
