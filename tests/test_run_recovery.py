@@ -120,6 +120,27 @@ async def test_recovery_never_repeats_a_completed_call_and_reports_an_unknown_ou
 
 
 @pytest.mark.asyncio
+async def test_a_finished_call_whose_result_was_not_saved_is_not_run_again(tmp_path):
+    # Found by the durability audit (2026-09-28): results are saved once the
+    # whole batch of a turn finishes, so a call that completed while a sibling
+    # was still running had its state saved but not its result. Recovery took
+    # "no result" to mean "never ran" and charged the card a second time.
+    ledger = tmp_path / "ledger"
+    model = RecordingModel([("c1", "charge", '{"amount": 5}'), ("r1", "report", "{}")], "recovered")
+    agent = await _agent(model, _tools(ledger))
+    crashed = await _crash(agent)
+    assert {c["tool_call_id"]: c["state"] for c in crashed["tool_calls"]}["c1"] == "completed"
+    await asyncio.sleep(1.2)
+
+    result = await agent.resume("run_crash")
+
+    assert result["response"] == "recovered"
+    assert ledger.read_text().splitlines().count("charge 5") == 1, "the card was charged once"
+    told = next(m for m in model.calls[-1] if m.get("tool_call_id") == "c1")
+    assert "finished" in json.dumps(told) and "result was lost" in json.dumps(told)
+
+
+@pytest.mark.asyncio
 async def test_an_interrupted_idempotent_call_runs_again(tmp_path):
     ledger = tmp_path / "ledger"
     model = RecordingModel(*TURNS, "recovered")
