@@ -1,87 +1,497 @@
 ---
-title: Headless runs
-description: 'Run one instruction unattended from the command line, for CI and evaluation harnesses'
-icon: 'terminal'
+title: "Headless runs in CI"
+description: "Run one instruction unattended with omnicoreagent run: approvals and budgets decided up front, an exit code per terminal state, and the evidence written to files"
+icon: "terminal"
 ---
 
-# Headless runs
+# Headless runs in CI
 
-`omnicoreagent run` executes one instruction and exits. It needs only the core
-install — no server — which makes it the entry point for CI jobs and for
-evaluation harnesses such as Harbor that run an agent inside a task container.
+`omnicoreagent run` runs one instruction and exits. Nobody is there to approve
+a call or top up a budget, so you say up front how those are answered; the
+exit code names how the run ended, and the evidence is written to files. By
+the end of this page you will have an agent that opens a pull request from a
+CI job, the run's record read back from its files, and an outcome recorded
+once the tests have passed.
 
-```bash
-omnicoreagent run --agent agent.py \
-  --instruction "Fix the failing test in tests/test_orders.py" \
-  --approval-mode deny --timeout 900 \
-  --provenance trial_id=trial-3 --provenance adapter=harbor \
-  --output-dir ./out
+It needs only the core install: no server.
+
+<Info>
+Every output on this page is what the command printed when it was run. The
+model's wording, the ids and the token counts will differ on your run.
+</Info>
+
+## An agent file
+
+The command loads a Python file that defines an `agent` variable or a
+`create_agent()` function, the same file `omniserve run` takes. This agent
+lists changes and may open a pull request, and its policy says a person
+approves pull requests:
+
+```python
+# agent.py
+import os
+
+os.environ.setdefault("DATABASE_URL", "sqlite:///./runs.db")
+
+from omnicoreagent import MemoryRouter, OmniCoreAgent, ToolRegistry
+from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy
+
+tools = ToolRegistry()
+
+@tools.register_tool("list_changes", idempotent=True)
+def list_changes(since: str) -> dict:
+    """List the merged changes since a release tag."""
+    return {"since": since, "changes": ["Add CSV export", "Fix login timeout", "Faster search"]}
+
+@tools.register_tool("open_pull_request")
+def open_pull_request(title: str, body: str) -> dict:
+    """Open a pull request."""
+    return {"number": 318, "title": title}
+
+policy = build_default_policy("interactive-dev")
+policy.rules.ask.append(
+    PolicyRule(
+        rule_id="ask_before_pull_requests",
+        effect=PolicyEffect.ASK,
+        capability="tool.local.call",
+        target={"tool_name": "open_pull_request"},
+        reason="A person approves pull requests.",
+    )
+)
+
+agent = OmniCoreAgent(
+    name="release_notes",
+    system_instruction="You write release notes. Answer in plain text, in two sentences at most.",
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    local_tools=tools,
+    memory_router=MemoryRouter("sql"),
+    agent_config={"governance_config": {"enabled": True, "policy": policy}},
+)
 ```
 
-The agent file is the same one `omniserve run` uses: it defines an `agent`
-variable or a `create_agent()` function.
+The SQLite store keeps the run's record after the command exits, so a later
+step can read it and record its outcome (SQLite needs
+`pip install "omnicoreagent[postgres]"`, which brings SQLAlchemy). With the
+default in-memory store the record is gone when the command ends.
 
-## Nobody is there to approve
+## Run it
 
-A policy `ask` rule pauses a run for a person. In a headless run you choose,
-up front, how those requests are answered:
+```bash
+export LLM_API_KEY=...
+omnicoreagent run --agent agent.py \
+  --instruction "Write release notes for the changes since v1.2, then open a pull request with them." \
+  --tag nightly --provenance environment=ci --provenance build=4471 \
+  --output-dir out
+echo "exit code: $?"
+```
 
-| `--approval-mode` | What happens |
-|---|---|
-| `stop` (default) | The run is left waiting; the command exits with code 3. |
-| `allow` | Every request is approved. |
-| `deny` | Every request is denied; the model is told why and carries on. |
-| `scripted` | Rules in `--approvals-file` decide, first match wins. |
+```text
+status=awaiting_approval exit=3 run_id=run_e4b53e13d12e4988afc823d45c94c717
+exit code: 3
+```
+
+The model asked to open the pull request, the policy asked for a person, and
+by default (`--approval-mode stop`) the command leaves the run waiting and
+exits 3. `out/result.json` says what it is waiting for:
+
+```text
+"pending": {
+  "approvals": [
+    {
+      "approval_id": "approval_b1d219ba032a4f9e9255ce268c5d6d1a",
+      "tool_name": "open_pull_request",
+      "capability": "tool.local.call",
+      "arguments": {
+        "title": "Release notes since v1.2",
+        "body": "# Release Notes\n\n## Changes since v1.2\n- Add CSV export\n- Fix login timeout\n- Faster search"
+      },
+      "reason": "A person approves pull requests.",
+      ...
+```
+
+A person can approve it later from any process that shares the store
+(`resolve_approval`, then `resume`: [Approvals](/docs/core-concepts/approvals)).
+In CI, decide instead. An approvals file approves pull requests and denies
+anything else the policy asks about:
 
 ```json
 {
   "default": "deny",
   "rules": [
-    {"tool_name": "create_pull_request", "decision": "approve", "note": "case allows PRs"},
-    {"capability": "sandbox.execute", "decision": "approve"}
+    {"tool_name": "open_pull_request", "decision": "approve", "note": "release PRs are allowed in CI"}
   ]
 }
 ```
 
-`default` may be `approve`, `deny`, or `stop`. Every decision goes through
-`resolve_approval` with the approver `omnicoreagent-cli` and a note naming the
-mode, so the run's record shows who decided and how. The trace is tagged
-`headless`, `approval-mode:<mode>` and `budget-mode:<mode>`.
+```bash
+omnicoreagent run --agent agent.py \
+  --instruction "Write release notes for the changes since v1.2, then open a pull request with them." \
+  --approval-mode scripted --approvals-file approvals.json \
+  --timeout 300 --tag nightly --provenance environment=ci --provenance build=4472 \
+  --output-dir out2 --json
+```
 
-When a budget runs out, `--budget-mode stop` (default) exits with code 4 and
-leaves the run waiting; `--budget-mode deny` denies the top-up and the run
-ends cleanly. The CLI never grants budget.
+```text
+{
+  "schema": "omnicoreagent.headless_result/v1",
+  "status": "success",
+  "exit_code": 0,
+  "run_id": "run_d99e8e420e6b4e87b2d81ee249a5121c",
+  "session_id": "omni_core_agent_release_notes_3a5d85cf",
+  "response": "Opened PR #318 titled “Release notes for changes since v1.2” with the release notes for Add CSV export, Fix login timeout, and Faster search.",
+  "termination_reason": "stop",
+  "error": null,
+  "trace_ids": [
+    "trace_4bc4819e90c44da194a407d51a07e574",
+    "trace_f31203c1583c4caea5e48904edd9a428"
+  ],
+  "approval_mode": "scripted",
+  "budget_mode": "stop",
+  "cli_decisions": [
+    {
+      "kind": "approval",
+      "approval_id": "approval_1f102341157045838efcefbf38d4e950",
+      "tool_name": "open_pull_request",
+      "capability": "tool.local.call",
+      "decision": "approve",
+      "rule": 0,
+      "note": "release PRs are allowed in CI"
+    }
+  ],
+  "pending": null,
+  "usage": {
+    "requests": 1,
+    "request_tokens": 1763,
+    "response_tokens": 37,
+    "total_tokens": 1800,
+    "total_time": 1.37213440800042,
+    "details": {
+      "cached_input_tokens": 1536
+    }
+  },
+  "duration_seconds": 11.787,
+  "omnicoreagent_version": "0.4.1.dev13+5ebddc2",
+  "evidence_error": null
+}
+status=success exit=0 run_id=run_d99e8e420e6b4e87b2d81ee249a5121c
+```
 
-`--timeout` is one deadline for the whole run, pauses and resumes included,
-recorded in the trace as `timeout`, not `cancelled`.
+The run paused at the pull request, the CLI approved it by rule 0, and the
+run resumed and finished: two traces, one run. The last line is on stderr.
+`usage` is the last segment's (the resume made one model call); the whole
+run's totals are in `trajectory.json`.
 
-## Exit codes
+## How it works
 
-| Code | Terminal state |
+<Steps>
+  <Step title="Load the agent, run the instruction">
+    The run is tagged `headless`, `approval-mode:<mode>` and
+    `budget-mode:<mode>`, plus your `--tag`s, and recorded as entered from the
+    `headless` surface. MCP servers the agent names are connected first.
+  </Step>
+  <Step title="Answer each pause by the mode you chose">
+    When the run pauses for approvals, each one is decided by
+    `--approval-mode` through the same `resolve_approval` a person would use,
+    with the approver `omnicoreagent-cli` and a note naming the mode or rule,
+    and the run is resumed. This repeats up to `--max-approval-rounds` (20)
+    times. When a budget runs out, `--budget-mode deny` denies the top-up
+    through `deny_budget`; the CLI never grants money.
+  </Step>
+  <Step title="One deadline for all of it">
+    `--timeout` covers the whole run, pauses and resumes included. When it
+    passes, the run is stopped and recorded as `timeout`, not `cancelled`.
+  </Step>
+  <Step title="Write the evidence, exit with the state">
+    `result.json` and `trajectory.json` go to `--output-dir`; the answer (or
+    with `--json`, the whole `result.json`) to stdout; one status line to
+    stderr. Reading the evidence never changes the outcome: if the trajectory
+    cannot be read, `evidence_error` says why.
+  </Step>
+</Steps>
+
+### Approval modes
+
+| `--approval-mode` | Each approval is |
 |---|---|
-| 0 | success |
-| 1 | failed or error |
-| 2 | usage or agent file error |
-| 3 | awaiting approval |
-| 4 | awaiting budget |
-| 5 | timeout |
-| 6 | interrupted |
+| `stop` (default) | Left waiting; the command exits 3 |
+| `allow` | Approved |
+| `deny` | Denied; the model is told, and carries on |
+| `scripted` | Decided by the first matching rule in `--approvals-file`, else by its `default` |
 
-## Output
+A rule matches on `tool_name`, `capability`, or both, and has a `decision`
+(`approve` or `deny`) and an optional `note`. The file's `default` is
+`approve`, `deny` (when omitted) or `stop`.
 
-With `--output-dir`, the command writes:
+### Exit codes
 
-- `result.json` (`omnicoreagent.headless_result/v1`): status, exit code, run
-  and session IDs, trace IDs, the answer, termination reason, usage, what is
-  still pending, and every decision the CLI made.
-- `trajectory.json`: the run's durable trajectory across every pause and
-  resume (`get_run_trajectory`).
+| Code | The run |
+|---|---|
+| 0 | succeeded |
+| 1 | failed, errored, was blocked by the guardrail, or ended because its budget was denied |
+| 2 | never started: a usage error or a bad agent file |
+| 3 | is waiting for an approval |
+| 4 | is waiting for a budget |
+| 5 | timed out |
+| 6 | was interrupted |
 
-The answer is printed to stdout (or the whole `result.json` with `--json`); a
-one-line status summary goes to stderr.
+### What it writes
 
-To record an outcome for the run later (`agent.record_outcome(run_id, ...)`,
-say from CI once tests pass), the agent must keep its runs where another
-process can read them: a durable memory store (`sql`, `redis` or `mongodb`) and
-the same workspace directory. With the default in-memory store, the run is gone
-when the command exits. Recording an outcome needs no model key.
+| File | Holds |
+|---|---|
+| `result.json` | `schema` (`omnicoreagent.headless_result/v1`), `status`, `exit_code`, `run_id`, `session_id`, `response`, `termination_reason`, `error`, `trace_ids`, the two modes, `cli_decisions`, `pending` (the approvals or budget request it stopped on), `usage` (the last segment's), `duration_seconds`, `omnicoreagent_version`, `evidence_error` |
+| `trajectory.json` | The whole run across its pauses, as `get_run_trajectory(run_id)` returns it: `segments` (each with its full trajectory), `totals`, `approvals`, `tool_calls`, `usage` |
+
+The traces themselves are also in the agent's telemetry store
+(`./workspace/telemetry/` by default), and the run's record in its memory
+store.
+
+## Read the run afterwards
+
+`trajectory.json` needs no agent to read:
+
+```python
+# read_run.py
+import json
+
+run = json.load(open("out2/trajectory.json"))
+print(run["status"], "| segments:", len(run["segments"]), "| tokens:", run["totals"]["tokens"]["total"],
+      "| cost:", round(run["totals"]["estimated_cost_usd"], 6))
+for approval in run["approvals"]:
+    print("approval:", approval["tool_name"], approval["status"], "by", approval["approver"], "-", approval["note"])
+first = run["segments"][0]["trajectory"]
+print("tags:", first["tags"])
+print("provenance:", {k: v for k, v in first["provenance"].items() if v})
+for segment in run["segments"]:
+    for step in segment["trajectory"]["steps"]:
+        for call in step["tool_calls"]:
+            print(f"step {step['step']}:", call["tool_name"], call["outcome"])
+```
+
+```text
+completed | segments: 2 | tokens: 4993 | cost: 0.002444
+approval: open_pull_request used by omnicoreagent-cli - release PRs are allowed in CI
+tags: ['nightly', 'headless', 'approval-mode:scripted', 'budget-mode:stop']
+provenance: {'source': 'omnicoreagent', 'environment': 'ci', 'external_ids': {'build': '4472'}}
+step 1: list_changes success
+step 2: open_pull_request awaiting_approval
+step 2: open_pull_request success
+```
+
+The approval's status is `used`: approved, and its call made. `--provenance`
+keys the trace knows (`environment`, `trial_id`, `case_id`, `evaluation_id`,
+`deployment_id`, `application_version`, `adapter`, ...) are set directly; any
+other key, like `build`, goes under `external_ids`. What every field means is
+in [Read a run](/docs/how-to-guides/read-a-run).
+
+## Record the outcome after the tests
+
+The run said it opened a pull request; whether the change was any good is
+known when the tests run. A later step records it on the run, with no model
+key needed:
+
+```python
+# record_outcome.py
+import asyncio
+import json
+import sys
+
+from agent import agent
+
+async def main(result_file, passed):
+    run_id = json.load(open(result_file))["run_id"]
+    outcome = await agent.record_outcome(
+        run_id,
+        source="ci",
+        reward=1.0 if passed else 0.0,
+        label="tests_passed" if passed else "tests_failed",
+        detail={"build": "4472"},
+    )
+    print(run_id, outcome["label"], outcome["reward"])
+    await agent.cleanup()
+
+asyncio.run(main(sys.argv[1], sys.argv[2] == "passed"))
+```
+
+```bash
+python record_outcome.py out2/result.json passed
+```
+
+```text
+run_d99e8e420e6b4e87b2d81ee249a5121c tests_passed 1.0
+```
+
+The run is now one training record, both segments in it, with its outcome:
+
+```python
+import asyncio
+from agent import agent
+
+async def main():
+    [record] = await agent.training_records(run_id="run_d99e8e420e6b4e87b2d81ee249a5121c")
+    print("trace_ids:", len(record["trace_ids"]), "| outcomes:", [(o["source"], o["label"]) for o in record["outcomes"]])
+    for step in record["steps"]:
+        print("segment", step["segment"], "step", step["step"], "resumed" if step.get("resumed") else "model turn",
+              [(c["name"], c["outcome"]) for c in step["tool_calls"]])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+trace_ids: 2 | outcomes: [('ci', 'tests_passed')]
+segment 0 step 1 model turn [('list_changes', 'success')]
+segment 0 step 2 model turn [('open_pull_request', 'awaiting_approval')]
+segment 1 step 2 resumed [('open_pull_request', 'success')]
+segment 1 step 3 model turn []
+```
+
+More in [Outcomes and training records](/docs/how-to-guides/outcomes-and-training).
+
+## In a CI job
+
+A GitHub Actions job: run the agent, keep its evidence whatever happened, run
+the tests, record the outcome. The steps share one machine, so the SQLite file
+and the workspace carry from step to step; across jobs or machines, point
+`DATABASE_URL` at a shared database and keep the workspace with it.
+
+```yaml
+jobs:
+  release-notes:
+    runs-on: ubuntu-latest
+    env:
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "omnicoreagent[postgres]"
+
+      - name: Run the agent
+        id: agent
+        run: |
+          set +e
+          omnicoreagent run --agent agent.py \
+            --instruction-file .github/release-notes.md \
+            --approval-mode scripted --approvals-file approvals.json \
+            --budget-mode deny --timeout 900 \
+            --tag ci --provenance environment=ci --provenance build=${{ github.run_id }} \
+            --output-dir out
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-run
+          path: out/
+
+      - name: Tests
+        id: tests
+        run: pytest
+
+      - name: Record the outcome
+        if: always() && steps.agent.outputs.exit_code == '0'
+        run: python record_outcome.py out/result.json ${{ steps.tests.outcome == 'success' && 'passed' || 'failed' }}
+```
+
+`--instruction-file` reads the instruction from a file (or `-` for stdin),
+which keeps a long one out of the workflow. With `--budget-mode deny`, a run
+that runs out of budget ends (exit 1) instead of waiting (exit 4) for a
+top-up nobody will give.
+
+## Options
+
+| Flag | Default | What |
+|---|---|---|
+| `--agent`, `-a` | required | The agent file |
+| `--instruction`, `-i` / `--instruction-file`, `-f` | one is required | The instruction, or a file with it (`-` for stdin) |
+| `--session-id`, `--run-id` | new | Run in this session, with this run ID |
+| `--tag` | | A label on the trace; repeatable |
+| `--provenance KEY=VALUE` | | Provenance on the trace; repeatable |
+| `--approval-mode` | `stop` | `stop`, `allow`, `deny`, `scripted` |
+| `--approvals-file` | | The rules for `scripted` |
+| `--budget-mode` | `stop` | `stop` (exit 4) or `deny` (end the run) |
+| `--timeout` | none | Seconds for the whole run |
+| `--max-approval-rounds` | 20 | Most pause-and-resume cycles |
+| `--output-dir`, `-o` | | Write `result.json` and `trajectory.json` here |
+| `--json` | | Print `result.json` to stdout instead of the answer |
+
+The [command line reference](/docs/reference/cli) is generated from the code.
+
+## When things go wrong
+
+<AccordionGroup>
+  <Accordion title="Exit 5: run exceeded its deadline">
+    ```text
+    status=timeout exit=5 run_id=run_40b361d1d5974bb08421e1b1e083550b error=run exceeded its deadline
+    ```
+
+    `--timeout 2` against a model call that takes several seconds. The run
+    is recorded as `timeout` in its trace and its record, and `result.json`
+    has `"error": "run exceeded its deadline"`. Give it the time a real run
+    needs.
+  </Accordion>
+
+  <Accordion title="Exit 1: the budget was denied">
+    With `--budget-mode deny` and a request budget of one model call:
+
+    ```text
+    This run stopped because the request budget is exhausted: The request budget for model_calls is exhausted: 1 of 1 used, 1 more needed
+    status=error exit=1 run_id=run_40377197700e44f496e0126339dcf553
+    ```
+
+    `termination_reason` is `budget_exhausted`, and `cli_decisions` holds the
+    denial. Raise the budget ([Budgets](/docs/core-concepts/budgets)).
+  </Accordion>
+
+  <Accordion title="Exit 1: LLM_API_KEY not found">
+    ```text
+    status=error exit=1 run_id=run_be9dcaaf35a34657b075e4a50607eb93 error=ValueError: LLM_API_KEY not found in environment variables
+    ```
+
+    The model key is not in the step's environment. In GitHub Actions, set
+    it from a secret, as above.
+  </Accordion>
+
+  <Accordion title="Exit 2: the command did not start">
+    Nothing ran; the message says why:
+
+    ```text
+    Error: Give exactly one of --instruction or --instruction-file
+    Error: The instruction is empty
+    Error: Agent file not found: missing.py
+    Error: --approval-mode scripted needs --approvals-file
+    Error: approval rule 0 needs a decision of approve or deny
+    Error: Invalid value for '--approval-mode': 'maybe' is not one of 'stop', 'allow', 'deny', 'scripted'.
+    ```
+
+    An agent file that raises on import, or defines neither `agent` nor
+    `create_agent()`, is exit 2 as well.
+  </Accordion>
+
+  <Accordion title="LookupError: No run … when recording the outcome">
+    The later step cannot find the run: the agent keeps its records in
+    memory (the default), or the step points at a different store. Give the
+    agent a durable store, as `agent.py` does, and run both steps against it.
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Read a run" icon="magnifying-glass" href="/docs/how-to-guides/read-a-run">
+    Every field of the trajectory the command writes.
+  </Card>
+  <Card title="Outcomes and training records" icon="graduation-cap" href="/docs/how-to-guides/outcomes-and-training">
+    What the outcome is for, and how to export runs.
+  </Card>
+  <Card title="Observability" icon="chart-line" href="/docs/how-to-guides/observability">
+    Traces, stores and exporters.
+  </Card>
+  <Card title="Harbor and Terminal-Bench" icon="flask" href="/docs/how-to-guides/harbor">
+    The same headless run, on benchmark tasks.
+  </Card>
+</CardGroup>

@@ -1,0 +1,432 @@
+---
+title: "Outcomes and training records"
+description: "Attach what a run turned out to be worth, whenever it is known, and read finished runs back as records an evaluator or a trainer can use"
+icon: "graduation-cap"
+---
+
+# Outcomes and training records
+
+A run ends with an answer, but whether the answer was any good is known later:
+the customer accepts it the next day, the pull request is merged, the tests
+pass in CI. By the end of this page you will have a run, an outcome recorded
+for it by a different process, and the run exported as one JSONL line an
+evaluator or a fine-tuning job can read.
+
+<Info>
+Every output on this page is what the code printed when it was run. The
+model's wording, the ids and the token counts will differ on your run.
+</Info>
+
+## A run, an outcome, a record
+
+Three processes share one agent definition. The run record lives in SQLite so
+the other two can find it, and the traces live in the default place,
+`./workspace/telemetry/`.
+
+<Steps>
+  <Step title="One definition, imported by every process">
+    ```python
+    # agent_def.py
+    import os
+
+    os.environ.setdefault("DATABASE_URL", "sqlite:///./runs.db")
+
+    from omnicoreagent import MemoryRouter, OmniCoreAgent, ToolRegistry
+
+    tools = ToolRegistry()
+
+    @tools.register_tool("get_order", idempotent=True)
+    def get_order(order_id: str) -> dict:
+        """Look up an order's status."""
+        return {"order_id": order_id, "status": "shipped", "carrier": "DHL", "eta": "2026-10-02"}
+
+    def build_agent() -> OmniCoreAgent:
+        return OmniCoreAgent(
+            name="support",
+            system_instruction="You answer order questions. Answer in plain text, in one sentence.",
+            model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+            local_tools=tools,
+            memory_router=MemoryRouter("sql"),
+        )
+    ```
+
+    SQLite needs `pip install "omnicoreagent[postgres]"` (it brings SQLAlchemy).
+  </Step>
+  <Step title="The run">
+    ```python
+    # answer.py
+    import asyncio
+    from agent_def import build_agent
+
+    async def main():
+        agent = build_agent()
+        result = await agent.run("Where is my order 1042?", session_id="customer-7")
+        print(result["status"], "|", result["response"])
+        print("run_id:", result["run_id"])
+        await agent.cleanup()
+
+    asyncio.run(main())
+    ```
+
+    ```text
+    success | Your order 1042 has shipped via DHL and is expected to arrive on 2026-10-02.
+    run_id: run_9b7577546c1942f2aff919e196f547f8
+    ```
+  </Step>
+  <Step title="The next day, another process records the outcome">
+    ```python
+    # accepted.py
+    import asyncio
+    import sys
+    from agent_def import build_agent
+
+    async def main(run_id):
+        agent = build_agent()
+        outcome = await agent.record_outcome(
+            run_id,
+            source="support-desk",
+            reward=1.0,
+            label="accepted",
+            detail={"ticket": "T-5531", "csat": 5},
+        )
+        print(outcome)
+        run = await agent.get_run(run_id)
+        print("on the record:", [(o["label"], o["reward"]) for o in run["outcomes"]])
+        trajectory = await agent.get_trajectory(run_id=run_id)
+        print("in the trajectory:", [(o["source"], o["label"]) for o in trajectory["outcomes"]])
+        await agent.cleanup()
+
+    asyncio.run(main(sys.argv[1]))
+    ```
+
+    ```bash
+    python accepted.py run_9b7577546c1942f2aff919e196f547f8
+    ```
+
+    ```text
+    {'outcome_id': 'outcome_1a03fbe8e18c4d448a17d72505ac984a', 'reward': 1.0, 'label': 'accepted', 'source': 'support-desk', 'detail': {'ticket': 'T-5531', 'csat': 5}, 'recorded_at': '2026-09-28T05:28:54.762685+00:00'}
+    on the record: [('accepted', 1.0)]
+    in the trajectory: [('support-desk', 'accepted')]
+    ```
+
+    This process ran with no model key in its environment: recording an
+    outcome, and reading runs back, never calls the model.
+  </Step>
+  <Step title="Export the runs worth learning from">
+    The same question was asked once more in the session, and nobody rated
+    that answer. Export only the runs with a reward:
+
+    ```python
+    # export.py
+    import asyncio
+    import json
+    from pathlib import Path
+    from agent_def import build_agent
+
+    async def main():
+        agent = build_agent()
+        records = await agent.training_records(session_id="customer-7")
+        rated = [r for r in records if any(o["reward"] is not None for o in r["outcomes"])]
+        print(f"{len(records)} finished runs, {len(rated)} with a reward")
+        with Path("support.jsonl").open("w") as out:
+            for record in rated:
+                out.write(json.dumps(record) + "\n")
+
+        record = rated[0]
+        print(sorted(record))
+        print("status:", record["status"], "| policy:", record["policy_version"])
+        print("request:", record["request"])
+        print("outcomes:", [(o["source"], o["reward"], o["label"]) for o in record["outcomes"]])
+        print("totals:", record["totals"])
+        for step in record["steps"]:
+            roles = [m["role"] for m in step["messages"]]
+            print(f"step {step['step']}: sent {roles} and {len(step['tools'])} tools; "
+                  f"finish {step['finish_reason']}, tokens {step['tokens']['total']}")
+            for call in step["tool_calls"]:
+                print("   tool:", call["name"], call["arguments"], call["outcome"])
+        print("answer:", record["steps"][-1]["response"]["content"])
+        await agent.cleanup()
+
+    asyncio.run(main())
+    ```
+
+    ```text
+    2 finished runs, 1 with a reward
+    ['agent', 'ended_at', 'evidence_status', 'final_answer', 'outcomes', 'policy_version', 'request', 'run_id', 'session_id', 'started_at', 'status', 'steps', 'totals', 'trace_id', 'trace_ids']
+    status: completed | policy: {'model': 'gpt-5.4-mini'}
+    request: Where is my order 1042?
+    outcomes: [('support-desk', 1.0, 'accepted')]
+    totals: {'tokens': {'input': 3041, 'output': 47, 'total': 3088, 'cached_input': 1024, 'reasoning': 0}, 'estimated_cost_usd': 0.00180105, 'duration_ms': 12761.352}
+    step 1: sent ['system', 'user'] and 15 tools; finish tool_calls, tokens 1492
+       tool: get_order {"order_id":"1042"} success
+    step 2: sent ['system', 'user', 'assistant', 'tool'] and 15 tools; finish stop, tokens 1596
+    answer: Your order 1042 has shipped via DHL and is expected to arrive on 2026-10-02.
+    ```
+
+    `support.jsonl` has one line, 23 KB: every message the model was sent at
+    both steps, in full, with the 15 tool definitions (`get_order` and the
+    built-in workspace tools).
+  </Step>
+</Steps>
+
+## How it works
+
+<Steps>
+  <Step title="An outcome goes on the record and into the trace">
+    `record_outcome` appends to the run's record in the memory store
+    (`get_run(run_id)["outcomes"]`) and adds a `run_outcome` event to the
+    run's latest trace, so the trajectory lists it under `outcomes`. It needs
+    the run's record: the memory store must be one both processes reach
+    (SQLite, PostgreSQL, Redis, MongoDB), and the traces must be in the same
+    workspace for the trace half. A run may gather any number of outcomes, from
+    different sources; none replaces another.
+  </Step>
+  <Step title="A training record is one finished run">
+    `training_records` reads traces from the telemetry store, keeps the runs
+    that finished (`completed`, `failed`, `blocked`, `cancelled`), and builds
+    one record per run. A run that paused for an approval or a budget and was
+    resumed is one record: `trace_ids` lists its segments, and each step says
+    which `segment` it came from. A run still running or waiting is left out
+    until it finishes.
+  </Step>
+  <Step title="Built from what the trace recorded">
+    The record holds only what the trace holds. A run recorded without model
+    prompts (the `default` capture preset) has nothing to learn from, and is
+    left out.
+  </Step>
+</Steps>
+
+### What a record holds
+
+| Field | What |
+|---|---|
+| `run_id`, `session_id`, `agent` | Which run |
+| `trace_id`, `trace_ids` | Its last trace, and every segment's, in order |
+| `status` | How its last segment ended: `completed`, `failed`, ... |
+| `started_at`, `ended_at` | From its first segment's start to its last's end |
+| `request` | The instruction the run was given |
+| `policy_version` | The model the provider served, with its fingerprint, version and service tier when the provider reports them: how stale a run is, for a trainer |
+| `outcomes` | Every outcome recorded for it (from the run record; from the trace when the record is gone) |
+| `totals` | `tokens`, `estimated_cost_usd`, `duration_ms`, summed over segments |
+| `evidence_status` | Whether the trace is complete |
+| `steps` | One entry per model turn, below |
+| `final_answer` | Meant to hold the answer; in this release it is `null`. Read the last step's `response["content"]`, as above |
+
+Each step:
+
+| Field | What |
+|---|---|
+| `step`, `segment` | The step number, and which trace segment it came from |
+| `messages` | Every message the model was sent at this step, as sent |
+| `tools` | The tool definitions it was offered |
+| `response` | What it produced: `content`, `tool_calls`, `finish_reason`, `refusal`, `usage` |
+| `finish_reason`, `tokens` | Why it stopped; its tokens in and out |
+| `token_details` | The tokens it chose and their probabilities, when recorded (below); otherwise `null` |
+| `tool_calls` | Each call the step made: `name`, `arguments` (as the model wrote them), `outcome`, `observation` (what the tool answered), `error` |
+
+A step that only ran calls a person approved, on resume, has
+`"resumed": True`, no messages, and those calls in `tool_calls`.
+
+### An outcome
+
+| Argument | What |
+|---|---|
+| `source` | Who reports it: `github`, `ci`, `reviewer`, an evaluator's name. Required |
+| `reward` | The number a trainer or an evaluator uses. Optional, stored as a float |
+| `label` | What it is called: `merged`, `accepted`, `tests_passed`. Optional |
+| `detail` | Anything else worth keeping, as a dict. Optional |
+
+Each outcome gets an `outcome_id` and `recorded_at`. Over HTTP,
+[OmniServe](/docs/how-to-guides/omniserve) takes the same body at
+`POST /runs/{run_id}/outcome`:
+
+```bash
+curl -s -X POST localhost:8000/runs/$RUN_ID/outcome -H 'content-type: application/json' \
+  -d '{"source": "github", "reward": 1.0, "label": "merged", "detail": {"pull_request": 252}}'
+```
+
+## Choosing and exporting records
+
+`training_records` takes one filter:
+
+| Argument | Reads |
+|---|---|
+| `session_id=` | Every finished run in a session |
+| `run_id=` | One run (every segment of it) |
+| `trace_ids=[...]` | The runs these traces belong to |
+| `limit=` | At most this many records |
+
+With none, it reads every run in the telemetry store. Anything else — by
+reward, by label, by date, by model — is a Python filter over the records, as
+`rated` was above. Each record is plain JSON: `json.dumps(record)` per line is
+a JSONL file. The messages are already in the chat format a fine-tuning job
+reads; which records and which fields to keep for a given trainer is yours to
+choose. To score a batch, an evaluator reads `request`, the last step's
+`response`, and `outcomes`.
+
+## Token details
+
+A trainer that reuses a run (rather than only imitating it) needs the tokens
+the model chose and their probabilities. Ask the provider for them, and
+record them:
+
+```python
+from omnicoreagent import OmniCoreAgent
+
+agent = OmniCoreAgent(
+    name="support",
+    system_instruction="You answer order questions.",
+    model_config={"provider": "openai", "model": "gpt-5.4-mini", "logprobs": True, "top_logprobs": 2},
+    telemetry_config={"record_token_details": True},
+)
+```
+
+They are large, so they are off by default. Whether they come back is the
+provider's decision. With this model, the provider returned them for a plain
+chat call made directly, but not for the agent's calls (the model call's
+`request_settings` show both settings were sent), so `token_details` was
+`null`. A hosted reasoning model often returns none. A provider that refuses the setting outright names
+it, and the call is retried without it (the model call's `retries` in the
+trajectory say so).
+
+## What privacy settings change
+
+The record is built from the trace, so it holds what the trace was allowed to
+keep ([privacy](/docs/core-concepts/privacy)). The same run through two
+agents, one with `capture: "default"`:
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+
+tools = ToolRegistry()
+
+@tools.register_tool("get_account", idempotent=True)
+def get_account(account_id: str) -> dict:
+    """Look up a customer account."""
+    return {"account_id": account_id, "plan": "pro", "api_key": "sk-live-1234"}
+
+def build(name, telemetry_config):
+    return OmniCoreAgent(
+        name=name,
+        system_instruction="Answer in plain text, in one sentence.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        local_tools=tools,
+        telemetry_config={"storage": "memory", **telemetry_config},
+    )
+
+async def main():
+    private = build("private", {"capture": "default"})
+    result = await private.run("Which plan is account A-9 on?")
+    print("capture=default:", len(await private.training_records(run_id=result["run_id"])), "records")
+    await private.cleanup()
+
+    full = build("full", {})
+    result = await full.run("Which plan is account A-9 on?")
+    [record] = await full.training_records(run_id=result["run_id"])
+    print("capture=full:", len(record["steps"]), "steps")
+    print("tool result:", record["steps"][0]["tool_calls"][0]["observation"])
+    await full.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+capture=default: 0 records
+capture=full: 2 steps
+tool result: {"tool_name": "get_account", "args": {"account_id": "A-9"}, "status": "success", "data": {"account_id": "A-9", "plan": "pro", "api_key": "[REDACTED]"}, "message": null}
+```
+
+| Setting | In the training records |
+|---|---|
+| `capture: "full"` (the default) | Every run that finished, with its prompts and responses |
+| `capture: "default"` | None: the model's inputs were not recorded |
+| `record_model_prompts: False` | None, the same way |
+| `record_tool_results: False` | Records, with each tool call's `observation` `null`. The result is still in the next step's `messages` (the tool message the model was sent), because model prompts are recorded |
+| `redact_keys` | Records, with `[REDACTED]` where those keys were, at any depth, including inside the JSON a tool message carries |
+| `max_payload_bytes` | A payload over it is a truncated marker, unless `offload_large_payloads` keeps it whole |
+
+A redacted value is redacted in the record too: the `api_key` above is
+`[REDACTED]` in the tool call's `observation` and in the tool message of step
+2's `messages`. A trainer never sees it. Every
+setting is in the [telemetry reference](/docs/reference/telemetry-config).
+
+## How long you have
+
+An outcome can arrive only while the run's record exists, and a record can be
+built only while the run's traces exist:
+
+| Evidence | Kept by default | Setting |
+|---|---|---|
+| Run record (needed by `record_outcome`) | 30 days | `agent_config["run_retention_days"]` |
+| Traces (needed by `training_records`) | 7 days | `telemetry_config["retention_days"]` |
+
+If outcomes arrive weeks later, or you export monthly, raise both
+([how long a run's evidence is kept](/docs/core-concepts/durable-runs#how-long-a-runs-evidence-is-kept)).
+Once the record is gone but the traces remain, a training record still carries
+the outcomes that were recorded, read from the trace.
+
+## Options
+
+| You want | Use |
+|---|---|
+| Attach an outcome | `await agent.record_outcome(run_id, source=, reward=, label=, detail=)` |
+| Over HTTP | `POST /runs/{run_id}/outcome` |
+| See a run's outcomes | `get_run(run_id)["outcomes"]`, or the trajectory's `outcomes` |
+| Finished runs as records | `await agent.training_records(session_id= / run_id= / trace_ids=, limit=)` |
+| Keep chosen tokens and probabilities | `model_config` `logprobs` (and `top_logprobs`), with `telemetry_config` `record_token_details` |
+
+The methods are in the [OmniCoreAgent reference](/docs/reference/omnicoreagent).
+
+## When things go wrong
+
+<AccordionGroup>
+  <Accordion title="LookupError: No run …">
+    ```text
+    LookupError: No run run_pruned_long_ago
+    ```
+
+    The memory store has no record of that run. Either it was pruned
+    (`run_retention_days`), or the process that ran it kept records in
+    memory, the default, and they went with it. Give every process the same
+    durable store, as `agent_def.py` does. Over HTTP it is a 404.
+  </Accordion>
+
+  <Accordion title="ValueError: record_outcome needs a source">
+    ```text
+    ValueError: record_outcome needs a source: who reports this outcome
+    ```
+
+    `source` is required and must not be blank. Over HTTP it is a 422.
+  </Accordion>
+
+  <Accordion title="training_records returns []">
+    One of: the runs have not finished (a run waiting for an approval is left
+    out until it ends); the agent records with `capture: "default"`; the
+    traces are past `retention_days`; or this process reads a different
+    telemetry store than the one that ran them (another workspace, or
+    `storage: "memory"` in another process).
+  </Accordion>
+
+  <Accordion title="token_details is null">
+    Either `record_token_details` is off, or the provider returned no
+    `logprobs` for that call (above).
+  </Accordion>
+</AccordionGroup>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Read a run" icon="magnifying-glass" href="/docs/how-to-guides/read-a-run">
+    The trajectory a training record is built from, step by step.
+  </Card>
+  <Card title="Observability" icon="chart-line" href="/docs/how-to-guides/observability">
+    Traces, stores and exporters.
+  </Card>
+  <Card title="Headless runs in CI" icon="terminal" href="/docs/how-to-guides/headless-runs">
+    Run the agent in a CI job, then record whether the tests passed.
+  </Card>
+  <Card title="Harbor and Terminal-Bench" icon="flask" href="/docs/how-to-guides/harbor">
+    Runs on benchmark tasks, each with a verifier's reward.
+  </Card>
+</CardGroup>
