@@ -842,11 +842,15 @@ store for runs and readiness checks are on
   </Accordion>
 
   <Accordion title="504 Request timed out">
-    A `/run/sync` whose tool took 30 seconds, under a 20-second timeout:
+    A `/run/sync` under a 1-second timeout, with a model slower than that:
 
     ```text
-    {"error":"GatewayTimeout","message":"Request timed out","detail":"Request timed out after 20 seconds"}
+    {"detail":{"message":"Request timed out after 1 seconds","run_id":"run_bb48117c442e48c0b63efaa7beee4b4a","session_id":"omni_core_agent_slow_ceb1792e","request_timeout_seconds":1}}
     ```
+
+    The run is stopped and its record says `timeout`
+    (`GET /runs/{run_id}`); the `run_id` finds its trajectory. `POST
+    /runs/{run_id}/resume` answers a timeout the same way.
 
     A background run waited on with `"wait": true`:
 
@@ -869,9 +873,10 @@ store for runs and readiness checks are on
       Value error, OMNICOREAGENT_SERVE_WORKERS must be 1 for direct OmniServe. Run multiple OmniServe processes behind a process manager for horizontal scaling. [type=value_error, ...]
     ```
 
-    A Redis or MongoDB task store without its address stops startup with
-    `ValueError: Redis background task store requires OMNICOREAGENT_BACKGROUND_TASK_STORE_URL`
-    (`..._URI` for MongoDB).
+    A Redis or MongoDB task store without its address is refused the same
+    way: `Error: Invalid OmniServe config: Redis background task store
+    requires OMNICOREAGENT_BACKGROUND_TASK_STORE_URL` (`..._URI` for
+    MongoDB).
   </Accordion>
 
   <Accordion title="Agent file must define an 'agent' variable or 'create_agent()' function">

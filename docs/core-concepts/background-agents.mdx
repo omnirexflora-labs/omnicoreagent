@@ -284,12 +284,14 @@ timeout | attempts: 2 | error: Run exceeded its 3 second deadline
 | `max_delay_seconds` | `300` | the longest delay |
 | `retry_on` | `["exception", "timeout"]` | which failures are retried |
 
-<Warning>
-Without `timeout_seconds`, `run_now(wait=True)` on a manager that is not
-started returns the run `queued` as soon as a retry is scheduled for later,
-and nothing runs that retry. Pass `timeout_seconds`, or `start()` the manager,
-when a task retries with a delay.
-</Warning>
+<Note>
+`run_now(wait=True)` returns when the run ends, at `timeout_seconds`, or when
+an attempt failed and its retry is scheduled for later: the run comes back
+`queued`, with its `queued_at`, rather than holding you through the whole
+backoff. A started manager runs the retry when it is due; on a manager that
+is not started, nothing does, so `start()` it when a task retries with a
+delay.
+</Note>
 
 ## A run that waits for a person
 

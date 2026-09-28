@@ -143,8 +143,8 @@ disk:
 `workspace/telemetry/` files.
 
 <Note>
-`list_runs` returns the records as stored; `get_run` adds each approval's
-`arguments`, the call as the model made it. Read the approvals from `get_run`.
+`list_runs` and `get_run` both give each approval's `arguments`: the call as
+the model made it, for the person deciding.
 </Note>
 
 ## Which store holds what
@@ -334,15 +334,15 @@ short), and neither is background run history. Details:
 
 | You opened | Close it with | Closes |
 |---|---|---|
-| `MemoryRouter(...)` | `await router.close()` | Redis and MongoDB connections |
+| `MemoryRouter(...)` | `await router.close()` | MongoDB, Redis and SQL connections (a SQL pool is shared per database and closes with the last store using it) |
 | `OmniCoreAgent(...)` | `await agent.cleanup()` | MCP connections and sub-agents; not the memory router you passed |
 | `BackgroundAgentManager(...)` | `await manager.shutdown()` | The worker loop, the runs it is executing (their attempts are recorded), the task store |
 
 Whoever creates a router owns it: `agent.cleanup()` leaves it open, because
 other agents may share it. Build one per process and close it at shutdown, or
-close it in a `finally`, as `ask.py` does. For a `sql` router, `close()`
-currently does nothing: the connection pool is shared per database URL and
-lasts as long as the process.
+close it in a `finally`, as `ask.py` does. Routers that name the same SQL
+database share one connection pool: closing one releases its share, and the
+pool closes with the last.
 
 ## Options
 
@@ -366,9 +366,9 @@ Every agent key: [Agent settings](/docs/reference/agent-config). The manager:
   <Accordion title="Process two cannot find the run: LookupError: No run …">
     The two processes do not share a memory store. Most often the store is
     in memory, sometimes without you asking for it: `MemoryRouter("sql")`
-    with no `DATABASE_URL` set falls back to an in-memory store, and says so
-    only in a warning on the `omnicoreagent` logger. Print the router to
-    check:
+    with no `DATABASE_URL` set falls back to an in-memory store, with a
+    `RuntimeWarning` (`SQL memory selected but DATABASE_URL is not set; using
+    in_memory (nothing survives a restart)`). Print the router to check:
 
     ```text
     MemoryRouter(type=sql, store=InMemoryStore)
