@@ -66,3 +66,20 @@ async def test_by_default_the_model_sees_the_real_text(tmp_path, monkeypatch):
     sent = agent.llm_connection._completion_params(MESSAGES)["messages"]
 
     assert sent[0]["content"] == "Email jane@example.com about order 42."
+
+
+@pytest.mark.asyncio
+async def test_the_run_header_says_which_boundaries_are_redacted(tmp_path, monkeypatch):
+    # The trace is redacted whether or not the model was, so the stranger
+    # test could not tell from a run whether redact_model_io was on: only a
+    # fingerprint differed. The header says it in words.
+    from test_telemetry_tool_record import ScriptedModel
+
+    agent = await _agent(tmp_path, monkeypatch, redact_model_io=True)
+    agent.llm_connection = ScriptedModel()
+    result = await agent.run("hello")
+    header = (await agent.get_trajectory(result["trace_id"]))["harness"]
+
+    assert "model_io" in header["privacy"]["redacted"]
+    assert "telemetry" in header["privacy"]["redacted"]
+    assert "email" in header["privacy"]["categories"]

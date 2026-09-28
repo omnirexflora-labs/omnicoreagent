@@ -13,6 +13,13 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- A person's denial, and an approval nobody decided in time, are decisions
+  in the evidence: a `deny` with `denied_by` (the person, or `system`) and
+  the reason `denied` or `expired_policy`, like an approval's `allow` with
+  `approved_by`.
+- A resumed run's totals count a step once, not once per segment.
+- The run header says which boundaries redact personal data
+  (`harness.privacy`), since the trace is redacted either way.
 - `privacy_config["redact_model_io"]` now keeps personal data from the model
   provider. It was accepted but never applied.
 - A call that crosses a `model_tokens` budget is recorded in full, and the

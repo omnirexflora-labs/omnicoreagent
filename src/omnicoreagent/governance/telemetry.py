@@ -72,6 +72,7 @@ async def emit_policy_decision(
         "approval_id": (decision.metadata or {}).get("decided_approval_id")
         or decision.approval_id,
         "approved_by": (decision.metadata or {}).get("approved_by"),
+        "denied_by": (decision.metadata or {}).get("denied_by"),
     }
     if request is not None:
         metadata.update(_request_correlation(request))

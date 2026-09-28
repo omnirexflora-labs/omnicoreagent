@@ -128,6 +128,68 @@ optional `timeout` in seconds: 60 by default, at most the agent's
 out comes back to the model as an error, with its exit code, `stdout` and
 `stderr`.
 
+## With your own strict policy
+
+A `strict` policy allows nothing it does not name, the sandbox included. These
+three rules let the agent use `execute` and run commands only inside the
+sandbox:
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent
+
+policy = {
+    "name": "strict-with-sandbox",
+    "mode": "strict",
+    "rules": {
+        "allow": [
+            {"rule_id": "use_execute", "capability": "sandbox.execute"},
+            {"rule_id": "sandbox_setup", "capability": "sandbox.*"},
+            {"rule_id": "commands_in_the_sandbox", "capability": "process.exec",
+             "conditions": {"execution_surface": "sandbox"}},
+        ],
+    },
+}
+
+async def main():
+    agent = OmniCoreAgent(
+        name="runner",
+        system_instruction="Run the command the user asks for with execute. Reply in plain text.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        agent_config={"governance_config": {
+            "enabled": True,
+            "policy": policy,
+            "sandbox_config": {"provider": "docker"},
+        }},
+    )
+    result = await agent.run('Run: python -c "print(6*7)" and tell me the output.')
+    print(result["status"], "|", result["response"])
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    for step in trajectory["steps"]:
+        for call in step["tool_calls"]:
+            for decision in call["governance"]:
+                print(call["tool_name"], decision["capability"], decision["effect"], decision["matched_rule_ids"])
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+success | 42
+execute sandbox.execute allow ['use_execute', 'sandbox_setup']
+execute process.exec allow ['commands_in_the_sandbox']
+execute process.exec allow ['commands_in_the_sandbox']
+```
+
+The two `process.exec` decisions are the model's command and the runtime's
+own: after a command, the runtime lists what changed in the sandbox to copy
+it back to the workspace, and that listing is a command too, decided by the
+same rules. Leave out `sandbox.*` and the sandbox cannot start; leave out the
+`process.exec` rule and every command is refused. `sandbox.network.configure`
+is part of `sandbox.*` here: to keep the network behind a person, add an
+`ask` rule for it, as the development profiles do ([Policy
+reference](/docs/reference/policy)).
+
 ## Files between the workspace and the sandbox
 
 What is copied, and what is not:

@@ -116,7 +116,7 @@ class RunApprovalResolver:
                     resolved_by="system",
                     reason=f"Approval expired at {recorded.get('expires_at')} without a decision",
                     resolved_at=now,
-                    metadata={"recorded_approval_id": recorded["approval_id"]},
+                    metadata={"recorded_approval_id": recorded["approval_id"], "expired": True},
                 )
             if recorded["status"] == "pending":
                 return None  # already waiting for a person

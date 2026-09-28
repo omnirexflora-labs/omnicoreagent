@@ -364,7 +364,23 @@ class GovernanceEngine:
                 },
             )
         if not result.approved:
+            # The answer is a decision, recorded like an approval: a deny by
+            # the person, or by the system when nobody decided in time.
+            expired = bool((result.metadata or {}).get("expired"))
+            decision.effect = PolicyEffect.DENY
+            decision.reason_code = ReasonCode.EXPIRED_POLICY if expired else ReasonCode.DENIED
+            decision.reason = result.reason or decision.reason
             decision.approval_id = approval.approval_id
+            decision.metadata["denied_by"] = result.resolved_by
+            decision.metadata["decided_approval_id"] = (
+                (result.metadata or {}).get("recorded_approval_id") or result.approval_id
+            )
+            await emit_policy_decision(
+                self.telemetry_recorder,
+                decision,
+                request=request,
+                strict=_decision_requires_strict_audit(decision),
+            )
             raise ApprovalRequiredError(
                 result.reason if result is not None and result.reason else decision.reason,
                 metadata={

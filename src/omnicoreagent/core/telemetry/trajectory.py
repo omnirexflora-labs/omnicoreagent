@@ -393,6 +393,7 @@ def _tool_call(
                 "matched_rule_ids": event.metadata.get("matched_rule_ids") or [],
                 "approval_id": event.metadata.get("approval_id"),
                 "approved_by": event.metadata.get("approved_by"),
+                "denied_by": event.metadata.get("denied_by"),
             }
             for event in events
             if event.event_type.startswith("policy_decision_")
