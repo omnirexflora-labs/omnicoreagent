@@ -188,3 +188,14 @@ def test_the_tagline_is_the_same_everywhere_it_is_shown():
     assert f"description: '{TAGLINE}'" in index
     assert config["description"] == TAGLINE
 
+
+def test_the_navigation_leads_with_what_is_different():
+    # Governance, durable runs and the evidence come before the parts every
+    # framework has; the reorder moves groups, never pages between groups.
+    _, groups = _nav_groups()
+    assert [g["group"] for g in groups] == [
+        "Get Started", "Make It Safe", "Run It", "See and Improve", "Build", "How It Works",
+        "Reference", "HTTP API (OmniServe)", "Releases",
+    ]
+    build = next(g for g in groups if g["group"] == "Build")
+    assert "docs/core-concepts/memory" in build["pages"]

@@ -46,26 +46,6 @@
                         ]
                     },
                     {
-                        "group": "Build",
-                        "pages": [
-                            "docs/core-concepts/overview",
-                            "docs/how-to-guides/basic-usage",
-                            "docs/core-concepts/local-tools",
-                            "docs/how-to-guides/advanced-tools",
-                            "docs/core-concepts/mcp",
-                            "docs/core-concepts/skills",
-                            "docs/core-concepts/code-mode",
-                            "docs/core-concepts/agents-md",
-                            "docs/core-concepts/memory",
-                            "docs/core-concepts/workspace-files",
-                            "docs/core-concepts/context-engineering",
-                            "docs/core-concepts/sub-agents",
-                            "docs/core-concepts/events",
-                            "docs/how-to-guides/models",
-                            "docs/how-to-guides/configuration"
-                        ]
-                    },
-                    {
                         "group": "Make It Safe",
                         "pages": [
                             "docs/core-concepts/security-model",
@@ -96,6 +76,26 @@
                             "docs/how-to-guides/outcomes-and-training",
                             "docs/how-to-guides/headless-runs",
                             "docs/how-to-guides/harbor"
+                        ]
+                    },
+                    {
+                        "group": "Build",
+                        "pages": [
+                            "docs/core-concepts/overview",
+                            "docs/how-to-guides/basic-usage",
+                            "docs/core-concepts/local-tools",
+                            "docs/how-to-guides/advanced-tools",
+                            "docs/core-concepts/mcp",
+                            "docs/core-concepts/skills",
+                            "docs/core-concepts/code-mode",
+                            "docs/core-concepts/agents-md",
+                            "docs/core-concepts/memory",
+                            "docs/core-concepts/workspace-files",
+                            "docs/core-concepts/context-engineering",
+                            "docs/core-concepts/sub-agents",
+                            "docs/core-concepts/events",
+                            "docs/how-to-guides/models",
+                            "docs/how-to-guides/configuration"
                         ]
                     },
                     {
