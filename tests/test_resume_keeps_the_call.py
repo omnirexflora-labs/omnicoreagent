@@ -73,6 +73,10 @@ async def test_a_call_waiting_for_a_person_is_not_recorded_as_denied(tmp_path, m
     (call,) = [c for s in trajectory["steps"] for c in s["tool_calls"]]
 
     assert call["outcome"] == "awaiting_approval", call
-    assert "denied" not in json.dumps(call).lower(), call
+    # Nothing calls it denied: no deny decision (``denied_by`` is empty), and
+    # nothing else in the record says so.
+    assert all(g["effect"] != "deny" and not g["denied_by"] for g in call["governance"]), call
+    rest = {key: value for key, value in call.items() if key != "governance"}
+    assert "denied" not in json.dumps(rest).lower(), call
     assert trajectory["totals"]["tool_calls"]["by_outcome"]["awaiting_approval"] == 1
     assert trajectory["totals"]["tool_calls"]["by_outcome"]["denied"] == 0

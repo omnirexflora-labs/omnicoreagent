@@ -246,7 +246,7 @@ store in `agent_def.py` changes:
 
 | Store | In `agent_def.py` | Install |
 |---|---|---|
-| SQLite (one machine) | `DATABASE_URL=sqlite:///./runs.db`, `MemoryRouter("sql")` | core |
+| SQLite (one machine) | `DATABASE_URL=sqlite:///./runs.db`, `MemoryRouter("sql")` | `omnicoreagent[postgres]` (it brings SQLAlchemy, which every `sql` store needs) |
 | PostgreSQL | `DATABASE_URL=postgresql://user:pass@host/db`, `MemoryRouter("sql")` | `omnicoreagent[postgres]` |
 | Redis | `REDIS_URL=redis://host:6379/0`, `MemoryRouter("redis")` | `omnicoreagent[redis]` |
 | MongoDB | `MONGODB_URI=mongodb://host:27017`, `MemoryRouter("mongodb")` | `omnicoreagent[mongodb]` |
@@ -443,8 +443,8 @@ The decision returns the approval (`status` `denied`, `approver`, `note`,
 
 | Where | What |
 |---|---|
-| Run record: `get_run(run_id)`, `GET /runs/{run_id}` | each approval's `status`, `approver`, `note`, `decided_at`, `edited_arguments` |
-| Trajectory: the call's `governance` | `reason_code` `approved`, `approved_by`, `approval_id` |
+| Run record: `get_run(run_id)`, `GET /runs/{run_id}` | each approval's `status` (`pending`, `approved`, `denied`, `expired`, then `used` once applied), `decision` (`approve` or `deny`), `approver`, `note`, `decided_at`, `edited_arguments` |
+| Trajectory: the call's `governance` | the `ask`, then the decision: `allow` with `reason_code` `approved` and `approved_by`, or `deny` with `reason_code` `denied` and `denied_by` (the person), or `deny` with `expired_policy` and `denied_by` `system` when nobody decided in time; each with `approval_id` |
 
 Each pause and resume is its own trace segment; `get_run_trajectory(run_id)`
 joins them ([Durable runs](/docs/core-concepts/durable-runs)).

@@ -542,6 +542,9 @@ class OmniCoreAgent:
             },
             "mcp_servers": self._mcp_server_status(),
             "guardrail": {"mode": metadata.get("guardrail_mode")},
+            # In words, not only a fingerprint: the trace is redacted whether
+            # or not the model was, so a reader cannot tell from it.
+            "privacy": _privacy_summary(self.privacy_filter.config),
             "security_warnings": self._security_warnings(),
             "governance": {
                 "enabled": engine is not None,
@@ -2424,6 +2427,16 @@ class OmniCoreAgent:
                 if outcome is not None:
                     by_outcome[outcome] = by_outcome.get(outcome, 0) + 1
             totals["tool_calls"] = {"total": len(outcomes), "by_outcome": by_outcome}
+            # A step that paused and the same step resumed share a number:
+            # count each step once, not once per segment.
+            if "steps" in totals:
+                totals["steps"] = len(
+                    {
+                        step.get("step")
+                        for segment in kept
+                        for step in segment["trajectory"].get("steps") or []
+                    }
+                )
             totals["including_subagents"] = including
         return {
             "run_id": run_id,
@@ -2671,6 +2684,18 @@ def _not_resumable(record: dict[str, Any], run_id: str) -> Optional[str]:
     from omnicoreagent.core.runs import not_resumable
 
     return not_resumable(record, run_id)
+
+
+def _privacy_summary(config: Any) -> Dict[str, Any]:
+    """Which boundaries redact personal data, and which kinds."""
+    boundaries = ("telemetry", "memory", "workspace", "stream", "public", "model_io")
+    return {
+        "enabled": bool(config.enabled),
+        "redacted": [
+            name for name in boundaries if config.enabled and getattr(config, f"redact_{name}")
+        ],
+        "categories": list(config.categories),
+    }
 
 
 def _add_totals(total: Any, segment: Any) -> Any:

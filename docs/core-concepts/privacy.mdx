@@ -157,6 +157,11 @@ redact_model_io False -> "jane@example.com"
 redact_model_io True -> [REDACTED_EMAIL]
 ```
 
+The trace is redacted either way, so it cannot show what the provider
+received. The run's header says which boundaries were redacted:
+`trajectory["harness"]["privacy"]` is `{"enabled": True, "redacted":
+["telemetry", "model_io"], "categories": [...]}` for the second run above.
+
 <Note>
 Applied from the release after 0.4.1. In 0.4.1 the setting is accepted but has
 no effect.
