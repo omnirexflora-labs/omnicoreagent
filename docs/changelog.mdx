@@ -9,94 +9,110 @@ icon: 'clock-rotate-left'
 Every release, with its notes, is also on
 [GitHub Releases](https://github.com/omnirexflora-labs/omnicoreagent/releases).
 
-## Unreleased
+## 0.4.2
 
-### Changed
+*September 2026 · Python 3.12+*
 
-- **Harbor trials: the agent's files are the task's.** The file tools work in
-  the directory the task's commands run in, whatever the task set; the
-  runtime's own files stay outside it. They pointed at the agent's own
-  workspace, and a model spent steps on "Path not found". New
-  `workspace_config["files_dir"]` puts the file tools in any directory you
-  already have.
+Every section of these docs was rewritten by running its examples, and then
+tested by agents that had only the docs and a build of this release: they
+built a refunds desk, an ops service, and an evaluation loop, and every
+feature they used worked. What they and the writers found in the code is
+fixed here. Most of it is fixes; five settings now do what their names say,
+and those are listed first.
+
+### Before you upgrade
+
 - **A durable memory store needs its URL.** `MemoryRouter("sql")` without
-  `DATABASE_URL` (and `redis` without `REDIS_URL`, `mongodb` without
+  `DATABASE_URL` (`redis` without `REDIS_URL`, `mongodb` without
   `MONGODB_URI`) raises a `ValueError` naming the variable. It fell back to
   memory, so runs silently did not survive a restart or resume elsewhere.
-  `MemoryRouter("in_memory")` is unchanged.
-- **The default `misfire_policy` is `run_once`**, which is what the old
-  default did (one run for time missed while no manager ran).
-  `skip_missed` now skips: nothing runs for a time missed by more than a
-  minute.
+  `MemoryRouter("in_memory")`, the default, is unchanged.
+- **Sandbox settings no provider keeps are refused when the agent is
+  built:** `denied_hosts` (except with `http`), `environment.secret_refs`,
+  and a host allowlist on Daytona. They were accepted and silently not
+  enforced.
 - **`cancel_previous` interrupts the run it replaces**, within a heartbeat,
   instead of letting it finish its attempt and then discarding it.
-- **Trace retention removes abandoned traces**: a trace still `running`
-  with no activity for longer than `retention_days`, whose process died.
-  A trace waiting for a person is never removed.
+- **`misfire_policy`:** the default is now `run_once`, which behaves as the
+  old default did. `skip_missed` now skips: nothing runs for a time missed
+  by more than a minute.
+- **Trace retention removes abandoned traces:** a trace still `running`
+  with no activity for longer than `retention_days`, whose process died. A
+  trace waiting for a person is never removed.
+- **OmniServe:** a timed-out `/run/sync` or resume answers `504` with a
+  `detail` object that names the run (`message`, `run_id`, ...), where
+  `detail` was a string. A `403` for a refused request adds `capability`,
+  `reason_code` and `matched_rule_ids`.
+
+### New
+
+- **`workspace_config["files_dir"]`:** the file tools work in a directory
+  you already have; the runtime's own files stay in `workspace_dir`.
+  [Workspace files](/docs/core-concepts/workspace-files)
+- **Harbor trials use the task's own directory** for the agent's files,
+  whatever the task set (they pointed at the agent's workspace, and a model
+  spent steps on "Path not found"). `harbor doctor` takes `--ak` as `run`
+  does. [Harbor](/docs/how-to-guides/harbor)
+- **A denial is a decision in the evidence:** a `deny` with `denied_by` (the
+  person, or `system` for an approval nobody decided in time), as an
+  approval is an `allow` with `approved_by`.
+- **The run header says which privacy boundaries redact** (`harness.privacy`).
+- **`await memory_router.close()`** closes MongoDB, Redis and SQL
+  connections.
 
 ### Fixed
 
-- `omnicoreagent harbor doctor` takes `--ak install_spec=...` or
-  `--ak wheel=...`, as `run` does: a development build with no source could
-  never pass it.
-- A run with nothing priced says `None` for its cost everywhere; the total
-  including sub-agents said `0.0`.
-- Every training-record step has `resumed` (it was only on resumed steps).
-- Pruned traces stay pruned: they came back on the next start while their
-  records were still in the log, and `prune()` reported 0 when it removed
-  archived traces.
-- `training_records()` carries the run's `final_answer` (it was always
-  `None`).
-- A headless run's `result.json` counts the whole run's usage, not only the
-  last segment's.
-- `ls(".")`, and `glob` or `grep` with no path, list the whole workspace; they
-  were refused as invalid arguments.
-- A refused ask over HTTP names the capability and the rule
-  (`capability`, `matched_rule_ids` in the 403).
-- An exporter's failure keeps its reason in the trace.
-- `omnicoreagent harbor doctor` fails a development runtime that neither
-  `uv` nor `pip` can build into a wheel.
-- A person's denial, and an approval nobody decided in time, are decisions
-  in the evidence: a `deny` with `denied_by` (the person, or `system`) and
-  the reason `denied` or `expired_policy`, like an approval's `allow` with
-  `approved_by`.
-- A resumed run's totals count a step once, not once per segment.
-- The run header says which boundaries redact personal data
-  (`harness.privacy`), since the trace is redacted either way.
-- A finished trace read back by a new process was marked incomplete, its
-  evidence partial: the log's records of a trace already restored from the
-  archive counted as damage. It reads back complete.
-- A timed-out `/run/sync` (or resume) names its run in the 504 (`run_id`),
-  and the run's record says `timeout`, as its trace does.
-- `await memory_router.close()` closes a SQL store's share of its pool; the
-  last store using a database's pool closes it.
-- `list_runs()` approvals carry the call's `arguments`, as `get_run()`'s do.
-- `omniserve run` with a Redis or MongoDB task store and no URL is a clean
-  config error, not a traceback.
+**Privacy and governance**
 - `privacy_config["redact_model_io"]` now keeps personal data from the model
   provider. It was accepted but never applied.
+- An approval past its expiry no longer strands its run: one nobody decided
+  in time is a refusal on resume, and a decision made in time stands however
+  late the resume. A person's denial reaches the model as theirs, note
+  included; with `approval_mode="fail"`, the model is told the call was
+  refused.
+- `ls(".")`, and `glob` or `grep` with no path, list the whole workspace;
+  they were refused as invalid arguments.
+- Clearer messages: a strict-policy denial says no rule matched; a YAML
+  policy says YAML is not supported.
+
+**Budgets**
 - A call that crosses a `model_tokens` budget is recorded in full, and the
   next call is stopped before it is made. The crossing call's tokens were
-  lost, its dollar hold left open, and a resume made the call again.
-- An approval past its expiry no longer strands its run. One nobody decided
-  in time is a no: `resume()` refuses the call, the model is told it expired,
-  and the run finishes. A decision made in time stands, however late the
-  resume.
-- A person's denial reaches the model as theirs ("Denied by bob: ..."), note
-  included.
-- With `approval_mode="fail"`, the model is told the call was refused
-  (nobody will be asked), and the trajectory says `denied`.
-- Sandbox settings no provider keeps are refused when the agent is built:
-  `denied_hosts` (except `http`), `environment.secret_refs`, and a host
-  allowlist on Daytona.
-- The prompt-injection guardrail logs to the `omnicoreagent.guardrails`
+  lost and a resume made the call again.
+
+**Evidence and telemetry**
+- A finished trace read back by a new process was marked incomplete; it
+  reads back complete.
+- Pruned traces stay pruned (they came back on the next start), and
+  `prune()` counts archived traces.
+- A resumed run's totals count a step once; a run with nothing priced says
+  `None` for its cost everywhere.
+- `training_records()` carries `final_answer`, and every step has
+  `resumed`.
+- An exporter's failure keeps its reason in the trace.
+
+**Runs, stores and serving**
+- A timed-out run's record says `timeout`, as its trace does.
+- `list_runs()` approvals carry the call's `arguments`.
+- The MongoDB store closes its connections; a store built per request
+  leaked a pool each time. SQL stores release their shared pool.
+- `omniserve run` with a Redis or MongoDB task store and no URL is a clean
+  config error.
+- The prompt-injection guardrail logs through the `omnicoreagent.guardrails`
   logger instead of printing to stdout.
-- The MongoDB memory store closes its connections: `await store.close()`
-  and `await memory_router.close()`, and a failed connection attempt closes
-  what it opened. A store built per request leaked a connection pool each
-  time.
-- Clearer messages: a strict-policy denial says no rule matched the request;
-  a YAML policy says YAML is not supported.
+
+**CLI**
+- A headless run's `result.json` counts the whole run's usage.
+- `harbor doctor` fails a development runtime nothing can build into a
+  wheel.
+
+### Docs
+
+Build, Make It Safe, Run It and See and Improve rewritten page by page, with
+new pages for Policies, Approvals, Budgets, Privacy and credentials, Stores
+and scale, Read a run, and Outcomes and training records; a
+[comparison](/docs/comparison) with other agent frameworks; and the
+generated reference now shows each method's whole description.
 
 ## 0.4.1
 
