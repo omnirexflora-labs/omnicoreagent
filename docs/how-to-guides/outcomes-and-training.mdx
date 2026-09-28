@@ -210,7 +210,7 @@ the other two can find it, and the traces live in the default place,
 | `totals` | `tokens`, `estimated_cost_usd`, `duration_ms`, summed over segments |
 | `evidence_status` | Whether the trace is complete |
 | `steps` | One entry per model turn, below |
-| `final_answer` | Meant to hold the answer; in this release it is `null`. Read the last step's `response["content"]`, as above |
+| `final_answer` | The run's answer. (In 0.4.1 it is always `null`: read the last step's `response["content"]`, as above, which works in every release) |
 
 Each step:
 
