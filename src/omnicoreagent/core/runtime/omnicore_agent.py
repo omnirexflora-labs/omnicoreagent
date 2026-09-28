@@ -1776,6 +1776,9 @@ class OmniCoreAgent:
         summary = summarize_trace(trace)
         combined_tokens = dict(summary["tokens"])
         combined_cost = summary["estimated_cost_usd"] or 0.0
+        # Whether anything was priced at all: if nothing was, the combined
+        # cost is unknown (None), as the run's own is, not 0.0.
+        priced = summary["estimated_cost_usd"] is not None
         cost_complete = summary["cost_complete"] or summary["model_calls"]["total"] == 0
         for child_id in summary["subagents"]["child_trace_ids"]:
             child = await recorder.peek_trace(child_id)
@@ -1786,11 +1789,12 @@ class OmniCoreAgent:
             for key, value in child_summary["tokens"].items():
                 combined_tokens[key] = combined_tokens.get(key, 0) + value
             combined_cost += child_summary["estimated_cost_usd"] or 0.0
+            priced = priced or child_summary["estimated_cost_usd"] is not None
             if child_summary["model_calls"]["total"] and not child_summary["cost_complete"]:
                 cost_complete = False
         summary["including_subagents"] = {
             "tokens": combined_tokens,
-            "estimated_cost_usd": round(combined_cost, 10),
+            "estimated_cost_usd": round(combined_cost, 10) if priced else None,
             "cost_complete": cost_complete,
         }
         return {
@@ -2814,6 +2818,8 @@ def _training_steps(trajectory: Dict[str, Any]) -> List[Dict[str, Any]]:
             steps.append(
                 {
                     "step": step.get("step"),
+                    # Present on every step, so a reader can index it.
+                    "resumed": False,
                     "_policy_version": facts.get("policy_version"),
                     "messages": request.get("messages"),
                     "tools": request.get("tools"),

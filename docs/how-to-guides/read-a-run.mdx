@@ -596,9 +596,13 @@ the [OmniCoreAgent reference](/docs/reference/omnicoreagent).
     why. Tokens, cost and outcomes are still there.
   </Accordion>
 
-  <Accordion title="estimated_cost_usd is 0.0 and cost_complete is False">
-    The model has no published price (a model behind `base_url`, for
-    example). The tokens are right; the cost is unknown, not zero.
+  <Accordion title="estimated_cost_usd is None, or cost_complete is False">
+    `None`: nothing was priced, because no model call answered (a run cut off
+    by its deadline before the first answer) or the model has no published
+    price (a model behind `base_url`, for example). `cost_complete: False`:
+    some calls could not be priced, so the figure is a lower bound. The
+    tokens are right either way. `including_subagents` follows the same
+    rule. Guard for `None` before rounding or adding.
   </Accordion>
 </AccordionGroup>
 

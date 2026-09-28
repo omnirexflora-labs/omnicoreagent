@@ -254,8 +254,9 @@ store.
 import json
 
 run = json.load(open("out2/trajectory.json"))
+cost = run["totals"]["estimated_cost_usd"]  # None when nothing was priced (a run cut off before any answer)
 print(run["status"], "| segments:", len(run["segments"]), "| tokens:", run["totals"]["tokens"]["total"],
-      "| cost:", round(run["totals"]["estimated_cost_usd"], 6))
+      "| cost:", round(cost, 6) if cost is not None else "unknown")
 for approval in run["approvals"]:
     print("approval:", approval["tool_name"], approval["status"], "by", approval["approver"], "-", approval["note"])
 first = run["segments"][0]["trajectory"]
