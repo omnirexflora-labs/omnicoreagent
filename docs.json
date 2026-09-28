@@ -151,6 +151,68 @@
             }
         ]
     },
+    "redirects": [
+        {
+            "source": "/quickstart",
+            "destination": "/docs/getting-started/quickstart"
+        },
+        {
+            "source": "/docs/quickstart",
+            "destination": "/docs/getting-started/quickstart"
+        },
+        {
+            "source": "/install",
+            "destination": "/docs/getting-started/installation"
+        },
+        {
+            "source": "/installation",
+            "destination": "/docs/getting-started/installation"
+        },
+        {
+            "source": "/docs/install",
+            "destination": "/docs/getting-started/installation"
+        },
+        {
+            "source": "/docs/installation",
+            "destination": "/docs/getting-started/installation"
+        },
+        {
+            "source": "/tour",
+            "destination": "/docs/getting-started/tour"
+        },
+        {
+            "source": "/docs/tour",
+            "destination": "/docs/getting-started/tour"
+        },
+        {
+            "source": "/comparison",
+            "destination": "/docs/comparison"
+        },
+        {
+            "source": "/docs/policies",
+            "destination": "/docs/core-concepts/policies"
+        },
+        {
+            "source": "/docs/approvals",
+            "destination": "/docs/core-concepts/approvals"
+        },
+        {
+            "source": "/docs/budgets",
+            "destination": "/docs/core-concepts/budgets"
+        },
+        {
+            "source": "/docs/durable-runs",
+            "destination": "/docs/core-concepts/durable-runs"
+        },
+        {
+            "source": "/docs/read-a-run",
+            "destination": "/docs/how-to-guides/read-a-run"
+        },
+        {
+            "source": "/docs/harbor",
+            "destination": "/docs/how-to-guides/harbor"
+        }
+    ],
     "footer": {
         "socials": {
             "x": "https://x.com/abiorhmangana",

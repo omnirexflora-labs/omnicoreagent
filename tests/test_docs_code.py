@@ -159,3 +159,20 @@ def test_every_command_a_shell_block_runs_exists(body):
             known = _subcommands(entry)
             if known:
                 assert used in known, f"`{entry} {used}` is not a command ({sorted(known)})"
+
+
+def _nav_groups():
+    config = json.loads((ROOT / "docs.json").read_text())
+    return config, config["navigation"]["dropdowns"][0]["groups"]
+
+
+def test_short_paths_redirect_to_real_pages():
+    # An outside review (2026-09-28) found /docs/quickstart was a 404: people guess
+    # short paths, and posts link them. Each redirect must land on a page in the nav.
+    config, groups = _nav_groups()
+    pages = {f"/{page}" for page in re.findall(r'"(docs/[^"#]+)"', json.dumps(groups))}
+    redirects = {r["source"]: r["destination"] for r in config.get("redirects", [])}
+    assert {"/docs/quickstart", "/quickstart", "/docs/install", "/docs/installation"} <= set(redirects)
+    assert not [d for d in redirects.values() if d not in pages]
+    assert not [s for s in redirects if s in pages]
+
