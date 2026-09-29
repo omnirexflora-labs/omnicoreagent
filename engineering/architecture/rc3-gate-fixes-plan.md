@@ -18,3 +18,7 @@ and published only when a gate finds nothing to fix.
 - T3 A command refused inside `execute` reads `denied` in the trace, as in
   the run record; S4 changed only the record, and the two disagreed (area B).
 
+- T4 A second call of the same turn that asks the same question (two
+  commands that both need the sandbox network) waits on the one pending
+  approval and is replayed on resume; it was refused and never run (area B).
+

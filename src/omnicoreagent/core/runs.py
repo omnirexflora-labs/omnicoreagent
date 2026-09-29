@@ -529,6 +529,7 @@ def waiting_for_approval(tool_call_id: str) -> bool:
         and (
             approval.get("tool_call_id") == tool_call_id
             or str(approval.get("tool_call_id") or "").startswith(f"{tool_call_id}.")
+            or tool_call_id in (approval.get("also_waiting") or [])
         )
         for approval in run.record.get("approvals", [])
     )
