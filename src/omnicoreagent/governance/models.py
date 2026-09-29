@@ -306,6 +306,15 @@ class PolicyRuleSet:
     allow: list[PolicyRule] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
+        """Check every rule's bucket and that rule ids are unique.
+
+        Run again when an agent is built: rules appended after the rule set
+        was created, as the docs show, skipped it, and a deny rule put in the
+        allow bucket allowed (the 0.5.0rc3 gate).
+        """
         buckets = {
             PolicyEffect.DENY: self.deny,
             PolicyEffect.ASK: self.ask,

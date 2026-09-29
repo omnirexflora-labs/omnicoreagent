@@ -44,3 +44,7 @@ and published only when a gate finds nothing to fix.
   took the port too, and the first crashed after its startup (area A; S7
   was incomplete).
 
+- T11 Rules appended to a policy object after it was built are checked when
+  the agent is built (bucket and unique id); a deny rule in the allow bucket
+  allowed (area A).
+
