@@ -1,10 +1,13 @@
 ---
-title: Upgrading to 0.4
-description: 'From 0.3: what runs unchanged, what was removed and what took its place, and the defaults that changed'
+title: Upgrading
+description: 'From 0.3 to 0.4, through each 0.4 release, and from 0.4 to 0.5.0: what runs unchanged, what was removed, and the defaults that changed'
 icon: 'arrow-up-right-dots'
 ---
 
-# Upgrading to 0.4
+# Upgrading
+
+Coming from 0.3, start here: sections 1 to 5 cover 0.3 to 0.4. Each later
+release has its own section below them, ending with *From 0.4 to 0.5.0*.
 
 Most 0.3 code runs on 0.4 unchanged: an agent built from a name, an
 instruction, a model, local tools and MCP servers, `run()` and its result,
@@ -21,8 +24,10 @@ effectively upgrading from 0.3.8 — this page is for you.
 
 ## 1. Python 3.12 or later
 
-0.4 needs Python 3.12, 3.13 or 3.14. On 3.10 or 3.11, `pip install -U
-omnicoreagent` does not fail: it quietly stays on 0.3.9. Check what you got:
+0.4 and later need Python 3.12, 3.13 or 3.14. On 3.10 or 3.11, `pip install -U
+omnicoreagent` now stops with a message saying so. Before the guard release
+(0.3.10, published with 0.4.3) it did not fail: it quietly stayed on 0.3.9
+([Installation](/docs/getting-started/installation)). Check what you got:
 
 ```bash
 python --version
