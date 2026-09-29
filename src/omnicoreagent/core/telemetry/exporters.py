@@ -485,12 +485,21 @@ async def export_trace_to_many(
                     exporter=name,
                     error_type=exc.__class__.__name__,
                 ) from exc
+            message = str(exc)
+            if isinstance(exc, asyncio.TimeoutError):
+                # Given up on, not cancelled: the destination may still get it
+                # (an OTLP collector received a trace recorded as failed, the
+                # 0.5.0rc1 gate). Say only what is known.
+                message = (
+                    f"no answer within {timeout:g}s; the export was not cancelled "
+                    "and may still have been delivered"
+                )
             results.append(
                 TelemetryExportResult(
                     exporter=name,
                     trace_id=trace.trace_id,
                     destination=None,
-                    metadata={"error": str(exc), "error_type": exc.__class__.__name__},
+                    metadata={"error": message, "error_type": "TimeoutError" if isinstance(exc, asyncio.TimeoutError) else exc.__class__.__name__},
                 )
             )
     return results

@@ -56,11 +56,16 @@ class ServerConnection:
         try:
             return await asyncio.wait_for(asyncio.shield(self._opened), timeout)
         except asyncio.TimeoutError:
+            # No one waits for it now: cancelled, the owner does not set an
+            # exception on it that nothing retrieves ("Future exception was
+            # never retrieved", the 0.5.0rc1 gate).
+            self._opened.cancel()
             await self._abandon()
             raise MCPConnectionError(
                 f"Connecting to MCP server '{self.name}' timed out after {timeout:g}s"
             ) from None
         except asyncio.CancelledError:
+            self._opened.cancel()
             await self._abandon()
             raise
 
