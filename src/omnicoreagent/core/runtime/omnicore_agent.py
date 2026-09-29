@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -840,9 +841,12 @@ class OmniCoreAgent:
             # starts: imported on the loop at a process's first call, it froze
             # it for seconds to minutes, the heartbeat stalled and a second
             # process took over a live run (the 0.5.0rc1 gate).
+            # A model connection of the application's own may have no async
+            # warm_up, or a plain one.
             warm_up = getattr(self.llm_connection, "warm_up", None)
-            if warm_up is not None:
-                await warm_up()
+            warmed = warm_up() if callable(warm_up) else None
+            if inspect.isawaitable(warmed):
+                await warmed
             await run_tracker.start(trace_context.trace_id)
             # Keeps the heartbeat fresh during long model or tool calls.
             keep_alive = asyncio.create_task(run_tracker.keep_alive())
