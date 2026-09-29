@@ -563,6 +563,7 @@ to `api_prefix` (empty by default).
 |--------|-------|--------------|
 | `POST` | `/run/sync` | Run and wait; the result as JSON |
 | `POST` | `/run` | Run and stream SSE events, ending with `complete` |
+| `GET` | `/runs` | Runs by `status` and `session_id`, oldest first (`limit`, up to 500): what waits for a person, what a crash left `running`. Each as `GET /runs/{run_id}` returns it |
 | `GET` | `/runs/{run_id}` | The run's record: status, step, usage, tool call states, approvals (never its conversation) |
 | `GET` | `/runs/{run_id}/trajectory` | The whole run as one story: every trace segment, totals, each tool call once, the approvals |
 | `POST` | `/runs/{run_id}/approvals/{approval_id}` | Decide an approval: `{"decision": "approve" \| "deny", "approver", "note"?, "arguments"?}` |

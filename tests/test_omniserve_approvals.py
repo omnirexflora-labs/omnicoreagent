@@ -132,3 +132,23 @@ def test_a_paused_and_resumed_run_is_one_story_over_http(tmp_path):
         assert {c["tool_name"]: c["outcome"] for c in body["tool_calls"]}["delete_file"] == "success"
 
         assert client.get("/runs/run_nope/trajectory").status_code == 404
+
+
+def test_runs_waiting_for_a_person_are_listed_over_http(tmp_path):
+    # The 0.5.0rc1 stranger test: a caller that lost its connection (a crash,
+    # a timeout) had no run id and no way to find what waits for a person.
+    agent, server = _server(tmp_path, WRITE_AND_DELETE, DELETE, "done")
+    with TestClient(server.app) as client:
+        paused = _pause(client)
+        assert paused["status"] == "awaiting_approval"
+
+        waiting = client.get("/runs", params={"status": "awaiting_approval"})
+        assert waiting.status_code == 200
+        runs = waiting.json()["runs"]
+        assert [r["run_id"] for r in runs] == [paused["run_id"]]
+        assert runs[0]["approvals"][0]["status"] == "pending"
+        assert "context" not in runs[0]  # the saved conversation is never returned
+
+        by_session = client.get("/runs", params={"session_id": runs[0]["session_id"]}).json()["runs"]
+        assert [r["run_id"] for r in by_session] == [paused["run_id"]]
+        assert client.get("/runs", params={"status": "completed"}).json()["runs"] == []
