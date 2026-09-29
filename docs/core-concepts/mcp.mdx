@@ -269,7 +269,7 @@ What the built-in profiles do with MCP:
 | Profile | Connecting a server | Each MCP tool call |
 |---|---|---|
 | `interactive-dev` | asks | asks |
-| `permissive-dev` | allowed (no rule matches, and permissive mode allows) | allowed |
+| `permissive-dev` (the default) | allowed (`allow_configured_mcp_servers`) | allowed (`allow_configured_mcp_tools`) |
 | `strict-production` | denied without a rule of yours | denied without a rule of yours |
 
 Connecting happens outside any run, so an ask there cannot pause: it fails
