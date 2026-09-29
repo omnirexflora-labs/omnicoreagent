@@ -136,3 +136,22 @@ async def test_a_waiting_runs_budget_request_is_readable_over_http():
         (waiting,) = body["requests"]
         assert waiting["status"] == "pending" and waiting["meter"] == "model_cost_usd"
         assert waiting["shortfall"] > 0
+
+
+@pytest.mark.asyncio
+async def test_an_abandoned_runs_budget_request_cannot_be_granted():
+    # The 0.5.0rc1 gate: abandon_run left the run's budget request pending, and
+    # a later grant was accepted, adding headroom nobody resumes into (on a
+    # shared budget, for everyone).
+    from test_budget_pause import ONE_CALL, _two_turns
+
+    agent = await _agent(_two_turns(), budgets=ONE_CALL)
+    paused = await agent.run("go", session_id="abandon-grant")
+    assert paused["status"] == "awaiting_budget"
+
+    await agent.abandon_run(paused["run_id"], status="cancelled", reason="nobody will fund it")
+
+    with pytest.raises(LookupError, match="not waiting"):
+        await agent.grant_budget(paused["run_id"], approver="ops")
+    requests = (await agent.get_run(paused["run_id"]))["budget_requests"]
+    assert [r["status"] for r in requests] == ["abandoned"]

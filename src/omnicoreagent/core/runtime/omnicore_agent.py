@@ -1542,6 +1542,11 @@ class OmniCoreAgent:
             current["error"] = {"type": "RunEndedOutside", "message": reason}
             if spent:
                 current["budgets"] = spent
+            # A request no one will resume into is closed: granting it later
+            # added headroom to a budget, a shared one too (the 0.5.0rc1 gate).
+            for request in current.get("budget_requests") or []:
+                if request.get("status") == "pending":
+                    request["status"] = "abandoned"
 
         await update_from_outside(self.memory_router, run_id, close)
         return await self.get_run(run_id)
@@ -1668,6 +1673,10 @@ class OmniCoreAgent:
         record = await self._run_record(run_id)
         if record is None:
             raise LookupError(f"No run {run_id}")
+        if record.get("status") != "awaiting_budget":
+            raise LookupError(
+                f"Run {run_id} is not waiting for a budget decision (it is {record.get('status')})"
+            )
         pending = [
             request
             for request in record.get("budget_requests", [])
