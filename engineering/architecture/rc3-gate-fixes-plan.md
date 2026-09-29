@@ -39,3 +39,8 @@ and published only when a gate finds nothing to fix.
   earlier attempt's error (the attempt keeps it); the docs say the trace
   window also applies when a process first reads its traces (area C).
 
+- T10 OmniServe's socket listens, not only binds, and the CLI holds the
+  port it checked while the agent loads: a second server starting meanwhile
+  took the port too, and the first crashed after its startup (area A; S7
+  was incomplete).
+

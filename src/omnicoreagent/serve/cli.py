@@ -162,13 +162,14 @@ def run(
     except Exception as exc:
         raise click.ClickException(f"Invalid OmniServe config: {exc}") from exc
 
-    # The port, before loading the agent: loading can take a minute, and a
-    # taken port found only then left clients talking to another server
-    # (the 0.5.0rc2 gate). The server binds it again when it starts.
+    # The port, before loading the agent, and held while it loads: loading
+    # can take a minute; a taken port found only then left clients talking
+    # to another server (the 0.5.0rc2 gate), and a port checked then let go
+    # was taken by a second server starting meanwhile (the 0.5.0rc3 gate).
     from omnicoreagent.serve.server import bind_server_socket
 
     try:
-        bind_server_socket(config.host, config.port).close()
+        held = bind_server_socket(config.host, config.port)
     except OSError as exc:
         raise click.ClickException(exc.strerror or str(exc)) from exc
 
@@ -218,7 +219,7 @@ def run(
     server = OmniServe(
         loaded_agent, config=config, routers=loaded.routers, public_paths=loaded.public_paths
     )
-    server.start()
+    server.start(sock=held)
 
 
 @cli.command()
