@@ -265,7 +265,9 @@ async def test_a_governed_agent_cannot_delegate_to_an_ungoverned_one(tmp_path):
         system_instruction="Help.",
         model_config=_MODEL,
         local_tools=_app_tools(marker),
-        agent_config={"guardrail_mode": "off", "enable_workspace_files": False},
+        # Ungoverned on purpose: since 0.5.0 an agent is governed unless it says so.
+        agent_config={"guardrail_mode": "off", "enable_workspace_files": False,
+                      "governance_config": {"enabled": False}},
     )
     await child.initialize()
     child.llm_connection = ScriptedModel([("k1", "write_marker", "{}")], "child done")

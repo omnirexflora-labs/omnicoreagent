@@ -174,7 +174,9 @@ def check_trajectory(
         (c["tool_call_id"], c["outcome"]) for c in step_one
     ]
     malformed = next(c for c in step_one if c["tool_call_id"] == "c_bad")
-    assert malformed["raw_arguments"] == "{broken", malformed
+    # Agents are governed by default (0.5.0), and a governed agent's argument
+    # values are recorded only under full capture.
+    assert malformed["raw_arguments"] == ("{broken" if full_capture else "[REDACTED]"), malformed
     assert malformed["rejection_reason"] == "invalid_arguments", malformed
     failed = next(c for c in step_one if c["tool_call_id"] == "c_err")
     # If this ever fails, say whether the trace lost a write (incomplete).
@@ -189,7 +191,7 @@ def check_trajectory(
     assert "weather service unavailable" in mcp["m_tool_error"]["error"]["message"], mcp["m_tool_error"]
     assert "MCP error -32602" in mcp["m_protocol_error"]["error"]["message"], mcp["m_protocol_error"]
     assert "MCP error -32001" in mcp["m_call_timeout"]["error"]["message"], mcp["m_call_timeout"]
-    assert mcp["m_bad"]["raw_arguments"] == "{broken", mcp["m_bad"]
+    assert mcp["m_bad"]["raw_arguments"] == ("{broken" if full_capture else "[REDACTED]"), mcp["m_bad"]
     assert mcp["m_bad"]["rejection_reason"] == "invalid_arguments", mcp["m_bad"]
     if full_capture:
         assert '"temp": 31' in mcp["m_ok"]["observation"]["content"], mcp["m_ok"]["observation"]

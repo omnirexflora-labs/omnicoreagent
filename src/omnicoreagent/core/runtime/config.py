@@ -302,10 +302,9 @@ class AgentConfig:
     # model gets a preview and an artifact it can read in full.
     tool_offload: dict[str, Any] = field(default_factory=_default_tool_offload)
     # The policy (a profile, a policy, or a policy file), budgets, the sandbox
-    # provider and its manifest, and how unanswered approvals are handled. Off
-    # by default; see the security model.
-    # Empty unless given: what the agent chose is told apart from the defaults
-    # it did not choose (see DEFAULT_PROFILE).
+    # provider and its manifest, and how unanswered approvals are handled. On
+    # by default with the permissive-dev profile; {"enabled": False} turns it
+    # off. Enabling it without a profile means interactive-dev.
     governance_config: dict[str, Any] = field(default_factory=dict)
     # Where the agent's workspace lives: workspace_dir on local disk (default
     # ./workspace), or S3 / R2 storage.

@@ -118,3 +118,18 @@ async def test_enabled_false_turns_it_off():
     agent = await _agent(RecordingModel("hi"), governance_config={"enabled": False})
     assert agent.agent.governance_engine is None
     await agent.cleanup()
+
+
+def test_a_delegated_task_is_left_out_of_the_authority_record_not_masked():
+    # With governance on by default, every delegation records a policy request.
+    # Its task text is delegated content, recorded with the delegation call, not
+    # an authority fact. It was replaced by "[REDACTED]", so under full capture
+    # every governed run reported a gap in its evidence that was not one (found
+    # by the trajectory acceptance test when the default changed).
+    from omnicoreagent.governance.models import AuthorityRequest
+    from omnicoreagent.governance.telemetry import _request_payload
+
+    request = AuthorityRequest(capability="subagent.spawn", metadata={"task": "review the API", "task_length": 14})
+    metadata = _request_payload(request)["metadata"]
+    assert "task" not in metadata and metadata["task_length"] == 14
+    assert "[REDACTED]" not in json.dumps(metadata)
