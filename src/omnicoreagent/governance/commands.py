@@ -398,3 +398,89 @@ def to_metadata(parsed: ParsedCommand) -> dict[str, Any]:
         "opaque": parsed.opaque,
         "opaque_reasons": list(parsed.opaque_reasons),
     }
+
+
+# --- Matching rules to commands ------------------------------------------------------
+
+_PARSED = "_omnicoreagent_parsed_command"
+
+
+def attach_command(request, argv: Sequence[str]):
+    """Parse ``argv`` and attach it to a ``process.exec`` request.
+
+    The parse rides on the request as an attribute, not a field, so it is never
+    serialized: what a trace keeps of a command stays under the capture policy.
+    The metadata carries what an approval must show and bind: the programs with
+    their arguments, whether it is opaque, and the digest of the exact command.
+    """
+    argv = list(argv)
+    parsed = parse_command(argv)
+    object.__setattr__(request, _PARSED, parsed)
+    request.metadata["command"] = {
+        "name": argv[0] if argv else "",
+        "argc": len(argv),
+        **to_metadata(parsed),
+    }
+    return request
+
+
+def parsed_command(request) -> ParsedCommand | None:
+    return getattr(request, _PARSED, None)
+
+
+def _globs(value) -> list[str]:
+    return [value] if isinstance(value, str) else list(value)
+
+
+def _arguments(argv: Sequence[str]) -> list[str]:
+    """Arguments after the program, with short-option clusters expanded:
+    ``-rf`` also counts as ``-r`` and ``-f``."""
+    out: list[str] = []
+    for arg in argv[1:]:
+        out.append(arg)
+        if len(arg) > 2 and arg.startswith("-") and not arg.startswith("--") and arg[1:].isalpha():
+            out.extend(f"-{letter}" for letter in arg[1:])
+    return out
+
+
+def command_matches(matcher, command: SimpleCommand) -> bool:
+    """Whether one simple command matches a rule's ``command`` matcher."""
+    from fnmatch import fnmatchcase
+
+    if matcher.program is not None and not any(fnmatchcase(command.program, g) for g in _globs(matcher.program)):
+        return False
+    if matcher.prefix is not None:
+        words = [command.program, *command.argv[1:]]
+        if len(words) < len(matcher.prefix):
+            return False
+        for word, token in zip(words, matcher.prefix):
+            if not any(fnmatchcase(word, g) for g in _globs(token)):
+                return False
+    if matcher.args_any is not None:
+        arguments = _arguments(command.argv)
+        if not any(fnmatchcase(a, g) for a in arguments for g in matcher.args_any):
+            return False
+    return True
+
+
+def allowable(matcher, command: SimpleCommand) -> bool:
+    """Whether an allow rule may allow this command at all: literal words, a
+    program found on the system path (not ./git or /tmp/git), no output to a
+    file unless the rule says so, no leading variables it does not name."""
+    if not command.plain or command.path_kind == "other":
+        return False
+    if command.redirects_to_file and not matcher.redirect:
+        return False
+    return set(command.env_assignments) <= set(matcher.env or [])
+
+
+def rule_example_holds(effect: str, matcher, example: str) -> bool:
+    """Whether a rule matches its own example, as it would be evaluated."""
+    parsed = parse_command(["sh", "-c", example])
+    if effect == "allow":
+        return (
+            not parsed.opaque
+            and bool(parsed.commands)
+            and all(allowable(matcher, c) and command_matches(matcher, c) for c in parsed.commands)
+        )
+    return any(command_matches(matcher, c) for c in parsed.commands)
