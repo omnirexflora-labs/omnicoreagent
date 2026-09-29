@@ -319,11 +319,14 @@ What a run does after its process dies, stated exactly. "Resume" means
 - **Background retries** after a failure, a timeout or a cancellation are new
   attempts from the first step; only a worker that died is resumed.
 
-These come from `_pending_calls` (`core/agents/base.py`), the call recording in
-`core/agents/native_tools.py` and `core/runs.py`, and `RunBudgets.release_stale`
-(`core/budgets.py`); the tests that hold them are `tests/test_run_recovery.py`,
-`tests/test_durable_runs_end_to_end.py`, `tests/test_run_suspend.py` and
-`tests/test_budget_stale_holds.py`.
+These come from `_pending_calls` ([`core/agents/base.py`](https://github.com/omnirexflora-labs/omnicoreagent/blob/main/src/omnicoreagent/core/agents/base.py)),
+the call recording in [`core/agents/native_tools.py`](https://github.com/omnirexflora-labs/omnicoreagent/blob/main/src/omnicoreagent/core/agents/native_tools.py)
+and [`core/runs.py`](https://github.com/omnirexflora-labs/omnicoreagent/blob/main/src/omnicoreagent/core/runs.py), and `RunBudgets.release_stale`
+([`core/budgets.py`](https://github.com/omnirexflora-labs/omnicoreagent/blob/main/src/omnicoreagent/core/budgets.py)). The tests that hold them are in the
+repository, not the installed package: [`test_run_recovery.py`](https://github.com/omnirexflora-labs/omnicoreagent/blob/main/tests/test_run_recovery.py),
+[`test_durable_runs_end_to_end.py`](https://github.com/omnirexflora-labs/omnicoreagent/blob/main/tests/test_durable_runs_end_to_end.py),
+[`test_run_suspend.py`](https://github.com/omnirexflora-labs/omnicoreagent/blob/main/tests/test_run_suspend.py) and
+[`test_budget_stale_holds.py`](https://github.com/omnirexflora-labs/omnicoreagent/blob/main/tests/test_budget_stale_holds.py).
 
 ## Pause and resume
 
