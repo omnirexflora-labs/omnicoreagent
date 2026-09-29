@@ -1,10 +1,13 @@
 ---
-title: Upgrading to 0.4
-description: 'From 0.3: what runs unchanged, what was removed and what took its place, and the defaults that changed'
+title: Upgrading
+description: 'From 0.3 to 0.4, through each 0.4 release, and from 0.4 to 0.5.0: what runs unchanged, what was removed, and the defaults that changed'
 icon: 'arrow-up-right-dots'
 ---
 
-# Upgrading to 0.4
+# Upgrading
+
+Coming from 0.3, start here: sections 1 to 5 cover 0.3 to 0.4. Each later
+release has its own section below them, ending with *From 0.4 to 0.5.0*.
 
 Most 0.3 code runs on 0.4 unchanged: an agent built from a name, an
 instruction, a model, local tools and MCP servers, `run()` and its result,
@@ -21,8 +24,10 @@ effectively upgrading from 0.3.8 — this page is for you.
 
 ## 1. Python 3.12 or later
 
-0.4 needs Python 3.12, 3.13 or 3.14. On 3.10 or 3.11, `pip install -U
-omnicoreagent` does not fail: it quietly stays on 0.3.9. Check what you got:
+0.4 and later need Python 3.12, 3.13 or 3.14. On 3.10 or 3.11, `pip install -U
+omnicoreagent` now stops with a message saying so. Before the guard release
+(0.3.10, published with 0.4.3) it did not fail: it quietly stayed on 0.3.9
+([Installation](/docs/getting-started/installation)). Check what you got:
 
 ```bash
 python --version
@@ -261,7 +266,7 @@ default profile, `permissive-dev`, refuses or asks about:
 | Runs a shell command on the host (the `local` provider) | Ran | Refused by `deny_unrestricted_process_exec` | Use a sandbox provider, or start from `interactive-dev` as the [local provider recipe](/docs/how-to-guides/sandbox-providers#local-this-machine-not-a-sandbox) shows. An allow rule added to `permissive-dev` does not help: its deny rule wins over any allow |
 | Is given a sandbox with network | Ran | Asks a person first (`ask_sandbox_network`) | Decide it, or allow `sandbox.network.configure` in your policy |
 | Reads a raw secret, installs a package, reaches the network or host files without a rule | Ran | Refused | Add the rule for what it needs ([Policies](/docs/core-concepts/policies)) |
-| Relied on tool argument values in its traces under the default capture | Recorded | Recorded by name, not value | `telemetry_config={"capture": "full"}` |
+| Relied on tool argument values in its traces under `capture="default"` | Recorded | Recorded by name, not value | `telemetry_config={"capture": "full"}` (the capture you get without setting one) |
 | Set `"enabled": True` without a profile | `interactive-dev` | `interactive-dev` | Nothing |
 
 To keep 0.4's behaviour exactly: `agent_config={"governance_config": {"enabled": False}}`.

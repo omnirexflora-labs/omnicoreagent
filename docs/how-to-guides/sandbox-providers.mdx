@@ -345,7 +345,10 @@ The built-in profiles never allow host commands on their own
 (`permissive-dev` and `strict-production` deny them; `interactive-dev` asks a
 person for each one). To let an agent run them without asking, start from a
 profile, drop the asks that stand in the way, and allow host commands with a
-rule of your own:
+rule of your own. The manifest's `working_dir` must already exist, so create
+it first (here `app/`, next to the script: `mkdir app`, or the `os.makedirs`
+line below); otherwise the first command fails, saying the working directory
+does not exist:
 
 ```python
 import os
@@ -365,6 +368,8 @@ policy.rules.allow.insert(0, PolicyRule(
     capability="process.exec",
     conditions=PolicyRuleConditions(execution_surface="host"),
 ))
+
+os.makedirs("app", exist_ok=True)  # the working directory must exist
 
 agent = OmniCoreAgent(
     name="host_runner",

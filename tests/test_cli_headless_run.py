@@ -403,3 +403,26 @@ async def test_ctrl_c_interrupts_the_run_writes_its_evidence_and_exits_interrupt
     assert outcome.trace_ids
     assert len(_sent(ledger)) == 1  # the call in flight finished; no second one ran
     assert signal.SIGINT not in getattr(asyncio.get_running_loop(), "_signal_handlers", {})
+
+
+@pytest.mark.asyncio
+async def test_ctrl_c_before_the_run_has_a_record_says_nothing_ran(tmp_path):
+    # The 0.5.0rc2 gate: a Ctrl-C while the model client loaded (before the
+    # run's record exists) was reported as "stopped by a second interrupt".
+    import os
+    import signal
+
+    agent = await _agent(RecordingModel("hi"), tmp_path / "ledger", ask=False)
+
+    async def slow_warm_up():
+        await asyncio.sleep(3)
+
+    agent.llm_connection.warm_up = slow_warm_up
+    running = asyncio.create_task(execute_headless(agent, HeadlessRequest(instruction="hi")))
+    await asyncio.sleep(0.5)
+    os.kill(os.getpid(), signal.SIGINT)
+
+    outcome = await asyncio.wait_for(running, 30)
+
+    assert (outcome.status, outcome.exit_code) == ("interrupted", ExitCode.INTERRUPTED)
+    assert outcome.error == "interrupted before the run had started; nothing ran"

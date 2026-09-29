@@ -576,6 +576,7 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         self.skipped_records = 0
         self.last_prune: dict[str, Any] | None = None
         self.removed_total = 0
+        self.abandoned_total = 0
         # An archive that cannot be written to is not allowed to fail a run,
         # and is not allowed to be silent either: the count and the last
         # reason are here, and each failure is logged.
@@ -838,6 +839,7 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             # too. The pass asked for then found nothing and reported 0 while
             # traces had gone (the 0.5.0rc1 gate).
             before = self.removed_total
+            abandoned_before = self.abandoned_total
             await self._load_unlocked()
             days = self.retention_days if retention_days is None else retention_days
             if days is None:
@@ -845,7 +847,9 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             await self._prune_expired_unlocked(days, trigger=trigger)
             removed = self.removed_total - before
             if isinstance(self.last_prune, dict):
+                # Both counts, the load's pass included (the rc1 and rc2 gates).
                 self.last_prune["removed"] = removed
+                self.last_prune["abandoned"] = self.abandoned_total - abandoned_before
             return removed
 
     def retention_status(self) -> dict[str, Any]:
@@ -889,6 +893,7 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
             "abandoned": len(abandoned),
         }
         self.removed_total += removed
+        self.abandoned_total += len(abandoned)
         if removed:
             logger.info(
                 "Telemetry retention removed %d trace(s) older than %d day(s) from %s",

@@ -29,8 +29,8 @@ graph TD
     Runtime --> Harness["Harness capabilities"]
 
     Loop --> Model["LiteLLM model call"]
-    Loop --> Parser["Custom tool-call parser"]
-    Parser --> Batch["Parallel tool batch runner"]
+    Loop --> Calls["Provider-native tool calls"]
+    Calls --> Batch["Parallel tool batch runner"]
     Batch --> Observation["Observation pipeline"]
     Observation --> Loop
 
@@ -69,11 +69,12 @@ graph TD
     Before every LLM call, the runtime checks whether context management should
     trigger. If enabled and the configured threshold is crossed, it truncates or
     summarizes the message history before LiteLLM sends the prompt to the
-    provider. The model returns either a final answer or one or more tool calls
-    using OmniCoreAgent's tool-call contract.
+    provider. The model returns either a final answer or one or more tool calls,
+    as the provider's own (native) tool calls.
   </Step>
-  <Step title="Tool calls are parsed and resolved">
-    The parser extracts tool calls. The resolver maps each call to the right
+  <Step title="Tool calls are resolved">
+    The tool calls come back as structured data from the provider; nothing is
+    parsed out of the model's text. The resolver maps each call to the right
     executor: local Python tool, MCP tool, skill, workspace tool, or harness tool.
   </Step>
   <Step title="Independent tools run as a batch">
@@ -121,8 +122,9 @@ The runtime construction layer normalizes:
 - harness capability setup
 
 This is where defaults are resolved. For example, workspace files are enabled by
-default, context management and tool offload are disabled by default, and enabling
-subagents forces workspace files on.
+default, context management (`context_management`) and tool output offload
+(`tool_offload`) are on by default, and enabling subagents forces workspace
+files on.
 
 ### 3. ReAct Loop
 

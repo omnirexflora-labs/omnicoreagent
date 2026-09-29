@@ -414,3 +414,31 @@ async def test_the_sync_is_still_governed(tmp_path):
     only_commands = policy_from_mapping({"name": "p", "mode": "strict", "rules": {"allow": [
         {"rule_id": "exec", "capability": "process.exec"}]}})
     assert PolicyEvaluator().evaluate(only_commands, request).effect.value == "deny"
+
+
+async def test_a_strict_policy_without_file_rules_copies_nothing_and_the_command_runs(tmp_path):
+    # The 0.5.0rc2 gate: the docs' strict example names the sandbox and its
+    # commands but no workspace.files.* rule. A file no rule names raised
+    # UnknownCapabilityError, which the bridge did not treat as a refusal: with
+    # any file in the workspace execute failed before the command ran, and a
+    # command that wrote a file ran, then was reported to the model as denied.
+    from omnicoreagent.governance.policy import policy_from_mapping
+
+    policy = policy_from_mapping({
+        "name": "strict-with-sandbox", "mode": "strict",
+        "rules": {"allow": [
+            {"rule_id": "sandbox", "capability": "sandbox.*"},
+            {"rule_id": "commands", "capability": "process.exec"},
+        ]},
+    })
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+    storage.write_text("notes.txt", "private")
+
+    async with _scope(storage, policy=policy).active() as scope:
+        result = await _sh(scope, "ls; echo 42; echo out > made.txt")
+
+    assert result.exit_code == 0
+    assert "42" in result.stdout and "notes.txt" not in result.stdout
+    assert not (tmp_path / "files" / "made.txt").exists()
+    assert result.metadata["workspace"]["written"] == []
+    assert [s["reason"] for s in result.metadata["workspace"]["skipped"]] == ["not permitted by policy"]

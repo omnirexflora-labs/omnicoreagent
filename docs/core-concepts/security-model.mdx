@@ -61,8 +61,13 @@ profile. What it does with each kind of request:
   files into it (`ask_sandbox_host_mount`). Nothing else pauses.
 - **Refused without asking:** reading raw secrets, host files outside the
   workspace, network access from the **host** (any `network.*` request, rule
-  `deny_unrestricted_network_egress`), installing packages, and shell
-  commands on the host.
+  `deny_unrestricted_network_egress`), installing packages as a capability (a
+  `package.install` request, rule `deny_unrestricted_package_install`), and
+  shell commands on the host.
+
+Inside a sandbox, `pip install` is not a `package.install` request: it is an
+ordinary command, allowed like any other command there. What contains it is
+the sandbox's network, which is off until a person approves turning it on.
 
 There is no budget until you set one, and no sandbox (no `execute` tool) until
 you configure one. `governance_config={"enabled": False}` turns it off. There
@@ -160,6 +165,29 @@ Install the Docker extra with `pip install "omnicoreagent[docker]"`.
 
 Every rule: [policy reference](/docs/reference/policy). Your own rules:
 [Policies](/docs/core-concepts/policies).
+
+`permissive-dev`, the default, **allows deletes in the workspace**: the
+agent's `delete_file` and `clear_files` run without asking (its
+`allow_local_dev_workspace` rule allows every `workspace.*` request). The
+workspace is the agent's own directory, never files outside it. To have a
+person approve each delete, add ask rules to the profile:
+
+```python
+from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy
+
+policy = build_default_policy("permissive-dev")
+policy.rules.ask += [
+    PolicyRule(rule_id="ask_before_delete", effect=PolicyEffect.ASK,
+               capability="workspace.files.delete", reason="Deleting a file needs a person."),
+    PolicyRule(rule_id="ask_before_clear", effect=PolicyEffect.ASK,
+               capability="workspace.files.clear", reason="Clearing the workspace needs a person."),
+]
+agent_config = {"governance_config": {"policy": policy}}
+```
+
+An ask outranks the profile's allow, so every other workspace call is still
+allowed and only these two pause the run
+([Approvals](/docs/core-concepts/approvals)).
 
 ## What the Docker sandbox enforces
 

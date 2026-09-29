@@ -170,7 +170,7 @@ def _read_policy_file(path: Path) -> dict[str, Any]:
         try:
             data = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise PolicyLoadError(f"Invalid JSON policy file: {path}") from exc
+            raise PolicyLoadError(f"Invalid JSON policy file: {path}: {exc}") from exc
     elif suffix in {".yaml", ".yml"}:
         raise PolicyLoadError(
             "YAML policies are not supported. Use a JSON policy file or a policy in code."

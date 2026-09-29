@@ -36,8 +36,9 @@ background worker on a server, and onto a benchmark.
 <CardGroup cols={3}>
   <Card title="It stays in bounds" icon="shield-check">
     Before each action, the policy decides: **allow** it, **ask a person**, or
-    **refuse** it, and names the rule. Limits on tokens, cost, steps and tool
-    calls are checked before a call is made, not added up after. On by default.
+    **refuse** it, and names the rule; the policy is on by default. Budgets on
+    tokens, cost, model calls and tool calls, once you set them, are checked
+    before a call is made, not added up after.
   </Card>
   <Card title="It picks up where it stopped" icon="rotate">
     A run pauses for a person or a top-up and continues where it stopped; with

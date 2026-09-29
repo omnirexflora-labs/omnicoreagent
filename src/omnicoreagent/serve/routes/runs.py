@@ -186,6 +186,14 @@ def create_runs_router() -> APIRouter:
     ) -> dict:
         # A caller that lost its connection had no run id and no way to find
         # what waits for a person (the 0.5.0rc1 stranger test).
+        from omnicoreagent.core.runs import RUN_STATUSES
+
+        if status is not None and status not in RUN_STATUSES:
+            # A misspelt status found no runs and answered 200 (the 0.5.0rc2 gate).
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown status {status!r}; one of: {', '.join(RUN_STATUSES)}",
+            )
         agent = get_agent(request)
         records = await agent.list_runs(session_id=session_id, status=status, limit=limit)
         return {"runs": [_public_run(agent, record) for record in records]}
@@ -428,6 +436,9 @@ def _public_run(agent, record: dict) -> dict:
         for key in (
             "run_id", "session_id", "agent_name", "agent_version", "status", "step",
             "trace_ids", "tool_calls", "usage", "error", "created_at", "updated_at",
+            # Whether a `running` run is alive, and which try this is: what
+            # Durable runs reads from get_run, over HTTP too (the 0.5.0rc2 gate).
+            "heartbeat_at", "lease_seconds", "attempt", "previous_attempts",
         )
     }
     view["approvals"] = [_public_view(agent, a, record) for a in record.get("approvals") or []]

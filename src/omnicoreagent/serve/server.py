@@ -5,6 +5,7 @@ The primary entry point for turning an OmniCoreAgent into a production-ready
 FastAPI server.
 """
 
+import socket
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -129,18 +130,20 @@ class OmniServe:
             workers=final_workers,
         )
 
+        sock = bind_server_socket(final_host, final_port)
         logger.info(f"OmniServe: Starting server at http://{final_host}:{final_port}")
         logger.info(
             f"OmniServe: Swagger UI available at http://{final_host}:{final_port}/docs"
         )
 
-        uvicorn.run(
+        config = uvicorn.Config(
             self.app,
             host=final_host,
             port=final_port,
             workers=final_workers,
             log_level=self.config.log_level.lower(),
         )
+        uvicorn.Server(config).run(sockets=[sock])
 
     async def start_async(
         self,
@@ -166,6 +169,7 @@ class OmniServe:
             workers=self.config.workers,
         )
 
+        sock = bind_server_socket(final_host, final_port)
         logger.info(
             f"OmniServe: Starting async server at http://{final_host}:{final_port}"
         )
@@ -177,7 +181,7 @@ class OmniServe:
             log_level=self.config.log_level.lower(),
         )
         server = uvicorn.Server(config)
-        await server.serve()
+        await server.serve(sockets=[sock])
 
     def get_app(self) -> FastAPI:
         """
@@ -189,3 +193,26 @@ class OmniServe:
             The FastAPI application
         """
         return self.app
+
+
+def bind_server_socket(host: str, port: int) -> socket.socket:
+    """Take the port before the server starts up.
+
+    uvicorn runs the app's startup, then binds; a startup that took 26-110 s
+    (the 0.5.0rc2 gate) found a taken port only at the end, while clients
+    polling it reached whatever held it.
+    """
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+    except OSError as exc:
+        sock.close()
+        raise OSError(
+            exc.errno,
+            f"OmniServe cannot listen on {host}:{port}: it is in use or not "
+            f"available ({exc.strerror}); choose another port",
+        ) from exc
+    sock.set_inheritable(True)
+    return sock

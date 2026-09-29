@@ -30,7 +30,11 @@ from typing import TYPE_CHECKING, Any
 from omnicoreagent.core.workspace.paths import normalize_workspace_path
 from omnicoreagent.governance.capabilities import tool_authority_requests
 from omnicoreagent.governance.models import AuthorityTarget
-from omnicoreagent.governance.errors import ApprovalRequiredError, PolicyDeniedError
+from omnicoreagent.governance.errors import (
+    ApprovalRequiredError,
+    PolicyDeniedError,
+    UnknownCapabilityError,
+)
 
 if TYPE_CHECKING:
     from omnicoreagent.core.privacy import PrivacyFilter
@@ -259,8 +263,11 @@ class WorkspaceBridge:
             # rest are one summary per copy: the steward's trace held 8,812
             # recorded "allow"s for files copied into its sandboxes.
             await self.governance_engine.authorize_all(requests, record_allows=False)
-        except (PolicyDeniedError, ApprovalRequiredError):
-            # Anything else (budget, audit, evaluation failure) stops the command.
+        except (PolicyDeniedError, ApprovalRequiredError, UnknownCapabilityError):
+            # A strict policy that names no file rule refuses by not matching
+            # (the 0.5.0rc2 gate: the docs' own strict example failed every
+            # execute). Anything else (budget, audit, evaluation failure)
+            # stops the command.
             checks["denied"].append(path)
             return False
         checks["allowed"] += 1

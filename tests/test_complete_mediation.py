@@ -41,6 +41,10 @@ REVIEWED_SITES = {
         "execution service, which authorizes each as process.exec on surface "
         "host (never satisfying a rule that requires a sandbox) before it runs"
     ),
+    ("serve/server.py", "socket.socket"): (
+        "OmniServe's own listening socket, bound on the host and port the "
+        "operator configured, before startup so a taken port is found at once"
+    ),
     ("mcp_clients_connection/oauth.py", "socket.socket"): (
         "binds a loopback port to find a free one for the OAuth callback; "
         "sends and receives nothing"

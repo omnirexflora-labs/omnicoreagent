@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -91,6 +92,10 @@ def run(agent_path, instruction, instruction_file, session_id, run_id, tags,
     """Run one instruction unattended and exit with its terminal state."""
     from omnicoreagent.cli.headless import build_provenance
 
+    # From here until the run's own handler takes over, Ctrl-C is noted, not
+    # raised: raised inside an import it left an import lock held and hung
+    # the process (the 0.5.0rc2 gate). A second one stops at once.
+    early = _note_early_interrupts()
     text = _read_instruction(instruction, instruction_file)
     if approval_mode == "scripted" and not approvals_file:
         raise click.UsageError("--approval-mode scripted needs --approvals-file")
@@ -122,7 +127,12 @@ def run(agent_path, instruction, instruction_file, session_id, run_id, tags,
     except AgentFileError as exc:
         raise _StartupError(str(exc)) from exc
 
+    if early["count"]:
+        _stop_before_the_run()
+
     async def main():
+        if early["count"]:
+            _stop_before_the_run()
         try:
             return await execute_headless(agent, request)
         finally:
@@ -145,6 +155,32 @@ def run(agent_path, instruction, instruction_file, session_id, run_id, tags,
         err=True,
     )
     sys.exit(outcome.exit_code)
+
+
+def _note_early_interrupts() -> dict:
+    import signal
+
+    early = {"count": 0}
+
+    def noted(signum, frame):
+        early["count"] += 1
+        if early["count"] > 1:
+            click.echo("Stopped before the run started; nothing ran.", err=True)
+            os._exit(6)
+        click.echo(
+            "Stopping once the agent has loaded; nothing has run (Ctrl-C again to stop now)...",
+            err=True,
+        )
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, noted)
+    return early
+
+
+def _stop_before_the_run() -> None:
+    click.echo("status=interrupted exit=6 run_id=None error=interrupted before the run "
+               "started; nothing ran", err=True)
+    sys.exit(6)
 
 
 from omnicoreagent.cli.harbor import harbor_command  # noqa: E402

@@ -149,6 +149,11 @@ def tool_outcomes(trace: TelemetryTrace) -> dict[str, str]:
             if event.metadata.get("rejection_reason"):
                 outcomes[call_id] = "rejected"
             continue
+        if event.event_type == "tool_observation" and event.metadata.get("recovered_outcome"):
+            # A call that finished before its process died, answered on
+            # recovery from the run record: its recorded outcome.
+            outcomes[call_id] = event.metadata["recovered_outcome"]
+            continue
         if event.event_type not in _EXECUTION_EVENTS or not call_id:
             continue
         if event.metadata.get("tool_span_id"):

@@ -59,7 +59,7 @@ omniserve run --agent my_agent.py --port 8771
 
 ==================================================
 OmniServe
-OmniCoreAgent 0.5.0rc1
+OmniCoreAgent 0.5.0
 ==================================================
 Agent: support
 Server: http://0.0.0.0:8771
@@ -82,7 +82,8 @@ INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8771 (Press CTRL+C to quit)
 ```
 
-Wait for `/ready`, then ask:
+Wait for `/ready`, then ask. Loading the model library can take a minute on
+a busy machine; the `agent_name` in the answer confirms it is your server:
 
 ```bash
 curl -s localhost:8771/ready
@@ -263,9 +264,9 @@ The stored events of one run, inside a shared session, as JSON, as a
 compact trace, or replayed and followed over SSE:
 
 ```bash
-curl -s "localhost:8771/events/dave/list?run_id=$RUN_ID"     # {"session_id", "events", "count"}: 33 events
-curl -s "localhost:8771/events/dave/trace?run_id=$RUN_ID"    # {"session_id", "summary", "steps"}
-curl -sN "localhost:8771/events/dave?run_id=$RUN_ID"         # SSE; resume with ?cursor= or Last-Event-ID
+curl -s "localhost:8771/events/alice/list?run_id=$RUN_ID"    # {"session_id", "events", "count"}
+curl -s "localhost:8771/events/alice/trace?run_id=$RUN_ID"   # {"session_id", "summary", "steps"}
+curl -sN "localhost:8771/events/alice?run_id=$RUN_ID"        # SSE; resume with ?cursor= or Last-Event-ID
 curl -s "localhost:8771/telemetry/events?run_id=$RUN_ID&event_type=tool_result"
 curl -s "localhost:8771/telemetry/traces?session_id=alice&limit=20"
 ```
@@ -354,6 +355,7 @@ curl -s -X POST localhost:8773/run/sync -H "Content-Type: application/json" \
             "capability": "tool.local.call",
             "target": {"path": null, "host": null, "resource": null, "tool_name": "issue_refund", "mcp_server": null},
             "arguments": {"order_id": "1042", "amount": 42},
+            "command": null,
             "risk_level": "low",
             "reason": "Refunds need a person.",
             "expires_at": "2026-09-28T23:03:40.248649+00:00",
@@ -380,7 +382,7 @@ curl -s -X POST localhost:8773/runs/$RUN_ID/resume
 ```
 
 ```text
-{"approval_id":"approval_1db56482b7db412b96e07776776d86b4","status":"approved","tool_call_id":"call_LLR9crHj6dOvLFSdlwvzRJKl","tool_name":"issue_refund","capability":"tool.local.call","target":{"path":null,"host":null,"resource":null,"tool_name":"issue_refund","mcp_server":null},"risk_level":"low","reason":"Refunds need a person.","created_at":"2026-09-27T23:03:40.248649+00:00","expires_at":"2026-09-28T23:03:40.248649+00:00","approver":"alice","note":"Customer called.","decided_at":"2026-09-27T23:03:49.543763+00:00","edited_arguments":null,"delegated_run_id":null,"delegated_name":null}
+{"approval_id":"approval_1db56482b7db412b96e07776776d86b4","status":"approved","decision":"approve","tool_call_id":"call_LLR9crHj6dOvLFSdlwvzRJKl","tool_name":"issue_refund","capability":"tool.local.call","target":{"path":null,"host":null,"resource":null,"tool_name":"issue_refund","mcp_server":null},"command":null,"risk_level":"low","reason":"Refunds need a person.","created_at":"2026-09-27T23:03:40.248649+00:00","expires_at":"2026-09-28T23:03:40.248649+00:00","approver":"alice","note":"Customer called.","decided_at":"2026-09-27T23:03:49.543763+00:00","edited_arguments":null,"delegated_run_id":null,"delegated_name":null}
 {"status":"success","termination_reason":"stop","guardrail_result":null,"response":"Refunded order 1042 for $42.","approvals":null,"budget_request":null,"session_id":"bob","agent_name":"support","metric":{"requests":1,"request_tokens":1321,"response_tokens":14,"total_tokens":1335,"total_time":1.2692612289974932,"details":{"cached_input_tokens":1024}},"trace_id":"trace_144287d009e34dacbda7f2eed7db7a97","run_id":"run_192cf4b607f641cd9f7431befc89b93f"}
 ```
 
@@ -542,8 +544,10 @@ is a complete application served this way.
   <Step title="Startup">
     The server connects the agent's MCP servers, warms the model client,
     starts the background manager (registering the agent as `default`) and
-    its worker. Only then does `/ready` say `true`. `/health` answers as soon
-    as the process is up.
+    its worker. The server answers no request, `/health` included, until
+    startup has finished, which can take up to a minute on a busy machine.
+    After that, `/health` says the process is up, and `/ready` says `true`
+    while the agent is initialized and its MCP servers are connected.
   </Step>
   <Step title="Each request">
     Middleware, outermost first: CORS, request logging, the rate limit, the
@@ -580,7 +584,7 @@ to `api_prefix` (empty by default).
 |--------|-------|--------------|
 | `POST` | `/run/sync` | Run and wait; the result as JSON |
 | `POST` | `/run` | Run and stream SSE events, ending with `complete` |
-| `GET` | `/runs` | Runs by `status` and `session_id`, oldest first (`limit`, up to 500): what waits for a person, what a crash left `running`. Each as `GET /runs/{run_id}` returns it |
+| `GET` | `/runs` | Runs by `status` and `session_id`, oldest first (`limit`, up to 500): what waits for a person, what a crash left `running` (its `heartbeat_at` and `lease_seconds` say whether it is still alive; `attempt` which try it is). An unknown status is `422`. Each as `GET /runs/{run_id}` returns it |
 | `GET` | `/runs/{run_id}` | The run's record: status, step, usage, tool call states, approvals (never its conversation) |
 | `GET` | `/runs/{run_id}/trajectory` | The whole run as one story: every trace segment, totals, each tool call once, the approvals |
 | `POST` | `/runs/{run_id}/approvals/{approval_id}` | Decide an approval: `{"decision": "approve" \| "deny", "approver", "note"?, "arguments"?}` |
@@ -777,7 +781,10 @@ docker run -p 8000:8000 -e LLM_API_KEY omnicoreagent-serve
 The generated Dockerfile installs `omnicoreagent[serve]` on
 `python:3.12-slim`, copies the build context to `/app`, runs as a non-root
 user, checks `/health`, and keeps the workspace in `/tmp/workspace` (gone
-with the container unless you mount a volume). Add the extras your agent
+with the container unless you mount a volume). Its `HEALTHCHECK` allows a
+start period of 10 seconds (`--start-period=10s`); a slow host may need
+longer before `/health` first answers, so raise it in the Dockerfile or with
+`docker run --health-start-period=60s`. Add the extras your agent
 needs (`[serve,postgres]` for a SQL memory store). A persistent volume, a
 store for runs and readiness checks are on
 [Running the agent in a container](/docs/how-to-guides/agent-in-a-container).
@@ -943,6 +950,17 @@ store for runs and readiness checks are on
     Set `LLM_API_KEY` in the server's environment. A key the provider
     rejects starts fine, and each run ends with `status` `error`,
     `termination_reason` `provider_error`.
+  </Accordion>
+
+  <Accordion title="OmniServe cannot listen on host:port: it is in use">
+    Another process holds the port. The port is checked before the agent is
+    loaded, so this comes at once:
+
+    ```text
+    Error: OmniServe cannot listen on 0.0.0.0:8771: it is in use or not available (Address already in use); choose another port
+    ```
+
+    Pick another `--port`, or stop what holds it.
   </Accordion>
 </AccordionGroup>
 

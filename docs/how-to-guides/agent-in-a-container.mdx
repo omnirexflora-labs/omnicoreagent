@@ -82,8 +82,10 @@ CMD ["omniserve", "run", "--agent", "/app/agent.py"]
 - `postgres` is the SQL extra: SQLAlchemy, used for SQLite too.
 - The image holds no secret. The model key arrives at run time.
 - The health check asks `/ready`, which is `true` only once the agent is
-  initialized and its MCP servers are connected (`/health` is up as soon as
-  the process is). The slim image has no `curl`, so it uses Python.
+  initialized and its MCP servers are connected (`/health` only says the
+  process is up; neither answers before startup has finished, which can take
+  up to a minute on a busy machine, so raise `--start-period` on a slow
+  host). The slim image has no `curl`, so it uses Python.
 
 ```bash
 docker build -t support-agent .
@@ -103,8 +105,10 @@ docker run -d --name support -p 8000:8000 \
 ```
 
 `-e LLM_API_KEY` with no `=value` passes the variable through from your
-shell, so the key is not in your shell history or in `docker inspect`'s
-command line. In production, inject it the same way from your platform's
+shell, so the key is not in your shell history or on the `docker run`
+command line. It is still in the container's environment: `docker inspect`
+shows it under `Config.Env` to anyone who can reach the Docker daemon. In
+production, inject it the same way from your platform's
 secret store. `LLM_API_KEY` is the only model key variable the runtime reads.
 
 ```bash

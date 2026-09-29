@@ -141,7 +141,7 @@ async def test_an_agent_on_the_host_is_stopped_by_a_command_rule_by_name(tmp_pat
     assert (tmp_path / "build" / "app").read_text() == "keep"
     run = await agent.get_run(result["run_id"])
     outcomes = {c["tool_call_id"]: c["outcome"] for c in run["tool_calls"]}
-    assert outcomes == {"c1": "error", "c2": "success"}
+    assert outcomes == {"c1": "denied", "c2": "success"}
     trace = json.dumps(await agent.telemetry_store.get_trace(result["trace_id"]), default=str)
     assert "deny_recursive_rm" in trace
     await agent.cleanup()

@@ -163,12 +163,15 @@ class TelemetryConfig:
             raise ValueError("telemetry archive_index_url must not be empty")
         if self.archive_bodies_path is not None and not str(self.archive_bodies_path).strip():
             raise ValueError("telemetry archive_bodies_path must not be empty")
-        if self.retention_days is not None and self.retention_days < 0:
-            raise ValueError("telemetry retention_days must be non-negative or None")
-        if self.payload_retention_days is not None and self.payload_retention_days < 0:
-            raise ValueError(
-                "telemetry payload_retention_days must be non-negative or None"
-            )
+        for name in ("retention_days", "payload_retention_days"):
+            days = getattr(self, name)
+            # A string was a raw TypeError at the comparison (the 0.5.0rc2 gate).
+            if days is not None and (
+                isinstance(days, bool) or not isinstance(days, (int, float)) or days < 0
+            ):
+                raise ValueError(
+                    f"telemetry {name} must be a non-negative number of days or None, got {days!r}"
+                )
         if self.memory_max_traces is not None and self.memory_max_traces < 1:
             raise ValueError("telemetry memory_max_traces must be positive or None")
         for field_name in ("persistence_timeout_seconds", "export_timeout_seconds"):

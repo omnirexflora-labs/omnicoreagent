@@ -27,11 +27,13 @@ from omnicoreagent.governance.hashing import arguments_digest
 RUN_STATUSES = (
     "running",
     "awaiting_approval",
+    "awaiting_budget",
     "interrupted",
     "completed",
     "blocked",
     "failed",
     "cancelled",
+    "timeout",
 )
 
 _CURRENT: ContextVar["RunTracker | None"] = ContextVar("omnicoreagent_run", default=None)

@@ -4,7 +4,6 @@ import inspect
 from copy import deepcopy
 import os
 import random
-import sys
 import re
 import time
 import warnings
@@ -26,16 +25,50 @@ for logger_name in ["LiteLLM", "litellm", "litellm.proxy"]:
     _litellm_logger.propagate = False
 
 
+# Whether the model client's import has finished (not merely started).
+_LITELLM_LOADED = False
+# Whether the token counter's encoding has been loaded.
+_ENCODING_LOADED = False
+
+
 async def _litellm_off_loop():
-    """The model client, imported on a worker thread the first time.
+    """The model client, imported on a worker thread until it is loaded.
 
     ``import litellm`` takes seconds of CPU; on the event loop it held
-    everything else in the process (heartbeats, timers, other runs). Once it
-    is loaded, getting it again is immediate.
+    everything else in the process (heartbeats, timers, other runs). A call
+    made while another thread is still importing it waits on a thread too:
+    `litellm` is in sys.modules from the moment its import starts, and taking
+    that as loaded blocked the loop on the import lock for 21-40 s (the
+    0.5.0rc2 gate). Once loaded, getting it again is immediate.
     """
-    if "litellm" in sys.modules:
+    global _LITELLM_LOADED
+    if _LITELLM_LOADED:
         return _get_litellm()
-    return await asyncio.to_thread(_get_litellm)
+    module = await asyncio.to_thread(_get_litellm)
+    _LITELLM_LOADED = True
+    return module
+
+
+async def load_model_client() -> None:
+    """Load the model client now, off the event loop, so no request has to.
+
+    A server or a background worker calls this while it starts. A failure is
+    left for the request that needs the client, which reports it properly.
+    """
+    global _ENCODING_LOADED
+    if not _LITELLM_LOADED:
+        try:
+            await _litellm_off_loop()
+        except Exception as exc:
+            logger.debug(f"The model client could not be loaded early: {exc}")
+    if not _ENCODING_LOADED:
+        # The token counter's encoding, too: loaded (or downloaded) at a
+        # run's first count, on the loop, it froze it 2-3 s (the 0.5.0rc2
+        # gate). get_encoding falls back to an estimate on its own failure.
+        from omnicoreagent.core.summarizer import tokenizer
+
+        await asyncio.to_thread(tokenizer.get_encoding)
+        _ENCODING_LOADED = True
 
 
 def _get_litellm():
@@ -274,7 +307,6 @@ class LLMConnection:
 
     def __init__(self, model_config: dict[str, Any], api_key: str | None = None):
         self.model_config = dict(model_config or {})
-        self._warmed = False
         # Parameters this model has refused by name; not sent again.
         self._unsupported_params: set[str] = set()
         self.llm_api_key = api_key or self.model_config.get("api_key")
@@ -506,14 +538,7 @@ class LLMConnection:
         starts. A failure is left for the request that needs the client, which
         reports it properly; this only tries early.
         """
-        if self._warmed:
-            return
-        self._warmed = True
-        try:
-            await asyncio.to_thread(_get_litellm)
-        except Exception as exc:
-            self._warmed = False
-            logger.debug(f"The model client could not be loaded early: {exc}")
+        await load_model_client()
 
     def request_settings(self) -> dict[str, Any]:
         """The model and generation settings sent with every request."""

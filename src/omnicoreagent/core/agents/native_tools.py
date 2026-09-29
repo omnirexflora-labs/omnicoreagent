@@ -15,7 +15,7 @@ from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.runs import RunSuspended, current_run, waiting_for_approval
 from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
 from omnicoreagent.governance.calls import tool_call_metadata
-from omnicoreagent.governance.errors import PolicyDeniedError
+from omnicoreagent.governance.errors import GovernanceError, PolicyDeniedError
 from omnicoreagent.core.tools.mcp_tool_handler import MCPToolHandler
 from omnicoreagent.core.tools.tool_executor import ToolExecutor
 from omnicoreagent.core.types import AgentState, ToolCallResult
@@ -310,6 +310,8 @@ async def execute_native_turn(
                     )
                 except Exception as exc:
                     result = {"status": "error", "message": str(exc)}
+                    if isinstance(exc, GovernanceError):
+                        result["governance_error_code"] = exc.code
                 if _waiting_for_approval(call_id):
                     # A person has to decide this call: pause the program here.
                     run = current_run()
@@ -402,11 +404,21 @@ async def execute_native_turn(
                     for call in (run.record["tool_calls"] if run is not None else [])
                     if call["tool_call_id"] == request.id
                     and call["state"] == "completed"
-                    and call["outcome"] in {"success", "error"}
+                    and call["outcome"] in {"success", "error", "denied", "rejected"}
                 ),
                 None,
             )
             if finished is not None:
+                # The trace of this segment says how the call really ended,
+                # not "cancelled" for want of an execution record (the
+                # 0.5.0rc2 gate).
+                outcome["recovered_outcome"] = finished["outcome"]
+            if finished is not None and finished["outcome"] in {"denied", "rejected"}:
+                message = (
+                    f"This call was refused ({finished['outcome']}) and did not run; "
+                    "the reason was lost when the process running it stopped."
+                )
+            elif finished is not None:
                 # It ran to the end; only its result was lost with the process.
                 # Its recorded outcome stands, and it is not run again.
                 message = (
@@ -422,7 +434,9 @@ async def execute_native_turn(
                 )
             result = {
                 "tool_name": request.name,
-                "args": {},
+                # The call's own arguments: an empty {} here was copied by the
+                # model into its next call (the 0.5.0rc2 gate).
+                "args": arguments,
                 "status": "error",
                 "data": None,
                 "message": message,
@@ -456,6 +470,10 @@ async def execute_native_turn(
                 "data": None,
                 "message": str(exc),
             }
+            if isinstance(exc, GovernanceError):
+                # Authority the tool asked for while it ran (a sandbox
+                # command) was refused: a denial, as for the call's own.
+                result["governance_error_code"] = exc.code
         # Whatever the tool printed, a credential the runtime holds is not
         # handed to the model, the run's state, the workspace or the trace.
         result = scrub_credentials(result)
@@ -555,6 +573,7 @@ async def execute_native_turn(
                     ),
                     "tool_span_id": outcome.get("tool_span_id"),
                     "tool_result_event_id": outcome.get("tool_result_event_id"),
+                    "recovered_outcome": outcome.get("recovered_outcome"),
                 },
             )
             observation_event_id = observation_event.event_id
@@ -801,5 +820,14 @@ async def _record_tool_outcome(tool_call_id: str, result: dict) -> None:
     if error_type in {"cancelled", "timeout"}:
         await run.tool_finished(tool_call_id=tool_call_id, outcome=error_type, state="interrupted")
         return
-    outcome = "success" if result.get("status", "success") == "success" else "error"
+    if result.get("status", "success") == "success":
+        outcome = "success"
+    elif result.get("governance_error_code") == "invalid_arguments":
+        outcome = "rejected"
+    elif result.get("governance_error_code"):
+        # Refused by the policy or a person: the trace says `denied`, and the
+        # run record says the same (the 0.5.0rc2 gate found them disagreeing).
+        outcome = "denied"
+    else:
+        outcome = "error"
     await run.tool_finished(tool_call_id=tool_call_id, outcome=outcome)
