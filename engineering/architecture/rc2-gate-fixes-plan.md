@@ -25,3 +25,7 @@ land, and published only when a gate finds nothing to fix.
 - S4 A call the policy or a person refused reads `denied` in the run record
   (`rejected` for invalid arguments), as it does in the trace; it said
   `error` (area F).
+- S5 `GET /runs` and `GET /runs/{run_id}` include `heartbeat_at`,
+  `lease_seconds`, `attempt` and `previous_attempts`, so an operator over HTTP
+  can tell a dead `running` run from a live one (area F); an unknown `status`
+  filter is a 422 naming the valid ones, not an empty list (area B).

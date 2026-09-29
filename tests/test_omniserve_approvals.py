@@ -152,3 +152,29 @@ def test_runs_waiting_for_a_person_are_listed_over_http(tmp_path):
         by_session = client.get("/runs", params={"session_id": runs[0]["session_id"]}).json()["runs"]
         assert [r["run_id"] for r in by_session] == [paused["run_id"]]
         assert client.get("/runs", params={"status": "completed"}).json()["runs"] == []
+
+
+def test_a_run_over_http_shows_whether_it_is_alive_and_which_attempt(tmp_path):
+    # The 0.5.0rc2 gate (a stranger's app): Durable runs tells a dead
+    # `running` run from a live one by its heartbeat and attempt, which only
+    # Python's get_run showed; over HTTP an operator learned it from a 409.
+    agent, server = _server(tmp_path, WRITE_AND_DELETE, DELETE, "done")
+    with TestClient(server.app) as client:
+        paused = _pause(client)
+        body = client.get(f"/runs/{paused['run_id']}").json()
+        for key in ("attempt", "previous_attempts", "heartbeat_at", "lease_seconds"):
+            assert key in body, key
+        assert body["attempt"] == 1 and body["previous_attempts"] == []
+        (listed,) = client.get("/runs", params={"status": "awaiting_approval"}).json()["runs"]
+        assert listed["heartbeat_at"] == body["heartbeat_at"]
+
+
+def test_an_unknown_status_is_refused_not_an_empty_list(tmp_path):
+    # The 0.5.0rc2 gate: `status=bogus` (a typo) answered 200 with no runs.
+    agent, server = _server(tmp_path, "done")
+    with TestClient(server.app) as client:
+        refused = client.get("/runs", params={"status": "awaiting-approval"})
+        assert refused.status_code == 422
+        assert "awaiting_approval" in refused.text  # the valid ones are named
+        assert client.get("/runs", params={"status": "awaiting_budget"}).status_code == 200
+        assert client.get("/runs", params={"status": "timeout"}).status_code == 200
