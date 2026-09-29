@@ -70,7 +70,9 @@ modal = ["modal>=1.5.5"]
 e2b = ["e2b>=2.51.0"]
 daytona = ["daytona>=0.214.0"]
 vercel = ["vercel-sandbox>=0.6.0"]
-postgres = ["sqlalchemy>=2.0.54", "psycopg2-binary>=2.9.13"]
+# Both drivers: SQLAlchemy 2.0 uses psycopg2 for postgresql://, 2.1 uses psycopg 3.
+# With one, the documented URL failed on a fresh install (the 0.5.0rc1 gate).
+postgres = ["sqlalchemy>=2.0.54", "psycopg2-binary>=2.9.13", "psycopg[binary]>=3.2"]
 # Running as a Harbor (Terminal-Bench) agent: the adapter in
 # omnicoreagent.harbor derives from Harbor's own installed-agent base class.
 harbor = ["harbor>=0.23.0"]
@@ -97,6 +99,7 @@ all = [
     "redis>=8.1.0",
     "sqlalchemy>=2.0.54",
     "psycopg2-binary>=2.9.13",
+    "psycopg[binary]>=3.2",
     "motor>=3.7.1",
     "pymongo>=4.18.1",
     "boto3>=1.43.98",
