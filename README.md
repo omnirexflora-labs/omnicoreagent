@@ -6,8 +6,8 @@
 </p>
 
 <p align="center">
-  <strong>The governed runtime for Python agents you can let act.</strong><br />
-  <em>Governed, sandboxed, durable, budgeted — and every run kept as evidence you can read, evaluate and train on.</em>
+  <strong>Give your agent real work. Keep control.</strong><br />
+  <em>Every action checked before it runs. Every run survives a crash without silently redoing anything. Every step on the record.</em>
 </p>
 
 <p align="center">

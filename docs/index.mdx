@@ -1,6 +1,6 @@
 ---
 title: OmniCoreAgent
-description: 'The governed runtime for Python agents you can let act.'
+description: 'Give your agent real work. Keep control.'
 mode: 'wide'
 ---
 
@@ -17,43 +17,50 @@ mode: 'wide'
   style={{ width: "420px", maxWidth: "100%" }}
 />
 
-## The runtime around the model
+## Give your agent real work. Keep control.
 
-A model is not an agent. **OmniCoreAgent** is everything around it: the loop,
-tools, memory and files — and, once the agent can do real things, the policy
-that says what it may do, the sandbox its code runs in, the record that survives
-a crash, the budget that stops it spending, and the evidence of every run.
+**Every action checked before it runs. Every run survives a crash without silently redoing anything. Every step on the record.**
 
-OmniCoreAgent is an agent **runtime and harness**, used through a **Python
-SDK**. One agent object, from a first script to a governed background worker
-on a server, and onto a benchmark.
-
-| | What it means here |
-|---|---|
-| **Runtime** | What executes and keeps the work: runs and their state, the durable record, workers, sandboxes, persistence. |
-| **Harness** | What surrounds the model and controls each step: the loop, context, tool execution, approvals, budgets, recovery, telemetry. |
-| **SDK** | What you write against: `OmniCoreAgent`, `ToolRegistry`, the configuration, the methods, the CLI and the HTTP API. |
+An agent that does real work (writes code, runs commands, changes systems,
+calls APIs) needs more around it than a loop and tools. **OmniCoreAgent** is the
+runtime around the model: it knows up front what the agent may and may not do,
+it carries a run through pauses and crashes, and it keeps every step, so you
+can trace everything the agent did. It is a **runtime and harness**, used
+through a **Python SDK**: one agent object, from a first script to a governed
+background worker on a server, and onto a benchmark.
 
 <Frame>
   <img src="/assets/how-a-run-works.svg" alt="How a run works: your app calls OmniCoreAgent, which governs every action with a policy, a budget and a sandbox, talks to the model and to tools, and keeps the evidence of the run." />
 </Frame>
 
 <CardGroup cols={3}>
-  <Card title="It acts safely" icon="shield-check">
-    A policy allows, denies or **asks a person** before each action. Commands
-    run in a sandbox that is not given your keys and tokens. A budget prices
-    each model call and holds that amount before the call is made.
+  <Card title="It stays in bounds" icon="shield-check">
+    Before each action, the policy decides: **allow** it, **ask a person**, or
+    **refuse** it, and names the rule. Limits on tokens, cost, steps and tool
+    calls are checked before a call is made, not added up after. On by default.
   </Card>
-  <Card title="It survives" icon="rotate">
-    A run pauses for a person or a top-up and resumes where it stopped — with
-    a durable memory store, even after a crash, in another process — and never
-    repeats a call silently.
+  <Card title="It picks up where it stopped" icon="rotate">
+    A run pauses for a person or a top-up and continues where it stopped; with
+    a durable store, even after a crash, in another process. It never silently
+    redoes an action it already started.
   </Card>
-  <Card title="It leaves evidence" icon="magnifying-glass-chart">
-    Every run is kept: what the model saw at each step, what it did, what came
-    back, outcomes that arrive later, and records to evaluate or train on.
+  <Card title="It's all on the record" icon="magnifying-glass-chart">
+    Every step is kept: what the model saw, what it did, what the policy
+    decided and who approved, what it cost, and outcomes that arrive later, to
+    review, evaluate and train on.
   </Card>
 </CardGroup>
+
+And what every runtime for real work needs: sandboxes that are not given your
+keys, human approval, MCP, sub-agents, scheduled runs, an HTTP server, and the
+same agent on [Harbor and Terminal-Bench](/docs/how-to-guides/harbor).
+[How it compares](/docs/comparison).
+
+| | What it means here |
+|---|---|
+| **Runtime** | What executes and keeps the work: runs and their state, the durable record, workers, sandboxes, persistence. |
+| **Harness** | What surrounds the model and controls each step: the loop, context, tool execution, approvals, budgets, recovery, telemetry. |
+| **SDK** | What you write against: `OmniCoreAgent`, `ToolRegistry`, the configuration, the methods, the CLI and the HTTP API. |
 
 ## Start in three steps
 
