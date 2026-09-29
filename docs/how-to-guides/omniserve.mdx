@@ -264,9 +264,9 @@ The stored events of one run, inside a shared session, as JSON, as a
 compact trace, or replayed and followed over SSE:
 
 ```bash
-curl -s "localhost:8771/events/dave/list?run_id=$RUN_ID"     # {"session_id", "events", "count"}: 33 events
-curl -s "localhost:8771/events/dave/trace?run_id=$RUN_ID"    # {"session_id", "summary", "steps"}
-curl -sN "localhost:8771/events/dave?run_id=$RUN_ID"         # SSE; resume with ?cursor= or Last-Event-ID
+curl -s "localhost:8771/events/alice/list?run_id=$RUN_ID"    # {"session_id", "events", "count"}
+curl -s "localhost:8771/events/alice/trace?run_id=$RUN_ID"   # {"session_id", "summary", "steps"}
+curl -sN "localhost:8771/events/alice?run_id=$RUN_ID"        # SSE; resume with ?cursor= or Last-Event-ID
 curl -s "localhost:8771/telemetry/events?run_id=$RUN_ID&event_type=tool_result"
 curl -s "localhost:8771/telemetry/traces?session_id=alice&limit=20"
 ```
@@ -544,8 +544,10 @@ is a complete application served this way.
   <Step title="Startup">
     The server connects the agent's MCP servers, warms the model client,
     starts the background manager (registering the agent as `default`) and
-    its worker. Only then does `/ready` say `true`. `/health` answers as soon
-    as the process is up.
+    its worker. The server answers no request, `/health` included, until
+    startup has finished, which can take up to a minute on a busy machine.
+    After that, `/health` says the process is up, and `/ready` says `true`
+    while the agent is initialized and its MCP servers are connected.
   </Step>
   <Step title="Each request">
     Middleware, outermost first: CORS, request logging, the rate limit, the
@@ -779,7 +781,10 @@ docker run -p 8000:8000 -e LLM_API_KEY omnicoreagent-serve
 The generated Dockerfile installs `omnicoreagent[serve]` on
 `python:3.12-slim`, copies the build context to `/app`, runs as a non-root
 user, checks `/health`, and keeps the workspace in `/tmp/workspace` (gone
-with the container unless you mount a volume). Add the extras your agent
+with the container unless you mount a volume). Its `HEALTHCHECK` allows a
+start period of 10 seconds (`--start-period=10s`); a slow host may need
+longer before `/health` first answers, so raise it in the Dockerfile or with
+`docker run --health-start-period=60s`. Add the extras your agent
 needs (`[serve,postgres]` for a SQL memory store). A persistent volume, a
 store for runs and readiness checks are on
 [Running the agent in a container](/docs/how-to-guides/agent-in-a-container).
