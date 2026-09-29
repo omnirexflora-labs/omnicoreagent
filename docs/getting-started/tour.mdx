@@ -136,26 +136,34 @@ inside the sandbox, not on your machine, and the sandbox is not given your
 process's keys and tokens.
 
 ```python
-agent = OmniCoreAgent(
-    name="builder",
-    system_instruction="Use the execute tool to run commands. Answer in plain text, without markdown.",
-    model_config={"provider": "openai", "model": "gpt-5.6-terra"},
-    agent_config={
-        "governance_config": {
-            "enabled": True,
-            "profile": "interactive-dev",
-            "sandbox_config": {"provider": "docker"},
-        },
-    },
-)
-result = await agent.run("Which Linux distribution and Python version does your sandbox have? Check, don't guess.")
-print(result["response"])
+import asyncio
 
-trajectory = await agent.get_trajectory(result["trace_id"])
-for step in trajectory["steps"]:
-    for call in step["tool_calls"]:
-        for execution in call["executions"]:
-            print("ran:", execution["command"], "| exit", execution["exit_code"], "| in", execution["sandbox_provider"])
+from omnicoreagent import OmniCoreAgent
+
+async def main():
+    agent = OmniCoreAgent(
+        name="builder",
+        system_instruction="Use the execute tool to run commands. Answer in plain text, without markdown.",
+        model_config={"provider": "openai", "model": "gpt-5.6-terra"},
+        agent_config={
+            "governance_config": {
+                "enabled": True,
+                "profile": "interactive-dev",
+                "sandbox_config": {"provider": "docker"},
+            },
+        },
+    )
+    result = await agent.run("Which Linux distribution and Python version does your sandbox have? Check, don't guess.")
+    print(result["response"])
+
+    trajectory = await agent.get_trajectory(result["trace_id"])
+    for step in trajectory["steps"]:
+        for call in step["tool_calls"]:
+            for execution in call["executions"]:
+                print("ran:", execution["command"], "| exit", execution["exit_code"], "| in", execution["sandbox_provider"])
+    await agent.cleanup()
+
+asyncio.run(main())
 ```
 
 ```text
@@ -182,27 +190,35 @@ little above the hold; the real cost is recorded either way. Here, a limit
 far too small:
 
 ```python
-agent = OmniCoreAgent(
-    name="thrifty",
-    system_instruction="You are a helpful assistant.",
-    model_config={"provider": "openai", "model": "gpt-5.6-terra"},
-    agent_config={
-        "governance_config": {
-            "enabled": True,
-            "profile": "interactive-dev",
-            "budgets": {"request": [{"meter": "model_cost_usd", "limit": 0.0001}]},
-        },
-    },
-)
-result = await agent.run("Write a haiku about budgets.")
-print("status:", result["status"])
-request = result["budget_request"]
-print("needs", request["needed"], "| limit", request["limit"], "| spent", request["used"])
+import asyncio
 
-await agent.grant_budget(result["run_id"], approver="alice", note="one-off, for the tour")
-resumed = await agent.resume(result["run_id"])
-print("status:", resumed["status"])
-print(resumed["response"])
+from omnicoreagent import OmniCoreAgent
+
+async def main():
+    agent = OmniCoreAgent(
+        name="thrifty",
+        system_instruction="You are a helpful assistant.",
+        model_config={"provider": "openai", "model": "gpt-5.6-terra"},
+        agent_config={
+            "governance_config": {
+                "enabled": True,
+                "profile": "interactive-dev",
+                "budgets": {"request": [{"meter": "model_cost_usd", "limit": 0.0001}]},
+            },
+        },
+    )
+    result = await agent.run("Write a haiku about budgets.")
+    print("status:", result["status"])
+    request = result["budget_request"]
+    print("needs", request["needed"], "| limit", request["limit"], "| spent", request["used"])
+
+    await agent.grant_budget(result["run_id"], approver="alice", note="one-off, for the tour")
+    resumed = await agent.resume(result["run_id"])
+    print("status:", resumed["status"])
+    print(resumed["response"])
+    await agent.cleanup()
+
+asyncio.run(main())
 ```
 
 ```text
