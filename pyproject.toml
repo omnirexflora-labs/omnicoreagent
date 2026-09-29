@@ -56,6 +56,9 @@ dependencies = [
     "click>=8.5.0",
     "docstring_parser>=0.18.0",
     "packaging>=26.3",
+    # Governance parses shell commands to apply command rules (MIT, binary wheels).
+    "tree-sitter>=0.26.0",
+    "tree-sitter-bash>=0.25.1",
 ]
 
 [project.optional-dependencies]

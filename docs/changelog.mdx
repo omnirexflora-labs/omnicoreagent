@@ -9,6 +9,44 @@ icon: 'clock-rotate-left'
 Every release, with its notes, is also on
 [GitHub Releases](https://github.com/omnirexflora-labs/omnicoreagent/releases).
 
+## 0.4.4
+
+*September 2026 · Python 3.12+*
+
+Filming OmniCoreAgent as it really runs (an agent killed mid-payment, a
+command denied, a budget topped up from another process) found two gaps.
+This release closes them.
+
+### New
+
+- **[Rules on shell commands](/docs/reference/policy#rules-on-shell-commands).**
+  Every command reached the policy as `sh`, so no rule could name `rm -rf`. A
+  `process.exec` rule can now carry a `command` matcher (`program`, `prefix`,
+  `args_any`). The command is parsed first, so quoting, paths, `$(...)`,
+  `sudo`, `sh -c '...'`, `xargs` and `find -exec` do not hide what runs. Any
+  matching deny or ask applies; an allow needs every command proven; a command
+  whose effect cannot be proven (`eval`, `... | sh`) is never allowed by one.
+  Rules carry `examples`, checked when the policy loads. Tested against the
+  bypasses that defeated text denylists elsewhere, and against a real shell.
+
+### Fixed
+
+- **An approval for a command now shows the command, and is bound to it.** A
+  person asked to approve a command on the host saw `sh` and an argument count,
+  and the approval did not name the command: approving `ls` looked the same as
+  approving `rm -rf ~`. It now lists the commands it would run and applies to
+  that exact text.
+- **`budget_status` and `abandon_run` work from a process that never ran a
+  query.** `budget_status` answered `[]`, and `abandon_run` left the run's
+  budget holds on the day's counter, when called from a second process.
+- **An unknown key in a policy rule is a clear `PolicyLoadError`** naming the
+  rule and the key, not a bare `TypeError`.
+
+### Changed
+
+- **New dependencies:** `tree-sitter` and `tree-sitter-bash` (MIT, binary
+  wheels), to parse commands.
+
 ## 0.4.3
 
 *September 2026 · Python 3.12+*

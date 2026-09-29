@@ -190,6 +190,17 @@ is part of `sandbox.*` here: to keep the network behind a person, add an
 `ask` rule for it, as the development profiles do ([Policy
 reference](/docs/reference/policy)).
 
+### Rules on what a command runs
+
+A `process.exec` rule can also name what a command would really run, with a
+`command` matcher: deny `rm -r`, ask before `git push`, allow only `git status`
+and `git log`. The command is parsed first, so `git status && rm -rf ~`,
+`echo $(rm -rf ~)`, `sudo /bin/rm -rf ~` and `sh -c 'rm -rf ~'` are all seen
+as running `rm`; a command whose effect cannot be proven (`eval`, `... | sh`) is
+never allowed by such a rule. It applies wherever the command runs: on the host
+and in every sandbox. It narrows what the agent may do; the sandbox is still the
+boundary. See [Rules on shell commands](/docs/reference/policy#rules-on-shell-commands).
+
 ## Files between the workspace and the sandbox
 
 What is copied, and what is not:

@@ -48,6 +48,12 @@ def request_digest(request: Any) -> str:
         "target_role": metadata.get("target_role"),
         "arguments_digest": metadata.get("arguments_digest"),
     }
+    command_digest = (metadata.get("command") or {}).get("digest")
+    if command_digest:
+        # A shell command's exact text: approving `ls` must not approve
+        # `rm -rf ~` (both reached the policy as `sh`). Only commands carry
+        # it, so every other approval's digest is unchanged.
+        payload["command_digest"] = command_digest
     if isinstance(payload["target"], dict):
         # The tool name inside the target duplicates metadata; keep one copy.
         payload["target"] = {k: v for k, v in payload["target"].items() if v is not None}
@@ -138,6 +144,9 @@ class RunApprovalResolver:
                 "risk_level": approval.risk_level,
                 "reason": approval.reason,
                 "arguments_digest": metadata.get("arguments_digest"),
+                # For a shell command: the commands it would run, which the
+                # person deciding reads (the target alone says only `sh`).
+                "command": _command_for_approver(metadata.get("command")),
                 "created_at": now.isoformat(),
                 "expires_at": (approval.expires_at or now + DEFAULT_APPROVAL_TTL).isoformat(),
                 "approver": None,
@@ -146,6 +155,17 @@ class RunApprovalResolver:
             }
         )
         return None
+
+
+def _command_for_approver(command: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not command or "summary" not in command:
+        return None
+    return {
+        "summary": list(command["summary"]),
+        "programs": list(command.get("programs") or []),
+        "opaque": bool(command.get("opaque")),
+        "opaque_reasons": list(command.get("opaque_reasons") or []),
+    }
 
 
 def _decision_reason(recorded: dict[str, Any]) -> str:

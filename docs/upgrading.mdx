@@ -237,3 +237,15 @@ crash:
 
 See [what is guaranteed](/docs/core-concepts/durable-runs#what-is-guaranteed)
 for the whole contract.
+
+## From 0.4.3 to 0.4.4
+
+Code that runs on 0.4.3 runs on 0.4.4. A policy without `command` rules decides
+exactly as before, with the same policy hash.
+
+| If | 0.4.3 | 0.4.4 | Do |
+|---|---|---|---|
+| A run is paused on an approval for a **shell command** when you upgrade | Its approval was not bound to the command text | Bound to it, so the pending approval no longer matches and is asked again | Decide it again; approvals of tools and everything else keep their digest |
+| A policy rule has a key it does not know (a typo) | A bare `TypeError`, or on load from a file an "Invalid policy file" error | `PolicyLoadError: rule <id>: unknown key(s) <key>` | Fix the key |
+| You read `budget_status` or call `abandon_run` from a process that never ran a query | `[]`, and holds left on the budget | The run's budgets, and holds released | Nothing |
+

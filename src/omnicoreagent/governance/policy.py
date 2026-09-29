@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import fields
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
 from omnicoreagent.governance.defaults import build_default_policy
+
 from omnicoreagent.governance.errors import PolicyLoadError
 from omnicoreagent.governance.hashing import attach_policy_hash
 from omnicoreagent.governance.models import (
@@ -119,7 +121,16 @@ def _normalize_rules(data: dict[str, Any]) -> PolicyRuleSet:
 def _normalize_rule(data: dict[str, Any], effect: str) -> PolicyRule:
     payload = dict(data)
     payload.setdefault("effect", effect)
-    return PolicyRule(**payload)
+    rule_id = payload.get("rule_id", "?")
+    unknown = sorted(set(payload) - {f.name for f in fields(PolicyRule)})
+    if unknown:
+        # A misspelt key would otherwise be a bare TypeError, or on an older
+        # runtime a rule silently narrower than written.
+        raise PolicyLoadError(f"rule {rule_id}: unknown key(s) {', '.join(unknown)}")
+    try:
+        return PolicyRule(**payload)
+    except (TypeError, ValueError) as exc:
+        raise PolicyLoadError(f"rule {rule_id}: {exc}") from exc
 
 
 def _validate_policy_path(path: Path, project_root: Path, *, explicit: bool) -> Path:

@@ -1,3 +1,4 @@
+import json
 import pytest
 
 import omnicoreagent
@@ -418,10 +419,13 @@ async def test_sandbox_execution_service_filters_policy_metadata():
         )
     )
 
-    assert engine.requests[0].metadata == {
-        "command": {"name": "ok", "argc": 3},
-        "purpose": "test",
-    }
+    metadata = engine.requests[0].metadata
+    assert metadata["purpose"] == "test" and set(metadata) == {"command", "purpose"}
+    # The command's shape and names, never its arguments: governance events
+    # record this metadata as it is, and arguments can hold secrets.
+    assert metadata["command"]["name"] == "ok" and metadata["command"]["argc"] == 3
+    assert metadata["command"]["programs"] == ["ok"]
+    assert "value" not in json.dumps(metadata) and "--secret" not in json.dumps(metadata)
 
 
 @pytest.mark.asyncio

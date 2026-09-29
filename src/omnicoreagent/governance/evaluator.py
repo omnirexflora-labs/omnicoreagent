@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fnmatch import fnmatchcase
 
+from omnicoreagent.governance.commands import allowable, command_matches, parsed_command
 from omnicoreagent.governance.errors import PolicyEvaluationError
 from omnicoreagent.governance.models import (
     AuthorityRequest,
@@ -52,6 +53,7 @@ class PolicyEvaluator:
                     "Policy cost budget exceeded.",
                 )
 
+        command = parsed_command(request)
         deny = _matching_rules(policy.rules.deny, request)
         if deny:
             return _matched_decision(
@@ -73,6 +75,7 @@ class PolicyEvaluator:
             )
 
         allow = _matching_rules(policy.rules.allow, request)
+        allow += _command_allow_rules(policy.rules.allow, request, command)
         if allow:
             return _matched_decision(
                 policy,
@@ -82,6 +85,24 @@ class PolicyEvaluator:
                 allow,
             )
 
+        if (
+            command is not None
+            and command.opaque
+            and policy.mode != PolicyMode.PERMISSIVE
+            # Only where a command rule could have allowed it: a policy with no
+            # command rules decides exactly as before.
+            and any(r.command is not None and _base_matches(r, request) for r in policy.rules.allow)
+        ):
+            # No command rule could allow what cannot be proven: say so.
+            return _decision(
+                policy,
+                request,
+                PolicyEffect.ASK if policy.mode == PolicyMode.INTERACTIVE else PolicyEffect.DENY,
+                ReasonCode.COMMAND_OPAQUE,
+                "No rule may allow this command: its effect cannot be proven ("
+                + "; ".join(command.opaque_reasons)
+                + ").",
+            )
         if policy.mode == PolicyMode.PERMISSIVE:
             return _decision(
                 policy,
@@ -114,6 +135,21 @@ def _matching_rules(rules: list[PolicyRule], request: AuthorityRequest) -> list[
 
 
 def _rule_matches(rule: PolicyRule, request: AuthorityRequest) -> bool:
+    if not _base_matches(rule, request):
+        return False
+    if rule.command is not None:
+        # Deny and ask: any command the text would run. A command allow rule is
+        # decided with the other allow rules, as a set (_command_allow_rules).
+        if rule.effect == PolicyEffect.ALLOW:
+            return False
+        command = parsed_command(request)
+        return command is not None and any(
+            command_matches(rule.command, c) for c in command.commands
+        )
+    return True
+
+
+def _base_matches(rule: PolicyRule, request: AuthorityRequest) -> bool:
     if not fnmatchcase(request.capability, rule.capability):
         return False
     if rule.conditions and not _conditions_match(rule, request, rule.effect):
@@ -121,6 +157,30 @@ def _rule_matches(rule: PolicyRule, request: AuthorityRequest) -> bool:
     if rule.target and not _target_matches(rule, request):
         return False
     return True
+
+
+def _command_allow_rules(
+    rules: list[PolicyRule], request: AuthorityRequest, command
+) -> list[PolicyRule]:
+    """The command allow rules that together allow this command, or none.
+
+    Allow must be proven: every command the text would run is plain and
+    matched by some allow rule. An opaque command is never allowed this way.
+    """
+    candidates = [r for r in rules if r.command is not None and _base_matches(r, request)]
+    if command is None or command.opaque or not command.commands or not candidates:
+        return []
+    used: list[PolicyRule] = []
+    for simple in command.commands:
+        rule = next(
+            (r for r in candidates if allowable(r.command, simple) and command_matches(r.command, simple)),
+            None,
+        )
+        if rule is None:
+            return []
+        if rule not in used:
+            used.append(rule)
+    return used
 
 
 def _conditions_match(

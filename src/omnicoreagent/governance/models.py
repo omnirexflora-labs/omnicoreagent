@@ -55,6 +55,9 @@ class ReasonCode(str, Enum):
     SANDBOX_REQUIRED = "sandbox_required"
     BUDGET_EXCEEDED = "budget_exceeded"
     EXPIRED_POLICY = "expired_policy"
+    # A shell command whose effect could not be proven (a parse error, eval,
+    # piping into a shell...): no command rule could allow it.
+    COMMAND_OPAQUE = "command_opaque"
 
 
 class PolicySource(str, Enum):
@@ -171,6 +174,46 @@ class TargetMatcher:
 
 
 @dataclass
+class CommandMatcher:
+    """What a rule matches in a shell command (see governance/commands.py).
+
+    ``program``: glob(s) on the program's name. ``prefix``: the first words,
+    program first; each is a glob or a list of alternatives. ``args_any``: globs,
+    any later argument (``-rf`` counts as ``-r`` and ``-f``). For allow rules
+    only: ``redirect`` lets output go to a file, ``env`` names variables that may
+    be set before the program.
+    """
+
+    program: str | list[str] | None = None
+    prefix: list[Any] | None = None
+    args_any: list[str] | None = None
+    redirect: bool = False
+    env: list[str] | None = None
+
+    def __post_init__(self) -> None:
+        if self.program is None and self.prefix is None:
+            raise ValueError("command needs a program or a prefix")
+        if self.program is not None:
+            if isinstance(self.program, str):
+                self.program = _non_empty_string(self.program, "command.program")
+            else:
+                self.program = _string_list(self.program, "command.program")
+        if self.prefix is not None:
+            if not isinstance(self.prefix, list) or not self.prefix:
+                raise ValueError("command.prefix must be a non-empty list")
+            self.prefix = [
+                token if isinstance(token, str) else _string_list(token, "command.prefix")
+                for token in self.prefix
+            ]
+        if self.args_any is not None:
+            self.args_any = _string_list(self.args_any, "command.args_any")
+        if not isinstance(self.redirect, bool):
+            raise ValueError("command.redirect must be true or false")
+        if self.env is not None:
+            self.env = _string_list(self.env, "command.env")
+
+
+@dataclass
 class PolicyRule:
     rule_id: str
     effect: PolicyEffect | str
@@ -180,6 +223,10 @@ class PolicyRule:
     constraints: PolicyConstraints | dict[str, Any] = field(default_factory=PolicyConstraints)
     reason: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    # A rule on the text of a shell command (process.exec only), and commands it
+    # must and must not match, checked when the policy loads.
+    command: CommandMatcher | dict[str, Any] | None = None
+    examples: dict[str, list[str]] | None = None
 
     def __post_init__(self) -> None:
         self.rule_id = _non_empty_string(self.rule_id, "rule_id")
@@ -201,6 +248,39 @@ class PolicyRule:
             raise ValueError("rule.constraints must be PolicyConstraints or dict")
         if not isinstance(self.metadata, dict):
             raise ValueError("rule.metadata must be a dict")
+        if isinstance(self.command, dict):
+            self.command = CommandMatcher(**self.command)
+        elif self.command is not None and not isinstance(self.command, CommandMatcher):
+            raise ValueError("rule.command must be a CommandMatcher or dict")
+        if self.command is not None:
+            from fnmatch import fnmatchcase
+
+            if not fnmatchcase("process.exec", self.capability):
+                raise ValueError(
+                    f"rule {self.rule_id}: a command matcher applies only to process.exec, "
+                    f"not {self.capability}"
+                )
+            if self.effect != PolicyEffect.ALLOW and (self.command.redirect or self.command.env):
+                raise ValueError(
+                    f"rule {self.rule_id}: command.redirect and command.env are for allow rules"
+                )
+        if self.examples is not None:
+            self._check_examples()
+
+    def _check_examples(self) -> None:
+        from omnicoreagent.governance.commands import rule_example_holds
+
+        if self.command is None:
+            raise ValueError(f"rule {self.rule_id}: examples need a command matcher")
+        if not isinstance(self.examples, dict) or set(self.examples) - {"match", "not_match"}:
+            raise ValueError(f"rule {self.rule_id}: examples takes match and not_match lists")
+        effect = self.effect.value
+        for example in _string_list(self.examples.get("match", []), "examples.match"):
+            if not rule_example_holds(effect, self.command, example):
+                raise ValueError(f"rule {self.rule_id} does not match its example {example!r}")
+        for example in _string_list(self.examples.get("not_match", []), "examples.not_match"):
+            if rule_example_holds(effect, self.command, example):
+                raise ValueError(f"rule {self.rule_id} matches {example!r}, listed as not_match")
 
 
 @dataclass

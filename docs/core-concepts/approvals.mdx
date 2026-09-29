@@ -149,6 +149,10 @@ Refund for order 1042 couldn’t be issued because approval was denied and store
 ```
 
 A decision applies once, to that exact call (tool, target and arguments).
+For a shell command, the pending approval names the commands it would run,
+one per line, in `approvals[i]["command"]["summary"]` (padding cannot hide a
+second one), and the decision applies to that exact command text: approving
+`ls` approves nothing else.
 
 ## From another process
 
