@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -95,6 +94,8 @@ def run(agent_path, instruction, instruction_file, session_id, run_id, tags,
     # From here until the run's own handler takes over, Ctrl-C is noted, not
     # raised: raised inside an import it left an import lock held and hung
     # the process (the 0.5.0rc2 gate). A second one stops at once.
+    from omnicoreagent._early_interrupt import install as _note_early_interrupts
+
     early = _note_early_interrupts()
     text = _read_instruction(instruction, instruction_file)
     if approval_mode == "scripted" and not approvals_file:
@@ -155,26 +156,6 @@ def run(agent_path, instruction, instruction_file, session_id, run_id, tags,
         err=True,
     )
     sys.exit(outcome.exit_code)
-
-
-def _note_early_interrupts() -> dict:
-    import signal
-
-    early = {"count": 0}
-
-    def noted(signum, frame):
-        early["count"] += 1
-        if early["count"] > 1:
-            click.echo("Stopped before the run started; nothing ran.", err=True)
-            os._exit(6)
-        click.echo(
-            "Stopping once the agent has loaded; nothing has run (Ctrl-C again to stop now)...",
-            err=True,
-        )
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(sig, noted)
-    return early
 
 
 def _stop_before_the_run() -> None:

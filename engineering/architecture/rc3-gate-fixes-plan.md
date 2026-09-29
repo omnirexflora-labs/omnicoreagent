@@ -22,3 +22,8 @@ and published only when a gate finds nothing to fix.
   commands that both need the sandbox network) waits on the one pending
   approval and is replayed on resume; it was refused and never run (area B).
 
+- T5 The `omnicoreagent` console script notes Ctrl-C before importing the
+  CLI (1-4 s under load): a Ctrl-C in that window gave a traceback and exit
+  130, or was swallowed in the import machinery and the run went ahead
+  (area E).
+

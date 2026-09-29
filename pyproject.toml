@@ -132,7 +132,7 @@ examples = [
 
 [project.scripts]
 omniserve = "omnicoreagent.serve.cli:main"
-omnicoreagent = "omnicoreagent.cli:main"
+omnicoreagent = "omnicoreagent._cli_entry:main"
 
 [project.urls]
 Repository = "https://github.com/omnirexflora-labs/omnicoreagent"
