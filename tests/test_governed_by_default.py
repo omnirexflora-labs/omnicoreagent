@@ -133,3 +133,23 @@ def test_a_delegated_task_is_left_out_of_the_authority_record_not_masked():
     metadata = _request_payload(request)["metadata"]
     assert "task" not in metadata and metadata["task_length"] == 14
     assert "[REDACTED]" not in json.dumps(metadata)
+
+
+@pytest.mark.parametrize("surface", [None, "host", "sandbox"])
+def test_the_default_decides_every_capability_by_a_named_rule(surface):
+    # "Every action checked before it runs": under the default profile no
+    # capability is allowed merely because no rule matched. MCP was (found
+    # running the cookbook under the new default, 2026-09-29): servers the
+    # application configures are trusted, and now a rule says so.
+    from omnicoreagent.governance import build_default_policy
+    from omnicoreagent.governance.capabilities import CAPABILITIES
+    from omnicoreagent.governance.evaluator import PolicyEvaluator
+    from omnicoreagent.governance.models import AuthorityRequest
+
+    policy = build_default_policy("permissive-dev")
+    unnamed = [
+        capability
+        for capability in sorted(CAPABILITIES)
+        if not PolicyEvaluator().evaluate(policy, AuthorityRequest(capability=capability, execution_surface=surface)).matched_rule_ids
+    ]
+    assert unnamed == []
