@@ -39,7 +39,7 @@ async def main():
         name="context_managed_agents",
         system_instruction="""You are a research assistant helping with a long project.
 You remember context from our entire conversation, even as it grows very long.""",
-        model_config=model_config(max_tokens=400),
+        model_config=model_config(max_tokens=1200),
         agent_config={
             # === CONTEXT MANAGEMENT ===
             # Keep long sessions inside a configured context budget.
@@ -89,8 +89,8 @@ You remember context from our entire conversation, even as it grows very long.""
         print(f"User: {msg[:50]}...")
 
         result = await agent.run(msg, session_id="test_session")
-        response = result.get("response", "")
-        print(f"Agent: {response[:200]}...")
+        response = result.get("response") or ""
+        print(f"Agent ({result['status']}): {response[:200]}...")
 
         # Show metrics
         metrics = await agent.get_metrics()

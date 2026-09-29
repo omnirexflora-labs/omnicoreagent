@@ -13,7 +13,7 @@ bump = true
 [project]
 name = "omnicoreagent"
 dynamic = ["version"]
-description = "The governed runtime for Python agents you can let act: policy on every action, durable runs, sandboxes, budgets, and the evidence of every run."
+description = "Give your agent real work. Keep control. Every action checked before it runs. Every run survives a crash without silently redoing anything. Every step on the record."
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [{ name = "Abiola Adeshina", email = "abiolaadedayo1993@gmail.com" }]
 requires-python = ">=3.12,<3.15"

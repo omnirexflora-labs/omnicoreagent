@@ -157,7 +157,11 @@ def _default_tool_offload() -> dict[str, Any]:
 
 def _default_governance_config() -> dict[str, Any]:
     return {
-        "enabled": False,
+        # On by default (0.5.0): an agent is governed unless it says otherwise.
+        # The docs said "It acts safely" while a quickstart agent had no policy.
+        "enabled": True,
+        # The profile when governance is enabled explicitly without one. An
+        # agent that never chose gets DEFAULT_PROFILE instead (see AgentConfig).
         "profile": "interactive-dev",
         "policy": None,
         "policy_path": None,
@@ -195,6 +199,11 @@ def _default_privacy_config() -> dict[str, Any]:
 
 
 GOVERNANCE_CONFIG_KEYS = frozenset(_default_governance_config())
+# The profile of an agent that never chose governance: it never pauses for a
+# person, and refuses raw secrets, unrestricted host files and network, package
+# installs and shell commands on the host. Someone who enabled governance
+# themselves keeps interactive-dev, as before 0.5.0, so no one's policy loosens.
+DEFAULT_PROFILE = "permissive-dev"
 
 
 @dataclass
@@ -293,9 +302,10 @@ class AgentConfig:
     # model gets a preview and an artifact it can read in full.
     tool_offload: dict[str, Any] = field(default_factory=_default_tool_offload)
     # The policy (a profile, a policy, or a policy file), budgets, the sandbox
-    # provider and its manifest, and how unanswered approvals are handled. Off
-    # by default; see the security model.
-    governance_config: dict[str, Any] = field(default_factory=_default_governance_config)
+    # provider and its manifest, and how unanswered approvals are handled. On
+    # by default with the permissive-dev profile; {"enabled": False} turns it
+    # off. Enabling it without a profile means interactive-dev.
+    governance_config: dict[str, Any] = field(default_factory=dict)
     # Where the agent's workspace lives: workspace_dir on local disk (default
     # ./workspace), or S3 / R2 storage.
     workspace_config: WorkspaceConfig | dict[str, Any] | None = None
@@ -363,9 +373,10 @@ class AgentConfig:
             self.governance_config,
             GOVERNANCE_CONFIG_KEYS,
         )
-        self.governance_config = _merge_defaults(
-            _default_governance_config(), self.governance_config
-        )
+        chosen = self.governance_config
+        self.governance_config = _merge_defaults(_default_governance_config(), chosen)
+        if "profile" not in chosen and chosen.get("enabled") is not True:
+            self.governance_config["profile"] = DEFAULT_PROFILE
         if self.workspace_config is not None:
             self.workspace_config = resolve_workspace_config(self.workspace_config)
 

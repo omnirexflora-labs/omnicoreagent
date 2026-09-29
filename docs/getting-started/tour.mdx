@@ -31,9 +31,10 @@ refunds are asked about.
 workspace, memory, skills, code mode and sandboxed commands; it asks before
 commands outside a sandbox, network access, package installs, MCP tools,
 sub-agents and background runs; and it denies reading raw secrets.
-`permissive-dev` allows sub-agents and background runs outright, and *denies*
-unsandboxed commands, host files, network access and package installs instead of
-asking. `strict-production` allows nothing but its own telemetry without a rule
+`permissive-dev`, the default for an agent that sets nothing, allows
+sub-agents, background runs and the MCP servers you configure outright, and
+*denies* unsandboxed commands, host files, network access and package installs
+instead of asking. `strict-production` allows nothing but its own telemetry without a rule
 of yours. See the [security model](/docs/core-concepts/security-model).
 </Note>
 

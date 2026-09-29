@@ -165,6 +165,21 @@ def _permissive_dev_policy() -> PolicyEnvelope:
                     effect=PolicyEffect.ALLOW,
                     capability="background.*",
                 ),
+                # MCP servers the application configures are trusted: starting
+                # and connecting to them, and calling their tools. Said by a
+                # rule, so no capability is allowed only because nothing matched.
+                PolicyRule(
+                    rule_id="allow_configured_mcp_servers",
+                    effect=PolicyEffect.ALLOW,
+                    capability="mcp.server.*",
+                    reason="MCP servers the application configured are trusted.",
+                ),
+                PolicyRule(
+                    rule_id="allow_configured_mcp_tools",
+                    effect=PolicyEffect.ALLOW,
+                    capability="tool.mcp.call",
+                    reason="MCP servers the application configured are trusted.",
+                ),
             ],
         ),
     )

@@ -349,8 +349,8 @@ In `agent_config["governance_config"]`:
 
 | Key | Default | What it does |
 |---|---|---|
-| `enabled` | `False` | Turns governance on |
-| `profile` | `"interactive-dev"` | Built-in profile |
+| `enabled` | `True` | `False` turns governance off (on by default since 0.5.0) |
+| `profile` | `"permissive-dev"` | Built-in profile. Enabling governance yourself without one means `"interactive-dev"`, as before 0.5.0 |
 | `policy` | `None` | Dict or `PolicyEnvelope` |
 | `policy_path` | `None` | JSON policy file |
 | `project_root` | current directory | Where policy files may live |

@@ -167,7 +167,10 @@ async def emit_approval_result(
 
 
 # Request metadata fields that carry delegated content rather than authority
-# facts. Their size and shape (for example ``task_length``) stay recorded.
+# facts. They are left out of the record (the delegation call keeps them, under
+# the capture policy); their size and shape (``task_length``) stay. A
+# "[REDACTED]" placeholder here made every governed run's full-capture evidence
+# look incomplete.
 _CONTENT_METADATA_KEYS = frozenset({"task"})
 
 
@@ -176,8 +179,7 @@ def _request_payload(request: AuthorityRequest) -> dict[str, Any]:
     metadata = payload.get("metadata")
     if isinstance(metadata, dict):
         payload["metadata"] = {
-            key: "[REDACTED]" if key in _CONTENT_METADATA_KEYS and value else value
-            for key, value in metadata.items()
+            key: value for key, value in metadata.items() if key not in _CONTENT_METADATA_KEYS
         }
     return payload
 

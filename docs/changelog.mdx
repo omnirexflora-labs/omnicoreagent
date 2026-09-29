@@ -9,6 +9,49 @@ icon: 'clock-rotate-left'
 Every release, with its notes, is also on
 [GitHub Releases](https://github.com/omnirexflora-labs/omnicoreagent/releases).
 
+## 0.5.0
+
+*September 2026 · Python 3.12+*
+
+**Give your agent real work. Keep control.** Every action checked before it
+runs. Every run survives a crash without silently redoing anything. Every step
+on the record. From this release an agent is governed unless it says otherwise.
+
+### Changed: governance is on by default
+
+An agent with no governance settings is governed by the `permissive-dev`
+profile. Its own tools, workspace, memory, code mode, skills, sub-agents and
+background runs are allowed, and nothing pauses for a person unless the agent is
+given a sandbox with network (then a person is asked first). Refused unasked:
+reading raw secrets, unrestricted host files and network, installing packages,
+and shell commands on the host. The MCP servers you configure are
+trusted: starting them and calling their tools is allowed by a named rule. There
+is no budget until you set one. `governance_config={"enabled": False}` turns it
+off. Enabling governance
+yourself without naming a profile still means `interactive-dev`, as before, so
+no one's policy loosens. See [Upgrading](/docs/upgrading), "From 0.4 to 0.5.0".
+
+### Changed: what a trace keeps by default
+
+A governed agent's tool and delegation arguments are recorded by name, not
+value, under the default capture; `telemetry_config={"capture": "full"}` keeps
+the values. Since every agent is now governed, this applies to all of them.
+
+### Fixed
+
+- **A governed run's evidence under full capture was reported incomplete.**
+  Every delegation's policy request masked its task as `[REDACTED]`, which the
+  trajectory counted as a capture gap. The task text is left out of that record
+  instead (the delegation call keeps it); `task_length` stays.
+
+### Docs
+
+- **A new landing page** that leads with what is different, and a
+  [comparison](/docs/comparison) with an Agno column and a row for what happens
+  to an interrupted tool call after a crash, each cell from the project's own
+  docs, read 2026-09-29. Pydantic AI's `cost_limit` cell is corrected: it is
+  checked after each response.
+
 ## 0.4.4
 
 *September 2026 · Python 3.12+*

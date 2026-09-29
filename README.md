@@ -6,8 +6,8 @@
 </p>
 
 <p align="center">
-  <strong>The governed runtime for Python agents you can let act.</strong><br />
-  <em>Governed, sandboxed, durable, budgeted — and every run kept as evidence you can read, evaluate and train on.</em>
+  <strong>Give your agent real work. Keep control.</strong><br />
+  <em>Every action checked before it runs. Every run survives a crash without silently redoing anything. Every step on the record.</em>
 </p>
 
 <p align="center">
@@ -114,7 +114,9 @@ Order 1042 has shipped via DHL.
 That is the whole loop: the model calls tools (independent calls run in one
 batch), results come back as structured observations, the session remembers,
 files land in a workspace, the injection guardrail watches, and the run is
-recorded. Everything below is opt-in.
+recorded, all under the default policy, which allowed its tools and would
+have refused raw secrets, host shell commands and unrestricted network.
+Everything below you add when you need it.
 
 Works with OpenAI, Anthropic, Gemini, Groq, DeepSeek, Mistral, Azure,
 OpenRouter and Ollama through one `model_config`

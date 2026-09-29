@@ -42,7 +42,10 @@ async def _warnings(tmp_path, monkeypatch, caplog, **agent_config):
 
 @pytest.mark.asyncio
 async def test_host_skill_scripts_without_governance_are_warned_about(tmp_path, monkeypatch, caplog):
-    codes, logged = await _warnings(tmp_path, monkeypatch, caplog, enable_agent_skills=True)
+    # Off on purpose: since 0.5.0 an agent is governed unless it says so.
+    codes, logged = await _warnings(
+        tmp_path, monkeypatch, caplog, enable_agent_skills=True, governance_config={"enabled": False}
+    )
 
     assert codes == ["ungoverned_host_scripts"]
     assert "no policy" in logged
