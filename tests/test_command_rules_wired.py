@@ -145,3 +145,25 @@ async def test_an_agent_on_the_host_is_stopped_by_a_command_rule_by_name(tmp_pat
     trace = json.dumps(await agent.telemetry_store.get_trace(result["trace_id"]), default=str)
     assert "deny_recursive_rm" in trace
     await agent.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_a_paused_run_shows_the_approver_the_command(tmp_path):
+    # What a person reads (get_run, OmniServe's /runs/{id}) names the commands,
+    # not `sh` and an argument count.
+    from test_execute_tool import ScriptedModel
+    from test_local_sandbox import _agent, _agent_policy
+
+    policy = _agent_policy()
+    policy.rules.ask.insert(0, PolicyRule(rule_id="ask_git_push", effect=PolicyEffect.ASK,
+                                          capability="process.exec", command={"prefix": ["git", "push"]}))
+    model = ScriptedModel([("c1", "execute", '{"command": "git status;   git push origin main"}')], "done")
+    agent = await _agent(model, tmp_path, policy=policy)
+
+    paused = await agent.run("Publish it.", session_id="push")
+
+    assert paused["status"] == "awaiting_approval"
+    approval = (await agent.get_run(paused["run_id"]))["approvals"][0]
+    assert approval["command"]["summary"] == ["git status", "git push origin main"]
+    assert approval["command"]["programs"] == ["git", "git"]
+    await agent.cleanup()
