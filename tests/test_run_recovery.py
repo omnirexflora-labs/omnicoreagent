@@ -166,6 +166,12 @@ async def test_a_finished_call_whose_result_was_not_saved_is_not_run_again(tmp_p
     # With the call's own arguments, not an empty {} the model then copied
     # into its next call's arguments (the 0.5.0rc2 gate).
     assert '"args": {"amount": 5}' in told["content"], told["content"]
+    # The trajectory agrees: the charge finished before the crash, so the
+    # resumed segment reports it succeeded, not cancelled; only the report,
+    # interrupted mid-call, ended cancelled (the 0.5.0rc2 gate).
+    story = await agent.get_run_trajectory("run_crash")
+    by_outcome = story["segments"][-1]["trajectory"]["totals"]["tool_calls"]["by_outcome"]
+    assert (by_outcome["success"], by_outcome["cancelled"]) == (1, 1), by_outcome
 
 
 @pytest.mark.asyncio

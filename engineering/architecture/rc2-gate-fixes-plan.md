@@ -61,3 +61,8 @@ land, and published only when a gate finds nothing to fix.
   model reads carries the call's arguments, not `{}`, which the model had
   copied into its next call (areas C and F).
 
+- S14 After a lost-result recovery, the resumed segment's trace reports the
+  finished call's recorded outcome, not `cancelled` for want of an execution
+  record; an interrupted call is still `cancelled` there, as documented
+  (area C).
+

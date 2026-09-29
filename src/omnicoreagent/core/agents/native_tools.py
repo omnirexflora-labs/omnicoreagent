@@ -408,6 +408,11 @@ async def execute_native_turn(
                 ),
                 None,
             )
+            if finished is not None:
+                # The trace of this segment says how the call really ended,
+                # not "cancelled" for want of an execution record (the
+                # 0.5.0rc2 gate).
+                outcome["recovered_outcome"] = finished["outcome"]
             if finished is not None and finished["outcome"] in {"denied", "rejected"}:
                 message = (
                     f"This call was refused ({finished['outcome']}) and did not run; "
@@ -568,6 +573,7 @@ async def execute_native_turn(
                     ),
                     "tool_span_id": outcome.get("tool_span_id"),
                     "tool_result_event_id": outcome.get("tool_result_event_id"),
+                    "recovered_outcome": outcome.get("recovered_outcome"),
                 },
             )
             observation_event_id = observation_event.event_id
