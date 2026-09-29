@@ -114,7 +114,9 @@ Order 1042 has shipped via DHL.
 That is the whole loop: the model calls tools (independent calls run in one
 batch), results come back as structured observations, the session remembers,
 files land in a workspace, the injection guardrail watches, and the run is
-recorded. Everything below is opt-in.
+recorded, all under the default policy, which allowed its tools and would
+have refused raw secrets, host shell commands and unrestricted network.
+Everything below you add when you need it.
 
 Works with OpenAI, Anthropic, Gemini, Groq, DeepSeek, Mistral, Azure,
 OpenRouter and Ollama through one `model_config`

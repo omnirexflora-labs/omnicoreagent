@@ -50,10 +50,16 @@ in a container, not on your host).
 
 ## The defaults
 
-**Governance is off by default:** no policy, no approvals, no budgets, no
-sandbox (no `execute` tool). Every tool the agent has may be called.
+**Governance is on by default** (since 0.5.0), with the `permissive-dev`
+profile: the agent's own tools, its workspace, memory, code mode, skills,
+sub-agents and background runs are allowed, and nothing pauses for a person
+unless the agent is given a sandbox with network (then a person is asked
+first). Refused unasked: reading raw secrets, unrestricted host files and
+network, installing packages, and shell commands on the host. There is no
+budget until you set one, and no sandbox (no `execute` tool) until you configure
+one. `governance_config={"enabled": False}` turns it off.
 
-| On without governance | Setting |
+| Also on by default | Setting |
 |---|---|
 | Injection guardrail on requests and tool results | `guardrail_mode="full"` |
 | Personal data redacted from traces | `privacy_config` |
@@ -65,9 +71,11 @@ sandbox (no `execute` tool). Every tool the agent has may be called.
 
 Every setting is in the [agent settings reference](/docs/reference/agent-config).
 
-## Turn it on
+## Choose a profile
 
-Enable governance and pick a built-in profile:
+Pick a built-in profile (`interactive-dev` asks a person before network, MCP
+calls, sub-agents and background runs; `strict-production` denies what no rule
+allows), or write [your own policy](/docs/core-concepts/policies):
 
 ```python
 import asyncio

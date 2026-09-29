@@ -133,10 +133,11 @@ The second line is the run's **trajectory**: the step, the tool the model
 chose, its arguments, and exactly what the model received back.
 
 <Note>
-This agent runs with **governance off**, the default: no policy, approvals,
-budgets or sandbox, so every tool it has may be called. The guardrail, privacy
-redaction and the trace are on already. Turning governance on is one setting;
-see [the defaults](/docs/core-concepts/security-model#the-defaults).
+This agent is **governed by default**: the `permissive-dev` policy allowed its
+tool, and would have refused reading raw secrets, shell commands on the host,
+unrestricted network and package installs. There is no budget until you set
+one. The guardrail, privacy redaction and the trace are on too; see
+[the defaults](/docs/core-concepts/security-model#the-defaults).
 </Note>
 
 ## Find your way
