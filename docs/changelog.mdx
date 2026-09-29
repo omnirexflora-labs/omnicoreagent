@@ -33,9 +33,10 @@ no one's policy loosens. See [Upgrading](/docs/upgrading), "From 0.4 to 0.5.0".
 
 ### Changed: what a trace keeps by default
 
-A governed agent's tool and delegation arguments are recorded by name, not
-value, under the default capture; `telemetry_config={"capture": "full"}` keeps
-the values. Since every agent is now governed, this applies to all of them.
+Under `telemetry_config={"capture": "default"}`, a governed agent's tool and
+delegation arguments are recorded by name, not value. Every agent is now
+governed, so under that preset this applies to all of them. The capture you
+get without setting one, `full`, keeps the values (personal data redacted).
 
 ### Fixed
 

@@ -97,9 +97,10 @@ commands and the wording will differ on your run.
 
 <Steps>
   <Step title="The tool appears only with a sandbox">
-    `execute` is added when governance is on **and** the configured provider can
-    run commands. Without `governance_config["enabled"]`, or with provider
-    `none`, the agent has no way to run a command.
+    `execute` is added when governance is on (the default) **and** the
+    configured provider can run commands. With governance turned off
+    (`"enabled": False`), or with provider `none`, the agent has no way to run
+    a command.
   </Step>
   <Step title="Each command is authorized twice">
     The tool call is `sandbox.execute`; the command inside the sandbox is
@@ -427,9 +428,11 @@ every capability in the [policy reference](/docs/reference/policy).
 
 <AccordionGroup>
   <Accordion title="The agent never calls execute">
-    The tool is not there. Check that `governance_config` has `"enabled": True`
-    and a `sandbox_config` whose provider runs commands (`none` does not). A
-    model that asks for it anyway gets:
+    The tool is not there. Check that governance is not turned off
+    (`"enabled": False`) and that `governance_config` has a `sandbox_config`
+    whose provider runs commands (`none` does not). Do not add
+    `"enabled": True` to fix it: without a profile that switches to
+    `interactive-dev`. A model that asks for it anyway gets:
 
     ```text
     Tool 'execute' is not available; discover it first if hidden
