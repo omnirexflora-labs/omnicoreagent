@@ -54,3 +54,6 @@ and published only when a gate finds nothing to fix.
   TimeoutError saying what timed out. It raised a bare TimeoutError out of
   `run()` after a fixed 20 s that covered the summary's model call (area A).
 
+- T14 Loading the model client also loads the OpenAI client modules litellm
+  would import lazily on the first request, on the event loop (area A).
+

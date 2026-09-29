@@ -210,3 +210,19 @@ async def test_a_run_stopped_during_the_warm_up_keeps_its_trace_on_the_record():
     story = await agent.get_run_trajectory("run_warm_cut")
     assert len(story["segments"]) == 1
     await agent.cleanup()
+
+
+def test_loading_the_client_also_loads_what_its_first_request_imports():
+    # The 0.5.0rc3 gate: litellm imports the OpenAI client's resources lazily,
+    # on the first request, on the event loop: 6-8 s under load.
+    import subprocess
+    import sys
+
+    script = (
+        "import sys\n"
+        "from omnicoreagent.core.llm import _get_litellm\n"
+        "_get_litellm()\n"
+        "print(all(m in sys.modules for m in ('openai.resources', 'litellm.llms.openai.openai')))\n"
+    )
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=300)
+    assert done.stdout.strip().splitlines()[-1] == "True", done.stdout + done.stderr

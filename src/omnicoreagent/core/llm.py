@@ -111,6 +111,14 @@ def _get_litellm():
     os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
     import litellm
 
+    # What its first request would otherwise import lazily, on the event
+    # loop: 6-8 s under load (the 0.5.0rc3 gate). Here, on the loader thread.
+    try:
+        import litellm.llms.openai.openai  # noqa: F401
+        import openai.resources  # noqa: F401
+    except ImportError:
+        pass
+
     if not _LITELLM_CONFIGURED:
         os.environ["LITELLM_LOG"] = "CRITICAL"
         litellm.set_verbose = False
