@@ -379,3 +379,27 @@ async def test_the_result_counts_the_whole_runs_usage(tmp_path):
     record = await agent.get_run(outcome.run_id)
     assert outcome.usage == record["usage"]
     assert outcome.usage["requests"] == len(model.calls) >= 2
+
+
+@pytest.mark.asyncio
+async def test_ctrl_c_interrupts_the_run_writes_its_evidence_and_exits_interrupted(tmp_path):
+    # The 0.5.0rc1 gate: Ctrl-C gave click's "Aborted!", exit 1, and no
+    # result.json or trajectory.json. The first Ctrl-C now asks the run to stop
+    # at its next step boundary; the run ends interrupted, with its evidence.
+    import os
+    import signal
+
+    ledger = tmp_path / "ledger"
+    agent = await _agent(RecordingModel(SEND, SEND, "sent"), ledger, ask=False, slow=1.5)
+    running = asyncio.create_task(execute_headless(agent, HeadlessRequest(instruction="send")))
+    await asyncio.sleep(0.8)  # the run is in its first tool call
+    handlers = getattr(asyncio.get_running_loop(), "_signal_handlers", {})
+    assert signal.SIGINT in handlers, "no Ctrl-C handler: a real Ctrl-C would abort with no evidence"
+    os.kill(os.getpid(), signal.SIGINT)
+
+    outcome = await asyncio.wait_for(running, 30)
+
+    assert (outcome.status, outcome.exit_code) == ("interrupted", ExitCode.INTERRUPTED)
+    assert outcome.trace_ids
+    assert len(_sent(ledger)) == 1  # the call in flight finished; no second one ran
+    assert signal.SIGINT not in getattr(asyncio.get_running_loop(), "_signal_handlers", {})

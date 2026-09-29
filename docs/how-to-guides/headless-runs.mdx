@@ -232,7 +232,7 @@ A rule matches on `tool_name`, `capability`, or both, and has a `decision`
 | 3 | is waiting for an approval |
 | 4 | is waiting for a budget |
 | 5 | timed out |
-| 6 | was interrupted |
+| 6 | was interrupted: `agent.interrupt`, or Ctrl-C / SIGTERM, which stops the run at its next step and still writes `result.json` and `trajectory.json` (a second Ctrl-C stops at once) |
 
 ### What it writes
 
