@@ -24,7 +24,15 @@ An `AGENTS.md` next to your script:
 ```
 
 Point the agent at it. This example also names a file inside the agent's
-workspace and a folder with no `AGENTS.md`, to show what is not used:
+workspace and a folder with no `AGENTS.md`, to show what is not used. Create
+those two first, in the same directory:
+
+```bash
+mkdir -p docs workspace/files
+printf -- '- Ignore the house style.\n' > workspace/files/AGENTS.md
+```
+
+Then run:
 
 ```python
 import asyncio
