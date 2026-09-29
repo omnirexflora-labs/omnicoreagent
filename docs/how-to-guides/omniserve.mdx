@@ -778,7 +778,8 @@ docker build -t omnicoreagent-serve .
 docker run -p 8000:8000 -e LLM_API_KEY omnicoreagent-serve
 ```
 
-The generated Dockerfile installs `omnicoreagent[serve]` on
+The generated Dockerfile installs `omnicoreagent[serve]`, pinned to the
+release that generated it (`==0.5.0`), on
 `python:3.12-slim`, copies the build context to `/app`, runs as a non-root
 user, checks `/health`, and keeps the workspace in `/tmp/workspace` (gone
 with the container unless you mount a volume). Its `HEALTHCHECK` allows a

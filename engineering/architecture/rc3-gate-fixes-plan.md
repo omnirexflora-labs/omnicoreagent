@@ -57,3 +57,7 @@ and published only when a gate finds nothing to fix.
 - T14 Loading the model client also loads the OpenAI client modules litellm
   would import lazily on the first request, on the event loop (area A).
 
+- T15 `omniserve generate-dockerfile` passes the key by name
+  (`-e LLM_API_KEY`), not its value on the command line, and pins the
+  release that generated it (area A).
+
