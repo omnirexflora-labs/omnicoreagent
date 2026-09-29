@@ -30,6 +30,7 @@ def stand_in_litellm(monkeypatch):
         return object()
 
     monkeypatch.setattr(llm_module, "_get_litellm", fake_get_litellm)
+    monkeypatch.setattr(llm_module, "_LITELLM_LOADED", False)  # a fresh process
     return loaded
 
 

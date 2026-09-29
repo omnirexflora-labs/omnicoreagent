@@ -37,3 +37,13 @@ land, and published only when a gate finds nothing to fix.
   before loading the agent): uvicorn binds after startup, which took up to
   110 s on a loaded machine, so a taken port showed only at the end while
   clients reached another server (area F).
+- S8 (blocker) R1 finished: the model client counts as loaded only once its
+  import has completed. `litellm` is in sys.modules from the moment its
+  import starts, so a second call arriving meanwhile imported on the loop and
+  waited on the import lock (21-77 s frozen, false lease expiry, a retry left
+  running). The background worker loads the client itself (an agent's
+  connection is None until its first run), and the token counter's encoding
+  is loaded with it, off the loop (areas A and C).
+- S9 A default-capture run that paused gives no training record (its only
+  step was the resumed one, nothing to learn from), and a paused segment read
+  alone carries its sub-agents' totals (area E).
