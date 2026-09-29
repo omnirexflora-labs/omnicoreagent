@@ -216,9 +216,9 @@ asyncio.run(main())
 ```
 
 ```text
-waiting on: issue_refund call_X7FKn8xwH1APDbzbQ5VrAqvd.2 None
-waiting on: issue_refund call_X7FKn8xwH1APDbzbQ5VrAqvd.3 None
-success - Refunded every order in transit for more than 7 days.
+waiting on: issue_refund call_FaQpOBEjc27UQMHtdxCf15np.2 {'order_id': 'A1'}
+waiting on: issue_refund call_FaQpOBEjc27UQMHtdxCf15np.3 {'order_id': 'A3'}
+success - Refunded all in-transit orders over 7 days: A1 and A3.
 refunded: ['A1', 'A3']
 ```
 
@@ -226,12 +226,11 @@ The program paused at its first refund (call `.2`), continued from there
 after the approval, and paused again at the second (`.3`). Nothing before a
 pause ran again: each order was refunded exactly once.
 
-<Warning>
-For a call made from a program, `approval["arguments"]` is `None`: the
-approval names the call (`tool_call_id`, `tool_name`, `capability`,
-`target`), not the arguments the program passed. If an approver must see the
-arguments, have the model call that tool directly rather than from a program.
-</Warning>
+<Note>
+For a call made from a program, `approval["arguments"]` holds the arguments
+the program passed to that call (`{'order_id': 'A1'}` above), so the approver
+sees what would run, as for a call the model made directly.
+</Note>
 
 A **denied** call raises inside the program with the approver's note, so the
 program can catch it and carry on.

@@ -87,7 +87,7 @@ The base install stays focused on the core runtime and harness. Add heavier prod
 | Extra | Installs |
 |-------|----------|
 | `redis` | Redis memory and Redis-backed background task state |
-| `postgres` | SQLAlchemy and the PostgreSQL driver: every `sql` store, SQLite included |
+| `postgres` | SQLAlchemy and the PostgreSQL driver. Every `sql` store needs it, SQLite included: each one goes through SQLAlchemy, and this is the extra that ships it (Python has SQLite built in, not SQLAlchemy) |
 | `mongodb` | MongoDB async and sync drivers |
 | `s3` | AWS S3 and Cloudflare R2 workspace storage |
 | `serve` | OmniServe REST/SSE API server |
@@ -125,10 +125,11 @@ omnicoreagent --version
 ```
 
 ```text
-omnicoreagent, version 0.4.0
+omnicoreagent, version 0.5.0
 ```
 
-These docs describe 0.4.0 and later. If the command is not found, `pip show
+These docs describe 0.5.0 and later; [Upgrading](/docs/upgrading) lists what
+changed since 0.4. If the command is not found, `pip show
 omnicoreagent` names the version you have; for 0.3.x, see *An older version was
 installed* below.
 
@@ -138,7 +139,7 @@ installed* below.
 
 <AccordionGroup>
   <Accordion title="An older version was installed">
-    OmniCoreAgent 0.4.0 needs Python 3.12 or later. Until the guard release
+    OmniCoreAgent 0.4.0 and later need Python 3.12 or later. Until the guard release
     (0.3.10, published with 0.4.3), pip on Python 3.10 or 3.11 did not fail: it
     quietly installed **0.3.9**, the last release that supported 3.11 —
     which cannot even build an agent (its package was published without one of

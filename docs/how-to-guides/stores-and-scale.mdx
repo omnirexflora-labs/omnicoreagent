@@ -166,7 +166,7 @@ Session memory, run records and budget counters share one store:
 | `MemoryRouter(...)` | Set | Install | Reaches |
 |---|---|---|---|
 | `"in_memory"` (default) | — | — | This process only; gone when it ends |
-| `"sql"` | `DATABASE_URL`: `sqlite:///./agent.db` or `postgresql://user:pass@host/db` | `omnicoreagent[postgres]` | SQLite: processes on one machine. PostgreSQL: every server that can reach it |
+| `"sql"` | `DATABASE_URL`: `sqlite:///./agent.db` or `postgresql://user:pass@host/db` | `omnicoreagent[postgres]`, for SQLite too (it ships SQLAlchemy) | SQLite: processes on one machine. PostgreSQL: every server that can reach it |
 | `"redis"` | `REDIS_URL`, e.g. `redis://host:6379/0` | `omnicoreagent[redis]` | Every server |
 | `"mongodb"` | `MONGODB_URI`; optional `MONGODB_DB_NAME`, `MONGODB_COLLECTION` | `omnicoreagent[mongodb]` | Every server |
 

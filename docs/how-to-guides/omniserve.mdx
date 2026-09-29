@@ -59,7 +59,7 @@ omniserve run --agent my_agent.py --port 8771
 
 ==================================================
 OmniServe
-OmniCoreAgent 0.4.1.dev13+5ebddc2
+OmniCoreAgent 0.5.0rc1
 ==================================================
 Agent: support
 Server: http://0.0.0.0:8771
@@ -140,7 +140,10 @@ and a final `complete` with the same fields as `/run/sync`. A small client:
 import json
 import httpx
 
-body = {"query": "Where is order 1042, and what did it cost?", "session_id": "dave"}
+body = {
+    "query": "Where is order 1042, and what did it cost? Save a one-line note about it in notes.txt.",
+    "session_id": "dave",
+}
 with httpx.stream("POST", "http://localhost:8771/run", json=body, timeout=None) as response:
     event = None
     for line in response.iter_lines():
@@ -150,10 +153,14 @@ with httpx.stream("POST", "http://localhost:8771/run", json=body, timeout=None) 
             data = json.loads(line.removeprefix("data: "))
             if event == "text_delta":
                 print(data["text"], end="", flush=True)
-            elif event == "tool_call":
-                print(f"[tool_call] {data['input']['tool_name']} {data['input']['tool_args']}")
-            elif event == "tool_result":
+            elif event == "tool_requested":  # every tool: yours, workspace, MCP
+                print(f"[tool_requested] {data['input']['tool_name']} {data['input']['arguments']}")
+            elif event == "tool_result":  # what one of your own tools returned
                 print(f"[tool_result] {data['output']['status']} {data['output']['data']}")
+            elif event in ("workspace_read", "workspace_write"):  # a workspace file tool
+                print(f"[{event}] {data['output']['status']} {data['input']['tool_args']['path']}")
+            elif event == "tool_observation":  # the result as the model was given it
+                print(f"[tool_observation] {data['output']['tool_name']}")
             elif event == "complete":
                 print(f"\n[complete] {data['status']} {data['run_id']}")
             elif event == "error":
@@ -161,11 +168,21 @@ with httpx.stream("POST", "http://localhost:8771/run", json=body, timeout=None) 
 ```
 
 ```text
-[tool_call] get_order {'order_id': '1042'}
+[tool_requested] get_order {'order_id': '1042'}
 [tool_result] success {'order_id': '1042', 'status': 'shipped', 'total': 42.0}
-Order 1042 is shipped and it cost $42.00.
-[complete] success run_9de2453cbf3747789ea3ad6fc7915edb
+[tool_observation] get_order
+[tool_requested] write_file {'path': 'notes.txt', 'content': 'Order 1042 is shipped and cost $42.00.\n', 'mode': 'create'}
+[workspace_write] success notes.txt
+[tool_observation] write_file
+Order 1042 is shipped and cost $42.00, and I saved a one-line note in notes.txt.
+[complete] success run_c9fad249e7734f1aae948066a2b5f9a9
 ```
+
+Every tool call, whatever its kind, arrives as `tool_requested` and ends with
+`tool_observation`. What ran in between is named by its kind: `tool_call` and
+`tool_result` for your own tools, `workspace_read` and `workspace_write` for the
+workspace file tools. A client that listens only for `tool_result` misses every
+file the agent reads or writes.
 
 A stream always opens with `event: session` (`"status": "started"`) and
 closes with `event: session` (`"status": "ended"`). In between, for a run
@@ -173,8 +190,8 @@ with no tool call, `curl -N` saw these events, in order:
 
 ```text
 session user_message guardrail_check memory_read run_configuration runtime_message
-memory_write agent_step context_assembly context_message (x6) context_tools model_call
-text_delta (x10) model_response memory_write final_answer complete session
+memory_write agent_step context_assembly context_message (x2) context_tools model_call
+text_delta (x7) model_response memory_write final_answer complete session
 ```
 
 - `text_delta` is live only: it is never stored, so a replay does not have it.

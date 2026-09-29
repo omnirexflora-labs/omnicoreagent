@@ -258,7 +258,7 @@ default profile, `permissive-dev`, refuses or asks about:
 | If your agent | 0.4 (governance off unless enabled) | 0.5.0 (on by default) | Do |
 |---|---|---|---|
 | Uses its own tools, memory, workspace, sub-agents, background runs | Ran | Runs, unchanged | Nothing |
-| Runs a shell command on the host (the `local` provider) | Ran | Refused by `deny_unrestricted_process_exec` | Add an allow rule for `process.exec` on the `host` surface, or use a sandbox provider |
+| Runs a shell command on the host (the `local` provider) | Ran | Refused by `deny_unrestricted_process_exec` | Use a sandbox provider, or start from `interactive-dev` as the [local provider recipe](/docs/how-to-guides/sandbox-providers#local-this-machine-not-a-sandbox) shows. An allow rule added to `permissive-dev` does not help: its deny rule wins over any allow |
 | Is given a sandbox with network | Ran | Asks a person first (`ask_sandbox_network`) | Decide it, or allow `sandbox.network.configure` in your policy |
 | Reads a raw secret, installs a package, reaches the network or host files without a rule | Ran | Refused | Add the rule for what it needs ([Policies](/docs/core-concepts/policies)) |
 | Relied on tool argument values in its traces under the default capture | Recorded | Recorded by name, not value | `telemetry_config={"capture": "full"}` |

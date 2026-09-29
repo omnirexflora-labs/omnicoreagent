@@ -52,7 +52,7 @@ permissive-dev
   lookup_order  allow ['allow_local_tools']
   write_file    allow ['allow_local_dev_workspace']
   delete_file   allow ['allow_local_dev_workspace']
-  search        allow matched_allow
+  search        allow ['allow_configured_mcp_tools']
 interactive-dev
   lookup_order  allow ['allow_local_tools']
   write_file    allow ['allow_workspace']
@@ -313,7 +313,10 @@ for profile in ("permissive-dev", "interactive-dev", "strict-production"):
     ask ['ask_before_refunds']
     ```
 
-    The agent records the same hash in every trace.
+    The agent records the same hash in every trace. The hash is computed from
+    the policy and where it was loaded from (the file's absolute path is part of
+    it, formatting is not), so yours will differ from the one above; it changes
+    when the rules or the file's location do.
 
     The file must be inside `project_root` (default: current directory), and
     not in the workspace or under a directory named `workspace(s)`,
@@ -349,7 +352,7 @@ In `agent_config["governance_config"]`:
 
 | Key | Default | What it does |
 |---|---|---|
-| `enabled` | `True` | `False` turns governance off (on by default since 0.5.0) |
+| `enabled` | `True` | `False` turns governance off (on by default since 0.5.0). Writing `"enabled": True` without a `profile`, `policy` or `policy_path` selects `"interactive-dev"`, so leave it out unless that is the profile you want |
 | `profile` | `"permissive-dev"` | Built-in profile. Enabling governance yourself without one means `"interactive-dev"`, as before 0.5.0 |
 | `policy` | `None` | Dict or `PolicyEnvelope` |
 | `policy_path` | `None` | JSON policy file |
@@ -419,7 +422,7 @@ All settings: [agent settings reference](/docs/reference/agent-config).
     ValueError: Rule 'r' declares effect 'deny' but is stored in the allow bucket
     ValueError: Duplicate policy rule_id: r
     TypeError: PolicyRule.__init__() got an unexpected keyword argument 'targets'
-    TypeError: TargetMatcher.__init__() got an unexpected keyword argument 'tool'
+    PolicyLoadError: rule r: TargetMatcher.__init__() got an unexpected keyword argument 'tool'
     ValueError: 'ask' is not a valid PolicyMode
     ```
 

@@ -8,7 +8,7 @@ icon: "shield-halved"
 
 Text the model reads can steer it, so every tool call and command is a
 request that has to be allowed first. This page shows the pieces, the
-defaults, and how to turn governance on.
+defaults (governance is on), and how to choose a profile or turn it off.
 
 <Info>
 Every output on this page is what the code printed when it was run. The
@@ -51,13 +51,23 @@ in a container, not on your host).
 ## The defaults
 
 **Governance is on by default** (since 0.5.0), with the `permissive-dev`
-profile: the agent's own tools, its workspace, memory, code mode, skills,
-sub-agents and background runs are allowed, and nothing pauses for a person
-unless the agent is given a sandbox with network (then a person is asked
-first). Refused unasked: reading raw secrets, unrestricted host files and
-network, installing packages, and shell commands on the host. There is no
-budget until you set one, and no sandbox (no `execute` tool) until you configure
-one. `governance_config={"enabled": False}` turns it off.
+profile. What it does with each kind of request:
+
+- **Allowed:** the agent's own tools, its workspace, memory, code mode, skills,
+  sub-agents, background runs, the MCP servers you configured, and commands
+  inside a sandbox.
+- **Asked of a person first:** leaving a sandbox's containment, that is,
+  turning the **sandbox's** network on (`ask_sandbox_network`) or mounting host
+  files into it (`ask_sandbox_host_mount`). Nothing else pauses.
+- **Refused without asking:** reading raw secrets, host files outside the
+  workspace, network access from the **host** (any `network.*` request, rule
+  `deny_unrestricted_network_egress`), installing packages, and shell
+  commands on the host.
+
+There is no budget until you set one, and no sandbox (no `execute` tool) until
+you configure one. `governance_config={"enabled": False}` turns it off. There
+is no need to write `"enabled": True`: written without a `profile` (or a
+policy of your own), it selects `interactive-dev`, as it did before 0.5.0.
 
 | Also on by default | Setting |
 |---|---|
@@ -207,14 +217,15 @@ Governance decides whether your tool runs, not what it does once it runs.
 
 <AccordionGroup>
   <Accordion title="A sandbox is configured but nothing runs in it">
-    `sandbox_config` is set but `governance_config["enabled"]` is not `True`.
-    The trace header says so:
+    `sandbox_config` is set but governance was turned off with
+    `"enabled": False`, so there is no policy and no `execute` tool. The trace
+    header says so:
 
     ```text
     sandbox_unused_without_governance: A sandbox is configured but governance is off, so nothing runs in it; enable governance to use it.
     ```
 
-    Set `"enabled": True` next to `sandbox_config`.
+    Remove `"enabled": False`: governance is on by default.
   </Accordion>
 
   <Accordion title="ValueError: governance_config.profile must be one of ...">

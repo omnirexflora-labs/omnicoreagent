@@ -137,7 +137,7 @@ is chosen in code; its connection string comes from the environment.
 |---|---|---|---|
 | In process (default) | `MemoryRouter("in_memory")` | none | none |
 | Redis | `MemoryRouter("redis")` | `REDIS_URL`, e.g. `redis://localhost:6379/0` | `omnicoreagent[redis]` |
-| SQL (SQLite, PostgreSQL, or another SQLAlchemy database) | `MemoryRouter("sql")` | `DATABASE_URL`, e.g. `postgresql://user:pass@localhost:5432/db` | `omnicoreagent[postgres]` |
+| SQL (SQLite, PostgreSQL, or another SQLAlchemy database) | `MemoryRouter("sql")` | `DATABASE_URL`, e.g. `postgresql://user:pass@localhost:5432/db` | `omnicoreagent[postgres]`, for SQLite too: it ships SQLAlchemy, which every SQL store uses |
 | MongoDB | `MemoryRouter("mongodb")` | `MONGODB_URI`, e.g. `mongodb://localhost:27017`; optional `MONGODB_DB_NAME` (default `omnicoreagent`), `MONGODB_COLLECTION` (default `messages`) | `omnicoreagent[mongodb]` |
 
 ```python
@@ -155,10 +155,12 @@ The same store keeps each run's durable record, so a paused run can be resumed
 in another process ([Durable runs](/docs/core-concepts/durable-runs)).
 
 <Warning>
-If the variable is missing, the store falls back to process memory and says so
-only in a log line: `Redis memory selected but REDIS_URL is not set; using
-in_memory (nothing survives a restart)`. Turn on logging
-(`logging.basicConfig(level=logging.WARNING)`) to see it.
+If the variable is missing, building the router raises instead of quietly
+keeping history in process memory: `ValueError: MemoryRouter("redis") needs
+REDIS_URL (e.g. redis://localhost:6379/0). Set it, or use
+MemoryRouter("in_memory") for a store that lasts only as long as this process.`
+`"sql"` without `DATABASE_URL` and `"mongodb"` without `MONGODB_URI` raise the
+same way.
 </Warning>
 
 ### Workspace
@@ -481,9 +483,11 @@ All of these are raised by the constructor, before any model call, unless noted.
     The store's extra is not installed. The message names it, for example
     `Install it with: pip install 'omnicoreagent[redis]'`.
   </Accordion>
-  <Accordion title="History is gone after a restart, though I chose Redis">
-    `REDIS_URL` (or `DATABASE_URL`, `MONGODB_URI`) was not set, so the store
-    fell back to process memory. See the warning under [Memory](#memory).
+  <Accordion title="ValueError: MemoryRouter needs REDIS_URL (or DATABASE_URL, MONGODB_URI)">
+    The store's variable (`REDIS_URL`, `DATABASE_URL` or `MONGODB_URI`) is not
+    set in the process that builds the router. Set it before the router is
+    built; the store never falls back to process memory on its own, so history
+    is not lost quietly. See the warning under [Memory](#memory).
   </Accordion>
 </AccordionGroup>
 
