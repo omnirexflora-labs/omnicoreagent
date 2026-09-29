@@ -229,6 +229,13 @@ and running a script is `skill.script.run` (high risk, on the `host` or
 built-in development profiles allow both.
 
 <Warning>
+Governance is on by default, and with no sandbox that runs commands a skill
+script runs on the host: governed by policy, but not contained. Every such
+run, the default among them, carries the warning `host_scripts_not_contained`
+in its header (`trajectory["harness"]["security_warnings"]`), and the agent
+logs it once at start-up. Give the agent a sandbox to contain the scripts
+([Execution](/docs/core-concepts/execution)).
+
 With governance off, a skill script runs on the host with no policy and no
 sandbox. The agent records the warning `ungoverned_host_scripts` in every run's
 header (`trajectory["harness"]["security_warnings"]`) and logs it once at
