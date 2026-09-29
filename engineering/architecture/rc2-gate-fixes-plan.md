@@ -47,3 +47,7 @@ land, and published only when a gate finds nothing to fix.
 - S9 A default-capture run that paused gives no training record (its only
   step was the resumed one, nothing to learn from), and a paused segment read
   alone carries its sub-agents' totals (area E).
+- S10 Ctrl-C before the run starts is noted, not raised: raised inside an
+  import it left an import lock held and hung the CLI (3 in 45 tries). The
+  command exits 6 saying nothing ran; one during the model client's loading
+  says the same, not "a second interrupt" (area E).

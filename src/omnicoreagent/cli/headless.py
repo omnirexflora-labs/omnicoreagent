@@ -272,6 +272,8 @@ def _interrupt_on_signals(agent: Any, run_id: str):
         for sig in installed:
             loop.remove_signal_handler(sig)
 
+    restore.received = received  # how many signals: what stopped the run
+
     return restore
 
 
@@ -395,9 +397,15 @@ async def _execute_headless(agent: Any, request: HeadlessRequest) -> HeadlessOut
         outcome.status = "timeout"
         outcome.error = "run exceeded its deadline"
     except asyncio.CancelledError:
-        # A second Ctrl-C: stopped at once, still with what evidence there is.
+        # A second Ctrl-C, or a first before the run had a record to stop
+        # (while the model client loads): stopped at once, still with what
+        # evidence there is.
         outcome.status = "interrupted"
-        outcome.error = "stopped by a second interrupt"
+        outcome.error = (
+            "stopped by a second interrupt"
+            if restore_signals.received["count"] > 1
+            else "interrupted before the run had started; nothing ran"
+        )
     except Exception as exc:
         outcome.status = "error"
         outcome.error = f"{exc.__class__.__name__}: {exc}"
