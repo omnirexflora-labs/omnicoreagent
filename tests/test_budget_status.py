@@ -53,7 +53,10 @@ async def test_the_application_budget_is_shared_across_runs():
     status = await agent.budget_status(second["run_id"])
 
     assert _by(status, "application", "model_cost_usd")["spent"] == pytest.approx(2 * CALL_COST)
-    assert (await agent.budget_status(first["run_id"])) == status or True  # same day, same key
+    # Same day, same key: both runs see the one shared application budget.
+    # (This line once ended "or True", and so could not fail.)
+    first_status = await agent.budget_status(first["run_id"])
+    assert _by(first_status, "application", "model_cost_usd") == _by(status, "application", "model_cost_usd")
 
 
 @pytest.mark.asyncio

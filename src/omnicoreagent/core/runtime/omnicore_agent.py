@@ -620,7 +620,9 @@ class OmniCoreAgent:
 
         Uses the same check governance uses before routing a command, so a
         tool is never offered that governance could not route. A ``local``
-        sandbox counts: it runs commands, on the host.
+        sandbox counts: it runs commands, on the host. It answers once the
+        agent is initialized (``await agent.initialize()``, or after its first
+        run); before that it is ``False``, since it cannot wait to initialize.
         """
         engine = getattr(getattr(self, "agent", None), "governance_engine", None)
         return bool(engine is not None and engine.sandbox_runtime_can_execute())
@@ -1227,6 +1229,11 @@ class OmniCoreAgent:
         """
         from omnicoreagent.core.budgets import METERS, BudgetScope
 
+        # The budgets come from the policy, built when the agent initializes. A
+        # process that only reads runs never ran a query, and read none: it
+        # answered [] (found recording real footage of 0.4.3, 2026-09-29).
+        if not self._initialized:
+            await self.initialize()
         record = await self._run_record(run_id)
         if record is None:
             raise LookupError(f"No run {run_id}")
@@ -1491,6 +1498,10 @@ class OmniCoreAgent:
 
         if status not in {"cancelled", "failed", "timeout"}:
             raise ValueError("status must be cancelled, failed or timeout")
+        # Its budgets come from the policy, built when the agent initializes;
+        # uninitialized, the run was closed and its holds left standing.
+        if not self._initialized:
+            await self.initialize()
         record = await self._run_record(run_id)
         if record is None or record.get("status") in _ENDED_RUN_STATUSES:
             return record
