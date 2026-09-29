@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import fields
 from fnmatch import fnmatchcase
@@ -49,6 +50,11 @@ def load_policy(
         return load_policy_file(explicit_path, project_root=root, explicit=True)
     if policy is not None:
         if isinstance(policy, PolicyEnvelope):
+            # A copy: the object is the caller's, often shared (one definition
+            # for every agent, or built twice by OmniServe). Stamping it, and
+            # then writing budgets into it, made the second build fail with
+            # "the policy already has budgets" (the 0.5.0rc1 gate).
+            policy = copy.deepcopy(policy)
             policy.provenance.source = PolicySource.CODE
             return attach_policy_hash(policy)
         return policy_from_mapping(policy, source=PolicySource.CODE)
