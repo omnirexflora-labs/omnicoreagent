@@ -222,7 +222,6 @@ everything not excluded):
 ```python
 agent_config = {
     "governance_config": {
-        "enabled": True,
         "sandbox_config": {"provider": "docker"},
         "workspace_bridge": {"include": ["src/*", "data/*.csv"], "exclude": ["data/archive/*"]},
     },
@@ -356,7 +355,6 @@ the policy says ([Security model](/docs/core-concepts/security-model)).
 ```python
 agent_config = {
     "governance_config": {
-        "enabled": True,
         "sandbox_config": {"provider": "docker"},
         "sandbox_manifest": {"environment": {"plain": {"APP_ENV": "test"}}},
     },

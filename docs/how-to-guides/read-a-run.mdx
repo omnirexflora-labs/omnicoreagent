@@ -46,7 +46,6 @@ async def main():
         system_instruction="Use get_weather for each city. Answer in plain text, in one sentence.",
         model_config={"provider": "openai", "model": "gpt-5.4-mini"},
         local_tools=tools,
-        agent_config={"governance_config": {"enabled": True}},
     )
     result = await agent.run("What is the weather in Lagos?")
     print(result["response"])
@@ -291,7 +290,6 @@ async def main():
         system_instruction="Use get_weather. Answer in plain text, in one sentence.",
         model_config={"provider": "openai", "model": "gpt-5.4-mini"},
         local_tools=tools,
-        agent_config={"governance_config": {"enabled": True}},
         telemetry_config={"capture": "default"},
     )
     result = await agent.run("What is the weather in Accra?")

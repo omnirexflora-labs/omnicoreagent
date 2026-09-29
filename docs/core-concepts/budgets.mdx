@@ -34,7 +34,6 @@ async def main():
         model_config={"provider": "openai", "model": "gpt-5.4-mini", "max_tokens": 300},
         agent_config={
             "governance_config": {
-                "enabled": True,
                 "budgets": {
                     "request": [{"meter": "model_cost_usd", "limit": 0.0005}],
                     "session": [{"meter": "model_calls", "limit": 20}],
@@ -117,7 +116,6 @@ session, agent and application counters stay.
 ```python
 agent_config = {
     "governance_config": {
-        "enabled": True,
         "budgets": {
             "application_id": "support-desk",
             "application": [{"meter": "model_cost_usd", "limit": 20.0, "window": "day"}],
@@ -212,7 +210,6 @@ async def main():
         local_tools=tools,
         agent_config={
             "governance_config": {
-                "enabled": True,
                 "budgets": {"request": [{"meter": "tool_calls", "limit": 2, "on_exhausted": "terminate"}]},
             },
         },
@@ -253,7 +250,6 @@ async def main():
         model_config={"provider": "openai", "model": "qwen3-coder-30b", "base_url": "http://localhost:8000/v1"},
         agent_config={
             "governance_config": {
-                "enabled": True,
                 "budgets": {"session": [
                     {"meter": "model_calls", "limit": 2},
                     {"meter": "model_tokens", "limit": 50000},
@@ -303,7 +299,6 @@ agent = OmniCoreAgent(
     model_config={"provider": "openai", "model": "qwen3-coder-30b", "base_url": "http://localhost:8000/v1"},
     agent_config={
         "governance_config": {
-            "enabled": True,
             "budgets": {"session": [{"meter": "model_calls", "limit": 1}]},
         },
     },

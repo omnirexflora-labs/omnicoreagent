@@ -14,7 +14,6 @@ this page you will have picked one, set it up, and know what it enforces.
 ```python
 agent_config = {
     "governance_config": {
-        "enabled": True,
         "sandbox_config": {"provider": "e2b", "options": {"timeout_seconds": 300}},
     },
 }
@@ -104,7 +103,6 @@ pip install "omnicoreagent[docker]"
 ```python
 agent_config = {
     "governance_config": {
-        "enabled": True,
         "sandbox_config": {"provider": "docker", "options": {"image": "python:3.12-slim"}},
     },
 }
@@ -213,7 +211,6 @@ export DAYTONA_API_KEY=your_daytona_key
 ```python
 agent_config = {
     "governance_config": {
-        "enabled": True,
         "sandbox_config": {"provider": "daytona"},
         "sandbox_manifest": {"network_policy": {"default": "allow"}},
     },
@@ -247,7 +244,6 @@ modal token new
 ```python
 agent_config = {
     "governance_config": {
-        "enabled": True,
         "sandbox_config": {"provider": "modal"},
         "sandbox_manifest": {
             "network_policy": {"default": "deny", "allowed_hosts": ["pypi.org", "*.pythonhosted.org"]},
@@ -279,7 +275,6 @@ export VERCEL_TOKEN=... VERCEL_TEAM_ID=... VERCEL_PROJECT_ID=...
 ```python
 agent_config = {
     "governance_config": {
-        "enabled": True,
         "sandbox_config": {"provider": "vercel", "options": {"timeout_seconds": 300}},
     },
 }
@@ -304,7 +299,6 @@ agent at it:
 ```python
 agent_config = {
     "governance_config": {
-        "enabled": True,
         "sandbox_config": {
             "provider": "http",
             "options": {"base_url": "https://sandboxes.example.com", "token": "..."},
@@ -449,7 +443,6 @@ async def main():
         model_config={"provider": "openai", "model": "gpt-5.4-mini"},
         agent_config={
             "governance_config": {
-                "enabled": True,
                 "sandbox_runtime": LocalTestSandboxRuntime(commands={"sh": fake_shell}),
                 "allow_test_sandbox_runtime": True,
             },

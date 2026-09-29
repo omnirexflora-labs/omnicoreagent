@@ -108,7 +108,7 @@ async def main():
     for setting in (
         {"enable_workspace_files": False},
         {"enable_subagents": True},
-        {"governance_config": {"enabled": True, "sandbox_config": {"provider": "docker"}}},
+        {"governance_config": {"sandbox_config": {"provider": "docker"}}},
     ):
         names = await tool_names(setting)
         print(setting, "-> added", sorted(names - base), "removed", len(base - names))
@@ -120,7 +120,7 @@ asyncio.run(main())
 default: 14 tools
 {'enable_workspace_files': False} -> added [] removed 10
 {'enable_subagents': True} -> added ['spawn_subagents'] removed 0
-{'governance_config': {'enabled': True, 'sandbox_config': {'provider': 'docker'}}} -> added ['execute'] removed 0
+{'governance_config': {'sandbox_config': {'provider': 'docker'}}} -> added ['execute'] removed 0
 ```
 
 A sandbox gives the agent an `execute` tool whose commands run in the sandbox,

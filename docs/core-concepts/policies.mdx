@@ -349,7 +349,7 @@ In `agent_config["governance_config"]`:
 
 | Key | Default | What it does |
 |---|---|---|
-| `enabled` | `True` | `False` turns governance off (on by default since 0.5.0) |
+| `enabled` | `True` | `False` turns governance off (on by default since 0.5.0). Writing `"enabled": True` without a `profile`, `policy` or `policy_path` selects `"interactive-dev"`, so leave it out unless that is the profile you want |
 | `profile` | `"permissive-dev"` | Built-in profile. Enabling governance yourself without one means `"interactive-dev"`, as before 0.5.0 |
 | `policy` | `None` | Dict or `PolicyEnvelope` |
 | `policy_path` | `None` | JSON policy file |

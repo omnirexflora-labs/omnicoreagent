@@ -57,7 +57,9 @@ unless the agent is given a sandbox with network (then a person is asked
 first). Refused unasked: reading raw secrets, unrestricted host files and
 network, installing packages, and shell commands on the host. There is no
 budget until you set one, and no sandbox (no `execute` tool) until you configure
-one. `governance_config={"enabled": False}` turns it off.
+one. `governance_config={"enabled": False}` turns it off. There is no need to
+write `"enabled": True`: written without a `profile` (or a policy of your own),
+it selects `interactive-dev`, as it did before 0.5.0.
 
 | Also on by default | Setting |
 |---|---|
