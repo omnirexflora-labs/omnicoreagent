@@ -262,3 +262,23 @@ def test_a_rule_without_a_command_hashes_as_before():
     before = {"allow": [{"rule_id": "a", "capability": "process.exec"}]}
     after = {"allow": [{"rule_id": "a", "capability": "process.exec", "command": None, "examples": None}]}
     assert policy_hash(policy(before)) == policy_hash(policy(after))
+
+
+def test_the_policy_reference_example_loads_and_does_what_it_says():
+    # The example on docs/reference/policy.mdx is real: it loads (its rules pass
+    # their own examples) and decides as the page describes.
+    import re
+    from pathlib import Path
+
+    page = (Path(__file__).resolve().parents[1] / "docs/reference/policy.mdx").read_text()
+    section = page[page.index("## Rules on shell commands"):]
+    block = re.search(r"```python\n(.*?)```", section, re.S).group(1)
+    scope: dict = {}
+    exec(block, scope)
+    loaded = policy_from_mapping(scope["policy"])
+    evaluate = lambda text: PolicyEvaluator().evaluate(loaded, request(text)).effect.value  # noqa: E731
+    assert evaluate("git status && rm -rf ~") == "deny"
+    assert evaluate("cd x && git push") == "ask"       # any ask applies, before the mode
+    assert evaluate("git push origin main") == "ask"
+    assert evaluate("git status") == "allow"
+    assert evaluate("git status | head") == "deny"     # head not allowed: strict denies
