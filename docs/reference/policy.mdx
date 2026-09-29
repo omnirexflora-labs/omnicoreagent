@@ -90,6 +90,13 @@ agent_config = {
 | `command` | Optional, `process.exec` rules only: what the rule matches in a shell command. See *Rules on shell commands*. |
 | `examples` | Optional, with `command`: `match` and `not_match` lists of commands, checked when the policy loads. A rule that contradicts its own examples does not load. |
 
+A policy can carry its budgets under a `budgets` key: in a dict policy, in a
+JSON policy file (`policy_path`), or as `policy.budgets` on a policy object.
+It takes the same shape as
+`governance_config["budgets"]` ([budgets](/docs/reference/budgets)), and the
+budgets are hashed with the policy. Set budgets in the policy or in
+`governance_config`, not both: both is refused.
+
 ## Rules on shell commands
 
 Every command an agent runs reaches the policy as `process.exec` on `sh` (the
