@@ -161,6 +161,59 @@ Every field, default and meter is in the [budgets reference](/docs/reference/bud
 Budgets can also live in a policy file (`budgets:` in the
 [policy](/docs/reference/policy)); set them in one place or the other, not both.
 
+### On a policy object
+
+A policy you build in code carries its budgets in `policy.budgets`, a
+`PolicyBudgets` with one list of `BudgetLimit`s per scope. They become part of
+the policy and are hashed with it, like budgets in a policy file:
+
+```python
+import asyncio
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+from omnicoreagent.governance import BudgetLimit, PolicyBudgets, build_default_policy
+
+tools = ToolRegistry()
+
+@tools.register_tool("get_weather")
+def get_weather(city: str) -> dict:
+    """Get the current weather for a city."""
+    return {"city": city, "temperature": "25C"}
+
+policy = build_default_policy("permissive-dev")
+policy.budgets = PolicyBudgets(
+    request=[BudgetLimit(meter="tool_calls", limit=2, on_exhausted="terminate")],
+    session=[BudgetLimit(meter="model_calls", limit=20)],
+)
+
+async def main():
+    agent = OmniCoreAgent(
+        name="weather",
+        system_instruction="Call get_weather once per city. Answer in plain text.",
+        model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+        local_tools=tools,
+        agent_config={"governance_config": {"policy": policy}},
+    )
+    result = await agent.run("What is the weather in Lagos, Accra and Nairobi?")
+    print(result["status"], "|", result["termination_reason"])
+    for b in await agent.budget_status(result["run_id"]):
+        print(f"  {b['scope']:8} {b['meter']:12} limit {b['limit']:g}  spent {b['spent']:g}")
+    await agent.cleanup()
+
+asyncio.run(main())
+```
+
+```text
+error | budget_exhausted
+  session  model_calls  limit 20  spent 1
+  request  tool_calls   limit 2  spent 2
+```
+
+`BudgetLimit` takes the same fields as a dict limit (`meter`, `limit`,
+`window`, `warn_at`, `on_exhausted`), and `PolicyBudgets` the same keys as
+`governance_config["budgets"]` (`request`, `session`, `agent`, `application`,
+`application_id`). A policy that has budgets takes no `governance_config["budgets"]`
+as well.
+
 ## When a budget runs out
 
 ### Pause, then grant or deny
