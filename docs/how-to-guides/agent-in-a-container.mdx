@@ -297,8 +297,8 @@ with the same variables and volume.
     (or use a database server), set `DATABASE_URL` with
     `MemoryRouter("sql")`, a durable task store, and
     `OMNICOREAGENT_WORKSPACE_DIR` on the volume. If `DATABASE_URL` is unset,
-    the log says `SQL memory selected but DATABASE_URL is not set; using
-    in_memory (nothing survives a restart)`.
+    the agent does not start: `MemoryRouter("sql")` raises `ValueError:
+    MemoryRouter("sql") needs DATABASE_URL`.
   </Accordion>
 
   <Accordion title="Read-only file system">

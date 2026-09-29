@@ -239,17 +239,17 @@ logging.basicConfig(level=logging.WARNING)
 ```
 
 <AccordionGroup>
-  <Accordion title="The history is gone after a restart, with no error">
-    The URL variable was not set when the `MemoryRouter` was created, so it
-    fell back to memory. With logging on:
+  <Accordion title="ValueError: MemoryRouter(...) needs DATABASE_URL">
+    The URL variable was not set when the `MemoryRouter` was created. Building
+    the router raises rather than keeping history in process memory, where a
+    restart would lose it:
 
     ```text
-    WARNING omnicoreagent: SQL memory selected but DATABASE_URL is not set; using in_memory (nothing survives a restart)
+    ValueError: MemoryRouter("sql") needs DATABASE_URL (e.g. sqlite:///./memory.db). Set it, or use MemoryRouter("in_memory") for a store that lasts only as long as this process.
     ```
 
-    Set `DATABASE_URL`, `REDIS_URL` or `MONGODB_URI` before building the
-    router. `print(router)` shows the store it chose:
-    `MemoryRouter(type=sql, store=InMemoryStore)` means the fallback.
+    `"redis"` without `REDIS_URL` and `"mongodb"` without `MONGODB_URI` raise
+    the same way. Set the variable before building the router.
   </Accordion>
 
   <Accordion title="ImportError: SQL database memory requires optional dependency 'sqlalchemy'">
