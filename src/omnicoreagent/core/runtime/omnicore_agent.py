@@ -2443,6 +2443,13 @@ class OmniCoreAgent:
         trajectory = await self._trajectory_for(
             trace, include_children=include_children, depth=max_depth, seen=set()
         )
+        totals = trajectory.get("totals")
+        if isinstance(totals, dict) and totals.get("including_subagents") is None:
+            # A finished segment carries its children's totals; one that
+            # paused has them only in its trace (the 0.5.0rc1 and rc2 gates).
+            summary = (await self._run_summary(trace.trace_id))["run_summary"]
+            if summary is not None:
+                totals["including_subagents"] = summary.get("including_subagents")
         if run_id is not None:
             trajectory["other_trace_ids_for_run"] = other_trace_ids
         return trajectory
@@ -2481,14 +2488,11 @@ class OmniCoreAgent:
             trajectory = segment["trajectory"]
             segment_totals = trajectory.get("totals") or {}
             totals = _add_totals(totals, segment_totals)
-            # A finished segment carries its children's totals. One that
-            # paused has them only in its trace: taking its own totals alone
-            # dropped a sub-agent it ran before the pause (the 0.5.0rc1 gate
-            # counted 10,257 tokens of a run's 13,301).
+            # get_trajectory fills a paused segment's children's totals from
+            # its trace: taking its own totals alone dropped a sub-agent it
+            # ran before the pause (the 0.5.0rc1 gate counted 10,257 tokens
+            # of a run's 13,301).
             segment_including = segment_totals.get("including_subagents")
-            if segment_including is None:
-                summary = (await self._run_summary(segment["trace_id"]))["run_summary"]
-                segment_including = (summary or {}).get("including_subagents")
             including = _add_totals(
                 including,
                 segment_including
@@ -2834,7 +2838,9 @@ def _training_record(
         for step in _training_steps(trajectory):
             policy_version = step.pop("_policy_version") or policy_version
             steps.append({**step, "segment": index})
-    if not steps:
+    if all(step["resumed"] for step in steps):
+        # No model turn was recorded (the privacy-first capture): a resumed
+        # step alone holds nothing to learn from (the 0.5.0rc2 gate).
         return None
     first, last = segments[0], segments[-1]
     outcomes = (run or {}).get("outcomes")

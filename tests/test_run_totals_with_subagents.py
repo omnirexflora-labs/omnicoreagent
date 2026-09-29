@@ -49,6 +49,10 @@ async def test_a_paused_segments_subagents_are_counted():
 
     paused = await lead.run("go", session_id="totals")
     assert paused["status"] == "awaiting_approval"
+    # The paused segment read on its own carries its sub-agent too (the
+    # 0.5.0rc2 gate: get_trajectory of that segment said None).
+    segment = (await lead.get_trajectory(trace_id=paused["trace_id"]))["totals"]
+    assert segment["including_subagents"]["tokens"]["total"] == segment["tokens"]["total"] + 12
     approval = (await lead.get_run(paused["run_id"]))["approvals"][0]
     await lead.resolve_approval(paused["run_id"], approval["approval_id"], decision="approve", approver="alice")
     await lead.resume(paused["run_id"])
