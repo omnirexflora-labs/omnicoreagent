@@ -128,6 +128,44 @@ while result["status"] == "awaiting_approval":
     result = await agent.resume(result["run_id"])
 ```
 
+### On the default profile
+
+The examples on this page start from `interactive-dev`, which also asks
+before other things (MCP tool calls, shell commands, high-risk actions). To
+keep the default profile, `permissive-dev`, and ask about one tool only, add
+one ask rule to it. An ask outranks the profile's allows, so the rule takes
+effect:
+
+```python
+from omnicoreagent import OmniCoreAgent, ToolRegistry
+from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy
+
+tools = ToolRegistry()
+
+@tools.register_tool("issue_refund")
+def issue_refund(order_id: str, amount: float) -> dict:
+    """Refund an order."""
+    return {"order_id": order_id, "refunded": amount}
+
+policy = build_default_policy("permissive-dev")
+policy.rules.ask.append(
+    PolicyRule(rule_id="ask_before_refunds", effect=PolicyEffect.ASK,
+               capability="tool.local.call", target={"tool_name": "issue_refund"},
+               reason="Refunds need a person.")
+)
+
+agent = OmniCoreAgent(
+    name="support",
+    system_instruction="You help with orders. Refund when asked. Answer in plain text, in one sentence.",
+    model_config={"provider": "openai", "model": "gpt-5.4-mini"},
+    local_tools=tools,
+    agent_config={"governance_config": {"policy": policy}},
+)
+```
+
+Every other call is decided as `permissive-dev` decides it; `issue_refund`
+pauses the run for a person, as above.
+
 ## The three decisions
 
 ```python
