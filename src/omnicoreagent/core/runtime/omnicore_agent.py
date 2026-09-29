@@ -2435,11 +2435,17 @@ class OmniCoreAgent:
             trajectory = segment["trajectory"]
             segment_totals = trajectory.get("totals") or {}
             totals = _add_totals(totals, segment_totals)
-            # Only a finished segment carries its children's totals; any
-            # other counts its own, so no segment is left out of the sum.
+            # A finished segment carries its children's totals. One that
+            # paused has them only in its trace: taking its own totals alone
+            # dropped a sub-agent it ran before the pause (the 0.5.0rc1 gate
+            # counted 10,257 tokens of a run's 13,301).
+            segment_including = segment_totals.get("including_subagents")
+            if segment_including is None:
+                summary = (await self._run_summary(segment["trace_id"]))["run_summary"]
+                segment_including = (summary or {}).get("including_subagents")
             including = _add_totals(
                 including,
-                segment_totals.get("including_subagents")
+                segment_including
                 or {
                     "tokens": segment_totals.get("tokens") or {},
                     "estimated_cost_usd": segment_totals.get("estimated_cost_usd") or 0.0,
