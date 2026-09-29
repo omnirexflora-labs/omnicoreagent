@@ -15,3 +15,6 @@ and published only when a gate finds nothing to fix.
   ungoverned agent's keeps them. (Area F's F-7, an empty `args` on a refused
   call, is this same rule, by design.)
 
+- T3 A command refused inside `execute` reads `denied` in the trace, as in
+  the run record; S4 changed only the record, and the two disagreed (area B).
+
