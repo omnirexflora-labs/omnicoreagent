@@ -453,4 +453,6 @@ def test_the_security_model_page_is_published_and_states_its_limits():
 
     assert "docs/core-concepts/security-model" in pages
     assert "## What is not protected" in text
-    assert "off by default" in text
+    # The page states the default, and how to leave it (0.5.0: on by default).
+    assert "Governance is on by default" in text
+    assert '{"enabled": False}' in text
