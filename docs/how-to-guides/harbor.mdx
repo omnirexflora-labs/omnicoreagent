@@ -185,7 +185,8 @@ cost; under it, the line of an error that says what went wrong, and any MCP
 server the run could not use. `steps` counts the steps of the trajectory
 Harbor reads, whose first step is the instruction the agent was given, so it is
 one more than the model turns the run took (the run's own
-`totals["steps"]`). `--json` gives every field:
+`totals["steps"]`). `--json` gives every field, for one job as below; for a
+directory of jobs, a list of these, newest first:
 
 ```text
 {

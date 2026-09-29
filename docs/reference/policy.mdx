@@ -149,7 +149,9 @@ exact text: approving `ls` approves nothing else.
 Command rules narrow what an agent may run; they are not the security
 boundary. An allowed program can run other code through its own options
 (`git -c core.fsmonitor=...`, `sed 's/x/y/e'`, a project's `npm test`), and
-`git -C . push` does not match a `git push` prefix. Run untrusted work in a
+`git -C . push` does not match a `git push` prefix, nor `python3 -m pip install`
+a `pip install` one (`{"program": ["pip", "pip3", "python*"], "args_any":
+["install"]}` names both). Run untrusted work in a
 [sandbox](/docs/how-to-guides/sandbox-providers), where the boundary is
 enforced, and use command rules to say what the agent may do there.
 </Warning>
