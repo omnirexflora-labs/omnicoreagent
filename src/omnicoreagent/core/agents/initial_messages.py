@@ -14,7 +14,7 @@ class AgentInitialMessagePreparer:
         *,
         message_history_loader: Any,
         prompt_context_builder: Any,
-        timeout_seconds: float = 20.0,
+        timeout_seconds: float = 90.0,
     ):
         self.message_history_loader = message_history_loader
         self.prompt_context_builder = prompt_context_builder
@@ -31,16 +31,25 @@ class AgentInitialMessagePreparer:
         project_instructions: str | None = None,
         keep_pending_tool_calls: bool = False,
     ) -> None:
-        # A storage failure must not silently start a fresh conversation.
-        await asyncio.wait_for(
-            self.message_history_loader.load(
-                message_history=message_history,
-                session_id=session_id,
-                session_state=session_state,
-                keep_pending_tool_calls=keep_pending_tool_calls,
-            ),
-            timeout=self.timeout_seconds,
-        )
+        # A storage failure must not silently start a fresh conversation. The
+        # limit covers the store (a summary, a model call, has its own and
+        # falls back to recent messages); a bare TimeoutError said nothing
+        # of what timed out (the 0.5.0rc3 gate).
+        try:
+            await asyncio.wait_for(
+                self.message_history_loader.load(
+                    message_history=message_history,
+                    session_id=session_id,
+                    session_state=session_state,
+                    keep_pending_tool_calls=keep_pending_tool_calls,
+                ),
+                timeout=self.timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"Loading the session history of {session_id!r} took longer than "
+                f"{self.timeout_seconds:g} s; check the memory store"
+            ) from None
         bindings = list(catalog.bindings.values())
         capabilities = {
             binding.name for binding in bindings if binding.provider != "mcp"

@@ -5,6 +5,7 @@ Provides history preparation functions for both sliding window and token budget 
 with optional LLM-based summarization of older messages.
 """
 
+import asyncio
 from typing import Callable, Any, Coroutine
 from omnicoreagent.core.summarizer.tokenizer import (
     count_tokens,
@@ -22,6 +23,12 @@ from omnicoreagent.core.interaction_history import split_recent, interaction_gro
 
 SummarizeFn = Callable[[list[dict[str, Any]]], Coroutine[Any, Any, str]]
 SummarizeFnWithBudget = Callable[[list[dict[str, Any]], int], Coroutine[Any, Any, str]]
+
+
+# A summary is a model call inside the history load; one slower than this
+# falls back to the recent messages, as a failed one does, instead of failing
+# the run (the 0.5.0rc3 gate: it raised a bare TimeoutError out of run()).
+SUMMARY_TIMEOUT_SECONDS = 60.0
 
 
 async def prepare_history_sliding_window(
@@ -76,7 +83,9 @@ async def prepare_history_sliding_window(
     )
 
     try:
-        summary_text = await summarize_fn(messages_to_summarize)
+        summary_text = await asyncio.wait_for(
+            summarize_fn(messages_to_summarize), timeout=SUMMARY_TIMEOUT_SECONDS
+        )
         summary_content = format_summary_content(summary_text)
     except Exception as e:
         logger.error(f"Summarization failed: {e}. Falling back to truncation.")
@@ -169,7 +178,10 @@ async def prepare_history_token_budget(
     )
 
     try:
-        summary_text = await summarize_fn(messages_to_summarize, summary_budget)
+        summary_text = await asyncio.wait_for(
+            summarize_fn(messages_to_summarize, summary_budget),
+            timeout=SUMMARY_TIMEOUT_SECONDS,
+        )
         summary_content = format_summary_content(summary_text)
     except Exception as e:
         logger.error(f"Summarization failed: {e}. Falling back to truncation.")

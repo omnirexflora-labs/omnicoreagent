@@ -48,3 +48,9 @@ and published only when a gate finds nothing to fix.
   the agent is built (bucket and unique id); a deny rule in the allow bucket
   allowed (area A).
 
+- T12 The unknown-manifest-field error lists only settable fields (area A).
+- T13 A summary slower than 60 s falls back to the recent messages, as a
+  failed one does; the history load's own limit (90 s, the store) raises a
+  TimeoutError saying what timed out. It raised a bare TimeoutError out of
+  `run()` after a fixed 20 s that covered the summary's model call (area A).
+
