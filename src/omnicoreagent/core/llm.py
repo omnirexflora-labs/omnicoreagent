@@ -4,6 +4,7 @@ import inspect
 from copy import deepcopy
 import os
 import random
+import sys
 import re
 import time
 import warnings
@@ -23,6 +24,18 @@ for logger_name in ["LiteLLM", "litellm", "litellm.proxy"]:
     _litellm_logger = logging.getLogger(logger_name)
     _litellm_logger.setLevel(logging.CRITICAL)
     _litellm_logger.propagate = False
+
+
+async def _litellm_off_loop():
+    """The model client, imported on a worker thread the first time.
+
+    ``import litellm`` takes seconds of CPU; on the event loop it held
+    everything else in the process (heartbeats, timers, other runs). Once it
+    is loaded, getting it again is immediate.
+    """
+    if "litellm" in sys.modules:
+        return _get_litellm()
+    return await asyncio.to_thread(_get_litellm)
 
 
 def _get_litellm():
@@ -401,7 +414,7 @@ class LLMConnection:
     ):
         try:
             params = self._completion_params(messages, tools)
-            litellm = _get_litellm()
+            litellm = await _litellm_off_loop()
             params.update(api_key=self.llm_api_key, drop_params=False, num_retries=0)
             try:
                 return await litellm.acompletion(**params)
@@ -467,7 +480,7 @@ class LLMConnection:
         assembler = ModelStreamAssembler()
         stream = None
         try:
-            litellm = _get_litellm()
+            litellm = await _litellm_off_loop()
             params.update(api_key=self.llm_api_key, drop_params=False, num_retries=0)
             stream = await litellm.acompletion(**params)
             async for chunk in stream:

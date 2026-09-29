@@ -836,6 +836,13 @@ class OmniCoreAgent:
                     agent_version=self.agent_config.get("agent_version"),
                     lease_seconds=lease_seconds,
                 )
+            # Load the model client off the event loop before the heartbeat
+            # starts: imported on the loop at a process's first call, it froze
+            # it for seconds to minutes, the heartbeat stalled and a second
+            # process took over a live run (the 0.5.0rc1 gate).
+            warm_up = getattr(self.llm_connection, "warm_up", None)
+            if warm_up is not None:
+                await warm_up()
             await run_tracker.start(trace_context.trace_id)
             # Keeps the heartbeat fresh during long model or tool calls.
             keep_alive = asyncio.create_task(run_tracker.keep_alive())
