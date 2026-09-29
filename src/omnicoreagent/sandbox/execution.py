@@ -107,6 +107,34 @@ class SandboxExecutionService:
         self._sandbox_seconds_charged[session_id] = elapsed
         await budgets.charge("sandbox_seconds", owed)
 
+    async def _refuse_if_every_command_is_denied(self, surface: str) -> None:
+        """Refuse a sandbox no command could run in, before asking anyone.
+
+        permissive-dev denies host commands; with the local provider it asked a
+        person about the sandbox's network first, then denied every command:
+        an approval that could lead nowhere (the 0.5.0rc1 gate). Only a deny
+        rule with no command matcher refuses early; command rules may still
+        allow a specific command, so a policy with them is decided per command.
+        """
+        from omnicoreagent.governance.evaluator import PolicyEvaluator
+        from omnicoreagent.governance.models import PolicyEffect, ReasonCode
+
+        policy = getattr(self.governance_engine, "policy", None)
+        if policy is None:
+            return
+        probe = AuthorityRequest(
+            capability="process.exec",
+            provider="sandbox",
+            execution_surface=surface,
+            target=AuthorityTarget(resource="sh"),
+            risk_level="high",
+            metadata={"command": {"name": "sh", "argc": 0}, "purpose": "any_command"},
+        )
+        decision = PolicyEvaluator().evaluate(policy, probe)
+        if decision.effect == PolicyEffect.DENY and decision.reason_code == ReasonCode.MATCHED_DENY:
+            # Through the engine, so the refusal is recorded like any other.
+            await self.governance_engine.authorize_sandboxed(probe)
+
     async def open_session(
         self, manifest: SandboxManifest | dict[str, Any] | None = None
     ) -> SandboxSession:
@@ -120,6 +148,7 @@ class SandboxExecutionService:
         manifest = manifest or SandboxManifest()
         runtime = self._runtime()
         self._refuse_mount_over_policy(manifest)
+        await self._refuse_if_every_command_is_denied(_surface(runtime))
         requests = _manifest_authority_requests(manifest, SandboxCommandSpec(command=["session"]))
         if requests:
             await self.governance_engine.authorize_all(requests)
@@ -178,6 +207,7 @@ class SandboxExecutionService:
         authority_request = _sandbox_authority_request(spec, _surface(runtime))
         manifest = spec.manifest or SandboxManifest()
         self._refuse_mount_over_policy(manifest)
+        await self._refuse_if_every_command_is_denied(_surface(runtime))
         manifest_requests = _manifest_authority_requests(manifest, spec)
         if manifest_requests:
             await self.governance_engine.authorize_all(manifest_requests)

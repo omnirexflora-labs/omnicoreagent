@@ -67,11 +67,12 @@ async def test_a_quickstart_agent_answers_exactly_as_before():
 
 
 @pytest.mark.asyncio
-async def test_nothing_runs_on_the_host_unasked(tmp_path):
+async def test_nothing_runs_on_the_host_and_no_one_is_asked_in_vain(tmp_path):
     # Given a host "sandbox" (the local provider, which cannot switch the
-    # network off), the default asks a person before that sandbox gets network,
-    # and runs nothing meanwhile. Found writing this test: the plan said the
-    # default never pauses; it never pauses an agent with no sandbox.
+    # network off), the default refuses its commands. It used to ask a person
+    # about the sandbox's network first, then refuse every command anyway: an
+    # approval that could lead nowhere (the 0.5.0rc1 gate). It now refuses
+    # before asking, by name.
     model = RecordingModel([("c1", "execute", '{"command": "touch made.txt"}')], "done")
     agent = await _agent(
         model,
@@ -84,9 +85,12 @@ async def test_nothing_runs_on_the_host_unasked(tmp_path):
 
     result = await agent.run("Make a file.", session_id="host")
 
-    assert result["status"] == "awaiting_approval"
-    approval = (await agent.get_run(result["run_id"]))["approvals"][0]
-    assert approval["capability"] == "sandbox.network.configure"
+    assert result["status"] == "success"
+    assert (await agent.get_run(result["run_id"]))["approvals"] == []
+    refused = next(m for m in model.calls[-1] if m.get("tool_call_id") == "c1")
+    assert "Host process execution needs explicit policy" in json.dumps(refused)
+    trace = json.dumps(await agent.telemetry_store.get_trace(result["trace_id"]), default=str)
+    assert "deny_unrestricted_process_exec" in trace
     assert not (tmp_path / "made.txt").exists()
     await agent.cleanup()
 
