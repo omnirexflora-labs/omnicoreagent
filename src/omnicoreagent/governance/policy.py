@@ -192,6 +192,10 @@ def _compose_auto_discovered_policy(
     _validate_auto_discovered_allow_rules(discovered, baseline)
     discovered.rules.deny = [*baseline.rules.deny, *discovered.rules.deny]
     discovered.rules.ask = [*baseline.rules.ask, *discovered.rules.ask]
+    # A file can only narrow: it adds denies and asks, and its own allows are
+    # within the profile's. Replacing the profile's allows with the file's
+    # took them all away when the file had none (the 0.5.0rc1 gate).
+    discovered.rules.allow = [*baseline.rules.allow, *discovered.rules.allow]
     discovered.mode = _stricter_mode(baseline.mode, discovered.mode)
     discovered.profile = baseline.profile
     return attach_policy_hash(discovered)
