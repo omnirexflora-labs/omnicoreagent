@@ -113,6 +113,9 @@ async def main():
         model_config=model_config(max_tokens=900),
         local_tools=local_tools,  # <- Local Python tools
         mcp_tools=mcp_tools,  # <- MCP server tools
+        # The filesystem server's tools share their names with the built-in
+        # workspace file tools; turn those off so the model uses the server's.
+        agent_config={"enable_workspace_files": False},
     )
 
     # Connect to MCP servers

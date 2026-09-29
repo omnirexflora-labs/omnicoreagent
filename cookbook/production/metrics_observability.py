@@ -22,7 +22,7 @@ async def main():
     agent = OmniCoreAgent(
         name="monitored_agent",
         system_instruction="You are a helpful assistant.",
-        model_config=model_config(max_tokens=500),
+        model_config=model_config(max_tokens=1500),
     )
 
     # --- Per-Request Metrics ---
@@ -31,6 +31,8 @@ async def main():
     print("=" * 50)
 
     result = await agent.run("Explain quantum computing in simple terms")
+    # "error" with termination "length" means the answer was cut off at max_tokens.
+    print("Status:", result["status"])
 
     metric = result["metric"]
     print("Query: 'Explain quantum computing...'")

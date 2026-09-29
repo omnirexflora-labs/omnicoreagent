@@ -52,6 +52,10 @@ async def main():
         system_instruction="You are a helpful assistant with access to filesystem tools.",
         model_config=model_config(max_tokens=800),
         mcp_tools=mcp_tools,  # <- Attach MCP tools here
+        # The filesystem server's read_file, write_file... share their names
+        # with the built-in workspace file tools; turn those off so the model
+        # uses the server's.
+        agent_config={"enable_workspace_files": False},
     )
 
     # Connect to MCP servers (required before using MCP tools)
