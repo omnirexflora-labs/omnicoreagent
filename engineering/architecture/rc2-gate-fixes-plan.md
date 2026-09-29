@@ -22,3 +22,6 @@ land, and published only when a gate finds nothing to fix.
   resume opens a new session, so a run that paused after its network was
   approved asked the same question again (area D). A tool call's approval is
   still spent once.
+- S4 A call the policy or a person refused reads `denied` in the run record
+  (`rejected` for invalid arguments), as it does in the trace; it said
+  `error` (area F).

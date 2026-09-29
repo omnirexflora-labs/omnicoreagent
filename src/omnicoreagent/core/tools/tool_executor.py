@@ -7,6 +7,7 @@ from omnicoreagent.core.tools.mcp_results import (
     is_mcp_call_result,
     normalize_mcp_call_result,
 )
+from omnicoreagent.governance.errors import GovernanceError
 
 RESULT_ENVELOPE_STATUSES = {"success", "partial", "error"}
 RESULT_ENVELOPE_KEYS = {"status", "data", "message", "error"}
@@ -35,6 +36,10 @@ class ToolExecutor:
                 "data": None,
                 "message": str(e),
             }
+            if isinstance(e, GovernanceError):
+                # Authority the tool asked for while it ran (a sandbox
+                # command) was refused: recorded as a denial, not a failure.
+                normalized["governance_error_code"] = e.code
 
         return normalized
 
