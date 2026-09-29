@@ -351,6 +351,15 @@ it is. Each thing it asks for is a policy question when the session opens:
 | `environment` | `{"plain": {}}` | `sandbox.environment.set` |
 | `resources` | none (e.g. `{"cpu": "2", "memory": "1g"}`) | `sandbox.resources.set` |
 | `workspace_mount` | none | `sandbox.filesystem.mount` (asks in the dev profiles) |
+| `filesystem_policy` | `{"default": "deny"}`, no path lists | `sandbox.filesystem.configure` (for `"default": "allow"`, and once per path in `readable_paths`, `writable_paths`, `denied_paths`) |
+| `lifecycle` | `{"cleanup": "always", "snapshot": False}` | — |
+
+`filesystem_policy` is a question for the policy; of the built-in providers
+only `local` reads it, and refuses anything but `{"default": "allow"}` with no
+path lists. `lifecycle` does not change the agent's own sandbox, which is
+closed when its run ends: `cleanup` (`"always"`, `"on_success"`, `"never"`)
+applies only to a one-off command run through the sandbox service without a
+session, and nothing acts on `snapshot` yet.
 
 A manifest with an unknown field, or one that sets `provider` or `sandbox_id`,
 is refused when the agent is built.
