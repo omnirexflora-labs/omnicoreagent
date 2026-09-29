@@ -66,16 +66,17 @@ asyncio.run(main())
 ```
 
 ```text
-Tokyo is 22°C and sunny. A light jacket is optional, but probably not necessary unless you get cold easily.
+Tokyo is 22°C and sunny. You probably don’t need a jacket, though a light one could be handy if you’ll be out late.
 status: success
-31 telemetry events:
-user_message, guardrail_check, memory_read, run_configuration, runtime_message, memory_write, agent_step, context_assembly, context_message, context_message, context_tools, model_call, model_response, memory_write, tool_batch_start, tool_requested, tool_resolved, tool_call, tool_result, tool_observation, memory_write, observation_pipeline_end, tool_batch_end, agent_step, context_assembly, context_message, context_message, model_call, model_response, memory_write, final_answer
+33 telemetry events:
+user_message, guardrail_check, memory_read, run_configuration, runtime_message, memory_write, agent_step, context_assembly, context_message, context_message, context_tools, model_call, model_response, memory_write, tool_batch_start, tool_requested, tool_resolved, policy_request_created, policy_decision_allow, tool_call, tool_result, tool_observation, memory_write, observation_pipeline_end, tool_batch_end, agent_step, context_assembly, context_message, context_message, model_call, model_response, memory_write, final_answer
 ```
 
 The first line appeared piece by piece. `run()` still returns the whole result
 when the run ends. The last line is the other stream: every event the run
-recorded, in order — two `agent_step`s, the tool call between them, the
-`final_answer`.
+recorded, in order — two `agent_step`s, the tool call between them (asked of
+the policy first: `policy_request_created`, then `policy_decision_allow`, since
+governance is on by default), the `final_answer`.
 
 ### Or iterate over the run
 
@@ -107,10 +108,10 @@ asyncio.run(main())
 ```
 
 ```text
-Silver ribbons glide
-Through quiet stones and green reeds
-Earth hums in their song
---- complete: success | trace trace_04c440c9
+River bends and hums
+Silver threads through sleeping stones
+Time slips softly by
+--- complete: success | trace trace_ab6de575
 ```
 
 The `complete` event has every key `run()` returns (`response`, `status`,
@@ -189,7 +190,7 @@ tool_call
 tool_result {'tool_name': 'get_weather', 'args': {'city': 'Oslo'}, 'status': 'success', 'data': {'city': 'Oslo', 'temp': '22C', 'condition': 'Sunny'}, 'message': None}
 model_call
 final_answer
-Oslo is 22°C and sunny.
+Oslo: 22°C, Sunny.
 9 text deltas
 ```
 
@@ -210,9 +211,9 @@ whether a tool's arguments are kept in full) follows your
 | The run | `user_message`, `run_configuration`, `agent_step`, `final_answer`, `runtime_error` (the error's type and message; with `capture: "full"`, its traceback too) |
 | The model | `model_call`, `model_response`, `model_error` |
 | Context | `context_assembly`, `context_message`, `context_tools`, `context_compression` (history was [trimmed or summarized](/docs/core-concepts/context-engineering)), `memory_read`, `memory_write` |
-| Tools | `tool_batch_start`, `tool_requested`, `tool_resolved`, `tool_call`, `tool_result`, `tool_error`, `tool_observation`, `observation_pipeline_end`, `tool_batch_end`, `workspace_offload` |
+| Tools | `tool_batch_start`, `tool_requested`, `tool_resolved`, `tool_call`, `tool_result`, `tool_error`, `tool_observation`, `observation_pipeline_end`, `tool_batch_end`, `workspace_offload`; a workspace file tool records `workspace_read`, `workspace_write` or `workspace_delete` in place of `tool_call` and `tool_result` |
 | Sub-agents | `subagent_spawn`, `subagent_result`, `subagent_error` |
-| Safety and policy | `guardrail_check`, `guardrail_violation`, `policy_decision_allow`, `policy_decision_ask`, `policy_decision_deny` |
+| Safety and policy | `guardrail_check`, `guardrail_violation`, `policy_request_created` (each request put to the policy), `policy_decision_allow`, `policy_decision_ask`, `policy_decision_deny` |
 | Pauses and budgets | `run_suspended`, `run_resumed`, `run_interrupted`, `run_steered`, `budget_granted`, `budget_denied` |
 
 ## Look up a finished run
