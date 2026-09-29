@@ -61,8 +61,13 @@ profile. What it does with each kind of request:
   files into it (`ask_sandbox_host_mount`). Nothing else pauses.
 - **Refused without asking:** reading raw secrets, host files outside the
   workspace, network access from the **host** (any `network.*` request, rule
-  `deny_unrestricted_network_egress`), installing packages, and shell
-  commands on the host.
+  `deny_unrestricted_network_egress`), installing packages as a capability (a
+  `package.install` request, rule `deny_unrestricted_package_install`), and
+  shell commands on the host.
+
+Inside a sandbox, `pip install` is not a `package.install` request: it is an
+ordinary command, allowed like any other command there. What contains it is
+the sandbox's network, which is off until a person approves turning it on.
 
 There is no budget until you set one, and no sandbox (no `execute` tool) until
 you configure one. `governance_config={"enabled": False}` turns it off. There
