@@ -1404,10 +1404,23 @@ class OmniCoreAgent:
                 if run.get("status") not in _FINISHED_RUN_STATUSES:
                     continue
                 trace_ids = list(run.get("trace_ids") or [trace.trace_id])
-            elif str(getattr(trace.status, "value", trace.status)) in _UNFINISHED_TRACE_STATUSES:
-                continue
             else:
-                trace_ids = [trace.trace_id]
+                # No record (pruned, or kept in another process's memory): the
+                # run is every trace carrying its id, in order, finished if its
+                # last one is. Reading one trace skipped a resumed run whole
+                # (its paused segment is unfinished; the 0.5.0rc1 gate).
+                related = [trace]
+                if trace.run_id:
+                    related = [
+                        t
+                        for t in await self.telemetry_store.list_traces(TraceFilter(run_id=trace.run_id))
+                        if any(span.kind == "agent.run" for span in t.spans)
+                    ] or [trace]
+                related.sort(key=lambda t: t.started_at)
+                last = related[-1]
+                if str(getattr(last.status, "value", last.status)) in _UNFINISHED_TRACE_STATUSES:
+                    continue
+                trace_ids = [t.trace_id for t in related]
             segments = [
                 t
                 for t in [
