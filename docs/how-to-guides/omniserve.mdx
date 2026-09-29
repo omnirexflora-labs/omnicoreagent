@@ -59,7 +59,7 @@ omniserve run --agent my_agent.py --port 8771
 
 ==================================================
 OmniServe
-OmniCoreAgent 0.5.0rc1
+OmniCoreAgent 0.5.0
 ==================================================
 Agent: support
 Server: http://0.0.0.0:8771
@@ -82,7 +82,8 @@ INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8771 (Press CTRL+C to quit)
 ```
 
-Wait for `/ready`, then ask:
+Wait for `/ready`, then ask. Loading the model library can take a minute on
+a busy machine; the `agent_name` in the answer confirms it is your server:
 
 ```bash
 curl -s localhost:8771/ready
@@ -943,6 +944,17 @@ store for runs and readiness checks are on
     Set `LLM_API_KEY` in the server's environment. A key the provider
     rejects starts fine, and each run ends with `status` `error`,
     `termination_reason` `provider_error`.
+  </Accordion>
+
+  <Accordion title="OmniServe cannot listen on host:port: it is in use">
+    Another process holds the port. The port is checked before the agent is
+    loaded, so this comes at once:
+
+    ```text
+    Error: OmniServe cannot listen on 0.0.0.0:8771: it is in use or not available (Address already in use); choose another port
+    ```
+
+    Pick another `--port`, or stop what holds it.
   </Accordion>
 </AccordionGroup>
 

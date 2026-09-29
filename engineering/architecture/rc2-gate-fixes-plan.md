@@ -33,3 +33,7 @@ land, and published only when a gate finds nothing to fix.
   named like one in `command` (it was a raw `__init__` TypeError); a
   malformed JSON policy file says the line and column (areas B and F).
 
+- S7 OmniServe takes its port before it starts up (and the CLI checks it
+  before loading the agent): uvicorn binds after startup, which took up to
+  110 s on a loaded machine, so a taken port showed only at the end while
+  clients reached another server (area F).
