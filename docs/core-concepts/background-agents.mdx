@@ -556,8 +556,28 @@ def build_manager(worker_id: str | None = None) -> BackgroundAgentManager:
 
 ```python
 # enqueue.py: register, then queue four runs, each with its own query
-for text in ["Good morning.", "Thank you.", "See you tomorrow.", "Where is the station?"]:
-    await manager.run_now("translate", query=text)
+import asyncio
+from jobs import build_agent, build_manager
+
+
+async def main():
+    manager = build_manager()
+    # replace=True: the store keeps both from an earlier run of this script.
+    await manager.register_agent("translator", build_agent(), replace=True)
+    await manager.register_task(
+        task_id="translate",
+        agent_id="translator",
+        query="Good morning.",
+        schedule={"type": "manual"},
+        overlap_policy="allow_parallel",  # the default skips a run while one is active
+        replace=True,
+    )
+    for text in ["Good morning.", "Thank you.", "See you tomorrow.", "Where is the station?"]:
+        await manager.run_now("translate", query=text)
+    await manager.shutdown()
+
+
+asyncio.run(main())
 ```
 
 ```python
