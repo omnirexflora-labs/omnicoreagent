@@ -114,3 +114,34 @@ async def test_a_person_asked_to_approve_sees_the_command(tmp_path):
     shown = seen[0].metadata["command"]
     assert shown["summary"] == ["git status", "git push --force"]
     assert seen[0].target.resource == "sh"
+
+
+@pytest.mark.asyncio
+async def test_an_agent_on_the_host_is_stopped_by_a_command_rule_by_name(tmp_path):
+    # The scene the recording could not film honestly: an agent that may run
+    # commands on this machine, asked to rm -rf, stopped by a rule naming rm.
+    import json
+
+    from test_execute_tool import ScriptedModel
+    from test_local_sandbox import _agent, _agent_policy
+
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "app").write_text("keep")
+    policy = _agent_policy()
+    policy.rules.deny.insert(0, DENY_RM)
+    model = ScriptedModel(
+        [("c1", "execute", '{"command": "rm -rf build && make"}')],
+        [("c2", "execute", '{"command": "ls build"}')],
+        "done",
+    )
+    agent = await _agent(model, tmp_path, policy=policy)
+
+    result = await agent.run("Clean the build folder and rebuild.", session_id="rm")
+
+    assert (tmp_path / "build" / "app").read_text() == "keep"
+    run = await agent.get_run(result["run_id"])
+    outcomes = {c["tool_call_id"]: c["outcome"] for c in run["tool_calls"]}
+    assert outcomes == {"c1": "error", "c2": "success"}
+    trace = json.dumps(await agent.telemetry_store.get_trace(result["trace_id"]), default=str)
+    assert "deny_recursive_rm" in trace
+    await agent.cleanup()
