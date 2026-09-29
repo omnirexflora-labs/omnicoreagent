@@ -19,15 +19,26 @@ it in the official docs, which is not the same as No.
 
 ## The short version
 
-**What OmniCoreAgent does differently.** It puts one policy over every action
-an agent takes: each tool, each command, the network, each MCP server,
-delegation, background runs. When the policy asks, the run pauses for a person
-and can resume days later in another process. A budget prices each model call
-before making it, and when it runs out the run waits for a person instead of
-failing. Commands run in a sandbox whose network is off by default and
-*checked* to be off. Every run is recorded locally, with no service to sign up
-for. The same package also schedules runs and serves them over HTTP. All of
-this is opt-in: governance is off until you turn it on.
+**What OmniCoreAgent does differently.** Three things together, which no
+other framework here does by default:
+
+- **Every action is checked before it runs.** One policy covers each tool,
+  command, network request, MCP server, delegation and background run: allow,
+  ask a person, or deny, by name. It is on by default. Limits are checked
+  before a call is made: a budget holds a model call's price first and, when it
+  runs out, the run waits for a person instead of failing. Pydantic AI and the
+  Claude Agent SDK check cost after the response, so one call can overshoot.
+- **A run survives a crash without silently redoing anything.** It resumes
+  from its checkpoint, even in another process, and a tool call that was
+  interrupted is reported to the model, not run again (unless the tool is
+  marked safe to repeat). LangGraph re-runs an unfinished task and asks you
+  to make it idempotent.
+- **Every step is on the record,** locally, with no service to sign up for:
+  what the model saw, what it did, what the policy decided and who approved,
+  what it cost, and outcomes that arrive later, to evaluate and train on.
+
+Sandboxes, human approval, MCP, sub-agents, scheduling and an HTTP server come
+with it too; most runtimes now have their own.
 
 **Where the others are stronger:**
 
@@ -51,30 +62,32 @@ this is opt-in: governance is off until you turn it on.
 
 ## Capability by capability
 
-| | OmniCoreAgent 0.4 | OpenAI Agents SDK | LangGraph | Pydantic AI | Claude Agent SDK | CrewAI |
-|---|---|---|---|---|---|---|
-| **1. One policy that allows, asks or denies each action** | Yes (opt-in) | Partial: per-tool approval and guardrails | Partial: per-tool approval (`langchain` middleware) | Partial: a guard you write (Harness package) | Yes: rules, modes, hooks | Partial: hooks you write |
-| **2. A person's approval pauses the run; it resumes later, in another process** | Yes (durable store) | Yes: `RunState` | Yes: `interrupt()` + checkpointer | Yes: deferred tools | Yes: `defer` hook (one tool call per turn) | Yes: Flows `@human_feedback` |
-| **3. Dollar budget enforced before a model call** | Yes: holds the call's price first; pauses for a person | Not documented (tokens and turns) | No in open source; LangSmith gateway (paid, beta) | Yes: `cost_limit` ends the run once exceeded | Partial: `max_budget_usd` stops after the call that crosses it | No: paid Cost Limit only emails |
-| **4. Built-in sandboxed command execution** | Yes: Docker, E2B, Modal, Daytona, Vercel, your own, local | Yes: local, Docker, 7 hosted | Partial: Docker or Codex policy (`langchain`); providers via Deep Agents | Partial: Modal, Monty (Harness) | Yes: OS-level, opt-in | Partial: E2B and Daytona tools |
-| **5. Sandbox network off by default** | Yes, and checked on E2B and Daytona | No: Docker keeps its default network | Partial: yes for the Docker policy; the default runs on the host | Not documented | Partial: sandbox opt-in; new hosts are asked about | No (E2B tool) |
-| **6. A run survives a process crash and resumes** | Yes (durable store) | Partial: save state yourself, or Temporal and others | Yes: checkpoints | Yes: Temporal, DBOS, Prefect, Restate... | Partial: resumes the conversation | Yes: `checkpoint=True` |
-| **7. Every run recorded locally, no service needed** | Yes, on by default | Partial: default exporter sends to OpenAI | Partial: checkpoint history; tracing needs LangSmith | Partial: opt-in | Yes: JSONL transcripts | Partial: opt-in log files |
-| **8. OpenTelemetry export** | Yes (OTLP, LangSmith, Opik) | Not documented | Yes (via `langsmith`) | Yes | Yes (traces in beta) | Yes |
-| **9. MCP client, local and remote** | Yes (+ OAuth) | Yes | Yes (`langchain`) | Yes | Yes | Yes |
-| **10. Sub-agents / delegation** | Yes | Yes: handoffs, agents as tools | Yes | Yes | Yes | Yes |
-| **11. Scheduled / background runs built in** | Yes: cron, interval, durable task store | Not documented | Partial: LangSmith Deployment | Partial: via Prefect and others | Partial: session-scoped scheduling | Not documented |
-| **12. HTTP server built in** | Yes (OmniServe) | Not documented | Partial: dev server; production is LangSmith Deployment | Partial: dev web UI; adapters for your app | No | Partial: AG-UI package; paid hosted API |
-| **13. Model providers** | Many (LiteLLM) | Many (OpenAI default; adapters in beta) | Many | Many | Claude only, on several clouds | Many |
-| **14. Workflow graphs** | No: compose in Python | Partial: Python orchestration | Yes: the core of it | Yes: pydantic-graph | Partial: Workflow tool | Yes: Flows |
-| **15. Hosted tracing / evaluation from the same vendor** | No | Yes: OpenAI Traces | Yes: LangSmith | Yes: Logfire | Not documented | Yes: AMP |
-| **16. Languages** | Python | Python; TypeScript (separate) | Python, TypeScript | Python | Python, TypeScript | Python |
-| **17. License** | MIT | MIT | MIT (library) | MIT | Commercial terms (Python repo MIT) | MIT |
+| | OmniCoreAgent 0.5 | OpenAI Agents SDK | LangGraph | Pydantic AI | Claude Agent SDK | CrewAI | Agno |
+|---|---|---|---|---|---|---|---|
+| **1. One policy that allows, asks or denies each action** | Yes, on by default | Partial: per-tool approval and guardrails | Partial: per-tool approval (`langchain` middleware) | Partial: a guard you write (Harness package) | Yes: rules, modes, hooks | Partial: hooks you write | Partial: per-tool confirmation and `@approval`; guardrails check input |
+| **2. A person's approval pauses the run; it resumes later, in another process** | Yes (durable store) | Yes: `RunState` | Yes: `interrupt()` + checkpointer | Yes: deferred tools | Yes: `defer` hook (one tool call per turn) | Yes: Flows `@human_feedback` | Yes: `continue_run(run_id)` with the same database and session |
+| **3. Dollar budget enforced before a model call** | Yes: holds the call's price first; pauses for a person | Not documented (tokens and turns) | No in open source; LangSmith gateway (paid, beta) | Partial: `cost_limit` is checked after each response, so one call can overshoot | Partial: `max_budget_usd` stops after the call that crosses it | No: paid Cost Limit only emails | No: cost is recorded, not enforced |
+| **4. Built-in sandboxed command execution** | Yes: Docker, E2B, Modal, Daytona, Vercel, your own, local | Yes: local, Docker, 7 hosted | Partial: Docker or Codex policy (`langchain`); providers via Deep Agents | Partial: Modal, Monty (Harness) | Yes: OS-level, opt-in | Partial: E2B and Daytona tools | Partial: Daytona, E2B, Superserve toolkits; local shell tools run on the host |
+| **5. Sandbox network off by default** | Yes, and checked on E2B and Daytona | No: Docker keeps its default network | Partial: yes for the Docker policy; the default runs on the host | Not documented | Partial: sandbox opt-in; new hosts are asked about | No (E2B tool) | Not documented |
+| **6. A run survives a process crash and resumes** | Yes (durable store) | Partial: save state yourself, or Temporal and others | Yes: checkpoints | Yes: Temporal, DBOS, Prefect, Restate... | Partial: resumes the conversation | Yes: `checkpoint=True` | Partial: AgentOS durable queue; a crashed run fails by default, a retry re-runs it whole |
+| **7. Every run recorded locally, no service needed** | Yes, on by default | Partial: default exporter sends to OpenAI | Partial: checkpoint history; tracing needs LangSmith | Partial: opt-in | Yes: JSONL transcripts | Partial: opt-in log files | Yes: sessions, runs and traces in your own database |
+| **8. OpenTelemetry export** | Yes (OTLP, LangSmith, Opik) | Not documented | Yes (via `langsmith`) | Yes | Yes (traces in beta) | Yes | Yes |
+| **9. MCP client, local and remote** | Yes (+ OAuth) | Yes | Yes (`langchain`) | Yes | Yes | Yes | Yes: stdio and Streamable HTTP |
+| **10. Sub-agents / delegation** | Yes | Yes: handoffs, agents as tools | Yes | Yes | Yes | Yes | Yes: Teams |
+| **11. Scheduled / background runs built in** | Yes: cron, interval, durable task store | Not documented | Partial: LangSmith Deployment | Partial: via Prefect and others | Partial: session-scoped scheduling | Not documented | Yes: AgentOS scheduler, background runs, durable queue |
+| **12. HTTP server built in** | Yes (OmniServe) | Not documented | Partial: dev server; production is LangSmith Deployment | Partial: dev web UI; adapters for your app | No | Partial: AG-UI package; paid hosted API | Yes: AgentOS (FastAPI) |
+| **13. Model providers** | Many (LiteLLM) | Many (OpenAI default; adapters in beta) | Many | Many | Claude only, on several clouds | Many | Many |
+| **14. Workflow graphs** | No: compose in Python | Partial: Python orchestration | Yes: the core of it | Yes: pydantic-graph | Partial: Workflow tool | Yes: Flows | Yes: Workflows |
+| **15. Hosted tracing / evaluation from the same vendor** | No | Yes: OpenAI Traces | Yes: LangSmith | Yes: Logfire | Not documented | Yes: AMP | Yes: AgentOS control plane |
+| **16. Languages** | Python | Python; TypeScript (separate) | Python, TypeScript | Python | Python, TypeScript | Python | Python |
+| **17. License** | MIT | MIT | MIT (library) | MIT | Commercial terms (Python repo MIT) | MIT | Apache-2.0 |
+| **18. After a crash, an interrupted tool call is reported, not re-run** | Yes, unless the tool is marked idempotent | No: reconciling side effects is left to your app | No: an unfinished task may run again; make it idempotent | Partial: opt-in Harness `StepPersistence` marks it `unknown_after_crash` | Not documented | No: resume restarts from the last checkpoint; only completed tasks are skipped | Partial: the durable queue fails a crashed run by default; no per-call record |
 
 ## Sources
 
 Read on 2026-09-26: only each project's own docs and repository, no
-third-party comparisons. The method is in the repository, in
+third-party comparisons. Row 18, the Pydantic AI budget cell and the Agno
+column were read on 2026-09-29. The method is in the repository, in
 `engineering/architecture/comparison-plan.md`.
 
 **OmniCoreAgent:** this documentation.
@@ -169,3 +182,30 @@ third-party comparisons. The method is in the repository, in
 [Flows](https://docs.crewai.com/en/concepts/flows) (14);
 [AMP traces](https://docs-platform.crewai.com/platform/en/features/traces) (15);
 [repository](https://github.com/crewAIInc/crewAI) (16, 17).
+
+**Agno** (agno 3.0.11, read 2026-09-29):
+[human in the loop](https://docs.agno.com/hitl/overview),
+[guardrails](https://docs.agno.com/guardrails/overview) (1, 2);
+[metrics](https://docs.agno.com/sessions/metrics) (3);
+[E2B](https://docs.agno.com/tools/toolkits/others/e2b),
+[Superserve](https://docs.agno.com/tools/toolkits/others/superserve),
+[workspace](https://docs.agno.com/tools/toolkits/local/workspace) (4, 5);
+[durable queue](https://docs.agno.com/agent-os/background-execution/durable-queue) (6, 18);
+[tracing](https://docs.agno.com/tracing/overview) (7, 8);
+[MCP](https://docs.agno.com/tools/mcp/overview) (9);
+[teams](https://docs.agno.com/teams/overview) (10);
+[scheduling](https://docs.agno.com/features/scheduling),
+[background execution](https://docs.agno.com/background-execution/overview) (11);
+[runtime](https://docs.agno.com/features/runtime) (12);
+[models](https://docs.agno.com/models/providers/model-index) (13);
+[workflows](https://docs.agno.com/workflows/overview) (14);
+[control plane](https://docs.agno.com/agent-os/control-plane) (15);
+[repository](https://github.com/agno-agi/agno) (16, 17).
+
+**Row 18, the others:**
+OmniCoreAgent: [what is guaranteed](/docs/core-concepts/durable-runs#what-is-guaranteed);
+OpenAI Agents SDK: [human in the loop](https://openai.github.io/openai-agents-python/human_in_the_loop/);
+LangGraph: [functional API](https://docs.langchain.com/oss/python/langgraph/functional-api);
+Pydantic AI: [step persistence](https://pydantic.dev/docs/ai/harness/step-persistence/);
+Claude Agent SDK: [sessions](https://code.claude.com/docs/en/agent-sdk/sessions);
+CrewAI: [checkpointing](https://docs.crewai.com/en/concepts/checkpointing).
