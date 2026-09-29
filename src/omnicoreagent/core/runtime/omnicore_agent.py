@@ -2701,6 +2701,9 @@ def _public_approval(approval: dict[str, Any], record: dict[str, Any]) -> dict[s
         "capability": approval.get("capability"),
         "target": approval.get("target"),
         "arguments": arguments,
+        # For a shell command: the commands it would run, one per line. The
+        # target alone says only `sh` (the 0.5.0rc1 gate).
+        "command": approval.get("command"),
         "risk_level": approval.get("risk_level"),
         "reason": approval.get("reason"),
         "expires_at": approval.get("expires_at"),
