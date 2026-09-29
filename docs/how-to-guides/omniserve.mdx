@@ -79,7 +79,6 @@ Features Enabled:
 INFO:     Started server process [476363]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:8771 (Press CTRL+C to quit)
 ```
 
 Wait for `/ready`, then ask. Loading the model library can take a minute on
@@ -241,6 +240,10 @@ curl -s localhost:8771/runs/$RUN_ID
     "error": null,
     "created_at": "2026-09-27T23:02:03.632040+00:00",
     "updated_at": "2026-09-27T23:02:08.056437+00:00",
+    "heartbeat_at": "2026-09-27T23:02:06.538787+00:00",
+    "lease_seconds": 60,
+    "attempt": 1,
+    "previous_attempts": [],
     "approvals": [],
     "budget_requests": [],
     "outcomes": []
@@ -857,11 +860,14 @@ store for runs and readiness checks are on
     ```text
     {"detail":"Run run_192cf4b607f641cd9f7431befc89b93f is still waiting for approval: approval_1db56482b7db412b96e07776776d86b4"}
     {"detail":"Approval approval_1db56482b7db412b96e07776776d86b4 is already approved"}
+    {"detail":"Approval approval_1db56482b7db412b96e07776776d86b4 is already used"}
     {"detail":"Run run_192cf4b607f641cd9f7431befc89b93f is completed; only a waiting or stopped run can resume"}
     {"detail":"Task already registered: order_check"}
     ```
 
-    Decide every approval before resuming; send `"replace": true` to
+    An approval reads `already approved` (or `denied`) once decided, and
+    `already used` once a resume has applied the decision. Decide every
+    approval before resuming; send `"replace": true` to
     overwrite a task.
   </Accordion>
 
