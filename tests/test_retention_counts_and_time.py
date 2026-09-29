@@ -59,3 +59,31 @@ async def test_trace_retention_reports_what_it_removed(tmp_path):
     assert removed == 2
     assert store.retention_status()["last_prune"]["removed"] == 2
     assert await store.get_trace("trace-old-1") is None
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_process_reports_the_abandoned_traces_it_removed(tmp_path):
+    # The 0.5.0rc2 gate: `removed` counted the load-time pass, `abandoned`
+    # did not: a killed run's `running` trace was removed and reported 0.
+    from datetime import timedelta
+
+    from omnicoreagent.core.telemetry.models import utc_now
+    from omnicoreagent.core.telemetry.store import JsonlTelemetryStore
+    from test_telemetry_retention import _trace
+
+    path = tmp_path / "traces.jsonl"
+    seed = JsonlTelemetryStore(path)
+    killed = _trace("trace-killed")  # running, its process gone
+    long_ago = utc_now() - timedelta(days=30)
+    killed.started_at = long_ago
+    for span in killed.spans:
+        span.started_at = long_ago
+    await seed.upsert_trace(killed)
+    await seed.upsert_trace(_trace("trace-old", ended_days_ago=30))
+    await seed.flush()
+
+    store = JsonlTelemetryStore(path, retention_days=7)
+    removed = await store.prune()
+
+    assert removed == 2
+    assert store.retention_status()["last_prune"]["abandoned"] == 1

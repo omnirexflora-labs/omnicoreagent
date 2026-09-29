@@ -56,3 +56,8 @@ land, and published only when a gate finds nothing to fix.
   field; a telemetry retention that is not a number; a store URL set but
   empty (it built a store with no database) (areas A and C).
 
+- S13 A fresh process's retention reports the abandoned traces its load
+  removed (only `removed` counted them), and the unknown-outcome result the
+  model reads carries the call's arguments, not `{}`, which the model had
+  copied into its next call (areas C and F).
+

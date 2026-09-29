@@ -429,7 +429,9 @@ async def execute_native_turn(
                 )
             result = {
                 "tool_name": request.name,
-                "args": {},
+                # The call's own arguments: an empty {} here was copied by the
+                # model into its next call (the 0.5.0rc2 gate).
+                "args": arguments,
                 "status": "error",
                 "data": None,
                 "message": message,
