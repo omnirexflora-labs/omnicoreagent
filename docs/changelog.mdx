@@ -24,8 +24,10 @@ profile. Its own tools, workspace, memory, code mode, skills, sub-agents and
 background runs are allowed, and nothing pauses for a person unless the agent is
 given a sandbox with network (then a person is asked first). Refused unasked:
 reading raw secrets, unrestricted host files and network, installing packages,
-and shell commands on the host. There is no budget until you set one.
-`governance_config={"enabled": False}` turns it off. Enabling governance
+and shell commands on the host. The MCP servers you configure are
+trusted: starting them and calling their tools is allowed by a named rule. There
+is no budget until you set one. `governance_config={"enabled": False}` turns it
+off. Enabling governance
 yourself without naming a profile still means `interactive-dev`, as before, so
 no one's policy loosens. See [Upgrading](/docs/upgrading), "From 0.4 to 0.5.0".
 

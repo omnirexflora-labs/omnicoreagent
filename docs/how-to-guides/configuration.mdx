@@ -310,7 +310,7 @@ you do not need.
 | `context_management` | on, 100,000 tokens, at 75% | Truncates or summarizes older messages before a call would overflow ([Context engineering](/docs/core-concepts/context-engineering)). |
 | `tool_offload` | on, over 500 tokens or 2,000 bytes | Saves a large tool result to the workspace and gives the model a preview. |
 | `guardrail_mode` | `"full"` | `full` (input and tool results), `input_only`, or `off` ([Guardrails](/docs/core-concepts/guardrails)). |
-| `governance_config` | off | Policy, budgets, sandbox ([Security model](/docs/core-concepts/security-model), [Policy](/docs/reference/policy), [Budgets](/docs/reference/budgets)). |
+| `governance_config` | on, profile `permissive-dev` | Policy, budgets, sandbox; `{"enabled": False}` turns it off ([Security model](/docs/core-concepts/security-model), [Policy](/docs/reference/policy), [Budgets](/docs/reference/budgets)). |
 | `enable_subagents` | `False` | The `spawn_subagents` tool; turns the workspace, context management and offload on. |
 | `enable_agent_skills`, `skills_dir` | `False`, `./.agents/skills` | Skills the agent may load ([Skills](/docs/core-concepts/skills)). |
 | `code_mode` | off | A `run_code` tool ([Code mode](/docs/core-concepts/code-mode)). |

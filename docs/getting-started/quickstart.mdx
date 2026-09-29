@@ -163,9 +163,12 @@ guardrail, and a full record of the run.
 You will find a `workspace/` folder where you ran the script: the agent's files
 (`files/`), large tool results saved for the agent to read back (`artifacts/`),
 and the record of every run (`telemetry/`). To keep it elsewhere, set
-`agent_config={"workspace_config": {"workspace_dir": "/path/to/workspace"}}`. Everything else is switched on when you
-want it: a policy over what the agent may do, a sandbox for commands, budgets,
-background runs, a server.
+`agent_config={"workspace_config": {"workspace_dir": "/path/to/workspace"}}`. The agent is also
+governed already: the default policy (`permissive-dev`) allowed its tool, and
+would have refused raw secrets, shell commands on the host, unrestricted
+network and package installs ([the defaults](/docs/core-concepts/security-model#the-defaults)).
+Everything else you switch on when you want it: a stricter policy, a sandbox
+for commands, budgets, background runs, a server.
 
 ## When things go wrong
 
