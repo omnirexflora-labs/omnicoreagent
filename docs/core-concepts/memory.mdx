@@ -213,8 +213,11 @@ messages fill the rest. A tool call and its result are kept together. Without
 | `summary.enabled` | `False` (default), `True` | Summarize what falls out of the window instead of dropping it |
 | `summary.retention_policy` | `"keep"` (default), `"delete"` | After summarizing: keep the originals in the store, marked inactive, or delete them |
 
-Give `mode` and `value` together: `memory_config` replaces the default as a
-whole. Within one run, the context is kept under the model's limit separately,
+`memory_config` is merged with the defaults one level deep: a key you leave
+out keeps its default, so `{"value": 50}` still counts in messages. A `summary`
+you give replaces the default `summary` as a whole, and a key left out of it
+takes the summarizer's own default (`retention_policy` falls back to `"keep"`).
+Within one run, the context is kept under the model's limit separately,
 by `context_management` ([context engineering](/docs/core-concepts/context-engineering)).
 
 ## Options
