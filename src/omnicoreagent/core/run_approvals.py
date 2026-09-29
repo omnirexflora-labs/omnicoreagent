@@ -65,6 +65,12 @@ def _parse(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
 
 
+# Sandbox set-up a session asks for when it opens; not a call the agent makes.
+_SESSION_SETUP = frozenset(
+    {"sandbox.network.configure", "sandbox.filesystem.configure", "sandbox.environment.set"}
+)
+
+
 class RunApprovalResolver:
     """Resolves governance asks from decisions recorded on the current run."""
 
@@ -79,6 +85,23 @@ class RunApprovalResolver:
         for recorded in run.record.get("approvals", []):
             if recorded["request_digest"] != digest:
                 continue
+            if (
+                recorded["status"] == "used"
+                and recorded.get("decision") == "approve"
+                and recorded.get("capability") in _SESSION_SETUP
+            ):
+                # Setting up the sandbox is asked again by every session, and
+                # a resume opens a new one (the 0.5.0rc2 gate: the network
+                # was asked about twice in one run). The person's yes holds
+                # for this exact set-up for the rest of the run.
+                return ApprovalResult(
+                    approved=True,
+                    approval_id=approval.approval_id,
+                    resolved_by=recorded["approver"],
+                    reason=_decision_reason(recorded),
+                    resolved_at=now,
+                    metadata={"recorded_approval_id": recorded["approval_id"]},
+                )
             if recorded["status"] in {"approved", "denied"}:
                 # A decision made in time stands, however late the resume:
                 # the expiry limits how long a person has to decide.

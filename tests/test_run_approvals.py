@@ -246,3 +246,36 @@ async def test_the_decision_is_on_the_record_as_soon_as_it_is_made(decision):
     (decided,) = (await agent.get_run("run_approve"))["approvals"]
     assert decided["decision"] == decision
     assert decided["status"] == ("approved" if decision == "approve" else "denied")
+
+
+@pytest.mark.asyncio
+async def test_an_approved_sandbox_network_holds_for_the_rest_of_the_run():
+    # The 0.5.0rc2 gate: a run whose sandbox network was approved paused later
+    # for another approval; the resume opened a new sandbox session, which
+    # asked about the same network again. Setting up the sandbox is repeated
+    # for each session, so its approval holds for the run; a tool call's
+    # approval is still spent once.
+    from omnicoreagent.sandbox.execution import _sandbox_scope_request
+
+    def network():
+        return _sandbox_scope_request(
+            "sandbox.network.configure", actor="agent", host="*", risk_level="high",
+            metadata={"default": "allow", "allowed_hosts": [], "denied_hosts": []},
+        )
+
+    agent, tracker, engine = await _setup()
+    with pytest.raises(ApprovalRequiredError):
+        await _ask(engine, tracker, network())
+    (pending,) = (await agent.get_run("run_approve"))["approvals"]
+    await agent.resolve_approval("run_approve", pending["approval_id"], decision="approve", approver="alice")
+    await tracker.reload()
+
+    for _ in range(2):  # the first session, then the session after a resume
+        decision = await _ask(engine, tracker, network())
+        assert decision.effect.value == "allow" or decision.approval_id
+
+    with pytest.raises(ApprovalRequiredError):  # another host is another question
+        await _ask(engine, tracker, _sandbox_scope_request(
+            "sandbox.network.configure", actor="agent", host="example.com",
+            risk_level="medium", metadata={"mode": "allow"}))
+    assert len((await agent.get_run("run_approve"))["approvals"]) == 2

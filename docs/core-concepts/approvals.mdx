@@ -154,6 +154,11 @@ one per line, in `approvals[i]["command"]["summary"]` (padding cannot hide a
 second one), and the decision applies to that exact command text: approving
 `ls` approves nothing else.
 
+Setting up a sandbox is the one exception: an approved network, file system
+or environment set-up holds for the rest of the run, for that exact set-up.
+Each sandbox session asks for it when it opens, and a resume opens a new
+one; the person is not asked the same question twice in one run.
+
 ## From another process
 
 A paused run lives in the agent's memory store. With a durable store, any
@@ -447,7 +452,7 @@ The decision returns the approval (`status` `denied`, `approver`, `note`,
 
 | Where | What |
 |---|---|
-| Run record: `get_run(run_id)`, `GET /runs/{run_id}` | each approval's `status` (`pending`, `approved`, `denied`, `expired`, then `used` once applied), `decision` (`approve` or `deny`), `approver`, `note`, `decided_at`, `edited_arguments` |
+| Run record: `get_run(run_id)`, `GET /runs/{run_id}` | each approval's `status` (`pending`, `approved`, `denied`, `expired`, then `used` once applied), `decision` (`approve` or `deny`, set when the person decides), `approver`, `note`, `decided_at`, `edited_arguments` |
 | Trajectory: the call's `governance` | the `ask`, then the decision: `allow` with `reason_code` `approved` and `approved_by`, or `deny` with `reason_code` `denied` and `denied_by` (the person), or `deny` with `expired_policy` and `denied_by` `system` when nobody decided in time; each with `approval_id` |
 
 Each pause and resume is its own trace segment; `get_run_trajectory(run_id)`

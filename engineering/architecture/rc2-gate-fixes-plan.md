@@ -17,3 +17,8 @@ land, and published only when a gate finds nothing to fix.
   when a resume applies it (areas B and F: `decision: null` in the decide
   answer and the run record). The documented `used` status is kept; the
   decision says whether it was an approval or a denial.
+- S3 An approved sandbox set-up (network, file system, environment) holds
+  for the rest of the run. Every sandbox session asks for its set-up and a
+  resume opens a new session, so a run that paused after its network was
+  approved asked the same question again (area D). A tool call's approval is
+  still spent once.
