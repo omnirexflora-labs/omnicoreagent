@@ -271,16 +271,17 @@ logging.basicConfig(level=logging.WARNING)
     PostgreSQL, MySQL and SQLite are all `"sql"`; the URL picks the database.
   </Accordion>
 
-  <Accordion title="KeyError: 'value' / Invalid memory mode">
-    Raised when the agent starts, from a `memory_config` without a `value`, or
-    with an unknown `mode`:
+  <Accordion title="Invalid memory mode">
+    Raised when the agent starts, from a `memory_config` with an unknown
+    `mode`:
 
     ```text
-    KeyError: 'value'
     ValueError: Invalid memory mode: window. Must be one of {'sliding_window', 'token_budget'}.
     ```
 
-    Give both: `{"mode": "token_budget", "value": 8000}`.
+    Use `sliding_window` or `token_budget`. A partial `memory_config` is
+    merged with the defaults, so a key you leave out, such as `value`, keeps
+    its default.
   </Accordion>
 </AccordionGroup>
 
