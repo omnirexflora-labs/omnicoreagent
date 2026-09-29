@@ -22,7 +22,8 @@ until someone decides ([durable runs](/docs/core-concepts/durable-runs)); the
    asks; remove the ask rule, or write your own policy.
 3. Otherwise an **allow** rule that matches.
 4. Otherwise the policy's **mode** decides: `permissive` allows,
-   `interactive` asks (reason `unknown_capability`), `strict` denies.
+   `interactive` asks, `strict` denies, each with reason `unknown_capability`
+   and no rule named, so the evidence tells it apart from a rule's decision.
 
 A decision is recorded in the run's trace with its `effect` and `reason_code`
 (`matched_allow`, `matched_ask`, `matched_deny`, `unknown_capability`,

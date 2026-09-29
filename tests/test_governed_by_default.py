@@ -157,3 +157,17 @@ def test_the_default_decides_every_capability_by_a_named_rule(surface):
         if not PolicyEvaluator().evaluate(policy, AuthorityRequest(capability=capability, execution_surface=surface)).matched_rule_ids
     ]
     assert unnamed == []
+
+
+def test_a_permissive_allow_with_no_rule_says_no_rule_matched():
+    # The 0.5.0rc1 gate: it reported matched_allow with no rule ids, so the
+    # evidence could not tell "a rule allowed it" from "nothing matched".
+    from omnicoreagent.governance.evaluator import PolicyEvaluator
+    from omnicoreagent.governance.models import AuthorityRequest, ReasonCode
+    from omnicoreagent.governance.policy import policy_from_mapping
+
+    policy = policy_from_mapping({"name": "open", "mode": "permissive", "rules": {}})
+    decision = PolicyEvaluator().evaluate(policy, AuthorityRequest(capability="tool.local.call"))
+    assert decision.effect.value == "allow"
+    assert decision.reason_code == ReasonCode.UNKNOWN_CAPABILITY
+    assert decision.matched_rule_ids == []
