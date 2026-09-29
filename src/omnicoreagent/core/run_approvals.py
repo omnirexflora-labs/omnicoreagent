@@ -215,6 +215,7 @@ async def decide(
     now = utc_now().isoformat()
     approval.update(
         status="approved" if decision == "approve" else "denied",
+        decision=decision,
         approver=str(approver),
         note=note,
         decided_at=now,

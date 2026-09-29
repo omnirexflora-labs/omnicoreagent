@@ -228,3 +228,21 @@ async def test_resolving_an_unknown_or_decided_approval_is_an_error():
         await agent.resolve_approval("run_approve", pending["approval_id"], decision="deny", approver="b")
     with pytest.raises(ValueError, match="decision"):
         await agent.resolve_approval("run_approve", pending["approval_id"], decision="maybe", approver="b")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["approve", "deny"])
+async def test_the_decision_is_on_the_record_as_soon_as_it_is_made(decision):
+    # The 0.5.0rc2 gate: `decision` was written only when a resume applied the
+    # approval, so the answer to the decide call (and the run record until
+    # the resume) showed `"decision": null`.
+    agent, tracker, engine = await _setup()
+    with pytest.raises(ApprovalRequiredError):
+        await _ask(engine, tracker, _delete("a.txt"))
+    (pending,) = (await agent.get_run("run_approve"))["approvals"]
+
+    await agent.resolve_approval("run_approve", pending["approval_id"], decision=decision, approver="alice")
+
+    (decided,) = (await agent.get_run("run_approve"))["approvals"]
+    assert decided["decision"] == decision
+    assert decided["status"] == ("approved" if decision == "approve" else "denied")
