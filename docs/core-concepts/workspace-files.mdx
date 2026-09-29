@@ -107,7 +107,15 @@ its workspace files are copied in too.
 
 To have the file tools work in an existing directory instead of copying files
 in, name it `files_dir`. The runtime's own files (traces, offloaded results)
-stay in `workspace_dir`, out of your directory:
+stay in `workspace_dir`, out of your directory. The example reviews
+`myproject/app.py`; create it first:
+
+```bash
+mkdir -p myproject
+printf 'def average(numbers):\n    return sum(numbers) / len(numbers)\n' > myproject/app.py
+```
+
+Then:
 
 ```python
 import asyncio
