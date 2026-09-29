@@ -157,6 +157,14 @@ Inspect results by running `harbor view jobs`
 Of the five minutes, the agent's run took 18 seconds; the rest was building
 the image and installing the runtime into it.
 
+<Tip>
+Installing the runtime into the container counts against Harbor's agent-setup
+timeout (360 seconds). On a slow machine or network it can run out, and the
+trial errors with `AgentSetupTimeoutError: Agent setup timed out after …
+seconds`. Give setup longer with Harbor's own flag, for example
+`--agent-setup-timeout-multiplier 3`.
+</Tip>
+
 ## Read what the trial did
 
 ```bash
@@ -174,7 +182,10 @@ For each trial it prints the outcome (`passed`, `partial`, `failed`,
 `errored`, `no reward` or `running`), the reward, the run's own status (with
 why it ended when it did not succeed, such as `error (max_steps)`), steps and
 cost; under it, the line of an error that says what went wrong, and any MCP
-server the run could not use. `--json` gives every field:
+server the run could not use. `steps` counts the steps of the trajectory
+Harbor reads, whose first step is the instruction the agent was given, so it is
+one more than the model turns the run took (the run's own
+`totals["steps"]`). `--json` gives every field:
 
 ```text
 {
