@@ -31,3 +31,7 @@ and published only when a gate finds nothing to fix.
   stopped while they loaded held the process 43-74 s at exit for an import
   nobody needed (area E).
 
+- T7 A run stopped during the warm-up keeps its trace on the record: it said
+  cancelled or timeout with `trace_ids: []`, and its trajectory had no
+  segment (area E).
+

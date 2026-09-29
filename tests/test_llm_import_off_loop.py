@@ -182,3 +182,31 @@ def test_a_run_stopped_while_the_client_loads_does_not_wait_for_the_import():
     started = time.monotonic()
     subprocess.run([sys.executable, "-c", script], check=True, timeout=60)
     assert time.monotonic() - started < 15, "the process waited for the import to finish"
+
+
+@pytest.mark.asyncio
+async def test_a_run_stopped_during_the_warm_up_keeps_its_trace_on_the_record():
+    # The 0.5.0rc3 gate: a Ctrl-C or deadline while the client loaded left a
+    # record saying cancelled or timeout with trace_ids [], though its trace
+    # existed: get_run_trajectory showed no segment.
+    from test_governed_by_default import _agent
+    from test_run_suspend import RecordingModel
+
+    agent = await _agent(RecordingModel("hi"))
+
+    async def slow_warm_up():
+        await asyncio.sleep(30)
+
+    agent.llm_connection.warm_up = slow_warm_up
+    running = asyncio.create_task(agent.run("hi", session_id="warm", run_id="run_warm_cut"))
+    await asyncio.sleep(0.5)
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    record = await agent.get_run("run_warm_cut")
+    assert record["status"] == "cancelled"
+    assert len(record["trace_ids"]) == 1, record["trace_ids"]
+    story = await agent.get_run_trajectory("run_warm_cut")
+    assert len(story["segments"]) == 1
+    await agent.cleanup()

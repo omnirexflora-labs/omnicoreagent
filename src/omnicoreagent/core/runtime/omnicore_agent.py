@@ -846,6 +846,7 @@ class OmniCoreAgent:
             # process took over a live run (the 0.5.0rc1 gate).
             # A model connection of the application's own may have no async
             # warm_up, or a plain one.
+            run_tracker.attach_trace(trace_context.trace_id)
             warm_up = getattr(self.llm_connection, "warm_up", None)
             warmed = warm_up() if callable(warm_up) else None
             if inspect.isawaitable(warmed):
