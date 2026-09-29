@@ -586,6 +586,17 @@ class AgentLlmStepRunner:
                 },
             )
             raise
+        except (BudgetExhaustedForRun, RunAwaitingBudget):
+            # A budget stopped the call before it was made: not a model
+            # error. Recorded as one with a stack, it paged anyone alerting
+            # on model errors at every ordinary pause (the 0.5.0rc3 gate);
+            # the call reads no_response, and the run says why it stopped.
+            await telemetry_recorder.end_span(
+                span_context.span_id,
+                status=SpanStatus.SKIPPED,
+                output={"stopped_by": "budget"},
+            )
+            raise
         except Exception as exc:
             failed_facts = self._model_call_facts(
                 llm_connection,
