@@ -137,7 +137,7 @@ is chosen in code; its connection string comes from the environment.
 |---|---|---|---|
 | In process (default) | `MemoryRouter("in_memory")` | none | none |
 | Redis | `MemoryRouter("redis")` | `REDIS_URL`, e.g. `redis://localhost:6379/0` | `omnicoreagent[redis]` |
-| SQL (SQLite, PostgreSQL, or another SQLAlchemy database) | `MemoryRouter("sql")` | `DATABASE_URL`, e.g. `postgresql://user:pass@localhost:5432/db` | `omnicoreagent[postgres]` |
+| SQL (SQLite, PostgreSQL, or another SQLAlchemy database) | `MemoryRouter("sql")` | `DATABASE_URL`, e.g. `postgresql://user:pass@localhost:5432/db` | `omnicoreagent[postgres]`, for SQLite too: it ships SQLAlchemy, which every SQL store uses |
 | MongoDB | `MemoryRouter("mongodb")` | `MONGODB_URI`, e.g. `mongodb://localhost:27017`; optional `MONGODB_DB_NAME` (default `omnicoreagent`), `MONGODB_COLLECTION` (default `messages`) | `omnicoreagent[mongodb]` |
 
 ```python

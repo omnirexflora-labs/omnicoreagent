@@ -106,8 +106,10 @@ The second process had never seen the first message: it read it from
 | `"mongodb"` | In MongoDB | `MONGODB_URI`; optional `MONGODB_DB_NAME` (default `omnicoreagent`) and `MONGODB_COLLECTION` (default `messages`) | `omnicoreagent[mongodb]` |
 
 `DATABASE_URL` is a SQLAlchemy URL. The `postgres` extra brings SQLAlchemy and
-the PostgreSQL driver; another database SQLAlchemy supports needs its own
-driver installed.
+the PostgreSQL driver. SQLite needs it too, though Python has SQLite built in:
+every `"sql"` store goes through SQLAlchemy, and the `postgres` extra is the one
+that ships it. Another database SQLAlchemy supports needs its own driver
+installed.
 
 A router you create keeps its connections open until you close it. Build one
 per process and share it across agents; if you build one per request, close it

@@ -429,7 +429,7 @@ records stay in the agent's [memory store](/docs/core-concepts/memory).
 | `task_store=` | Keeps state | Install |
 |---|---|---|
 | none (`"in_memory"`) | the in-memory store: while the process lives | core |
-| `"sql"` | SQLite at `.omnicoreagent/background.db`, or `DATABASE_URL` when set | `omnicoreagent[postgres]` |
+| `"sql"` | SQLite at `.omnicoreagent/background.db`, or `DATABASE_URL` when set | `omnicoreagent[postgres]` (it ships SQLAlchemy, which SQLite needs too) |
 | `{"backend": "sql", "url": "postgresql://user:pass@host/db"}` | PostgreSQL (or `mysql+pymysql://...`) | `omnicoreagent[postgres]` |
 | `"redis"` or `{"backend": "redis", "url": "redis://localhost:6379/0"}` | Redis (`"redis"` reads `REDIS_URL`) | `omnicoreagent[redis]` |
 | `"mongodb"` or `{"backend": "mongodb", "uri": "mongodb://localhost:27017", "database": "omnicoreagent"}` | MongoDB (`"mongodb"` reads `MONGODB_URI`) | `omnicoreagent[mongodb]` |
