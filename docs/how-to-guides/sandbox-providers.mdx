@@ -132,10 +132,13 @@ tasks need and name it in the options or the manifest.
 | `max_output_bytes` | `1000000` | Output kept per stream; the rest is cut |
 
 A run on Docker, end to end, is on [Sandboxes and execution](/docs/core-concepts/execution#a-first-run-in-docker).
-Containers left behind by a process that was killed carry the label
-`omnicoreagent.sandbox`; `await DockerSandboxRuntime().cleanup_orphans()`
-(from `omnicoreagent.sandbox.docker`) removes every container with that label,
-including those of agents still running on the same Docker host.
+A container left behind by a process that was killed is removed when its run
+is resumed, run again with the same run ID, or abandoned (`abandon_run`): each
+container carries its run's ID in the label `omnicoreagent.run`. To remove one
+run's leftovers yourself, `await DockerSandboxRuntime().cleanup_orphans(run_id=...)`
+(from `omnicoreagent.sandbox.docker`). Without `run_id` it removes every
+container labelled `omnicoreagent.sandbox`, including those of agents still
+running on the same Docker host.
 
 ## E2B
 

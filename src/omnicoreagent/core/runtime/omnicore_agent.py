@@ -820,6 +820,9 @@ class OmniCoreAgent:
 
             # The run's durable record lives in the chosen memory store.
             lease_seconds = int(self.agent_config.get("run_lease_seconds") or 60)
+            if _resume is not None or retry_of is not None:
+                # What a dead attempt of this run left running goes first.
+                await self._remove_run_sandboxes(run_id)
             if _resume is not None:
                 run_tracker = RunTracker.from_record(
                     self.memory_router, _resume, lease_seconds=lease_seconds
@@ -1549,7 +1552,28 @@ class OmniCoreAgent:
                     request["status"] = "abandoned"
 
         await update_from_outside(self.memory_router, run_id, close)
+        await self._remove_run_sandboxes(run_id)
         return await self.get_run(run_id)
+
+    async def _remove_run_sandboxes(self, run_id: str) -> None:
+        """Remove sandboxes a dead process of this run left running.
+
+        After kill -9 a run's sandbox kept running for good, and the only
+        cleanup removed every agent's (the 0.5.0rc1 gate). A provider that can
+        find a run's sandboxes removes them; a failure here never stops the run.
+        """
+        engine = getattr(getattr(self, "agent", None), "governance_engine", None)
+        cleanup = getattr(getattr(engine, "sandbox_runtime", None), "cleanup_orphans", None)
+        if cleanup is None or "run_id" not in inspect.signature(cleanup).parameters:
+            return
+        try:
+            removed = await cleanup(run_id=run_id)
+            if removed:
+                runtime_logger().info(f"Removed {removed} sandbox(es) left by run {run_id}")
+        except Exception as exc:
+            runtime_logger().warning(
+                f"Could not remove sandboxes left by run {run_id}: {exc.__class__.__name__}"
+            )
 
     async def interrupt(self, run_id: str) -> Dict[str, Any]:
         """Ask a running run to stop at its next step boundary; it becomes
