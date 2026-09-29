@@ -201,7 +201,12 @@ A `process.exec` rule can also name what a command would really run, with a
 and `git log`. The command is parsed first, so `git status && rm -rf ~`,
 `echo $(rm -rf ~)`, `sudo /bin/rm -rf ~` and `sh -c 'rm -rf ~'` are all seen
 as running `rm`; a command whose effect cannot be proven (`eval`, `... | sh`) is
-never allowed by such a rule. It applies wherever the command runs: on the host
+never allowed by such a rule. Such a command is **opaque**: in
+`echo cm0gLXJmIH4= | base64 -d | sh` the parser sees `echo`, `base64` and
+`sh`, not the `rm` the pipe feeds to `sh`, so a deny rule on `rm` cannot see
+it either. A rule without a `command` matcher still matches it: under the dev
+profiles, `allow_sandboxed_execution` allows it in a sandbox, where the
+sandbox is what contains it. It applies wherever the command runs: on the host
 and in every sandbox. It narrows what the agent may do; the sandbox is still the
 boundary. See [Rules on shell commands](/docs/reference/policy#rules-on-shell-commands).
 
