@@ -15,7 +15,8 @@ runs, sessions, traces and scheduled tasks are still there.
 
 <Info>
 Every output on this page is what the commands printed when they were run,
-with `omnicoreagent` 0.4.1 from PyPI in the image.
+with an `omnicoreagent` 0.5.0 release candidate installed from its wheel in the
+image (the commented lines in the `Dockerfile` below).
 </Info>
 
 This is a deployment pattern, not a setting: nothing in OmniCoreAgent turns
@@ -177,7 +178,7 @@ The new container's answer, reduced to `task_id`, `schedule.expression` and
 `schedule_state.next_due_at`:
 
 ```text
-nightly 0 2 * * * 2026-09-28T02:00:00Z
+nightly 0 2 * * * 2026-09-30T02:00:00Z
 ```
 
 The run from before the restart was there too: `GET /runs/{run_id}` returned
