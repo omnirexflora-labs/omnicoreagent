@@ -35,3 +35,7 @@ and published only when a gate finds nothing to fix.
   cancelled or timeout with `trace_ids: []`, and its trajectory had no
   segment (area E).
 
+- T9 A background run that succeeded on a retry no longer carries the
+  earlier attempt's error (the attempt keeps it); the docs say the trace
+  window also applies when a process first reads its traces (area C).
+
