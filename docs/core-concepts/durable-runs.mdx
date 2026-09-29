@@ -222,12 +222,15 @@ the run over without charging twice.
 - The dead process left the record `running`, with `charge_card` `started`.
 - Until its heartbeat was 15 seconds old (`run_lease_seconds`), `resume`
   refused: from outside, a dead process and a busy one look the same.
-- `charge_card` is not idempotent, so it was **not** run again. The model was
-  told its outcome is unknown, checked with `list_charges`, found the charge
-  and answered. One charge, not two. The call's `outcome` is `unknown`.
-- `list_charges`, completed before the crash, was not run again: its result
-  was already in the run's context. (The second `list_charges` is the model's
-  own check.)
+- `charge_card` is not idempotent, so the runtime did **not** run it again,
+  and never will: that is the guarantee. The model was told its outcome is
+  unknown; on this run it checked with `list_charges`, found the charge and
+  answered. One charge, not two. The call's `outcome` is `unknown`.
+- `list_charges` is idempotent, so the runtime may run it again by design: a
+  call whose result was saved is never repeated, but one whose result was
+  lost (it finished while a sibling call was still running) runs again on
+  resume, because running it twice is harmless. The second `list_charges`
+  above is a new call; how many a run makes depends on the model.
 - The runtime never repeats a call whose outcome is unknown, but the model
   decides what to do next: told the outcome is unknown, a model can choose to
   call the tool again. That is a new call it made, recorded as one. Give
