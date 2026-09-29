@@ -213,6 +213,18 @@ class CommandMatcher:
             self.env = _string_list(self.env, "command.env")
 
 
+def _from_mapping(cls: type, value: dict[str, Any], rule_id: str, part: str) -> Any:
+    """Build one part of a rule from a dict, naming a misspelt key (a raw
+    `__init__() got an unexpected keyword argument` told the author neither
+    the rule nor the part: the 0.5.0rc1 and rc2 gates)."""
+    from dataclasses import fields
+
+    unknown = sorted(set(value) - {f.name for f in fields(cls)})
+    if unknown:
+        raise ValueError(f"rule {rule_id}: {part} has unknown key(s) {', '.join(unknown)}")
+    return cls(**value)
+
+
 @dataclass
 class PolicyRule:
     rule_id: str
@@ -233,28 +245,27 @@ class PolicyRule:
         self.effect = PolicyEffect(self.effect)
         self.capability = _non_empty_string(self.capability, "capability")
         if isinstance(self.target, dict):
-            self.target = TargetMatcher(**self.target)
+            self.target = _from_mapping(TargetMatcher, self.target, self.rule_id, "target")
         elif self.target is not None and not isinstance(self.target, TargetMatcher):
             raise ValueError("rule.target must be a TargetMatcher or dict")
         if isinstance(self.conditions, dict):
-            self.conditions = PolicyRuleConditions(**self.conditions)
+            self.conditions = _from_mapping(
+                PolicyRuleConditions, self.conditions, self.rule_id, "conditions"
+            )
         elif self.conditions is not None and not isinstance(
             self.conditions, PolicyRuleConditions
         ):
             raise ValueError("rule.conditions must be PolicyRuleConditions or dict")
         if isinstance(self.constraints, dict):
-            self.constraints = PolicyConstraints(**self.constraints)
+            self.constraints = _from_mapping(
+                PolicyConstraints, self.constraints, self.rule_id, "constraints"
+            )
         elif not isinstance(self.constraints, PolicyConstraints):
             raise ValueError("rule.constraints must be PolicyConstraints or dict")
         if not isinstance(self.metadata, dict):
             raise ValueError("rule.metadata must be a dict")
         if isinstance(self.command, dict):
-            from dataclasses import fields as _fields
-
-            unknown = sorted(set(self.command) - {f.name for f in _fields(CommandMatcher)})
-            if unknown:
-                raise ValueError(f"rule {self.rule_id}: command has unknown key(s) {', '.join(unknown)}")
-            self.command = CommandMatcher(**self.command)
+            self.command = _from_mapping(CommandMatcher, self.command, self.rule_id, "command")
         elif self.command is not None and not isinstance(self.command, CommandMatcher):
             raise ValueError("rule.command must be a CommandMatcher or dict")
         if self.command is not None:

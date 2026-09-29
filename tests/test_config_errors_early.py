@@ -55,3 +55,21 @@ def test_an_unknown_command_key_is_a_clear_error():
     with pytest.raises(PolicyLoadError, match="rule r1: command has unknown key.*programme"):
         policy_from_mapping({"name": "p", "rules": {"deny": [{
             "rule_id": "r1", "capability": "process.exec", "command": {"programme": "rm"}}]}})
+
+
+@pytest.mark.parametrize("part", ["target", "conditions", "constraints"])
+def test_an_unknown_key_in_any_part_of_a_rule_is_named(part):
+    # The 0.5.0rc2 gate: `command` said "command has unknown key(s) ..." but a
+    # misspelt target key surfaced as a raw TargetMatcher.__init__ TypeError.
+    with pytest.raises(PolicyLoadError) as refused:
+        policy_from_mapping({"name": "p", "rules": {"deny": [{
+            "rule_id": "r1", "capability": "tool.local.call", part: {"tool": "x"}}]}})
+    assert str(refused.value) == f"rule r1: {part} has unknown key(s) tool"
+
+
+def test_a_malformed_json_policy_file_says_where(tmp_path):
+    # The 0.5.0rc2 gate: the line and column were only in __cause__.
+    path = tmp_path / "policy.json"
+    path.write_text('{"name": "p",\n "rules": {"deny": [}\n}')
+    with pytest.raises(PolicyLoadError, match=r"Invalid JSON policy file: .*policy.json: .*line 2 column"):
+        load_policy_file(path)

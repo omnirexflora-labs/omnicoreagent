@@ -29,3 +29,7 @@ land, and published only when a gate finds nothing to fix.
   `lease_seconds`, `attempt` and `previous_attempts`, so an operator over HTTP
   can tell a dead `running` run from a live one (area F); an unknown `status`
   filter is a 422 naming the valid ones, not an empty list (area B).
+- S6 A misspelt key in a rule's `target`, `conditions` or `constraints` is
+  named like one in `command` (it was a raw `__init__` TypeError); a
+  malformed JSON policy file says the line and column (areas B and F).
+
