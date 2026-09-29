@@ -646,11 +646,14 @@ Methods, each in the [OmniCoreAgent reference](/docs/reference/omnicoreagent):
   </Accordion>
 
   <Accordion title="LookupError: No run …">
+    `resume` (or `record_outcome`) on a run id the store does not hold:
+
     ```text
     LookupError: No run run_nope
     ```
 
-    The run is not in this agent's memory store. In another process, build
+    `get_run` and `get_run_trajectory` do not raise for such an id; they
+    return `None`. The run is not in this agent's memory store. In another process, build
     the agent with the same `memory_router`: the default in-memory store is
     not shared, and a run record kept there is gone when the process ends.
     It may also have been pruned (`run_retention_days`).
