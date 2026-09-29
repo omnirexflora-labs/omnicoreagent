@@ -199,6 +199,8 @@ def _default_privacy_config() -> dict[str, Any]:
 
 
 GOVERNANCE_CONFIG_KEYS = frozenset(_default_governance_config())
+# Built-in sandbox providers whose options are checked when the agent is built.
+_PROVIDERS_CHECKED_AT_BUILD = frozenset({"docker", "local", "e2b", "daytona", "modal", "vercel"})
 # The profile of an agent that never chose governance: it never pauses for a
 # person, and refuses raw secrets, unrestricted host files and network, package
 # installs and shell commands on the host. Someone who enabled governance
@@ -744,6 +746,23 @@ def _validate_governance_config(value: dict[str, Any]):
                 "governance_config.sandbox_config.provider must be a registered "
                 f"sandbox provider: {', '.join(registered_sandbox_providers())}"
             )
+        if provider in _PROVIDERS_CHECKED_AT_BUILD:
+            # Its options, now: they were read only at the first run (the
+            # 0.5.0rc1 gate). Every built-in provider reads them without its
+            # SDK or the network, so this costs nothing.
+            from omnicoreagent.sandbox import build_sandbox_runtime
+
+            build_sandbox_runtime(sandbox_config)
+    if value.get("policy") is not None and isinstance(value["policy"], dict):
+        # A policy given as a dict, read now: it was refused only at the first
+        # run, though settings are checked when the agent is built.
+        from omnicoreagent.governance.errors import PolicyLoadError
+        from omnicoreagent.governance.policy import policy_from_mapping
+
+        try:
+            policy_from_mapping(value["policy"])
+        except PolicyLoadError as exc:
+            raise ValueError(str(exc)) from exc
     if value.get("sandbox_manifest") is not None:
         from omnicoreagent.sandbox.factory import sandbox_manifest_from_config
 

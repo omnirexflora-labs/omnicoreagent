@@ -91,7 +91,8 @@ def load_policy_file(
             source_ref=str(safe_path),
         )
     except Exception as exc:
-        raise PolicyLoadError(f"Invalid policy file: {safe_path}") from exc
+        # The reason, not only the file: it was left in __cause__ (the 0.5.0rc1 gate).
+        raise PolicyLoadError(f"Invalid policy file: {safe_path}: {exc}") from exc
     if not explicit:
         envelope.metadata["auto_discovered"] = True
         envelope.metadata["may_only_narrow_trusted_baseline"] = True
@@ -136,7 +137,11 @@ def _normalize_rule(data: dict[str, Any], effect: str) -> PolicyRule:
     try:
         return PolicyRule(**payload)
     except (TypeError, ValueError) as exc:
-        raise PolicyLoadError(f"rule {rule_id}: {exc}") from exc
+        message = str(exc)
+        # Name the rule once: some messages already do.
+        if not message.startswith(f"rule {rule_id}"):
+            message = f"rule {rule_id}: {message}"
+        raise PolicyLoadError(message) from exc
 
 
 def _validate_policy_path(path: Path, project_root: Path, *, explicit: bool) -> Path:
