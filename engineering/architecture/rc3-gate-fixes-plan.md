@@ -27,3 +27,7 @@ and published only when a gate finds nothing to fix.
   130, or was swallowed in the import machinery and the run went ahead
   (area E).
 
+- T6 The model client and token encoding load on a daemon thread: a run
+  stopped while they loaded held the process 43-74 s at exit for an import
+  nobody needed (area E).
+

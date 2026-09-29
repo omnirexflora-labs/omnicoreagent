@@ -44,9 +44,43 @@ async def _litellm_off_loop():
     global _LITELLM_LOADED
     if _LITELLM_LOADED:
         return _get_litellm()
-    module = await asyncio.to_thread(_get_litellm)
+    module = await _on_a_thread_nothing_waits_for(_get_litellm)
     _LITELLM_LOADED = True
     return module
+
+
+def _on_a_thread_nothing_waits_for(function):
+    """Run a slow import on a daemon thread and await its result.
+
+    Not asyncio.to_thread: asyncio.run joins its executor and the interpreter
+    its worker threads, so a run stopped while the client loaded (Ctrl-C, a
+    deadline) held the process 43-74 s for an import nobody needed any more
+    (the 0.5.0rc3 gate).
+    """
+    import threading
+
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+
+    def settle(result, error):
+        if not future.done():
+            if error is not None:
+                future.set_exception(error)
+            else:
+                future.set_result(result)
+
+    def work():
+        try:
+            result, error = function(), None
+        except BaseException as exc:  # handed to the awaiting task
+            result, error = None, exc
+        try:
+            loop.call_soon_threadsafe(settle, result, error)
+        except RuntimeError:
+            pass  # the loop is closed: nobody is waiting
+
+    threading.Thread(target=work, name="omnicoreagent-load", daemon=True).start()
+    return future
 
 
 async def load_model_client() -> None:
@@ -67,7 +101,7 @@ async def load_model_client() -> None:
         # gate). get_encoding falls back to an estimate on its own failure.
         from omnicoreagent.core.summarizer import tokenizer
 
-        await asyncio.to_thread(tokenizer.get_encoding)
+        await _on_a_thread_nothing_waits_for(tokenizer.get_encoding)
         _ENCODING_LOADED = True
 
 

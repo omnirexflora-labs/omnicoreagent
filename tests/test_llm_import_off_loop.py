@@ -152,3 +152,33 @@ async def test_a_background_worker_loads_the_client_before_its_first_task(monkey
         assert calls, "the model client was loaded when the worker started"
     finally:
         await manager.shutdown()
+
+
+def test_a_run_stopped_while_the_client_loads_does_not_wait_for_the_import():
+    # The 0.5.0rc3 gate: Ctrl-C during the warm-up printed "nothing ran", then
+    # the process waited 43-74 s for the import thread (asyncio.run joins its
+    # executor; the interpreter joins its threads). The import runs on a
+    # thread nothing waits for.
+    import subprocess
+    import sys
+
+    script = (
+        "import asyncio, time\n"
+        "import omnicoreagent.core.llm as llm\n"
+        "def slow():\n"
+        "    time.sleep(20)\n"
+        "    return object()\n"
+        "llm._get_litellm = slow\n"
+        "async def main():\n"
+        "    task = asyncio.create_task(llm._litellm_off_loop())\n"
+        "    await asyncio.sleep(0.2)\n"
+        "    task.cancel()\n"
+        "    try:\n"
+        "        await task\n"
+        "    except asyncio.CancelledError:\n"
+        "        pass\n"
+        "asyncio.run(main())\n"
+    )
+    started = time.monotonic()
+    subprocess.run([sys.executable, "-c", script], check=True, timeout=60)
+    assert time.monotonic() - started < 15, "the process waited for the import to finish"
