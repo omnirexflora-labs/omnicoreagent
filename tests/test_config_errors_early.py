@@ -91,6 +91,9 @@ def test_an_unknown_sandbox_manifest_field_is_named():
         _build({"sandbox_config": {"provider": "docker"}, "sandbox_manifest": {"imagee": "x"}})
     assert "sandbox_manifest has unknown field(s) imagee" in str(refused.value)
     assert "__init__" not in str(refused.value)
+    # The known fields it lists are ones a manifest may set (rc3 gate).
+    known = str(refused.value).split("known: ")[1]
+    assert "provider" not in known and "sandbox_id" not in known
 
 
 def test_a_telemetry_retention_that_is_not_a_number_is_a_clear_error():

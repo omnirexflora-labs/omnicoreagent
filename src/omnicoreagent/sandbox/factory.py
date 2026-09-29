@@ -132,7 +132,7 @@ def sandbox_manifest_from_config(value: Any) -> SandboxManifest | None:
         # (the 0.5.0rc2 gate).
         raise ValueError(
             f"governance_config.sandbox_manifest has unknown field(s) {', '.join(unknown)}; "
-            f"known: {', '.join(f.name for f in fields(SandboxManifest))}"
+            f"known: {', '.join(f.name for f in fields(SandboxManifest) if f.name not in ('provider', 'sandbox_id'))}"
         )
     try:
         return SandboxManifest(**value)
