@@ -834,11 +834,19 @@ class JsonlTelemetryStore(AbstractTelemetryStore):
         and stream cursors never move backwards.
         """
         async with self._lock:
+            # A process's first load prunes by itself; count what it removed
+            # too. The pass asked for then found nothing and reported 0 while
+            # traces had gone (the 0.5.0rc1 gate).
+            before = self.removed_total
             await self._load_unlocked()
             days = self.retention_days if retention_days is None else retention_days
             if days is None:
-                return 0
-            return await self._prune_expired_unlocked(days, trigger=trigger)
+                return self.removed_total - before
+            await self._prune_expired_unlocked(days, trigger=trigger)
+            removed = self.removed_total - before
+            if isinstance(self.last_prune, dict):
+                self.last_prune["removed"] = removed
+            return removed
 
     def retention_status(self) -> dict[str, Any]:
         return {
