@@ -370,3 +370,47 @@ async def test_patterns_choose_what_the_bridge_copies_either_way(tmp_path):
     assert storage.exists("out/r.txt") and not storage.exists("archive/new.csv")
     skipped = {item["path"]: item["reason"] for item in result.metadata["workspace"]["skipped"]}
     assert "patterns" in skipped["archive/new.csv"]
+
+
+async def test_a_policy_of_command_rules_does_not_judge_the_runtimes_own_sync(tmp_path):
+    # The 0.5.0rc1 gate: under a strict policy whose only process.exec allows are
+    # command rules, every execute failed. The agent's command ran, then the
+    # bridge's own listing (`find ... -exec sh -c ...`) was judged as an agent
+    # command, found opaque and denied; the model was told "blocked" after its
+    # command's side effects had happened. The listing is the runtime's, still
+    # governed, as sandbox.workspace.sync.
+    from omnicoreagent.governance.policy import policy_from_mapping
+
+    policy = policy_from_mapping({
+        "name": "build-box", "mode": "strict",
+        "rules": {"allow": [
+            {"rule_id": "sandbox", "capability": "sandbox.*"},
+            {"rule_id": "files", "capability": "workspace.*"},
+            {"rule_id": "basics", "capability": "process.exec",
+             "command": {"program": ["cat", "mkdir", "echo"], "redirect": True}},
+        ]},
+    })
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+    storage.write_text("data/input.txt", "hello")
+
+    async with _scope(storage, policy=policy).active() as scope:
+        result = await _sh(scope, "cat data/input.txt && mkdir -p out && echo done > out/answer.txt")
+
+    assert result.exit_code == 0 and result.stdout == "hello"
+    assert storage.read_text("out/answer.txt") == "done\n"
+    assert result.metadata["workspace"]["written"] == ["out/answer.txt"]
+
+
+async def test_the_sync_is_still_governed(tmp_path):
+    # Without sandbox.* the sandbox's own machinery is refused, the sync included.
+    from omnicoreagent.sandbox.execution import SandboxCommandSpec
+    from omnicoreagent.sandbox.workspace_bridge import sync_authority_request
+
+    from omnicoreagent.governance.evaluator import PolicyEvaluator
+    from omnicoreagent.governance.policy import policy_from_mapping
+
+    request = sync_authority_request(SandboxCommandSpec(command=["sh", "-c", "find ."]), "sandbox")
+    assert request.capability == "sandbox.workspace.sync" and request.actor == "runtime"
+    only_commands = policy_from_mapping({"name": "p", "mode": "strict", "rules": {"allow": [
+        {"rule_id": "exec", "capability": "process.exec"}]}})
+    assert PolicyEvaluator().evaluate(only_commands, request).effect.value == "deny"

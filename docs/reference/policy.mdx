@@ -186,6 +186,7 @@ enforced, and use command rules to say what the agent may do there.
 | `sandbox.image.use` | Start the sandbox from an image named in the manifest. Target: resource (the image). |
 | `sandbox.network.configure` | Turn the sandbox's network on, or allow or deny a host in it. Target: host. |
 | `sandbox.resources.set` | Set the sandbox's CPU, memory, disk or time limits. |
+| `sandbox.workspace.sync` | The runtime's own listing of the sandbox's files after a command, to copy what changed back to the workspace. Not an agent command: command rules do not judge it. Target: resource (the program). |
 | `secret.read` | Read a secret's value. |
 | `secret.use` | Use a secret without reading it: brokered into a command, never shown to the model. |
 | `skill.files.read` | Read a skill's instructions and files. |

@@ -358,6 +358,11 @@ def _value(value: Any) -> Any:
     return getattr(value, "value", value)
 
 
+# An agent's command, or the runtime's own listing after one (the workspace
+# sync, whose script command rules would find opaque; the 0.5.0rc1 gate).
+_SANDBOX_COMMAND_CAPABILITIES = frozenset({"process.exec", "sandbox.workspace.sync"})
+
+
 def _default_authority_request(
     spec: SandboxCommandSpec, surface: str = "sandbox"
 ) -> AuthorityRequest:
@@ -387,7 +392,7 @@ def _sandbox_authority_request(
     """
     request = spec.authority_request or _default_authority_request(spec, surface)
     command_name = spec.command[0] if spec.command else ""
-    if request.capability != "process.exec":
+    if request.capability not in _SANDBOX_COMMAND_CAPABILITIES:
         raise ValueError("sandbox command execution requires process.exec authority")
     if request.provider not in {None, "sandbox"}:
         raise ValueError("sandbox command authority provider must be sandbox")
@@ -413,6 +418,10 @@ def _sandbox_authority_request(
             **_safe_metadata(request.metadata),
         },
     )
+    if authority.capability != "process.exec":
+        # The runtime's own command (the workspace sync): governed by its own
+        # capability, not judged as a command the agent asked for.
+        return authority
     # What the command would really run, for command rules, and for an
     # approval to show and bind (it saw only "sh" and an argument count).
     return attach_command(authority, spec.command)
