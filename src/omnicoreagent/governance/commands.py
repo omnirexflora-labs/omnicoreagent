@@ -389,17 +389,6 @@ def _unescape_double(content: str) -> str:
     return "".join(out)
 
 
-def to_metadata(parsed: ParsedCommand) -> dict[str, Any]:
-    """What an approval shows and binds: the programs, whether it is opaque, the digest."""
-    return {
-        "digest": parsed.digest,
-        "programs": [c.program for c in parsed.commands],
-        "summary": parsed.summary,
-        "opaque": parsed.opaque,
-        "opaque_reasons": list(parsed.opaque_reasons),
-    }
-
-
 # --- Matching rules to commands ------------------------------------------------------
 
 _PARSED = "_omnicoreagent_parsed_command"
@@ -409,9 +398,12 @@ def attach_command(request, argv: Sequence[str]):
     """Parse ``argv`` and attach it to a ``process.exec`` request.
 
     The parse rides on the request as an attribute, not a field, so it is never
-    serialized: what a trace keeps of a command stays under the capture policy.
-    The metadata carries what an approval must show and bind: the programs with
-    their arguments, whether it is opaque, and the digest of the exact command.
+    serialized. The metadata, which governance events record as it is, gets no
+    argument: only the program names, whether it is opaque, and the digest that
+    binds an approval to the exact command. Arguments can hold secrets
+    (``curl -H "Authorization: ..."``); the full sub-commands go only on an
+    approval, which a person reads and which traces keep under the capture
+    policy (``approval_metadata``).
     """
     argv = list(argv)
     parsed = parse_command(argv)
@@ -419,9 +411,25 @@ def attach_command(request, argv: Sequence[str]):
     request.metadata["command"] = {
         "name": argv[0] if argv else "",
         "argc": len(argv),
-        **to_metadata(parsed),
+        "digest": parsed.digest,
+        "programs": [c.program for c in parsed.commands],
+        "opaque": parsed.opaque,
     }
     return request
+
+
+def approval_metadata(request) -> dict[str, Any]:
+    """An approval's metadata: the request's, plus the sub-commands a person
+    approving a command must see (not ``sh`` and an argument count)."""
+    metadata = dict(request.metadata)
+    parsed = parsed_command(request)
+    if parsed is not None:
+        metadata["command"] = {
+            **(metadata.get("command") or {}),
+            "summary": parsed.summary,
+            "opaque_reasons": list(parsed.opaque_reasons),
+        }
+    return metadata
 
 
 def parsed_command(request) -> ParsedCommand | None:

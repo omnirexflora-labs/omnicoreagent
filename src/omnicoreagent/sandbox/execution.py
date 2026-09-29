@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import unquote
 from uuid import uuid4
 
+from omnicoreagent.governance.commands import attach_command
 from omnicoreagent.governance.calls import tool_call_metadata
 from omnicoreagent.governance.capabilities import secret_authority_request
 from omnicoreagent.governance.models import AuthorityRequest, AuthorityTarget
@@ -394,7 +395,7 @@ def _sandbox_authority_request(
         raise ValueError(f"sandbox command authority execution_surface must be {surface}")
     if request.target and request.target.resource not in {None, command_name}:
         raise ValueError("sandbox command authority target must match command name")
-    return AuthorityRequest(
+    authority = AuthorityRequest(
         capability=request.capability,
         actor=request.actor,
         target=AuthorityTarget(resource=command_name),
@@ -412,6 +413,9 @@ def _sandbox_authority_request(
             **_safe_metadata(request.metadata),
         },
     )
+    # What the command would really run, for command rules, and for an
+    # approval to show and bind (it saw only "sh" and an argument count).
+    return attach_command(authority, spec.command)
 
 
 def _manifest_authority_requests(

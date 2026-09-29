@@ -209,9 +209,11 @@ def test_bypass_attempts_are_never_allowed(text, expected):
 
 
 def test_padding_is_seen_through_in_the_approval():
-    parsed = request("grep x f;" + " " * 300 + "git push").metadata["command"]
-    assert parsed["programs"] == ["grep", "git"]
-    assert parsed["summary"] == ["grep x f", "git push"]
+    from omnicoreagent.governance.commands import approval_metadata
+
+    shown = approval_metadata(request("grep x f;" + " " * 300 + "git push"))["command"]
+    assert shown["programs"] == ["grep", "git"]
+    assert shown["summary"] == ["grep x f", "git push"]
 
 
 # --- loading ----------------------------------------------------------------------

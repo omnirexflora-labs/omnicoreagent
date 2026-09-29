@@ -48,6 +48,12 @@ def request_digest(request: Any) -> str:
         "target_role": metadata.get("target_role"),
         "arguments_digest": metadata.get("arguments_digest"),
     }
+    command_digest = (metadata.get("command") or {}).get("digest")
+    if command_digest:
+        # A shell command's exact text: approving `ls` must not approve
+        # `rm -rf ~` (both reached the policy as `sh`). Only commands carry
+        # it, so every other approval's digest is unchanged.
+        payload["command_digest"] = command_digest
     if isinstance(payload["target"], dict):
         # The tool name inside the target duplicates metadata; keep one copy.
         payload["target"] = {k: v for k, v in payload["target"].items() if v is not None}

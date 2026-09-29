@@ -4,6 +4,7 @@ import asyncio
 from datetime import timedelta
 
 from omnicoreagent.core.telemetry import TelemetryRecorder
+from omnicoreagent.governance.commands import approval_metadata
 from omnicoreagent.governance.approvals import ApprovalResolver
 from omnicoreagent.governance.errors import (
     ApprovalInvalidError,
@@ -298,7 +299,7 @@ class GovernanceEngine:
                 if decision.constraints.approval_expires_seconds is not None
                 else None
             ),
-            metadata=dict(request.metadata),
+            metadata=approval_metadata(request),
         )
         await emit_approval_request(
             self.telemetry_recorder,
