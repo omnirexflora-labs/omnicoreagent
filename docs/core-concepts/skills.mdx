@@ -193,8 +193,14 @@ agent_config = {
 }
 ```
 
-A skill script that checks what it can see, run from a process that has both
-variables set:
+`skill_script_env` applies to scripts that run on the host only. A script run
+in a sandbox gets the sandbox's environment, never your process's: give it a
+value with `governance_config["sandbox_manifest"]["environment"]["plain"]`
+([Execution](/docs/core-concepts/execution#secrets-stay-out)), and put nothing
+secret there.
+
+A skill script that checks what it can see, run on the host from a process that
+has both variables set:
 
 ```python
 import os
@@ -236,7 +242,7 @@ on governance with a sandbox ([security model](/docs/core-concepts/security-mode
 |---|---|---|
 | `enable_agent_skills` | `False` | Find skills, list them in the system prompt, and give the model `read_skill_file` and `run_skill_script` |
 | `skills_dir` | `None` (`./.agents/skills`, from the working directory) | Where skills are found |
-| `skill_script_env` | `[]` | Environment variables a host script receives beyond the minimal set |
+| `skill_script_env` | `[]` | Environment variables a host script receives beyond the minimal set; not used in a sandbox (use `sandbox_manifest.environment.plain`) |
 | `tool_call_timeout` | `180` | Seconds any tool call may take, including a script, whatever `timeout` the model passes |
 
 Every setting is in the [agent settings reference](/docs/reference/agent-config).

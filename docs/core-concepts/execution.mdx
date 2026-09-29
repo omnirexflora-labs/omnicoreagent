@@ -217,7 +217,10 @@ What is copied, and what is not:
 
 Limits: 500 files, 2 MB per file and 20 MB per copy. To copy less, give glob
 patterns over workspace paths (`*` crosses folders; no `include` copies
-everything not excluded):
+everything not excluded). The patterns apply both ways: a file outside them is
+not copied in, and a file a command creates or changes outside them is not
+copied back either (it is skipped, with the reason "outside the bridge's
+include/exclude patterns"):
 
 ```python
 agent_config = {
