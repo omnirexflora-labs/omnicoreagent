@@ -113,6 +113,7 @@ exits 3. `out/result.json` says what it is waiting for:
         "title": "Release notes since v1.2",
         "body": "Release notes since v1.2:\n\n- Added CSV export for easier data portability.\n- Fixed a login timeout issue to improve session reliability.\n- Improved search performance for faster results."
       },
+      "command": null,
       "risk_level": "low",
       "reason": "A person approves pull requests.",
       ...
@@ -263,7 +264,8 @@ cost = run["totals"]["estimated_cost_usd"]  # None when nothing was priced (a ru
 print(run["status"], "| segments:", len(run["segments"]), "| tokens:", run["totals"]["tokens"]["total"],
       "| cost:", round(cost, 6) if cost is not None else "unknown")
 for approval in run["approvals"]:
-    print("approval:", approval["tool_name"], approval["status"], "by", approval["approver"], "-", approval["note"])
+    print("approval:", approval["tool_name"], approval["status"], approval["decision"],
+          "by", approval["approver"], "-", approval["note"])
 first = run["segments"][0]["trajectory"]
 print("tags:", first["tags"])
 print("provenance:", {k: v for k, v in first["provenance"].items() if v})
@@ -275,7 +277,7 @@ for segment in run["segments"]:
 
 ```text
 completed | segments: 2 | tokens: 5037 | cost: 0.003585
-approval: open_pull_request used by omnicoreagent-cli - release PRs are allowed in CI
+approval: open_pull_request used approve by omnicoreagent-cli - release PRs are allowed in CI
 tags: ['nightly', 'headless', 'approval-mode:scripted', 'budget-mode:stop']
 provenance: {'source': 'omnicoreagent', 'environment': 'ci', 'external_ids': {'build': '4472'}}
 step 1: list_changes success
@@ -283,7 +285,10 @@ step 2: open_pull_request awaiting_approval
 step 2: open_pull_request success
 ```
 
-The approval's status is `used`: approved, and its call made. `--provenance`
+The approval's `status` is `used`: its decision was applied when the run
+resumed. `decision` says which decision it was, `approve` or `deny`; a denied
+approval is `used` too once the run resumes, and its call was not made.
+`--provenance`
 keys the trace knows (`environment`, `trial_id`, `case_id`, `evaluation_id`,
 `deployment_id`, `application_version`, `adapter`, ...) are set directly; any
 other key, like `build`, goes under `external_ids`. What every field means is

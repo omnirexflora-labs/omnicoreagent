@@ -97,6 +97,7 @@ status: awaiting_approval
   capability: tool.local.call
   target: {'path': None, 'host': None, 'resource': None, 'tool_name': 'issue_refund', 'mcp_server': None}
   arguments: {'order_id': '1042', 'amount': 42}
+  command: None
   risk_level: low
   reason: Refunds need a person.
   expires_at: 2026-09-27T16:26:21.045398+00:00
@@ -111,7 +112,8 @@ issue_refund {'order_id': '1042', 'amount': 30.0} success
 
 - `run()` returned `awaiting_approval`; nothing unapproved ran.
 - Each approval has the tool, the model's **arguments**, the rule's `reason`
-  and `expires_at`.
+  and `expires_at`. `command` is `None` here; for a shell command it names
+  the commands the call would run ([below](#the-three-decisions)).
 - `arguments=` replaced the model's: 30 was refunded, not 42.
 - On `resume`, the call was asked again and allowed by the recorded decision.
 
@@ -413,6 +415,7 @@ curl -s -X POST localhost:8765/run/sync -H "Content-Type: application/json" \
                 "order_id": "1042",
                 "amount": 42
             },
+            "command": null,
             "risk_level": "low",
             "reason": "Matched ask policy rule.",
             "expires_at": "2026-09-27T16:31:43.848500+00:00",
@@ -439,8 +442,8 @@ curl -s -X POST localhost:8765/runs/$RUN_ID/approvals/$APPROVAL_ID \
 curl -s -X POST localhost:8765/runs/$RUN_ID/resume
 ```
 
-The decision returns the approval (`status` `denied`, `approver`, `note`,
-`decided_at`); the resume returns the finished run.
+The decision returns the approval (`status` `denied`, `decision` `deny`,
+`approver`, `note`, `decided_at`); the resume returns the finished run.
 
 | Route | Body | Errors |
 |---|---|---|

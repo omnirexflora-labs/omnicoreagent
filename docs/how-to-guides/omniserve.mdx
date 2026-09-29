@@ -355,6 +355,7 @@ curl -s -X POST localhost:8773/run/sync -H "Content-Type: application/json" \
             "capability": "tool.local.call",
             "target": {"path": null, "host": null, "resource": null, "tool_name": "issue_refund", "mcp_server": null},
             "arguments": {"order_id": "1042", "amount": 42},
+            "command": null,
             "risk_level": "low",
             "reason": "Refunds need a person.",
             "expires_at": "2026-09-28T23:03:40.248649+00:00",
@@ -381,7 +382,7 @@ curl -s -X POST localhost:8773/runs/$RUN_ID/resume
 ```
 
 ```text
-{"approval_id":"approval_1db56482b7db412b96e07776776d86b4","status":"approved","tool_call_id":"call_LLR9crHj6dOvLFSdlwvzRJKl","tool_name":"issue_refund","capability":"tool.local.call","target":{"path":null,"host":null,"resource":null,"tool_name":"issue_refund","mcp_server":null},"risk_level":"low","reason":"Refunds need a person.","created_at":"2026-09-27T23:03:40.248649+00:00","expires_at":"2026-09-28T23:03:40.248649+00:00","approver":"alice","note":"Customer called.","decided_at":"2026-09-27T23:03:49.543763+00:00","edited_arguments":null,"delegated_run_id":null,"delegated_name":null}
+{"approval_id":"approval_1db56482b7db412b96e07776776d86b4","status":"approved","decision":"approve","tool_call_id":"call_LLR9crHj6dOvLFSdlwvzRJKl","tool_name":"issue_refund","capability":"tool.local.call","target":{"path":null,"host":null,"resource":null,"tool_name":"issue_refund","mcp_server":null},"command":null,"risk_level":"low","reason":"Refunds need a person.","created_at":"2026-09-27T23:03:40.248649+00:00","expires_at":"2026-09-28T23:03:40.248649+00:00","approver":"alice","note":"Customer called.","decided_at":"2026-09-27T23:03:49.543763+00:00","edited_arguments":null,"delegated_run_id":null,"delegated_name":null}
 {"status":"success","termination_reason":"stop","guardrail_result":null,"response":"Refunded order 1042 for $42.","approvals":null,"budget_request":null,"session_id":"bob","agent_name":"support","metric":{"requests":1,"request_tokens":1321,"response_tokens":14,"total_tokens":1335,"total_time":1.2692612289974932,"details":{"cached_input_tokens":1024}},"trace_id":"trace_144287d009e34dacbda7f2eed7db7a97","run_id":"run_192cf4b607f641cd9f7431befc89b93f"}
 ```
 
