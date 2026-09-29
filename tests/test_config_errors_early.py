@@ -73,3 +73,39 @@ def test_a_malformed_json_policy_file_says_where(tmp_path):
     path.write_text('{"name": "p",\n "rules": {"deny": [}\n}')
     with pytest.raises(PolicyLoadError, match=r"Invalid JSON policy file: .*policy.json: .*line 2 column"):
         load_policy_file(path)
+
+
+def test_budgets_in_both_the_policy_and_the_config_are_refused_when_built():
+    # The 0.5.0rc2 gate: refused only at the first run.
+    from omnicoreagent.governance import PolicyBudgets, build_default_policy
+
+    policy = build_default_policy("permissive-dev")
+    policy.budgets = PolicyBudgets(request=[{"meter": "model_calls", "limit": 5}])
+    with pytest.raises(ValueError, match="keep them in one place"):
+        _build({"policy": policy, "budgets": {"request": [{"meter": "model_calls", "limit": 9}]}})
+
+
+def test_an_unknown_sandbox_manifest_field_is_named():
+    # The 0.5.0rc2 gate: a raw "__init__() got an unexpected keyword argument".
+    with pytest.raises(ValueError) as refused:
+        _build({"sandbox_config": {"provider": "docker"}, "sandbox_manifest": {"imagee": "x"}})
+    assert "sandbox_manifest has unknown field(s) imagee" in str(refused.value)
+    assert "__init__" not in str(refused.value)
+
+
+def test_a_telemetry_retention_that_is_not_a_number_is_a_clear_error():
+    # The 0.5.0rc2 gate: retention_days="x" raised a raw TypeError.
+    from omnicoreagent.core.telemetry.redaction import TelemetryConfig
+
+    with pytest.raises(ValueError, match="retention_days must be"):
+        TelemetryConfig(retention_days="x")
+
+
+def test_an_empty_database_url_is_the_same_as_a_missing_one(monkeypatch):
+    # The 0.5.0rc2 gate: DATABASE_URL="" built a store with no database;
+    # /ready said true and the first run raised "Database not configured".
+    from omnicoreagent.core.memory_store.memory_router import MemoryRouter
+
+    monkeypatch.setenv("DATABASE_URL", "")
+    with pytest.raises(ValueError, match="DATABASE_URL"):
+        MemoryRouter("sql")

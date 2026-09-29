@@ -14,6 +14,8 @@ def _missing_url(backend: str, variable: str, example: str) -> ValueError:
     # An error, not a fallback to memory: a durable store that quietly is not
     # one loses every run at the next restart (the maintainer's decision,
     # 2026-09-28).
+    # Set but empty counts as missing: it built a store with no database,
+    # which /ready called ready (the 0.5.0rc2 gate).
     return ValueError(
         f'MemoryRouter("{backend}") needs {variable} (e.g. {example}). '
         'Set it, or use MemoryRouter("in_memory") for a store that lasts only as '
@@ -51,8 +53,8 @@ class MemoryRouter:
         if self.memory_store_type == "in_memory":
             self.memory_store = InMemoryStore()
         elif self.memory_store_type == "sql":
-            db_url = os.environ.get("DATABASE_URL")
-            if db_url is None:
+            db_url = (os.environ.get("DATABASE_URL") or "").strip()
+            if not db_url:
                 raise _missing_url("sql", "DATABASE_URL", "sqlite:///./memory.db")
             else:
                 DatabaseMessageStore = load_optional(
@@ -65,8 +67,8 @@ class MemoryRouter:
                 )
                 self.memory_store = DatabaseMessageStore(db_url=db_url)
         elif self.memory_store_type == "redis":
-            redis_url = os.environ.get("REDIS_URL")
-            if redis_url is None:
+            redis_url = (os.environ.get("REDIS_URL") or "").strip()
+            if not redis_url:
                 raise _missing_url("redis", "REDIS_URL", "redis://localhost:6379/0")
             else:
                 RedisMemoryStore = load_optional(
@@ -79,8 +81,8 @@ class MemoryRouter:
                 )
                 self.memory_store = RedisMemoryStore(redis_url=redis_url)
         elif self.memory_store_type == "mongodb":
-            uri = os.environ.get("MONGODB_URI")
-            if uri is None:
+            uri = (os.environ.get("MONGODB_URI") or "").strip()
+            if not uri:
                 raise _missing_url("mongodb", "MONGODB_URI", "mongodb://localhost:27017")
             else:
                 db_name = os.environ.get("MONGODB_DB_NAME", "omnicoreagent")

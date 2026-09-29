@@ -753,6 +753,18 @@ def _validate_governance_config(value: dict[str, Any]):
             from omnicoreagent.sandbox import build_sandbox_runtime
 
             build_sandbox_runtime(sandbox_config)
+    if value.get("budgets") is not None:
+        # Budgets in both places, refused now: it was only at the first run
+        # (the 0.5.0rc2 gate). A policy file's are read at the first run.
+        policy = value.get("policy")
+        policy_budgets = (
+            policy.get("budgets") if isinstance(policy, dict) else getattr(policy, "budgets", None)
+        )
+        if policy_budgets:
+            raise ValueError(
+                "governance_config.budgets cannot be set when the policy already has "
+                "budgets; keep them in one place"
+            )
     if value.get("policy") is not None and isinstance(value["policy"], dict):
         # A policy given as a dict, read now: it was refused only at the first
         # run, though settings are checked when the agent is built.

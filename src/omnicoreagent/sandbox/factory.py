@@ -124,10 +124,19 @@ def sandbox_manifest_from_config(value: Any) -> SandboxManifest | None:
                 f"governance_config.sandbox_manifest cannot set {key}: the provider "
                 "is sandbox_config's and each run's session is the runtime's"
             )
+    from dataclasses import fields
+
+    unknown = sorted(set(value) - {f.name for f in fields(SandboxManifest)})
+    if unknown:
+        # Named, not a raw "__init__() got an unexpected keyword argument"
+        # (the 0.5.0rc2 gate).
+        raise ValueError(
+            f"governance_config.sandbox_manifest has unknown field(s) {', '.join(unknown)}; "
+            f"known: {', '.join(f.name for f in fields(SandboxManifest))}"
+        )
     try:
         return SandboxManifest(**value)
     except TypeError as exc:
-        # An unknown field, named by the dataclass constructor.
         raise ValueError(f"governance_config.sandbox_manifest: {exc}") from None
     except ValueError as exc:
         raise ValueError(f"governance_config.sandbox_manifest: {exc}") from None

@@ -51,3 +51,8 @@ land, and published only when a gate finds nothing to fix.
   import it left an import lock held and hung the CLI (3 in 45 tries). The
   command exits 6 saying nothing ran; one during the model client's loading
   says the same, not "a second interrupt" (area E).
+- S11 Refused when the agent is built, each naming the problem: budgets in
+  both the policy and `governance_config`; an unknown `sandbox_manifest`
+  field; a telemetry retention that is not a number; a store URL set but
+  empty (it built a store with no database) (areas A and C).
+
