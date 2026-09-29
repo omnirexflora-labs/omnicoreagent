@@ -10,3 +10,8 @@ and published only when a gate finds nothing to fix.
   `model_error` with a Python stack, so a client alerting on model errors
   paged at every ordinary budget pause, and the call read `error`, not the
   documented `no_response` (area F).
+- T2 A governed agent's unknown-outcome result carries no argument values,
+  as every governed tool result: the rc2 fix (S13) put them back; an
+  ungoverned agent's keeps them. (Area F's F-7, an empty `args` on a refused
+  call, is this same rule, by design.)
+

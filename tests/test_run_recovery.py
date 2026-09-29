@@ -163,9 +163,10 @@ async def test_a_finished_call_whose_result_was_not_saved_is_not_run_again(tmp_p
     assert ledger.read_text().splitlines().count("charge 5") == 1, "the card was charged once"
     told = next(m for m in model.calls[-1] if m.get("tool_call_id") == "c1")
     assert "finished" in json.dumps(told) and "result was lost" in json.dumps(told)
-    # With the call's own arguments, not an empty {} the model then copied
-    # into its next call's arguments (the 0.5.0rc2 gate).
-    assert '"args": {"amount": 5}' in told["content"], told["content"]
+    # A governed agent's tool results never carry argument values (the model
+    # keeps its own call); rc2 put them back here and the 0.5.0rc3 gate's
+    # privacy check caught it.
+    assert '"args": {}' in told["content"], told["content"]
     # The trajectory agrees: the charge finished before the crash, so the
     # resumed segment reports it succeeded, not cancelled; only the report,
     # interrupted mid-call, ended cancelled (the 0.5.0rc2 gate).
@@ -353,3 +354,42 @@ async def test_a_killed_process_is_finished_by_another_without_repeating_side_ef
     assert ledger.read_text().splitlines() == ["charge 5", "report"], "no side effect repeated"
     assert "outcome is unknown" in json.dumps(model.calls[-1])
     assert (await survivor.get_run("run_killed"))["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_an_ungoverned_agent_is_told_the_call_with_its_arguments(tmp_path):
+    # Without governance, tool results carry their arguments, as every other
+    # ungoverned result does; the model had copied an empty {} (the rc2 gate).
+    from omnicoreagent.core.runs import current_run
+
+    ledger = tmp_path / "ledger"
+    tools = ToolRegistry()
+    crashed_once = {"yes": False}
+
+    @tools.register_tool("charge", description="Charges the card (not idempotent).")
+    def charge(amount: int) -> dict:
+        with ledger.open("a") as f:
+            f.write(f"charge {amount}\n")
+        return {"status": "success", "data": {"charged": amount}}
+
+    @tools.register_tool("report", description="Builds a report.")
+    async def report() -> dict:
+        if not crashed_once["yes"]:
+            crashed_once["yes"] = True
+            for _ in range(500):
+                calls = current_run().record["tool_calls"]
+                if any(c["tool_call_id"] == "c1" and c["state"] == "completed" for c in calls):
+                    break
+                await asyncio.sleep(0.01)
+            raise ProcessDied()
+        return {"status": "success", "data": {"report": "ready"}}
+
+    model = RecordingModel([("c1", "charge", '{"amount": 5}'), ("r1", "report", "{}")], "recovered")
+    agent = await _agent(model, tools, governance_config={"enabled": False})
+    await _crash(agent)
+    await asyncio.sleep(1.2)
+
+    await agent.resume("run_crash")
+
+    told = next(m for m in model.calls[-1] if m.get("tool_call_id") == "c1")
+    assert '"args": {"amount": 5}' in told["content"], told["content"]
