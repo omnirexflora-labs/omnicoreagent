@@ -671,3 +671,44 @@ async def test_the_workspace_is_not_copied_into_the_directory_commands_run_in(
         if event.event_type == "tool_result"
     ]
     assert not tool_result["data"].get("workspace_files", {}).get("written")
+
+
+@pytest.mark.asyncio
+async def test_a_session_is_refused_before_asking_when_every_command_would_be(tmp_path):
+    # The 0.5.0rc1 gate: permissive-dev asked a person about the network, then
+    # denied every host command. No one is asked for what cannot lead anywhere.
+    from omnicoreagent.governance.errors import PolicyDeniedError
+
+    asked = []
+
+    class Resolver:
+        async def resolve(self, approval):
+            asked.append(approval.capability)
+            return None
+
+    engine = GovernanceEngine(build_default_policy("permissive-dev"), sandbox_runtime=_runtime(),
+                              approval_resolver=Resolver())
+    with pytest.raises(PolicyDeniedError, match="Host process execution needs explicit policy"):
+        await SandboxExecutionService(engine).open_session(
+            _manifest(tmp_path)
+        )
+    assert asked == []
+
+
+@pytest.mark.asyncio
+async def test_a_policy_that_allows_some_commands_is_not_refused_early(tmp_path):
+    # Command rules may allow a specific command: only a blanket deny refuses early.
+    from omnicoreagent.governance.policy import policy_from_mapping
+
+    policy = policy_from_mapping({"name": "p", "mode": "strict", "rules": {"allow": [
+        {"rule_id": "setup", "capability": "sandbox.*"},
+        {"rule_id": "echo", "capability": "process.exec", "command": {"program": "echo"}},
+    ]}})
+    engine = GovernanceEngine(policy, sandbox_runtime=_runtime())
+    service = SandboxExecutionService(engine)
+    session = await service.open_session(_manifest(tmp_path))
+    try:
+        result = await service.execute(SandboxCommandSpec(command=["echo", "hi"]), session=session)
+        assert result.ok
+    finally:
+        await service.close_session(session)

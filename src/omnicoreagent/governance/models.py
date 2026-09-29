@@ -249,6 +249,11 @@ class PolicyRule:
         if not isinstance(self.metadata, dict):
             raise ValueError("rule.metadata must be a dict")
         if isinstance(self.command, dict):
+            from dataclasses import fields as _fields
+
+            unknown = sorted(set(self.command) - {f.name for f in _fields(CommandMatcher)})
+            if unknown:
+                raise ValueError(f"rule {self.rule_id}: command has unknown key(s) {', '.join(unknown)}")
             self.command = CommandMatcher(**self.command)
         elif self.command is not None and not isinstance(self.command, CommandMatcher):
             raise ValueError("rule.command must be a CommandMatcher or dict")

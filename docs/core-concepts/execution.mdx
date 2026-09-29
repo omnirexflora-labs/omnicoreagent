@@ -178,13 +178,16 @@ asyncio.run(main())
 success | 42
 execute sandbox.execute allow ['use_execute', 'sandbox_setup']
 execute process.exec allow ['commands_in_the_sandbox']
-execute process.exec allow ['commands_in_the_sandbox']
+execute sandbox.workspace.sync allow ['sandbox_setup']
 ```
 
-The two `process.exec` decisions are the model's command and the runtime's
-own: after a command, the runtime lists what changed in the sandbox to copy
-it back to the workspace, and that listing is a command too, decided by the
-same rules. Leave out `sandbox.*` and the sandbox cannot start; leave out the
+The `process.exec` decision is the model's command. The last one is the
+runtime's own: after a command, it lists what changed in the sandbox to copy
+it back to the workspace. That listing is governed too, as
+`sandbox.workspace.sync` (part of `sandbox.*`), and it is not judged as a
+command the agent asked for, so [rules on shell
+commands](/docs/reference/policy#rules-on-shell-commands) do not apply to it.
+Leave out `sandbox.*` and the sandbox cannot start; leave out the
 `process.exec` rule and every command is refused. `sandbox.network.configure`
 is part of `sandbox.*` here: to keep the network behind a person, add an
 `ask` rule for it, as the development profiles do ([Policy
@@ -217,12 +220,14 @@ What is copied, and what is not:
 
 Limits: 500 files, 2 MB per file and 20 MB per copy. To copy less, give glob
 patterns over workspace paths (`*` crosses folders; no `include` copies
-everything not excluded):
+everything not excluded). The patterns apply both ways: a file outside them is
+not copied in, and a file a command creates or changes outside them is not
+copied back either (it is skipped, with the reason "outside the bridge's
+include/exclude patterns"):
 
 ```python
 agent_config = {
     "governance_config": {
-        "enabled": True,
         "sandbox_config": {"provider": "docker"},
         "workspace_bridge": {"include": ["src/*", "data/*.csv"], "exclude": ["data/archive/*"]},
     },
@@ -356,7 +361,6 @@ the policy says ([Security model](/docs/core-concepts/security-model)).
 ```python
 agent_config = {
     "governance_config": {
-        "enabled": True,
         "sandbox_config": {"provider": "docker"},
         "sandbox_manifest": {"environment": {"plain": {"APP_ENV": "test"}}},
     },

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import fields
 from fnmatch import fnmatchcase
@@ -49,6 +50,11 @@ def load_policy(
         return load_policy_file(explicit_path, project_root=root, explicit=True)
     if policy is not None:
         if isinstance(policy, PolicyEnvelope):
+            # A copy: the object is the caller's, often shared (one definition
+            # for every agent, or built twice by OmniServe). Stamping it, and
+            # then writing budgets into it, made the second build fail with
+            # "the policy already has budgets" (the 0.5.0rc1 gate).
+            policy = copy.deepcopy(policy)
             policy.provenance.source = PolicySource.CODE
             return attach_policy_hash(policy)
         return policy_from_mapping(policy, source=PolicySource.CODE)
@@ -85,7 +91,8 @@ def load_policy_file(
             source_ref=str(safe_path),
         )
     except Exception as exc:
-        raise PolicyLoadError(f"Invalid policy file: {safe_path}") from exc
+        # The reason, not only the file: it was left in __cause__ (the 0.5.0rc1 gate).
+        raise PolicyLoadError(f"Invalid policy file: {safe_path}: {exc}") from exc
     if not explicit:
         envelope.metadata["auto_discovered"] = True
         envelope.metadata["may_only_narrow_trusted_baseline"] = True
@@ -130,7 +137,11 @@ def _normalize_rule(data: dict[str, Any], effect: str) -> PolicyRule:
     try:
         return PolicyRule(**payload)
     except (TypeError, ValueError) as exc:
-        raise PolicyLoadError(f"rule {rule_id}: {exc}") from exc
+        message = str(exc)
+        # Name the rule once: some messages already do.
+        if not message.startswith(f"rule {rule_id}"):
+            message = f"rule {rule_id}: {message}"
+        raise PolicyLoadError(message) from exc
 
 
 def _validate_policy_path(path: Path, project_root: Path, *, explicit: bool) -> Path:
@@ -186,6 +197,10 @@ def _compose_auto_discovered_policy(
     _validate_auto_discovered_allow_rules(discovered, baseline)
     discovered.rules.deny = [*baseline.rules.deny, *discovered.rules.deny]
     discovered.rules.ask = [*baseline.rules.ask, *discovered.rules.ask]
+    # A file can only narrow: it adds denies and asks, and its own allows are
+    # within the profile's. Replacing the profile's allows with the file's
+    # took them all away when the file had none (the 0.5.0rc1 gate).
+    discovered.rules.allow = [*baseline.rules.allow, *discovered.rules.allow]
     discovered.mode = _stricter_mode(baseline.mode, discovered.mode)
     discovered.profile = baseline.profile
     return attach_policy_hash(discovered)

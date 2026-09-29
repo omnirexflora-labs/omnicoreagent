@@ -48,6 +48,19 @@ DEFAULT_PIDS_LIMIT = 256
 DEFAULT_USER = "65534:65534"
 DEFAULT_WORKDIR_SIZE = "1g"
 LABEL = "omnicoreagent.sandbox"
+# The run a container was made for, so a crash's leftovers can be removed with
+# that run and not by a host-wide sweep.
+RUN_LABEL = "omnicoreagent.run"
+
+
+def _labels(session_id: str) -> dict[str, str]:
+    from omnicoreagent.core.runs import current_run
+
+    labels = {LABEL: "1", "omnicoreagent.session": session_id}
+    run = current_run()
+    if run is not None and getattr(run, "run_id", None):
+        labels[RUN_LABEL] = str(run.run_id)
+    return labels
 # Extra time the host waits beyond a command's own limit before giving up on it.
 HOST_TIMEOUT_GRACE_SECONDS = 10
 _UNITS = {"k": 1024, "m": 1024**2, "g": 1024**3}
@@ -132,7 +145,7 @@ class DockerSandboxRuntime(SandboxRuntime):
             "mounts": mounts,
             "environment": {"HOME": "/tmp", **dict(manifest.environment.plain)},
             "user": self.user,
-            "labels": {LABEL: "1", "omnicoreagent.session": session_id},
+            "labels": _labels(session_id),
             "cap_drop": ["ALL"],
             "security_opt": ["no-new-privileges"],
             "pids_limit": self.pids_limit,
@@ -191,11 +204,18 @@ class DockerSandboxRuntime(SandboxRuntime):
             return
         await asyncio.to_thread(container.remove, force=True, v=True)
 
-    async def cleanup_orphans(self) -> int:
-        """Remove every OmniCoreAgent sandbox container left by earlier processes."""
+    async def cleanup_orphans(self, *, run_id: str | None = None) -> int:
+        """Remove sandbox containers left by earlier processes.
+
+        With ``run_id``, only that run's: a run resumed, retried or abandoned
+        removes what its dead process left, without touching other agents'
+        live sandboxes on the same Docker host (the 0.5.0rc1 gate). Without
+        it, every OmniCoreAgent sandbox on the host.
+        """
         client = await self._docker()
+        labels = [LABEL] + ([f"{RUN_LABEL}={run_id}"] if run_id else [])
         containers = await asyncio.to_thread(
-            client.containers.list, all=True, filters={"label": LABEL}
+            client.containers.list, all=True, filters={"label": labels}
         )
         for container in containers:
             await asyncio.to_thread(container.remove, force=True, v=True)

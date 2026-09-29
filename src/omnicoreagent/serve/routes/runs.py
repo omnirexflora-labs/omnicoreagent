@@ -3,7 +3,7 @@
 import asyncio
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import Query, APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from omnicoreagent.core.logging import logger
@@ -167,6 +167,28 @@ def create_runs_router() -> APIRouter:
             if privacy_filter is not None:
                 message = privacy_filter.redact_text(message, boundary="public")
             raise HTTPException(status_code=500, detail=message)
+
+    @router.get(
+        "/runs",
+        summary="List runs",
+        description=(
+            "Runs by status and session, oldest first: what waits for a person "
+            "(`awaiting_approval`, `awaiting_budget`), what a crash left "
+            "`running`, what finished. Each as `GET /runs/{run_id}` returns it; "
+            "no saved conversation."
+        ),
+    )
+    async def list_runs(
+        request: Request,
+        status: str | None = None,
+        session_id: str | None = None,
+        limit: int = Query(100, ge=1, le=500),
+    ) -> dict:
+        # A caller that lost its connection had no run id and no way to find
+        # what waits for a person (the 0.5.0rc1 stranger test).
+        agent = get_agent(request)
+        records = await agent.list_runs(session_id=session_id, status=status, limit=limit)
+        return {"runs": [_public_run(agent, record) for record in records]}
 
     @router.get(
         "/runs/{run_id}",
@@ -379,9 +401,10 @@ def create_runs_router() -> APIRouter:
 
 
 _PUBLIC_APPROVAL_KEYS = (
-    "approval_id", "status", "tool_call_id", "tool_name", "capability", "target",
-    "risk_level", "reason", "created_at", "expires_at", "approver", "note",
-    "decided_at", "edited_arguments", "delegated_run_id", "delegated_name",
+    "approval_id", "status", "decision", "tool_call_id", "tool_name", "capability",
+    "target", "command", "risk_level", "reason", "created_at", "expires_at",
+    "approver", "note", "decided_at", "edited_arguments", "delegated_run_id",
+    "delegated_name",
 )
 
 

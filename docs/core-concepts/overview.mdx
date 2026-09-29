@@ -108,7 +108,7 @@ async def main():
     for setting in (
         {"enable_workspace_files": False},
         {"enable_subagents": True},
-        {"governance_config": {"enabled": True, "sandbox_config": {"provider": "docker"}}},
+        {"governance_config": {"sandbox_config": {"provider": "docker"}}},
     ):
         names = await tool_names(setting)
         print(setting, "-> added", sorted(names - base), "removed", len(base - names))
@@ -120,7 +120,7 @@ asyncio.run(main())
 default: 14 tools
 {'enable_workspace_files': False} -> added [] removed 10
 {'enable_subagents': True} -> added ['spawn_subagents'] removed 0
-{'governance_config': {'enabled': True, 'sandbox_config': {'provider': 'docker'}}} -> added ['execute'] removed 0
+{'governance_config': {'sandbox_config': {'provider': 'docker'}}} -> added ['execute'] removed 0
 ```
 
 A sandbox gives the agent an `execute` tool whose commands run in the sandbox,
@@ -166,7 +166,7 @@ this list.
 | A trace of every run, on disk, kept 7 days | on | `telemetry_config` ([Observability](/docs/how-to-guides/observability)) |
 | A durable run record, kept 30 days | on | `run_retention_days` ([Durable runs](/docs/core-concepts/durable-runs)) |
 | Personal data redacted from the record | on | `privacy_config` |
-| Policy: allow, ask or deny each capability | off | `governance_config` ([Security model](/docs/core-concepts/security-model)) |
+| Policy: allow, ask or deny each capability | on, the `permissive-dev` profile (since 0.5.0) | `governance_config` ([Security model](/docs/core-concepts/security-model)) |
 | Sandboxed commands (`execute`) | off | `governance_config["sandbox_config"]` ([Execution](/docs/core-concepts/execution)) |
 | Budgets in dollars or tokens | off | `governance_config["budgets"]` ([Budgets](/docs/reference/budgets)) |
 | Sub-agents, skills, code mode, tool retrieval | off | `enable_subagents`, `enable_agent_skills`, `code_mode`, `enable_advanced_tool_use` |
@@ -183,7 +183,7 @@ together.
 | `name` | Required. The agent's name in its traces, records and workspace. |
 | `system_instruction` | Required. What the agent is for; the start of its system prompt. |
 | `model_config` | Required. `{"provider": ..., "model": ...}`, plus sampling settings ([Models](/docs/how-to-guides/models)). |
-| `local_tools` | Your Python functions: a `ToolRegistry`, or a list of functions ([Local tools](/docs/core-concepts/local-tools)). |
+| `local_tools` | Your Python functions: a `ToolRegistry` they are registered on, or a list of `Tool` objects (a plain function in the list raises `TypeError`) ([Local tools](/docs/core-concepts/local-tools)). |
 | `mcp_tools` | MCP servers whose tools it may use ([MCP](/docs/core-concepts/mcp)). |
 | `sub_agents` | Other agents it may hand a task to; each becomes a `delegate_<name>` tool ([Sub-agents](/docs/core-concepts/sub-agents)). |
 | `agent_config` | How it runs: steps, limits, workspace, memory window, policy ([agent settings](/docs/reference/agent-config)). |

@@ -3,7 +3,7 @@ import logging
 import shutil
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Protocol
 from uuid import uuid4
@@ -190,7 +190,9 @@ class LocalWorkspaceStorage:
                 WorkspaceFile(
                     path=str(child.relative_to(self.root)),
                     name=child.name,
-                    modified_at=datetime.fromtimestamp(child.stat().st_mtime),
+                    # UTC, as every other store's: naive local time was read
+                    # as UTC by payload retention, hours off on a non-UTC host.
+                    modified_at=datetime.fromtimestamp(child.stat().st_mtime, tz=timezone.utc),
                     is_dir=child.is_dir(),
                 )
             )
@@ -368,7 +370,7 @@ class S3WorkspaceStorage:
                     WorkspaceFile(
                         path=key[len(self.prefix) :].rstrip("/"),
                         name=name,
-                        modified_at=datetime.fromtimestamp(0),
+                        modified_at=datetime.fromtimestamp(0, tz=timezone.utc),
                         is_dir=True,
                     )
                 )

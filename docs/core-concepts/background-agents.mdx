@@ -406,7 +406,7 @@ completed | Freshly baked warmth in every bite.
 | You want | Call |
 |---|---|
 | status, attempt count, times, answer, error | `get_run(run_id)` |
-| every attempt: worker, reason (`initial`, `retry`, `recovery`), how it ended | `list_attempts(run_id)` |
+| every attempt: worker, reason (`initial`, `retry`, `recovery`, or `lease_expired` for an attempt whose worker's lease ran out), how it ended | `list_attempts(run_id)` |
 | lifecycle events, numbered from 1 | `get_run_events(run_id)` |
 | the run's folder and files | `get_run_workspace(run_id)` |
 | what the model did: steps, calls, tokens, cost, across pauses and attempts | `agent.get_run_trajectory(run_id)` |
@@ -429,7 +429,7 @@ records stay in the agent's [memory store](/docs/core-concepts/memory).
 | `task_store=` | Keeps state | Install |
 |---|---|---|
 | none (`"in_memory"`) | the in-memory store: while the process lives | core |
-| `"sql"` | SQLite at `.omnicoreagent/background.db`, or `DATABASE_URL` when set | `omnicoreagent[postgres]` |
+| `"sql"` | SQLite at `.omnicoreagent/background.db`, or `DATABASE_URL` when set | `omnicoreagent[postgres]` (it ships SQLAlchemy, which SQLite needs too) |
 | `{"backend": "sql", "url": "postgresql://user:pass@host/db"}` | PostgreSQL (or `mysql+pymysql://...`) | `omnicoreagent[postgres]` |
 | `"redis"` or `{"backend": "redis", "url": "redis://localhost:6379/0"}` | Redis (`"redis"` reads `REDIS_URL`) | `omnicoreagent[redis]` |
 | `"mongodb"` or `{"backend": "mongodb", "uri": "mongodb://localhost:27017", "database": "omnicoreagent"}` | MongoDB (`"mongodb"` reads `MONGODB_URI`) | `omnicoreagent[mongodb]` |
@@ -609,8 +609,8 @@ of translating it: runs of one task share a memory session by default
 turns. For runs that must not see each other, give the task
 `session_policy={"mode": "run"}`. If a worker dies, its
 lease runs out and another worker takes the run back, continuing from the
-agent's checkpoint; `list_attempts` shows that attempt's reason as
-`recovery`. More in [Stores and scale](/docs/how-to-guides/stores-and-scale).
+agent's checkpoint; `list_attempts` shows the lost attempt with the reason
+`lease_expired` and the attempt that took over with `recovery`. More in [Stores and scale](/docs/how-to-guides/stores-and-scale).
 
 ## Starting and shutting down
 
@@ -620,9 +620,12 @@ agent's checkpoint; `list_attempts` shows that attempt's reason as
   runs one queued run.
 - Without `start()`, nothing is scheduled; `run_now(wait=True)` and
   `run_until_terminal` run a queued run in your process.
-- `shutdown()` stops the loop, cancels the runs it is executing (each
-  interrupted attempt is recorded, and retried if the task retries), and
-  closes the store. Call it before the process exits.
+- `shutdown()` stops the loop, stops the runs it is executing, and closes the
+  store. Each stopped attempt is recorded as `failed` with the error
+  `worker shutdown`. A task with retries left puts the run back in the queue
+  (`queued`, for the next worker); otherwise the run ends `failed` with that
+  error. It is not `cancelled`: only `cancel_run` cancels. Call `shutdown()`
+  before the process exits.
 
 With a `governance_engine` on the manager, a task is bound to the policy it
 was created under. When the policy changes, the task can still be paused or

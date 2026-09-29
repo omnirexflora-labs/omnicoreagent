@@ -156,14 +156,13 @@ class WorkspaceBridge:
         written: list[str] = []
         skipped: list[dict[str, str]] = []
         self._checks = {}
-        listing = await service.execute(
-            SandboxCommandSpec(
-                command=["sh", "-c", _LIST_SCRIPT, str(self.max_file_bytes)],
-                timeout_seconds=LIST_TIMEOUT_SECONDS,
-                metadata={"purpose": "workspace_sync"},
-            ),
-            session=session,
+        spec = SandboxCommandSpec(
+            command=["sh", "-c", _LIST_SCRIPT, str(self.max_file_bytes)],
+            timeout_seconds=LIST_TIMEOUT_SECONDS,
+            metadata={"purpose": "workspace_sync"},
         )
+        spec.authority_request = sync_authority_request(spec)
+        listing = await service.execute(spec, session=session)
         if listing.exit_code != 0:
             return {"written": written, "skipped": [{"path": ".", "reason": "could not list the sandbox files"}]}
         runtime = service._runtime()
@@ -301,6 +300,28 @@ def _parse_listing(stdout: str) -> list[tuple[int, str, str]]:
 
 
 _RUN_RECORDS = frozenset({"run.json", "events.jsonl"})
+
+
+def sync_authority_request(spec, surface: str | None = None):
+    """The runtime's own listing after a command, as ``sandbox.workspace.sync``.
+
+    It is governed like everything else, but it is not a command the agent
+    asked for: judged as ``process.exec``, command rules found its script
+    opaque and denied it, and under a policy of command rules every execute
+    failed after the agent's command had already run (the 0.5.0rc1 gate).
+    """
+    from omnicoreagent.governance.models import AuthorityRequest, AuthorityTarget
+
+    name = spec.command[0] if spec.command else ""
+    return AuthorityRequest(
+        capability="sandbox.workspace.sync",
+        actor="runtime",
+        provider="sandbox",
+        execution_surface=surface,
+        target=AuthorityTarget(resource=name),
+        risk_level="low",
+        metadata={"command": {"name": name, "argc": len(spec.command)}, "purpose": "workspace_sync"},
+    )
 
 
 def _run_record(path: str) -> bool:

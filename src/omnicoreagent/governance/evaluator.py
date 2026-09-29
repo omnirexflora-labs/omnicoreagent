@@ -104,12 +104,15 @@ class PolicyEvaluator:
                 + ").",
             )
         if policy.mode == PolicyMode.PERMISSIVE:
+            # No rule matched: say so, as interactive and strict do. It said
+            # matched_allow, with no rule, so the evidence could not tell "a
+            # rule allowed it" from "nothing matched" (the 0.5.0rc1 gate).
             return _decision(
                 policy,
                 request,
                 PolicyEffect.ALLOW,
-                ReasonCode.MATCHED_ALLOW,
-                "Permissive policy allowed unmatched capability.",
+                ReasonCode.UNKNOWN_CAPABILITY,
+                "Allowed by the permissive mode: no rule matches this request.",
             )
         if policy.mode == PolicyMode.INTERACTIVE:
             return _decision(

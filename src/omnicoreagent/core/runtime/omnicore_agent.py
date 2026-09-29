@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -819,6 +820,9 @@ class OmniCoreAgent:
 
             # The run's durable record lives in the chosen memory store.
             lease_seconds = int(self.agent_config.get("run_lease_seconds") or 60)
+            if _resume is not None or retry_of is not None:
+                # What a dead attempt of this run left running goes first.
+                await self._remove_run_sandboxes(run_id)
             if _resume is not None:
                 run_tracker = RunTracker.from_record(
                     self.memory_router, _resume, lease_seconds=lease_seconds
@@ -836,6 +840,16 @@ class OmniCoreAgent:
                     agent_version=self.agent_config.get("agent_version"),
                     lease_seconds=lease_seconds,
                 )
+            # Load the model client off the event loop before the heartbeat
+            # starts: imported on the loop at a process's first call, it froze
+            # it for seconds to minutes, the heartbeat stalled and a second
+            # process took over a live run (the 0.5.0rc1 gate).
+            # A model connection of the application's own may have no async
+            # warm_up, or a plain one.
+            warm_up = getattr(self.llm_connection, "warm_up", None)
+            warmed = warm_up() if callable(warm_up) else None
+            if inspect.isawaitable(warmed):
+                await warmed
             await run_tracker.start(trace_context.trace_id)
             # Keeps the heartbeat fresh during long model or tool calls.
             keep_alive = asyncio.create_task(run_tracker.keep_alive())
@@ -1393,10 +1407,23 @@ class OmniCoreAgent:
                 if run.get("status") not in _FINISHED_RUN_STATUSES:
                     continue
                 trace_ids = list(run.get("trace_ids") or [trace.trace_id])
-            elif str(getattr(trace.status, "value", trace.status)) in _UNFINISHED_TRACE_STATUSES:
-                continue
             else:
-                trace_ids = [trace.trace_id]
+                # No record (pruned, or kept in another process's memory): the
+                # run is every trace carrying its id, in order, finished if its
+                # last one is. Reading one trace skipped a resumed run whole
+                # (its paused segment is unfinished; the 0.5.0rc1 gate).
+                related = [trace]
+                if trace.run_id:
+                    related = [
+                        t
+                        for t in await self.telemetry_store.list_traces(TraceFilter(run_id=trace.run_id))
+                        if any(span.kind == "agent.run" for span in t.spans)
+                    ] or [trace]
+                related.sort(key=lambda t: t.started_at)
+                last = related[-1]
+                if str(getattr(last.status, "value", last.status)) in _UNFINISHED_TRACE_STATUSES:
+                    continue
+                trace_ids = [t.trace_id for t in related]
             segments = [
                 t
                 for t in [
@@ -1518,9 +1545,35 @@ class OmniCoreAgent:
             current["error"] = {"type": "RunEndedOutside", "message": reason}
             if spent:
                 current["budgets"] = spent
+            # A request no one will resume into is closed: granting it later
+            # added headroom to a budget, a shared one too (the 0.5.0rc1 gate).
+            for request in current.get("budget_requests") or []:
+                if request.get("status") == "pending":
+                    request["status"] = "abandoned"
 
         await update_from_outside(self.memory_router, run_id, close)
+        await self._remove_run_sandboxes(run_id)
         return await self.get_run(run_id)
+
+    async def _remove_run_sandboxes(self, run_id: str) -> None:
+        """Remove sandboxes a dead process of this run left running.
+
+        After kill -9 a run's sandbox kept running for good, and the only
+        cleanup removed every agent's (the 0.5.0rc1 gate). A provider that can
+        find a run's sandboxes removes them; a failure here never stops the run.
+        """
+        engine = getattr(getattr(self, "agent", None), "governance_engine", None)
+        cleanup = getattr(getattr(engine, "sandbox_runtime", None), "cleanup_orphans", None)
+        if cleanup is None or "run_id" not in inspect.signature(cleanup).parameters:
+            return
+        try:
+            removed = await cleanup(run_id=run_id)
+            if removed:
+                runtime_logger().info(f"Removed {removed} sandbox(es) left by run {run_id}")
+        except Exception as exc:
+            runtime_logger().warning(
+                f"Could not remove sandboxes left by run {run_id}: {exc.__class__.__name__}"
+            )
 
     async def interrupt(self, run_id: str) -> Dict[str, Any]:
         """Ask a running run to stop at its next step boundary; it becomes
@@ -1644,6 +1697,10 @@ class OmniCoreAgent:
         record = await self._run_record(run_id)
         if record is None:
             raise LookupError(f"No run {run_id}")
+        if record.get("status") != "awaiting_budget":
+            raise LookupError(
+                f"Run {run_id} is not waiting for a budget decision (it is {record.get('status')})"
+            )
         pending = [
             request
             for request in record.get("budget_requests", [])
@@ -2424,11 +2481,17 @@ class OmniCoreAgent:
             trajectory = segment["trajectory"]
             segment_totals = trajectory.get("totals") or {}
             totals = _add_totals(totals, segment_totals)
-            # Only a finished segment carries its children's totals; any
-            # other counts its own, so no segment is left out of the sum.
+            # A finished segment carries its children's totals. One that
+            # paused has them only in its trace: taking its own totals alone
+            # dropped a sub-agent it ran before the pause (the 0.5.0rc1 gate
+            # counted 10,257 tokens of a run's 13,301).
+            segment_including = segment_totals.get("including_subagents")
+            if segment_including is None:
+                summary = (await self._run_summary(segment["trace_id"]))["run_summary"]
+                segment_including = (summary or {}).get("including_subagents")
             including = _add_totals(
                 including,
-                segment_totals.get("including_subagents")
+                segment_including
                 or {
                     "tokens": segment_totals.get("tokens") or {},
                     "estimated_cost_usd": segment_totals.get("estimated_cost_usd") or 0.0,
@@ -2690,6 +2753,9 @@ def _public_approval(approval: dict[str, Any], record: dict[str, Any]) -> dict[s
         "capability": approval.get("capability"),
         "target": approval.get("target"),
         "arguments": arguments,
+        # For a shell command: the commands it would run, one per line. The
+        # target alone says only `sh` (the 0.5.0rc1 gate).
+        "command": approval.get("command"),
         "risk_level": approval.get("risk_level"),
         "reason": approval.get("reason"),
         "expires_at": approval.get("expires_at"),

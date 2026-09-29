@@ -15,6 +15,7 @@ that names the terminal state.
 from __future__ import annotations
 
 import asyncio
+import sys
 import json
 import time
 from dataclasses import asdict, dataclass, field, fields
@@ -230,6 +231,50 @@ def _status_of(result: dict[str, Any]) -> str:
     return str(status)
 
 
+def _interrupt_on_signals(agent: Any, run_id: str):
+    """Ctrl-C (or SIGTERM) interrupts the run instead of killing the process.
+
+    It gave click's "Aborted!", exit 1, and no result.json or trajectory.json
+    (the 0.5.0rc1 gate). The first signal asks the run to stop at its next step
+    boundary; it ends interrupted, its evidence is written, and the command
+    exits 6. A second signal, or one before the run has a record, cancels at
+    once. Returns a function that puts the old handlers back.
+    """
+    import signal
+
+    loop = asyncio.get_running_loop()
+    main = asyncio.current_task()
+    received = {"count": 0}
+
+    def cancel_now(_task=None):
+        if _task is not None and (_task.cancelled() or _task.exception() is None):
+            return
+        if main is not None:
+            main.cancel()
+
+    def on_signal():
+        received["count"] += 1
+        if received["count"] > 1:
+            cancel_now()
+            return
+        print("Interrupting the run at its next step (Ctrl-C again to stop now)...", file=sys.stderr)
+        loop.create_task(agent.interrupt(run_id)).add_done_callback(cancel_now)
+
+    installed = []
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, on_signal)
+            installed.append(sig)
+        except (NotImplementedError, RuntimeError, ValueError):
+            pass  # not the main thread, or a platform without it
+
+    def restore():
+        for sig in installed:
+            loop.remove_signal_handler(sig)
+
+    return restore
+
+
 async def execute_headless(agent: Any, request: HeadlessRequest) -> HeadlessOutcome:
     """Run one instruction to a terminal state, answering pauses by policy.
 
@@ -283,6 +328,7 @@ async def _execute_headless(agent: Any, request: HeadlessRequest) -> HeadlessOut
         )
 
     result: dict[str, Any] = {}
+    restore_signals = _interrupt_on_signals(agent, run_id)
     try:
         result = await bounded(start())
         rounds = 0
@@ -348,9 +394,15 @@ async def _execute_headless(agent: Any, request: HeadlessRequest) -> HeadlessOut
     except asyncio.TimeoutError:
         outcome.status = "timeout"
         outcome.error = "run exceeded its deadline"
+    except asyncio.CancelledError:
+        # A second Ctrl-C: stopped at once, still with what evidence there is.
+        outcome.status = "interrupted"
+        outcome.error = "stopped by a second interrupt"
     except Exception as exc:
         outcome.status = "error"
         outcome.error = f"{exc.__class__.__name__}: {exc}"
+    finally:
+        restore_signals()
 
     outcome.exit_code = int(exit_code_for(outcome.status))
     outcome.session_id = result.get("session_id") or outcome.session_id

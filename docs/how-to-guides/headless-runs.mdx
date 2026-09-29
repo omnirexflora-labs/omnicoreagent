@@ -86,7 +86,7 @@ echo "exit code: $?"
 ```
 
 ```text
-status=awaiting_approval exit=3 run_id=run_e4b53e13d12e4988afc823d45c94c717
+status=awaiting_approval exit=3 run_id=run_2e2c93f291314a789492554e689b4483
 exit code: 3
 ```
 
@@ -98,13 +98,22 @@ exits 3. `out/result.json` says what it is waiting for:
 "pending": {
   "approvals": [
     {
-      "approval_id": "approval_b1d219ba032a4f9e9255ce268c5d6d1a",
+      "approval_id": "approval_f031f81207eb4bcabe060d3c59fa99f8",
+      "tool_call_id": "call_aEoMcrcIxWivLGt8b5AvD7AZ",
       "tool_name": "open_pull_request",
       "capability": "tool.local.call",
+      "target": {
+        "path": null,
+        "host": null,
+        "resource": null,
+        "tool_name": "open_pull_request",
+        "mcp_server": null
+      },
       "arguments": {
         "title": "Release notes since v1.2",
-        "body": "# Release Notes\n\n## Changes since v1.2\n- Add CSV export\n- Fix login timeout\n- Faster search"
+        "body": "Release notes since v1.2:\n\n- Added CSV export for easier data portability.\n- Fixed a login timeout issue to improve session reliability.\n- Improved search performance for faster results."
       },
+      "risk_level": "low",
       "reason": "A person approves pull requests.",
       ...
 ```
@@ -136,21 +145,21 @@ omnicoreagent run --agent agent.py \
   "schema": "omnicoreagent.headless_result/v1",
   "status": "success",
   "exit_code": 0,
-  "run_id": "run_d99e8e420e6b4e87b2d81ee249a5121c",
-  "session_id": "omni_core_agent_release_notes_3a5d85cf",
-  "response": "Opened PR #318 titled “Release notes for changes since v1.2” with the release notes for Add CSV export, Fix login timeout, and Faster search.",
+  "run_id": "run_0923cebcb71c4b68a4094b82e465298d",
+  "session_id": "omni_core_agent_release_notes_6ad9dc78",
+  "response": "Release notes since v1.2: added CSV export, fixed login timeout handling, and improved search performance.  \nOpened pull request #318 titled \u201cRelease notes for changes since v1.2.\u201d",
   "termination_reason": "stop",
   "error": null,
   "trace_ids": [
-    "trace_4bc4819e90c44da194a407d51a07e574",
-    "trace_f31203c1583c4caea5e48904edd9a428"
+    "trace_e43c0f0aa5904040840f5fc5c5cb49e6",
+    "trace_7b97624dbfe14ecca8772ef74179e737"
   ],
   "approval_mode": "scripted",
   "budget_mode": "stop",
   "cli_decisions": [
     {
       "kind": "approval",
-      "approval_id": "approval_1f102341157045838efcefbf38d4e950",
+      "approval_id": "approval_7254bc648d1d401c9adc6ff85d31d5ff",
       "tool_name": "open_pull_request",
       "capability": "tool.local.call",
       "decision": "approve",
@@ -160,26 +169,22 @@ omnicoreagent run --agent agent.py \
   ],
   "pending": null,
   "usage": {
-    "requests": 1,
-    "request_tokens": 1763,
-    "response_tokens": 37,
-    "total_tokens": 1800,
-    "total_time": 1.37213440800042,
-    "details": {
-      "cached_input_tokens": 1536
-    }
+    "requests": 3,
+    "request_tokens": 4904,
+    "response_tokens": 133,
+    "total_tokens": 5037
   },
-  "duration_seconds": 11.787,
-  "omnicoreagent_version": "0.4.1.dev13+5ebddc2",
+  "duration_seconds": 21.545,
+  "omnicoreagent_version": "0.5.0rc1",
   "evidence_error": null
 }
-status=success exit=0 run_id=run_d99e8e420e6b4e87b2d81ee249a5121c
+status=success exit=0 run_id=run_0923cebcb71c4b68a4094b82e465298d
 ```
 
 The run paused at the pull request, the CLI approved it by rule 0, and the
 run resumed and finished: two traces, one run. The last line is on stderr.
-`usage` is the last segment's (the resume made one model call); the whole
-run's totals are in `trajectory.json`.
+`usage` is the whole run's, both segments counted (three model calls: two
+before the pause, one after), the same totals `trajectory.json` holds.
 
 ## How it works
 
@@ -232,13 +237,13 @@ A rule matches on `tool_name`, `capability`, or both, and has a `decision`
 | 3 | is waiting for an approval |
 | 4 | is waiting for a budget |
 | 5 | timed out |
-| 6 | was interrupted |
+| 6 | was interrupted: `agent.interrupt`, or Ctrl-C / SIGTERM, which stops the run at its next step and still writes `result.json` and `trajectory.json` (a second Ctrl-C stops at once) |
 
 ### What it writes
 
 | File | Holds |
 |---|---|
-| `result.json` | `schema` (`omnicoreagent.headless_result/v1`), `status`, `exit_code`, `run_id`, `session_id`, `response`, `termination_reason`, `error`, `trace_ids`, the two modes, `cli_decisions`, `pending` (the approvals or budget request it stopped on), `usage` (the last segment's), `duration_seconds`, `omnicoreagent_version`, `evidence_error` |
+| `result.json` | `schema` (`omnicoreagent.headless_result/v1`), `status`, `exit_code`, `run_id`, `session_id`, `response`, `termination_reason`, `error`, `trace_ids`, the two modes, `cli_decisions`, `pending` (the approvals or budget request it stopped on), `usage` (the whole run's, every segment counted), `duration_seconds`, `omnicoreagent_version`, `evidence_error` |
 | `trajectory.json` | The whole run across its pauses, as `get_run_trajectory(run_id)` returns it: `segments` (each with its full trajectory), `totals`, `approvals`, `tool_calls`, `usage` |
 
 The traces themselves are also in the agent's telemetry store
@@ -269,7 +274,7 @@ for segment in run["segments"]:
 ```
 
 ```text
-completed | segments: 2 | tokens: 4993 | cost: 0.002444
+completed | segments: 2 | tokens: 5037 | cost: 0.003585
 approval: open_pull_request used by omnicoreagent-cli - release PRs are allowed in CI
 tags: ['nightly', 'headless', 'approval-mode:scripted', 'budget-mode:stop']
 provenance: {'source': 'omnicoreagent', 'environment': 'ci', 'external_ids': {'build': '4472'}}
@@ -318,17 +323,20 @@ python record_outcome.py out2/result.json passed
 ```
 
 ```text
-run_d99e8e420e6b4e87b2d81ee249a5121c tests_passed 1.0
+run_0923cebcb71c4b68a4094b82e465298d tests_passed 1.0
 ```
 
 The run is now one training record, both segments in it, with its outcome:
 
 ```python
+# training_record.py
 import asyncio
+import json
 from agent import agent
 
 async def main():
-    [record] = await agent.training_records(run_id="run_d99e8e420e6b4e87b2d81ee249a5121c")
+    run_id = json.load(open("out2/result.json"))["run_id"]
+    [record] = await agent.training_records(run_id=run_id)
     print("trace_ids:", len(record["trace_ids"]), "| outcomes:", [(o["source"], o["label"]) for o in record["outcomes"]])
     for step in record["steps"]:
         print("segment", step["segment"], "step", step["step"], "resumed" if step.get("resumed") else "model turn",

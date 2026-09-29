@@ -118,6 +118,8 @@ live: memory_write
 live: tool_batch_start
 live: tool_requested
 live: tool_resolved
+live: policy_request_created
+live: policy_decision_allow
 live: tool_call
 live: tool_result
 live: tool_observation
@@ -134,9 +136,9 @@ live: memory_write
 live: final_answer
 The weather in Nairobi is 25°C.
 metric: 3016 request tokens, 2 requests
-trace: completed 14 spans, 31 events, jsonl
+trace: completed 14 spans, 33 events, jsonl
 latest in session is this one: True
-{'total_requests': 2, 'total_request_tokens': 3016, 'total_response_tokens': 32, 'total_tokens': 3048, 'total_time': 8.68615158600005, 'average_time': 4.343075793000025}
+{'total_requests': 2, 'total_request_tokens': 3016, 'total_response_tokens': 32, 'total_tokens': 3048, 'total_time': 7.65733917200123, 'average_time': 3.828669586000615}
 ```
 
 And the collector printed:
@@ -150,8 +152,9 @@ And the collector printed:
 What happened:
 
 - The watcher saw every event as it was recorded: the request, the run's
-  header (`run_configuration`), each step's context, model call, tool call,
-  and the answer. It passed `run_id=` to see only this run.
+  header (`run_configuration`), each step's context, model call, the policy's
+  decision on the tool call (governance is on by default), the tool call, and
+  the answer. It passed `run_id=` to see only this run.
 - `result["metric"]` counted two model requests: this run's two model calls.
 - The trace was stored locally (`jsonl`, in `./workspace/telemetry/`) and
   exported when it ended: 14 spans to the collector, the same trace to the
@@ -265,13 +268,13 @@ asyncio.run(main())
 ```
 
 ```text
-trace_7c2419f3641843cf986901a61dcc5cb1 completed complete False
+trace_a593f1dedf4b4e26a57dd97b577e7a2c completed complete False
 kinds: ['agent.run', 'agent.step', 'context.assembly', 'memory.read', 'memory.write', 'model.call', 'tool.batch', 'tool.call']
 normalized events in order: [1, 2, 3, 4, 5, 6, 7, 8]
 family: ['weather']
 in session demo: 1
-224 tool_result {'tool_name': 'get_weather', 'args': {'city': 'Nairobi'}, 'status': 'success', 'data': {'city': 'Nairobi', 'temperature_c': 25}, 'message': None}
-236 final_answer {'response': 'The weather in Nairobi is 25°C.', 'status': 'success', 'termination_reason': 'stop'}
+21 tool_result {'tool_name': 'get_weather', 'args': {'city': 'Nairobi'}, 'status': 'success', 'data': {'city': 'Nairobi', 'temperature_c': 25}, 'message': None}
+33 final_answer {'response': 'The weather in Nairobi is 25°C.', 'status': 'success', 'termination_reason': 'stop'}
 after the last cursor: []
 ```
 
@@ -362,8 +365,8 @@ asyncio.run(main())
 ```
 
 ```text
-{'exporter': 'jsonl', 'trace_id': 'trace_7c2419f3641843cf986901a61dcc5cb1', 'exported_spans': 14, 'exported_events': 31, 'destination': 'exports/one-off.jsonl', 'metadata': {}}
-{'exporter': 'otlp', 'trace_id': 'trace_7c2419f3641843cf986901a61dcc5cb1', 'exported_spans': 0, 'exported_events': 0, 'destination': None, 'metadata': {'error': 'OTLP export failed: [Errno 111] Connection refused', 'error_type': 'TelemetryExportError'}}
+{'exporter': 'jsonl', 'trace_id': 'trace_a593f1dedf4b4e26a57dd97b577e7a2c', 'exported_spans': 14, 'exported_events': 33, 'destination': 'exports/one-off.jsonl', 'metadata': {}}
+{'exporter': 'otlp', 'trace_id': 'trace_a593f1dedf4b4e26a57dd97b577e7a2c', 'exported_spans': 0, 'exported_events': 0, 'destination': None, 'metadata': {'error': 'OTLP export failed: [Errno 111] Connection refused', 'error_type': 'TelemetryExportError'}}
 TelemetryExportError otlp export failed: TelemetryExportError: OTLP export failed: [Errno 111] Connection refused
 ```
 

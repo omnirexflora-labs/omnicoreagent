@@ -9,7 +9,7 @@ work here. People are welcome too; the [README](./README.md) is the tour.
 
 | You want to know | Look in |
 |---|---|
-| How to use a feature | [`docs/`](./docs) — the published docs; start at `docs/index.mdx`, the nav is `docs.json` |
+| How to use a feature | [`docs/`](./docs) — the published docs; start at `docs/index.mdx`; the nav is [`docs.json`](./docs.json) at the repository root, not in `docs/` |
 | What an option does, exactly | the source it is defined in (below); every setting has a comment |
 | Why something is built the way it is | [`engineering/architecture/`](./engineering/architecture) — one plan per piece of work, with the decisions |
 | What broke in real use and how it was fixed | [`engineering/validation/production-proving.md`](./engineering/validation/production-proving.md) |

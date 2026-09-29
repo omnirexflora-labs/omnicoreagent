@@ -67,11 +67,12 @@ async def test_a_quickstart_agent_answers_exactly_as_before():
 
 
 @pytest.mark.asyncio
-async def test_nothing_runs_on_the_host_unasked(tmp_path):
+async def test_nothing_runs_on_the_host_and_no_one_is_asked_in_vain(tmp_path):
     # Given a host "sandbox" (the local provider, which cannot switch the
-    # network off), the default asks a person before that sandbox gets network,
-    # and runs nothing meanwhile. Found writing this test: the plan said the
-    # default never pauses; it never pauses an agent with no sandbox.
+    # network off), the default refuses its commands. It used to ask a person
+    # about the sandbox's network first, then refuse every command anyway: an
+    # approval that could lead nowhere (the 0.5.0rc1 gate). It now refuses
+    # before asking, by name.
     model = RecordingModel([("c1", "execute", '{"command": "touch made.txt"}')], "done")
     agent = await _agent(
         model,
@@ -84,9 +85,12 @@ async def test_nothing_runs_on_the_host_unasked(tmp_path):
 
     result = await agent.run("Make a file.", session_id="host")
 
-    assert result["status"] == "awaiting_approval"
-    approval = (await agent.get_run(result["run_id"]))["approvals"][0]
-    assert approval["capability"] == "sandbox.network.configure"
+    assert result["status"] == "success"
+    assert (await agent.get_run(result["run_id"]))["approvals"] == []
+    refused = next(m for m in model.calls[-1] if m.get("tool_call_id") == "c1")
+    assert "Host process execution needs explicit policy" in json.dumps(refused)
+    trace = json.dumps(await agent.telemetry_store.get_trace(result["trace_id"]), default=str)
+    assert "deny_unrestricted_process_exec" in trace
     assert not (tmp_path / "made.txt").exists()
     await agent.cleanup()
 
@@ -153,3 +157,17 @@ def test_the_default_decides_every_capability_by_a_named_rule(surface):
         if not PolicyEvaluator().evaluate(policy, AuthorityRequest(capability=capability, execution_surface=surface)).matched_rule_ids
     ]
     assert unnamed == []
+
+
+def test_a_permissive_allow_with_no_rule_says_no_rule_matched():
+    # The 0.5.0rc1 gate: it reported matched_allow with no rule ids, so the
+    # evidence could not tell "a rule allowed it" from "nothing matched".
+    from omnicoreagent.governance.evaluator import PolicyEvaluator
+    from omnicoreagent.governance.models import AuthorityRequest, ReasonCode
+    from omnicoreagent.governance.policy import policy_from_mapping
+
+    policy = policy_from_mapping({"name": "open", "mode": "permissive", "rules": {}})
+    decision = PolicyEvaluator().evaluate(policy, AuthorityRequest(capability="tool.local.call"))
+    assert decision.effect.value == "allow"
+    assert decision.reason_code == ReasonCode.UNKNOWN_CAPABILITY
+    assert decision.matched_rule_ids == []

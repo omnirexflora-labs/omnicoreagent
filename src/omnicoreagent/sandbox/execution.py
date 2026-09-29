@@ -107,6 +107,34 @@ class SandboxExecutionService:
         self._sandbox_seconds_charged[session_id] = elapsed
         await budgets.charge("sandbox_seconds", owed)
 
+    async def _refuse_if_every_command_is_denied(self, surface: str) -> None:
+        """Refuse a sandbox no command could run in, before asking anyone.
+
+        permissive-dev denies host commands; with the local provider it asked a
+        person about the sandbox's network first, then denied every command:
+        an approval that could lead nowhere (the 0.5.0rc1 gate). Only a deny
+        rule with no command matcher refuses early; command rules may still
+        allow a specific command, so a policy with them is decided per command.
+        """
+        from omnicoreagent.governance.evaluator import PolicyEvaluator
+        from omnicoreagent.governance.models import PolicyEffect, ReasonCode
+
+        policy = getattr(self.governance_engine, "policy", None)
+        if policy is None:
+            return
+        probe = AuthorityRequest(
+            capability="process.exec",
+            provider="sandbox",
+            execution_surface=surface,
+            target=AuthorityTarget(resource="sh"),
+            risk_level="high",
+            metadata={"command": {"name": "sh", "argc": 0}, "purpose": "any_command"},
+        )
+        decision = PolicyEvaluator().evaluate(policy, probe)
+        if decision.effect == PolicyEffect.DENY and decision.reason_code == ReasonCode.MATCHED_DENY:
+            # Through the engine, so the refusal is recorded like any other.
+            await self.governance_engine.authorize_sandboxed(probe)
+
     async def open_session(
         self, manifest: SandboxManifest | dict[str, Any] | None = None
     ) -> SandboxSession:
@@ -120,6 +148,7 @@ class SandboxExecutionService:
         manifest = manifest or SandboxManifest()
         runtime = self._runtime()
         self._refuse_mount_over_policy(manifest)
+        await self._refuse_if_every_command_is_denied(_surface(runtime))
         requests = _manifest_authority_requests(manifest, SandboxCommandSpec(command=["session"]))
         if requests:
             await self.governance_engine.authorize_all(requests)
@@ -178,6 +207,7 @@ class SandboxExecutionService:
         authority_request = _sandbox_authority_request(spec, _surface(runtime))
         manifest = spec.manifest or SandboxManifest()
         self._refuse_mount_over_policy(manifest)
+        await self._refuse_if_every_command_is_denied(_surface(runtime))
         manifest_requests = _manifest_authority_requests(manifest, spec)
         if manifest_requests:
             await self.governance_engine.authorize_all(manifest_requests)
@@ -358,6 +388,11 @@ def _value(value: Any) -> Any:
     return getattr(value, "value", value)
 
 
+# An agent's command, or the runtime's own listing after one (the workspace
+# sync, whose script command rules would find opaque; the 0.5.0rc1 gate).
+_SANDBOX_COMMAND_CAPABILITIES = frozenset({"process.exec", "sandbox.workspace.sync"})
+
+
 def _default_authority_request(
     spec: SandboxCommandSpec, surface: str = "sandbox"
 ) -> AuthorityRequest:
@@ -387,7 +422,7 @@ def _sandbox_authority_request(
     """
     request = spec.authority_request or _default_authority_request(spec, surface)
     command_name = spec.command[0] if spec.command else ""
-    if request.capability != "process.exec":
+    if request.capability not in _SANDBOX_COMMAND_CAPABILITIES:
         raise ValueError("sandbox command execution requires process.exec authority")
     if request.provider not in {None, "sandbox"}:
         raise ValueError("sandbox command authority provider must be sandbox")
@@ -413,6 +448,10 @@ def _sandbox_authority_request(
             **_safe_metadata(request.metadata),
         },
     )
+    if authority.capability != "process.exec":
+        # The runtime's own command (the workspace sync): governed by its own
+        # capability, not judged as a command the agent asked for.
+        return authority
     # What the command would really run, for command rules, and for an
     # approval to show and bind (it saw only "sh" and an argument count).
     return attach_command(authority, spec.command)

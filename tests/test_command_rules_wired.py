@@ -166,4 +166,13 @@ async def test_a_paused_run_shows_the_approver_the_command(tmp_path):
     approval = (await agent.get_run(paused["run_id"]))["approvals"][0]
     assert approval["command"]["summary"] == ["git status", "git push origin main"]
     assert approval["command"]["programs"] == ["git", "git"]
+    # And where a person actually reads it: run()'s own result, and OmniServe's
+    # view (the 0.5.0rc1 gate found both left it out).
+    assert paused["approvals"][0]["command"]["summary"] == ["git status", "git push origin main"]
+    from omnicoreagent.serve.routes.runs import _public_view
+
+    record = await agent.get_run(paused["run_id"])
+    view = _public_view(agent, record["approvals"][0], record)
+    assert view["command"]["summary"] == ["git status", "git push origin main"]
+    assert "decision" in view
     await agent.cleanup()

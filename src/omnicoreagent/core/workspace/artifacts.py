@@ -16,7 +16,7 @@ import json
 import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from omnicoreagent.core.summarizer.tokenizer import count_tokens
 from omnicoreagent.core.logging import logger
@@ -389,7 +389,7 @@ class ToolResponseOffloader:
 
     def cleanup_old_artifacts(self):
         """Remove artifacts older than retention period."""
-        cutoff = datetime.now() - timedelta(days=self.config.retention_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=self.config.retention_days)
         removed_count = 0
 
         for file in self.storage.list_files():
@@ -397,7 +397,10 @@ class ToolResponseOffloader:
                 continue
 
             try:
-                if file.modified_at < cutoff:
+                modified = file.modified_at
+                if modified.tzinfo is None:  # a store that gives naive local time
+                    modified = modified.astimezone(timezone.utc)
+                if modified < cutoff:
                     self.storage.delete(file.path)
                     removed_count += 1
             except Exception as e:
