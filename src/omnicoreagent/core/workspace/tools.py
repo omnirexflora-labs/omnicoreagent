@@ -173,7 +173,7 @@ def build_tool_registry_workspace_files(
     workspace: Workspace | None = None,
     workspace_config: WorkspaceConfig | dict | None = None,
     privacy_filter: PrivacyFilter | None = None,
-    readable: Any = None,
+    allows: Any = None,
 ) -> ToolRegistry:
     """
     Register workspace file commands in a ToolRegistry.
@@ -190,8 +190,9 @@ def build_tool_registry_workspace_files(
         workspace_config=workspace_config,
         privacy_filter=privacy_filter,
     )
-    # Search and listing show only what the policy would let the agent read.
-    workspace_files.files_backend.readable = readable
+    # Search and listing show only what the policy would let the agent read;
+    # a folder is deleted or moved only if each file under it could be.
+    workspace_files.files_backend.allows = allows
 
     def grep_tool(
         pattern: str,
