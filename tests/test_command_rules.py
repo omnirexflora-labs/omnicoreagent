@@ -282,3 +282,14 @@ def test_the_policy_reference_example_loads_and_does_what_it_says():
     assert evaluate("git push origin main") == "ask"
     assert evaluate("git status") == "allow"
     assert evaluate("git status | head") == "deny"     # head not allowed: strict denies
+
+
+def test_the_summary_a_person_reads_is_quoted_as_the_shell_reads_it():
+    # The 0.5.0rc4 gate: arguments were joined with spaces, so
+    # `git commit -m 'add c'` read as `git commit -m add c`, and a quoted
+    # newline looked like a second command on its own line.
+    from omnicoreagent.governance.commands import parse_command
+
+    assert parse_command(["sh", "-c", "git commit -m 'add c'"]).summary == ["git commit -m 'add c'"]
+    (line,) = parse_command(["sh", "-c", "printf 'safe\nrm -rf /'"]).summary
+    assert "\n" not in line and line == "printf $'safe\\nrm -rf /'"

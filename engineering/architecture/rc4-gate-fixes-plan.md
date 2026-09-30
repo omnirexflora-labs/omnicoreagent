@@ -37,3 +37,7 @@ and published only when a gate finds nothing to fix.
 - U8 The budget warning counts what a person granted; after a top-up it said
   "remaining 0.0" with budget left (area F).
 
+- U9 The command summary a person approves is quoted as the shell reads it,
+  one line per command; joined with spaces, a quoted argument read as
+  several, and a quoted newline looked like a second command (area B).
+
