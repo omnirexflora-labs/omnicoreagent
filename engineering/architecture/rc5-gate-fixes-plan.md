@@ -49,3 +49,8 @@ the BLOCKER and MUST-FIX findings. Each unit is test-first and one commit.
   a folder link failed every execute before its command ran, and a file link
   the command wrote turned its output into an error (area D).
 
+- V11 (security-relevant) The approval summary shows each command as
+  written, with its variable settings and redirects, control characters made
+  visible: rebuilt from its arguments it hid `>> ~/.ssh/authorized_keys` and
+  `GIT_SSH_COMMAND=...`, and quoted `~` as a folder name (area B).
+

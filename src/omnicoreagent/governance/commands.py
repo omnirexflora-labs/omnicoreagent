@@ -74,6 +74,7 @@ class SimpleCommand:
     redirects_to_file: bool = False  # output sent to a file (not /dev/null)
     env_assignments: tuple[str, ...] = ()
     via: tuple[str, ...] = ()        # how it was reached: "sudo", "sh -c", "$()", "xargs"...
+    text: str = ""                   # as written, with its settings and redirects
 
 
 @dataclass(frozen=True)
@@ -93,10 +94,23 @@ class ParsedCommand:
         c`, and a quoted newline looked like a second command (the 0.5.0rc4
         gate).
         """
-        return [" ".join(_shown(a) for a in c.argv) for c in self.commands]
+        return [_visible(c.text) if c.text else " ".join(_shown(a) for a in c.argv) for c in self.commands]
 
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _visible(text: str) -> str:
+    """The command as written, on one line: a control character is shown, never
+    acted on, so a quoted newline cannot pass for a second command. Written as
+    the shell reads it, redirects, settings and `~` included: rebuilt from its
+    arguments it hid `>> ~/.ssh/authorized_keys` and `GIT_SSH_COMMAND=...`
+    (the 0.5.0rc5 gate)."""
+    return "".join(
+        {"\n": "\\n", "\t": "\\t", "\r": "\\r"}.get(ch)
+        or (f"\\x{ord(ch):02x}" if _CONTROL.match(ch) else ch)
+        for ch in text
+    ).strip()
 
 
 def _shown(argument: str) -> str:
@@ -196,7 +210,7 @@ def _text(node, source: bytes) -> str:
 def _walk(node, source: bytes, *, via: tuple[str, ...], state: _State, depth: int) -> None:
     kind = node.type
     if kind == "command":
-        _command(node, source, via=via, state=state, depth=depth, redirect=False)
+        _command(node, source, via=via, state=state, depth=depth, redirect=False, text=_text(node, source))
         return
     if kind == "redirected_statement":
         body = node.child_by_field_name("body")
@@ -205,7 +219,10 @@ def _walk(node, source: bytes, *, via: tuple[str, ...], state: _State, depth: in
             # Nodes are new objects on each access: compare by position.
             is_body = body is not None and (child.start_byte, child.end_byte) == (body.start_byte, body.end_byte)
             if is_body and child.type == "command":
-                _command(child, source, via=via, state=state, depth=depth, redirect=to_file)
+                _command(
+                    child, source, via=via, state=state, depth=depth, redirect=to_file,
+                    text=_text(node, source),
+                )
             else:
                 _walk(child, source, via=via, state=state, depth=depth)
         return
@@ -261,7 +278,9 @@ def _words(command, source: bytes) -> list[str | None]:
     return words
 
 
-def _command(node, source: bytes, *, via, state: _State, depth: int, redirect: bool) -> None:
+def _command(
+    node, source: bytes, *, via, state: _State, depth: int, redirect: bool, text: str = ""
+) -> None:
     env = tuple(
         _text(c.child_by_field_name("name") or c.children[0], source)
         for c in node.children
@@ -273,7 +292,9 @@ def _command(node, source: bytes, *, via, state: _State, depth: int, redirect: b
     elif words:
         plain = all(w is not None for w in words)
         argv = [w if w is not None else _text_of_argument(node, i, source) for i, w in enumerate(words)]
-        _from_argv(argv, via=via, plain=plain, state=state, depth=depth, env=env, redirect=redirect)
+        _from_argv(
+            argv, via=via, plain=plain, state=state, depth=depth, env=env, redirect=redirect, text=text
+        )
     # Substitutions inside the arguments (or the assignments) run too.
     for child in node.children:
         if child.type not in {"command_name", "word", "number", "raw_string"}:
@@ -299,6 +320,7 @@ def _from_argv(
     depth: int,
     env: tuple[str, ...] = (),
     redirect: bool = False,
+    text: str = "",
 ) -> SimpleCommand | None:
     if not argv:
         return None
@@ -312,7 +334,7 @@ def _from_argv(
         path_kind = "other"
     command = SimpleCommand(
         argv=tuple(argv), program=program, path_kind=path_kind, plain=plain,
-        redirects_to_file=redirect, env_assignments=env, via=via,
+        redirects_to_file=redirect, env_assignments=env, via=via, text=text,
     )
     state.add(command)
     # What this program runs in turn is a command too.
