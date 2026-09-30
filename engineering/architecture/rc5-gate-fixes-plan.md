@@ -54,3 +54,8 @@ the BLOCKER and MUST-FIX findings. Each unit is test-first and one commit.
   visible: rebuilt from its arguments it hid `>> ~/.ssh/authorized_keys` and
   `GIT_SSH_COMMAND=...`, and quoted `~` as a folder name (area B).
 
+- V12 The sandbox-reset notice after a resume says it is the runtime's note,
+  not the user's, that the resumed calls ran after the reset, and to carry on
+  with the task: worded as news, the model answered it and the run's answer
+  was lost (area B).
+

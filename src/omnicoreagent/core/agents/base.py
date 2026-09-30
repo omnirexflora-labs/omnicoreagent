@@ -807,11 +807,15 @@ def _datetime_prefix(message: Any, query: str) -> str:
     return content[: len(content) - len(query)] if content.endswith(query) else content
 
 
+# A note, and says so: worded as news, the model answered it instead of the
+# task, and the run's answer was lost (the 0.5.0rc5 gate).
 SANDBOX_RESET_NOTICE = (
-    "This run was paused and has now resumed. Its sandbox was reset: files "
-    "outside the workspace (for example in /tmp), installed packages, and "
-    "running processes from before the pause are gone. The workspace files are "
-    "intact."
+    "(A note from the runtime, not from the user.) This run was paused and has "
+    "now resumed. Its sandbox was reset: files outside the workspace (for "
+    "example in /tmp), installed packages, and running processes from before "
+    "the pause are gone. The workspace files are intact. Any calls resumed just "
+    "now ran after the reset, so their results stand. Carry on with the task "
+    "and answer the user's request."
 )
 
 
