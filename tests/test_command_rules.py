@@ -344,3 +344,30 @@ def test_the_documented_readonly_rule_refuses_a_write_hidden_after_a_list():
                                    target={"resource": "sh"})
         attach_command(request, ["sh", "-c", script])
         assert PolicyEvaluator().evaluate(policy, request).effect.value == "deny", script
+
+
+def test_an_ampersand_redirect_to_a_file_is_a_write():
+    # The rc7 security review (S2-1): `>& file` and `>&file` send stdout and
+    # stderr to a file in bash, but were read as a descriptor copy like `>&2`,
+    # so an allow rule without `redirect` let `echo x >& ~/.bashrc` through.
+    from omnicoreagent.governance.commands import parse_command
+
+    def writes(script):
+        return [c.redirects_to_file for c in parse_command(["sh", "-c", script]).commands]
+
+    assert writes("echo hi >& out.txt") == [True]
+    assert writes("echo hi >&out.txt") == [True]
+    assert writes('echo hi >& "$HOME/.bashrc"') == [True]
+    assert writes("echo hi >&2") == [False]
+    assert writes("echo hi 2>&1") == [False]
+    assert writes("echo hi >&-") == [False]
+
+
+def test_the_summary_shows_unicode_format_characters_escaped():
+    # The rc7 security review (S2-2): a right-to-left override or a zero-width
+    # character reached the approver as it is, so what they read could differ
+    # from what runs.
+    from omnicoreagent.governance.commands import parse_command
+
+    summary = parse_command(["sh", "-c", "echo safe‮ txt.exe; echo a​b c"]).summary
+    assert summary == ["echo safe\\u202e txt.exe", "echo a\\u200bb\\u2028c"]
