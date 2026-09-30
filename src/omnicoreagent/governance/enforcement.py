@@ -162,7 +162,7 @@ class GovernanceEngine:
                 for request in requests
             ]
             self._require_audit_channel(decisions)
-            self._raise_first_denied(decisions)
+            self._raise_first_denied(decisions, requests)
             for decision in decisions:
                 await self._raise_if_sandbox_required_without_route(
                     decision, sandbox_route
@@ -257,21 +257,22 @@ class GovernanceEngine:
             runtime, "is_test_adapter", False
         )
 
-    def _raise_first_denied(self, decisions: list[PolicyDecision]) -> None:
-        for decision in decisions:
+    def _raise_first_denied(
+        self, decisions: list[PolicyDecision], requests: list[AuthorityRequest] | None = None
+    ) -> None:
+        for index, decision in enumerate(decisions):
             if decision.effect != PolicyEffect.DENY:
                 continue
+            metadata = _decision_metadata(decision)
+            if requests is not None and index < len(requests):
+                # Which capability was refused: OmniServe's 403 said null
+                # (the 0.5.0rc4 gate).
+                metadata["capability"] = requests[index].capability
             if decision.reason_code == ReasonCode.BUDGET_EXCEEDED:
-                raise BudgetExceededError(
-                    decision.reason,
-                    metadata=_decision_metadata(decision),
-                )
+                raise BudgetExceededError(decision.reason, metadata=metadata)
             if decision.reason_code == ReasonCode.UNKNOWN_CAPABILITY:
-                raise UnknownCapabilityError(
-                    decision.reason,
-                    metadata=_decision_metadata(decision),
-                )
-            raise PolicyDeniedError(decision.reason, metadata=_decision_metadata(decision))
+                raise UnknownCapabilityError(decision.reason, metadata=metadata)
+            raise PolicyDeniedError(decision.reason, metadata=metadata)
 
     async def _resolve_approval(
         self,

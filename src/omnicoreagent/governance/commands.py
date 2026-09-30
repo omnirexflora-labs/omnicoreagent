@@ -20,6 +20,8 @@ The parse is pure: no process is started and nothing is read from disk.
 from __future__ import annotations
 
 import hashlib
+import shlex
+import re
 import json
 import posixpath
 from dataclasses import dataclass, field
@@ -84,8 +86,29 @@ class ParsedCommand:
 
     @property
     def summary(self) -> list[str]:
-        """What a person approving it should see: each program with its arguments."""
-        return [" ".join(c.argv) for c in self.commands]
+        """What a person approving it should see: each program with its arguments,
+        quoted as the shell reads them, one line each.
+
+        Joined with spaces, `git commit -m 'add c'` read as `git commit -m add
+        c`, and a quoted newline looked like a second command (the 0.5.0rc4
+        gate).
+        """
+        return [" ".join(_shown(a) for a in c.argv) for c in self.commands]
+
+
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _shown(argument: str) -> str:
+    if not _CONTROL.search(argument):
+        return shlex.quote(argument)
+    # bash's $'...' form: a control character is written, never acted on.
+    escaped = "".join(
+        {"\n": "\\n", "\t": "\\t", "\r": "\\r", "\\": "\\\\", "'": "\\'"}.get(ch)
+        or (f"\\x{ord(ch):02x}" if _CONTROL.match(ch) else ch)
+        for ch in argument
+    )
+    return f"$'{escaped}'"
 
 
 def command_digest(argv: Sequence[str]) -> str:

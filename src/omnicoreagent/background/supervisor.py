@@ -194,6 +194,12 @@ class BackgroundSupervisor:
                 await self.mark_attempt_cancelled(running.attempt, running.run)
                 await self.mark_terminal(running.run, RunStatus.CANCELLED, "cancelled")
                 return True
+            if await self._agent_finished(running):
+                # The agent saved the run completed before the cancel landed:
+                # it is done. Recorded as a shutdown failure, a retry would
+                # have run the finished work again (the 0.5.0rc4 gate).
+                await self.complete_successful_attempt(running, {"status": "success"})
+                return False
             await self.handle_attempt_failure(
                 running.task,
                 running.run,
@@ -204,6 +210,17 @@ class BackgroundSupervisor:
             return False
         finally:
             await self.cleanup_running_attempt(running)
+
+    @staticmethod
+    async def _agent_finished(running: _RunningAttempt) -> bool:
+        get_run = getattr(running.agent, "get_run", None)
+        if not callable(get_run):
+            return False
+        try:
+            record = await get_run(running.run.run_id)
+        except Exception:
+            return False
+        return isinstance(record, dict) and record.get("status") == "completed"
 
     async def cancel_inline_execution_tasks(self) -> None:
         pending = [
@@ -626,9 +643,13 @@ class BackgroundSupervisor:
         """The agent paused because a budget ran out: the run waits for a
         top-up (agent.grant_budget) and resume_run, or a denial."""
         request = result.get("budget_request") or {}
+        shortfall = request.get("shortfall")
+        if isinstance(shortfall, float):
+            # Not 0.0013307500000000001 (the 0.5.0rc4 gate).
+            shortfall = f"{shortfall:.6g}"
         needs = (
             f"{request.get('scope')} {request.get('meter')} "
-            f"(needs {request.get('shortfall')} more)"
+            f"(needs {shortfall} more)"
         )
         await self.park(
             running,

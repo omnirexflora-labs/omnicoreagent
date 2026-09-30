@@ -131,3 +131,26 @@ def test_rules_appended_to_a_policy_are_checked_when_the_agent_is_built(mistake)
         expected = "Duplicate policy rule_id: allow_local_tools"
     with pytest.raises(ValueError, match=expected):
         _build({"policy": policy})
+
+
+def test_a_rule_for_a_capability_that_does_not_exist_is_refused():
+    # The 0.5.0rc4 gate: a deny rule on "tool.locall.call" built without a
+    # word and never matched; a misspelt capability silently disabled it.
+    with pytest.raises(PolicyLoadError, match="rule r1: unknown capability 'tool.locall.call'"):
+        policy_from_mapping({"name": "p", "rules": {"deny": [
+            {"rule_id": "r1", "capability": "tool.locall.call"}]}})
+    with pytest.raises(PolicyLoadError, match="matches no capability"):
+        policy_from_mapping({"name": "p", "rules": {"deny": [
+            {"rule_id": "r1", "capability": "sandboxx.*"}]}})
+    # Patterns that name real capabilities are fine.
+    policy_from_mapping({"name": "p", "rules": {"allow": [
+        {"rule_id": "a", "capability": "sandbox.*"}, {"rule_id": "b", "capability": "*"},
+        {"rule_id": "c", "capability": "workspace.files.read"}]}})
+
+
+def test_a_misspelt_rules_bucket_is_refused():
+    # The 0.5.0rc4 gate: rules under "denies" were dropped without a word,
+    # so in permissive mode the call they meant to deny was allowed.
+    with pytest.raises(PolicyLoadError, match="rules has unknown key\\(s\\) denies"):
+        policy_from_mapping({"name": "p", "rules": {"denies": [
+            {"rule_id": "r1", "capability": "tool.local.call"}]}})

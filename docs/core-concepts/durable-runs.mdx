@@ -582,8 +582,9 @@ A finished run's record (`completed`, `failed`, `blocked`, `cancelled`,
 `timeout`) is removed that many days after the run **started**. A run still
 running, waiting for a person or interrupted is never removed, however old.
 
-Each window is applied once, when the agent starts its first run. To apply
-them now, and to see what was done:
+Each window is applied once, when the agent starts its first run (the trace
+window also when a process first reads its traces, such as a first
+`get_run_trajectory`). To apply them now, and to see what was done:
 
 ```python
 print(await agent.prune_runs())

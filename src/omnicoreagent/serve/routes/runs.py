@@ -66,6 +66,7 @@ def create_runs_router() -> APIRouter:
                 body.query,
                 session_id,
                 timeout_seconds=config.request_timeout,
+                is_disconnected=request.is_disconnected,
             ),
             media_type="text/event-stream",
             headers={

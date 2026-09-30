@@ -225,7 +225,11 @@ suspicious ["delimiter_injection: '[system]'"]
 dangerous  ["instruction_override: 'ignore all previous instructions'"]
 ```
 
-(The guard's log lines are left out of this output.) The corpus that holds the
+Run on its own like this, the guard also prints a line to stderr for each
+dangerous or critical input, such as `THREAT DETECTED: CRITICAL (score: 32,
+confidence: 0.95)`; they are left out above. They are warnings on the
+`omnicoreagent.guardrails` logger, printed by Python because nothing else
+handles them. The corpus that holds the
 screen to this, ordinary developer text that must pass and attacks that must be
 blocked, is `tests/test_guardrail_corpus.py` in the repository.
 

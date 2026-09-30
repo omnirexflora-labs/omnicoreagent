@@ -93,6 +93,10 @@ class WorkspaceBridge:
         # modification time last copied in, so only changes are copied.
         self._in_sandbox: dict[str, str] = {}
         self._copied_in_at: dict[str, Any] = {}
+        # One copy at a time. A model's parallel execute calls each copied in;
+        # the second skipped files the first was still uploading and its
+        # command ran on a partial workspace (the 0.5.0rc4 gate).
+        self._sync_lock = asyncio.Lock()
 
     def forget(self) -> None:
         """The sandbox is gone: nothing the bridge copied is in the next one."""
@@ -104,8 +108,13 @@ class WorkspaceBridge:
     async def push(self, service: "SandboxExecutionService", session: "SandboxSession") -> list[str]:
         """Copy workspace files that changed since the last copy into the sandbox.
 
-        Returns the paths copied in.
+        Returns the paths copied in. A copy already in progress is waited for,
+        so the command that follows sees every file.
         """
+        async with self._sync_lock:
+            return await self._push(service, session)
+
+    async def _push(self, service: "SandboxExecutionService", session: "SandboxSession") -> list[str]:
         entries = await asyncio.to_thread(self._workspace_files)
         self._checks = {}
         uploads: dict[str, bytes] = {}
@@ -155,6 +164,12 @@ class WorkspaceBridge:
         self, service: "SandboxExecutionService", session: "SandboxSession"
     ) -> dict[str, list]:
         """Copy files the last command created or changed back into the workspace."""
+        async with self._sync_lock:
+            return await self._pull(service, session)
+
+    async def _pull(
+        self, service: "SandboxExecutionService", session: "SandboxSession"
+    ) -> dict[str, list]:
         from omnicoreagent.sandbox.execution import SandboxCommandSpec
 
         written: list[str] = []

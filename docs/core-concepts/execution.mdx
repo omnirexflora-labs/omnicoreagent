@@ -194,6 +194,17 @@ is part of `sandbox.*` here: to keep the network behind a person, add an
 `ask` rule for it, as the development profiles do ([Policy
 reference](/docs/reference/policy)).
 
+Under these three rules alone no workspace file is copied into the sandbox or
+back: each copy is checked as a read or a write of that file, and a strict
+policy refuses what it does not name. To let files through, add the two file
+rules, with a `path` target to narrow them:
+
+```python
+{"rule_id": "files_in", "capability": "workspace.files.read"},
+{"rule_id": "files_out", "capability": "workspace.files.write",
+ "target": {"path": "outputs/*"}},
+```
+
 ### Rules on what a command runs
 
 A `process.exec` rule can also name what a command would really run, with a

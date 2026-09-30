@@ -2004,8 +2004,39 @@ def test_the_generated_image_installs_the_release_that_generated_it(monkeypatch)
     from omnicoreagent.serve import cli as serve_cli
 
     monkeypatch.setattr(serve_cli, "_package_version", lambda: "0.5.0")
-    assert '"omnicoreagent[serve]==0.5.0"' in serve_cli._build_dockerfile_content("/app/a.py")
+    content = serve_cli._build_dockerfile_content("/app/a.py")
+    assert '"omnicoreagent[serve]==0.5.0"' in content
+    # An agent on SQL memory needs [serve,postgres]: said where it is edited
+    # (the 0.5.0rc4 gate: the image failed at import).
+    assert "extras your agent uses" in content
     # A development build is not on the index: unpinned, and said so.
     monkeypatch.setattr(serve_cli, "_package_version", lambda: "0.5.1.dev3+g1234")
     content = serve_cli._build_dockerfile_content("/app/a.py")
     assert '"omnicoreagent[serve]"' in content and "development build" in content
+
+
+def _generate(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "agent.py").write_text("agent = None\n")
+    (tmp_path / ".env").write_text("LLM_API_KEY=placeholder\n")
+    return CliRunner().invoke(cli, ["generate-dockerfile", "--file", "agent.py"])
+
+
+def test_the_generated_build_leaves_env_files_out_of_the_image(tmp_path, monkeypatch):
+    # The 0.5.0rc4 gate: `COPY . /app` with no .dockerignore baked the .env
+    # holding LLM_API_KEY into the image, though the advice passes the key
+    # at run time.
+    result = _generate(tmp_path, monkeypatch)
+
+    assert result.exit_code == 0, result.output
+    ignore = (tmp_path / ".dockerignore").read_text().splitlines()
+    assert ".env" in ignore and ".env.*" in ignore
+
+
+def test_an_existing_dockerignore_is_kept_and_a_missing_env_rule_is_named(tmp_path, monkeypatch):
+    (tmp_path / ".dockerignore").write_text("node_modules\n")
+
+    result = _generate(tmp_path, monkeypatch)
+
+    assert (tmp_path / ".dockerignore").read_text() == "node_modules\n"
+    assert ".dockerignore does not exclude .env" in result.output

@@ -69,3 +69,28 @@ def test_the_console_script_is_the_early_entry_point():
 
     pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
     assert pyproject["project"]["scripts"]["omnicoreagent"] == "omnicoreagent._cli_entry:main"
+
+
+def test_the_early_handler_is_reached_without_importing_typing():
+    # The 0.5.0rc4 gate: the package __init__ imported typing (about 0.2 s of
+    # a 0.26 s import under load) before the handler could be installed, so
+    # a Ctrl-C in the first half second still gave a traceback.
+    script = (
+        "import sys\n"
+        "import omnicoreagent._cli_entry, omnicoreagent._early_interrupt\n"
+        "print('typing' in sys.modules)\n"
+    )
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=60)
+    assert done.stdout.strip() == "False", done.stdout + done.stderr
+
+
+def test_a_failing_lazy_export_says_why(tmp_path):
+    # The 0.5.0rc4 gate: a local inspect.py shadowing the stdlib made
+    # `from omnicoreagent import MemoryRouter` say only "cannot import name".
+    (tmp_path / "inspect.py").write_text("x = 1\n")
+    done = subprocess.run(
+        [sys.executable, "-c", "from omnicoreagent import MemoryRouter"],
+        capture_output=True, text=True, timeout=120, cwd=tmp_path,
+    )
+    assert done.returncode != 0
+    assert "get_annotations" in done.stderr, done.stderr[-600:]

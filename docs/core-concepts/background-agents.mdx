@@ -398,6 +398,11 @@ completed | Freshly baked warmth in every bite.
   is the agent's own record of it.
 - With the manager started, `resume_run` is enough: a worker picks the run
   up. `run_until_terminal` runs it here, for a manager that is not started.
+- A scheduled task's runs share one session by default (`session_policy`
+  `{"mode": "task"}`), so a `session` budget with the default `total` window
+  adds up across runs and, once spent, pauses (by default) every run after it. For a limit
+  per run, use a `request` budget, or give each run its own session with
+  `session_policy={"mode": "run"}`.
 - In another process, build the agent with the same memory store to decide
   ([Approvals: from another process](/docs/core-concepts/approvals)).
 

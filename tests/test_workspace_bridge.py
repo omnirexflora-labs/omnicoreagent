@@ -442,3 +442,19 @@ async def test_a_strict_policy_without_file_rules_copies_nothing_and_the_command
     assert not (tmp_path / "files" / "made.txt").exists()
     assert result.metadata["workspace"]["written"] == []
     assert [s["reason"] for s in result.metadata["workspace"]["skipped"]] == ["not permitted by policy"]
+
+
+async def test_commands_run_together_each_see_the_whole_workspace(tmp_path):
+    # The 0.5.0rc4 gate: a model's parallel execute calls ran at once, and
+    # only one copied the workspace in; the others skipped the files it was
+    # still uploading and ran on a partial copy (41 files seen as 38 and 29).
+    import asyncio
+
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+    for i in range(40):
+        storage.write_text(f"data/f{i:02}.txt", "x" * 2000)
+
+    async with _scope(storage).active() as scope:
+        results = await asyncio.gather(*(_sh(scope, "ls data | wc -l") for _ in range(4)))
+
+    assert [r.stdout.strip() for r in results] == ["40"] * 4

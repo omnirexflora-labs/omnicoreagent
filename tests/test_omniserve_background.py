@@ -582,3 +582,27 @@ def test_background_openapi_matches_http_exception_response_shapes(tmp_path):
             task_status_schema["latest_run"]["anyOf"][0]["$ref"]
             == "#/components/schemas/BackgroundRun"
         )
+
+
+def test_background_api_wait_true_returns_a_run_that_waits_for_a_person(tmp_path):
+    # The 0.5.0rc4 gate: a run that paused for approval came back as a 504
+    # "did not finish within 118 seconds", 15 s in: waiting is settled, not late.
+    class Pauses(ServedAgent):
+        async def run(self, query, session_id=None, run_id=None):
+            self.calls.append({"query": query})
+            return {"status": "awaiting_approval", "response": None, "run_id": run_id,
+                    "approvals": [{"approval_id": "approval_1", "tool_name": "issue_refund"}]}
+
+    agent = Pauses()
+    server = OmniServe(
+        agent,
+        OmniServeConfig(background_agent_id="served", background_start_worker=False, request_timeout=30),
+        background_manager=make_background_manager(tmp_path),
+    )
+    with TestClient(server.app) as client:
+        client.post("/background/tasks", json={
+            "task_id": "refund", "query": "refund it", "schedule": {"type": "manual"}})
+        response = client.post("/background/tasks/refund/run", json={"wait": True})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "awaiting_approval"

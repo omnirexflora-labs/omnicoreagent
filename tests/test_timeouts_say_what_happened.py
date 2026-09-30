@@ -46,7 +46,9 @@ async def test_an_mcp_connect_timeout_leaves_no_unretrieved_future():
     loop.set_exception_handler(lambda _loop, context: unretrieved.append(context.get("message")))
     connection = ServerConnection("slow", never_opens)
 
-    with pytest.raises(MCPConnectionError, match="timed out"):
+    # And says which setting gives a slow server longer (the 0.5.0rc4 gate:
+    # a server importing slowly on a busy host failed at the 30 s default).
+    with pytest.raises(MCPConnectionError, match="timed out.*connect_timeout"):
         await connection.open(timeout=0.05)
     await asyncio.sleep(0.05)
     connection = None  # as when the failed connection is dropped: the warning comes at collection

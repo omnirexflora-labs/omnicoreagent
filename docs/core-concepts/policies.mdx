@@ -423,10 +423,13 @@ All settings: [agent settings reference](/docs/reference/agent-config).
     ValueError: Duplicate policy rule_id: r
     TypeError: PolicyRule.__init__() got an unexpected keyword argument 'targets'
     PolicyLoadError: rule r: target has unknown key(s) tool
+    PolicyLoadError: rule r: unknown capability 'tool.locall.call'; the capabilities are listed in the policy reference
     ValueError: 'ask' is not a valid PolicyMode
     ```
 
-    Each `rule_id` must be unique across the policy; the fields are those in
+    A misspelt capability would never match, so a deny rule on it would deny
+    nothing: it is refused, and a pattern (`sandbox.*`) must name at least one
+    capability. Each `rule_id` must be unique across the policy; the fields are those in
     [A rule](#a-rule); the mode is `permissive`, `interactive` or `strict`.
   </Accordion>
 

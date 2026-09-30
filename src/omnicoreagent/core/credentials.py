@@ -106,6 +106,11 @@ def register_config_credentials(config: Any) -> None:
             register_config_credentials(item)
 
 
+def _masks_a_secret(token: str, ordered: tuple[str, ...]) -> bool:
+    tail = token.rstrip(".").rsplit("*", 1)[-1]
+    return len(tail) >= 4 and any(secret.endswith(tail[-4:]) for secret in ordered)
+
+
 def scrub_credentials(value: Any) -> Any:
     """A copy of ``value`` with every registered credential replaced."""
     ordered = _ordered
@@ -114,11 +119,21 @@ def scrub_credentials(value: Any) -> Any:
     return _scrub(value, ordered)
 
 
+# A key as a provider echoes it back, masked: "sk-proj-*******4444".
+_MASKED = re.compile(r"[\w.-]*\*{3,}[\w.-]+")
+
+
 def _scrub(value: Any, ordered: tuple[str, ...]) -> Any:
     if isinstance(value, str):
         for secret in ordered:
             if secret in value:
                 value = value.replace(secret, MARKER)
+        if "***" in value:
+            # Not the key, but its prefix and last characters, and a rejected
+            # key's error carries it (the 0.5.0rc4 gate).
+            value = _MASKED.sub(
+                lambda m: MARKER if _masks_a_secret(m.group(0), ordered) else m.group(0), value
+            )
         return value
     if isinstance(value, dict):
         return {key: _scrub(item, ordered) for key, item in value.items()}

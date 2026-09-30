@@ -97,6 +97,22 @@ async def test_a_top_up_lets_the_run_finish_from_where_it_stopped():
 
 
 @pytest.mark.asyncio
+async def test_the_warning_after_a_top_up_counts_what_was_granted():
+    # The 0.5.0rc4 gate: after a grant the warning said "remaining 0.0" with
+    # budget left: it measured against the configured limit alone.
+    model = _two_turns()
+    agent = await _agent(model, budgets={"request": [{"meter": "model_calls", "limit": 1, "warn_at": 0.5}]})
+    waiting = await agent.run("go", session_id="pause-warn")
+    await agent.grant_budget(waiting["run_id"], amount=3, approver="ops@example.com")
+
+    finished = await agent.resume(waiting["run_id"])
+
+    trace = await agent.telemetry_store.get_trace(finished["trace_id"])
+    [warning] = _events(trace, "budget_warning")
+    assert warning.metadata["remaining"] == pytest.approx(2.0)  # 1 + 3 granted, 2 spent
+
+
+@pytest.mark.asyncio
 async def test_a_denied_top_up_ends_the_run_cleanly():
     agent = await _agent(_two_turns(), budgets=ONE_CALL)
     waiting = await agent.run("go", session_id="pause-4")
