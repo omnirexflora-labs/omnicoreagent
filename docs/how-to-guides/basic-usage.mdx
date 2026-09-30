@@ -293,9 +293,12 @@ async def answer(agent, query: str, user_id: str) -> str | None:
 ```
 
 <Warning>
-The guardrail logs a line such as `THREAT DETECTED: CRITICAL (score: 32,
-confidence: 0.95)` when it blocks an input. That is the guardrail working, not
-an error in your code.
+When the guardrail blocks an input it logs a warning such as `THREAT DETECTED:
+CRITICAL (score: 32, confidence: 0.95)` on the `omnicoreagent.guardrails`
+logger. Inside an agent you see it only if your application configures logging
+(for example `logging.basicConfig()`); the refusal itself is in the result
+(`termination_reason` `safety_guard`) and the trace. It is the guardrail
+working, not an error in your code.
 </Warning>
 
 ## Next
