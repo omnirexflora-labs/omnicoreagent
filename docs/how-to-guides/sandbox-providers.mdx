@@ -545,8 +545,14 @@ isolates commands.
 
   <Accordion title="ImportError: … requires optional dependency">
     The provider's extra is not installed, e.g.
-    `pip install "omnicoreagent[e2b]"`. For Docker the message is
-    `The Docker sandbox needs the Docker SDK: pip install omnicoreagent[docker]`.
+    `pip install "omnicoreagent[e2b]"`.
+  </Accordion>
+
+  <Accordion title="SandboxUnsupportedError: The Docker sandbox needs the Docker SDK">
+    Without the `docker` extra, nothing fails when the agent is built: the
+    run's first `execute` call fails with `The Docker sandbox needs the Docker
+    SDK: pip install omnicoreagent[docker]`. Install it:
+    `pip install "omnicoreagent[docker]"`.
   </Accordion>
 </AccordionGroup>
 

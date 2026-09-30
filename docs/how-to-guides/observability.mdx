@@ -581,7 +581,11 @@ reference](/docs/reference/omnicoreagent): `get_trace`, `get_latest_trace`,
   </Accordion>
 
   <Accordion title="OpenTelemetry export requires the 'otel' extra">
-    The OTLP, LangSmith and Opik exporters need the OpenTelemetry packages:
+    The OTLP, LangSmith and Opik exporters need the OpenTelemetry packages.
+    Without them nothing fails when the agent is built and the run is
+    unaffected: an exporter configured on the agent fails at the end of each
+    run, and the trace records the message in a `telemetry_error` event
+    (`export_trace` returns it as the result's `error`):
 
     ```text
     OpenTelemetry export requires the 'otel' extra: pip install "omnicoreagent[otel]"
