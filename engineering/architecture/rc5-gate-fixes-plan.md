@@ -29,3 +29,8 @@ the BLOCKER and MUST-FIX findings. Each unit is test-first and one commit.
   synchronous tool's thread cannot be stopped, and a card "failed due to a
   timeout" was charged (area E).
 
+- V6 An absolute path under the workspace files root names that file, for
+  storage and policy alike (Harbor: `/app/ssl/x` was written to
+  `/app/app/ssl/x`); an absolute path elsewhere stays inside the workspace
+  as before (area E).
+
