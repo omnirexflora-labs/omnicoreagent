@@ -353,7 +353,12 @@ your tools names from your domain, such as `fetch_invoice` or
     slow_report timeout {'type': 'TimeoutError', 'message': 'Tool execution exceeded its time limit'}
     ```
 
-    Raise the timeout, or make the tool return sooner (start the work and
+    A timed-out call may still finish and take effect: a plain (synchronous)
+    function runs in a thread that cannot be stopped, so it carries on after
+    the limit. The model is told so ("it may still take effect… Check before
+    calling it again"), not that it failed; the trace records it as `timeout`.
+    Give a tool with side effects a way to check (a list or lookup tool), and
+    raise the timeout or make the tool return sooner (start the work and
     return a handle the model can check later).
   </Accordion>
 

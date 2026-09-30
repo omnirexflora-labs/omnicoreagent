@@ -460,7 +460,12 @@ async def execute_native_turn(
                 "args": {},
                 "status": "error",
                 "data": None,
-                "message": "Tool execution cancelled",
+                # It may have taken effect before it stopped (the 0.5.0rc5
+                # gate): said so, as for a call whose process stopped.
+                "message": (
+                    "Tool execution was cancelled; it may already have taken effect. "
+                    "Check before calling it again."
+                ),
                 "error_type": "cancelled",
             }
         except asyncio.TimeoutError:
@@ -469,7 +474,13 @@ async def execute_native_turn(
                 "args": {},
                 "status": "error",
                 "data": None,
-                "message": "Tool execution timed out",
+                # A tool running in a thread cannot be stopped: it may still
+                # finish and take effect after this (the 0.5.0rc5 gate: a card
+                # "failed due to a timeout" was charged).
+                "message": (
+                    "Tool execution timed out; it may still take effect, as a "
+                    "running call cannot always be stopped. Check before calling it again."
+                ),
                 "error_type": "timeout",
             }
         except Exception as exc:

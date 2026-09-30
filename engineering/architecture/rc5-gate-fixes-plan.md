@@ -24,3 +24,8 @@ the BLOCKER and MUST-FIX findings. Each unit is test-first and one commit.
   adds up, so one grant covers them; each made its own, and the documented
   grant-then-resume failed (area B).
 
+- V5 (blocker) A timed-out or cancelled call is told to the model as
+  possibly having taken effect (check before calling again), not as failed: a
+  synchronous tool's thread cannot be stopped, and a card "failed due to a
+  timeout" was charged (area E).
+
