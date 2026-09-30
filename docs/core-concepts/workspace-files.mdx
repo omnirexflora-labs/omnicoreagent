@@ -185,7 +185,9 @@ The agent works in `files/` with these tools:
 | `grep` | `pattern`, `path`, `include`, `case_sensitive`, `max_matches` | Search inside files; returns `path:line:content` |
 
 These are workspace tools, not a shell: every path is relative to `files/`,
-and a path that leads outside it is refused. They work the same on local disk,
+and a path that leads outside it is refused (an absolute path too, unless it
+is under the files directory). Under governance, `grep`, `glob` and `ls` show
+only files the policy lets the agent read. They work the same on local disk,
 S3 and R2. Their names are reserved while workspace files are on, so give your
 own tools other names. Under governance each is a capability —
 `workspace.files.read`, `.write`, `.delete`, `.move`, `.clear` — that a policy

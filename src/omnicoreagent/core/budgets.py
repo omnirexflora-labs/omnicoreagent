@@ -877,6 +877,9 @@ class RunBudgets:
             "shortfall": exhausted.shortfall,
             "status": "pending",
             "asked_at": datetime.now(timezone.utc).isoformat(),
+            # Which call was refused, so a repeat refusal of it (after a
+            # crash) is not counted again.
+            "for": _refused_call_id(),
         }
         from omnicoreagent.core.runs import current_run
 
@@ -951,3 +954,10 @@ def _check(
         raise BudgetExhausted(
             key=key, meter=meter, limit=float(limit), used=used, reserved=held, requested=float(amount)
         )
+
+
+def _refused_call_id() -> str | None:
+    from omnicoreagent.governance.calls import current_tool_call
+
+    call = current_tool_call()
+    return call.tool_call_id if call is not None else None

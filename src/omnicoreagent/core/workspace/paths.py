@@ -24,13 +24,14 @@ def register_workspace_root(root: str | Path) -> None:
             _ROOTS.add(form)
 
 
-def _under_a_root(decoded: str) -> str:
+def _under_a_root(decoded: str) -> str | None:
+    """The path relative to the root it is under; None when it is under none."""
     for root in sorted(_ROOTS, key=len, reverse=True):
         if decoded == root:
             return ""
         if decoded.startswith(root + "/"):
             return decoded[len(root) + 1 :]
-    return decoded
+    return None
 
 
 def normalize_workspace_path(
@@ -44,7 +45,22 @@ def normalize_workspace_path(
 
     decoded = urllib.parse.unquote(str(path)).strip()
     if decoded.startswith("/"):
-        decoded = _under_a_root(decoded)
+        inside = _under_a_root(decoded)
+        if inside is not None:
+            decoded = inside
+        elif decoded.strip("/") and not any(
+            decoded.lstrip("/") == prefix.strip("/")
+            or decoded.lstrip("/").startswith(prefix.strip("/") + "/")
+            for prefix in strip_prefixes
+        ):
+            # An absolute path under no workspace root leads outside: refused,
+            # as the docs say. It was taken as relative, so /tmp/x was written
+            # to <root>/tmp/x and the record named /tmp/x (the 0.5.0rc6 gate).
+            # "/" alone and "/files/..." still mean the workspace.
+            raise ValueError(
+                f"Invalid path '{path}': an absolute path outside the workspace. "
+                "Use a path relative to the workspace files."
+            )
     decoded = decoded.lstrip("/")
     while decoded.startswith("./"):
         decoded = decoded[2:]

@@ -76,6 +76,7 @@ async def test_two_refused_calls_make_one_request_and_one_grant_covers_them():
     pending = [r for r in (await agent.get_run(paused["run_id"]))["budget_requests"]
                if r["status"] == "pending"]
     assert len(pending) == 1, pending
+    assert pending[0]["shortfall"] == 2, "each refused call counts once"
 
     await agent.grant_budget(paused["run_id"], amount=5, approver="ops")
     finished = await agent.resume(paused["run_id"])
@@ -83,3 +84,25 @@ async def test_two_refused_calls_make_one_request_and_one_grant_covers_them():
     assert finished["status"] == "success", finished
     assert sorted(ran) == sorted(CITIES)
     await agent.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_a_call_refused_again_after_a_crash_is_not_counted_twice():
+    # The 0.5.0rc6 gate: recovery refused the same not-run calls again and
+    # added them to the waiting request a second time: two calls read a
+    # shortfall of 4, and the default grant allowed twice what was meant.
+    from omnicoreagent.core.memory_store.memory_router import MemoryRouter
+    from omnicoreagent.core.runs import RunTracker
+
+    tracker = RunTracker(MemoryRouter("in_memory"), run_id="run_b", session_id="s", agent_name="a")
+    await tracker.start(None)
+
+    def refusal(call_id):
+        return {"request_id": f"r_{call_id}", "key": "request:run_b:total", "scope": "request",
+                "meter": "tool_calls", "needed": 1, "shortfall": 1, "status": "pending", "for": call_id}
+
+    for call_id in ("c1", "c2", "c1", "c2"):  # the second pass is the recovery
+        waiting = await tracker.add_budget_request(refusal(call_id))
+
+    assert (waiting["needed"], waiting["shortfall"]) == (2, 2)
+    assert len(tracker.record["budget_requests"]) == 1

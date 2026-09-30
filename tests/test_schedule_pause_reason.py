@@ -89,6 +89,25 @@ async def test_registering_a_paused_task_again_binds_it_to_the_current_policy():
 
     current = policy_snapshot_from_engine(manager.governance_engine)
     assert task.metadata[POLICY_SNAPSHOT_METADATA_KEY]["policy_hash"] == current["policy_hash"]
+    # And it runs again: the schedule's pause for the old policy is cleared
+    # (the 0.5.0rc6 gate: it stayed paused for good).
+    state = await store.get_schedule_state("nightly")
+    assert state.paused is False and not state.paused_reason
+
+
+@pytest.mark.asyncio
+async def test_replacing_a_task_a_person_paused_keeps_it_paused():
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(
+        task_store=store, governance_engine=GovernanceEngine(_background_governance_policy(name="p")))
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    spec = dict(task_id="hourly", agent_id="agent", query="q", schedule={"type": "interval", "seconds": 3600})
+    await manager.register_task(**spec)
+    await manager.pause_task("hourly")
+
+    await manager.register_task(**spec, replace=True)
+
+    assert (await store.get_schedule_state("hourly")).paused is True
 
 
 @pytest.mark.asyncio

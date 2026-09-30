@@ -187,3 +187,13 @@ def test_governance_turned_off_with_a_policy_or_budget_is_refused(setting):
     # policy would deny ran.
     with pytest.raises(ValueError, match="enabled.*False.*ignored"):
         _build({"enabled": False, **setting})
+
+
+def test_a_misspelt_capability_to_exclude_is_refused():
+    # The 0.5.0rc6 gate: an allow rule on "*" excluding "proces.exec" loaded,
+    # excluded nothing, and allowed process.exec: a typo widened the rule.
+    with pytest.raises(PolicyLoadError, match="exclude_capability.*'proces.exec'"):
+        policy_from_mapping({"name": "p", "mode": "strict", "rules": {"allow": [
+            {"rule_id": "all", "capability": "*", "conditions": {"exclude_capability": ["proces.exec"]}}]}})
+    policy_from_mapping({"name": "p", "mode": "strict", "rules": {"allow": [
+        {"rule_id": "all", "capability": "*", "conditions": {"exclude_capability": ["process.*", "sandbox.network.configure"]}}]}})

@@ -428,12 +428,24 @@ class RunTracker:
                 ),
                 None,
             )
+            # Each refused call counts once, keyed by the call ("for"): a
+            # recovery refuses the same not-run calls again, and adding them
+            # doubled the shortfall (the 0.5.0rc6 gate).
+            key = request.get("for") or "model"
+            share = {"needed": request.get("needed") or 0, "shortfall": request.get("shortfall") or 0}
             if waiting is None:
                 waiting = dict(request)
+                waiting["refusals"] = {key: share}
                 requests.append(waiting)
             else:
+                refusals = waiting.setdefault(
+                    "refusals",
+                    {"earlier": {"needed": waiting.get("needed") or 0,
+                                 "shortfall": waiting.get("shortfall") or 0}},
+                )
+                refusals[key] = share
                 for field in ("needed", "shortfall"):
-                    waiting[field] = (waiting.get(field) or 0) + (request.get(field) or 0)
+                    waiting[field] = sum(r[field] for r in refusals.values())
             await self._save()
             return dict(waiting)
 

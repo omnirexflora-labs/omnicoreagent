@@ -3,7 +3,7 @@ from typing import Any
 
 from omnicoreagent.core.budgets import current_budgets
 from omnicoreagent.core.runs import waiting_for_approval
-from omnicoreagent.core.runtime.deadline import current_stop_reason, stop_after
+from omnicoreagent.core.runtime.deadline import stop_after
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.telemetry.recorder import redacts_governed_arguments
 from omnicoreagent.core.types import (
@@ -55,7 +55,7 @@ class GovernedToolRunner:
             async with stop_after(deadline_seconds):
                 budgets = current_budgets()
                 if budgets is not None and budgets.enabled:
-                    await _charge_before_the_call(budgets)
+                    await _charge_before_the_call(budgets, single_tool)
                 governance_error = await self._authorize_single_tool(single_tool)
                 if governance_error is not None:
                     return self._governance_error_result(
@@ -113,12 +113,12 @@ class GovernedToolRunner:
         # The deadline covers the call, not the recording of it: it starts
         # once the span is open, so a call stopped by its deadline is always
         # recorded as a timeout rather than left unfinished.
-        async with stop_after(deadline_seconds):
+        async with stop_after(deadline_seconds) as own_limit:
             try:
                 # A call that the run cannot afford is not made.
                 budgets = current_budgets()
                 if budgets is not None and budgets.enabled:
-                    await _charge_before_the_call(budgets)
+                    await _charge_before_the_call(budgets, single_tool)
                 governance_error = await self._authorize_single_tool(single_tool)
                 if governance_error is not None:
                     result = self._governance_error_result(
@@ -265,7 +265,10 @@ class GovernedToolRunner:
                     )
                 return result
             except asyncio.CancelledError:
-                if current_stop_reason() == "timeout":
+                # Its own limit, not the run's deadline around it: that is a
+                # cancellation, as the run record says (the 0.5.0rc6 gate: 13 s
+                # into a 180 s limit it read "exceeded its time limit").
+                if own_limit is not None and own_limit.reason == "timeout":
                     timeout_error = {
                         "type": "TimeoutError",
                         "message": "Tool execution exceeded its time limit",
@@ -468,15 +471,22 @@ def _redact_tool_result_args(result: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
-async def _charge_before_the_call(budgets) -> None:
+async def _charge_before_the_call(budgets, single_tool=None) -> None:
     """Count the call; a refusal here means the tool never ran.
 
     Marked so, a refused call of a parallel turn is recorded as not run and
     runs once a person tops the budget up; recorded as started, it was an
     unknown outcome and never ran (the 0.5.0rc5 gate).
     """
+    from omnicoreagent.governance.calls import on_behalf_of
+
     try:
-        await budgets.charge("tool_calls", 1)
+        if single_tool is not None:
+            # Named, so a refusal repeated after a crash counts once.
+            with on_behalf_of(single_tool.tool_call_id, single_tool.tool_name, single_tool.tool_provider):
+                await budgets.charge("tool_calls", 1)
+        else:
+            await budgets.charge("tool_calls", 1)
     except Exception as stop:
         stop.before_the_call = True
         raise

@@ -1067,6 +1067,7 @@ class OmniCoreAgent:
                     "timeout",
                     TimeoutError("The run's deadline passed"),
                     budgets=run_budgets,
+                    usage=getattr(exc, "usage", None),
                 )
             else:
                 await self._finish_run_record(run_tracker, "cancelled", exc, budgets=run_budgets)
@@ -1217,6 +1218,7 @@ class OmniCoreAgent:
         exc: BaseException,
         *,
         budgets: Any = None,
+        usage: Any = None,
     ) -> None:
         """Record how a run ended; it must not replace the original error."""
         if run_tracker is None or run_tracker.record["status"] != "running":
@@ -1226,7 +1228,12 @@ class OmniCoreAgent:
             if budgets is not None:
                 budgets_spent = await complete_despite_cancellation(budgets.settle())
             await complete_despite_cancellation(
-                run_tracker.finish(status, error=exc, budgets=budgets_spent)
+                run_tracker.finish(
+                    status,
+                    usage=usage if usage is not None else getattr(exc, "usage", None),
+                    error=exc,
+                    budgets=budgets_spent,
+                )
             )
         except Exception as record_exc:
             runtime_logger().warning(

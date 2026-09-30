@@ -22,6 +22,10 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
 
     _PATH_PREFIXES = WORKSPACE_FILE_PATH_PREFIXES
 
+    # Whether the policy lets the agent read a file (set when governed):
+    # search and listing leave out what it may not read.
+    readable: Any = None
+
     def __init__(self, storage: WorkspaceStorage):
         self.storage = storage
         self.storage.ensure_root()
@@ -52,10 +56,10 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
             item_path = item.path
             if item.is_dir:
                 files.extend(self._walk_files(item_path))
-            else:
+            elif self._may_read(item_path):
                 files.append(item_path)
 
-        if not files and path and self.storage.exists(path, **self._storage_kwargs()):
+        if not files and path and self._may_read(path) and self.storage.exists(path, **self._storage_kwargs()):
             try:
                 self.storage.read_text(path, **self._storage_kwargs())
                 files.append(path)
@@ -64,9 +68,15 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
 
         return files
 
+    def _may_read(self, path: str) -> bool:
+        return self.readable is None or bool(self.readable(str(path)))
+
     def ls(self, path: str | None = None) -> str:
         try:
-            items = self._list_directory(path)
+            items = [
+                item for item in self._list_directory(path)
+                if item.is_dir or self._may_read(item.path)
+            ]
             if items:
                 location = self._location(path)
                 names = []

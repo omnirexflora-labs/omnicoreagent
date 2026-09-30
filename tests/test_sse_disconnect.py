@@ -19,6 +19,21 @@ from omnicoreagent.serve.sse import run_agent_stream
 from test_execute_tool import _MODEL
 
 
+class Streams:
+    """An answer still streaming: text deltas, never the end."""
+
+    def estimate_cost(self, usage):
+        return None
+
+    async def llm_call(self, messages, tools=None, **kwargs):
+        await asyncio.sleep(3600)
+
+    async def llm_stream(self, messages, tools=None, **kwargs):
+        while True:
+            yield {"type": "text_delta", "text": "forests "}
+            await asyncio.sleep(0.2)
+
+
 class Hangs:
     def estimate_cost(self, usage):
         return None
@@ -62,19 +77,20 @@ _SERVER = '''
 import asyncio, sys
 sys.path.insert(0, {tests!r})
 from omnicoreagent import OmniCoreAgent, OmniServe, OmniServeConfig
-from test_sse_disconnect import Hangs
+from test_sse_disconnect import Hangs, Streams
 
 agent = OmniCoreAgent(name="streamer", system_instruction="x",
                       model_config={{"provider": "openai", "model": "gpt-5.4-mini", "api_key": "k"}},
                       agent_config={{"guardrail_mode": "off", "enable_workspace_files": False}})
 asyncio.run(agent.initialize())
-agent.llm_connection = Hangs()
+agent.llm_connection = {model}()
 OmniServe(agent, OmniServeConfig(host="127.0.0.1", port={port}, request_timeout=0,
           background_enabled=False)).start()
 '''
 
 
-def test_a_client_hanging_up_on_a_real_server_cancels_the_run(tmp_path):
+@pytest.mark.parametrize("model", ["Hangs", "Streams"])
+def test_a_client_hanging_up_on_a_real_server_cancels_the_run(tmp_path, model):
     # The 0.5.0rc5 gate: through a real server, Starlette cancels the stream
     # when the client goes, and the first await in its cleanup raised before
     # the run was cancelled: the run carried on to the end, every time.
@@ -90,7 +106,7 @@ def test_a_client_hanging_up_on_a_real_server_cancels_the_run(tmp_path):
     port = probe.getsockname()[1]
     probe.close()
     script = tmp_path / "server.py"
-    script.write_text(_SERVER.format(tests=str(Path(__file__).parent), port=port))
+    script.write_text(_SERVER.format(tests=str(Path(__file__).parent), port=port, model=model))
     server = subprocess.Popen([sys.executable, str(script)], cwd=tmp_path,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -107,8 +123,14 @@ def test_a_client_hanging_up_on_a_real_server_cancels_the_run(tmp_path):
             body = json.dumps({"query": "write an essay", "session_id": "cut"}).encode()
             client.sendall(b"POST /run HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
                            + f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
-            client.recv(256)
-            time.sleep(2)
+            # Read as a client does, then hang up mid-stream.
+            client.settimeout(0.5)
+            until = time.monotonic() + 3
+            while time.monotonic() < until:
+                try:
+                    client.recv(4096)
+                except socket.timeout:
+                    pass
         status = None
         for _ in range(40):
             time.sleep(0.5)
@@ -117,6 +139,16 @@ def test_a_client_hanging_up_on_a_real_server_cancels_the_run(tmp_path):
             if status not in (None, "running"):
                 break
         assert status == "cancelled", status
+        # And no trace is left running: the request trace too (the 0.5.0rc6
+        # gate: it stayed running forever after a hang-up).
+        running = []
+        for _ in range(20):
+            time.sleep(0.5)
+            answer = json.load(urllib.request.urlopen(base + "/telemetry/traces?status=running", timeout=5))
+            running = answer.get("traces", answer) if isinstance(answer, dict) else answer
+            if not running:
+                break
+        assert not running, running
     finally:
         server.kill()
         server.wait()

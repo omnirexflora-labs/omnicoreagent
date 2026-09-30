@@ -24,7 +24,7 @@ import shlex
 import re
 import json
 import posixpath
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any, Sequence
 
@@ -214,7 +214,8 @@ def _walk(node, source: bytes, *, via: tuple[str, ...], state: _State, depth: in
         return
     if kind == "redirected_statement":
         body = node.child_by_field_name("body")
-        to_file = any(_writes_to_file(r, source) for r in node.children if r.type == "file_redirect")
+        redirects = [r for r in node.children if r.type == "file_redirect"]
+        to_file = any(_writes_to_file(r, source) for r in redirects)
         for child in node.children:
             # Nodes are new objects on each access: compare by position.
             is_body = body is not None and (child.start_byte, child.end_byte) == (body.start_byte, body.end_byte)
@@ -223,6 +224,30 @@ def _walk(node, source: bytes, *, via: tuple[str, ...], state: _State, depth: in
                     child, source, via=via, state=state, depth=depth, redirect=to_file,
                     text=_text(node, source),
                 )
+            elif is_body:
+                # A list, pipeline or group redirected as a whole
+                # (`a && b > f`, `{ a; b; } > f`): the redirect applies to the
+                # commands inside. Carried only onto a single command, it was
+                # dropped here: the approver read `echo k` for `echo k >>
+                # ~/.ssh/authorized_keys`, and an allow rule without
+                # `redirect` let the write through (the 0.5.0rc6 gate).
+                first = len(state.commands)
+                _walk(child, source, via=via, state=state, depth=depth)
+                suffix = " ".join(_text(r, source) for r in redirects)
+                targets = _redirect_targets(child)
+                for index in range(first, len(state.commands)):
+                    command = state.commands[index]
+                    # Within the part the redirect reaches; when unsure, the
+                    # write is shown rather than hidden.
+                    if targets is not None and command.text and not any(
+                        command.text in t for t in targets
+                    ):
+                        continue
+                    state.commands[index] = replace(
+                        command,
+                        redirects_to_file=command.redirects_to_file or to_file,
+                        text=f"{command.text} {suffix}".strip() if command.text else command.text,
+                    )
             else:
                 _walk(child, source, via=via, state=state, depth=depth)
         return
@@ -236,6 +261,23 @@ def _walk(node, source: bytes, *, via: tuple[str, ...], state: _State, depth: in
         _pipeline(node, source, state=state)
     for child in node.children:
         _walk(child, source, via=via, state=state, depth=depth)
+
+
+def _redirect_targets(body) -> set[str] | None:
+    """Which commands of a redirected body the redirect reaches: in a list
+    (`a && b > f`) only the last; in a group or a pipeline's last stage, all
+    of the group. None means every command in the body."""
+    if body.type == "list":
+        last = body.children[-1] if body.children else None
+        return None if last is None else {_node_text_key(last)}
+    if body.type == "pipeline":
+        stages = [c for c in body.children if c.is_named]
+        return None if not stages else {_node_text_key(stages[-1])}
+    return None
+
+
+def _node_text_key(node) -> str:
+    return node.text.decode("utf-8", "replace") if node.text is not None else ""
 
 
 def _pipeline(node, source: bytes, *, state: _State) -> None:
