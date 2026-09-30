@@ -115,8 +115,8 @@ policy = {
         "deny": [{
             "rule_id": "deny_recursive_rm",
             "capability": "process.exec",
-            "command": {"program": "rm", "args_any": ["-r", "-R", "--recursive"]},
-            "examples": {"match": ["rm -rf build", "sudo /bin/rm -fr /"], "not_match": ["git rm -r x"]},
+            "command": {"program": "rm", "args_any": ["-r", "-R", "--r*"]},
+            "examples": {"match": ["rm -rf build", "sudo /bin/rm -fr /", "rm --rec build"], "not_match": ["git rm -r x"]},
         }],
         "ask": [{"rule_id": "ask_git_push", "capability": "process.exec",
                  "command": {"prefix": ["git", ["push", "send-pack"]]}}],
@@ -133,6 +133,11 @@ policy = {
 | `args_any` | Any later argument, as globs; `-rf` also counts as `-r` and `-f`. |
 | `redirect` | Allow rules only: output may go to a file (otherwise only to `/dev/null`). |
 | `env` | Allow rules only: variables that may be set before the program. |
+
+`--r*` rather than `--recursive`: GNU `rm` accepts any unambiguous start of a
+long option (`--r`, `--rec`), so name the shortest one as a glob. A rule
+on `program` `rm` does not match `busybox rm -rf /`, where the program is
+`busybox`: add a rule for it too if it is installed.
 
 How a command is decided:
 
