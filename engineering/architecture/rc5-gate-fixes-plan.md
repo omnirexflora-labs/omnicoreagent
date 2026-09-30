@@ -67,3 +67,7 @@ the BLOCKER and MUST-FIX findings. Each unit is test-first and one commit.
   when the agent is built: they were dropped without a word, and a 1-call
   budget and a strict policy went unenforced (area B).
 
+- V15 A budget request carries `granted` (what people granted before), and
+  the docs say `limit` is the configured limit: they said the limit included
+  grants, which it did not (area B).
+

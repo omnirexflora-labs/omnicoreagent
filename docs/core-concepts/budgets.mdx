@@ -225,7 +225,8 @@ as well.
 | Field | What |
 |---|---|
 | `scope`, `meter`, `window` | Which budget |
-| `limit` | Its limit, plus any earlier grants |
+| `limit` | Its configured limit |
+| `granted` | What people granted it before (the budget allows `limit` plus this) |
 | `used` | Spent and held so far |
 | `needed` | What the call that stopped needs |
 | `shortfall` | How much more the budget needs for that call |
