@@ -643,9 +643,13 @@ class BackgroundSupervisor:
         """The agent paused because a budget ran out: the run waits for a
         top-up (agent.grant_budget) and resume_run, or a denial."""
         request = result.get("budget_request") or {}
+        shortfall = request.get("shortfall")
+        if isinstance(shortfall, float):
+            # Not 0.0013307500000000001 (the 0.5.0rc4 gate).
+            shortfall = f"{shortfall:.6g}"
         needs = (
             f"{request.get('scope')} {request.get('meter')} "
-            f"(needs {request.get('shortfall')} more)"
+            f"(needs {shortfall} more)"
         )
         await self.park(
             running,

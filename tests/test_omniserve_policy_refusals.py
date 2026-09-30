@@ -48,6 +48,8 @@ def test_a_background_task_the_policy_refuses_is_forbidden_and_says_why(server):
 
     assert response.status_code == 403, response.text
     assert "background.task.create" in response.json()["detail"]
+    # The body names the capability too (the 0.5.0rc4 gate: it was null).
+    assert response.json()["capability"] == "background.task.create"
 
 
 def test_an_ask_nobody_can_answer_names_the_capability_and_the_rule(tmp_path, monkeypatch):

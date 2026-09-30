@@ -57,3 +57,6 @@ and published only when a gate finds nothing to fix.
   is scrubbed like the key: a rejected key's error stored its prefix and last
   characters in the trace (area A, security).
 
+- U14 OmniServe's 403 names the refused capability (it was null), and a
+  background budget pause's message rounds the shortfall (area A).
+
