@@ -153,8 +153,11 @@ installed* below.
     python --version
     uv python install 3.12
     uv venv --python 3.12 && source .venv/bin/activate
-    pip install omnicoreagent
+    uv pip install omnicoreagent
     ```
+
+    A venv `uv venv` makes has no `pip` of its own, so a plain `pip install`
+    there reaches the system's pip; use `uv pip`, or `uv venv --seed`.
   </Accordion>
   <Accordion title="Permission Denied">
     **Error**: Permission denied during installation

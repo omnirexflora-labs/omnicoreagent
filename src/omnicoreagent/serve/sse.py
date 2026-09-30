@@ -493,6 +493,10 @@ async def run_agent_stream(
                 await cleanup
             except asyncio.CancelledError:
                 closed = True  # each step still gets its turn
+            except Exception as exc:
+                # A stream finalized late (its telemetry context gone) must
+                # not skip the steps after it (the 0.5.0rc5 gate).
+                logger.debug(f"OmniServe SSE: cleanup step failed: {exc}")
         if closed:
             raise asyncio.CancelledError
 
