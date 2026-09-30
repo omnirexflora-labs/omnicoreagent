@@ -427,9 +427,25 @@ async def _execute_headless(agent: Any, request: HeadlessRequest) -> HeadlessOut
         if trajectory is not None:
             outcome.trace_ids = [s["trace_id"] for s in trajectory.get("segments") or []]
         else:
-            trajectory = await agent.get_trajectory(run_id=run_id)
-            if trajectory is not None and trajectory.get("trace_id"):
-                outcome.trace_ids = [trajectory["trace_id"]]
+            # No run record (it failed before one was made, e.g. no model
+            # key): the trace alone, in the run's shape, so a reader written
+            # for one reads the other (the 0.5.0rc5 gate: KeyError 'segments').
+            segment = await agent.get_trajectory(run_id=run_id)
+            if segment is not None and segment.get("trace_id"):
+                outcome.trace_ids = [segment["trace_id"]]
+                trajectory = {
+                    "run_id": run_id,
+                    "status": segment.get("status"),
+                    "segments": [
+                        {
+                            "trace_id": segment["trace_id"],
+                            "status": segment.get("status"),
+                            "trajectory": segment,
+                            "trace_kept": True,
+                        }
+                    ],
+                    "totals": segment.get("totals") or {},
+                }
         outcome.trajectory = trajectory
         if trajectory is not None and trajectory.get("usage"):
             # The run's own record counts every segment; a result counts only

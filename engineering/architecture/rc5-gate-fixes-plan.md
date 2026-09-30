@@ -34,3 +34,6 @@ the BLOCKER and MUST-FIX findings. Each unit is test-first and one commit.
   `/app/app/ssl/x`); an absolute path elsewhere stays inside the workspace
   as before (area E).
 
+- V7 A headless run with no run record (no model key) writes its trajectory
+  in the run's shape, one segment; the docs' read_run.py failed on it (area E).
+
