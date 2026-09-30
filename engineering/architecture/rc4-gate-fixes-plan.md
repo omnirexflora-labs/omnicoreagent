@@ -14,3 +14,8 @@ and published only when a gate finds nothing to fix.
   holding LLM_API_KEY went in), and names an existing one that does not
   exclude `.env` (area D, security).
 
+- U3 A rule whose capability matches no capability is refused when the
+  policy loads: a deny rule on `tool.locall.call` built and silently denied
+  nothing (area F). The built-in profiles' `memory.*` and `telemetry.*`
+  rules stay as published.
+

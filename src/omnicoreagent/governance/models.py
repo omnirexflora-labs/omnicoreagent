@@ -213,6 +213,12 @@ class CommandMatcher:
             self.env = _string_list(self.env, "command.env")
 
 
+# Named by the built-in profiles' rules (memory.*, telemetry.*) though no
+# authority request carries them today; kept so those profiles and their
+# policy hashes stay as published.
+_RESERVED_NAMESPACES = ("memory.", "telemetry.")
+
+
 def _from_mapping(cls: type, value: dict[str, Any], rule_id: str, part: str) -> Any:
     """Build one part of a rule from a dict, naming a misspelt key (a raw
     `__init__() got an unexpected keyword argument` told the author neither
@@ -282,6 +288,28 @@ class PolicyRule:
                 )
         if self.examples is not None:
             self._check_examples()
+        self._check_capability()
+
+    def _check_capability(self) -> None:
+        # A misspelt capability built without a word and never matched: a
+        # deny rule on "tool.locall.call" silently denied nothing (the
+        # 0.5.0rc4 gate). A pattern must name at least one capability.
+        from fnmatch import fnmatchcase
+
+        from omnicoreagent.governance.capabilities import CAPABILITIES
+
+        if self.capability in CAPABILITIES or self.capability.startswith(_RESERVED_NAMESPACES):
+            return
+        if any(ch in self.capability for ch in "*?["):
+            if not any(fnmatchcase(name, self.capability) for name in CAPABILITIES):
+                raise ValueError(
+                    f"rule {self.rule_id}: capability pattern {self.capability!r} matches no capability"
+                )
+            return
+        raise ValueError(
+            f"rule {self.rule_id}: unknown capability {self.capability!r}; the capabilities "
+            "are listed in the policy reference"
+        )
 
     def _check_examples(self) -> None:
         from omnicoreagent.governance.commands import rule_example_holds
