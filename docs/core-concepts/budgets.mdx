@@ -95,8 +95,8 @@ resumed, and the call really cost $0.001321.
   <Step title="The real cost replaces the hold">
     When the call returns, the hold is settled at what it really cost and its
     tokens are counted. The trace records a `budget_warning` when a meter
-    reaches `warn_at` (80%) of its limit, and `budget_exhausted` when it runs
-    out.
+    reaches `warn_at` (80%) of its limit plus anything a person granted, and
+    `budget_exhausted` when it runs out.
   </Step>
   <Step title="At the wall: pause or end">
     With `on_exhausted: "pause"` (the default) the run returns

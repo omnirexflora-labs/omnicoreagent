@@ -34,3 +34,6 @@ and published only when a gate finds nothing to fix.
   so the CLI's Ctrl-C handler is in place sooner; an export that fails to
   load says why instead of a bare "cannot import name" (area E).
 
+- U8 The budget warning counts what a person granted; after a top-up it said
+  "remaining 0.0" with budget left (area F).
+

@@ -833,6 +833,13 @@ class RunBudgets:
             return
         if (key, limit.meter) in self._warned:
             return
+        # What a person granted counts: after a top-up the warning said
+        # "remaining 0.0" with budget left (the 0.5.0rc4 gate). Read only
+        # once spending passes the configured line.
+        granted = float((await self.ledger.granted(key)).get(limit.meter, 0.0))
+        allowed = limit.limit + granted
+        if float(spent) < limit.warn_at * allowed:
+            return
         self._warned.add((key, limit.meter))
         await self._emit(
             "budget_warning",
@@ -840,8 +847,9 @@ class RunBudgets:
                 "scope": scope.value,
                 "meter": limit.meter,
                 "limit": limit.limit,
+                "granted": granted,
                 "used": float(spent),
-                "remaining": max(0.0, limit.limit - float(spent)),
+                "remaining": max(0.0, allowed - float(spent)),
                 "window": limit.window,
             },
         )
