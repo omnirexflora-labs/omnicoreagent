@@ -154,3 +154,22 @@ def test_a_misspelt_rules_bucket_is_refused():
     with pytest.raises(PolicyLoadError, match="rules has unknown key\\(s\\) denies"):
         policy_from_mapping({"name": "p", "rules": {"denies": [
             {"rule_id": "r1", "capability": "tool.local.call"}]}})
+
+
+@pytest.mark.parametrize("conditions", [{"execution_surface": "Tool"}, {"execution_surface": "sandboxed"},
+                                        {"exclude_execution_surface": ["sandbx"]}])
+def test_a_condition_on_a_surface_that_does_not_exist_is_refused(conditions):
+    # The 0.5.0rc5 gate: a deny rule with "execution_surface": "Tool" loaded,
+    # never matched (the surface is "tool"), and the refund it meant to deny
+    # was allowed.
+    with pytest.raises(PolicyLoadError, match="unknown execution surface"):
+        policy_from_mapping({"name": "p", "rules": {"deny": [
+            {"rule_id": "r1", "capability": "tool.local.call", "conditions": conditions}]}})
+
+
+def test_every_surface_the_runtime_uses_is_accepted():
+    from omnicoreagent.governance.models import EXECUTION_SURFACES
+
+    for surface in EXECUTION_SURFACES:
+        policy_from_mapping({"name": "p", "rules": {"deny": [
+            {"rule_id": "r1", "capability": "tool.local.call", "conditions": {"execution_surface": surface}}]}})

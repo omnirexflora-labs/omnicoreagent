@@ -436,7 +436,9 @@ def policy_page() -> str:
             "| `effect` | `allow`, `ask` or `deny` (the list it is in, for a dict policy). |",
             "| `capability` | A capability below, or a glob: `workspace.files.*`, `network.http.*`, `*`. |",
             "| `target` | Optional. Any of `tool_name`, `mcp_server`, `path`, `host`, `resource`; each a glob the request's target must match. |",
-            "| `conditions` | Optional. `risk_level` (list), `provider`, `execution_surface`, `exclude_execution_surface` (list), `exclude_capability` (list of globs), `mcp_server`, `method`, `host`. |",
+            "| `conditions` | Optional. `risk_level` (list), `provider`, `execution_surface`, `exclude_execution_surface` (list), `exclude_capability` (list of globs), `mcp_server`, `method`, `host`. A surface is one of "
+            + ", ".join(f"`{s}`" for s in sorted(__import__("omnicoreagent.governance.models", fromlist=["EXECUTION_SURFACES"]).EXECUTION_SURFACES))
+            + "; any other is refused when the policy loads. |",
             "| `constraints` | Optional. `approval_expires_seconds` (how long a person's decision stays valid), `sandbox_required`, `audit_required`. |",
             "| `command` | Optional, `process.exec` rules only: what the rule matches in a shell command. See *Rules on shell commands*. |",
             "| `examples` | Optional, with `command`: `match` and `not_match` lists of commands, checked when the policy loads. A rule that contradicts its own examples does not load. |",

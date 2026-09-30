@@ -59,3 +59,7 @@ the BLOCKER and MUST-FIX findings. Each unit is test-first and one commit.
   with the task: worded as news, the model answered it and the run's answer
   was lost (area B).
 
+- V13 A condition on an execution surface that does not exist is refused
+  when the policy loads, and the reference lists the surfaces: a deny rule on
+  `"Tool"` loaded and silently denied nothing (area B).
+
