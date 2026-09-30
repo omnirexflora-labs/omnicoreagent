@@ -55,7 +55,7 @@ class GovernedToolRunner:
             async with stop_after(deadline_seconds):
                 budgets = current_budgets()
                 if budgets is not None and budgets.enabled:
-                    await _charge_before_the_call(budgets)
+                    await _charge_before_the_call(budgets, single_tool)
                 governance_error = await self._authorize_single_tool(single_tool)
                 if governance_error is not None:
                     return self._governance_error_result(
@@ -118,7 +118,7 @@ class GovernedToolRunner:
                 # A call that the run cannot afford is not made.
                 budgets = current_budgets()
                 if budgets is not None and budgets.enabled:
-                    await _charge_before_the_call(budgets)
+                    await _charge_before_the_call(budgets, single_tool)
                 governance_error = await self._authorize_single_tool(single_tool)
                 if governance_error is not None:
                     result = self._governance_error_result(
@@ -468,15 +468,22 @@ def _redact_tool_result_args(result: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
-async def _charge_before_the_call(budgets) -> None:
+async def _charge_before_the_call(budgets, single_tool=None) -> None:
     """Count the call; a refusal here means the tool never ran.
 
     Marked so, a refused call of a parallel turn is recorded as not run and
     runs once a person tops the budget up; recorded as started, it was an
     unknown outcome and never ran (the 0.5.0rc5 gate).
     """
+    from omnicoreagent.governance.calls import on_behalf_of
+
     try:
-        await budgets.charge("tool_calls", 1)
+        if single_tool is not None:
+            # Named, so a refusal repeated after a crash counts once.
+            with on_behalf_of(single_tool.tool_call_id, single_tool.tool_name, single_tool.tool_provider):
+                await budgets.charge("tool_calls", 1)
+        else:
+            await budgets.charge("tool_calls", 1)
     except Exception as stop:
         stop.before_the_call = True
         raise

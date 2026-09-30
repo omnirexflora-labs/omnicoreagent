@@ -25,3 +25,8 @@ others. Each unit is test-first and one commit.
   schedule runs again; a pause a person made stays. V16 re-bound the task but
   left the schedule paused for good (areas A and C).
 
+- W6 A budget request counts each refused call once, keyed by the call: a
+  recovery refused the same not-run calls again and doubled the shortfall, so
+  the default grant allowed twice what was meant (area C; a regression from
+  rc5's V4).
+
