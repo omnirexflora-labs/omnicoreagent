@@ -53,3 +53,7 @@ and published only when a gate finds nothing to fix.
   stream's run stayed running for good. Checked live: cancelled within 5 s
   (area A).
 
+- U13 A provider's masked echo of a registered key (`sk-proj-****4444`)
+  is scrubbed like the key: a rejected key's error stored its prefix and last
+  characters in the trace (area A, security).
+

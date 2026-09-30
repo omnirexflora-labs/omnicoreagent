@@ -56,6 +56,21 @@ def test_a_registered_credential_is_replaced_wherever_it_appears():
     }
 
 
+def test_a_providers_masked_echo_of_a_key_is_replaced_too():
+    # The 0.5.0rc4 gate: a rejected key came back in the provider's error as
+    # "sk-unit-****************2333", which is not the key, so it was stored
+    # in the trace with the key's prefix and last characters.
+    register_credential("sk-unit-masked-key-0001112223334444")
+
+    scrubbed = scrub_credentials(
+        "Incorrect API key provided: sk-unit-********************4444. You can find"
+    )
+
+    assert "4444" not in scrubbed and MARKER in scrubbed
+    # Ordinary text with asterisks stays as it is.
+    assert scrub_credentials("rating: ***** (5/5)") == "rating: ***** (5/5)"
+
+
 @pytest.mark.parametrize("value", ["k", "short", "true", "", "   "])
 def test_a_value_too_short_to_be_a_credential_is_never_registered(value):
     """A test's api_key of "k" must not redact every k in every output."""
