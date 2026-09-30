@@ -18,3 +18,6 @@ others. Each unit is test-first and one commit.
   dropped, so the approver read `echo k` for `echo k >> ~/.ssh/authorized_keys`
   and a read-only allow rule let the write through (area B).
 
+- W4 A misspelt `exclude_capability` value is refused: it excluded nothing,
+  so `*` minus `proces.exec` allowed process.exec (area B).
+

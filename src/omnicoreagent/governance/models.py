@@ -168,6 +168,12 @@ class PolicyRuleConditions:
             self.exclude_capability = _string_list(
                 self.exclude_capability, "exclude_capability"
             )
+            # A misspelt exclusion excluded nothing and so widened its rule
+            # (the 0.5.0rc6 gate: "*" minus "proces.exec" allowed process.exec).
+            for name in self.exclude_capability:
+                problem = _capability_problem(name)
+                if problem:
+                    raise ValueError(f"exclude_capability {name!r}: {problem}")
         if self.data_classes is not None:
             self.data_classes = _string_list(self.data_classes, "data_classes")
         for name in ("provider", "execution_surface", "mcp_server", "method", "host"):
@@ -235,6 +241,21 @@ class CommandMatcher:
 # authority request carries them today; kept so those profiles and their
 # policy hashes stay as published.
 _RESERVED_NAMESPACES = ("memory.", "telemetry.")
+
+
+def _capability_problem(name: str) -> str | None:
+    """Why a capability name or pattern names nothing, or None when it does."""
+    from fnmatch import fnmatchcase
+
+    from omnicoreagent.governance.capabilities import CAPABILITIES
+
+    if name in CAPABILITIES or name.startswith(_RESERVED_NAMESPACES):
+        return None
+    if any(ch in name for ch in "*?["):
+        if any(fnmatchcase(known, name) for known in CAPABILITIES):
+            return None
+        return "matches no capability"
+    return "unknown capability"
 
 
 def _from_mapping(cls: type, value: dict[str, Any], rule_id: str, part: str) -> Any:
@@ -312,22 +333,16 @@ class PolicyRule:
         # A misspelt capability built without a word and never matched: a
         # deny rule on "tool.locall.call" silently denied nothing (the
         # 0.5.0rc4 gate). A pattern must name at least one capability.
-        from fnmatch import fnmatchcase
-
-        from omnicoreagent.governance.capabilities import CAPABILITIES
-
-        if self.capability in CAPABILITIES or self.capability.startswith(_RESERVED_NAMESPACES):
-            return
-        if any(ch in self.capability for ch in "*?["):
-            if not any(fnmatchcase(name, self.capability) for name in CAPABILITIES):
-                raise ValueError(
-                    f"rule {self.rule_id}: capability pattern {self.capability!r} matches no capability"
-                )
-            return
-        raise ValueError(
-            f"rule {self.rule_id}: unknown capability {self.capability!r}; the capabilities "
-            "are listed in the policy reference"
-        )
+        problem = _capability_problem(self.capability)
+        if problem == "matches no capability":
+            raise ValueError(
+                f"rule {self.rule_id}: capability pattern {self.capability!r} matches no capability"
+            )
+        if problem:
+            raise ValueError(
+                f"rule {self.rule_id}: unknown capability {self.capability!r}; the capabilities "
+                "are listed in the policy reference"
+            )
 
     def _check_examples(self) -> None:
         from omnicoreagent.governance.commands import rule_example_holds
