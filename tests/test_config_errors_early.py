@@ -146,3 +146,11 @@ def test_a_rule_for_a_capability_that_does_not_exist_is_refused():
     policy_from_mapping({"name": "p", "rules": {"allow": [
         {"rule_id": "a", "capability": "sandbox.*"}, {"rule_id": "b", "capability": "*"},
         {"rule_id": "c", "capability": "workspace.files.read"}]}})
+
+
+def test_a_misspelt_rules_bucket_is_refused():
+    # The 0.5.0rc4 gate: rules under "denies" were dropped without a word,
+    # so in permissive mode the call they meant to deny was allowed.
+    with pytest.raises(PolicyLoadError, match="rules has unknown key\\(s\\) denies"):
+        policy_from_mapping({"name": "p", "rules": {"denies": [
+            {"rule_id": "r1", "capability": "tool.local.call"}]}})

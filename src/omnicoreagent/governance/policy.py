@@ -119,6 +119,14 @@ def policy_from_mapping(
 
 
 def _normalize_rules(data: dict[str, Any]) -> PolicyRuleSet:
+    unknown = sorted(set(data) - {"deny", "ask", "allow"})
+    if unknown:
+        # A misspelt bucket ("denies") dropped its rules without a word; in
+        # permissive mode what they meant to deny was allowed (the 0.5.0rc4
+        # gate).
+        raise PolicyLoadError(
+            f"rules has unknown key(s) {', '.join(unknown)}; the buckets are deny, ask and allow"
+        )
     return PolicyRuleSet(
         deny=[_normalize_rule(item, "deny") for item in data.get("deny", [])],
         ask=[_normalize_rule(item, "ask") for item in data.get("ask", [])],

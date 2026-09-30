@@ -19,3 +19,6 @@ and published only when a gate finds nothing to fix.
   nothing (area F). The built-in profiles' `memory.*` and `telemetry.*`
   rules stay as published.
 
+- U4 A misspelt rules bucket (`denies`) is refused; its rules were dropped
+  and what they meant to deny was allowed in permissive mode (area B).
+
