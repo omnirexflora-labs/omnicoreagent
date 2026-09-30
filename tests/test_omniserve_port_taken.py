@@ -50,3 +50,52 @@ def test_the_server_binds_before_its_startup(taken_port, how):
             server.start()
         else:
             asyncio.run(server.start_async())
+
+
+def test_two_servers_cannot_both_take_the_port():
+    # The 0.5.0rc3 gate: bound but not listening, a second server's bind
+    # succeeded too; the first then crashed at the end of its startup.
+    from omnicoreagent.serve.server import bind_server_socket
+
+    first = bind_server_socket("127.0.0.1", 0)
+    try:
+        port = first.getsockname()[1]
+        with pytest.raises(OSError, match="in use"):
+            bind_server_socket("127.0.0.1", port).close()
+    finally:
+        first.close()
+
+
+def test_the_cli_holds_the_port_while_the_agent_loads(tmp_path):
+    # The port the CLI checked stays its own through the agent's loading: a
+    # second server starting meanwhile is refused at once.
+    import subprocess
+    import sys
+    import time
+
+    from omnicoreagent.serve.server import bind_server_socket
+
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    agent_file = tmp_path / "agent.py"
+    agent_file.write_text("import time\ntime.sleep(30)\nagent = None\n")
+    server = subprocess.Popen(
+        [sys.executable, "-c", "from omnicoreagent.serve.cli import main; main()",
+         "run", "--agent", str(agent_file), "--host", "127.0.0.1", "--port", str(port)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:  # until the CLI holds the port
+            try:
+                bind_server_socket("127.0.0.1", port).close()
+            except OSError:
+                break
+            time.sleep(0.2)
+        else:
+            raise AssertionError("the CLI never held the port while loading its agent")
+    finally:
+        server.kill()
+        server.wait()

@@ -765,6 +765,10 @@ def _validate_governance_config(value: dict[str, Any]):
                 "governance_config.budgets cannot be set when the policy already has "
                 "budgets; keep them in one place"
             )
+    rules = getattr(value.get("policy"), "rules", None)
+    if callable(getattr(rules, "validate", None)):
+        # A policy object: its rules may have been appended after it was built.
+        rules.validate()
     if value.get("policy") is not None and isinstance(value["policy"], dict):
         # A policy given as a dict, read now: it was refused only at the first
         # run, though settings are checked when the agent is built.

@@ -109,6 +109,7 @@ class OmniServe:
         host: Optional[str] = None,
         port: Optional[int] = None,
         workers: Optional[int] = None,
+        sock: Optional[socket.socket] = None,
     ) -> None:
         """
         Start the server (blocking).
@@ -118,6 +119,8 @@ class OmniServe:
             port: Port to bind to (overrides config)
             workers: Worker process count. Direct OmniServe requires 1 because
                 the served agent instance lives in the current process.
+            sock: A socket already listening on host and port (from
+                ``bind_server_socket``), held while the agent loaded.
         """
         import uvicorn
 
@@ -130,7 +133,8 @@ class OmniServe:
             workers=final_workers,
         )
 
-        sock = bind_server_socket(final_host, final_port)
+        if sock is None:
+            sock = bind_server_socket(final_host, final_port)
         logger.info(f"OmniServe: Starting server at http://{final_host}:{final_port}")
         logger.info(
             f"OmniServe: Swagger UI available at http://{final_host}:{final_port}/docs"
@@ -207,6 +211,10 @@ def bind_server_socket(host: str, port: int) -> socket.socket:
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((host, port))
+        # Listening, not only bound: two sockets may both bind with
+        # SO_REUSEADDR, and a second server starting meanwhile did (the
+        # 0.5.0rc3 gate); only one can listen.
+        sock.listen(2048)
     except OSError as exc:
         sock.close()
         raise OSError(

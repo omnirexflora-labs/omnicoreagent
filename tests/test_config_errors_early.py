@@ -91,6 +91,9 @@ def test_an_unknown_sandbox_manifest_field_is_named():
         _build({"sandbox_config": {"provider": "docker"}, "sandbox_manifest": {"imagee": "x"}})
     assert "sandbox_manifest has unknown field(s) imagee" in str(refused.value)
     assert "__init__" not in str(refused.value)
+    # The known fields it lists are ones a manifest may set (rc3 gate).
+    known = str(refused.value).split("known: ")[1]
+    assert "provider" not in known and "sandbox_id" not in known
 
 
 def test_a_telemetry_retention_that_is_not_a_number_is_a_clear_error():
@@ -109,3 +112,22 @@ def test_an_empty_database_url_is_the_same_as_a_missing_one(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "")
     with pytest.raises(ValueError, match="DATABASE_URL"):
         MemoryRouter("sql")
+
+
+@pytest.mark.parametrize("mistake", ["wrong_bucket", "duplicate_id"])
+def test_rules_appended_to_a_policy_are_checked_when_the_agent_is_built(mistake):
+    # The 0.5.0rc3 gate: the checks ran only when the rule set was created,
+    # and the docs append rules afterwards; a deny rule put in the allow
+    # bucket then allowed.
+    from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy
+
+    policy = build_default_policy("permissive-dev")
+    if mistake == "wrong_bucket":
+        policy.rules.allow.append(PolicyRule(rule_id="r", effect=PolicyEffect.DENY, capability="tool.local.call"))
+        expected = "declares effect 'deny' but is stored in the allow bucket"
+    else:
+        policy.rules.ask.append(PolicyRule(rule_id="allow_local_tools", effect=PolicyEffect.ASK,
+                                           capability="tool.local.call"))
+        expected = "Duplicate policy rule_id: allow_local_tools"
+    with pytest.raises(ValueError, match=expected):
+        _build({"policy": policy})

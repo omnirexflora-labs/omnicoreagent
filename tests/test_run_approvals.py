@@ -279,3 +279,36 @@ async def test_an_approved_sandbox_network_holds_for_the_rest_of_the_run():
             "sandbox.network.configure", actor="agent", host="example.com",
             risk_level="medium", metadata={"mode": "allow"}))
     assert len((await agent.get_run("run_approve"))["approvals"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_second_call_asking_the_same_question_waits_on_the_same_approval():
+    # The 0.5.0rc3 gate: two execute calls in one turn both needed the
+    # sandbox network. Only the first was recorded as waiting; the second was
+    # refused and never replayed, though the person approved the network.
+    from omnicoreagent.core.runs import waiting_for_approval
+    from omnicoreagent.sandbox.execution import _sandbox_scope_request
+
+    def network(call_id):
+        request = _sandbox_scope_request(
+            "sandbox.network.configure", actor="agent", host="*", risk_level="high",
+            metadata={"default": "allow", "allowed_hosts": [], "denied_hosts": []},
+        )
+        request.metadata["tool_call_id"] = call_id
+        return request
+
+    agent, tracker, engine = await _setup()
+    for call_id in ("c1", "c2"):
+        with pytest.raises(ApprovalRequiredError):
+            await _ask(engine, tracker, network(call_id))
+
+    approvals = (await agent.get_run("run_approve"))["approvals"]
+    assert len(approvals) == 1, "one question for the person"
+    async with tracker.active():
+        assert waiting_for_approval("c1") and waiting_for_approval("c2")
+
+    await agent.resolve_approval("run_approve", approvals[0]["approval_id"], decision="approve", approver="alice")
+    await tracker.reload()
+    for call_id in ("c1", "c2"):  # both run on resume
+        decision = await _ask(engine, tracker, network(call_id))
+        assert decision.effect.value == "allow" or decision.approval_id

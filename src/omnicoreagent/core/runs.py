@@ -270,10 +270,16 @@ class RunTracker:
                 await self._save()
             return delivered, bool(self.record.get("interrupt_requested"))
 
+    def attach_trace(self, trace_id: str | None) -> None:
+        """Name this segment's trace on the record before anything is saved,
+        so a run stopped before it starts still leads to its trace (the
+        0.5.0rc3 gate: stopped during the warm-up, it had none)."""
+        if trace_id and trace_id not in self.record["trace_ids"]:
+            self.record["trace_ids"].append(trace_id)
+
     async def start(self, trace_id: str | None) -> None:
         async with self._lock:
-            if trace_id:
-                self.record["trace_ids"].append(trace_id)
+            self.attach_trace(trace_id)
             await self._save()
 
     async def save_code_program(self, call_id: str, program: dict[str, Any] | None) -> None:
@@ -529,6 +535,7 @@ def waiting_for_approval(tool_call_id: str) -> bool:
         and (
             approval.get("tool_call_id") == tool_call_id
             or str(approval.get("tool_call_id") or "").startswith(f"{tool_call_id}.")
+            or tool_call_id in (approval.get("also_waiting") or [])
         )
         for approval in run.record.get("approvals", [])
     )

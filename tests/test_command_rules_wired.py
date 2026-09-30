@@ -142,6 +142,11 @@ async def test_an_agent_on_the_host_is_stopped_by_a_command_rule_by_name(tmp_pat
     run = await agent.get_run(result["run_id"])
     outcomes = {c["tool_call_id"]: c["outcome"] for c in run["tool_calls"]}
     assert outcomes == {"c1": "denied", "c2": "success"}
+    # The trace says the same: a command refused inside execute is a denial
+    # there too, not an error (the 0.5.0rc3 gate found them disagreeing).
+    story = await agent.get_run_trajectory(result["run_id"])
+    by_outcome = story["totals"]["tool_calls"]["by_outcome"]
+    assert (by_outcome["denied"], by_outcome["error"]) == (1, 0), by_outcome
     trace = json.dumps(await agent.telemetry_store.get_trace(result["trace_id"]), default=str)
     assert "deny_recursive_rm" in trace
     await agent.cleanup()

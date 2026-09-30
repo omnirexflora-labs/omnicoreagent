@@ -223,7 +223,16 @@ class GovernedToolRunner:
                         **event_kwargs,
                         metadata={
                             **relationship_metadata,
-                            "phase": "approval" if waiting else "result",
+                            # Authority the tool asked for while it ran (a
+                            # sandbox command) and was refused: a denial in
+                            # the trace, as in the run record (the 0.5.0rc3
+                            # gate found them disagreeing).
+                            "phase": "approval"
+                            if waiting
+                            else "authorization"
+                            if result.get("governance_error_code")
+                            not in (None, "invalid_arguments")
+                            else "result",
                         },
                     )
                     outcome["tool_result_event_id"] = error_event.event_id

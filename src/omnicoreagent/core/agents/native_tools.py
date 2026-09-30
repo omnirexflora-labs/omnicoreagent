@@ -434,9 +434,10 @@ async def execute_native_turn(
                 )
             result = {
                 "tool_name": request.name,
-                # The call's own arguments: an empty {} here was copied by the
-                # model into its next call (the 0.5.0rc2 gate).
-                "args": arguments,
+                # As every tool result: a governed agent's never carries
+                # argument values (the model keeps its own call); an
+                # ungoverned one's does (the 0.5.0rc2 and rc3 gates).
+                "args": {} if agent.governance_engine is not None else arguments,
                 "status": "error",
                 "data": None,
                 "message": message,

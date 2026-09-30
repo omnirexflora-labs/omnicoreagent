@@ -152,3 +152,77 @@ async def test_a_background_worker_loads_the_client_before_its_first_task(monkey
         assert calls, "the model client was loaded when the worker started"
     finally:
         await manager.shutdown()
+
+
+def test_a_run_stopped_while_the_client_loads_does_not_wait_for_the_import():
+    # The 0.5.0rc3 gate: Ctrl-C during the warm-up printed "nothing ran", then
+    # the process waited 43-74 s for the import thread (asyncio.run joins its
+    # executor; the interpreter joins its threads). The import runs on a
+    # thread nothing waits for.
+    import subprocess
+    import sys
+
+    script = (
+        "import asyncio, time\n"
+        "import omnicoreagent.core.llm as llm\n"
+        "def slow():\n"
+        "    time.sleep(20)\n"
+        "    return object()\n"
+        "llm._get_litellm = slow\n"
+        "async def main():\n"
+        "    task = asyncio.create_task(llm._litellm_off_loop())\n"
+        "    await asyncio.sleep(0.2)\n"
+        "    task.cancel()\n"
+        "    try:\n"
+        "        await task\n"
+        "    except asyncio.CancelledError:\n"
+        "        pass\n"
+        "asyncio.run(main())\n"
+    )
+    started = time.monotonic()
+    subprocess.run([sys.executable, "-c", script], check=True, timeout=60)
+    assert time.monotonic() - started < 15, "the process waited for the import to finish"
+
+
+@pytest.mark.asyncio
+async def test_a_run_stopped_during_the_warm_up_keeps_its_trace_on_the_record():
+    # The 0.5.0rc3 gate: a Ctrl-C or deadline while the client loaded left a
+    # record saying cancelled or timeout with trace_ids [], though its trace
+    # existed: get_run_trajectory showed no segment.
+    from test_governed_by_default import _agent
+    from test_run_suspend import RecordingModel
+
+    agent = await _agent(RecordingModel("hi"))
+
+    async def slow_warm_up():
+        await asyncio.sleep(30)
+
+    agent.llm_connection.warm_up = slow_warm_up
+    running = asyncio.create_task(agent.run("hi", session_id="warm", run_id="run_warm_cut"))
+    await asyncio.sleep(0.5)
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    record = await agent.get_run("run_warm_cut")
+    assert record["status"] == "cancelled"
+    assert len(record["trace_ids"]) == 1, record["trace_ids"]
+    story = await agent.get_run_trajectory("run_warm_cut")
+    assert len(story["segments"]) == 1
+    await agent.cleanup()
+
+
+def test_loading_the_client_also_loads_what_its_first_request_imports():
+    # The 0.5.0rc3 gate: litellm imports the OpenAI client's resources lazily,
+    # on the first request, on the event loop: 6-8 s under load.
+    import subprocess
+    import sys
+
+    script = (
+        "import sys\n"
+        "from omnicoreagent.core.llm import _get_litellm\n"
+        "_get_litellm()\n"
+        "print(all(m in sys.modules for m in ('openai.resources', 'litellm.llms.openai.openai')))\n"
+    )
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=300)
+    assert done.stdout.strip().splitlines()[-1] == "True", done.stdout + done.stderr

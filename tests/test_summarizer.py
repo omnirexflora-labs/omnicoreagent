@@ -282,3 +282,44 @@ class TestMessageStatus:
         assert InactiveReason.SUMMARIZED == "summarized"
         assert InactiveReason.ARCHIVED == "archived"
         assert InactiveReason.DELETED == "deleted"
+
+
+@pytest.mark.asyncio
+async def test_a_summary_that_takes_too_long_falls_back_to_truncation(monkeypatch):
+    # The 0.5.0rc3 gate: a slow summary ran inside the history load's fixed
+    # 20 s limit and run() raised a bare TimeoutError. It is bounded on its
+    # own and, like a failed one, falls back to the recent messages.
+    import asyncio
+
+    from omnicoreagent.core.summarizer import summarizer_engine
+
+    monkeypatch.setattr(summarizer_engine, "SUMMARY_TIMEOUT_SECONDS", 0.1)
+    messages = [{"id": str(i), "content": f"Message {i}"} for i in range(1, 6)]
+
+    async def slow_summary(msgs):
+        await asyncio.sleep(5)
+        return "never"
+
+    result, summarized_ids = await prepare_history_sliding_window(
+        messages, window_size=3, summarize_fn=slow_summary, summary_config=SummaryConfig(enabled=True)
+    )
+
+    assert [m["id"] for m in result] == ["3", "4", "5"] and summarized_ids == []
+
+
+@pytest.mark.asyncio
+async def test_a_history_load_that_hangs_says_so():
+    import asyncio
+
+    from omnicoreagent.core.agents.initial_messages import AgentInitialMessagePreparer
+
+    class Hangs:
+        async def load(self, **kwargs):
+            await asyncio.sleep(5)
+
+    preparer = AgentInitialMessagePreparer(
+        message_history_loader=Hangs(), prompt_context_builder=None, timeout_seconds=0.1
+    )
+    with pytest.raises(TimeoutError, match="session history"):
+        await preparer.prepare(session_state=None, system_prompt="", session_id="s",
+                               message_history=None, catalog=None)

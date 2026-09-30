@@ -56,6 +56,23 @@ async def test_the_run_says_what_it_is_waiting_for_in_its_trace():
     assert suspended.metadata["budget_request"]["meter"] == "model_calls"
 
 
+@pytest.mark.asyncio
+async def test_a_call_a_budget_stopped_is_not_a_model_error():
+    # The 0.5.0rc3 gate: a budget pause was recorded as a model_error with a
+    # Python stack, so a client alerting on model errors paged on every
+    # ordinary pause, and the call read "error", not "no_response" as documented.
+    agent = await _agent(_two_turns(), budgets=ONE_CALL)
+
+    result = await agent.run("go", session_id="pause-quiet")
+    trace = await agent.telemetry_store.get_trace(result["trace_id"])
+
+    assert _events(trace, "model_error") == []
+    trajectory = await agent.get_trajectory(trace_id=result["trace_id"])
+    calls = [c for step in trajectory["steps"] for c in step.get("model_calls") or []]
+    assert calls[-1]["outcome"] == "no_response"
+    assert trajectory["totals"]["model_calls"]["failed"] == 0
+
+
 # --- topping up ---------------------------------------------------------------
 
 

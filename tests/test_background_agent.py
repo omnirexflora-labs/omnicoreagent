@@ -1844,6 +1844,10 @@ async def test_manager_retries_failed_attempt():
     run = await manager.run_now("task", wait=True)
 
     assert run.status == RunStatus.COMPLETED
+    # A run that succeeded does not carry the first attempt's error (the
+    # 0.5.0rc3 gate: it read "completed" with a deadline error); the
+    # attempt keeps it.
+    assert (await manager.get_run(run.run_id)).error is None
     attempts = await manager.list_attempts(run.run_id)
     assert len(attempts) == 2
     assert attempts[0].status == AttemptStatus.FAILED

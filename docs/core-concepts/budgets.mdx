@@ -87,8 +87,10 @@ resumed, and the call really cost $0.001321.
     call could return: `model_config["max_tokens"]`, or 4,096 tokens when none
     is set (sent to the provider as the call's ceiling, so an answer that
     reaches it ends with `termination_reason` `length`). That amount is
-    **held**, together with one model call. If it does not fit, the call is
-    not made.
+    **held**, and the call is counted against `model_calls`. If it does not
+    fit, the call is not made. A hold larger than the whole limit never fits:
+    raise the limit (or lower `max_tokens`), since topping up by the
+    shortfall covers only that one call.
   </Step>
   <Step title="The real cost replaces the hold">
     When the call returns, the hold is settled at what it really cost and its
@@ -158,8 +160,8 @@ was not counted, and resuming made it again.)
 </Note>
 
 Every field, default and meter is in the [budgets reference](/docs/reference/budgets).
-Budgets can also live in a policy file (`budgets:` in the
-[policy](/docs/reference/policy)); set them in one place or the other, not both: both is refused when the agent is built (for a policy file, at its first run, when the file is read).
+Budgets can also live in a JSON policy file, under its `"budgets"` key
+([policy reference](/docs/reference/policy#writing-a-rule)); set them in one place or the other, not both: both is refused when the agent is built (for a policy file, at its first run, when the file is read).
 
 ### On a policy object
 

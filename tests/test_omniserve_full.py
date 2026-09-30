@@ -509,6 +509,10 @@ class TestConfiguration:
         assert "OMNICOREAGENT_WORKSPACE_BACKEND=local" in dockerfile
         assert "OMNICOREAGENT_WORKSPACE_DIR=/tmp/workspace" in dockerfile
         assert "LLM_API_KEY" not in dockerfile
+        # The key passes through by name, never its value on a command line
+        # (the 0.5.0rc3 gate: the advice printed -e LLM_API_KEY=$LLM_API_KEY).
+        assert "LLM_API_KEY=$LLM_API_KEY" not in result.output
+        assert "-e LLM_API_KEY " in result.output
 
     def test_generate_dockerfile_rejects_agent_outside_build_context(
         self, tmp_path, monkeypatch
@@ -1992,3 +1996,16 @@ class TestEndpoints:
 
         assert "omniserve_requests_total 1" in metrics_one
         assert "omniserve_requests_total 0" in metrics_two
+
+
+
+def test_the_generated_image_installs_the_release_that_generated_it(monkeypatch):
+    # The 0.5.0rc3 gate: it installed whatever omnicoreagent was newest.
+    from omnicoreagent.serve import cli as serve_cli
+
+    monkeypatch.setattr(serve_cli, "_package_version", lambda: "0.5.0")
+    assert '"omnicoreagent[serve]==0.5.0"' in serve_cli._build_dockerfile_content("/app/a.py")
+    # A development build is not on the index: unpinned, and said so.
+    monkeypatch.setattr(serve_cli, "_package_version", lambda: "0.5.1.dev3+g1234")
+    content = serve_cli._build_dockerfile_content("/app/a.py")
+    assert '"omnicoreagent[serve]"' in content and "development build" in content

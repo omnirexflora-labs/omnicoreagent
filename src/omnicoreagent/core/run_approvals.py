@@ -148,7 +148,17 @@ class RunApprovalResolver:
                     metadata={"recorded_approval_id": recorded["approval_id"], "expired": True},
                 )
             if recorded["status"] == "pending":
-                return None  # already waiting for a person
+                # Already waiting for a person. Another call of the same turn
+                # asking the same question waits on it too, and is replayed
+                # on resume: it was refused and never run (the 0.5.0rc3 gate,
+                # two commands that both needed the sandbox network).
+                call_id = (approval.metadata or {}).get("tool_call_id")
+                waiting = list(recorded.get("also_waiting") or [])
+                if call_id and call_id != recorded.get("tool_call_id") and call_id not in waiting:
+                    await run.update_approval(
+                        recorded["approval_id"], also_waiting=[*waiting, call_id]
+                    )
+                return None
         metadata = approval.metadata or {}
         await run.add_approval(
             {

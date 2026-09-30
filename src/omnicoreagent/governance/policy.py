@@ -55,6 +55,7 @@ def load_policy(
             # then writing budgets into it, made the second build fail with
             # "the policy already has budgets" (the 0.5.0rc1 gate).
             policy = copy.deepcopy(policy)
+            policy.rules.validate()  # rules appended after it was built
             policy.provenance.source = PolicySource.CODE
             return attach_policy_hash(policy)
         return policy_from_mapping(policy, source=PolicySource.CODE)

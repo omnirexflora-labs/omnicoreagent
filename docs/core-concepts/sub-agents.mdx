@@ -275,10 +275,11 @@ le train part à midi
 
 The rules:
 
-- **A governed agent only delegates to governed children.** An explicit child
-  without governance is refused — its tools would run under no policy. The
-  child is then governed by *its own* policy, so configure it for the child's
-  tools.
+- **A governed agent only delegates to governed children.** A child with no
+  `governance_config` is governed by default (`permissive-dev`); a child that
+  turns governance off (`{"enabled": False}`) is refused — its tools would run
+  under no policy. The child is governed by *its own* policy, so configure it
+  for the child's tools.
 - **Spawned workers** run under the lead's policy plus one rule: they cannot
   spawn workers of their own. What they spend counts against the lead's
   [budgets](/docs/reference/budgets).
@@ -312,9 +313,11 @@ Everything else is in the [agent settings](/docs/reference/agent-config) and
 
 <AccordionGroup>
   <Accordion title="Delegation refused: agent 'translator' is not governed. A governed agent can only delegate to agents with governance enabled.">
-    The lead has governance on and the child does not. The call fails with
-    this as its error, and the run carries on — in our run the model simply
-    translated the sentence itself. Give the child a `governance_config` too.
+    The lead has governance on and the child turned it off
+    (`"governance_config": {"enabled": False}`). The call fails with this as
+    its error, and the run carries on — in our run the model simply
+    translated the sentence itself. Leave the child's governance on: drop
+    `{"enabled": False}`, or give it a profile or policy of its own.
   </Accordion>
   <Accordion title="ValueError: sub_agents must be a list of agents, e.g. sub_agents=[researcher]">
     `sub_agents` takes a list, even for one child: `sub_agents=[researcher]`.

@@ -90,6 +90,13 @@ agent_config = {
 | `command` | Optional, `process.exec` rules only: what the rule matches in a shell command. See *Rules on shell commands*. |
 | `examples` | Optional, with `command`: `match` and `not_match` lists of commands, checked when the policy loads. A rule that contradicts its own examples does not load. |
 
+A policy can carry its budgets under a `budgets` key: in a dict policy, in a
+JSON policy file (`policy_path`), or as `policy.budgets` on a policy object.
+It takes the same shape as
+`governance_config["budgets"]` ([budgets](/docs/reference/budgets)), and the
+budgets are hashed with the policy. Set budgets in the policy or in
+`governance_config`, not both: both is refused.
+
 ## Rules on shell commands
 
 Every command an agent runs reaches the policy as `process.exec` on `sh` (the
@@ -149,7 +156,9 @@ exact text: approving `ls` approves nothing else.
 Command rules narrow what an agent may run; they are not the security
 boundary. An allowed program can run other code through its own options
 (`git -c core.fsmonitor=...`, `sed 's/x/y/e'`, a project's `npm test`), and
-`git -C . push` does not match a `git push` prefix. Run untrusted work in a
+`git -C . push` does not match a `git push` prefix, nor `python3 -m pip install`
+a `pip install` one (`{"program": ["pip", "pip3", "python*"], "args_any":
+["install"]}` names both). Run untrusted work in a
 [sandbox](/docs/how-to-guides/sandbox-providers), where the boundary is
 enforced, and use command rules to say what the agent may do there.
 </Warning>

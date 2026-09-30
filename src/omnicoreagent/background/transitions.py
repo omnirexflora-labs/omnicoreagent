@@ -196,7 +196,9 @@ class BackgroundRunTransitions:
                 latest.run_id,
                 {RunStatus.RUNNING},
                 RunStatus.COMPLETED,
-                {"result_preview": result_preview},
+                # A retry that succeeded: the run's error was the earlier
+                # attempt's, which keeps it (the 0.5.0rc3 gate).
+                {"result_preview": result_preview, "error": None},
                 self.worker_id,
                 latest.lease_token,
             )

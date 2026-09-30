@@ -325,8 +325,9 @@ share the stores above.
 | `telemetry_config["payload_retention_days"]` | `7` | Offloaded payloads no kept trace points to |
 
 `None` keeps everything. Each window is applied once, when an agent starts its
-first run; `await agent.prune_runs()` and `await agent.prune_telemetry()` apply
-it now. Session history is not pruned by age (windows and summaries keep it
+first run (the trace window also when a process first reads its traces, such
+as a first `get_run_trajectory`); `await agent.prune_runs()` and
+`await agent.prune_telemetry()` apply it now. Session history is not pruned by age (windows and summaries keep it
 short), and neither is background run history. Details:
 [how long a run's evidence is kept](/docs/core-concepts/durable-runs#how-long-a-runs-evidence-is-kept).
 
