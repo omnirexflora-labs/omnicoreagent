@@ -238,7 +238,7 @@ A rule matches on `tool_name`, `capability`, or both, and has a `decision`
 | 3 | is waiting for an approval |
 | 4 | is waiting for a budget |
 | 5 | timed out |
-| 6 | was interrupted: `agent.interrupt`, or Ctrl-C / SIGTERM, which stops the run at its next step and still writes `result.json` and `trajectory.json` (a second Ctrl-C stops at once). A Ctrl-C before the run has started (while the agent loads) exits 6 too, saying nothing ran, with no files to write |
+| 6 | was interrupted: `agent.interrupt`, or Ctrl-C / SIGTERM, which stops the run at its next step and still writes `result.json` and `trajectory.json` (a second Ctrl-C ends the run at once, though the process exits only when a blocking, synchronous tool call in progress returns). A Ctrl-C before the run has started (while the agent loads) exits 6 too, saying nothing ran, with no files to write |
 
 ### What it writes
 
