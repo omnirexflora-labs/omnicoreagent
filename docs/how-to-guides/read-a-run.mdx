@@ -532,6 +532,11 @@ had no known price); `model_latency_ms`; `model_retries`; `tool_calls`
 or the sandbox; `offloaded_results`; `duration_ms`; and
 `including_subagents` (tokens, cost, `cost_complete` with the children).
 
+`model_calls["total"]` counts every call the agent began, including one a
+budget stopped before it was sent (outcome `no_response`), so it can be
+higher than `usage["requests"]`, which counts only the calls that got a
+response.
+
 ### A whole run
 
 `get_run_trajectory(run_id)` returns `run_id`, `session_id`, `agent_name`,
