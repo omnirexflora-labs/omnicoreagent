@@ -10,7 +10,7 @@ import contextlib
 import json
 from dataclasses import dataclass
 from inspect import isawaitable, signature
-from typing import TYPE_CHECKING, Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable
 from uuid import uuid4
 
 from omnicoreagent.core.logging import logger
@@ -277,6 +277,7 @@ async def run_agent_stream(
     session_id: str,
     *,
     timeout_seconds: int | None = None,
+    is_disconnected: Callable[[], Awaitable[bool]] | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Run the agent and stream live telemetry events plus the final result via SSE.
@@ -285,6 +286,10 @@ async def run_agent_stream(
         agent: The OmniCoreAgent instance to run
         query: The user query
         session_id: Session ID for the conversation
+        is_disconnected: The request's check; when the client has gone, the
+            run is cancelled. Waiting for the server to close this generator
+            left an abandoned run going, forever with no request timeout (the
+            0.5.0rc4 gate).
 
     Yields:
         SSE-formatted event strings
@@ -295,6 +300,7 @@ async def run_agent_stream(
     pump_task: asyncio.Task[Any] | None = None
     run_task: asyncio.Task[Any] | None = None
     next_event_task: asyncio.Task[Any] | None = None
+    gone_task: asyncio.Task[Any] | None = None
     seen = _SeenEvents()
     run_id = f"run_{uuid4().hex}"
     serve_trace = None
@@ -319,14 +325,20 @@ async def run_agent_stream(
             )
         )
 
+        if is_disconnected is not None:
+            gone_task = asyncio.create_task(_until_disconnected(is_disconnected))
+
         while True:
             if next_event_task is None:
                 next_event_task = asyncio.create_task(event_queue.get())
 
             done, _ = await asyncio.wait(
-                {run_task, next_event_task},
+                {run_task, next_event_task, *([gone_task] if gone_task else [])},
                 return_when=asyncio.FIRST_COMPLETED,
             )
+            if gone_task is not None and gone_task in done:
+                logger.info(f"OmniServe SSE: client left; cancelling run {run_id}")
+                return  # the finally below cancels the run and ends its trace
 
             if run_task in done:
                 response = await run_task
@@ -470,8 +482,14 @@ async def run_agent_stream(
         await _cancel_task(next_event_task)
         await _cancel_task(run_task)
         await _cancel_task(pump_task)
+        await _cancel_task(gone_task)
 
     yield format_sse_event("session", {"session_id": session_id, "status": "ended"})
+
+
+async def _until_disconnected(is_disconnected: Callable[[], Awaitable[bool]]) -> None:
+    while not await is_disconnected():
+        await asyncio.sleep(0.5)
 
 
 async def stream_session_events(

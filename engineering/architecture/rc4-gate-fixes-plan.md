@@ -47,3 +47,9 @@ and published only when a gate finds nothing to fix.
 - U11 An MCP connect timeout names `connect_timeout`: a server importing
   slowly on a busy host failed at the 30 s default with no pointer (area F).
 
+- U12 Closing an SSE stream cancels its run: the stream watches for the
+  client leaving instead of waiting for the server to close it, which through
+  the middleware did not reliably happen; with no request timeout a cut
+  stream's run stayed running for good. Checked live: cancelled within 5 s
+  (area A).
+
