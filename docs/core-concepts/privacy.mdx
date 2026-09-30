@@ -251,8 +251,11 @@ When an agent is built, the runtime remembers the credentials it holds:
 Wherever one of these values appears literally, it becomes
 `[REDACTED:credential]`: in every tool result before the model sees it (and so
 before it reaches memory, the workspace or the trace), in everything telemetry
-records, and in model error messages. The list is process-wide: a key one agent
-holds is removed from what every agent in the process hands a model.
+records, and in model error messages. A provider's masked echo of a key, such
+as `sk-proj-*******4444` in a rejected key's error, is replaced too when its
+last characters are those of a key the runtime holds. The list is
+process-wide: a key one agent holds is removed from what every agent in the
+process hands a model.
 
 ```python
 import asyncio
