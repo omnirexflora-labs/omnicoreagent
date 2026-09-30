@@ -26,3 +26,7 @@ and published only when a gate finds nothing to fix.
   person or a budget answers 200 with its waiting status; it was a 504 "did
   not finish" (area F).
 
+- U6 A background run whose agent saved it completed before shutdown's
+  cancel landed is completed, not failed as "worker shutdown": with retries
+  the finished work would have run again (area C).
+

@@ -1723,6 +1723,46 @@ async def test_inline_timeout_shutdown_honors_retry_policy():
     assert attempts[0].error == "worker shutdown"
 
 
+class FinishesThenIsCancelled(FakeAgent):
+    """Saves its run as completed, then is cancelled before it returns."""
+
+    def __init__(self):
+        super().__init__(response="done")
+        self.records = {}
+
+    async def run(self, query: str, session_id: str, run_id: str | None = None):
+        self.calls.append({"run_id": run_id})
+        self.records[run_id] = {"run_id": run_id, "status": "completed"}
+        await asyncio.sleep(5)  # shutdown's cancel arrives here
+        return {"response": self.response}
+
+    async def get_run(self, run_id):
+        return self.records.get(run_id)
+
+
+@pytest.mark.asyncio
+async def test_a_run_the_agent_finished_is_not_failed_by_shutdown():
+    # The 0.5.0rc4 gate: shutdown's cancel landed after the agent had saved
+    # the run completed; the worker recorded "worker shutdown", and with
+    # retries the finished work would have run again.
+    store = InMemoryTaskStore()
+    manager = BackgroundAgentManager(task_store=store)
+    agent = FinishesThenIsCancelled()
+    await manager.register_agent("agent", agent)
+    await manager.register_task(
+        task_id="task", agent_id="agent", query="do work", schedule={"type": "manual"},
+        retry_policy=RetryPolicy(max_retries=2, initial_delay_seconds=0),
+    )
+
+    run = await manager.run_now("task", wait=True, timeout_seconds=0.01)
+    await wait_for(lambda: agent.calls)
+    await manager.shutdown()
+
+    latest = await store.get_run(run.run_id)
+    assert latest.status == RunStatus.COMPLETED, (latest.status, latest.error)
+    assert len(agent.calls) == 1
+
+
 @pytest.mark.asyncio
 async def test_inline_timeout_shutdown_requeues_retryable_run():
     store = InMemoryTaskStore()
