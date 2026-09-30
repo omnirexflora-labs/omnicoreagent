@@ -37,3 +37,7 @@ the BLOCKER and MUST-FIX findings. Each unit is test-first and one commit.
 - V7 A headless run with no run record (no model key) writes its trajectory
   in the run's shape, one segment; the docs' read_run.py failed on it (area E).
 
+- V8 (security) The generated `.dockerignore` excludes `.env` and
+  `workspace` in every folder (`**/`): an agent in a subfolder had its
+  `.env` baked into the image. Confirmed with a real build (area D).
+

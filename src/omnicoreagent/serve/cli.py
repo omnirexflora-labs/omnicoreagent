@@ -391,15 +391,16 @@ def _quote_docker_env_value(value: str) -> str:
 
 _DOCKERIGNORE = """\
 # Written by omniserve generate-dockerfile: the image copies the build context.
-.env
-.env.*
-.git
-.venv
-venv
-__pycache__
-*.pyc
-workspace
-.omnicoreagent
+# "**/" so a .env next to an agent in a subfolder stays out too.
+**/.env
+**/.env.*
+**/.git
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+**/workspace
+**/.omnicoreagent
 """
 
 
@@ -531,12 +532,15 @@ def generate_dockerfile(file_path: str, output_dir: str):
         ignore_path.write_text(_DOCKERIGNORE, encoding="utf-8")
         console.print(f"[bold green]✓ Generated {ignore_path}[/bold green] (keeps .env and secrets out of the image)")
     elif not any(
-        line.strip() in {".env", ".env*", "**/.env", ".env.*"}
+        line.strip() in {"**/.env", "**/.env*"}
         for line in ignore_path.read_text(encoding="utf-8").splitlines()
     ):
+        # ".env" alone matches only at the build context's root (the 0.5.0rc5
+        # gate: an agent's app/.env went into the image).
         console.print(
-            "[yellow]⚠ Your .dockerignore does not exclude .env: the image copies the "
-            "build context, so a .env holding LLM_API_KEY would be in it. Add .env and .env.*[/yellow]"
+            "[yellow]⚠ Your .dockerignore does not exclude .env in every folder: the image "
+            "copies the build context, so a .env holding LLM_API_KEY would be in it. "
+            "Add **/.env and **/.env.*[/yellow]"
         )
 
     console.print("\n[bold]Next Steps:[/bold]")
