@@ -6,9 +6,16 @@ Provider clients, dotenv loading in user code, and optional integrations should
 only be touched when the corresponding runtime object is requested.
 """
 
+from __future__ import annotations
+
 from importlib import import_module
 import sys
-from typing import Any
+
+# Not `from typing import ...`: typing was most of this import under load, and
+# the CLI installs its Ctrl-C handler only after it (the 0.5.0rc4 gate).
+TYPE_CHECKING = False
+if TYPE_CHECKING:
+    from typing import Any
 
 __all__ = [
     "__version__",
@@ -473,7 +480,13 @@ def __getattr__(name: str) -> Any:
 
     if name in _EXPORTS:
         module_name, attr_name = _EXPORTS[name]
-        value = getattr(import_module(module_name), attr_name)
+        try:
+            value = getattr(import_module(module_name), attr_name)
+        except AttributeError as exc:
+            # Raised as an AttributeError, Python reports only "cannot import
+            # name", and the cause (a local file shadowing a standard module)
+            # was lost (the 0.5.0rc4 gate).
+            raise ImportError(f"Could not load omnicoreagent.{name}: {exc}") from exc
         globals()[name] = value
         return value
 

@@ -30,3 +30,7 @@ and published only when a gate finds nothing to fix.
   cancel landed is completed, not failed as "worker shutdown": with retries
   the finished work would have run again (area C).
 
+- U7 The package import no longer loads `typing` (most of it under load),
+  so the CLI's Ctrl-C handler is in place sooner; an export that fails to
+  load says why instead of a bare "cannot import name" (area E).
+
