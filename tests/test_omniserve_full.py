@@ -2030,13 +2030,15 @@ def test_the_generated_build_leaves_env_files_out_of_the_image(tmp_path, monkeyp
 
     assert result.exit_code == 0, result.output
     ignore = (tmp_path / ".dockerignore").read_text().splitlines()
-    assert ".env" in ignore and ".env.*" in ignore
+    # In any folder: Docker applies ".env" only at the build context's root,
+    # and an agent in a subfolder had its .env copied in (the 0.5.0rc5 gate).
+    assert "**/.env" in ignore and "**/.env.*" in ignore and "**/workspace" in ignore
 
 
 def test_an_existing_dockerignore_is_kept_and_a_missing_env_rule_is_named(tmp_path, monkeypatch):
-    (tmp_path / ".dockerignore").write_text("node_modules\n")
+    (tmp_path / ".dockerignore").write_text("node_modules\n.env\n")  # root only
 
     result = _generate(tmp_path, monkeypatch)
 
-    assert (tmp_path / ".dockerignore").read_text() == "node_modules\n"
-    assert ".dockerignore does not exclude .env" in result.output
+    assert (tmp_path / ".dockerignore").read_text() == "node_modules\n.env\n"
+    assert ".dockerignore does not exclude" in result.output and "**/.env" in result.output

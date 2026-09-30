@@ -226,13 +226,10 @@ class BackgroundAgentManager:
             raise TaskAlreadyRegisteredError(f"Task already registered: {task.task_id}")
         if self.governance_engine is not None:
             action = "update" if existing is not None else "create"
-            if existing is not None:
-                require_current_policy_snapshot(
-                    existing.metadata,
-                    self.governance_engine,
-                    surface=f"background task {existing.task_id}",
-                    required=True,
-                )
+            # Replacing a task authorizes the new one under the current policy
+            # and binds it to that policy: the old one's snapshot does not
+            # matter. Requiring it refused the documented way to re-bind a
+            # task a policy change had paused (the 0.5.0rc5 gate).
             await self.governance_engine.authorize(
                 background_task_authority_request(task=task, action=action)
             )
@@ -262,6 +259,7 @@ class BackgroundAgentManager:
                 self.governance_engine,
                 surface=f"background task {existing.task_id}",
                 required=True,
+                capability="background.task.update",
             )
         data = existing.model_dump(mode="python")
         data.update(patch)
@@ -369,6 +367,7 @@ class BackgroundAgentManager:
                 self.governance_engine,
                 surface=f"background task {task.task_id}",
                 required=True,
+                capability="background.task.resume",
             )
             await self.governance_engine.authorize(
                 background_task_authority_request(task=task, action="resume")
@@ -398,6 +397,7 @@ class BackgroundAgentManager:
                 self.governance_engine,
                 surface=f"background task {task.task_id}",
                 required=True,
+                capability="background.run.start",
             )
         run = build_run(task, TriggerType.MANUAL, query or task.query)
         if self.governance_engine is not None:

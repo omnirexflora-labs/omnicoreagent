@@ -605,12 +605,17 @@ class AgentLlmStepRunner:
                 purpose=purpose,
                 retries=locals().get("retries", []),
             )
+            call_event = locals().get("model_call_event")
             await telemetry_recorder.record_exception(
                 exc,
                 event_type="model_error",
                 actor=TelemetryActor(type=ActorType.MODEL),
                 metadata={
                     "model_span_id": span_context.span_id,
+                    # Linked to its call, as a response is: unlinked, a call
+                    # the provider rejected read no_response with no error,
+                    # "never made" (the 0.5.0rc5 gate).
+                    "model_call_event_id": getattr(call_event, "event_id", None),
                     "model_call": failed_facts,
                 },
             )

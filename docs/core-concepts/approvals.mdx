@@ -190,10 +190,11 @@ Refund for order 1042 couldn’t be issued because approval was denied and store
 
 A decision applies once, to that exact call (tool, target and arguments).
 For a shell command, the pending approval names the commands it would run,
-one per line, in `approvals[i]["command"]["summary"]`, each quoted as the
-shell reads it (`git commit -m 'add c'`; a newline inside an argument is
-written `$'a\nb'`, so padding or a quoted newline cannot pass for a second
-command), and the decision applies to that exact command text: approving
+one per line, in `approvals[i]["command"]["summary"]`, each as written, with
+its variable settings and redirects (`GIT_SSH_COMMAND='…' git push`,
+`echo key >> ~/.ssh/authorized_keys`); a newline or other control character
+is shown as `\n`, so a quoted newline cannot pass for a second command. The
+decision applies to that exact command text: approving
 `ls` approves nothing else.
 
 Setting up a sandbox is the one exception: an approved network, file system

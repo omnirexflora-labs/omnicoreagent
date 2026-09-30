@@ -124,6 +124,16 @@ class PolicyConstraints:
             raise ValueError("constraints.metadata must be a dict")
 
 
+# Every surface a request is made on (governance/capabilities.py, the sandbox
+# runtimes, background and serve): what a rule's conditions can name. memory
+# and telemetry are reserved with their capability namespaces.
+EXECUTION_SURFACES = frozenset({
+    "tool", "code", "workspace", "artifact", "mcp", "sandbox", "host", "network",
+    "filesystem", "secret", "secret_broker", "background", "serve", "subagent",
+    "memory", "telemetry",
+})
+
+
 @dataclass
 class PolicyRuleConditions:
     risk_level: list[str] | None = None
@@ -146,6 +156,14 @@ class PolicyRuleConditions:
             self.exclude_execution_surface = _string_list(
                 self.exclude_execution_surface, "exclude_execution_surface"
             )
+        # A misspelt surface never matched, and a deny rule on "Tool"
+        # silently denied nothing (the 0.5.0rc5 gate).
+        for surface in [self.execution_surface, *(self.exclude_execution_surface or [])]:
+            if surface is not None and surface not in EXECUTION_SURFACES:
+                raise ValueError(
+                    f"unknown execution surface {surface!r}; one of: "
+                    f"{', '.join(sorted(EXECUTION_SURFACES))}"
+                )
         if self.exclude_capability is not None:
             self.exclude_capability = _string_list(
                 self.exclude_capability, "exclude_capability"

@@ -82,6 +82,9 @@ class LocalWorkspaceStorage:
     """Safe local storage rooted inside one workspace namespace."""
 
     def __init__(self, root: str | Path):
+        from omnicoreagent.core.workspace.paths import register_workspace_root
+
+        register_workspace_root(root)
         self.root = Path(root).resolve()
         self._locks: Path | None = None
         self.ensure_root()

@@ -46,6 +46,10 @@ async def test_a_paused_run_keeps_no_container_and_resumes_with_the_workspace_an
     assert result["response"] == "done"
     after_resume = json.dumps(model.calls[-2])
     assert "sandbox was reset" in after_resume and "workspace files are intact" in after_resume
+    # A note, not a request to answer: the model answered the notice and the
+    # task's answer was lost (the 0.5.0rc5 gate).
+    assert "not from the user" in after_resume and "carry on with the task" in after_resume.lower()
+    assert "ran after the reset" in after_resume
     last_execute = next(m for m in model.calls[-1] if m.get("tool_call_id") == "e2")
     assert "data" in json.dumps(last_execute), "the workspace file came back"
     assert "No such file" in json.dumps(last_execute), "/tmp did not survive the reset"

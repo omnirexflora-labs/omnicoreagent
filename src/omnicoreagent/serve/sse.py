@@ -473,16 +473,32 @@ async def run_agent_stream(
             },
         )
     finally:
+        # Cancel first, synchronously: when the client goes, the server
+        # cancels this generator, and that cancellation hits the first await
+        # below; the run cancelled after it never was, and carried on to the
+        # end (the 0.5.0rc5 gate).
+        for task in (run_task, pump_task, next_event_task, gone_task):
+            if task is not None and not task.done():
+                task.cancel()
+        closed = False
+        cleanups = [_cancel_task(t) for t in (next_event_task, run_task, pump_task, gone_task)]
         if serve_trace is not None:
-            await finish_serve_trace(
+            cleanups.insert(0, finish_serve_trace(
                 serve_trace,
                 status="cancelled",
                 error={"type": "CancelledError", "message": "SSE stream closed"},
-            )
-        await _cancel_task(next_event_task)
-        await _cancel_task(run_task)
-        await _cancel_task(pump_task)
-        await _cancel_task(gone_task)
+            ))
+        for cleanup in cleanups:
+            try:
+                await cleanup
+            except asyncio.CancelledError:
+                closed = True  # each step still gets its turn
+            except Exception as exc:
+                # A stream finalized late (its telemetry context gone) must
+                # not skip the steps after it (the 0.5.0rc5 gate).
+                logger.debug(f"OmniServe SSE: cleanup step failed: {exc}")
+        if closed:
+            raise asyncio.CancelledError
 
     yield format_sse_event("session", {"session_id": session_id, "status": "ended"})
 

@@ -655,8 +655,10 @@ agent's checkpoint; `list_attempts` shows the lost attempt with the reason
 With a `governance_engine` on the manager, a task is bound to the policy it
 was created under. When the policy changes, the task can still be paused or
 deleted but not run: at its next due time its schedule is paused, and
-`get_task_status` shows why in `schedule_state.paused_reason`. Delete the task
-and create it again under the new policy.
+`get_task_status` shows why in `schedule_state.paused_reason`. Any change to
+the policy counts, a budget number included. Register the task again with
+`replace=True` (over HTTP, `POST /background/tasks` with `"replace": true`):
+the new policy decides whether it may, and binds it to that policy.
 
 ## Over HTTP
 

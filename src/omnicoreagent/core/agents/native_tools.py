@@ -392,10 +392,19 @@ async def execute_native_turn(
                 )
             finally:
                 run_call_started = call_started["flag"]
-        except (BudgetExhaustedForRun, RunAwaitingBudget):
+        except (BudgetExhaustedForRun, RunAwaitingBudget) as stop:
             # A call the run cannot afford is not a failed call: the run ends
             # or waits for a person, and nothing is recorded against the tool.
-            raise
+            # Handed back, not raised: raised, it cancelled the turn's other
+            # calls and dropped the results of those that ran (the 0.5.0rc5
+            # gate). The batch raises it once they have all finished.
+            if run_call_started and getattr(stop, "before_the_call", False):
+                # Refused before the tool ran: not an unknown outcome. It runs
+                # on resume once a person tops the budget up.
+                await current_run().tool_finished(
+                    tool_call_id=request.id, outcome=None, state="not_run"
+                )
+            return _BudgetStop(stop)
         except _UnknownOutcome:
             run = current_run()
             finished = next(
@@ -451,7 +460,12 @@ async def execute_native_turn(
                 "args": {},
                 "status": "error",
                 "data": None,
-                "message": "Tool execution cancelled",
+                # It may have taken effect before it stopped (the 0.5.0rc5
+                # gate): said so, as for a call whose process stopped.
+                "message": (
+                    "Tool execution was cancelled; it may already have taken effect. "
+                    "Check before calling it again."
+                ),
                 "error_type": "cancelled",
             }
         except asyncio.TimeoutError:
@@ -460,7 +474,13 @@ async def execute_native_turn(
                 "args": {},
                 "status": "error",
                 "data": None,
-                "message": "Tool execution timed out",
+                # A tool running in a thread cannot be stopped: it may still
+                # finish and take effect after this (the 0.5.0rc5 gate: a card
+                # "failed due to a timeout" was charged).
+                "message": (
+                    "Tool execution timed out; it may still take effect, as a "
+                    "running call cannot always be stopped. Check before calling it again."
+                ),
                 "error_type": "timeout",
             }
         except Exception as exc:
@@ -727,6 +747,16 @@ async def execute_native_turn(
     tasks = [asyncio.create_task(one(request)) for request in turn.tool_calls]
     try:
         results = await asyncio.gather(*tasks)
+        stops = [r for r in results if isinstance(r, _BudgetStop)]
+        if stops:
+            # The calls that ran keep their results; the refused ones never
+            # started and run once a person tops the budget up.
+            await persist_results([r for r in results if isinstance(r, ToolFeedback)])
+            # The request that carries every refusal's shortfall: they add up.
+            raise max(
+                (r.stop for r in stops),
+                key=lambda stop: (getattr(stop, "request", None) or {}).get("shortfall") or 0,
+            )
         session_state.loop_detector.record_round(
             [result.interaction for result in results]
         )
@@ -788,6 +818,13 @@ async def execute_native_turn(
                 and _belongs_to(approval.get("tool_call_id"), awaiting)
             ]
         )
+
+
+class _BudgetStop:
+    """A call of a parallel turn that the budget refused."""
+
+    def __init__(self, stop: BaseException) -> None:
+        self.stop = stop
 
 
 class _UnknownOutcome(Exception):

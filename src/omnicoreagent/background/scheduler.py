@@ -101,6 +101,13 @@ class BackgroundScheduleDispatcher:
                     # Refusing is right; doing it silently was not: the
                     # steward's schedules stopped for hours with no trace.
                     reason = f"Paused when due at {due_at.isoformat()}: {exc}"
+                    if "policy snapshot" in str(exc):
+                        # How to go on, not only why (the 0.5.0rc5 gate:
+                        # the only way out seemed to be deleting the task).
+                        reason += (
+                            " Register the task again with replace=True to bind it "
+                            "to the current policy."
+                        )
                     await self.task_store.set_schedule_paused(task.task_id, True, reason=reason)
                     logger.warning(f"Background task {task.task_id!r} schedule paused. {reason}")
                     raise
@@ -147,6 +154,7 @@ class BackgroundScheduleDispatcher:
             self.governance_engine,
             surface=f"background task {task.task_id}",
             required=True,
+            capability="background.run.start",
         )
         await self.governance_engine.authorize(
             background_run_authority_request(

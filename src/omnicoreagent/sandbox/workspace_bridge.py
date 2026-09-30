@@ -146,7 +146,15 @@ class WorkspaceBridge:
         found: list[tuple[str, Any]] = []
         pending: list[str | None] = [None]
         while pending and len(found) < self.max_files:
-            for item in self.storage.list_files(pending.pop()):
+            folder = pending.pop()
+            try:
+                items = self.storage.list_files(folder)
+            except ValueError:
+                # A link that leads out of the workspace: not the workspace's,
+                # skipped as links are (the 0.5.0rc5 gate: it failed every
+                # execute before its command ran).
+                continue
+            for item in items:
                 path = str(item.path).replace("\\", "/").strip("/")
                 if _hidden(path) or _run_record(path):
                     continue
@@ -244,7 +252,14 @@ class WorkspaceBridge:
                 continue
             if self.privacy_filter is not None:
                 text = self.privacy_filter.redact_text(text, boundary="workspace")
-            await asyncio.to_thread(self.storage.write_text, path, text)
+            try:
+                await asyncio.to_thread(self.storage.write_text, path, text)
+            except ValueError:
+                # Its workspace path is a link out of the workspace: never
+                # written through (the 0.5.0rc5 gate: the command's output
+                # became an error).
+                skipped.append({"path": path, "reason": "a link out of the workspace; not written"})
+                continue
             total += size
             written.append(path)
             # The copy is now current in the workspace; do not send it back in.

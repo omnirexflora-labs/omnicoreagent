@@ -250,3 +250,19 @@ def test_the_budget_route_reports_a_run_that_is_not_waiting(tmp_path):
         )
 
         assert refused.status_code == 404 and "not waiting" in refused.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_a_second_request_says_what_was_granted_before():
+    # The 0.5.0rc5 gate: the docs said a request's limit includes earlier
+    # grants; it did not, and nothing on the request said what was granted.
+    model = _two_turns(runs=3)
+    agent = await _agent(model, budgets=ONE_CALL)
+    first = await agent.run("go", session_id="pause-granted")
+    await agent.grant_budget(first["run_id"], amount=1, approver="ops@example.com")
+
+    second = await agent.resume(first["run_id"])
+
+    assert second["status"] == "awaiting_budget", second
+    request = second["budget_request"]
+    assert (request["limit"], request["granted"]) == (1, 1), request

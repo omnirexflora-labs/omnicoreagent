@@ -23,9 +23,11 @@ Requires the Docker SDK: ``pip install omnicoreagent[docker]``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import os
 import posixpath
+import time
 import tarfile
 from typing import Any
 from uuid import uuid4
@@ -237,6 +239,7 @@ class DockerSandboxRuntime(SandboxRuntime):
         if limit:
             # Inside the container, so the process is killed where it runs.
             command = ["timeout", "-s", "KILL", str(int(limit)), *command]
+        started = time.monotonic()
         try:
             run = asyncio.to_thread(
                 container.exec_run,
@@ -260,14 +263,25 @@ class DockerSandboxRuntime(SandboxRuntime):
                 timed_out=True,
                 metadata={"session_terminated": True},
             )
+        except Exception as exc:
+            if await self._gone(container):
+                return await self._lost_result(session_id, container, exc)
+            raise
         finally:
             if stdin_path:
-                await asyncio.to_thread(container.exec_run, ["rm", "-f", stdin_path])
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread(container.exec_run, ["rm", "-f", stdin_path])
+        # `timeout -s KILL` exits 137 when it had to kill the command, which
+        # can only be at the limit; a 137 before it was something else.
+        timed_out = bool(limit) and exit_code == 137 and time.monotonic() - started >= limit - 1
+        if exit_code in (137, None, -1) and not timed_out and await self._gone(container, wait=3):
+            # Killed with its container, not by its limit: the sandbox is lost
+            # (the 0.5.0rc5 gate: it read as a timeout, and every later
+            # command failed against the dead container).
+            return await self._lost_result(session_id, container, None)
         stdout_bytes, stderr_bytes = output if output else (b"", b"")
         stdout, stdout_truncated = self._bounded(stdout_bytes or b"")
         stderr, stderr_truncated = self._bounded(stderr_bytes or b"")
-        # `timeout -s KILL` exits 137 when it had to kill the command.
-        timed_out = bool(limit) and exit_code == 137
         return SandboxExecResult(
             exit_code=exit_code,
             stdout=stdout,
@@ -356,6 +370,32 @@ class DockerSandboxRuntime(SandboxRuntime):
                     f"Sandbox image {image} is not present and pulling is disabled"
                 ) from None
             client.images.pull(image)
+
+    async def _gone(self, container, wait: float = 0) -> bool:
+        """Whether the container has stopped or no longer exists; Docker can
+        report a killed container as running for a moment, so ``wait``
+        seconds are given for it to say."""
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                await asyncio.to_thread(container.reload)
+            except Exception:
+                return True
+            if getattr(container, "status", "running") != "running":
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(0.25)
+
+    async def _lost_result(self, session_id: str, container, exc) -> SandboxExecResult:
+        ref = getattr(container, "short_id", None) or session_id
+        await self.terminate(session_id)
+        detail = f" ({exc})" if exc is not None else ""
+        return SandboxExecResult(
+            exit_code=137,
+            stderr=f"The sandbox {ref} no longer exists; the command did not finish{detail}",
+            metadata={"session_terminated": True, "session_lost": True},
+        )
 
     def _container(self, session_id: str):
         container = self._containers.get(session_id)

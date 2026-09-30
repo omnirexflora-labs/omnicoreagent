@@ -81,6 +81,24 @@ def require_current_policy_snapshot(
     *,
     surface: str,
     required: bool = False,
+    capability: str | None = None,
+) -> None:
+    try:
+        _require_current_policy_snapshot(metadata, governance_engine, surface=surface, required=required)
+    except PolicyDeniedError as exc:
+        # Which capability was refused: OmniServe's 403 said null (the
+        # 0.5.0rc5 gate).
+        if capability is not None and isinstance(getattr(exc, "metadata", None), dict):
+            exc.metadata.setdefault("capability", capability)
+        raise
+
+
+def _require_current_policy_snapshot(
+    metadata: dict[str, Any] | None,
+    governance_engine: Any,
+    *,
+    surface: str,
+    required: bool = False,
 ) -> None:
     snapshot = (metadata or {}).get(POLICY_SNAPSHOT_METADATA_KEY)
     if not snapshot:

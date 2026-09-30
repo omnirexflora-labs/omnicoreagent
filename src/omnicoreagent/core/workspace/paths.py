@@ -10,6 +10,29 @@ WORKSPACE_NAMESPACE_CONFIG = "config"
 WORKSPACE_FILE_PATH_PREFIXES = ("workspace", "workspace_files", "files")
 
 
+# The workspace files roots in this process. An absolute path under one names
+# that file: with the root at /app, "/app/ssl/x" was taken as "app/ssl/x" and
+# written to /app/app/ssl/x (the 0.5.0rc5 gate). Stripped here, where storage
+# and policy both normalize, so a rule on "ssl/*" sees what storage touches.
+_ROOTS: set[str] = set()
+
+
+def register_workspace_root(root: str | Path) -> None:
+    for form in {str(root), str(Path(root).resolve())}:
+        form = form.rstrip("/")
+        if form:
+            _ROOTS.add(form)
+
+
+def _under_a_root(decoded: str) -> str:
+    for root in sorted(_ROOTS, key=len, reverse=True):
+        if decoded == root:
+            return ""
+        if decoded.startswith(root + "/"):
+            return decoded[len(root) + 1 :]
+    return decoded
+
+
 def normalize_workspace_path(
     path: str | Path | None = None,
     *,
@@ -19,7 +42,10 @@ def normalize_workspace_path(
     if path is None or str(path).strip() == "":
         return ""
 
-    decoded = urllib.parse.unquote(str(path)).strip().lstrip("/")
+    decoded = urllib.parse.unquote(str(path)).strip()
+    if decoded.startswith("/"):
+        decoded = _under_a_root(decoded)
+    decoded = decoded.lstrip("/")
     while decoded.startswith("./"):
         decoded = decoded[2:]
     for prefix in strip_prefixes:

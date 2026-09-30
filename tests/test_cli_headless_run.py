@@ -426,3 +426,22 @@ async def test_ctrl_c_before_the_run_has_a_record_says_nothing_ran(tmp_path):
 
     assert (outcome.status, outcome.exit_code) == ("interrupted", ExitCode.INTERRUPTED)
     assert outcome.error == "interrupted before the run had started; nothing ran"
+
+
+@pytest.mark.asyncio
+async def test_the_trajectory_has_the_run_shape_when_the_run_has_no_record(tmp_path):
+    # The 0.5.0rc5 gate: on the "LLM_API_KEY not found" path there is no run
+    # record, and trajectory.json was a single segment with no "segments", so
+    # the docs' own read_run.py failed with KeyError.
+    agent = await _agent(RecordingModel("hi"), tmp_path / "ledger", ask=False)
+
+    async def no_record(run_id):
+        return None
+
+    agent.get_run_trajectory = no_record
+    outcome = await execute_headless(agent, HeadlessRequest(instruction="hi"))
+
+    story = outcome.trajectory
+    assert [s["trace_id"] for s in story["segments"]] == outcome.trace_ids
+    assert story["segments"][0]["trajectory"]["trace_id"] == outcome.trace_ids[0]
+    assert "totals" in story

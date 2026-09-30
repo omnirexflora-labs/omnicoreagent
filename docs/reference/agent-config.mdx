@@ -36,7 +36,7 @@ Everything `OmniCoreAgent(agent_config={...})` takes. Each description is the co
 | `privacy_config` | `dict[str, Any]` | see below | Personal data (email, phone, SSN, card numbers) redacted per boundary. By default only the record (telemetry and its exports) is redacted; the model, memory, files, stream and answer see the real data. redact_public covers everything returned to the application: run()'s answer and errors, and OmniServe's responses. |
 | `context_management` | `dict[str, Any]` | see below | Keeps what one model call is sent under a budget, within a run: in mode "token_budget", `value` is tokens (100,000); in "sliding_window", it is messages. Past threshold_percent of it, older messages are truncated or summarized (strategy), keeping the preserve_recent latest. memory_config decides the history a run starts from; this keeps the run itself in bounds as it grows. |
 | `tool_offload` | `dict[str, Any]` | see below | A tool result over the thresholds is saved to the workspace, and the model gets a preview and an artifact it can read in full. |
-| `governance_config` | `dict[str, Any]` | see below | The policy (a profile, a policy, or a policy file), budgets, the sandbox provider and its manifest, and how unanswered approvals are handled. On by default with the permissive-dev profile; \{"enabled": False\} turns it off. Enabling it without a profile means interactive-dev. |
+| `governance_config` | `dict[str, Any]` | see below | The policy (a profile, a policy, or a policy file), budgets, the sandbox provider and its manifest, and how unanswered approvals are handled. On by default with the permissive-dev profile; \{"enabled": False\} turns it off, and is refused alongside a policy, profile or budgets it would drop. Enabling it without a profile means interactive-dev. |
 | `workspace_config` | `WorkspaceConfig \| dict[str, Any] \| None` | `None` | Where the agent's workspace lives: workspace_dir on local disk (default ./workspace), or S3 / R2 storage. |
 
 ## Defaults in full
@@ -109,7 +109,7 @@ A tool result over the thresholds is saved to the workspace, and the model gets 
 
 ### `governance_config`
 
-The policy (a profile, a policy, or a policy file), budgets, the sandbox provider and its manifest, and how unanswered approvals are handled. On by default with the permissive-dev profile; \{"enabled": False\} turns it off. Enabling it without a profile means interactive-dev.
+The policy (a profile, a policy, or a policy file), budgets, the sandbox provider and its manifest, and how unanswered approvals are handled. On by default with the permissive-dev profile; \{"enabled": False\} turns it off, and is refused alongside a policy, profile or budgets it would drop. Enabling it without a profile means interactive-dev.
 
 ```json
 {

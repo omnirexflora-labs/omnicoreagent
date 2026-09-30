@@ -56,3 +56,67 @@ async def test_a_closed_stream_cancels_its_run_with_no_request_timeout():
         await asyncio.sleep(0.1)
     assert [r["status"] for r in runs] == ["cancelled"], [(r["status"], r.get("error")) for r in runs]
     await agent.cleanup()
+
+
+_SERVER = '''
+import asyncio, sys
+sys.path.insert(0, {tests!r})
+from omnicoreagent import OmniCoreAgent, OmniServe, OmniServeConfig
+from test_sse_disconnect import Hangs
+
+agent = OmniCoreAgent(name="streamer", system_instruction="x",
+                      model_config={{"provider": "openai", "model": "gpt-5.4-mini", "api_key": "k"}},
+                      agent_config={{"guardrail_mode": "off", "enable_workspace_files": False}})
+asyncio.run(agent.initialize())
+agent.llm_connection = Hangs()
+OmniServe(agent, OmniServeConfig(host="127.0.0.1", port={port}, request_timeout=0,
+          background_enabled=False)).start()
+'''
+
+
+def test_a_client_hanging_up_on_a_real_server_cancels_the_run(tmp_path):
+    # The 0.5.0rc5 gate: through a real server, Starlette cancels the stream
+    # when the client goes, and the first await in its cleanup raised before
+    # the run was cancelled: the run carried on to the end, every time.
+    import json
+    import socket
+    import subprocess
+    import sys
+    import urllib.request
+    from pathlib import Path
+
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    script = tmp_path / "server.py"
+    script.write_text(_SERVER.format(tests=str(Path(__file__).parent), port=port))
+    server = subprocess.Popen([sys.executable, str(script)], cwd=tmp_path,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        base = f"http://127.0.0.1:{port}"
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            try:
+                urllib.request.urlopen(base + "/health", timeout=2)
+                break
+            except OSError:
+                time.sleep(0.5)
+        # Open the stream, read its first bytes, hang up.
+        with socket.create_connection(("127.0.0.1", port)) as client:
+            body = json.dumps({"query": "write an essay", "session_id": "cut"}).encode()
+            client.sendall(b"POST /run HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+                           + f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+            client.recv(256)
+            time.sleep(2)
+        status = None
+        for _ in range(40):
+            time.sleep(0.5)
+            runs = json.load(urllib.request.urlopen(base + "/runs?session_id=cut", timeout=5))["runs"]
+            status = runs[0]["status"] if runs else None
+            if status not in (None, "running"):
+                break
+        assert status == "cancelled", status
+    finally:
+        server.kill()
+        server.wait()

@@ -458,3 +458,46 @@ async def test_commands_run_together_each_see_the_whole_workspace(tmp_path):
         results = await asyncio.gather(*(_sh(scope, "ls data | wc -l") for _ in range(4)))
 
     assert [r.stdout.strip() for r in results] == ["40"] * 4
+
+
+async def test_a_sandbox_that_dies_is_reported_lost_and_the_next_command_gets_a_fresh_one(tmp_path):
+    # The 0.5.0rc5 gate: a Docker sandbox killed mid-command read as a
+    # timeout (exit 137), and every later command failed against the dead
+    # container with a raw 409/404; nothing said the sandbox was lost.
+    import asyncio
+
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+    async with _scope(storage).active() as scope:
+        await _sh(scope, "true")  # the session is open
+        runtime = scope.service.governance_engine.sandbox_runtime
+        (container,) = runtime._containers.values()
+        running = asyncio.create_task(_sh(scope, "sleep 30"))
+        await asyncio.sleep(2)
+        await asyncio.to_thread(container.kill)
+        lost = await asyncio.wait_for(running, 60)
+
+        assert lost.metadata.get("session_lost") is True, (lost.exit_code, lost.stderr, lost.metadata)
+        assert not lost.timed_out
+        after = await _sh(scope, "echo fresh")
+        assert after.exit_code == 0 and after.stdout.strip() == "fresh"
+
+
+async def test_a_link_out_of_the_workspace_is_skipped_not_fatal(tmp_path):
+    # The 0.5.0rc5 gate: a folder link pointing outside made every execute
+    # fail before its command ran ("resolved outside workspace namespace"),
+    # and a file link the command wrote turned its output into an error.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "target.txt").write_text("untouched")
+    files = tmp_path / "files"
+    storage = LocalWorkspaceStorage(files)
+    storage.write_text("real.txt", "hello")
+    (files / "ext").symlink_to(outside, target_is_directory=True)
+    (files / "linked.txt").symlink_to(outside / "target.txt")
+
+    async with _scope(storage).active() as scope:
+        result = await _sh(scope, "cat real.txt; echo changed > linked.txt; echo out > new.txt")
+
+    assert result.exit_code == 0 and "hello" in result.stdout
+    assert (outside / "target.txt").read_text() == "untouched"
+    assert storage.read_text("new.txt") == "out\n"

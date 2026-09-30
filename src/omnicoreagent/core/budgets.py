@@ -868,6 +868,10 @@ class RunBudgets:
             "meter": limit.meter,
             "window": limit.window,
             "limit": limit.limit,
+            # What people granted before, apart from the limit, as
+            # budget_status shows it (the 0.5.0rc5 gate: the docs said the
+            # limit included it, and nothing on the request said it).
+            "granted": float((await self.ledger.granted(key)).get(limit.meter, 0.0)),
             "used": exhausted.used + exhausted.reserved,
             "needed": exhausted.requested,
             "shortfall": exhausted.shortfall,
@@ -878,7 +882,7 @@ class RunBudgets:
 
         run = current_run()
         if run is not None:
-            await run.add_budget_request(request)
+            request = await run.add_budget_request(request)
         return RunAwaitingBudget(request)
 
     async def _record_exhausted(
