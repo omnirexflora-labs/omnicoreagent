@@ -198,7 +198,8 @@ text_delta (x7) model_response memory_write final_answer complete session
 - Check `status` on `complete` before treating the run as a success
   (it can be `error`, `awaiting_approval` or `awaiting_budget`).
 - A failure arrives as `event: error` with `error`, `session_id` and `run_id`.
-- Closing the connection cancels the run.
+- Closing the connection cancels the run, whatever the request timeout
+  ([below](#the-request-timeout)).
 
 ## Look at a run afterwards
 
@@ -435,7 +436,9 @@ curl -s localhost:8773/background/runs/$RUN_ID/workspace
 ```
 
 The run's events were `background_run_queued`, `background_run_claimed`,
-`background_run_started`, `background_run_completed`, and its workspace held
+`background_run_started`, `background_run_completed`; while a run is running
+it also records a `background_run_heartbeat` at intervals (a longer run has
+several). Its workspace held
 `run.json` and `events.jsonl`.
 
 Under governance the agent's policy also decides what an operator asks here:
@@ -783,7 +786,8 @@ docker build -t omnicoreagent-serve .
 docker run -p 8000:8000 -e LLM_API_KEY omnicoreagent-serve
 ```
 
-It also writes a `.dockerignore` next to your agent, if there is none, that
+It also writes a `.dockerignore` in the directory you run it from (the build
+context), if there is none, that
 keeps `.env` and the workspace out of the image (the image copies the build
 context); an existing one that does not exclude `.env` is named. The
 generated Dockerfile installs `omnicoreagent[serve]`, pinned to the
@@ -794,7 +798,8 @@ with the container unless you mount a volume). Its `HEALTHCHECK` allows a
 start period of 10 seconds (`--start-period=10s`); a slow host may need
 longer before `/health` first answers, so raise it in the Dockerfile or with
 `docker run --health-start-period=60s`. Add the extras your agent
-needs (`[serve,postgres]` for a SQL memory store). A persistent volume, a
+needs (`[serve,postgres]` for a SQL memory store): a comment above the
+install line in the Dockerfile says so. A persistent volume, a
 store for runs and readiness checks are on
 [Running the agent in a container](/docs/how-to-guides/agent-in-a-container).
 
@@ -816,11 +821,12 @@ store for runs and readiness checks are on
     the policy does not allow:
 
     ```text
-    {"error":"UnknownCapabilityError","detail":"Denied by strict policy: no rule matches this background.task.delete request."}
+    {"error":"UnknownCapabilityError","detail":"Denied by strict policy: no rule matches this background.task.delete request.","capability":"background.task.delete","reason_code":"unknown_capability","matched_rule_ids":[]}
     ```
 
-    Add an allow rule for the capability named (`background.task.delete`),
-    for the operators you trust.
+    The body names the refused `capability`, the `reason_code` and the
+    `matched_rule_ids` (none here: no rule matched). Add an allow rule for
+    that capability (`background.task.delete`), for the operators you trust.
 
     An `ask` nobody can answer inside the request is refused the same way,
     and the body names the capability and the rule. Under `interactive-dev`,
