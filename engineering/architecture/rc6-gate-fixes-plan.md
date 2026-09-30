@@ -13,3 +13,8 @@ others. Each unit is test-first and one commit.
   file: checked on the folder searched only, grep returned the contents of a
   file a read rule protected, and glob and ls its name (area D).
 
+- W3 (blocker, security) A redirect after a list, pipeline or group applies
+  to the commands it reaches: carried onto single commands only, it was
+  dropped, so the approver read `echo k` for `echo k >> ~/.ssh/authorized_keys`
+  and a read-only allow rule let the write through (area B).
+
