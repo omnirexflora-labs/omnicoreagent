@@ -1,5 +1,6 @@
 """Per-app OmniServe HTTP request metrics."""
 
+import re
 import time
 from typing import TYPE_CHECKING, Callable
 
@@ -106,8 +107,13 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             else:
                 self.metrics.inc_counter("omniserve_requests_success")
 
-            path = request.url.path.replace("/", "_").strip("_") or "root"
-            self.metrics.inc_counter(f"omniserve_requests_{path}_total")
+            # Named for the route, not the path: /prometheus needs no token,
+            # and a counter per path showed the run and session ids other
+            # callers used, and grew by one for every path tried (the rc7
+            # security review).
+            route = getattr(request.scope.get("route"), "path", None)
+            name = re.sub(r"[^a-zA-Z0-9]+", "_", route).strip("_") if route else "unmatched"
+            self.metrics.inc_counter(f"omniserve_requests_{name or 'root'}_total")
 
 
 def add_prometheus_endpoint(app: FastAPI) -> None:

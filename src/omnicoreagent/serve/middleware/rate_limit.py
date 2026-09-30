@@ -58,8 +58,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         max_requests: int,
         window_seconds: int,
         exempt_paths: set[str],
+        trusted_proxies: list[str] | None = None,
     ):
         super().__init__(app)
+        self.trusted_proxies = set(trusted_proxies or ())
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.exempt_paths = exempt_paths
@@ -111,18 +113,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return response
 
     def _get_client_ip(self, request: Request) -> str:
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
-
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return real_ip
-
-        if request.client:
-            return request.client.host
-
-        return "unknown"
+        """The address the request came from. X-Forwarded-For is taken only
+        from a trusted proxy, and then its last hop that is not one: any
+        client can send the header, and rotating it never tripped the limit
+        (the rc7 security review)."""
+        peer = request.client.host if request.client else "unknown"
+        if peer not in self.trusted_proxies:
+            return peer
+        hops = [h.strip() for h in request.headers.get("X-Forwarded-For", "").split(",") if h.strip()]
+        for hop in reversed(hops):
+            if hop not in self.trusted_proxies:
+                return hop
+        return request.headers.get("X-Real-IP") or peer
 
 
 def add_rate_limit_middleware(app: FastAPI, config: OmniServeConfig) -> None:
@@ -135,6 +137,7 @@ def add_rate_limit_middleware(app: FastAPI, config: OmniServeConfig) -> None:
         max_requests=config.rate_limit_requests,
         window_seconds=config.rate_limit_window,
         exempt_paths=public_paths(config),
+        trusted_proxies=config.trusted_proxies,
     )
     logger.info(
         f"OmniServe: Rate limiting enabled - "
