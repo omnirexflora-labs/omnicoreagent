@@ -259,6 +259,7 @@ class BackgroundAgentManager:
                 self.governance_engine,
                 surface=f"background task {existing.task_id}",
                 required=True,
+                capability="background.task.update",
             )
         data = existing.model_dump(mode="python")
         data.update(patch)
@@ -366,6 +367,7 @@ class BackgroundAgentManager:
                 self.governance_engine,
                 surface=f"background task {task.task_id}",
                 required=True,
+                capability="background.task.resume",
             )
             await self.governance_engine.authorize(
                 background_task_authority_request(task=task, action="resume")
@@ -395,6 +397,7 @@ class BackgroundAgentManager:
                 self.governance_engine,
                 surface=f"background task {task.task_id}",
                 required=True,
+                capability="background.run.start",
             )
         run = build_run(task, TriggerType.MANUAL, query or task.query)
         if self.governance_engine is not None:

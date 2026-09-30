@@ -154,6 +154,7 @@ class BackgroundScheduleDispatcher:
             self.governance_engine,
             surface=f"background task {task.task_id}",
             required=True,
+            capability="background.run.start",
         )
         await self.governance_engine.authorize(
             background_run_authority_request(

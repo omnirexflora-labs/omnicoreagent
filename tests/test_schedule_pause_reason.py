@@ -89,3 +89,24 @@ async def test_registering_a_paused_task_again_binds_it_to_the_current_policy():
 
     current = policy_snapshot_from_engine(manager.governance_engine)
     assert task.metadata[POLICY_SNAPSHOT_METADATA_KEY]["policy_hash"] == current["policy_hash"]
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_refusal_names_its_capability():
+    # The 0.5.0rc5 gate: OmniServe's 403 for this refusal said capability null.
+    from omnicoreagent.governance.errors import PolicyDeniedError
+
+    manager = BackgroundAgentManager(
+        task_store=InMemoryTaskStore(),
+        governance_engine=GovernanceEngine(_background_governance_policy(name="first-policy")),
+    )
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    await manager.register_task(task_id="t", agent_id="agent", query="q", schedule={"type": "manual"})
+    manager.governance_engine = GovernanceEngine(_background_governance_policy(name="changed-policy"))
+
+    with pytest.raises(PolicyDeniedError) as refused:
+        await manager.run_now("t")
+    assert refused.value.metadata["capability"] == "background.run.start"
+    with pytest.raises(PolicyDeniedError) as refused:
+        await manager.resume_task("t")
+    assert refused.value.metadata["capability"] == "background.task.resume"
