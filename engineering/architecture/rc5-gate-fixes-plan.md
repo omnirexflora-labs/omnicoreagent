@@ -9,3 +9,9 @@ the BLOCKER and MUST-FIX findings. Each unit is test-first and one commit.
 - V1 (blocker) A model call the provider rejected reads `error` with its
   reason: the error event was not linked to its call, so the trajectory read
   `no_response`, "never made" (area E).
+- V2 (must fix; rc4's U12 did not hold) Closing an SSE stream cancels its
+  run through a real server: the server cancels the stream generator, and
+  that cancellation hit the first await of its cleanup, before the run was
+  cancelled. Every task is now cancelled synchronously first. Checked with a
+  real server test and live with a slow tool (area F).
+
