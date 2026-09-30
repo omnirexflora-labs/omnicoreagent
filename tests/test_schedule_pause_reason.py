@@ -63,3 +63,29 @@ async def test_resuming_a_schedule_clears_the_reason():
 
     state = await store.get_schedule_state("hourly")
     assert state.paused is False and state.paused_reason is None
+
+
+@pytest.mark.asyncio
+async def test_registering_a_paused_task_again_binds_it_to_the_current_policy():
+    # The 0.5.0rc5 gate: after one budget number changed, every scheduled task
+    # paused; registering it again with replace=True (what the docs say
+    # overwrites a task) was refused, 403 expired_policy, and the only way
+    # out was to delete it. The reason now says how to go on.
+    store = InMemoryTaskStore()
+    first = GovernanceEngine(_background_governance_policy(name="first-policy"))
+    manager = BackgroundAgentManager(task_store=store, governance_engine=first)
+    await manager.register_agent("agent", FakeAgent(response="complete"))
+    spec = dict(task_id="nightly", agent_id="agent", query="scheduled work",
+                schedule={"type": "once", "run_at": datetime.now(timezone.utc) - timedelta(seconds=1)})
+    await manager.register_task(**spec)
+    manager.governance_engine = GovernanceEngine(_background_governance_policy(name="changed-policy"))
+    with pytest.raises(Exception):
+        await manager._dispatch_due_schedules()
+    assert "replace" in (await store.get_schedule_state("nightly")).paused_reason
+
+    task = await manager.register_task(**spec, replace=True)
+
+    from omnicoreagent.governance.snapshots import POLICY_SNAPSHOT_METADATA_KEY, policy_snapshot_from_engine
+
+    current = policy_snapshot_from_engine(manager.governance_engine)
+    assert task.metadata[POLICY_SNAPSHOT_METADATA_KEY]["policy_hash"] == current["policy_hash"]

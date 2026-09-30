@@ -71,3 +71,9 @@ the BLOCKER and MUST-FIX findings. Each unit is test-first and one commit.
   the docs say `limit` is the configured limit: they said the limit included
   grants, which it did not (area B).
 
+- V16 A task a policy change paused is re-bound by registering it again with
+  `replace=True`, authorized under the current policy; replace demanded the
+  old snapshot and was refused, so deleting the task seemed the only way out.
+  The pause reason says how to go on (area F). This reverses an earlier test
+  that required the old snapshot on replace.
+

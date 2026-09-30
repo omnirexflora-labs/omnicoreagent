@@ -995,7 +995,13 @@ async def test_manager_fails_closed_when_governed_schedule_loses_engine():
 
 
 @pytest.mark.asyncio
-async def test_manager_replace_governed_task_validates_existing_snapshot():
+async def test_manager_replace_governed_task_authorizes_and_binds_the_replacement():
+    # Replacing is authorized under the current policy (background.task.update)
+    # and binds the task to it; the old task's snapshot does not decide. It
+    # used to be required, which refused the documented way to re-bind a task
+    # a policy change had paused (the 0.5.0rc5 gate).
+    from omnicoreagent.governance.snapshots import POLICY_SNAPSHOT_METADATA_KEY
+
     manager = BackgroundAgentManager(task_store="in_memory")
     await manager.register_agent("agent", FakeAgent(response="complete"))
     await manager.register_task(
@@ -1006,14 +1012,14 @@ async def test_manager_replace_governed_task_validates_existing_snapshot():
     )
     manager.governance_engine = GovernanceEngine(_background_governance_policy())
 
-    with pytest.raises(PolicyDeniedError, match="missing a required policy snapshot"):
-        await manager.register_task(
-            task_id="task",
-            agent_id="agent",
-            query="replacement",
-            schedule={"type": "manual"},
-            replace=True,
-        )
+    replaced = await manager.register_task(
+        task_id="task",
+        agent_id="agent",
+        query="replacement",
+        schedule={"type": "manual"},
+        replace=True,
+    )
+    assert POLICY_SNAPSHOT_METADATA_KEY in replaced.metadata
 
 
 @pytest.mark.asyncio
