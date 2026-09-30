@@ -480,3 +480,24 @@ async def test_a_sandbox_that_dies_is_reported_lost_and_the_next_command_gets_a_
         assert not lost.timed_out
         after = await _sh(scope, "echo fresh")
         assert after.exit_code == 0 and after.stdout.strip() == "fresh"
+
+
+async def test_a_link_out_of_the_workspace_is_skipped_not_fatal(tmp_path):
+    # The 0.5.0rc5 gate: a folder link pointing outside made every execute
+    # fail before its command ran ("resolved outside workspace namespace"),
+    # and a file link the command wrote turned its output into an error.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "target.txt").write_text("untouched")
+    files = tmp_path / "files"
+    storage = LocalWorkspaceStorage(files)
+    storage.write_text("real.txt", "hello")
+    (files / "ext").symlink_to(outside, target_is_directory=True)
+    (files / "linked.txt").symlink_to(outside / "target.txt")
+
+    async with _scope(storage).active() as scope:
+        result = await _sh(scope, "cat real.txt; echo changed > linked.txt; echo out > new.txt")
+
+    assert result.exit_code == 0 and "hello" in result.stdout
+    assert (outside / "target.txt").read_text() == "untouched"
+    assert storage.read_text("new.txt") == "out\n"

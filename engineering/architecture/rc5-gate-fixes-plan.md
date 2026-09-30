@@ -45,3 +45,7 @@ the BLOCKER and MUST-FIX findings. Each unit is test-first and one commit.
   command gets a fresh one, as execution.mdx says: it read as a timeout and
   every later command failed against the dead container (area D).
 
+- V10 A workspace link that leads out of the workspace is skipped, not fatal:
+  a folder link failed every execute before its command ran, and a file link
+  the command wrote turned its output into an error (area D).
+
