@@ -23,6 +23,7 @@ Requires the Docker SDK: ``pip install omnicoreagent[docker]``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import os
 import posixpath
@@ -260,9 +261,19 @@ class DockerSandboxRuntime(SandboxRuntime):
                 timed_out=True,
                 metadata={"session_terminated": True},
             )
+        except Exception as exc:
+            if await self._gone(container):
+                return await self._lost_result(session_id, container, exc)
+            raise
         finally:
             if stdin_path:
-                await asyncio.to_thread(container.exec_run, ["rm", "-f", stdin_path])
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread(container.exec_run, ["rm", "-f", stdin_path])
+        if exit_code in (137, None, -1) and await self._gone(container):
+            # Killed with its container, not by its limit: the sandbox is lost
+            # (the 0.5.0rc5 gate: it read as a timeout, and every later
+            # command failed against the dead container).
+            return await self._lost_result(session_id, container, None)
         stdout_bytes, stderr_bytes = output if output else (b"", b"")
         stdout, stdout_truncated = self._bounded(stdout_bytes or b"")
         stderr, stderr_truncated = self._bounded(stderr_bytes or b"")
@@ -356,6 +367,24 @@ class DockerSandboxRuntime(SandboxRuntime):
                     f"Sandbox image {image} is not present and pulling is disabled"
                 ) from None
             client.images.pull(image)
+
+    async def _gone(self, container) -> bool:
+        """Whether the container has stopped or no longer exists."""
+        try:
+            await asyncio.to_thread(container.reload)
+        except Exception:
+            return True
+        return getattr(container, "status", "running") != "running"
+
+    async def _lost_result(self, session_id: str, container, exc) -> SandboxExecResult:
+        ref = getattr(container, "short_id", None) or session_id
+        await self.terminate(session_id)
+        detail = f" ({exc})" if exc is not None else ""
+        return SandboxExecResult(
+            exit_code=137,
+            stderr=f"The sandbox {ref} no longer exists; the command did not finish{detail}",
+            metadata={"session_terminated": True, "session_lost": True},
+        )
 
     def _container(self, session_id: str):
         container = self._containers.get(session_id)

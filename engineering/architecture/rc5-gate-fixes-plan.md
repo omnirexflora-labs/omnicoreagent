@@ -41,3 +41,7 @@ the BLOCKER and MUST-FIX findings. Each unit is test-first and one commit.
   `workspace` in every folder (`**/`): an agent in a subfolder had its
   `.env` baked into the image. Confirmed with a real build (area D).
 
+- V9 A Docker sandbox that dies mid-command is reported lost and the next
+  command gets a fresh one, as execution.mdx says: it read as a timeout and
+  every later command failed against the dead container (area D).
+
