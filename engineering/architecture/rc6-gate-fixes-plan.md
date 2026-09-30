@@ -30,3 +30,12 @@ others. Each unit is test-first and one commit.
   the default grant allowed twice what was meant (area C; a regression from
   rc5's V4).
 
+- W7 After a client hangs up, the request trace ends too: its finish ran
+  inside the stream's cancelled scope, where every await is interrupted, and a
+  stream paused at a yield never ran its cleanup at all. The disconnect
+  watcher is its own task and ends the trace; the stream hands the finish to
+  a task of its own. Verified live with the tester's reproduction (CLI,
+  timeout off, real model; async tool, sync tool, mid-answer): both traces end
+  cancelled. The real-server test covers the run and traces, but did not
+  reproduce this failure on its own (area A).
+

@@ -301,6 +301,7 @@ async def run_agent_stream(
     run_task: asyncio.Task[Any] | None = None
     next_event_task: asyncio.Task[Any] | None = None
     gone_task: asyncio.Task[Any] | None = None
+    closer: _TraceCloser | None = None
     seen = _SeenEvents()
     run_id = f"run_{uuid4().hex}"
     serve_trace = None
@@ -315,6 +316,7 @@ async def run_agent_stream(
             query=query,
             streaming=True,
         )
+        closer = _TraceCloser(serve_trace)
         cursor = await _get_telemetry_stream_cursor(agent, session_id, run_id)
         pump_task = asyncio.create_task(
             _pump_session_events(agent, session_id, event_queue, cursor, run_id)
@@ -326,7 +328,21 @@ async def run_agent_stream(
         )
 
         if is_disconnected is not None:
-            gone_task = asyncio.create_task(_until_disconnected(is_disconnected))
+            # Its own task, not the stream's: a stream paused at a `yield`
+            # when the client left was never resumed, so nothing inside it
+            # ran and the request trace stayed running (the 0.5.0rc6 gate).
+            async def when_gone() -> None:
+                await _until_disconnected(is_disconnected)
+                logger.info(f"OmniServe SSE: client left; cancelling run {run_id}")
+                for task in (run_task, pump_task):
+                    if not task.done():
+                        task.cancel()
+                await closer.close(
+                    status="cancelled",
+                    error={"type": "CancelledError", "message": "SSE client disconnected"},
+                )
+
+            gone_task = _spawn(when_gone())
 
         while True:
             if next_event_task is None:
@@ -337,8 +353,7 @@ async def run_agent_stream(
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if gone_task is not None and gone_task in done:
-                logger.info(f"OmniServe SSE: client left; cancelling run {run_id}")
-                return  # the finally below cancels the run and ends its trace
+                return  # the watcher cancelled the run and ended its trace
 
             if run_task in done:
                 response = await run_task
@@ -420,6 +435,7 @@ async def run_agent_stream(
                     },
                 )
                 serve_trace = None
+                closer.done = True
                 yield format_sse_event(
                     "complete",
                     complete_payload,
@@ -447,6 +463,8 @@ async def run_agent_stream(
             error={"type": "TimeoutError", "message": "Request timed out"},
         )
         serve_trace = None
+        if closer is not None:
+            closer.done = True
         yield format_sse_event(
             "error",
             {
@@ -464,6 +482,8 @@ async def run_agent_stream(
             error={"type": e.__class__.__name__, "message": str(e)},
         )
         serve_trace = None
+        if closer is not None:
+            closer.done = True
         yield format_sse_event(
             "error",
             {
@@ -477,17 +497,20 @@ async def run_agent_stream(
         # cancels this generator, and that cancellation hits the first await
         # below; the run cancelled after it never was, and carried on to the
         # end (the 0.5.0rc5 gate).
-        for task in (run_task, pump_task, next_event_task, gone_task):
+        for task in (run_task, pump_task, next_event_task):
             if task is not None and not task.done():
                 task.cancel()
-        closed = False
-        cleanups = [_cancel_task(t) for t in (next_event_task, run_task, pump_task, gone_task)]
-        if serve_trace is not None:
-            cleanups.insert(0, finish_serve_trace(
-                serve_trace,
+        if gone_task is not None and not gone_task.done() and (closer is None or not closer.done):
+            gone_task.cancel()  # still only waiting for the client
+        if closer is not None and serve_trace is not None and not closer.done:
+            # In its own task: inside the stream's cancelled scope every await
+            # is interrupted, and the finish never ran (the 0.5.0rc6 gate).
+            _spawn(closer.close(
                 status="cancelled",
                 error={"type": "CancelledError", "message": "SSE stream closed"},
             ))
+        closed = False
+        cleanups = [_cancel_task(t) for t in (next_event_task, run_task, pump_task)]
         for cleanup in cleanups:
             try:
                 await cleanup
@@ -501,6 +524,36 @@ async def run_agent_stream(
             raise asyncio.CancelledError
 
     yield format_sse_event("session", {"session_id": session_id, "status": "ended"})
+
+
+class _TraceCloser:
+    """Ends a request's trace once, whoever gets there first: the stream,
+    or the watcher when the client leaves."""
+
+    def __init__(self, trace: Any) -> None:
+        self.trace = trace
+        self.done = trace is None
+
+    async def close(self, **outcome: Any) -> None:
+        if self.done:
+            return
+        self.done = True
+        try:
+            await finish_serve_trace(self.trace, **outcome)
+        except Exception as exc:
+            logger.debug(f"OmniServe SSE: could not end the request trace: {exc}")
+
+
+# Tasks that must outlive the stream that started them (a strong reference,
+# so they are not collected before they finish).
+_DETACHED: set[asyncio.Task[Any]] = set()
+
+
+def _spawn(coroutine: Any) -> asyncio.Task[Any]:
+    task = asyncio.create_task(coroutine)
+    _DETACHED.add(task)
+    task.add_done_callback(_DETACHED.discard)
+    return task
 
 
 async def _until_disconnected(is_disconnected: Callable[[], Awaitable[bool]]) -> None:
