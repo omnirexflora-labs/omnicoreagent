@@ -481,7 +481,8 @@ separately.
 | `payload_retention_days` | `7` | Offloaded payloads older than this, except any a kept trace still refers to. |
 
 `None` keeps everything. Retention runs once per agent, when it starts its
-first run. To run it now, and see what it did:
+first run, and also when a process first reads its traces (such as a first
+`get_run_trajectory`). To run it now, and see what it did:
 
 ```python
 import asyncio
