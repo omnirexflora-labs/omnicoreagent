@@ -228,6 +228,14 @@ When you have completed the task:
             debug=self.debug,
         )
 
+        # The worker spends the lead's budgets: one ledger for the lead and
+        # its workers. It built its own from a copy of the lead's policy, keyed
+        # on its own run, session and name, so three workers made nine model
+        # calls under a lead limit of four (the rc7 security review).
+        from omnicoreagent.core.budgets import WorkerBudgets, current_budgets
+
+        lead_budgets = current_budgets()
+        agent._lead_budgets = WorkerBudgets(lead_budgets) if lead_budgets is not None else None
         self._active_subagents[name] = agent
         return agent
 

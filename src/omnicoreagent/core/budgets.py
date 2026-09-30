@@ -914,6 +914,25 @@ class RunBudgets:
             logger.debug(f"Could not record {event}")
 
 
+class WorkerBudgets:
+    """The lead's budgets as a spawned worker spends them: every charge lands
+    on the lead's counters, but the worker's run ending is not the lead's.
+    Settling deleted the lead's request counter each time a worker finished,
+    and releasing stale holds would free the lead's live ones."""
+
+    def __init__(self, lead: RunBudgets) -> None:
+        self._lead = lead
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._lead, name)
+
+    async def settle(self) -> dict[str, dict[str, float]]:
+        return await self._lead.spent()
+
+    async def release_stale(self) -> int:
+        return 0
+
+
 _CURRENT_BUDGETS: ContextVar[RunBudgets | None] = ContextVar(
     "omnicoreagent_run_budgets", default=None
 )
