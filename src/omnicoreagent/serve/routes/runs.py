@@ -23,7 +23,7 @@ from ..models import (
     SteerRequest,
 )
 from ..serialization import normalize_run_result
-from ..sse import run_agent_stream
+from ..sse import _public_error, run_agent_stream
 from ..state import get_agent, get_agent_name, get_config, resolve_session_id
 from ..telemetry import build_run_kwargs, finish_serve_trace, start_serve_trace
 
@@ -157,17 +157,13 @@ def create_runs_router() -> APIRouter:
                 },
             )
         except Exception as exc:
-            logger.error(f"OmniServe: Run error - {exc}")
+            logger.error(f"OmniServe: Run error - {_public_error(agent, exc)}")
             await finish_serve_trace(
                 serve_trace,
                 status=TraceStatus.FAILED,
                 error={"type": exc.__class__.__name__, "message": str(exc)},
             )
-            message = str(exc)
-            privacy_filter = getattr(agent, "privacy_filter", None)
-            if privacy_filter is not None:
-                message = privacy_filter.redact_text(message, boundary="public")
-            raise HTTPException(status_code=500, detail=message)
+            raise HTTPException(status_code=500, detail=_public_error(agent, exc))
 
     @router.get(
         "/runs",

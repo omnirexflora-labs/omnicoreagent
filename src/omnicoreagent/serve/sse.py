@@ -85,8 +85,11 @@ def _cursor_value(value: Any) -> int | None:
 
 
 def _public_error(agent: AgentType, error: BaseException) -> str:
-    """Keep exception text behind the same public privacy boundary as results."""
-    message = str(error)
+    """Keep exception text behind the same public privacy boundary as results,
+    with the runtime's credentials taken out."""
+    from omnicoreagent.core.credentials import scrub_credentials
+
+    message = scrub_credentials(str(error))
     privacy_filter = getattr(agent, "privacy_filter", None)
     if privacy_filter is not None:
         return privacy_filter.redact_text(message, boundary="public")

@@ -71,3 +71,42 @@ def test_open_cors_never_sends_credentials():
     client = TestClient(OmniServe(agent=_agent(), config=explicit).app)
     response = client.get("/health", headers={"Origin": "https://app.example"})
     assert response.headers.get("access-control-allow-credentials") == "true"
+
+
+def test_an_error_body_never_carries_a_registered_credential():
+    # The rc7 security review (S4-E): the error middleware returned str(exc)
+    # as it was, so a key in an exception's message reached the caller.
+    from omnicoreagent.core import credentials
+    from omnicoreagent.core.privacy import PrivacyFilter
+    from omnicoreagent.serve.app_factory import create_omniserve_app
+
+    secret = "sk-proj-LEAKED0000SECRET0000KEY0000"
+    credentials.register_credential(secret)
+
+    class Failing:
+        name = "a"
+        privacy_filter = PrivacyFilter()
+
+        def generate_session_id(self):
+            return "s"
+
+        async def get_metrics(self):
+            raise RuntimeError(f"connect failed with key {secret}")
+
+        async def run(self, *args, **kwargs):
+            raise RuntimeError(f"model refused key {secret}")
+
+    app = create_omniserve_app(
+        agent=Failing(), config=OmniServeConfig(background_enabled=False), title="t", description="t"
+    )
+    client = TestClient(app, raise_server_exceptions=False)
+    assert secret not in client.get("/metrics").text
+    assert secret not in client.post("/run/sync", json={"query": "q"}).text
+
+
+def test_the_token_is_compared_in_constant_time():
+    import inspect
+
+    from omnicoreagent.serve.middleware import auth
+
+    assert "compare_digest" in inspect.getsource(auth)
