@@ -15,3 +15,12 @@ the BLOCKER and MUST-FIX findings. Each unit is test-first and one commit.
   cancelled. Every task is now cancelled synchronously first. Checked with a
   real server test and live with a slow tool (area F).
 
+- V3 (blocker) A budget pause in a turn of parallel calls keeps the calls
+  that ran, and a call refused before its tool ran is recorded `not_run` and
+  runs on resume; raised at once, the pause cancelled the other calls and
+  dropped the results of those that ran, and the refused call read as an
+  unknown outcome that never ran (area B).
+- V4 Two refusals of one budget in a turn make one request whose shortfall
+  adds up, so one grant covers them; each made its own, and the documented
+  grant-then-resume failed (area B).
+

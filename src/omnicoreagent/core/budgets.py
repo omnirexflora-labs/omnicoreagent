@@ -878,7 +878,7 @@ class RunBudgets:
 
         run = current_run()
         if run is not None:
-            await run.add_budget_request(request)
+            request = await run.add_budget_request(request)
         return RunAwaitingBudget(request)
 
     async def _record_exhausted(

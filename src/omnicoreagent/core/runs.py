@@ -411,10 +411,31 @@ class RunTracker:
                     approval.update(fields)
             await self._save()
 
-    async def add_budget_request(self, request: dict[str, Any]) -> None:
+    async def add_budget_request(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Ask a person for more budget. A second refusal of the same budget
+        and meter while one waits adds to it: two refused calls of one turn
+        made two requests, and one grant did not cover them (the 0.5.0rc5
+        gate). Returns the request the run waits on."""
         async with self._lock:
-            self.record.setdefault("budget_requests", []).append(dict(request))
+            requests = self.record.setdefault("budget_requests", [])
+            waiting = next(
+                (
+                    r
+                    for r in requests
+                    if r.get("status") == "pending"
+                    and r.get("key") == request.get("key")
+                    and r.get("meter") == request.get("meter")
+                ),
+                None,
+            )
+            if waiting is None:
+                waiting = dict(request)
+                requests.append(waiting)
+            else:
+                for field in ("needed", "shortfall"):
+                    waiting[field] = (waiting.get(field) or 0) + (request.get(field) or 0)
             await self._save()
+            return dict(waiting)
 
     async def reload(self) -> None:
         """Take the stored record as current (after someone else changed it)."""
