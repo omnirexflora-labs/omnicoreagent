@@ -2004,7 +2004,11 @@ def test_the_generated_image_installs_the_release_that_generated_it(monkeypatch)
     from omnicoreagent.serve import cli as serve_cli
 
     monkeypatch.setattr(serve_cli, "_package_version", lambda: "0.5.0")
-    assert '"omnicoreagent[serve]==0.5.0"' in serve_cli._build_dockerfile_content("/app/a.py")
+    content = serve_cli._build_dockerfile_content("/app/a.py")
+    assert '"omnicoreagent[serve]==0.5.0"' in content
+    # An agent on SQL memory needs [serve,postgres]: said where it is edited
+    # (the 0.5.0rc4 gate: the image failed at import).
+    assert "extras your agent uses" in content
     # A development build is not on the index: unpinned, and said so.
     monkeypatch.setattr(serve_cli, "_package_version", lambda: "0.5.1.dev3+g1234")
     content = serve_cli._build_dockerfile_content("/app/a.py")
