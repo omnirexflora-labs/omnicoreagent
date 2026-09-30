@@ -445,3 +445,8 @@ async def test_the_trajectory_has_the_run_shape_when_the_run_has_no_record(tmp_p
     assert [s["trace_id"] for s in story["segments"]] == outcome.trace_ids
     assert story["segments"][0]["trajectory"]["trace_id"] == outcome.trace_ids[0]
     assert "totals" in story
+    # Every key a whole run's story has, so the docs' read_run.py reads it
+    # (the 0.5.0rc6 gate: KeyError 'approvals').
+    for key in ("approvals", "tool_calls", "usage", "session_id", "agent_name",
+                "attempt", "previous_attempts", "traces_missing"):
+        assert key in story, key

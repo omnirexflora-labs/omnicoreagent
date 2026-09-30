@@ -39,3 +39,7 @@ others. Each unit is test-first and one commit.
   cancelled. The real-server test covers the run and traces, but did not
   reproduce this failure on its own (area A).
 
+- W8 The no-record headless trajectory carries every key a run's story has
+  (approvals, tool_calls, usage, ...), empty: rc5's V7 gave it segments only
+  and the docs' read_run.py still failed (area E).
+

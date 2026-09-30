@@ -435,7 +435,17 @@ async def _execute_headless(agent: Any, request: HeadlessRequest) -> HeadlessOut
                 outcome.trace_ids = [segment["trace_id"]]
                 trajectory = {
                     "run_id": run_id,
+                    "session_id": segment.get("session_id") or outcome.session_id,
+                    "agent_name": (segment.get("harness") or {}).get("agent"),
                     "status": segment.get("status"),
+                    # Nothing was recorded for the run itself: empty, not
+                    # missing (the 0.5.0rc6 gate: KeyError 'approvals').
+                    "attempt": 1,
+                    "previous_attempts": [],
+                    "approvals": [],
+                    "tool_calls": [],
+                    "usage": {},
+                    "traces_missing": 0,
                     "segments": [
                         {
                             "trace_id": segment["trace_id"],
