@@ -163,6 +163,7 @@ class BaseReactAgent:
         self.sandbox_execution = _sandbox_execution(self.governance_engine)
         self.tool_runtime_registry = ToolRuntimeRegistry(
             register_internal_tool=self.register_internal_tool,
+            governance_engine=self.governance_engine,
             tool_offloader=self.tool_offloader,
             sandbox_execution=self.sandbox_execution,
             tool_call_timeout=tool_call_timeout,

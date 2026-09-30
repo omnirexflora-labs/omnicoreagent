@@ -9,3 +9,7 @@ others. Each unit is test-first and one commit.
 - W1 (blocker) An absolute path outside the workspace is refused, as the docs
   say: taken as relative, /tmp/x was written to <root>/tmp/x and the record
   named /tmp/x. "/" alone and "/files/..." still mean the workspace (area E).
+- W2 (blocker, security) grep, glob and ls consult the read policy for each
+  file: checked on the folder searched only, grep returned the contents of a
+  file a read rule protected, and glob and ls its name (area D).
+

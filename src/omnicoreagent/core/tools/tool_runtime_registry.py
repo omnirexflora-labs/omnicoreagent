@@ -18,6 +18,7 @@ def build_tool_registry_workspace_files(
     workspace: Workspace | None = None,
     workspace_config: WorkspaceConfig | dict | None = None,
     privacy_filter: PrivacyFilter | None = None,
+    readable: Any = None,
 ):
     from omnicoreagent.core.workspace.tools import (
         build_tool_registry_workspace_files as build_workspace_files_tool,
@@ -29,6 +30,7 @@ def build_tool_registry_workspace_files(
         workspace=workspace,
         workspace_config=workspace_config,
         privacy_filter=privacy_filter,
+        readable=readable,
     )
 
 
@@ -79,6 +81,7 @@ class ToolRuntimeRegistry:
         tool_call_timeout: int = 60,
         skill_script_env: list[str] | None = None,
         code_mode: Any = None,
+        governance_engine: Any = None,
     ):
         self.register_internal_tool = register_internal_tool
         self.tool_offloader = tool_offloader
@@ -94,6 +97,7 @@ class ToolRuntimeRegistry:
         self.tool_call_timeout = tool_call_timeout
         self.skill_script_env = list(skill_script_env or [])
         self.code_mode = code_mode
+        self.governance_engine = governance_engine
 
     def _workspace_for_runtime_tools(self) -> Workspace:
         if self.workspace is None:
@@ -134,6 +138,7 @@ class ToolRuntimeRegistry:
                 workspace=self._workspace_for_runtime_tools(),
                 workspace_config=self.workspace_config,
                 privacy_filter=self.privacy_filter,
+                readable=self._readable if self.governance_engine is not None else None,
             )
 
         if self.tool_offloader.config.enabled:
@@ -175,3 +180,23 @@ class ToolRuntimeRegistry:
             build_code_mode_tool(registry, config=self.code_mode, functions=signatures)
 
         return registry
+
+    def _readable(self, path: str) -> bool:
+        """Whether the policy lets the agent read this workspace file, as
+        read_file would ask. grep, glob and ls consult it for each file: they
+        were checked on the folder searched only, and grep returned a file a
+        read rule protected (the 0.5.0rc6 gate)."""
+        from omnicoreagent.governance.capabilities import tool_authority_requests
+        from omnicoreagent.governance.models import PolicyEffect
+
+        engine = self.governance_engine
+        try:
+            requests = tool_authority_requests(
+                tool_name="read_file", tool_args={"path": path}, tool_provider="workspace"
+            )
+            return all(
+                engine.evaluator.evaluate(engine.policy, request).effect == PolicyEffect.ALLOW
+                for request in requests
+            )
+        except Exception:
+            return False  # a policy that cannot say is treated as refusing
