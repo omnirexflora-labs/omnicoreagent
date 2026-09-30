@@ -43,3 +43,7 @@ others. Each unit is test-first and one commit.
   (approvals, tool_calls, usage, ...), empty: rc5's V7 gave it segments only
   and the docs' read_run.py still failed (area E).
 
+- W9 A run stopped by its deadline (or cancelled) keeps the usage it spent,
+  on its record and in the headless result: they said null though the model
+  calls were made and paid for (area E).
+

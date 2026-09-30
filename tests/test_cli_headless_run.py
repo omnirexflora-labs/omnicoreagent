@@ -450,3 +450,18 @@ async def test_the_trajectory_has_the_run_shape_when_the_run_has_no_record(tmp_p
     for key in ("approvals", "tool_calls", "usage", "session_id", "agent_name",
                 "attempt", "previous_attempts", "traces_missing"):
         assert key in story, key
+
+
+@pytest.mark.asyncio
+async def test_a_run_its_deadline_stopped_keeps_the_usage_it_spent(tmp_path):
+    # The 0.5.0rc6 gate: a run stopped by --timeout had made and paid for its
+    # model calls, yet result.json said usage null and the run record, which
+    # outlives the traces, said nothing was used.
+    agent = await _agent(RecordingModel(SEND, "sent"), tmp_path / "ledger", ask=False, slow=5)
+
+    outcome = await execute_headless(agent, HeadlessRequest(instruction="send", timeout=2))
+
+    assert outcome.status == "timeout"
+    record = await agent.get_run(outcome.run_id)
+    assert (record["usage"] or {}).get("requests", 0) >= 1, record["usage"]
+    assert outcome.usage and outcome.usage.get("requests", 0) >= 1, outcome.usage

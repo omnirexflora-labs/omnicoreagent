@@ -780,6 +780,13 @@ class BaseReactAgent:
                         )
                     raise
                 except BaseException as exc:
+                    # What the run spent so far goes with it: a run a deadline
+                    # stopped recorded no usage for calls it had paid for (the
+                    # 0.5.0rc6 gate).
+                    try:
+                        exc.usage = run_usage
+                    except Exception:
+                        pass
                     if telemetry_recorder is not None and step_span is not None:
                         await telemetry_recorder.end_span(
                             step_span.span_id,
