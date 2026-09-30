@@ -658,7 +658,9 @@ deleted but not run: at its next due time its schedule is paused, and
 `get_task_status` shows why in `schedule_state.paused_reason`. Any change to
 the policy counts, a budget number included. Register the task again with
 `replace=True` (over HTTP, `POST /background/tasks` with `"replace": true`):
-the new policy decides whether it may, and binds it to that policy.
+the new policy decides whether it may (it needs `background.task.update`),
+binds it to that policy, and its schedule runs again. A task a person paused
+stays paused.
 
 ## Over HTTP
 

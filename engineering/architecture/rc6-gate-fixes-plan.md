@@ -21,3 +21,7 @@ others. Each unit is test-first and one commit.
 - W4 A misspelt `exclude_capability` value is refused: it excluded nothing,
   so `*` minus `proces.exec` allowed process.exec (area B).
 
+- W5 Re-registering a task a policy change paused clears that pause, so its
+  schedule runs again; a pause a person made stays. V16 re-bound the task but
+  left the schedule paused for good (areas A and C).
+

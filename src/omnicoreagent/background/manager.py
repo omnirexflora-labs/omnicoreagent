@@ -243,6 +243,13 @@ class BackgroundAgentManager:
                 }
             )
         await self.task_store.save_task(task)
+        if existing is not None:
+            state = await self.task_store.get_schedule_state(task.task_id)
+            if state is not None and state.paused and "policy snapshot" in (state.paused_reason or ""):
+                # Bound to the current policy now, so the pause the old one
+                # caused ends; one a person made stays (the 0.5.0rc6 gate:
+                # the re-bound schedule stayed paused for good).
+                await self.task_store.set_schedule_paused(task.task_id, False)
         return task
 
     async def update_task(
