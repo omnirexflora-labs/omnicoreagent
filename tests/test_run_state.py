@@ -455,3 +455,18 @@ async def test_every_store_deletes_only_finished_runs_started_before_a_time(back
     assert await store.get_run_state(f"new_done_{tag}") is not None
     listed = {r["run_id"] for r in await store.list_run_states(session_id=f"s_{tag}")}
     assert listed == {f"old_waiting_{tag}", f"new_done_{tag}"}, "gone from the listings too"
+
+
+@pytest.mark.asyncio
+async def test_a_run_read_from_python_has_the_same_keys_as_over_http():
+    # The 0.5.0rc4 gate: get_run and list_runs left out budget_requests and
+    # outcomes when a run had none, while HTTP returned []; a reader written
+    # against one crashed with KeyError on the other.
+    seen: list = []
+    agent = await _agent(ScriptedModel("done"), _tools(seen))
+    result = await agent.run("go", session_id="shape")
+
+    run = await agent.get_run(result["run_id"])
+    (listed,) = await agent.list_runs(session_id="shape")
+    for record in (run, listed):
+        assert record["budget_requests"] == [] and record["outcomes"] == []

@@ -41,3 +41,6 @@ and published only when a gate finds nothing to fix.
   one line per command; joined with spaces, a quoted argument read as
   several, and a quoted newline looked like a second command (area B).
 
+- U10 `get_run` and `list_runs` always carry `budget_requests` and
+  `outcomes`, as HTTP does; a run with none read without the keys (area F).
+

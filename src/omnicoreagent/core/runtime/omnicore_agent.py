@@ -2793,6 +2793,10 @@ def _with_approval_arguments(record: Dict[str, Any]) -> Dict[str, Any]:
     approver in another process has only this record, not the run's result."""
     return {
         **record,
+        # Always present, as over HTTP: a run with none read without the key
+        # and a reader crashed on it (the 0.5.0rc4 gate).
+        "budget_requests": list(record.get("budget_requests") or []),
+        "outcomes": list(record.get("outcomes") or []),
         "approvals": [
             {**approval, "arguments": _public_approval(approval, record)["arguments"]}
             for approval in record.get("approvals") or []
