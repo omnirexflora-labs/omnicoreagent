@@ -44,3 +44,6 @@ and published only when a gate finds nothing to fix.
 - U10 `get_run` and `list_runs` always carry `budget_requests` and
   `outcomes`, as HTTP does; a run with none read without the keys (area F).
 
+- U11 An MCP connect timeout names `connect_timeout`: a server importing
+  slowly on a busy host failed at the 30 s default with no pointer (area F).
+

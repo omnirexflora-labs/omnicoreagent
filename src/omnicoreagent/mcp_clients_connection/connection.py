@@ -62,7 +62,8 @@ class ServerConnection:
             self._opened.cancel()
             await self._abandon()
             raise MCPConnectionError(
-                f"Connecting to MCP server '{self.name}' timed out after {timeout:g}s"
+                f"Connecting to MCP server '{self.name}' timed out after {timeout:g}s; "
+                "a server that starts slowly needs a larger connect_timeout in its config"
             ) from None
         except asyncio.CancelledError:
             self._opened.cancel()
