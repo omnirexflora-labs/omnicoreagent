@@ -769,7 +769,9 @@ SQL needs `omnicoreagent[postgres]` (SQLAlchemy, for SQLite too), Redis
   and closes the stream.
 - `/background/tasks/{task_id}/run` with `"wait": true` waits a little less
   than the timeout, then answers `504` with the `run_id`. The run is **not**
-  stopped: it carries on in the background.
+  stopped: it carries on in the background. A run that pauses for a person or
+  a budget is answered at once, `200` with `awaiting_approval` or
+  `awaiting_budget`.
 
 For work longer than a request should last, use a background task.
 

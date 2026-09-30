@@ -22,3 +22,7 @@ and published only when a gate finds nothing to fix.
 - U4 A misspelt rules bucket (`denies`) is refused; its rules were dropped
   and what they meant to deny was allowed in permissive mode (area B).
 
+- U5 A background run waited on with `"wait": true` that pauses for a
+  person or a budget answers 200 with its waiting status; it was a 504 "did
+  not finish" (area F).
+

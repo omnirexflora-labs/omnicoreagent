@@ -13,7 +13,7 @@ from omnicoreagent.background import (
     TaskAlreadyRegisteredError,
     TaskNotFoundError,
 )
-from omnicoreagent.background.models import TERMINAL_RUN_STATUSES
+from omnicoreagent.background.models import SETTLED_RUN_STATUSES
 
 from ..models import (
     BackgroundAgentRegistrationRequest,
@@ -250,7 +250,10 @@ def create_background_router() -> APIRouter:
             )
             if not run_request.wait:
                 return run
-            if run.status not in TERMINAL_RUN_STATUSES:
+            # Settled: finished, or waiting for a person or a budget. A run
+            # waiting for approval came back as a 504 "did not finish" (the
+            # 0.5.0rc4 gate).
+            if run.status not in SETTLED_RUN_STATUSES:
                 if wait_timeout is None:
                     return run
                 _raise_run_timeout(run, wait_timeout, config.request_timeout)
