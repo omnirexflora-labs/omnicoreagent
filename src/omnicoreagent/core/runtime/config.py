@@ -306,7 +306,8 @@ class AgentConfig:
     # The policy (a profile, a policy, or a policy file), budgets, the sandbox
     # provider and its manifest, and how unanswered approvals are handled. On
     # by default with the permissive-dev profile; {"enabled": False} turns it
-    # off. Enabling it without a profile means interactive-dev.
+    # off, and is refused alongside a policy, profile or budgets it would drop.
+    # Enabling it without a profile means interactive-dev.
     governance_config: dict[str, Any] = field(default_factory=dict)
     # Where the agent's workspace lives: workspace_dir on local disk (default
     # ./workspace), or S3 / R2 storage.
@@ -376,6 +377,22 @@ class AgentConfig:
             GOVERNANCE_CONFIG_KEYS,
         )
         chosen = self.governance_config
+        if chosen.get("enabled") is False:
+            # Governance off would drop these without a word: a 1-call budget
+            # and a strict policy went unenforced (the 0.5.0rc5 gate). What
+            # the caller chose, not the defaults merged in below.
+            ignored = [
+                key for key in ("policy", "policy_path", "profile", "budgets")
+                if chosen.get(key) is not None
+                # The default profile is filled in when a config is built, and
+                # a config is built again from a built one.
+                and not (key == "profile" and chosen.get(key) == DEFAULT_PROFILE)
+            ]
+            if ignored:
+                raise ValueError(
+                    f"governance_config has \"enabled\": False, so {', '.join(ignored)} "
+                    "would be ignored; remove \"enabled\": False to enforce them, or remove them"
+                )
         self.governance_config = _merge_defaults(_default_governance_config(), chosen)
         if "profile" not in chosen and chosen.get("enabled") is not True:
             self.governance_config["profile"] = DEFAULT_PROFILE

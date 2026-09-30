@@ -63,3 +63,7 @@ the BLOCKER and MUST-FIX findings. Each unit is test-first and one commit.
   when the policy loads, and the reference lists the surfaces: a deny rule on
   `"Tool"` loaded and silently denied nothing (area B).
 
+- V14 `{"enabled": False}` alongside a policy, profile or budgets is refused
+  when the agent is built: they were dropped without a word, and a 1-call
+  budget and a strict policy went unenforced (area B).
+

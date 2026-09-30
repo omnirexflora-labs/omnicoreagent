@@ -173,3 +173,17 @@ def test_every_surface_the_runtime_uses_is_accepted():
     for surface in EXECUTION_SURFACES:
         policy_from_mapping({"name": "p", "rules": {"deny": [
             {"rule_id": "r1", "capability": "tool.local.call", "conditions": {"execution_surface": surface}}]}})
+
+
+@pytest.mark.parametrize("setting", [
+    {"policy": {"name": "p", "mode": "strict", "rules": {}}},
+    {"budgets": {"request": [{"meter": "model_calls", "limit": 1}]}},
+    {"profile": "strict-production"},
+    {"policy_path": "policy.json"},
+])
+def test_governance_turned_off_with_a_policy_or_budget_is_refused(setting):
+    # The 0.5.0rc5 gate: {"enabled": False} with a strict policy and a 1-call
+    # budget built without a word; the run went past the budget and a call the
+    # policy would deny ran.
+    with pytest.raises(ValueError, match="enabled.*False.*ignored"):
+        _build({"enabled": False, **setting})
