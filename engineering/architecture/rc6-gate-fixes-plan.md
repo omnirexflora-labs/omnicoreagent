@@ -47,3 +47,7 @@ others. Each unit is test-first and one commit.
   on its record and in the headless result: they said null though the model
   calls were made and paid for (area E).
 
+- W10 A call the run's deadline stopped reads cancelled in the trace, as in
+  the record; the tool asked any enclosing deadline and said it exceeded its
+  own limit, 13 s into 180 s (area E).
+

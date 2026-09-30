@@ -104,7 +104,7 @@ async def stop_after(timeout: float | None) -> AsyncIterator[None]:
     the block from being cancelled with its caller.
     """
     if timeout is None or timeout <= 0:
-        yield
+        yield None
         return
     task = asyncio.current_task()
     box = _StopReason(parent=_STOP_REASON.get())
@@ -116,7 +116,9 @@ async def stop_after(timeout: float | None) -> AsyncIterator[None]:
 
     handle = asyncio.get_running_loop().call_later(timeout, expire)
     try:
-        yield
+        # This block's own deadline: `box.reason` says whether it is what
+        # stopped the block, as opposed to one around it.
+        yield box
     except asyncio.CancelledError:
         if box.reason == "timeout" and task.uncancel() == 0:
             raise asyncio.TimeoutError(

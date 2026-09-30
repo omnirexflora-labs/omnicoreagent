@@ -3,7 +3,7 @@ from typing import Any
 
 from omnicoreagent.core.budgets import current_budgets
 from omnicoreagent.core.runs import waiting_for_approval
-from omnicoreagent.core.runtime.deadline import current_stop_reason, stop_after
+from omnicoreagent.core.runtime.deadline import stop_after
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.telemetry.recorder import redacts_governed_arguments
 from omnicoreagent.core.types import (
@@ -113,7 +113,7 @@ class GovernedToolRunner:
         # The deadline covers the call, not the recording of it: it starts
         # once the span is open, so a call stopped by its deadline is always
         # recorded as a timeout rather than left unfinished.
-        async with stop_after(deadline_seconds):
+        async with stop_after(deadline_seconds) as own_limit:
             try:
                 # A call that the run cannot afford is not made.
                 budgets = current_budgets()
@@ -265,7 +265,10 @@ class GovernedToolRunner:
                     )
                 return result
             except asyncio.CancelledError:
-                if current_stop_reason() == "timeout":
+                # Its own limit, not the run's deadline around it: that is a
+                # cancellation, as the run record says (the 0.5.0rc6 gate: 13 s
+                # into a 180 s limit it read "exceeded its time limit").
+                if own_limit is not None and own_limit.reason == "timeout":
                     timeout_error = {
                         "type": "TimeoutError",
                         "message": "Tool execution exceeded its time limit",

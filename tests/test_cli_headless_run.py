@@ -465,3 +465,19 @@ async def test_a_run_its_deadline_stopped_keeps_the_usage_it_spent(tmp_path):
     record = await agent.get_run(outcome.run_id)
     assert (record["usage"] or {}).get("requests", 0) >= 1, record["usage"]
     assert outcome.usage and outcome.usage.get("requests", 0) >= 1, outcome.usage
+
+
+@pytest.mark.asyncio
+async def test_a_call_the_runs_deadline_stopped_is_not_said_to_exceed_its_own_limit(tmp_path):
+    # The 0.5.0rc6 gate: 13 s into a 180 s tool limit, the run's deadline hit;
+    # the trajectory said the tool "exceeded its time limit" (outcome timeout)
+    # while the run record said cancelled.
+    agent = await _agent(RecordingModel(SEND, "sent"), tmp_path / "ledger", ask=False, slow=5)
+
+    outcome = await execute_headless(agent, HeadlessRequest(instruction="send", timeout=2))
+
+    story = await agent.get_run_trajectory(outcome.run_id)
+    calls = [t for s in story["segments"] for step in s["trajectory"]["steps"] for t in step["tool_calls"]]
+    assert [c["outcome"] for c in calls] == ["cancelled"], calls
+    record = await agent.get_run(outcome.run_id)
+    assert [c["outcome"] for c in record["tool_calls"]] == ["cancelled"]
