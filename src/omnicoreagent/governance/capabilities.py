@@ -508,13 +508,16 @@ def subagent_spawn_authority_requests(
             actor=actor,
             provider="subagent",
             execution_surface="subagent",
+            # The profile when there is one: a policy decides on the kind of
+            # worker the developer defined, not the name the model made up.
             target=AuthorityTarget(
-                resource=str(spec.get("name") or f"subagent_{index}"),
+                resource=str(spec.get("profile") or spec.get("name") or f"subagent_{index}"),
                 path=spec.get("output_path"),
             ),
             risk_level="medium",
             metadata={
                 "subagent_name": spec.get("name") or f"subagent_{index}",
+                "profile": spec.get("profile"),
                 "role": spec.get("role"),
                 "task": spec.get("task"),
                 "output_path": spec.get("output_path"),

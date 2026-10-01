@@ -242,6 +242,11 @@ class AgentConfig:
     # Let the agent spawn focused workers (spawn_subagents), each under the same
     # policy and budgets with its own linked trace. Turns workspace files on.
     enable_subagents: bool = False
+    # The kinds of worker the lead may spawn, each with its own model,
+    # reasoning effort, tools, steps and deny/ask rules; the lead picks one
+    # per worker by its description. Empty: workers are as the lead, less
+    # spawning. Needs enable_subagents. See core/worker_profiles.py.
+    worker_profiles: list[dict[str, Any]] = field(default_factory=list)
     # Offer the skills found in skills_dir: their instructions, files and scripts.
     enable_agent_skills: bool = False
     # Where skills are found; None is ./.agents/skills in the working directory.
@@ -417,6 +422,13 @@ class AgentConfig:
         _validate_context_management(self.context_management)
         _validate_tool_offload(self.tool_offload)
         _validate_governance_config(self.governance_config)
+
+        if self.worker_profiles:
+            if not self.enable_subagents:
+                raise ValueError("worker_profiles need enable_subagents: True")
+            from omnicoreagent.core.worker_profiles import worker_profiles_from_value
+
+            worker_profiles_from_value(self.worker_profiles)  # validates
 
         if self.enable_subagents:
             # Dynamic workers depend on a durable file surface for their output,

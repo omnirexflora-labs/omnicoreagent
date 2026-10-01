@@ -197,10 +197,71 @@ item for one worker, up to 15 for parallel work:
 All four fields are required. A leading `/workspace/` in `output_path` means
 the agent's workspace files folder.
 
+## Worker profiles: the right model for each worker
+
+A worker that only searches does not need your strongest model, and one that
+only reviews should not write. List the kinds of worker the lead may start in
+`worker_profiles`, and the lead picks one for each worker, by its description:
+
+```python
+from omnicoreagent import OmniCoreAgent
+
+lead = OmniCoreAgent(
+    name="lead",
+    system_instruction="Plan the work, delegate it, and check the results.",
+    model_config={"provider": "openai", "model": "gpt-5.4"},
+    agent_config={
+        "enable_subagents": True,
+        "worker_profiles": [
+            {
+                "name": "explorer",
+                "description": "Reads and searches the workspace; never edits.",
+                "model_config": {"model": "gpt-5.4-mini"},
+                "reasoning_effort": "low",
+                "tools": ["read_file", "grep", "glob", "ls"],
+                "max_steps": 20,
+            },
+            {
+                "name": "builder",
+                "description": "Writes and tests code.",
+                "reasoning_effort": "high",
+                "policy": {"ask": [{"capability": "workspace.files.delete"}]},
+            },
+        ],
+    },
+)
+```
+
+With profiles set, every worker names one: `spawn_subagents` takes a
+`profile` for each worker, and its description lists each profile with its
+model, effort, steps and tools. A worker with no profile, or one not listed,
+starts nothing, and the lead is told the names. Without profiles, workers are
+as described below.
+
+| Profile key | Default | What it does |
+|---|---|---|
+| `name` | required | What the lead names: lowercase letters, digits, `_` and `-`. |
+| `description` | required | What the lead reads to choose this kind of worker. |
+| `model_config` | the lead's | Laid over the lead's. With the same provider (or none given) the rest, the key among it, comes from the lead's; with another provider it is used whole, and the lead's key is not sent. |
+| `reasoning_effort` | the lead's | `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. |
+| `tools` | all of the lead's | The only tools the worker is offered; `write_file` is always kept, for its output. |
+| `mcp_servers` | all of the lead's | The only MCP servers the worker gets, by name. |
+| `policy` | none | `deny` and `ask` rules added before the lead's; `allow` is refused. Needs governance on. |
+| `max_steps` | the smaller of the lead's and 50 | 1 to 50, and never more than the lead's. |
+| `instructions` | none | Added to the worker's system prompt, after its role and task. |
+
+A profile only narrows: a tool or MCP server the lead does not have is refused
+when the lead initializes, and a worker never gets an allow rule its lead does
+not have. Every worker spends the lead's [budgets](/docs/reference/budgets),
+whatever its model. Each spawn records the profile, model and effort the
+worker ran with, and the `subagent.spawn` request names the profile, so a
+policy can, for example, ask before any `builder` starts. A runnable example
+is [`cookbook/getting_started/agent_with_worker_profiles.py`](https://github.com/omnirexflora-labs/omnicoreagent/blob/main/cookbook/getting_started/agent_with_worker_profiles.py).
+
 ## How it works
 
 **What a spawned worker gets.** A worker, named `subagent_<name>`, inherits
-the lead's model, MCP servers, your local tools, and its whole `agent_config`
+(unless its profile says otherwise) the lead's model, MCP servers, your local tools, and its whole `agent_config`
 — workspace files, skills, the sandbox, context management and tool offloading
 — with these changes: at most **50 steps**, no `spawn_subagents` of its own,
 and workspace files, context management and offloading always on. Its system
@@ -281,8 +342,9 @@ The rules:
   under no policy. The child is governed by *its own* policy, so configure it
   for the child's tools.
 - **Spawned workers** run under the lead's policy plus one rule: they cannot
-  spawn workers of their own. What they spend counts against the lead's
-  [budgets](/docs/reference/budgets).
+  spawn workers of their own; a worker's profile may add deny and ask rules.
+  What they spend counts against the lead's [budgets](/docs/reference/budgets):
+  one ledger for the lead and all its workers.
 - **A child's ask pauses the lead.** The child's pending approvals appear on
   the lead's run — each naming the child's call, its arguments, and the
   child's run (`delegated_run_id`) — and the lead's run goes to
@@ -302,6 +364,7 @@ See the [security model](/docs/core-concepts/security-model) and the
 |---|---|---|---|
 | constructor | `sub_agents` | `None` | A list of `OmniCoreAgent`s; each becomes a `delegate_<name>` tool. |
 | `agent_config` | `enable_subagents` | `False` | Gives the lead `spawn_subagents`. |
+| `agent_config` | `worker_profiles` | `[]` | The kinds of worker the lead may start, each with its own model, effort, tools and rules ([above](#worker-profiles-the-right-model-for-each-worker)). |
 | `agent_config` | `subagent_timeout` | `None` | Seconds one `spawn_subagents` call may take (2–86,400). |
 | `agent_config` | `tool_call_timeout` | `180` | Seconds one tool call may take — including a `delegate_<name>` call. |
 | `agent_config` | `max_steps` | `50` | The lead's step cap; a spawned worker gets the smaller of this and 50. |

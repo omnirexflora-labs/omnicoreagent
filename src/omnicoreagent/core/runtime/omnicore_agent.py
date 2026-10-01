@@ -220,6 +220,9 @@ class OmniCoreAgent:
         self.llm_connection = None
         self.guardrail = None
         self._subagent_factory = None
+        # Set by the lead's factory for a worker whose profile narrows its
+        # tools; None offers every tool.
+        self._only_tools: set[str] | None = None
         self.guardrail_mode = "full"  # Default: full protection
 
         self._initialized = False
@@ -240,6 +243,7 @@ class OmniCoreAgent:
         )
 
         self._create_agent()
+        await self._check_worker_profiles()
         self._initialized = True
         for warning in self._security_warnings():
             runtime_logger().warning(f"{self.name}: {warning['message']}")
@@ -267,6 +271,41 @@ class OmniCoreAgent:
         self._bind_privacy_to_model()
         self.local_tools = components.local_tools
         self._subagent_factory = components.subagent_factory
+        if self._only_tools is not None:
+            self.agent.tool_runtime_registry.only_tools = set(self._only_tools)
+
+    async def _check_worker_profiles(self) -> None:
+        """A profile names only tools and MCP servers this agent has: a
+        worker never gets more than its lead, and a misspelt name is refused
+        here, not found missing by a worker mid-run."""
+        factory = self._subagent_factory
+        if factory is None or not getattr(factory, "profiles", None):
+            return
+        prepared = await self.agent.tool_runtime_registry.prepare_tools(local_tools=self.local_tools)
+        tools = {tool.name for tool in prepared.list_tools()} if prepared is not None else set()
+        servers = {str(server.get("name") or "") for server in self.mcp_tools or []}
+        governed = getattr(self.agent, "governance_engine", None) is not None
+        for profile in factory.profiles.values():
+            if profile.policy and not governed:
+                # Its rules would be dropped without a word.
+                raise ValueError(
+                    f"worker profile {profile.name!r} has rules, and governance is off: "
+                    "turn governance on, or remove the profile's policy"
+                )
+            missing = sorted(set(profile.tools or ()) - tools - {"spawn_subagents"})
+            if "spawn_subagents" in (profile.tools or ()):
+                missing.append("spawn_subagents (workers do not spawn workers)")
+            if missing:
+                raise ValueError(
+                    f"worker profile {profile.name!r} names tools this agent does not have: "
+                    f"{', '.join(missing)}. Its tools: {', '.join(sorted(tools))}"
+                )
+            unknown = sorted(set(profile.mcp_servers or ()) - servers)
+            if unknown:
+                raise ValueError(
+                    f"worker profile {profile.name!r} names MCP servers this agent does not have: "
+                    f"{', '.join(unknown)}"
+                )
 
     async def _summarize_history(
         self, messages: list[Dict[str, Any]], max_tokens: int = None

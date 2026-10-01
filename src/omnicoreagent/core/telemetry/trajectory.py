@@ -344,6 +344,19 @@ def _tool_call(
     subagent_events = [
         event for event in events if event.event_type in {"subagent_result", "subagent_error"}
     ]
+    # Each worker the call started, with the profile, model and effort it
+    # ran with (worker profiles): a run's cost is read per worker.
+    spawned = [
+        {
+            "agent_name": (event.input or {}).get("agent_name"),
+            "profile": (event.input or {}).get("profile"),
+            "model": (event.input or {}).get("model"),
+            "reasoning_effort": (event.input or {}).get("reasoning_effort"),
+            "child_run_id": event.metadata.get("child_run_id"),
+        }
+        for event in events
+        if event.event_type == "subagent_spawn"
+    ]
     child_id = next(
         (event.metadata.get("child_trace_id") for event in subagent_events if event.metadata.get("child_trace_id")),
         None,
@@ -416,8 +429,9 @@ def _tool_call(
                     None,
                 ),
                 "child_trajectory": children.get(child_id),
+                "workers": spawned,
             }
-            if subagent_events
+            if subagent_events or spawned
             else None
         ),
         "reconnects": [

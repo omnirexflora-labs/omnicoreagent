@@ -98,6 +98,9 @@ class ToolRuntimeRegistry:
         self.skill_script_env = list(skill_script_env or [])
         self.code_mode = code_mode
         self.governance_engine = governance_engine
+        # The only tools this agent is offered, by name, or None for all: a
+        # worker's profile narrows what its lead has (core/worker_profiles.py).
+        self.only_tools: set[str] | None = None
 
     def _workspace_for_runtime_tools(self) -> Workspace:
         if self.workspace is None:
@@ -164,7 +167,15 @@ class ToolRuntimeRegistry:
                 on_host=getattr(runtime, "execution_surface", "sandbox") == "host",
             )
 
-        if getattr(self.code_mode, "enabled", False):
+        if self.only_tools is not None:
+            for name in list(registry.tools):
+                if name not in self.only_tools:
+                    registry.tools.pop(name)
+                    registry._internal_tool_providers.pop(name, None)
+
+        if getattr(self.code_mode, "enabled", False) and (
+            self.only_tools is None or "run_code" in self.only_tools
+        ):
             from omnicoreagent.core.tools.code_mode import (
                 build_code_mode_tool,
                 callable_name,
