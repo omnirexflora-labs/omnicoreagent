@@ -310,3 +310,29 @@ async def test_the_spawn_records_the_profile_model_and_effort(tmp_path):
     (spawn,) = [event for event in trace.events if event.event_type == "subagent_spawn"]
     assert spawn.input["profile"] == "explorer"
     assert spawn.input["model"] == "gpt-5.4-mini" and spawn.input["reasoning_effort"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_the_trajectory_lists_each_worker_with_its_profile(tmp_path):
+    from test_subagent_budgets import Scripted, _script_workers
+
+    lead = _lead_agent(tmp_path, [EXPLORER, BUILDER])
+    await lead.initialize()
+    spec = {"name": "w0", "role": "r", "task": "t", "output_path": "w0/out.md", "profile": "explorer"}
+    lead.llm_connection = Scripted([("s1", "spawn_subagents", {"subagents": [spec]})], "all done")
+    _script_workers(lead, [])
+    try:
+        result = await lead.run("go", session_id="s")
+        trajectory = await lead.get_trajectory(run_id=result["run_id"])
+    finally:
+        await lead.cleanup()
+
+    workers = [
+        worker
+        for step in trajectory["steps"]
+        for call in step.get("tool_calls") or []
+        for worker in ((call.get("subagent") or {}).get("workers") or [])
+    ]
+    assert [(w["profile"], w["model"], w["reasoning_effort"]) for w in workers] == [
+        ("explorer", "gpt-5.4-mini", "low")
+    ], trajectory["steps"]

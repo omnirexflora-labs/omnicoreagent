@@ -21,6 +21,7 @@ Everything `OmniCoreAgent(agent_config={...})` takes. Each description is the co
 | `mcp_enabled` | `bool` | `False` | Accepted for compatibility with 0.3.x and has no effect: MCP is on when mcp_tools are given. |
 | `enable_advanced_tool_use` | `bool` | `False` | For large tool sets: a tools_retriever tool the model uses to find tools by describing what it needs; the matching tools are offered on the next turn. |
 | `enable_subagents` | `bool` | `False` | Let the agent spawn focused workers (spawn_subagents), each under the same policy and budgets with its own linked trace. Turns workspace files on. |
+| `worker_profiles` | `list[dict[str, Any]]` | `[]` | The kinds of worker the lead may spawn, each with its own model, reasoning effort, tools, steps and deny/ask rules; the lead picks one per worker by its description. Empty: workers are as the lead, less spawning. Needs enable_subagents. See core/worker_profiles.py. |
 | `enable_agent_skills` | `bool` | `False` | Offer the skills found in skills_dir: their instructions, files and scripts. |
 | `skills_dir` | `str \| None` | `None` | Where skills are found; None is ./.agents/skills in the working directory. A harness names its own, so the task's directory stays the task's. |
 | `completion_review` | `int` | `0` | How many times a final answer is reviewed before it is accepted: the model is asked for each requirement and the check that showed it, and the run goes on in the same trace. Off by default. |
