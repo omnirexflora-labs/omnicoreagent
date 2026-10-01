@@ -123,6 +123,7 @@ class SubagentFactory:
                     "policy": derive_subagent_policy(
                         self.governance_engine.policy,
                         subagent_name=subagent_name,
+                        profile=profile,
                     ),
                 }
             )

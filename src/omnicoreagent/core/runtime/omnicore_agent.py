@@ -284,7 +284,14 @@ class OmniCoreAgent:
         prepared = await self.agent.tool_runtime_registry.prepare_tools(local_tools=self.local_tools)
         tools = {tool.name for tool in prepared.list_tools()} if prepared is not None else set()
         servers = {str(server.get("name") or "") for server in self.mcp_tools or []}
+        governed = getattr(self.agent, "governance_engine", None) is not None
         for profile in factory.profiles.values():
+            if profile.policy and not governed:
+                # Its rules would be dropped without a word.
+                raise ValueError(
+                    f"worker profile {profile.name!r} has rules, and governance is off: "
+                    "turn governance on, or remove the profile's policy"
+                )
             missing = sorted(set(profile.tools or ()) - tools - {"spawn_subagents"})
             if "spawn_subagents" in (profile.tools or ()):
                 missing.append("spawn_subagents (workers do not spawn workers)")

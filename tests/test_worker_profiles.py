@@ -207,3 +207,74 @@ async def test_a_profile_naming_a_tool_the_lead_lacks_is_refused_at_initialize(t
     with pytest.raises(ValueError, match="web_search"):
         await lead.initialize()
     await lead.cleanup()
+
+
+# P4 — a profile's rules narrow the worker; the lead's policy sees the profile
+
+
+def test_a_profiles_rules_are_added_to_the_policy_the_worker_inherits():
+    from omnicoreagent.core.worker_profiles import worker_profiles_from_value
+    from omnicoreagent.governance import build_default_policy
+    from omnicoreagent.governance.evaluator import PolicyEvaluator
+    from omnicoreagent.governance.models import AuthorityRequest
+    from omnicoreagent.governance.snapshots import derive_subagent_policy
+
+    (reviewer,) = worker_profiles_from_value([{
+        "name": "reviewer", "description": "Reads only.",
+        "policy": {"deny": [{"capability": "workspace.files.write"}],
+                   "ask": [{"capability": "workspace.files.read", "target": {"path": "secret/*"}}]},
+    }])
+    lead = build_default_policy("permissive-dev")
+    child = derive_subagent_policy(lead, subagent_name="w", profile=reviewer)
+
+    def effect(policy, capability, path):
+        request = AuthorityRequest(capability=capability, target={"path": path})
+        return PolicyEvaluator().evaluate(policy, request).effect.value
+
+    assert effect(lead, "workspace.files.write", "notes.md") == "allow"
+    assert effect(child, "workspace.files.write", "notes.md") == "deny"
+    assert effect(child, "workspace.files.read", "secret/k") == "ask"
+    assert effect(child, "workspace.files.read", "notes.md") == "allow"
+    assert child.metadata["worker_profile"] == "reviewer"
+    assert len(lead.rules.deny) < len(child.rules.deny), "the lead's own policy is untouched"
+
+
+def test_the_spawn_request_names_the_profile():
+    from omnicoreagent.governance.capabilities import subagent_spawn_authority_requests
+
+    (with_profile, without) = subagent_spawn_authority_requests(subagent_specs=[
+        {"name": "w1", "role": "r", "task": "t", "output_path": "a.md", "profile": "builder"},
+        {"name": "w2", "role": "r", "task": "t", "output_path": "b.md"},
+    ])
+    assert with_profile.target.resource == "builder"
+    assert with_profile.metadata["profile"] == "builder" and with_profile.metadata["subagent_name"] == "w1"
+    assert without.target.resource == "w2"
+
+
+@pytest.mark.asyncio
+async def test_a_worker_is_governed_by_its_profiles_rules(tmp_path):
+    lead = _lead_agent(tmp_path, [{
+        "name": "reviewer", "description": "Reads only.",
+        "policy": {"deny": [{"capability": "workspace.files.write", "target": {"path": "src/*"}}]},
+    }])
+    await lead.initialize()
+    try:
+        worker = lead._subagent_factory.create_subagent(
+            name="w", role="r", task="t", output_path="w.md", profile="reviewer"
+        )
+        policy = worker.agent_config["governance_config"]["policy"]
+    finally:
+        await lead.cleanup()
+    assert any(rule.rule_id == "reviewer_deny_1" for rule in policy.rules.deny)
+
+
+@pytest.mark.asyncio
+async def test_a_profiles_rules_need_governance_on(tmp_path):
+    lead = _lead_agent(
+        tmp_path,
+        [{"name": "reviewer", "description": "d", "policy": {"deny": [{"capability": "workspace.files.write"}]}}],
+        governance_config={"enabled": False},
+    )
+    with pytest.raises(ValueError, match="governance"):
+        await lead.initialize()
+    await lead.cleanup()

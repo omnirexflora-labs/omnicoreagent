@@ -147,6 +147,7 @@ def derive_subagent_policy(
     parent_policy: PolicyEnvelope,
     *,
     subagent_name: str,
+    profile: Any = None,
 ) -> PolicyEnvelope:
     child = deepcopy(parent_policy)
     child.policy_id = governance_id("policy")
@@ -165,11 +166,20 @@ def derive_subagent_policy(
         ),
         *child.rules.deny,
     ]
+    if profile is not None:
+        # A profile only narrows: its deny and ask rules come before the
+        # lead's, and it has no allow rules (core/worker_profiles.py).
+        from omnicoreagent.core.worker_profiles import profile_rules
+
+        rules = profile_rules(profile)
+        child.rules.deny = [*rules["deny"], *child.rules.deny]
+        child.rules.ask = [*rules["ask"], *child.rules.ask]
     child.metadata = {
         **child.metadata,
         "derived_for": "subagent",
         "subagent_name": subagent_name,
         "parent_policy_hash": parent_policy.provenance.policy_hash,
+        **({"worker_profile": profile.name} if profile is not None else {}),
     }
     if parent_policy.budget is not None:
         child.budget = PolicyBudget(
