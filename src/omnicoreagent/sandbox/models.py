@@ -37,11 +37,6 @@ class SandboxNetworkDefault(str, Enum):
     ALLOW = "allow"
 
 
-class SandboxFilesystemDefault(str, Enum):
-    DENY = "deny"
-    ALLOW = "allow"
-
-
 class WorkspaceMountMode(str, Enum):
     READ_ONLY = "read_only"
     READ_WRITE = "read_write"
@@ -80,24 +75,6 @@ class NetworkPolicy:
 
 
 @dataclass(slots=True)
-class SandboxFilesystemPolicy:
-    default: SandboxFilesystemDefault | str = SandboxFilesystemDefault.DENY
-    readable_paths: list[str] = field(default_factory=list)
-    writable_paths: list[str] = field(default_factory=list)
-    denied_paths: list[str] = field(default_factory=list)
-
-    def __post_init__(self) -> None:
-        self.default = SandboxFilesystemDefault(self.default)
-        self.readable_paths = [
-            _normalize_sandbox_path(path) for path in self.readable_paths
-        ]
-        self.writable_paths = [
-            _normalize_sandbox_path(path) for path in self.writable_paths
-        ]
-        self.denied_paths = [_normalize_sandbox_path(path) for path in self.denied_paths]
-
-
-@dataclass(slots=True)
 class SandboxResources:
     cpu: str | None = None
     memory: str | None = None
@@ -133,9 +110,9 @@ class SandboxManifest:
     image: str | None = None
     working_dir: str = "/workspace"
     workspace_mount: WorkspaceMount | dict[str, Any] | None = None
-    filesystem_policy: SandboxFilesystemPolicy | dict[str, Any] = field(
-        default_factory=SandboxFilesystemPolicy
-    )
+    # Removed: path lists no provider applied (simple-policy plan, SP3).
+    # Kept as a name only, so a manifest naming it is refused with why.
+    filesystem_policy: Any = None
     network_policy: NetworkPolicy | dict[str, Any] = field(default_factory=NetworkPolicy)
     environment: SandboxEnvironment | dict[str, Any] = field(
         default_factory=SandboxEnvironment
@@ -148,8 +125,14 @@ class SandboxManifest:
         self.working_dir = _normalize_sandbox_path(self.working_dir)
         if isinstance(self.workspace_mount, dict):
             self.workspace_mount = WorkspaceMount(**self.workspace_mount)
-        if isinstance(self.filesystem_policy, dict):
-            self.filesystem_policy = SandboxFilesystemPolicy(**self.filesystem_policy)
+        if self.filesystem_policy is not None:
+            raise ValueError(
+                "sandbox_manifest.filesystem_policy was removed: no provider applied its "
+                "path lists, though a person was asked to approve them. A sandboxed "
+                "command reaches the sandbox's own disk and the workspace mount (docker); "
+                "choose which workspace files go in with the workspace bridge's "
+                "include and exclude"
+            )
         if isinstance(self.network_policy, dict):
             self.network_policy = NetworkPolicy(**self.network_policy)
         if isinstance(self.environment, dict):

@@ -195,7 +195,6 @@ enforced, and use command rules to say what the agent may do there.
 | `process.exec` | Run a command: in the sandbox (execution surface sandbox), or on the host with the local provider (surface host). Target: resource (the command's name). |
 | `sandbox.environment.set` | Set plain environment variables in the sandbox (their names are in the request, not the target). |
 | `sandbox.execute` | Call the execute tool. Each command it runs is then decided as process.exec. |
-| `sandbox.filesystem.configure` | Give the sandbox read, write or deny path rules. Target: path. |
 | `sandbox.filesystem.cwd` | Run a command in a working directory the manifest or call names. Target: path. |
 | `sandbox.filesystem.mount` | Mount a host directory into the sandbox. Target: path, resource (the source). |
 | `sandbox.image.use` | Start the sandbox from an image named in the manifest. Target: resource (the image). |

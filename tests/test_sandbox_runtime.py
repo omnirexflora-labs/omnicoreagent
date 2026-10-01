@@ -30,8 +30,6 @@ from omnicoreagent.sandbox import (
     SandboxExecRequest,
     SandboxExecResult,
     SandboxExecutionService,
-    SandboxFilesystemDefault,
-    SandboxFilesystemPolicy,
     SandboxManifest,
     SandboxNetworkDefault,
     SandboxProvider,
@@ -189,11 +187,6 @@ def test_sandbox_manifest_normalizes_policy_contracts():
             "target": "/workspace",
             "mode": "read_write",
         },
-        filesystem_policy={
-            "default": "deny",
-            "readable_paths": ["/workspace/./input"],
-            "writable_paths": ["/workspace/out"],
-        },
         network_policy={
             "default": "deny",
             "allowed_hosts": ["API.EXAMPLE.COM", "*.Internal.EXAMPLE"],
@@ -207,8 +200,6 @@ def test_sandbox_manifest_normalizes_policy_contracts():
 
     assert manifest.working_dir == "/workspace/app"
     assert manifest.workspace_mount.source == "s3://bucket/workspaces/agent-a"
-    assert manifest.filesystem_policy.default == SandboxFilesystemDefault.DENY
-    assert manifest.filesystem_policy.readable_paths == ["/workspace/input"]
     assert manifest.network_policy.default == SandboxNetworkDefault.DENY
     assert manifest.network_policy.allowed_hosts == [
         "api.example.com",
@@ -219,14 +210,6 @@ def test_sandbox_manifest_normalizes_policy_contracts():
 
 
 def test_sandbox_policy_contracts_reject_unsafe_values():
-    with pytest.raises(ValueError, match="escapes"):
-        SandboxFilesystemPolicy(readable_paths=["/workspace/../host"])
-    with pytest.raises(ValueError, match="escapes"):
-        SandboxFilesystemPolicy(readable_paths=["/workspace/%2e%2e/host"])
-    with pytest.raises(ValueError, match="escapes"):
-        SandboxFilesystemPolicy(writable_paths=["/workspace/%2e%2e/host"])
-    with pytest.raises(ValueError, match="escapes"):
-        SandboxFilesystemPolicy(denied_paths=["/workspace/%2e%2e/host"])
     with pytest.raises(ValueError, match="escapes"):
         SandboxManifest(working_dir="/workspace/%2e%2e/host")
     with pytest.raises(ValueError, match="mount source"):
@@ -577,12 +560,6 @@ async def test_sandbox_execution_service_manifest_scope_is_policy_matchable():
                     capability="sandbox.filesystem.cwd",
                     target={"path": "/workspace/app"},
                 ),
-                PolicyRule(
-                    rule_id="allow_workspace_write",
-                    effect=PolicyEffect.ALLOW,
-                    capability="sandbox.filesystem.configure",
-                    target={"path": "/workspace/out"},
-                ),
             ]
         ),
         sandbox_runtime=runtime,
@@ -594,7 +571,6 @@ async def test_sandbox_execution_service_manifest_scope_is_policy_matchable():
             "command": ["ok"],
             "cwd": "/workspace/./app",
             "manifest": {
-                "filesystem_policy": {"writable_paths": ["/workspace/out"]},
                 "network_policy": {"allowed_hosts": ["api.example.com"]},
             },
         }
@@ -607,7 +583,6 @@ async def test_sandbox_execution_service_manifest_scope_is_policy_matchable():
     ]
     assert [request.target.path for request in scope_requests if request.target.path] == [
         "/workspace/app",
-        "/workspace/out",
     ]
 
 

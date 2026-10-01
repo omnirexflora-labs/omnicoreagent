@@ -193,7 +193,6 @@ agent = OmniCoreAgent(
             "sandbox_manifest": {{
                 "working_dir": TASK_DIR,
                 "network_policy": {{"default": "allow"}},
-                "filesystem_policy": {{"default": "allow"}},
             }},
         }},
     }},

@@ -43,7 +43,6 @@ from omnicoreagent.sandbox.models import (
     NetworkPolicy,
     SandboxExecRequest,
     SandboxExecResult,
-    SandboxFilesystemDefault,
     SandboxManifest,
     SandboxNetworkDefault,
     SandboxSession,
@@ -339,18 +338,6 @@ def _read(target: str) -> bytes:
 def _refuse_unenforceable(manifest: SandboxManifest) -> None:
     """Refuse a manifest that asks for isolation this backend cannot give."""
     _refuse_network_limits(manifest.network_policy)
-    filesystem = manifest.filesystem_policy
-    if (
-        filesystem.default != SandboxFilesystemDefault.ALLOW
-        or filesystem.readable_paths
-        or filesystem.writable_paths
-        or filesystem.denied_paths
-    ):
-        raise SandboxUnsupportedError(
-            "The local sandbox cannot limit which files a command reaches; set "
-            "sandbox_manifest.filesystem_policy to {'default': 'allow'} with no path "
-            "lists, or use an isolating provider such as docker"
-        )
     unsupported = []
     if manifest.image:
         unsupported.append("an image")

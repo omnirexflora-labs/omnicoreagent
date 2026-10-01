@@ -362,12 +362,14 @@ it is. Each thing it asks for is a policy question when the session opens:
 | `environment` | `{"plain": {}}` | `sandbox.environment.set` |
 | `resources` | none (e.g. `{"cpu": "2", "memory": "1g"}`) | `sandbox.resources.set` |
 | `workspace_mount` | none | `sandbox.filesystem.mount` (asks in the dev profiles) |
-| `filesystem_policy` | `{"default": "deny"}`, no path lists | `sandbox.filesystem.configure` (for `"default": "allow"`, and once per path in `readable_paths`, `writable_paths`, `denied_paths`) |
 | `lifecycle` | `{"cleanup": "always", "snapshot": False}` | — |
 
-`filesystem_policy` is a question for the policy; of the built-in providers
-only `local` reads it, and refuses anything but `{"default": "allow"}` with no
-path lists. `lifecycle` does not change the agent's own sandbox, which is
+A setting the chosen provider does not apply is refused when the agent is
+built, naming the provider and the setting: a workspace mount works on Docker
+only, a host allowlist on Modal and `http` only, CPU and memory limits
+everywhere but E2B. There is no list of paths a sandboxed command may read or
+write: it reaches the sandbox's own disk and, on Docker, the workspace mount;
+`filesystem_policy` was removed, since no provider applied it. `lifecycle` does not change the agent's own sandbox, which is
 closed when its run ends: `cleanup` (`"always"`, `"on_success"`, `"never"`)
 applies only to a one-off command run through the sandbox service without a
 session, and nothing acts on `snapshot` yet.

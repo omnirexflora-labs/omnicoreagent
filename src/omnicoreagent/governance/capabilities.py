@@ -56,7 +56,6 @@ CAPABILITIES: dict[str, str] = {
     "sandbox.filesystem.mount": "Mount a host directory into the sandbox. Target: path, resource (the source).",
     "sandbox.workspace.sync": "The runtime's own listing of the sandbox's files after a command, to copy what changed back to the workspace. Not an agent command: command rules do not judge it. Target: resource (the program).",
     "sandbox.filesystem.cwd": "Run a command in a working directory the manifest or call names. Target: path.",
-    "sandbox.filesystem.configure": "Give the sandbox read, write or deny path rules. Target: path.",
     "sandbox.network.configure": "Turn the sandbox's network on, or allow or deny a host in it. Target: host.",
     "sandbox.environment.set": "Set plain environment variables in the sandbox (their names are in the request, not the target).",
     "sandbox.resources.set": "Set the sandbox's CPU, memory, disk or time limits.",

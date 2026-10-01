@@ -114,3 +114,21 @@ async def test_a_runtime_refuses_at_session_open_what_it_does_not_apply():
     manifest = SandboxManifest(workspace_mount={"source": "/srv", "target": "/data"})
     with pytest.raises(Exception, match="workspace mount"):
         await SandboxExecutionService(engine).open_session(manifest)
+
+
+# SP3 (simple-policy plan): the sandbox's path lists were approved by a person
+# and applied by no provider, so they are gone; a manifest naming them is
+# refused with what to use instead.
+
+
+def test_a_filesystem_policy_is_refused_with_what_to_use_instead():
+    from omnicoreagent.sandbox.models import SandboxManifest
+
+    with pytest.raises(ValueError, match="filesystem_policy was removed.*workspace bridge"):
+        SandboxManifest(filesystem_policy={"default": "deny", "readable_paths": ["/workspace/in"]})
+    with pytest.raises(ValueError, match="filesystem_policy was removed"):
+        _build("docker", {"filesystem_policy": {"default": "allow"}})
+
+
+def test_the_local_provider_needs_no_filesystem_setting():
+    _build("local", {"network_policy": {"default": "allow"}})
