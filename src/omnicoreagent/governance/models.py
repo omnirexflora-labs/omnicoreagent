@@ -199,42 +199,52 @@ class TargetMatcher:
 
 @dataclass
 class CommandMatcher:
-    """What a rule matches in a shell command (see governance/commands.py).
+    """What a rule matches in a shell command: its first words (see
+    governance/commands.py).
 
-    ``program``: glob(s) on the program's name. ``prefix``: the first words,
-    program first; each is a glob or a list of alternatives. ``args_any``: globs,
-    any later argument (``-rf`` counts as ``-r`` and ``-f``). For allow rules
-    only: ``redirect`` lets output go to a file, ``env`` names variables that may
-    be set before the program.
+    ``prefix``: the program's name, then later words, each a literal or a list
+    of alternatives: ``["git", ["push", "reset"]]``. ``program``: shorthand for
+    a prefix of one word, or a list of alternatives for it. Words are literal:
+    a rule decides when to ask, and the sandbox what a command can touch.
     """
 
-    program: str | list[str] | None = None
     prefix: list[Any] | None = None
-    args_any: list[str] | None = None
-    redirect: bool = False
-    env: list[str] | None = None
+    program: str | list[str] | None = None
+    # Removed with the simple policy (engineering/architecture/
+    # simple-policy-plan.md); named only so a rule using them is told why.
+    args_any: Any = None
+    redirect: Any = None
+    env: Any = None
 
     def __post_init__(self) -> None:
-        if self.program is None and self.prefix is None:
-            raise ValueError("command needs a program or a prefix")
+        for removed in ("args_any", "redirect", "env"):
+            if getattr(self, removed) is not None:
+                raise ValueError(
+                    f"command.{removed} was removed: command rules are prefix rules, such "
+                    'as {"prefix": ["rm", "-rf"]}; what a command can touch is the '
+                    "sandbox's to decide"
+                )
+        if (self.program is None) == (self.prefix is None):
+            raise ValueError("command needs a prefix, or a program as shorthand for one")
         if self.program is not None:
-            if isinstance(self.program, str):
-                self.program = _non_empty_string(self.program, "command.program")
-            else:
-                self.program = _string_list(self.program, "command.program")
-        if self.prefix is not None:
-            if not isinstance(self.prefix, list) or not self.prefix:
-                raise ValueError("command.prefix must be a non-empty list")
-            self.prefix = [
-                token if isinstance(token, str) else _string_list(token, "command.prefix")
-                for token in self.prefix
-            ]
-        if self.args_any is not None:
-            self.args_any = _string_list(self.args_any, "command.args_any")
-        if not isinstance(self.redirect, bool):
-            raise ValueError("command.redirect must be true or false")
-        if self.env is not None:
-            self.env = _string_list(self.env, "command.env")
+            self.prefix = [self.program]
+        if not isinstance(self.prefix, list) or not self.prefix:
+            raise ValueError("command.prefix must be a non-empty list of words")
+        self.prefix = [_literal_word(token) for token in self.prefix]
+
+
+def _literal_word(token: Any) -> str | list[str]:
+    words = [token] if isinstance(token, str) else token
+    if not isinstance(words, list) or not words:
+        raise ValueError("command.prefix: each word is a string or a list of alternatives")
+    for word in words:
+        if not isinstance(word, str) or not word.strip():
+            raise ValueError("command.prefix: each word is a non-empty string")
+        if any(ch in word for ch in "*?["):
+            raise ValueError(
+                f"command.prefix word {word!r}: words are literal; list alternatives instead"
+            )
+    return token if isinstance(token, str) else list(words)
 
 
 # Named by the built-in profiles' rules (memory.*, telemetry.*) though no

@@ -74,6 +74,28 @@ class PolicyEvaluator:
                 ask,
             )
 
+        if (
+            command is not None
+            and command.opaque
+            and any(
+                r.command is not None and _base_matches(r, request)
+                for r in (*policy.rules.deny, *policy.rules.ask, *policy.rules.allow)
+            )
+        ):
+            # A line the rules cannot read meets a policy with command rules:
+            # asked about (refused in strict), in every mode, never allowed by
+            # a broader rule. A deny rule on rm fails closed for `eval "rm"`
+            # instead of open (engineering/architecture/simple-policy-plan.md).
+            return _decision(
+                policy,
+                request,
+                PolicyEffect.DENY if policy.mode == PolicyMode.STRICT else PolicyEffect.ASK,
+                ReasonCode.COMMAND_OPAQUE,
+                "The command rules cannot read this command ("
+                + "; ".join(command.opaque_reasons)
+                + "), so it is not run without a person's approval.",
+            )
+
         allow = _matching_rules(policy.rules.allow, request)
         allow += _command_allow_rules(policy.rules.allow, request, command)
         if allow:
@@ -85,24 +107,6 @@ class PolicyEvaluator:
                 allow,
             )
 
-        if (
-            command is not None
-            and command.opaque
-            and policy.mode != PolicyMode.PERMISSIVE
-            # Only where a command rule could have allowed it: a policy with no
-            # command rules decides exactly as before.
-            and any(r.command is not None and _base_matches(r, request) for r in policy.rules.allow)
-        ):
-            # No command rule could allow what cannot be proven: say so.
-            return _decision(
-                policy,
-                request,
-                PolicyEffect.ASK if policy.mode == PolicyMode.INTERACTIVE else PolicyEffect.DENY,
-                ReasonCode.COMMAND_OPAQUE,
-                "No rule may allow this command: its effect cannot be proven ("
-                + "; ".join(command.opaque_reasons)
-                + ").",
-            )
         if policy.mode == PolicyMode.PERMISSIVE:
             # No rule matched: say so, as interactive and strict do. It said
             # matched_allow, with no rule, so the evidence could not tell "a
@@ -146,7 +150,7 @@ def _rule_matches(rule: PolicyRule, request: AuthorityRequest) -> bool:
         if rule.effect == PolicyEffect.ALLOW:
             return False
         command = parsed_command(request)
-        return command is not None and any(
+        return command is not None and not command.opaque and any(
             command_matches(rule.command, c) for c in command.commands
         )
     return True
