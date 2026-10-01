@@ -21,6 +21,7 @@ from omnicoreagent.governance.calls import current_tool_call, tool_call_metadata
 from omnicoreagent.governance.capabilities import subagent_spawn_authority_requests
 from omnicoreagent.governance.snapshots import derive_subagent_policy
 from omnicoreagent.core.workspace.paths import WORKSPACE_FILE_PATH_PREFIXES
+from omnicoreagent.core.worker_profiles import worker_profiles_from_value
 from omnicoreagent.core.agents.subagent_helpers import (
     accepts_run_id,
     find_child_trace_id,
@@ -77,6 +78,12 @@ class SubagentFactory:
         self.governance_engine = governance_engine
         self.telemetry_recorder = telemetry_recorder
         self._active_subagents: Dict[str, Any] = {}
+        # The kinds of worker the lead may spawn, by name; empty when the
+        # developer set none, and then every worker is as the lead.
+        self.profiles = {
+            profile.name: profile
+            for profile in worker_profiles_from_value(self.agent_config.get("worker_profiles"))
+        }
 
     def _build_subagent_config(
         self, *, subagent_name: str = "subagent"
@@ -677,6 +684,9 @@ When you have completed the task:
                 "data": {"results": []},
                 "message": "No subagents to spawn",
             }
+        unknown = self._unknown_profile(subagent_specs)
+        if unknown is not None:
+            return {"status": "error", "data": None, "message": unknown}
 
         await self._authorize_subagent_spawns(subagent_specs)
         logger.info(f"Spawning {len(subagent_specs)} subagents in parallel")
@@ -735,6 +745,22 @@ When you have completed the task:
             },
             "message": f"Completed {successful}/{len(subagent_specs)} subagents successfully",
         }
+
+    def _unknown_profile(self, subagent_specs: list[dict[str, Any]]) -> str | None:
+        """Why no worker can start, when one names no profile the developer
+        set: none is started, so the lead can fix its call and spawn again."""
+        if not self.profiles:
+            return None
+        names = ", ".join(self.profiles)
+        for spec in subagent_specs:
+            profile = spec.get("profile")
+            if profile not in self.profiles:
+                given = "no profile" if profile is None else f"profile {profile!r}"
+                return (
+                    f"Worker {spec.get('name')!r} has {given}. Each worker needs one of: "
+                    f"{names}. No worker was started."
+                )
+        return None
 
     async def _authorize_subagent_spawns(
         self, subagent_specs: list[dict[str, Any]]
@@ -799,17 +825,7 @@ When you have completed the task:
         self._active_subagents.clear()
 
 
-def build_subagent_tools(
-    factory: SubagentFactory,
-    registry: ToolRegistry,
-) -> None:
-    """
-    Register subagent spawning tools with the given registry.
-    """
-
-    @registry.register_tool(
-        name="spawn_subagents",
-        description="""
+_SPAWN_DESCRIPTION = """
     Spawns one or more subagents to work on focused tasks.
 
     Always pass a JSON array of subagent specs. If you only need one subagent,
@@ -828,7 +844,54 @@ def build_subagent_tools(
     - Spawn subagents for API review, UI review, docs review, and test review
     - Each worker executes its assigned task independently
     - Read all outputs and synthesize the final result
-        """,
+        """
+
+
+def _profiles_description(factory: SubagentFactory) -> str:
+    """The profiles, as the lead reads them to choose a worker."""
+    lead_model = factory.base_model_config or {}
+    lines = ["", "    Worker profiles: give each worker the `profile` that fits its task.", ""]
+    for profile in factory.profiles.values():
+        model = profile.model_config_over(dict(lead_model))
+        facts = [f"model {model.get('model')}"]
+        if model.get("reasoning_effort"):
+            facts.append(f"effort {model['reasoning_effort']}")
+        if profile.max_steps is not None:
+            facts.append(f"at most {profile.max_steps} steps")
+        if profile.tools is not None:
+            facts.append("tools: " + ", ".join(profile.tools))
+        lines.append(f"    - {profile.name}: {profile.description.strip()} ({'; '.join(facts)})")
+    return "\n".join(lines) + "\n"
+
+
+def build_subagent_tools(
+    factory: SubagentFactory,
+    registry: ToolRegistry,
+) -> None:
+    """
+    Register subagent spawning tools with the given registry.
+    """
+
+    item_properties: dict[str, Any] = {
+        "name": {"type": "string"},
+        "role": {"type": "string"},
+        "task": {"type": "string"},
+        "output_path": {"type": "string"},
+    }
+    required = ["name", "role", "task", "output_path"]
+    description = _SPAWN_DESCRIPTION
+    if factory.profiles:
+        item_properties["profile"] = {
+            "type": "string",
+            "enum": list(factory.profiles),
+            "description": "The kind of worker: one of the profiles listed in this tool's description.",
+        }
+        required.append("profile")
+        description += _profiles_description(factory)
+
+    @registry.register_tool(
+        name="spawn_subagents",
+        description=description,
         inputSchema={
             "type": "object",
             "properties": {
@@ -838,13 +901,8 @@ def build_subagent_tools(
                     "maxItems": 15,
                     "items": {
                         "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "role": {"type": "string"},
-                            "task": {"type": "string"},
-                            "output_path": {"type": "string"},
-                        },
-                        "required": ["name", "role", "task", "output_path"],
+                        "properties": item_properties,
+                        "required": required,
                         "additionalProperties": False,
                     },
                 },
