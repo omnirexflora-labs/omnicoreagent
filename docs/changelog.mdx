@@ -31,6 +31,41 @@ off. Enabling governance
 yourself without naming a profile still means `interactive-dev`, as before, so
 no one's policy loosens. See [Upgrading](/docs/upgrading), "From 0.4 to 0.5.0".
 
+### New: worker profiles
+
+List the kinds of worker a lead may spawn in `worker_profiles`, each with its
+own model, reasoning effort, tools, MCP servers, steps and deny or ask rules,
+and the lead picks one for each worker
+([Sub-agents](/docs/core-concepts/sub-agents#worker-profiles-the-right-model-for-each-worker)).
+A profile only narrows what the lead has. Every worker spends the lead's
+budgets, and each spawn records the profile, model and effort it ran with.
+
+### Changed: a simple policy, the sandbox is the boundary
+
+- **Command rules are prefix rules.** A rule names a command by its first
+  words (`{"prefix": ["git", "push"]}`, or `{"program": "rm"}`). Only a plain
+  chain of commands is split; anything else (a redirect, `$(...)`, a variable,
+  `eval`, `sh -c`...) is one unreadable command, never allowed by a rule and,
+  where the policy has command rules, asked about in every mode (refused in
+  `strict`). `args_any`, `redirect`, `env` and globs in rules are refused with
+  the new form. This replaces 0.4.4's parser, which was never published.
+- **A sandbox setting the provider does not enforce is refused** when the
+  agent is built, naming the provider and the setting. Examples are a
+  workspace mount on a hosted provider, a sandbox lifetime, or a host
+  allowlist on Daytona. Each provider is listed in [What stops
+  harm](/docs/core-concepts/security-model#what-stops-harm).
+- **`filesystem_policy` is removed.** Its path lists were approved and then
+  applied by no provider; a manifest naming it is refused with what to use.
+- **Modal and Vercel check a sandbox's network from inside**, as E2B and
+  Daytona do, and refuse one that should be offline but is not.
+
+### Changed: OmniServe defaults
+
+`OMNICOREAGENT_SERVE_CORS_CREDENTIALS` is `false` by default and never applies
+with `*` origins. `X-Forwarded-For` is read only from the proxies in
+`OMNICOREAGENT_SERVE_TRUSTED_PROXIES`. `/prometheus` counts per route, not per
+path.
+
 ### Changed: what a trace keeps by default
 
 Under `telemetry_config={"capture": "default"}`, a governed agent's tool and
@@ -40,6 +75,12 @@ get without setting one, `full`, keeps the values (personal data redacted).
 
 ### Fixed
 
+- **A folder delete, move or clear is checked for each file in it**: a deny on
+  deleting `prod/*` did not stop `delete_file("prod")`. A workspace path
+  through a link is refused.
+- **Spawned workers spend the lead's budgets**; they each had their own.
+- **OmniServe**: error bodies never carry a registered credential, and the
+  token is compared in constant time.
 - **A governed run's evidence under full capture was reported incomplete.**
   Every delegation's policy request masked its task as `[REDACTED]`, which the
   trajectory counted as a capture gap. The task text is left out of that record
@@ -55,7 +96,8 @@ get without setting one, `full`, keeps the values (personal data redacted).
 
 ## 0.4.4
 
-*September 2026 · Python 3.12+*
+*Not published: tagged and tested, never uploaded. Its fixes ship in 0.5.0,
+and its command rules were replaced there by prefix rules.*
 
 Filming OmniCoreAgent as it really runs (an agent killed mid-payment, a
 command denied, a budget topped up from another process) found two gaps.
