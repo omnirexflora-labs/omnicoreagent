@@ -278,3 +278,35 @@ async def test_a_profiles_rules_need_governance_on(tmp_path):
     with pytest.raises(ValueError, match="governance"):
         await lead.initialize()
     await lead.cleanup()
+
+
+# P5 — the evidence says which profile, model and effort each worker had
+
+
+@pytest.mark.asyncio
+async def test_the_spawn_records_the_profile_model_and_effort(tmp_path):
+    from omnicoreagent.core.telemetry import InMemoryTelemetryStore, TelemetryActor, TelemetryRecorder
+
+    lead = _lead_agent(tmp_path, [EXPLORER, BUILDER])
+    await lead.initialize()
+    store = InMemoryTelemetryStore()
+    recorder = TelemetryRecorder(store)
+    factory = lead._subagent_factory
+    factory.telemetry_recorder = recorder
+    try:
+        context = await recorder.start_trace(
+            trace_id="t-profiles", run_id="r-profiles", session_id="s",
+            actor=TelemetryActor(type="agent", name="lead"),
+        )
+        worker = factory.create_subagent(name="w", role="r", task="t", output_path="w.md", profile="explorer")
+        await factory._start_delegation(
+            agent=worker, name="w", role="r", task="t", output_path="w.md", child_run_id=None
+        )
+        await recorder.end_trace()
+    finally:
+        await lead.cleanup()
+
+    trace = await store.get_trace(context.trace_id)
+    (spawn,) = [event for event in trace.events if event.event_type == "subagent_spawn"]
+    assert spawn.input["profile"] == "explorer"
+    assert spawn.input["model"] == "gpt-5.4-mini" and spawn.input["reasoning_effort"] == "low"

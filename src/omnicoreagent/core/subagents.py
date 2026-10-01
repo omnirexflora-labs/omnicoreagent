@@ -582,6 +582,16 @@ When you have completed the task:
             ),
             "output_path": output_path,
         }
+        profile = getattr(agent, "worker_profile", None)
+        if profile is not None:
+            # Which kind of worker the lead chose, and what it ran on: the
+            # cost of a run is read per worker against this.
+            model = getattr(agent, "model_config", None) or {}
+            spawn_input.update(
+                profile=profile.name,
+                model=model.get("model"),
+                reasoning_effort=model.get("reasoning_effort"),
+            )
         span = await recorder.start_span(
             name=f"subagent:{delegation['agent_name']}",
             kind="subagent.run",
