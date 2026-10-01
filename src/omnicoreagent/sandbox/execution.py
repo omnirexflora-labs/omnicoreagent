@@ -147,6 +147,16 @@ class SandboxExecutionService:
             manifest = SandboxManifest(**manifest)
         manifest = manifest or SandboxManifest()
         runtime = self._runtime()
+        from omnicoreagent.sandbox.contract import ENFORCES, check_enforced
+
+        provider = next(
+            (name for name, kept in ENFORCES.items() if kept is runtime.enforces),
+            type(runtime).__name__,
+        )
+        try:
+            check_enforced(provider, manifest, runtime.enforces)
+        except ValueError as exc:
+            raise SandboxUnsupportedError(str(exc)) from exc
         self._refuse_mount_over_policy(manifest)
         await self._refuse_if_every_command_is_denied(_surface(runtime))
         requests = _manifest_authority_requests(manifest, SandboxCommandSpec(command=["session"]))

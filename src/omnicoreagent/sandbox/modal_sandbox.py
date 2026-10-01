@@ -23,6 +23,8 @@ from typing import Any
 from uuid import uuid4
 
 from omnicoreagent.sandbox.base import SandboxRuntime
+from omnicoreagent.sandbox.contract import ENFORCES
+from omnicoreagent.sandbox.network_check import CHECK_TIMEOUT_SECONDS, confirm_isolated
 from omnicoreagent.sandbox.errors import SandboxUnsupportedError
 from omnicoreagent.sandbox.models import (
     NetworkPolicy,
@@ -43,6 +45,8 @@ _UNITS = {"k": 1, "m": 1, "g": 1024}
 
 
 class ModalSandboxRuntime(SandboxRuntime):
+    enforces = ENFORCES["modal"]  # sandbox/contract.py
+
     provider = "modal"
     supports_required_sandbox = True
     supports_execution = True
@@ -53,6 +57,9 @@ class ModalSandboxRuntime(SandboxRuntime):
         self.app_name = options.pop("app_name", DEFAULT_APP_NAME)
         self.timeout_seconds = int(options.pop("timeout_seconds", DEFAULT_TIMEOUT_SECONDS))
         self.max_output_bytes = int(options.pop("max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES))
+        # Checked from inside, as E2B and Daytona are: a provider that accepts
+        # "no network" and still hands back an open sandbox is refused.
+        self.verify_network_isolation = bool(options.pop("verify_network_isolation", True))
         if options:
             raise ValueError(f"Unknown modal sandbox option(s): {', '.join(sorted(options))}")
         self.telemetry_recorder = telemetry_recorder
@@ -81,11 +88,24 @@ class ModalSandboxRuntime(SandboxRuntime):
         if resources.memory:
             options["memory"] = _megabytes(resources.memory)
         sandbox = await modal.Sandbox.create.aio(**options)
+
+        async def run(command: str) -> int:
+            process = await sandbox.exec.aio("sh", "-c", command, timeout=CHECK_TIMEOUT_SECONDS)
+            return await process.wait.aio()
+
+        isolation = await confirm_isolated(
+            self.provider, policy, verify=self.verify_network_isolation,
+            run=run, discard=lambda: sandbox.terminate.aio(),
+        )
         session = SandboxSession(
             session_id=session_id,
             provider=self.provider,
             manifest=manifest,
-            metadata={"sandbox_id": getattr(sandbox, "object_id", None), "app": self.app_name},
+            metadata={
+                "sandbox_id": getattr(sandbox, "object_id", None),
+                "app": self.app_name,
+                "network_isolation": isolation,
+            },
         )
         self._sessions[session_id] = session
         self._sandboxes[session_id] = sandbox

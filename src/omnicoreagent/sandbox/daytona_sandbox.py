@@ -21,6 +21,7 @@ from typing import Any
 from uuid import uuid4
 
 from omnicoreagent.sandbox.base import SandboxRuntime
+from omnicoreagent.sandbox.contract import ENFORCES
 from omnicoreagent.sandbox.errors import SandboxUnsupportedError
 from omnicoreagent.sandbox.network_check import (
     CHECK_TIMEOUT_SECONDS,
@@ -43,6 +44,8 @@ DEFAULT_MAX_OUTPUT_BYTES = 1_000_000
 
 
 class DaytonaSandboxRuntime(SandboxRuntime):
+    enforces = ENFORCES["daytona"]  # sandbox/contract.py
+
     provider = "daytona"
     supports_required_sandbox = True
     supports_execution = True
@@ -241,10 +244,15 @@ def _restricts_traffic(policy: NetworkPolicy) -> bool:
 
 
 def _network_parameters(policy: NetworkPolicy) -> dict[str, Any]:
-    """Daytona enforces a host allow list, so an allowlist is honoured."""
+    """Network off or on. Daytona's allow list takes IP ranges, not host
+    names: a host list failed in its SDK (D6), so it is refused."""
     default = getattr(policy.default, "value", policy.default)
     if policy.allowed_hosts:
-        return {"network_block_all": False, "network_allow_list": list(policy.allowed_hosts)}
+        raise SandboxUnsupportedError(
+            "The daytona sandbox does not enforce a network host allowlist "
+            "(allowed_hosts): its API takes IP ranges, not host names. Use network "
+            "default 'deny' or 'allow', or a provider that enforces one (modal, http)"
+        )
     if default == SandboxNetworkDefault.ALLOW.value:
         return {"network_block_all": False}
     return {"network_block_all": True}

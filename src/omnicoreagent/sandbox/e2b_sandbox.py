@@ -21,6 +21,7 @@ from typing import Any
 from uuid import uuid4
 
 from omnicoreagent.sandbox.base import SandboxRuntime
+from omnicoreagent.sandbox.contract import ENFORCES
 from omnicoreagent.sandbox.errors import SandboxUnsupportedError
 from omnicoreagent.sandbox.network_check import (
     CHECK_TIMEOUT_SECONDS,
@@ -43,6 +44,8 @@ DEFAULT_MAX_OUTPUT_BYTES = 1_000_000
 
 
 class E2BSandboxRuntime(SandboxRuntime):
+    enforces = ENFORCES["e2b"]  # sandbox/contract.py
+
     provider = "e2b"
     supports_required_sandbox = True
     supports_execution = True

@@ -37,6 +37,7 @@ from typing import Any
 from uuid import uuid4
 
 from omnicoreagent.sandbox.base import SandboxRuntime
+from omnicoreagent.sandbox.contract import ENFORCES
 from omnicoreagent.sandbox.errors import SandboxUnsupportedError
 from omnicoreagent.sandbox.models import (
     NetworkPolicy,
@@ -60,6 +61,8 @@ _DRAIN_SECONDS = 5
 
 
 class LocalProcessSandboxRuntime(SandboxRuntime):
+    enforces = ENFORCES["local"]  # sandbox/contract.py
+
     provider = "local"
     # Commands run, but nothing isolates them: a policy that requires a
     # sandbox is never satisfied by this backend.

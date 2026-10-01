@@ -238,16 +238,17 @@ async def test_daytona_blocks_the_network_and_runs_commands(fake_daytona):
 
 
 @pytest.mark.asyncio
-async def test_daytona_honours_a_host_allow_list(fake_daytona):
+async def test_daytona_refuses_a_host_allow_list(fake_daytona):
+    # Daytona's network_allow_list takes IP ranges, not host names: a host
+    # list failed in its SDK (D6). Refused here too, not only by the config
+    # check, for a runtime used directly (simple-policy plan, SP1).
+    from omnicoreagent.sandbox.errors import SandboxUnsupportedError
+
     runtime = build_sandbox_runtime({"provider": "daytona"})
-
-    await runtime.create(
-        SandboxManifest(network_policy=NetworkPolicy(default="deny", allowed_hosts=["pypi.org"]))
-    )
-
-    params = fake_daytona["params"]
-    assert params["network_block_all"] is False
-    assert params["network_allow_list"] == ["pypi.org"]
+    with pytest.raises(SandboxUnsupportedError, match="allowed_hosts"):
+        await runtime.create(
+            SandboxManifest(network_policy=NetworkPolicy(default="deny", allowed_hosts=["pypi.org"]))
+        )
 
 
 @pytest.mark.parametrize("provider", ["e2b", "daytona"])

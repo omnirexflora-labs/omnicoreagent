@@ -33,6 +33,7 @@ from typing import Any
 from uuid import uuid4
 
 from omnicoreagent.sandbox.base import SandboxRuntime
+from omnicoreagent.sandbox.contract import ENFORCES
 from omnicoreagent.sandbox.errors import SandboxUnsupportedError
 from omnicoreagent.sandbox.models import (
     NetworkPolicy,
@@ -69,6 +70,8 @@ _UNITS = {"k": 1024, "m": 1024**2, "g": 1024**3}
 
 
 class DockerSandboxRuntime(SandboxRuntime):
+    enforces = ENFORCES["docker"]  # sandbox/contract.py
+
     provider = "docker"
     supports_required_sandbox = True
     supports_execution = True
