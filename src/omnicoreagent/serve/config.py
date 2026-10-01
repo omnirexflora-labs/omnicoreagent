@@ -16,7 +16,7 @@ Environment Variables (OVERRIDE code values):
     OMNICOREAGENT_SERVE_CORS_ORIGINS: Comma-separated allowed origins (default: *)
     OMNICOREAGENT_SERVE_CORS_METHODS: Comma-separated allowed methods (default: *)
     OMNICOREAGENT_SERVE_CORS_HEADERS: Comma-separated allowed headers (default: *)
-    OMNICOREAGENT_SERVE_CORS_CREDENTIALS: Allow credentials in CORS (default: true)
+    OMNICOREAGENT_SERVE_CORS_CREDENTIALS: Allow credentials in CORS, explicit origins only (default: false)
     OMNICOREAGENT_SERVE_AUTH_ENABLED: Enable Bearer token auth (default: false)
     OMNICOREAGENT_SERVE_AUTH_TOKEN: Bearer token for auth
     OMNICOREAGENT_SERVE_REQUEST_LOGGING: Log requests (default: true)
@@ -25,6 +25,7 @@ Environment Variables (OVERRIDE code values):
     OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED: Enable rate limiting (default: false)
     OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS: Max requests per window (default: 100)
     OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW: Time window in seconds (default: 60)
+    OMNICOREAGENT_SERVE_TRUSTED_PROXIES: Comma-separated proxy addresses whose X-Forwarded-For is trusted (default: none)
     OMNICOREAGENT_BACKGROUND_ENABLED: Enable background APIs (default: true)
     OMNICOREAGENT_BACKGROUND_AGENT_ID: Agent id used for the served agent (default: default)
     OMNICOREAGENT_BACKGROUND_TASK_STORE: Task store backend (default: in_memory)
@@ -159,8 +160,11 @@ class OmniServeConfig(BaseModel):
     cors_headers: list[str] = Field(
         default_factory=lambda: ["*"], description="Allowed CORS headers"
     )
+    # Off by default, and never with any origin ("*"): open CORS with
+    # credentials let any web page read a server running without a token
+    # (the rc7 security review).
     cors_credentials: bool = Field(
-        default=True, description="Allow credentials in CORS"
+        default=False, description="Allow credentials in CORS (explicit origins only)"
     )
 
     # Authentication
@@ -183,6 +187,13 @@ class OmniServeConfig(BaseModel):
     )
     rate_limit_window: int = Field(
         default=60, description="Rate limit time window in seconds"
+    )
+    # Addresses of proxies in front of the server. X-Forwarded-For is read
+    # only from these: any client can send it, and a rotated one never
+    # tripped the limit (the rc7 security review).
+    trusted_proxies: list[str] = Field(
+        default_factory=list,
+        description="Proxy addresses whose X-Forwarded-For is trusted",
     )
 
     # Background execution
@@ -279,6 +290,8 @@ class OmniServeConfig(BaseModel):
             self.rate_limit_requests = val
         if (val := _get_env_int(serve_prefix, "RATE_LIMIT_WINDOW")) is not None:
             self.rate_limit_window = val
+        if (val := _get_env_list(serve_prefix, "TRUSTED_PROXIES")) is not None:
+            self.trusted_proxies = val
 
         # Background execution
         if (val := _get_env_bool(background_prefix, "ENABLED")) is not None:

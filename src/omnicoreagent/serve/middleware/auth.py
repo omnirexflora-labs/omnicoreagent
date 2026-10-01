@@ -1,5 +1,6 @@
 """Bearer-token authentication middleware for OmniServe."""
 
+import hmac
 from typing import Callable
 
 from fastapi import FastAPI, Request, Response
@@ -64,7 +65,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
 
         token = auth_header.removeprefix("Bearer ").strip()
-        if token != self.auth_token:
+        # Compared in constant time: `!=` stops at the first differing byte.
+        if not hmac.compare_digest(token.encode(), str(self.auth_token).encode()):
             return JSONResponse(
                 status_code=401,
                 content={

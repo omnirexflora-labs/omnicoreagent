@@ -22,9 +22,11 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
 
     _PATH_PREFIXES = WORKSPACE_FILE_PATH_PREFIXES
 
-    # Whether the policy lets the agent read a file (set when governed):
-    # search and listing leave out what it may not read.
-    readable: Any = None
+    # Whether the policy would allow a workspace call, as allows(tool_name,
+    # tool_args) (set when governed): search and listing leave out what it
+    # may not read; a folder is deleted or moved only if each file under it
+    # could be.
+    allows: Any = None
 
     def __init__(self, storage: WorkspaceStorage):
         self.storage = storage
@@ -49,15 +51,17 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
     def _list_directory(self, path: str | None = None) -> list:
         return self.storage.list_files(path, **self._storage_kwargs())
 
-    def _walk_files(self, path: str | None = None) -> list[str]:
+    def _walk_files(self, path: str | None = None, *, readable_only: bool = True) -> list[str]:
         files: list[str] = []
 
         for item in self._list_directory(path):
             item_path = item.path
             if item.is_dir:
-                files.extend(self._walk_files(item_path))
-            elif self._may_read(item_path):
+                files.extend(self._walk_files(item_path, readable_only=readable_only))
+            elif not readable_only or self._may_read(item_path):
                 files.append(item_path)
+        if not readable_only:
+            return files
 
         if not files and path and self._may_read(path) and self.storage.exists(path, **self._storage_kwargs()):
             try:
@@ -69,7 +73,18 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
         return files
 
     def _may_read(self, path: str) -> bool:
-        return self.readable is None or bool(self.readable(str(path)))
+        return self.allows is None or bool(self.allows("read_file", {"path": str(path)}))
+
+    def _protected_below(self, path: str | None, call) -> str | None:
+        """The first file under a folder that the policy would not let this
+        call touch on its own, as call(file) -> (tool_name, tool_args)."""
+        if self.allows is None:
+            return None
+        for file_path in self._walk_files(path, readable_only=False):
+            tool_name, tool_args = call(file_path)
+            if not self.allows(tool_name, tool_args):
+                return file_path
+        return None
 
     def ls(self, path: str | None = None) -> str:
         try:
@@ -227,6 +242,15 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
             has_children = bool(self._list_directory(path))
             if not exists and not has_children:
                 return FileOpFailed(f"Path not found: {path}")
+            if has_children:
+                protected = self._protected_below(
+                    path, lambda f: ("delete_file", {"path": f})
+                )
+                if protected is not None:
+                    return FileOpFailed(
+                        f"Refused: deleting {path} would delete {protected}, which the "
+                        "policy does not allow deleting. Delete only the files you may."
+                    )
 
             self.storage.delete(path, **self._storage_kwargs())
             return f"Deleted: {self._location(path)}"
@@ -241,6 +265,20 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
             if not self.storage.exists(old_path, **self._storage_kwargs()) and not has_children:
                 return FileOpFailed(f"Path not found: {old_path}")
 
+            if has_children:
+                base = old_path.rstrip("/")
+
+                def as_moved(f: str) -> tuple[str, dict]:
+                    tail = f[len(base) + 1 :] if f.startswith(base + "/") else Path(f).name
+                    return "move_file", {"old_path": f, "new_path": f"{new_path.rstrip('/')}/{tail}"}
+
+                protected = self._protected_below(old_path, as_moved)
+                if protected is not None:
+                    return FileOpFailed(
+                        f"Refused: moving {old_path} would move {protected}, which the "
+                        "policy does not allow moving."
+                    )
+
             old_location = self._location(old_path)
             new_location = self._location(new_path)
             self.storage.rename(old_path, new_path, **self._storage_kwargs())
@@ -253,6 +291,12 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
     def clear(self) -> str:
         try:
             root = self._location()
+            protected = self._protected_below(None, lambda f: ("delete_file", {"path": f}))
+            if protected is not None:
+                return FileOpFailed(
+                    f"Refused: clearing the workspace would delete {protected}, which "
+                    "the policy does not allow deleting."
+                )
             self.storage.clear()
             return f"All workspace files cleared in {root}"
         except Exception as e:

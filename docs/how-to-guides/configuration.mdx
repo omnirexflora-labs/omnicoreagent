@@ -234,7 +234,7 @@ overrides the same value passed to `OmniServeConfig` in code.
     | `OMNICOREAGENT_SERVE_CORS_ORIGINS` | `*` | Comma-separated allowed origins. |
     | `OMNICOREAGENT_SERVE_CORS_METHODS` | `*` | Comma-separated allowed methods. |
     | `OMNICOREAGENT_SERVE_CORS_HEADERS` | `*` | Comma-separated allowed headers. |
-    | `OMNICOREAGENT_SERVE_CORS_CREDENTIALS` | `true` | Allow CORS credentials. |
+    | `OMNICOREAGENT_SERVE_CORS_CREDENTIALS` | `false` | Allow CORS credentials; only with explicit origins, never with `*`. |
     | `OMNICOREAGENT_SERVE_AUTH_ENABLED` | `false` | Bearer token auth; needs `OMNICOREAGENT_SERVE_AUTH_TOKEN`. |
     | `OMNICOREAGENT_SERVE_AUTH_TOKEN` | unset | The bearer token. |
     | `OMNICOREAGENT_SERVE_REQUEST_LOGGING` | `true` | Log requests. |
@@ -243,6 +243,7 @@ overrides the same value passed to `OmniServeConfig` in code.
     | `OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED` | `false` | In-process rate limiting. |
     | `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per window, at least `1`. |
     | `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Window in seconds, at least `1`. |
+    | `OMNICOREAGENT_SERVE_TRUSTED_PROXIES` | none | Comma-separated proxy addresses; the client IP is read from `X-Forwarded-For` only on requests from these. |
   </Accordion>
   <Accordion title="Background task store variables">
     | Variable | Default | Purpose |

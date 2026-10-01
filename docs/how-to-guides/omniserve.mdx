@@ -635,7 +635,7 @@ The trace detail routes return `404` when no trace matches.
 |--------|-------|-------|--------------|
 | `GET` | `/health` | No | The process is up: `status`, `agent_name`, `uptime`, `version` |
 | `GET` | `/ready` | No | Ready for work: startup done, agent initialized, every MCP server connected |
-| `GET` | `/prometheus` | No | Request counters in Prometheus text format |
+| `GET` | `/prometheus` | No | Request counters in Prometheus text format, one per route |
 | `GET` | `/metrics` | Yes | The agent's token and time totals |
 | `GET` | `/tools` | Yes | The agent's tools, with their input schemas |
 | `GET` | `/docs` | No | Swagger UI (`OMNICOREAGENT_SERVE_ENABLE_DOCS`) |
@@ -693,8 +693,11 @@ curl -s localhost:8774/tools -H "Authorization: Bearer s3cret-token"
 ```
 
 There is one token per server; for per-user identity, put OmniServe behind a
-gateway that authenticates users. CORS is open (`*`) by default; set
-`OMNICOREAGENT_SERVE_CORS_ORIGINS` to your front end's origin.
+gateway that authenticates users. CORS is open (`*`) by default, without
+credentials; set `OMNICOREAGENT_SERVE_CORS_ORIGINS` to your front end's origin
+(credentials are sent only to origins listed there). Behind a proxy, list its
+address in `OMNICOREAGENT_SERVE_TRUSTED_PROXIES` so the rate limit sees each
+client's address, not the proxy's.
 
 ## Configuration
 
@@ -718,10 +721,11 @@ background API and its worker run with an in-memory task store.
 | `OMNICOREAGENT_SERVE_CORS_ORIGINS` | `*` | Allowed origins, comma-separated |
 | `OMNICOREAGENT_SERVE_CORS_METHODS` | `*` | Allowed methods, comma-separated |
 | `OMNICOREAGENT_SERVE_CORS_HEADERS` | `*` | Allowed headers, comma-separated |
-| `OMNICOREAGENT_SERVE_CORS_CREDENTIALS` | `true` | Allow credentials |
+| `OMNICOREAGENT_SERVE_CORS_CREDENTIALS` | `false` | Allow credentials; only with explicit origins, never with `*` |
 | `OMNICOREAGENT_SERVE_AUTH_ENABLED` | `false` | Bearer-token auth; needs a token |
 | `OMNICOREAGENT_SERVE_AUTH_TOKEN` | — | The token |
-| `OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED` | `false` | Rate limit per client IP (`X-Forwarded-For` first) |
+| `OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED` | `false` | Rate limit per client IP |
+| `OMNICOREAGENT_SERVE_TRUSTED_PROXIES` | none | Comma-separated proxy addresses; the client IP is read from `X-Forwarded-For` only on requests from these |
 | `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per window, at least `1` |
 | `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Window in seconds, at least `1` |
 | `OMNICOREAGENT_SERVE_REQUEST_LOGGING` | `true` | Log each request; adds `X-Process-Time` |

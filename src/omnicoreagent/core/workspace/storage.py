@@ -103,13 +103,23 @@ class LocalWorkspaceStorage:
             return self.root
 
         relative_path = normalize_workspace_path(path, strip_prefixes=strip_prefixes)
-        candidate = (self.root / relative_path).resolve()
+        lexical = self.root / relative_path
+        candidate = lexical.resolve()
         try:
             candidate.relative_to(self.root)
         except ValueError:
             raise ValueError(
                 f"Invalid path '{path}' resolved outside workspace namespace.\n"
                 f"Path traversal detected.\nAll paths must stay inside: {self.root}"
+            )
+        if candidate != lexical:
+            # A link inside the root: the policy decides on the path as named,
+            # so `pub -> secret` let a read of pub/key past a rule on
+            # secret/* (the rc7 security review). The sandbox bridge skips
+            # links for the same reason.
+            raise ValueError(
+                f"Invalid path '{path}': it goes through a link. "
+                "Use the path the file is stored at."
             )
         return candidate
 

@@ -24,6 +24,7 @@ import shlex
 import re
 import json
 import posixpath
+import unicodedata
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any, Sequence
@@ -98,6 +99,9 @@ class ParsedCommand:
 
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+# Shown escaped too: a right-to-left override or a zero-width character can
+# make what the approver reads differ from what runs (the rc7 security review).
+_INVISIBLE = {"Cc", "Cf", "Zl", "Zp"}
 
 
 def _visible(text: str) -> str:
@@ -108,7 +112,8 @@ def _visible(text: str) -> str:
     (the 0.5.0rc5 gate)."""
     return "".join(
         {"\n": "\\n", "\t": "\\t", "\r": "\\r"}.get(ch)
-        or (f"\\x{ord(ch):02x}" if _CONTROL.match(ch) else ch)
+        or (f"\\x{ord(ch):02x}" if _CONTROL.match(ch) else None)
+        or (f"\\u{ord(ch):04x}" if unicodedata.category(ch) in _INVISIBLE else ch)
         for ch in text
     ).strip()
 
@@ -119,7 +124,8 @@ def _shown(argument: str) -> str:
     # bash's $'...' form: a control character is written, never acted on.
     escaped = "".join(
         {"\n": "\\n", "\t": "\\t", "\r": "\\r", "\\": "\\\\", "'": "\\'"}.get(ch)
-        or (f"\\x{ord(ch):02x}" if _CONTROL.match(ch) else ch)
+        or (f"\\x{ord(ch):02x}" if _CONTROL.match(ch) else None)
+        or (f"\\u{ord(ch):04x}" if unicodedata.category(ch) in _INVISIBLE else ch)
         for ch in argument
     )
     return f"$'{escaped}'"
@@ -304,7 +310,13 @@ def _writes_to_file(redirect, source: bytes) -> bool:
         return False
     destination = redirect.child_by_field_name("destination") or redirect.children[-1]
     target = _literal(destination, source)
-    if op.startswith(">&") or op.endswith("&") and target is not None and target.isdigit():
+    # `>&2`, `>&-` and `>&3-` copy or close a descriptor; `>& file` sends
+    # stdout and stderr to a file. Only a literal descriptor is a copy: every
+    # `>&` was, so `echo x >& ~/.bashrc` passed a rule without `redirect` (the
+    # rc7 security review).
+    if op == ">&-":
+        return False
+    if op.startswith(">&") and target is not None and re.fullmatch(r"\d*-?", target) and target:
         return False
     return target != "/dev/null"
 

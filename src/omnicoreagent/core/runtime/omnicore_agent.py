@@ -904,7 +904,8 @@ class OmniCoreAgent:
                     trace_id=trace_context.trace_id,
                 )
 
-            run_budgets = self._build_run_budgets(
+            # A spawned worker spends its lead's budgets (``WorkerBudgets``).
+            run_budgets = getattr(self, "_lead_budgets", None) or self._build_run_budgets(
                 run_id=run_id, session_id=session_id, resumed=_resume
             )
             if run_budgets is not None and (_resume is not None or retry_of is not None):
