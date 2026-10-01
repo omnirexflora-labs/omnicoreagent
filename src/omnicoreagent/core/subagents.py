@@ -86,7 +86,7 @@ class SubagentFactory:
         }
 
     def _build_subagent_config(
-        self, *, subagent_name: str = "subagent"
+        self, *, subagent_name: str = "subagent", profile: Any = None
     ) -> Dict[str, Any]:
         """
         Build agent_config for subagents inheriting parent's config.
@@ -99,7 +99,10 @@ class SubagentFactory:
         config = self.agent_config.copy()
 
         config["max_steps"] = min(config.get("max_steps", 50), 50)
+        if profile is not None:
+            config["max_steps"] = profile.steps_under(config.get("max_steps", 50))
         config["enable_subagents"] = False
+        config["worker_profiles"] = []
         config["enable_workspace_files"] = True
         context_management = dict(config.get("context_management") or {})
         context_management["enabled"] = True
@@ -195,6 +198,7 @@ When you have completed the task:
         role: str,
         task: str,
         output_path: str,
+        profile: str | None = None,
     ):
         """
         Create a focused subagent.
@@ -213,17 +217,31 @@ When you have completed the task:
             task=task,
             output_path=output_path,
         )
+        chosen = self.profiles.get(profile) if profile is not None else None
+        if profile is not None and chosen is None:
+            raise ValueError(f"No worker profile {profile!r}; profiles: {', '.join(self.profiles)}")
+        if chosen is not None and chosen.instructions:
+            instruction = f"{instruction}\n{chosen.instructions.strip()}\n"
 
-        subagent_config = self._build_subagent_config(subagent_name=name)
+        subagent_config = self._build_subagent_config(subagent_name=name, profile=chosen)
+        model_config = self.base_model_config
+        mcp_tools = self.mcp_tools
+        if chosen is not None:
+            model_config = chosen.model_config_over(dict(self.base_model_config or {}))
+            if chosen.mcp_servers is not None:
+                mcp_tools = [
+                    server for server in self.mcp_tools or []
+                    if str(server.get("name") or "") in chosen.mcp_servers
+                ]
 
         from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
 
         agent = OmniCoreAgent(
             name=f"subagent_{name}",
             system_instruction=instruction,
-            model_config=self.base_model_config,
+            model_config=model_config,
             agent_config=subagent_config,
-            mcp_tools=self.mcp_tools,
+            mcp_tools=mcp_tools,
             local_tools=self._build_subagent_local_tools(),
             memory_router=self.memory_router,
             telemetry_store=(
@@ -241,6 +259,10 @@ When you have completed the task:
         # calls under a lead limit of four (the rc7 security review).
         from omnicoreagent.core.budgets import WorkerBudgets, current_budgets
 
+        if chosen is not None and chosen.tools is not None:
+            # write_file always: a worker writes its output to a file.
+            agent._only_tools = {*chosen.tools, "write_file"}
+        agent.worker_profile = chosen
         lead_budgets = current_budgets()
         agent._lead_budgets = WorkerBudgets(lead_budgets) if lead_budgets is not None else None
         self._active_subagents[name] = agent
@@ -252,6 +274,7 @@ When you have completed the task:
         role: str,
         task: str,
         output_path: str,
+        profile: str | None = None,
     ) -> Dict[str, Any]:
         """
         Create and run a subagent, return result.
@@ -269,6 +292,7 @@ When you have completed the task:
             role=role,
             task=task,
             output_path=output_path,
+            profile=profile,
         )
         # A worker parked on an approval the lead has since decided resumes
         # from where it stopped instead of starting over.
@@ -699,6 +723,7 @@ When you have completed the task:
                 output_path=spec.get(
                     "output_path", f"/workspace/tasks/default/subagent_{i}/"
                 ),
+                **({"profile": spec["profile"]} if spec.get("profile") else {}),
             )
             for i, spec in enumerate(subagent_specs)
         ]
@@ -749,7 +774,7 @@ When you have completed the task:
     def _unknown_profile(self, subagent_specs: list[dict[str, Any]]) -> str | None:
         """Why no worker can start, when one names no profile the developer
         set: none is started, so the lead can fix its call and spawn again."""
-        if not self.profiles:
+        if not getattr(self, "profiles", None):
             return None
         names = ", ".join(self.profiles)
         for spec in subagent_specs:
@@ -880,10 +905,11 @@ def build_subagent_tools(
     }
     required = ["name", "role", "task", "output_path"]
     description = _SPAWN_DESCRIPTION
-    if factory.profiles:
+    profiles = getattr(factory, "profiles", None) or {}
+    if profiles:
         item_properties["profile"] = {
             "type": "string",
-            "enum": list(factory.profiles),
+            "enum": list(profiles),
             "description": "The kind of worker: one of the profiles listed in this tool's description.",
         }
         required.append("profile")

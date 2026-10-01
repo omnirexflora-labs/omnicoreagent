@@ -120,3 +120,90 @@ async def test_a_worker_without_a_known_profile_is_not_started(profile):
 
     assert result["status"] == "error" and not started
     assert "explorer" in result["message"] and "builder" in result["message"]
+
+
+# P3 — the worker is built from its profile
+
+
+def _lead_agent(tmp_path, profiles, **extra):
+    from omnicoreagent import OmniCoreAgent
+
+    return OmniCoreAgent(
+        name="lead",
+        system_instruction="x",
+        model_config={"provider": "openai", "model": "gpt-5.4", "api_key": "lead-key"},
+        agent_config={
+            "guardrail_mode": "off",
+            "enable_subagents": True,
+            "worker_profiles": profiles,
+            "workspace_config": {"workspace_dir": str(tmp_path / "ws")},
+            **extra,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_worker_gets_its_profiles_model_effort_steps_and_tools(tmp_path):
+    lead = _lead_agent(tmp_path, [{**EXPLORER, "instructions": "Never edit files."}, BUILDER])
+    await lead.initialize()
+    try:
+        worker = lead._subagent_factory.create_subagent(
+            name="w", role="search", task="find x", output_path="w.md", profile="explorer"
+        )
+        await worker.initialize()
+        tools = {tool["name"] for tool in await worker.list_all_available_tools()}
+        model = worker.model_config
+        steps = worker.agent_config["max_steps"]
+        instruction = worker.system_instruction
+        await worker.cleanup()
+    finally:
+        await lead.cleanup()
+
+    assert model["model"] == "gpt-5.4-mini" and model["reasoning_effort"] == "low"
+    assert model["api_key"] == "lead-key", "the same provider keeps the lead's key"
+    assert steps == 20
+    assert tools == {"read_file", "grep", "write_file"}, tools
+    assert "Never edit files." in instruction
+
+
+@pytest.mark.asyncio
+async def test_a_profile_on_another_provider_does_not_get_the_leads_key(tmp_path):
+    other = {"name": "other", "description": "d",
+             "model_config": {"provider": "anthropic", "model": "claude-sonnet-5"}}
+    lead = _lead_agent(tmp_path, [other])
+    await lead.initialize()
+    try:
+        worker = lead._subagent_factory.create_subagent(
+            name="w", role="r", task="t", output_path="w.md", profile="other"
+        )
+        model = worker.model_config
+    finally:
+        await lead.cleanup()
+
+    assert model["provider"] == "anthropic" and model["model"] == "claude-sonnet-5"
+    assert model.get("api_key") in (None, "") and "lead-key" not in str(model)
+
+
+@pytest.mark.asyncio
+async def test_a_worker_without_a_profile_is_as_the_lead(tmp_path):
+    lead = _lead_agent(tmp_path, [])
+    await lead.initialize()
+    try:
+        worker = lead._subagent_factory.create_subagent(name="w", role="r", task="t", output_path="w.md")
+        await worker.initialize()
+        tools = {tool["name"] for tool in await worker.list_all_available_tools()}
+        model = worker.model_config
+        await worker.cleanup()
+    finally:
+        await lead.cleanup()
+
+    assert model["model"] == "gpt-5.4"
+    assert {"read_file", "write_file", "edit_file", "delete_file"} <= tools
+
+
+@pytest.mark.asyncio
+async def test_a_profile_naming_a_tool_the_lead_lacks_is_refused_at_initialize(tmp_path):
+    lead = _lead_agent(tmp_path, [{**EXPLORER, "tools": ["read_file", "web_search"]}])
+    with pytest.raises(ValueError, match="web_search"):
+        await lead.initialize()
+    await lead.cleanup()
