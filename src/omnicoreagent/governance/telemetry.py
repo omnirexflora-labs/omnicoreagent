@@ -143,7 +143,7 @@ async def emit_approval_request(
     await _emit(
         recorder,
         "approval_request_created",
-        input={"approval": to_plain(request)},
+        input={"approval": _recorded_approval(recorder, request)},
         strict=strict,
     )
 
@@ -161,9 +161,26 @@ async def emit_approval_result(
         recorder,
         "approval_resolved",
         input={"approval_id": request.approval_id},
-        output={"approval": to_plain(request), "result": to_plain(result)},
+        output={"approval": _recorded_approval(recorder, request), "result": to_plain(result)},
         strict=strict,
     )
+
+
+def _recorded_approval(recorder: Any, request: ApprovalRequest) -> dict[str, Any]:
+    """The approval as the trace keeps it. The command's text is shown to the
+    approver and kept on the run's record; in the trace it follows the
+    argument capture policy, as the call's arguments do (the rc7 gate, E7-2:
+    the whole command sat in the trace under the default capture)."""
+    from omnicoreagent.core.telemetry.recorder import redacts_governed_arguments
+
+    plain = to_plain(request)
+    command = ((plain.get("metadata") or {}).get("command") or {}) if isinstance(plain, dict) else {}
+    if command.get("summary") and redacts_governed_arguments(recorder, True):
+        plain["metadata"] = {
+            **plain["metadata"],
+            "command": {**command, "summary": [f"[REDACTED] ({len(command['summary'])} command(s))"]},
+        }
+    return plain
 
 
 # Request metadata fields that carry delegated content rather than authority
