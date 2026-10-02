@@ -24,6 +24,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.ext.mutable import MutableDict
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.sql_schema import create_tables
 from omnicoreagent.core.memory_store.utils import utc_now_str
 from omnicoreagent.core.summarizer.summarizer_engine import (
     apply_summarization_logic,
@@ -276,8 +277,10 @@ class DatabaseMessageStore(AbstractMemoryStore):
 
             if "messages" in existing_tables:
                 self._migrate_add_columns(db_engine, inspector)
-            # Creates only the tables that are missing (such as run_states).
-            Base.metadata.create_all(db_engine)
+            # Creates only the tables that are missing (such as run_states),
+            # tolerating another process creating them at the same moment
+            # (the rc7 gate, C7-1: two replicas on an empty database).
+            create_tables(db_engine, Base.metadata)
 
             logger.debug(f"DatabaseMessageStore initialized with: {db_url}")
         else:
@@ -297,7 +300,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             existing_tables = inspector.get_table_names()
 
             if "messages" not in existing_tables:
-                Base.metadata.create_all(db_engine)
+                create_tables(db_engine, Base.metadata)
 
             logger.debug("DatabaseMessageStore connection initialized")
 

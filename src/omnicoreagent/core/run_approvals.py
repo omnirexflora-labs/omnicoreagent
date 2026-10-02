@@ -66,8 +66,17 @@ def _parse(value: str | None) -> datetime | None:
 
 
 # Sandbox set-up a session asks for when it opens; not a call the agent makes.
+# Each holds for the run: a session is opened again after every pause, and
+# the mount was asked about a second time after the network pause (the rc7
+# gate, D F1).
 _SESSION_SETUP = frozenset(
-    {"sandbox.network.configure", "sandbox.environment.set"}
+    {
+        "sandbox.network.configure",
+        "sandbox.environment.set",
+        "sandbox.filesystem.mount",
+        "sandbox.image.use",
+        "sandbox.resources.set",
+    }
 )
 
 

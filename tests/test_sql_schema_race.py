@@ -102,6 +102,19 @@ async def test_many_task_stores_open_one_database_at_once(url):
 
 
 @_both
+def test_many_memory_stores_open_one_database_at_once(url):
+    # The rc7 gate (C7-1): the memory store called create_all itself, so the
+    # second of two processes opening a fresh database raised out of its
+    # constructor (SQLite: table messages already exists; PostgreSQL: a
+    # pg_type unique violation).
+    from omnicoreagent.core.memory_store.sql_db_memory import DatabaseMessageStore
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        stores = list(pool.map(lambda _: DatabaseMessageStore(db_url=url), range(6)))
+    assert len(stores) == 6
+
+
+@_both
 def test_many_telemetry_indexes_open_one_database_at_once(url):
     prefix = f"t{uuid4().hex[:12]}_"
     indexes = [SqlTelemetryIndex(url, table_prefix=prefix) for _ in range(6)]

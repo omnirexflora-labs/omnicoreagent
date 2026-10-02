@@ -501,3 +501,25 @@ async def test_a_link_out_of_the_workspace_is_skipped_not_fatal(tmp_path):
     assert result.exit_code == 0 and "hello" in result.stdout
     assert (outside / "target.txt").read_text() == "untouched"
     assert storage.read_text("new.txt") == "out\n"
+
+
+async def test_the_file_limit_is_reported_and_counts_only_what_moves(tmp_path):
+    # The rc7 gate (D F2): with more files than max_files in play, the copy
+    # in stopped at the limit and the copy back cut the sandbox's sorted
+    # listing at it, before leaving out files already there, so a command's
+    # new files died with the sandbox and the model was told nothing.
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+    for n in range(5):
+        storage.write_text(f"in/{n}.txt", str(n))
+
+    async with _scope(storage, max_files=3).active() as scope:
+        first = await _sh(scope, "ls in | wc -l; for n in 0 1 2 3 4; do echo $n > out$n.txt; done")
+        second = await _sh(scope, "true")
+
+    assert first.stdout.splitlines()[0] == "3"
+    reasons = {s["path"]: s["reason"] for s in first.metadata["workspace"]["skipped"]}
+    assert sum("not copied in" in r for r in reasons.values()) == 2, reasons
+    assert len(first.metadata["workspace"]["written"]) == 3
+    assert sum("not copied back" in r for r in reasons.values()) == 2, reasons
+    # The next command moves the rest, since what is in place no longer counts.
+    assert len(second.metadata["workspace"]["written"]) == 2, second.metadata["workspace"]

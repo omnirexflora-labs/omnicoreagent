@@ -93,6 +93,10 @@ class WorkspaceBridge:
         # modification time last copied in, so only changes are copied.
         self._in_sandbox: dict[str, str] = {}
         self._copied_in_at: dict[str, Any] = {}
+        # Files the last copy in left behind over max_files: reported with
+        # the copy back, so the model is told (the rc7 gate, D F2: 104 of 600
+        # files never went in and nothing said so).
+        self._not_copied_in: list[str] = []
         # One copy at a time. A model's parallel execute calls each copied in;
         # the second skipped files the first was still uploading and its
         # command ran on a partial workspace (the 0.5.0rc4 gate).
@@ -119,9 +123,10 @@ class WorkspaceBridge:
         self._checks = {}
         uploads: dict[str, bytes] = {}
         total = 0
-        for path, modified_at in entries[: self.max_files]:
-            if self._copied_in_at.get(path) == modified_at:
-                continue
+        # Only what is not in the sandbox already counts against the limit.
+        changed = [(p, m) for p, m in entries if self._copied_in_at.get(p) != m]
+        self._not_copied_in = [p for p, _ in changed[self.max_files :]]
+        for path, modified_at in changed[: self.max_files]:
             if not await self._permitted("read_file", path):
                 continue
             try:
@@ -145,7 +150,7 @@ class WorkspaceBridge:
     def _workspace_files(self) -> list[tuple[str, Any]]:
         found: list[tuple[str, Any]] = []
         pending: list[str | None] = [None]
-        while pending and len(found) < self.max_files:
+        while pending:
             folder = pending.pop()
             try:
                 items = self.storage.list_files(folder)
@@ -210,15 +215,25 @@ class WorkspaceBridge:
                     "outside the workspace folder",
                 }
             )
-        for size, digest, raw_path in [entry for entry in listed if not entry[2].endswith("/.git")][
-            : self.max_files
-        ]:
+        for path in self._not_copied_in:
+            skipped.append({"path": path, "reason": f"not copied in: over the bridge's limit of {self.max_files} files"})
+        self._not_copied_in = []
+        # Only what the sandbox changed counts against the limit; the rest is
+        # reported, not dropped (the rc7 gate, D F2).
+        changed: list[tuple[int, str, str]] = []
+        for size, digest, raw_path in listed:
+            if raw_path.endswith("/.git"):
+                continue
             try:
                 path = normalize_workspace_path(raw_path)
             except ValueError:
                 continue
             if not path or _hidden(path) or self._in_sandbox.get(path) == digest:
                 continue
+            changed.append((size, digest, path))
+        for _, _, path in changed[self.max_files :]:
+            skipped.append({"path": path, "reason": f"not copied back: over the bridge's limit of {self.max_files} files"})
+        for size, digest, path in changed[: self.max_files]:
             if any(path == c or path.startswith(c + "/") for c in checkouts):
                 continue
             if _run_record(path):
