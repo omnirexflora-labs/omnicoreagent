@@ -222,6 +222,7 @@ async def execute_native_turn(
                 provider=binding.provider,
                 arguments=arguments,
                 parent_tool_call_id=parent,
+                idempotent=bool(getattr(binding, "idempotent", False)),
             )
             started["flag"] = True
         # The runner holds the deadline, starting it once the call is

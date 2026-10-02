@@ -291,6 +291,19 @@ files, artifacts, `read_skill_file`) are. An MCP tool is when its server marks
 it `readOnlyHint` or `idempotentHint`. For a tool with side effects, give the
 model a way to check, as `list_charges` did above.
 
+The flag is recorded on each call when it starts, and a call runs again only
+if the tool was idempotent then **and** is now, so changing a tool's flag in a
+deploy cannot rerun a call made under the old one.
+
+### Your idempotency key
+
+A tool that calls a service can make itself safe to run twice: the call's
+`tool_call_id` is the same on every resume of the run, so use it as the
+service's idempotency key (Stripe's `Idempotency-Key`, a database row's
+unique id). Then a retry after a crash is a no-op at the service, and the tool
+can be declared `idempotent=True`. Tools get the id from
+`omnicoreagent.governance.calls.current_tool_call()`.
+
 ## What is guaranteed
 
 What a run does after its process dies, stated exactly. "Resume" means
@@ -324,6 +337,24 @@ What a run does after its process dies, stated exactly. "Resume" means
   not resumed, except a worker waiting for an approval.
 - **Background retries** after a failure, a timeout or a cancellation are new
   attempts from the first step; only a worker that died is resumed.
+
+### What each store keeps when the machine loses power
+
+The rows above hold when the *process* dies. When the *machine* loses power,
+what survives depends on the store's own write settings:
+
+| Store | Survives a process crash | Survives a power loss |
+|---|---|---|
+| In-memory (the default when no store is given) | No: it lives in the process | No |
+| SQLite (`sqlite:///...`) | Yes | The last committed save, in WAL mode with `synchronous=FULL`; with `NORMAL`, the newest save may be lost |
+| PostgreSQL | Yes | Yes, with the server's default `synchronous_commit=on` |
+| Redis | Yes | Only what AOF or RDB had written: with `appendfsync everysec`, up to the last second |
+| MongoDB | Yes | With write concern `majority` and journaling (the default), the acknowledged saves |
+
+A save that did not survive leaves the run one step earlier than it was: the
+rows above then apply to that step, so a call made after the lost save is one
+the record never saw started, and it runs again. Give a store that holds
+payments the setting that keeps every save.
 
 These come from `_pending_calls` ([`core/agents/base.py`](https://github.com/omnirexflora-labs/omnicoreagent/blob/main/src/omnicoreagent/core/agents/base.py)),
 the call recording in [`core/agents/native_tools.py`](https://github.com/omnirexflora-labs/omnicoreagent/blob/main/src/omnicoreagent/core/agents/native_tools.py)

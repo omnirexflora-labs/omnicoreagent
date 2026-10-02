@@ -351,6 +351,7 @@ class RunTracker:
         provider: str | None,
         arguments: Any,
         parent_tool_call_id: str | None = None,
+        idempotent: bool = False,
     ) -> None:
         async with self._lock:
             entry = {
@@ -360,6 +361,11 @@ class RunTracker:
                 "tool_name": tool_name,
                 "provider": provider,
                 "arguments_digest": arguments_digest(arguments),
+                # Whether the tool was idempotent when the call was made: at
+                # resume this and the current flag must both say so before
+                # the call runs again, so a deploy that flips the flag cannot
+                # rerun an old call.
+                "idempotent": bool(idempotent),
                 "step": self.record["step"],
                 "state": "started",
                 "outcome": None,
