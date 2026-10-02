@@ -207,18 +207,15 @@ rules, with a `path` target to narrow them:
 
 ### Rules on what a command runs
 
-A `process.exec` rule can also name what a command would really run, with a
-`command` matcher: deny `rm -r`, ask before `git push`, allow only `git status`
-and `git log`. The command is parsed first, so `git status && rm -rf ~`,
-`echo $(rm -rf ~)`, `sudo /bin/rm -rf ~` and `sh -c 'rm -rf ~'` are all seen
-as running `rm`; a command whose effect cannot be proven (`eval`, `... | sh`) is
-never allowed by such a rule. Such a command is **opaque**: in
-`echo cm0gLXJmIH4= | base64 -d | sh` the parser sees `echo`, `base64` and
-`sh`, not the `rm` the pipe feeds to `sh`, so a deny rule on `rm` cannot see
-it either. A rule without a `command` matcher still matches it: under the dev
-profiles, `allow_sandboxed_execution` allows it in a sandbox, where the
-sandbox is what contains it. It applies wherever the command runs: on the host
-and in every sandbox. It narrows what the agent may do; the sandbox is still the
+A `process.exec` rule can also name a command by its first words, with a
+`command` matcher: deny `rm`, ask before `git push`, allow only `git status`
+and `git log`. Only a plain chain of commands (`git status && rm -rf build`)
+is split and matched command by command. Anything else, such as a redirect,
+`$(...)`, a variable, a glob, `eval` or `sh -c`, is one unreadable command:
+no rule allows it, and where the policy has command rules it is asked about
+(refused in `strict`), so `eval "rm -rf ~"` does not pass a deny on `rm`.
+Wrappers are not looked inside: `sudo rm` is a command named `sudo`. Command
+rules decide when to ask; what a command can touch is the sandbox's to decide.
 boundary. See [Rules on shell commands](/docs/reference/policy#rules-on-shell-commands).
 
 ## Files between the workspace and the sandbox
@@ -362,12 +359,14 @@ it is. Each thing it asks for is a policy question when the session opens:
 | `environment` | `{"plain": {}}` | `sandbox.environment.set` |
 | `resources` | none (e.g. `{"cpu": "2", "memory": "1g"}`) | `sandbox.resources.set` |
 | `workspace_mount` | none | `sandbox.filesystem.mount` (asks in the dev profiles) |
-| `filesystem_policy` | `{"default": "deny"}`, no path lists | `sandbox.filesystem.configure` (for `"default": "allow"`, and once per path in `readable_paths`, `writable_paths`, `denied_paths`) |
 | `lifecycle` | `{"cleanup": "always", "snapshot": False}` | — |
 
-`filesystem_policy` is a question for the policy; of the built-in providers
-only `local` reads it, and refuses anything but `{"default": "allow"}` with no
-path lists. `lifecycle` does not change the agent's own sandbox, which is
+A setting the chosen provider does not apply is refused when the agent is
+built, naming the provider and the setting: a workspace mount works on Docker
+only, a host allowlist on Modal and `http` only, CPU and memory limits
+everywhere but E2B. There is no list of paths a sandboxed command may read or
+write: it reaches the sandbox's own disk and, on Docker, the workspace mount;
+`filesystem_policy` was removed, since no provider applied it. `lifecycle` does not change the agent's own sandbox, which is
 closed when its run ends: `cleanup` (`"always"`, `"on_success"`, `"never"`)
 applies only to a one-off command run through the sandbox service without a
 session, and nothing acts on `snapshot` yet.

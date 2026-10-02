@@ -28,6 +28,7 @@ from typing import Any
 from uuid import uuid4
 
 from omnicoreagent.sandbox.base import SandboxRuntime
+from omnicoreagent.sandbox.contract import ENFORCES
 from omnicoreagent.sandbox.errors import SandboxUnsupportedError
 from omnicoreagent.sandbox.models import (
     NetworkPolicy,
@@ -43,6 +44,8 @@ DEFAULT_MAX_OUTPUT_BYTES = 1_000_000
 
 
 class HttpSandboxRuntime(SandboxRuntime):
+    enforces = ENFORCES["http"]  # sandbox/contract.py
+
     provider = "http"
     supports_required_sandbox = True
     supports_execution = True

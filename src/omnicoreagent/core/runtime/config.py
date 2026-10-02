@@ -34,18 +34,6 @@ SUPPORTED_MODELS_PROVIDERS = {
 GUARDRAIL_MODES = frozenset({"off", "input_only", "full"})
 
 
-# Providers that cannot restrict a sandbox's traffic to named hosts. (Daytona's
-# API takes IP ranges, not host names.)
-_PROVIDERS_WITHOUT_HOST_ALLOWLIST = frozenset({"docker", "e2b", "daytona", "vercel", "local"})
-# Built-in providers that do not block named hosts; http passes the list on to
-# your own service.
-_PROVIDERS_WITHOUT_HOST_DENYLIST = frozenset({"docker", "e2b", "daytona", "modal", "vercel", "local"})
-# Built-in providers, none of which delivers secret_refs to a command.
-_PROVIDERS_WITHOUT_SECRET_REFS = frozenset(
-    {"docker", "e2b", "daytona", "modal", "vercel", "local", "http"}
-)
-
-
 def normalize_guardrail_mode(value: Any) -> str:
     """Normalize and validate the guardrail enforcement boundary."""
     if not isinstance(value, str):
@@ -815,39 +803,13 @@ def _validate_governance_config(value: dict[str, Any]):
         named = sandbox_config if isinstance(sandbox_config, str) else (
             sandbox_config.get("provider") if isinstance(sandbox_config, dict) else None
         )
-        if (
-            manifest is not None
-            and manifest.network_policy.allowed_hosts
-            and named in _PROVIDERS_WITHOUT_HOST_ALLOWLIST
-        ):
-            # Refused now, not after a person has been asked to turn the
-            # network on for a rule the provider cannot keep.
-            raise ValueError(
-                f"The {named} sandbox cannot enforce a network host allowlist "
-                "(allowed_hosts): use network_policy default 'deny' or 'allow', "
-                "or a provider that enforces one (modal, http)"
-            )
-        if (
-            manifest is not None
-            and manifest.network_policy.denied_hosts
-            and named in _PROVIDERS_WITHOUT_HOST_DENYLIST
-        ):
-            raise ValueError(
-                f"The {named} sandbox cannot block named hosts (denied_hosts): "
-                "use network_policy default 'deny' with allowed_hosts on a provider "
-                "that enforces them, or the http provider with a service that does"
-            )
-        if (
-            manifest is not None
-            and manifest.environment.secret_refs
-            and named in _PROVIDERS_WITHOUT_SECRET_REFS
-        ):
-            raise ValueError(
-                f"The {named} sandbox cannot deliver secrets (environment.secret_refs): "
-                "no built-in provider passes them to a command. Put a value the "
-                "command may see in environment.plain, or keep the secret out "
-                "of the sandbox and call the service from a tool instead"
-            )
+        if named is not None:
+            # One table of what each provider applies: a setting it does not
+            # is refused now, not after a person has been asked to approve it
+            # (sandbox/contract.py).
+            from omnicoreagent.sandbox.contract import check_enforced
+
+            check_enforced(str(named), manifest)
     bridge = value.get("workspace_bridge")
     if bridge is not None:
         if not isinstance(bridge, dict) or set(bridge) - {"include", "exclude"}:

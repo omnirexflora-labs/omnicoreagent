@@ -64,7 +64,6 @@ def _manifest(working_dir, **fields):
     return SandboxManifest(
         working_dir=str(working_dir),
         network_policy={"default": "allow"},
-        filesystem_policy={"default": "allow"},
         **fields,
     )
 
@@ -235,8 +234,6 @@ async def test_files_move_in_and_out_inside_the_working_directory_only(session_o
     [
         ({"network_policy": {"default": "deny"}}, "restrict the network"),
         ({"network_policy": {"default": "allow", "denied_hosts": ["example.com"]}}, "restrict the network"),
-        ({"filesystem_policy": {"default": "deny"}}, "limit which files"),
-        ({"filesystem_policy": {"default": "allow", "denied_paths": ["/etc"]}}, "limit which files"),
         ({"image": "python:3.12-slim"}, "an image"),
         ({"workspace_mount": {"source": "/srv/data", "target": "/data"}}, "a workspace mount"),
         ({"resources": {"memory": "1g"}}, "CPU, memory or GPU"),
@@ -248,7 +245,6 @@ async def test_a_manifest_asking_for_isolation_it_cannot_give_is_refused(tmp_pat
     manifest = {
         "working_dir": str(tmp_path),
         "network_policy": {"default": "allow"},
-        "filesystem_policy": {"default": "allow"},
         **fields,
     }
 
@@ -372,7 +368,6 @@ async def _agent(model, tmp_path, *, policy=None, profile="interactive-dev"):
         "sandbox_manifest": {
             "working_dir": str(tmp_path),
             "network_policy": {"default": "allow"},
-            "filesystem_policy": {"default": "allow"},
         },
     }
     if policy is not None:
@@ -632,7 +627,6 @@ async def test_the_workspace_is_not_copied_into_the_directory_commands_run_in(
         "sandbox_manifest": {
             "working_dir": str(working),
             "network_policy": {"default": "allow"},
-            "filesystem_policy": {"default": "allow"},
         },
     }
     agent = OmniCoreAgent(

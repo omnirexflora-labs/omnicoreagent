@@ -268,6 +268,10 @@ default profile, `permissive-dev`, refuses or asks about:
 | Reads a raw secret, installs a package, reaches the network or host files without a rule | Ran | Refused | Add the rule for what it needs ([Policies](/docs/core-concepts/policies)) |
 | Relied on tool argument values in its traces under `capture="default"` | Recorded | Recorded by name, not value | `telemetry_config={"capture": "full"}` (the capture you get without setting one) |
 | Set `"enabled": True` without a profile | `interactive-dev` | `interactive-dev` | Nothing |
+| Sets `sandbox_manifest.filesystem_policy` | Approved, applied by no provider | Refused: removed | Remove it; choose which files go in with the workspace bridge's `include` and `exclude` |
+| Asks a sandbox provider for a setting it does not apply (a workspace mount on e2b, `resources.timeout_seconds`) | Approved, then ignored | Refused when the agent is built, naming the setting | Remove it, or use a provider that applies it ([What stops harm](/docs/core-concepts/security-model#what-stops-harm)) |
+| Serves with OmniServe behind a proxy | `X-Forwarded-For` trusted from anyone | Read only from `OMNICOREAGENT_SERVE_TRUSTED_PROXIES` | List your proxy's address |
+| Relies on CORS credentials | Sent by default, to any origin | Off by default, never with `*` | List your front end in `OMNICOREAGENT_SERVE_CORS_ORIGINS` and set `OMNICOREAGENT_SERVE_CORS_CREDENTIALS=true` |
 
 To keep 0.4's behaviour exactly: `agent_config={"governance_config": {"enabled": False}}`.
 

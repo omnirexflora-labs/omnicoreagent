@@ -387,17 +387,17 @@ async def test_a_policy_of_command_rules_does_not_judge_the_runtimes_own_sync(tm
             {"rule_id": "sandbox", "capability": "sandbox.*"},
             {"rule_id": "files", "capability": "workspace.*"},
             {"rule_id": "basics", "capability": "process.exec",
-             "command": {"program": ["cat", "mkdir", "echo"], "redirect": True}},
+             "command": {"program": ["cat", "mkdir", "cp"]}},
         ]},
     })
     storage = LocalWorkspaceStorage(tmp_path / "files")
     storage.write_text("data/input.txt", "hello")
 
     async with _scope(storage, policy=policy).active() as scope:
-        result = await _sh(scope, "cat data/input.txt && mkdir -p out && echo done > out/answer.txt")
+        result = await _sh(scope, "cat data/input.txt && mkdir -p out && cp data/input.txt out/answer.txt")
 
     assert result.exit_code == 0 and result.stdout == "hello"
-    assert storage.read_text("out/answer.txt") == "done\n"
+    assert storage.read_text("out/answer.txt") == "hello"
     assert result.metadata["workspace"]["written"] == ["out/answer.txt"]
 
 

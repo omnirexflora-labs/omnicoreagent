@@ -23,7 +23,7 @@ from test_local_sandbox import ALLOW_SETUP, _manifest, _policy, _runtime
 
 DENY_RM = PolicyRule(
     rule_id="deny_recursive_rm", effect=PolicyEffect.DENY, capability="process.exec",
-    command={"program": "rm", "args_any": ["-r", "-R", "--recursive"]},
+    command={"prefix": ["rm", ["-r", "-R", "-rf", "-fr", "--recursive"]]},
 )
 ALLOW_HOST = PolicyRule(
     rule_id="allow_host_commands", effect=PolicyEffect.ALLOW, capability="process.exec",
@@ -49,8 +49,14 @@ async def test_a_command_rule_stops_a_real_command_on_the_host(tmp_path):
     assert "deny_recursive_rm" in str(refused.value.metadata) or "deny_recursive_rm" in str(refused.value)
     assert (tmp_path / "build" / "app").read_text() == "keep"
 
-    ran = await service.execute(SandboxCommandSpec(command=["sh", "-c", "echo fine > out.txt"], manifest=_manifest(tmp_path)))
-    assert ran.ok and (tmp_path / "out.txt").read_text() == "fine\n"
+    ran = await service.execute(SandboxCommandSpec(command=["sh", "-c", "touch out.txt"], manifest=_manifest(tmp_path)))
+    assert ran.ok and (tmp_path / "out.txt").exists()
+
+    # A line the rules cannot read (a redirect) is asked about, not run: a
+    # deny rule fails closed (simple-policy plan, SP4).
+    with pytest.raises(GovernanceError, match="cannot read this command"):
+        await service.execute(SandboxCommandSpec(command=["sh", "-c", "echo x > other.txt"], manifest=_manifest(tmp_path)))
+    assert not (tmp_path / "other.txt").exists()
 
 
 def test_the_request_shows_what_would_run_without_a_field_for_traces():

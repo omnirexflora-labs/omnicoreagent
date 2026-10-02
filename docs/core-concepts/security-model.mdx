@@ -189,7 +189,41 @@ An ask outranks the profile's allow, so every other workspace call is still
 allowed and only these two pause the run
 ([Approvals](/docs/core-concepts/approvals)).
 
-## What the Docker sandbox enforces
+## What stops harm
+
+Three layers, each with one job:
+
+1. **The sandbox decides what a command can touch.** It is the boundary.
+2. **Capability rules decide what the agent's own tools may do**, such as
+   reading a file, an HTTP request, an MCP tool or spawning a worker, where
+   the target is exact.
+3. **Command rules decide when to ask about a shell command.** They are a
+   convenience, not a boundary ([Rules on shell
+   commands](/docs/reference/policy#rules-on-shell-commands)).
+
+What each sandbox provider enforces. A manifest asking a provider for
+anything it does not enforce is refused when the agent is built, so nothing
+is approved that is not kept:
+
+| Provider | Network off | Host allowlist | Workspace mount | CPU / memory |
+|---|---|---|---|---|
+| `docker` | Yes | No | Yes (read-only honoured) | Yes |
+| `e2b` | Yes, checked from inside | No | No | No |
+| `daytona` | Yes, checked from inside | No | No | Yes |
+| `modal` | Yes, checked from inside | Yes | No | Yes |
+| `vercel` | Yes, checked from inside | No | No | Yes |
+| `http` | Your service's | Your service's | No | Your service's |
+| `local` | **Not a sandbox**: commands run on your machine | | | |
+
+"Checked from inside" means a new sandbox that should have no network tries
+one outbound connection; if it gets through, the sandbox is destroyed and
+refused. There are no per-path read or write rules inside a sandbox: a
+command reaches the sandbox's own disk and, on Docker, the workspace mount.
+Which workspace files go in is the [workspace
+bridge](/docs/core-concepts/execution#files-between-the-workspace-and-the-sandbox)'s
+`include` and `exclude`, under the same file rules as `read_file`.
+
+### What the Docker sandbox adds
 
 - No network unless the policy allows it (the dev profiles ask).
 - Read-only root, unprivileged user, all capabilities dropped, no privilege
@@ -235,6 +269,9 @@ Governance decides whether your tool runs, not what it does once it runs.
 
 - **Anything your policy allows.** An allow rule for a dangerous capability is
   honoured.
+- **What a command rule does not name.** Command rules match a command's
+  first words; `sudo rm` is a command named `sudo`. The sandbox, not the rule,
+  limits what any command can do.
 - **Your own tools and host skill scripts** run with your privileges.
 - **Data leaving through an allowed channel** (an MCP tool, a tool of yours, a
   sandbox with the network on). There is no data-flow tracking.

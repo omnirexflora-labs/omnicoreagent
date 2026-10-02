@@ -99,27 +99,28 @@ budgets are hashed with the policy. Set budgets in the policy or in
 
 ## Rules on shell commands
 
+<Warning>
+Command rules decide which commands run without asking. They are not a
+security boundary: what a command can touch is decided by the
+[sandbox](/docs/how-to-guides/sandbox-providers) it runs in. An allowed
+program can do anything its own options allow, and `sudo rm` is a command
+named `sudo`, not `rm`.
+</Warning>
+
 Every command an agent runs reaches the policy as `process.exec` on `sh` (the
-`execute` tool runs `sh -c <command>`). A `command` matcher lets a rule name
-what the command would really run: the text is parsed into the simple
-commands it contains, wherever they sit (in pipelines and lists, inside
-`$(...)`, loops and functions, behind `sudo` or `timeout`, inside a literal
-`sh -c '...'`, after `xargs` or `find -exec`), and quoting, escapes and paths
-do not hide a program (`\rm`, `r"m"`, `/bin/rm`).
+`execute` tool runs `sh -c <command>`). A `command` matcher names a command by
+its first words:
 
 ```python
 policy = {
     "name": "build-box",
     "mode": "strict",
     "rules": {
-        "deny": [{
-            "rule_id": "deny_recursive_rm",
-            "capability": "process.exec",
-            "command": {"program": "rm", "args_any": ["-r", "-R", "--r*"]},
-            "examples": {"match": ["rm -rf build", "sudo /bin/rm -fr /", "rm --rec build"], "not_match": ["git rm -r x"]},
-        }],
+        "deny": [{"rule_id": "deny_rm", "capability": "process.exec",
+                  "command": {"program": "rm"},
+                  "examples": {"match": ["ls && rm -rf build"], "not_match": ["git rm x"]}}],
         "ask": [{"rule_id": "ask_git_push", "capability": "process.exec",
-                 "command": {"prefix": ["git", ["push", "send-pack"]]}}],
+                 "command": {"prefix": ["git", ["push", "reset"]]}}],
         "allow": [{"rule_id": "allow_git_readonly", "capability": "process.exec",
                    "command": {"prefix": ["git", ["status", "log", "diff"]]}}],
     },
@@ -128,45 +129,34 @@ policy = {
 
 | `command` field | Matches |
 |---|---|
-| `program` | A glob, or a list of globs, on the program's name. |
-| `prefix` | The first words, program first; each a glob, or a list of alternatives. |
-| `args_any` | Any later argument, as globs; `-rf` also counts as `-r` and `-f`. |
-| `redirect` | Allow rules only: output may go to a file (otherwise only to `/dev/null`). |
-| `env` | Allow rules only: variables that may be set before the program. |
+| `prefix` | The first words: the program's name (without its directory), then later words. Each word is literal, or a list of alternatives. |
+| `program` | Shorthand for a prefix of one word, or a list of alternatives for it. |
 
-`--r*` rather than `--recursive`: GNU `rm` accepts any unambiguous start of a
-long option (`--r`, `--rec`), so name the shortest one as a glob. A rule
-on `program` `rm` does not match `busybox rm -rf /`, where the program is
-`busybox`: add a rule for it too if it is installed.
+How a command is read: only a **plain chain** (simple commands of literal
+words joined by `&&`, `||`, `;`, `|` or a newline) is split into its commands.
+Anything else makes the whole command **unreadable**: a redirect, `$(...)` or
+backticks, a variable or `~`, a glob, a brace, an escape, a leading
+`NAME=value`, a subshell, a group, a heredoc, a function or loop, a command
+in the background, or a program that runs text as a command (`eval`,
+`source`, `exec`, `sh -c`).
 
 How a command is decided:
 
-- A **deny** or **ask** rule applies when **any** command the text would run
-  matches: `git status && rm -rf ~` is denied by the rule above.
-- An **allow** applies only when **every** command is plain (literal words, no
-  expansion), comes from the system path (not `./git` or `/tmp/git`), has no
-  redirect or variable the rule does not permit, and is matched by some allow
-  rule: `git status | head` needs `head` allowed too.
-- A command whose effect cannot be proven is **opaque**: a parse error, `eval`,
-  `source`, a function, a program built from a variable, piping into a shell
-  (`... | base64 -d | sh`), over 10,000 characters. No command rule allows it;
-  where one could have, the decision's reason code is `command_opaque`.
+- A **deny** or **ask** rule applies when **any** command of a readable line
+  begins with its prefix: `ls && rm -rf build` is denied by the rule above.
+- An **allow** rule applies only when **every** command is matched by some
+  allow rule and is named without a path (not `./git` or `/tmp/git`):
+  `git status | head` needs `head` allowed too.
+- An **unreadable** command is never allowed by a rule. Where the policy has
+  any command rule for it, it is asked about, in every mode (refused in
+  `strict`), with the reason code `command_opaque`: a deny rule on `rm`
+  is not passed by `eval "rm -rf x"`.
 - A policy without `command` rules decides exactly as before.
 
-A person asked to approve a command sees the commands it would run, one per
-line (padding cannot hide a second one), and the approval is bound to that
-exact text: approving `ls` approves nothing else.
-
-<Warning>
-Command rules narrow what an agent may run; they are not the security
-boundary. An allowed program can run other code through its own options
-(`git -c core.fsmonitor=...`, `sed 's/x/y/e'`, a project's `npm test`), and
-`git -C . push` does not match a `git push` prefix, nor `python3 -m pip install`
-a `pip install` one (`{"program": ["pip", "pip3", "python*"], "args_any":
-["install"]}` names both). Run untrusted work in a
-[sandbox](/docs/how-to-guides/sandbox-providers), where the boundary is
-enforced, and use command rules to say what the agent may do there.
-</Warning>
+Words are literal: write alternatives (`["-r", "-rf", "-fr"]`) rather than
+patterns. A person asked to approve a command sees each command of a plain
+chain on its own line, or the whole text when it is unreadable, with control
+and invisible characters shown; the approval is bound to that exact text.
 
 ## Capabilities
 
@@ -195,7 +185,6 @@ enforced, and use command rules to say what the agent may do there.
 | `process.exec` | Run a command: in the sandbox (execution surface sandbox), or on the host with the local provider (surface host). Target: resource (the command's name). |
 | `sandbox.environment.set` | Set plain environment variables in the sandbox (their names are in the request, not the target). |
 | `sandbox.execute` | Call the execute tool. Each command it runs is then decided as process.exec. |
-| `sandbox.filesystem.configure` | Give the sandbox read, write or deny path rules. Target: path. |
 | `sandbox.filesystem.cwd` | Run a command in a working directory the manifest or call names. Target: path. |
 | `sandbox.filesystem.mount` | Mount a host directory into the sandbox. Target: path, resource (the source). |
 | `sandbox.image.use` | Start the sandbox from an image named in the manifest. Target: resource (the image). |

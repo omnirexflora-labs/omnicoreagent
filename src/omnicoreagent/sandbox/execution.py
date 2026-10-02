@@ -15,7 +15,6 @@ from omnicoreagent.sandbox.base import SandboxRuntime
 from omnicoreagent.sandbox.errors import SandboxUnsupportedError
 from omnicoreagent.sandbox.models import (
     SandboxSession,
-    SandboxFilesystemDefault,
     SandboxAuthorityContext,
     SandboxExecRequest,
     SandboxExecResult,
@@ -147,6 +146,16 @@ class SandboxExecutionService:
             manifest = SandboxManifest(**manifest)
         manifest = manifest or SandboxManifest()
         runtime = self._runtime()
+        from omnicoreagent.sandbox.contract import ENFORCES, check_enforced
+
+        provider = next(
+            (name for name, kept in ENFORCES.items() if kept is runtime.enforces),
+            type(runtime).__name__,
+        )
+        try:
+            check_enforced(provider, manifest, runtime.enforces)
+        except ValueError as exc:
+            raise SandboxUnsupportedError(str(exc)) from exc
         self._refuse_mount_over_policy(manifest)
         await self._refuse_if_every_command_is_denied(_surface(runtime))
         requests = _manifest_authority_requests(manifest, SandboxCommandSpec(command=["session"]))
@@ -493,56 +502,6 @@ def _manifest_authority_requests(
                 actor=actor,
                 path=spec.cwd,
                 risk_level="medium",
-            )
-        )
-    filesystem_policy = manifest.filesystem_policy
-    if filesystem_policy.default == SandboxFilesystemDefault.ALLOW:
-        requests.append(
-            _sandbox_scope_request(
-                "sandbox.filesystem.configure",
-                actor=actor,
-                risk_level=(
-                    "high"
-                    if filesystem_policy.default == SandboxFilesystemDefault.ALLOW
-                    or filesystem_policy.writable_paths
-                    else "medium"
-                ),
-                metadata={
-                    "default": filesystem_policy.default.value,
-                    "readable_paths": list(filesystem_policy.readable_paths),
-                    "writable_paths": list(filesystem_policy.writable_paths),
-                    "denied_paths": list(filesystem_policy.denied_paths),
-                },
-            )
-        )
-    for path in filesystem_policy.readable_paths:
-        requests.append(
-            _sandbox_scope_request(
-                "sandbox.filesystem.configure",
-                actor=actor,
-                path=path,
-                risk_level="medium",
-                metadata={"mode": "read"},
-            )
-        )
-    for path in filesystem_policy.writable_paths:
-        requests.append(
-            _sandbox_scope_request(
-                "sandbox.filesystem.configure",
-                actor=actor,
-                path=path,
-                risk_level="high",
-                metadata={"mode": "write"},
-            )
-        )
-    for path in filesystem_policy.denied_paths:
-        requests.append(
-            _sandbox_scope_request(
-                "sandbox.filesystem.configure",
-                actor=actor,
-                path=path,
-                risk_level="medium",
-                metadata={"mode": "deny"},
             )
         )
     network_policy = manifest.network_policy

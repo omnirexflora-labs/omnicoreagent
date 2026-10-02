@@ -62,3 +62,27 @@ def refuse_open_sandbox(provider: str, verdict: str) -> None:
         "sandbox option verify_network_isolation=false to accept an unchecked "
         "sandbox."
     )
+
+
+async def confirm_isolated(provider: str, policy, *, verify: bool, run, discard) -> str:
+    """Check a new sandbox that must not reach the internet, from inside it.
+
+    ``run(command)`` returns the shell command's exit code; ``discard()``
+    removes the sandbox, which is done before a refusal. Returns what was
+    recorded: "not required" (the network is open), "unchecked" (the check
+    was turned off) or "checked". A host allowlist is checked too: a public
+    address outside it must stay unreachable."""
+    default = getattr(policy.default, "value", policy.default)
+    if default == "allow" and not policy.allowed_hosts:
+        return "not required"
+    if not verify:
+        return "unchecked"
+    try:
+        exit_code = await run(NETWORK_CHECK_COMMAND)
+    except TimeoutError:
+        exit_code = 124
+    verdict = isolation_verdict(exit_code)
+    if verdict != "isolated":
+        await discard()
+    refuse_open_sandbox(provider, verdict)
+    return "checked"

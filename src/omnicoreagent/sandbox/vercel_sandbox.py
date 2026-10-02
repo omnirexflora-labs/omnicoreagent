@@ -20,6 +20,8 @@ from typing import Any
 from uuid import uuid4
 
 from omnicoreagent.sandbox.base import SandboxRuntime
+from omnicoreagent.sandbox.contract import ENFORCES
+from omnicoreagent.sandbox.network_check import CHECK_TIMEOUT_SECONDS, confirm_isolated
 from omnicoreagent.sandbox.errors import SandboxUnsupportedError
 from omnicoreagent.sandbox.models import (
     NetworkPolicy,
@@ -36,6 +38,8 @@ DEFAULT_MAX_OUTPUT_BYTES = 1_000_000
 
 
 class VercelSandboxRuntime(SandboxRuntime):
+    enforces = ENFORCES["vercel"]  # sandbox/contract.py
+
     provider = "vercel"
     supports_required_sandbox = True
     supports_execution = True
@@ -46,6 +50,9 @@ class VercelSandboxRuntime(SandboxRuntime):
         self.project_id = options.pop("project_id", None)
         self.timeout_seconds = int(options.pop("timeout_seconds", DEFAULT_TIMEOUT_SECONDS))
         self.max_output_bytes = int(options.pop("max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES))
+        # Checked from inside, as E2B and Daytona are: a provider that accepts
+        # "no network" and still hands back an open sandbox is refused.
+        self.verify_network_isolation = bool(options.pop("verify_network_isolation", True))
         if options:
             raise ValueError(f"Unknown vercel sandbox option(s): {', '.join(sorted(options))}")
         self.telemetry_recorder = telemetry_recorder
@@ -71,11 +78,26 @@ class VercelSandboxRuntime(SandboxRuntime):
             options["resources"] = resources
         sandbox = await vercel.create_sandbox(**options)
         await sandbox.fs.mkdir(manifest.working_dir, recursive=True)
+
+        async def run(command: str) -> int:
+            finished = await sandbox.run_process(
+                "sh", ["-c", command], kill_after=float(CHECK_TIMEOUT_SECONDS)
+            )
+            return finished.returncode
+
+        isolation = await confirm_isolated(
+            self.provider, manifest.network_policy, verify=self.verify_network_isolation,
+            run=run, discard=sandbox.destroy,
+        )
         session = SandboxSession(
             session_id=session_id,
             provider=self.provider,
             manifest=manifest,
-            metadata={"sandbox_id": getattr(sandbox, "name", None), "image": image},
+            metadata={
+                "sandbox_id": getattr(sandbox, "name", None),
+                "image": image,
+                "network_isolation": isolation,
+            },
         )
         self._sessions[session_id] = session
         self._sandboxes[session_id] = sandbox

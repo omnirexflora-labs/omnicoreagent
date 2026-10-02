@@ -67,7 +67,7 @@ def _parse(value: str | None) -> datetime | None:
 
 # Sandbox set-up a session asks for when it opens; not a call the agent makes.
 _SESSION_SETUP = frozenset(
-    {"sandbox.network.configure", "sandbox.filesystem.configure", "sandbox.environment.set"}
+    {"sandbox.network.configure", "sandbox.environment.set"}
 )
 
 

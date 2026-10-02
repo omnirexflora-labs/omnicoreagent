@@ -19,7 +19,8 @@ import pytest
 from omnicoreagent.governance.commands import parse_command
 
 STANDINS = ["rm", "git", "ls", "cat", "head", "wc", "grep", "xargs", "find", "sudo", "timeout",
-            "nohup", "env", "date", "make", "base64", "curl", "touch", "true", "sed", "sort", "npm"]
+            "nohup", "env", "date", "make", "base64", "curl", "touch", "true", "sed", "sort", "npm",
+            "test", "["]
 
 CORPUS = [
     "git status",
@@ -50,6 +51,29 @@ CORPUS = [
     'echo "\\"; rm -rf target; echo \\""',
     "command rm -rf target",
     "exec rm -rf target",
+    # The simple policy (SP4): forms that got past earlier parsers, and more.
+    "{rm,-rf,target}",
+    "r''m -rf target",
+    "r\\\nm -rf target",
+    "$'rm' -rf target",
+    "time rm -rf target",
+    "! rm -rf target",
+    "rm -rf target &",
+    "git status & rm -rf target",
+    "coproc rm -rf target",
+    "echo $((1)) && rm -rf target",
+    "cat <<< $(rm -rf target)",
+    "A=1 B=2 rm -rf target",
+    "git log >& out.txt",
+    "builtin command rm -rf target",
+    "ls\nrm -rf target",
+    "ls;rm -rf target",
+    "ls||rm -rf target",
+    "nohup rm -rf target",
+    "env rm -rf target",
+    "find . -exec rm -rf target ;",
+    "[ -d target ] && rm -rf target",
+    "test -d target && rm -rf target",
 ]
 
 
@@ -71,10 +95,15 @@ def shell_env(tmp_path):
     return {"PATH": str(bin_dir), "HOME": str(work)}, work, log
 
 
+@pytest.mark.parametrize("shell", ["sh", "bash"])
 @pytest.mark.parametrize("text", CORPUS)
-def test_what_the_shell_runs_is_what_the_parser_saw(shell_env, text):
+def test_what_the_shell_runs_is_what_the_parser_saw(shell_env, text, shell):
+    # Under bash too: a sandbox's sh may be bash, which expands braces where
+    # dash does not.
     env, work, log = shell_env
-    subprocess.run(["sh", "-c", text], cwd=work, env=env, capture_output=True, timeout=10)
+    if not shutil.which(shell):
+        pytest.skip(f"no {shell} here")
+    subprocess.run([shell, "-c", text], cwd=work, env=env, capture_output=True, timeout=10)
     ran = set(log.read_text().split()) if log.exists() else set()
 
     parsed = parse_command(["sh", "-c", text])

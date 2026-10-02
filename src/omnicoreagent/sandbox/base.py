@@ -23,6 +23,9 @@ class SandboxRuntime(ABC):
     # Where commands really run, as governance sees it: "sandbox" for an
     # isolated backend, "host" for one that runs them on this machine.
     execution_surface: str = "sandbox"
+    # What this runtime applies from a manifest (sandbox/contract.py); a
+    # manifest asking for more is refused. None: not declared, trusted.
+    enforces: frozenset[str] | None = None
 
     @abstractmethod
     async def create(self, manifest: SandboxManifest) -> SandboxSession: ...

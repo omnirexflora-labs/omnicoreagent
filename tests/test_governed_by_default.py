@@ -78,8 +78,7 @@ async def test_nothing_runs_on_the_host_and_no_one_is_asked_in_vain(tmp_path):
         model,
         governance_config={
             "sandbox_config": {"provider": "local"},
-            "sandbox_manifest": {"working_dir": str(tmp_path), "network_policy": {"default": "allow"},
-                                 "filesystem_policy": {"default": "allow"}},
+            "sandbox_manifest": {"working_dir": str(tmp_path), "network_policy": {"default": "allow"}},
         },
     )
 
