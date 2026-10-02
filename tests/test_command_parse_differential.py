@@ -18,9 +18,12 @@ import pytest
 
 from omnicoreagent.governance.commands import parse_command
 
-STANDINS = ["rm", "git", "ls", "cat", "head", "wc", "grep", "xargs", "find", "sudo", "timeout",
-            "nohup", "env", "date", "make", "base64", "curl", "touch", "true", "sed", "sort", "npm",
-            "test", "["]
+STANDINS = ["rm", "git", "ls", "cat", "head", "wc", "grep", "date", "make", "base64", "curl",
+            "touch", "true", "sed", "sort", "npm", "test", "["]
+# Wrappers run what follows them; by design the parser reports the wrapper
+# only (simple-policy plan, decision 3). Stubbed as real pass-throughs: as
+# no-op loggers they hid every program a wrapper ran (the rc7 gate, area S).
+WRAPPERS = ["xargs", "find", "sudo", "timeout", "nohup", "env", "nice"]
 
 CORPUS = [
     "git status",
@@ -74,6 +77,19 @@ CORPUS = [
     "find . -exec rm -rf target ;",
     "[ -d target ] && rm -rf target",
     "test -d target && rm -rf target",
+    # Builtins that run a string they are given (the rc7 gate, area S).
+    "trap 'rm -rf target' EXIT; true",
+    "alias ls='rm -rf target'\nls",
+    "hash -p ./rm ls; ls",
+    "printf -v 'a[$(rm -rf target)]' x",
+    "test -v 'a[$(rm -rf target)]'",
+    "let 'a[$(rm -rf target)]=1'",
+    "mapfile -c 1 -C 'rm -rf target' arr < /dev/null",
+    "complete -C 'rm -rf target' ls",
+    "fc -e 'rm -rf target' -1",
+    "unset 'a[$(rm -rf target)]'",
+    'echo "a[$(rm -rf target)]"',
+    "nice rm -rf target",
 ]
 
 
@@ -85,6 +101,16 @@ def shell_env(tmp_path):
     for name in STANDINS:
         stub = bin_dir / name
         stub.write_text(f'#!/bin/sh\necho {name} >> "{log}"\n')
+        stub.chmod(0o755)
+    for name in WRAPPERS:
+        stub = bin_dir / name
+        # Logs itself, then runs its first non-option argument onward, as
+        # the real wrapper would (find: what follows -exec).
+        stub.write_text(
+            f'#!/bin/sh\necho {name} >> "{log}"\n'
+            'while [ $# -gt 0 ]; do case "$1" in -exec) shift; break;; -*|[0-9]*|.) shift;; *) break;; esac; done\n'
+            '[ $# -gt 0 ] && exec "$@"\n'
+        )
         stub.chmod(0o755)
     for shell in ("sh", "bash"):
         real = shutil.which(shell)
@@ -109,13 +135,17 @@ def test_what_the_shell_runs_is_what_the_parser_saw(shell_env, text, shell):
     parsed = parse_command(["sh", "-c", text])
     seen = {c.program for c in parsed.commands}
 
-    assert parsed.opaque or ran <= seen, f"the shell ran {sorted(ran - seen)}, which the parser did not report"
+    # A wrapper the parser reported may run anything: a rule on the wrapper's
+    # name decides it (the policy reference says so).
+    assert parsed.opaque or ran <= seen or seen & set(WRAPPERS), (
+        f"the shell ran {sorted(ran - seen)}, which the parser did not report"
+    )
 
 
 @pytest.mark.parametrize(
     "text, expected",
     [("echo $(rm -rf target)", {"rm"}), ("sh -c 'git status; rm -rf target'", {"git", "rm"}),
-     ("eval 'rm -rf target'", {"rm"}), ("ls | xargs rm -rf", {"ls", "xargs"})],
+     ("eval 'rm -rf target'", {"rm"}), ("ls | xargs rm -rf", {"ls", "xargs", "rm"})],
 )
 def test_the_harness_sees_what_the_shell_runs(shell_env, text, expected):
     # The comparison above is only as good as this log: it must catch programs
