@@ -27,6 +27,7 @@ class SubAgentCallRunner:
         session_id: str,
         telemetry_recorder: Any = None,
         redact_parameters: bool = False,
+        resume_run_id: str | None = None,
     ) -> tuple[str, Any]:
         agent_name = call.get("agent")
         if not agent_name:
@@ -65,7 +66,7 @@ class SubAgentCallRunner:
             agent = resolve_agent(agent_name, sub_agents)
             # The child's run id is assigned here so the delegation stays
             # linked to the child trace on every terminal path.
-            child_run_id = new_child_run_id() if accepts_run_id(agent) else None
+            child_run_id = resume_run_id or (new_child_run_id() if accepts_run_id(agent) else None)
             if telemetry_recorder is not None:
                 spawn_event = await telemetry_recorder.emit_event(
                     "subagent_spawn",
@@ -101,7 +102,12 @@ class SubAgentCallRunner:
                 await agent.connect_mcp_servers()
 
             logger.info(f"Running sub-agent: {agent_name}")
-            result = await agent.run(**kwargs)
+            if resume_run_id and hasattr(agent, "resume"):
+                # Parked on an ask the lead has since decided: continues from
+                # where it stopped (the rc7 gate, B7-1).
+                result = await agent.resume(resume_run_id)
+            else:
+                result = await agent.run(**kwargs)
             cleanup_attempted = True
             await self._cleanup_agent(agent_name, agent)
             succeeded = (

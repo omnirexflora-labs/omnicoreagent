@@ -1672,9 +1672,16 @@ class OmniCoreAgent:
             arguments=arguments,
         )
         if decided.get("delegated_run_id"):
-            # The ask was a worker's, mirrored here: the decision is theirs too.
+            # The ask was a child's, mirrored here: the decision is theirs
+            # too, recorded where the child keeps its runs (a named child may
+            # have its own store; a spawned worker shares the lead's).
+            child = next(
+                (c for c in self.sub_agents or [] if getattr(c, "name", None) == decided.get("delegated_name")),
+                None,
+            )
+            store = getattr(child, "memory_router", None) or self.memory_router
             await decide(
-                self.memory_router,
+                store,
                 decided["delegated_run_id"],
                 decided["delegated_approval_id"],
                 decision=decision,

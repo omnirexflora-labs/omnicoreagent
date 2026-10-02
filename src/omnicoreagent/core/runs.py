@@ -405,6 +405,17 @@ class RunTracker:
                 self.record["budgets"] = budgets
             await self._save()
 
+    async def note_delegation(self, *, tool_call_id: str, name: str, child_run_id: str) -> None:
+        """Which child run a delegation of this call started: a finished
+        worker is not run again when the call runs again after a pause."""
+        async with self._lock:
+            noted = [
+                d for d in self.record.get("delegations", [])
+                if not (d["tool_call_id"] == tool_call_id and d["name"] == name)
+            ]
+            self.record["delegations"] = [*noted, {"tool_call_id": tool_call_id, "name": name, "child_run_id": child_run_id}]
+            await self._save()
+
     async def add_approval(self, approval: dict[str, Any]) -> None:
         async with self._lock:
             self.record.setdefault("approvals", []).append(dict(approval))

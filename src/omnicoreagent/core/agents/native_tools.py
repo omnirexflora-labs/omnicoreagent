@@ -13,6 +13,7 @@ from omnicoreagent.core.agents.loop_detection import ToolInteraction
 from omnicoreagent.core.budgets import BudgetExhaustedForRun, RunAwaitingBudget
 from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.runs import RunSuspended, current_run, waiting_for_approval
+from omnicoreagent.governance.calls import current_tool_call
 from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
 from omnicoreagent.governance.calls import tool_call_metadata
 from omnicoreagent.governance.errors import GovernanceError, PolicyDeniedError
@@ -156,6 +157,10 @@ async def execute_native_turn(
                     for request in requests:
                         request.metadata = {**tool_call_metadata(), **(request.metadata or {})}
                     await agent.governance_engine.authorize_all(requests)
+                from omnicoreagent.core.subagents import park_child, parked_child
+
+                lead_run = current_run()
+                parked = parked_child(lead_run, binding.agent.name)
                 name, result = await agent.subagent_runner.run(
                     {"agent": binding.agent.name, "parameters": params},
                     [binding.agent],
@@ -164,9 +169,24 @@ async def execute_native_turn(
                     redact_parameters=redacts_governed_arguments(
                         telemetry_recorder, agent.governance_engine is not None
                     ),
+                    resume_run_id=parked,
                 )
                 if isinstance(result, BaseException):
                     raise result
+                if isinstance(result, dict) and result.get("status") in {
+                    "awaiting_approval", "awaiting_budget"
+                }:
+                    # The child is waiting for a person: the lead waits with
+                    # it (the rc7 gate, B7-1). Its record is read where the
+                    # child keeps it.
+                    await park_child(
+                        lead_run,
+                        call=current_tool_call(),
+                        name=binding.agent.name,
+                        child_run_id=result.get("run_id"),
+                        result=result,
+                        memory_router=getattr(binding.agent, "memory_router", None),
+                    )
                 if isinstance(result, dict) and isinstance(
                     result.get("metric"), Usage
                 ):

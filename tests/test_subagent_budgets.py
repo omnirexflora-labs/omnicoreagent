@@ -152,6 +152,26 @@ async def test_a_granted_worker_continues_when_the_lead_resumes(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_spawning_past_a_subagent_runs_limit_ends_the_run(tmp_path):
+    # The rc7 gate (B7-6): the subagent_runs charge happens inside the spawn
+    # tool, so its refusal came back as a tool error and the run went on to
+    # end "success"; model_calls and tool_calls refusals end the run.
+    budgets = {"request": [{"meter": "subagent_runs", "limit": 2, "on_exhausted": "terminate"}]}
+    lead = _lead(tmp_path, budgets)
+    await lead.initialize()
+    workers = [{"name": f"w{i}", "role": "r", "task": "t", "output_path": f"w{i}/out.md"} for i in range(3)]
+    lead.llm_connection = Scripted([("s1", "spawn_subagents", {"subagents": workers})], "all done")
+    _script_workers(lead, [])
+    try:
+        result = await lead.run("go", session_id="lead-session")
+    finally:
+        await lead.cleanup()
+
+    assert result["status"] == "error", result.get("status")
+    assert "subagent_runs" in str(result)
+
+
+@pytest.mark.asyncio
 async def test_a_worker_that_runs_out_asks_once_on_the_leads_run(tmp_path):
     budgets = {"request": [{"meter": "model_calls", "limit": 2, "on_exhausted": "pause"}]}
     lead = _lead(tmp_path, budgets)

@@ -26,10 +26,11 @@ def _deny(rule_id, capability, path):
                       capability=capability, target={"path": path})
 
 
-async def _run(tmp_path, rules, calls, setup):
+async def _run(tmp_path, rules, calls, setup, *then):
+    """``calls`` are one turn; ``then`` are further turns, run after it."""
     policy = build_default_policy("permissive-dev")
     policy.rules.deny[:0] = rules
-    model = RecordingModel(calls, "done")
+    model = RecordingModel(calls, *then, "done")
     agent = OmniCoreAgent(
         name="files", system_instruction="x", model_config=_MODEL,
         agent_config={"guardrail_mode": "off",
@@ -88,3 +89,29 @@ async def test_a_path_through_a_link_is_refused(tmp_path):
 
     assert "TOPSECRET-L-555" not in told["r1"]
     assert "link" in told["r1"]
+    # The rc7 gate (B7-5): the refusal came back as a successful read.
+    assert '"status": "error"' in told["r1"] or "'status': 'error'" in told["r1"], told["r1"]
+
+
+@pytest.mark.asyncio
+async def test_a_link_in_the_workspace_does_not_break_listing_or_search(tmp_path):
+    # The rc7 gate (B7-4): one link inside the workspace made ls, grep, glob
+    # and clear_files fail wholesale with "goes through a link".
+    def setup(files):
+        (files / "notes").mkdir(parents=True, exist_ok=True)
+        (files / "notes" / "a.txt").write_text("alpha")
+        os.symlink(files / "notes", files / "link")
+
+    files, told = await _run(
+        tmp_path,
+        [],
+        [("l1", "ls", json.dumps({"path": "."})),
+         ("g1", "grep", json.dumps({"pattern": "alpha"})),
+         ("g2", "glob", json.dumps({"pattern": "**/*.txt"}))],
+        setup,
+        [("c1", "clear_files", json.dumps({}))],
+    )
+    assert "notes" in told["l1"] and "goes through a link" not in told["l1"]
+    assert "notes/a.txt" in told["g1"] and "notes/a.txt" in told["g2"]
+    assert "goes through a link" not in told["c1"]
+    assert not (files / "notes").exists() and not (files / "link").exists()
