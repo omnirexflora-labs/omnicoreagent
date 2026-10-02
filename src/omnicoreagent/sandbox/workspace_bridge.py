@@ -288,6 +288,21 @@ class WorkspaceBridge:
         checks = self._checks.setdefault(
             tool_name, {"capability": requests[0].capability if requests else "", "allowed": 0, "denied": []}
         )
+        # A file an ask rule covers is skipped, never asked about: a copy
+        # cannot pause a command mid-way, and asking created pending
+        # approvals the run then waited on, missing from its result (the
+        # rc7 gate, F: three .pyc files under an ask on project/*).
+        from omnicoreagent.governance.models import PolicyEffect
+
+        engine = self.governance_engine
+        try:
+            decided = [engine.evaluator.evaluate(engine.policy, r).effect for r in requests]
+        except Exception:  # noqa: BLE001 - a policy that cannot say refuses
+            decided = [PolicyEffect.DENY]
+        if PolicyEffect.ASK in decided:
+            checks["denied"].append(path)
+            return False
+        # A refusal goes through the engine, so it is recorded on its own.
         try:
             # Each file is checked; only a refusal is recorded on its own. The
             # rest are one summary per copy: the steward's trace held 8,812

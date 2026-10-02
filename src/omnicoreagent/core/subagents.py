@@ -478,6 +478,13 @@ When you have completed the task:
                 and approval.get("status") in {"approved", "denied", "used"}
             ):
                 return approval["delegated_run_id"]
+        for request in reversed(run.record.get("budget_requests") or []):
+            if (
+                request.get("delegated_name") == name
+                and request.get("delegated_run_id")
+                and request.get("status") in {"granted", "denied"}
+            ):
+                return request["delegated_run_id"]
         return None
 
     async def _park_delegation(
@@ -522,6 +529,26 @@ When you have completed the task:
                     }
                 )
                 mirrored += 1
+        if status == "awaiting_budget" and child_record is not None and run is not None:
+            # The worker's budget request on the lead's run, so the lead
+            # pauses with it, the grant reaches the worker's (one ledger) and
+            # the lead's delegation resumes the worker (the rc7 gate, F).
+            already = {
+                r.get("delegated_request_id") for r in run.record.get("budget_requests") or []
+            }
+            for entry in child_record.get("budget_requests") or []:
+                if entry.get("status") != "pending" or entry["request_id"] in already:
+                    continue
+                await run.add_budget_request(
+                    {
+                        **entry,
+                        "request_id": f"budgetreq_{__import__('uuid').uuid4().hex}",
+                        "for": call.tool_call_id if call is not None else entry.get("for"),
+                        "delegated_run_id": child_run_id,
+                        "delegated_request_id": entry["request_id"],
+                        "delegated_name": name,
+                    }
+                )
         await self._finish_delegation(
             delegation,
             child_run_id=child_run_id,
