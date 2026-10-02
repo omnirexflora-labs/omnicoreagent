@@ -146,6 +146,12 @@ class OmniServe:
             port=final_port,
             workers=final_workers,
             log_level=self.config.log_level.lower(),
+            # OmniServe reads X-Forwarded-For itself, from trusted_proxies
+            # only. uvicorn's own proxy headers trust loopback peers by
+            # default and rewrote the client address before any OmniServe
+            # middleware ran, so a same-host client could rotate the header
+            # and reset the rate limit (the rc7 gate, A7-1).
+            proxy_headers=False,
         )
         uvicorn.Server(config).run(sockets=[sock])
 
@@ -183,6 +189,7 @@ class OmniServe:
             host=final_host,
             port=final_port,
             log_level=self.config.log_level.lower(),
+            proxy_headers=False,  # as above
         )
         server = uvicorn.Server(config)
         await server.serve(sockets=[sock])

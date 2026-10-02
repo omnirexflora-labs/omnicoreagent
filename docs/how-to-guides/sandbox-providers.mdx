@@ -520,16 +520,16 @@ isolates commands.
     Use `"sandbox_manifest": {"network_policy": {"default": "allow"}}`.
   </Accordion>
 
-  <Accordion title="ValueError: The docker sandbox cannot enforce a network host allowlist">
+  <Accordion title="ValueError: The docker sandbox does not enforce a network host allowlist">
     `allowed_hosts` on `docker`, `e2b`, `daytona`, `vercel` or `local`:
 
     ```text
-    ValueError: The docker sandbox cannot enforce a network host allowlist (allowed_hosts): use network_policy default 'deny' or 'allow', or a provider that enforces one (modal, http)
+    ValueError: The docker sandbox does not enforce a network host allowlist (allowed_hosts): use network_policy default 'deny' or 'allow', or a provider that enforces one (modal, http)
     ```
 
     The same check refuses `denied_hosts` on any built-in provider but `http`
-    ("cannot block named hosts"), and `environment.secret_refs` on every
-    built-in provider ("cannot deliver secrets").
+    ("does not enforce blocking named hosts"), and `environment.secret_refs` on every
+    built-in provider ("does not enforce delivering secrets").
   </Accordion>
 
   <Accordion title="The local sandbox cannot restrict the network">
