@@ -123,7 +123,7 @@ def test_otel_mapper_preserves_normalized_events_when_root_span_is_missing():
     assert len(records) == 1
     assert records[0].name == "telemetry.trace"
     assert [event.name for event in records[0].events] == [
-        "runtime_error",
+        "missing_evidence",
         "final_state",
     ]
 

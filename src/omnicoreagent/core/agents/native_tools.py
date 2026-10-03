@@ -13,6 +13,7 @@ from omnicoreagent.core.agents.loop_detection import ToolInteraction
 from omnicoreagent.core.budgets import BudgetExhaustedForRun, RunAwaitingBudget
 from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.runs import RunSuspended, current_run, waiting_for_approval
+from omnicoreagent.governance.calls import current_tool_call
 from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
 from omnicoreagent.governance.calls import tool_call_metadata
 from omnicoreagent.governance.errors import GovernanceError, PolicyDeniedError
@@ -113,6 +114,7 @@ async def execute_native_turn(
     # Calls governance asked a person to decide: their results are not stored
     # (the call has not happened), and the run pauses after this step.
     awaiting: set[str] = set()
+    awaiting_budget: list[dict] = []
 
     async def dispatch(call_id, binding, arguments, *, outcome, started, parent=None):
         """Run one resolved call on the governed path: the handler for its
@@ -155,6 +157,10 @@ async def execute_native_turn(
                     for request in requests:
                         request.metadata = {**tool_call_metadata(), **(request.metadata or {})}
                     await agent.governance_engine.authorize_all(requests)
+                from omnicoreagent.core.subagents import park_child, parked_child
+
+                lead_run = current_run()
+                parked = parked_child(lead_run, binding.agent.name)
                 name, result = await agent.subagent_runner.run(
                     {"agent": binding.agent.name, "parameters": params},
                     [binding.agent],
@@ -163,9 +169,24 @@ async def execute_native_turn(
                     redact_parameters=redacts_governed_arguments(
                         telemetry_recorder, agent.governance_engine is not None
                     ),
+                    resume_run_id=parked,
                 )
                 if isinstance(result, BaseException):
                     raise result
+                if isinstance(result, dict) and result.get("status") in {
+                    "awaiting_approval", "awaiting_budget"
+                }:
+                    # The child is waiting for a person: the lead waits with
+                    # it (the rc7 gate, B7-1). Its record is read where the
+                    # child keeps it.
+                    await park_child(
+                        lead_run,
+                        call=current_tool_call(),
+                        name=binding.agent.name,
+                        child_run_id=result.get("run_id"),
+                        result=result,
+                        memory_router=getattr(binding.agent, "memory_router", None),
+                    )
                 if isinstance(result, dict) and isinstance(
                     result.get("metric"), Usage
                 ):
@@ -222,6 +243,7 @@ async def execute_native_turn(
                 provider=binding.provider,
                 arguments=arguments,
                 parent_tool_call_id=parent,
+                idempotent=bool(getattr(binding, "idempotent", False)),
             )
             started["flag"] = True
         # The runner holds the deadline, starting it once the call is
@@ -504,6 +526,13 @@ async def execute_native_turn(
                 await current_run().tool_finished(
                     tool_call_id=request.id, outcome=None, state="awaiting_approval"
                 )
+            elif (mirrored := _waiting_for_budget(request.id)) is not None:
+                # A worker of this call ran out of budget: the lead waits
+                # with it, and this call runs again when the lead resumes.
+                await current_run().tool_finished(
+                    tool_call_id=request.id, outcome=None, state="awaiting_budget"
+                )
+                awaiting_budget.append(mirrored)
             else:
                 await _record_tool_outcome(request.id, result)
         # Loop signatures use normalized, guarded contents before artifact IDs
@@ -733,7 +762,11 @@ async def execute_native_turn(
         for result in results:
             if result.message["tool_call_id"] in persisted_ids:
                 continue
-            if result.message["tool_call_id"] in awaiting:
+            if result.message["tool_call_id"] in awaiting or result.message["tool_call_id"] in {
+                r.get("for") for r in awaiting_budget
+            }:
+                # A waiting call has no result yet: saved, it would count as
+                # answered and never run again on resume.
                 continue
             write = asyncio.create_task(persist_one(result))
             try:
@@ -808,6 +841,8 @@ async def execute_native_turn(
                 error={"type": type(exc).__name__, "message": str(exc)},
             )
         raise
+    if awaiting_budget:
+        raise RunAwaitingBudget(awaiting_budget[0])
     if awaiting:
         run = current_run()
         raise RunSuspended(
@@ -838,6 +873,23 @@ def _belongs_to(tool_call_id: str | None, call_ids: set[str]) -> bool:
 
 
 _waiting_for_approval = waiting_for_approval
+
+
+def _waiting_for_budget(tool_call_id: str) -> dict | None:
+    """A worker's pending budget request mirrored onto this call, if any."""
+    run = current_run()
+    if run is None:
+        return None
+    return next(
+        (
+            request
+            for request in run.record.get("budget_requests", [])
+            if request.get("status") == "pending"
+            and request.get("delegated_run_id")
+            and request.get("for") == tool_call_id
+        ),
+        None,
+    )
 
 
 def _is_governed(child: Any) -> bool:

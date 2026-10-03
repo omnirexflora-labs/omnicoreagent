@@ -216,7 +216,7 @@ no rule allows it, and where the policy has command rules it is asked about
 (refused in `strict`), so `eval "rm -rf ~"` does not pass a deny on `rm`.
 Wrappers are not looked inside: `sudo rm` is a command named `sudo`. Command
 rules decide when to ask; what a command can touch is the sandbox's to decide.
-boundary. See [Rules on shell commands](/docs/reference/policy#rules-on-shell-commands).
+See [Rules on shell commands](/docs/reference/policy#rules-on-shell-commands).
 
 ## Files between the workspace and the sandbox
 
@@ -488,12 +488,12 @@ every capability in the [policy reference](/docs/reference/policy).
     allow the network in the manifest (above).
   </Accordion>
 
-  <Accordion title="ValueError: The docker sandbox cannot enforce a network host allowlist">
+  <Accordion title="ValueError: The docker sandbox does not enforce a network host allowlist">
     Raised when the agent is built with `allowed_hosts` on a provider that
     cannot keep it:
 
     ```text
-    ValueError: The docker sandbox cannot enforce a network host allowlist (allowed_hosts): use network_policy default 'deny' or 'allow', or a provider that enforces one (modal, http)
+    ValueError: The docker sandbox does not enforce a network host allowlist (allowed_hosts): use network_policy default 'deny' or 'allow', or a provider that enforces one (modal, http)
     ```
 
     Use `"default": "allow"`, or [Modal](/docs/how-to-guides/sandbox-providers#modal)

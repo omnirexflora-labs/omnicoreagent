@@ -118,6 +118,90 @@ async def test_a_workers_ask_pauses_the_lead_and_the_leads_decision_reaches_the_
 
 
 @pytest.mark.asyncio
+async def test_a_named_childs_ask_pauses_the_lead_too(tmp_path):
+    # The rc7 gate (B7-1): a child in sub_agents that hit an ask returned
+    # awaiting_approval to the lead as a successful delegate_<name> result;
+    # the lead finished "success" and the child's run was left waiting with
+    # nobody to resume it.
+    lead_model = RecordingModel(
+        [("d1", "delegate_subagent_cleaner", json.dumps({"query": "tidy up"}))], "all tidy"
+    )
+    worker_model = RecordingModel(WORKER_WRITES, WORKER_DELETES, "worker done")
+    lead = await _lead(tmp_path, lead_model)
+    child = await _worker(lead, worker_model)
+    lead.sub_agents = [child]
+    await lead.cleanup()  # rebuild the lead's tools with the child listed
+    lead = OmniCoreAgent(
+        name="lead", system_instruction="Delegate the tidying.", model_config=_MODEL,
+        local_tools=ToolRegistry(), sub_agents=[child], memory_router=child.memory_router,
+        agent_config={"guardrail_mode": "off",
+                      "workspace_config": {"workspace_dir": str(tmp_path / "ws")},
+                      "governance_config": {"enabled": True, "policy": _lead_policy()}},
+        telemetry_config={"capture": "full"},
+    )
+    await lead.initialize()
+    lead.llm_connection = lead_model
+
+    paused = await lead.run("tidy up", session_id="team-named")
+
+    assert paused["status"] == "awaiting_approval", paused
+    (approval,) = paused["approvals"]
+    assert approval["tool_name"] == "delete_file" and approval["delegated_run_id"]
+    assert approval["delegated_name"] == "subagent_cleaner"
+    assert _file(tmp_path, "old.txt").exists()
+
+    await lead.resolve_approval(paused["run_id"], approval["approval_id"], decision="approve", approver="alice")
+    result = await lead.resume(paused["run_id"])
+
+    assert result["status"] == "success" and result["response"] == "all tidy"
+    assert not _file(tmp_path, "old.txt").exists(), "the child's approved delete ran"
+    child_record = await child.get_run(approval["delegated_run_id"])
+    assert child_record["status"] == "completed"
+    assert len(child_record["trace_ids"]) == 2, "the child's run resumed, it did not start over"
+    assert len(worker_model.calls) == 3, "one child, resumed, not a second one"
+    await lead.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_a_finished_sibling_is_not_run_again_when_the_lead_resumes(tmp_path):
+    # The rc7 gate (B7-3): when one of two workers asked and the lead
+    # resumed after the decision, the spawn call ran again and the sibling
+    # that had already finished ran again from scratch.
+    spawn = [("s1", "spawn_subagents", json.dumps({"subagents": [
+        {"name": "writer", "role": "Writer", "task": "write", "output_path": "/workspace/writer/out.md"},
+        {"name": "cleaner", "role": "Cleaner", "task": "tidy up", "output_path": "/workspace/cleaner/out.md"},
+    ]}))]
+    lead_model = RecordingModel(spawn, "both done")
+    writer_model = RecordingModel(
+        [("x1", "write_file", json.dumps({"path": "writer/out.md", "content": "draft"}))], "writer done"
+    )
+    cleaner_model = RecordingModel(WORKER_WRITES, WORKER_DELETES, "worker done")
+    lead = await _lead(tmp_path, lead_model)
+    workers = {"writer": await _worker(lead, writer_model), "cleaner": await _worker(lead, cleaner_model)}
+    lead._subagent_factory.create_subagent = lambda **kw: workers[kw["name"]]
+
+    paused = await lead.run("go", session_id="team-two")
+    assert paused["status"] == "awaiting_approval"
+    writer_calls_before = len(writer_model.calls)
+    (approval,) = paused["approvals"]
+    await lead.resolve_approval(paused["run_id"], approval["approval_id"], decision="approve", approver="alice")
+    result = await lead.resume(paused["run_id"])
+
+    assert result["response"] == "both done"
+    assert len(writer_model.calls) == writer_calls_before == 2, "the finished writer did not run again"
+    assert not _file(tmp_path, "old.txt").exists()
+    trajectory = await lead.get_run_trajectory(paused["run_id"])
+    names = [
+        w["agent_name"]
+        for segment in trajectory["segments"] for step in segment["trajectory"]["steps"]
+        for call in step.get("tool_calls") or [] for w in ((call.get("subagent") or {}).get("workers") or [])
+    ]
+    # The writer once, the cleaner in both segments (the helper names every
+    # child subagent_cleaner): three, not four.
+    assert len(names) == 3, names
+
+
+@pytest.mark.asyncio
 async def test_a_denied_workers_ask_is_heard_by_the_worker(tmp_path):
     lead_model = RecordingModel(SPAWN, "done anyway")
     worker_model = RecordingModel(WORKER_WRITES, WORKER_DELETES, "kept it")

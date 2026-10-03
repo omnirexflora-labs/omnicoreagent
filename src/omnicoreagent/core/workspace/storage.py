@@ -199,6 +199,10 @@ class LocalWorkspaceStorage:
 
         files = []
         for child in target.iterdir():
+            if child.is_symlink():
+                # Not the workspace's: a path through it is refused, and one
+                # link made every listing fail (the rc7 gate, B7-4).
+                continue
             files.append(
                 WorkspaceFile(
                     path=str(child.relative_to(self.root)),
@@ -279,7 +283,9 @@ class LocalWorkspaceStorage:
         self.ensure_root()
         with self._lock(self.root):
             for item in list(self.root.iterdir()):
-                if item.is_file():
+                if item.is_symlink():
+                    item.unlink()  # the link, never what it points to
+                elif item.is_file():
                     item.unlink()
                 elif item.is_dir():
                     shutil.rmtree(item)

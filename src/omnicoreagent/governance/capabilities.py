@@ -134,6 +134,11 @@ def tool_authority_requests(
         tool_provider=tool_provider,
         tool_server=tool_server,
     )
+    if tool_name == "spawn_subagents" and tool_provider == "local":
+        # Authorized per worker as subagent.spawn (the profile or name as the
+        # resource); it was also a tool.local.call, which a policy allowing
+        # only subagent.* then asked about (the rc7 gate, F).
+        return []
     return [
         AuthorityRequest(
             capability=descriptor.capability,

@@ -298,7 +298,17 @@ When you have completed the task:
         # A worker parked on an approval the lead has since decided resumes
         # from where it stopped instead of starting over.
         parked_run_id = self._parked_worker(name)
+        if not parked_run_id:
+            finished = await self._finished_worker(name, output_path)
+            if finished is not None:
+                return finished
         child_run_id = parked_run_id or (new_child_run_id() if accepts_run_id(agent) else None)
+        lead_run = current_run()
+        lead_call = current_tool_call()
+        if lead_run is not None and getattr(lead_run, "enabled", False) and child_run_id and lead_call is not None:
+            await lead_run.note_delegation(
+                tool_call_id=lead_call.tool_call_id, name=name, child_run_id=child_run_id
+            )
         delegation = await self._start_delegation(
             agent=agent,
             name=name,
@@ -468,17 +478,29 @@ When you have completed the task:
 
     def _parked_worker(self, name: str) -> str | None:
         """The run of a worker of this name whose asks the lead has decided."""
-        run = current_run()
-        if run is None or not getattr(run, "enabled", False):
+        return parked_child(current_run(), name)
+
+    async def _finished_worker(self, name: str, output_path: str) -> Dict[str, Any] | None:
+        """A worker of this name that finished before the lead paused on a
+        sibling: its result, so it is not run again when the spawn call runs
+        again (the rc7 gate, B7-3)."""
+        child = await finished_child(current_run(), name, self.memory_router)
+        if child is None:
             return None
-        for approval in reversed(run.record.get("approvals") or []):
-            if (
-                approval.get("delegated_name") == name
-                and approval.get("delegated_run_id")
-                and approval.get("status") in {"approved", "denied", "used"}
-            ):
-                return approval["delegated_run_id"]
-        return None
+        record, child_run_id = child
+        return {
+            "status": "success",
+            "data": {
+                "subagent_name": name,
+                "output_path": output_path,
+                "trace_id": (record.get("trace_ids") or [None])[-1],
+                "run_id": child_run_id,
+                "response": _last_assistant_text(record),
+                "workspace_output": {"path": output_path},
+                "governance": self._governance_reference(),
+            },
+            "message": f"Subagent '{name}' finished before this run paused; its output is at {output_path}.",
+        }
 
     async def _park_delegation(
         self,
@@ -492,36 +514,14 @@ When you have completed the task:
     ) -> Dict[str, Any]:
         """Mirror the worker's pending asks onto the lead's run and report."""
         status = result["status"]
-        run = current_run()
-        call = current_tool_call()
-        mirrored = 0
-        child_record = None
-        if run is not None and getattr(run, "enabled", False) and child_run_id and self.memory_router is not None:
-            try:
-                child_record = await self.memory_router.get_run_state(child_run_id)
-            except Exception:  # noqa: BLE001 - a store without run state
-                child_record = None
-        if status == "awaiting_approval" and child_record is not None and run is not None:
-            already = {
-                a.get("delegated_approval_id") for a in run.record.get("approvals") or []
-            }
-            public = {a.get("approval_id"): a for a in result.get("approvals") or []}
-            for entry in child_record.get("approvals") or []:
-                if entry.get("status") != "pending" or entry["approval_id"] in already:
-                    continue
-                shown = public.get(entry["approval_id"]) or {}
-                await run.add_approval(
-                    {
-                        **entry,
-                        "approval_id": f"approval_{__import__('uuid').uuid4().hex}",
-                        "tool_call_id": call.tool_call_id if call is not None else None,
-                        "arguments": shown.get("arguments"),
-                        "delegated_run_id": child_run_id,
-                        "delegated_approval_id": entry["approval_id"],
-                        "delegated_name": name,
-                    }
-                )
-                mirrored += 1
+        mirrored = await park_child(
+            current_run(),
+            call=current_tool_call(),
+            name=name,
+            child_run_id=child_run_id,
+            result=result,
+            memory_router=self.memory_router,
+        )
         await self._finish_delegation(
             delegation,
             child_run_id=child_run_id,
@@ -981,3 +981,107 @@ async def _workspace_files(agent: Any) -> Any:
     if files is None or not hasattr(files, "read_text"):
         return None
     return files
+
+
+# --- Pausing with a child, shared by spawned workers and named children -------
+
+
+async def park_child(run, *, call, name: str, child_run_id: str | None, result: dict, memory_router) -> int:
+    """Mirror a child's pending asks (approvals, a budget request) onto the
+    lead's run, so the lead pauses with the child, a decision reaches the
+    child's, and the lead's delegation resumes the child. Returns how many
+    were mirrored. A named child's ask was returned to the lead as a
+    successful result and the child left waiting (the rc7 gate, B7-1)."""
+    status = result.get("status")
+    if run is None or not getattr(run, "enabled", False) or not child_run_id or memory_router is None:
+        return 0
+    try:
+        child_record = await memory_router.get_run_state(child_run_id)
+    except Exception:  # noqa: BLE001 - a store without run state
+        return 0
+    if child_record is None:
+        return 0
+    call_id = call.tool_call_id if call is not None else None
+    mirrored = 0
+    if status == "awaiting_approval":
+        already = {a.get("delegated_approval_id") for a in run.record.get("approvals") or []}
+        public = {a.get("approval_id"): a for a in result.get("approvals") or []}
+        for entry in child_record.get("approvals") or []:
+            if entry.get("status") != "pending" or entry["approval_id"] in already:
+                continue
+            shown = public.get(entry["approval_id"]) or {}
+            await run.add_approval(
+                {
+                    **entry,
+                    "approval_id": f"approval_{__import__('uuid').uuid4().hex}",
+                    "tool_call_id": call_id,
+                    "arguments": shown.get("arguments"),
+                    "delegated_run_id": child_run_id,
+                    "delegated_approval_id": entry["approval_id"],
+                    "delegated_name": name,
+                }
+            )
+            mirrored += 1
+    if status == "awaiting_budget":
+        already = {r.get("delegated_request_id") for r in run.record.get("budget_requests") or []}
+        for entry in child_record.get("budget_requests") or []:
+            if entry.get("status") != "pending" or entry["request_id"] in already:
+                continue
+            await run.add_budget_request(
+                {
+                    **entry,
+                    "request_id": f"budgetreq_{__import__('uuid').uuid4().hex}",
+                    "for": call_id or entry.get("for"),
+                    "delegated_run_id": child_run_id,
+                    "delegated_request_id": entry["request_id"],
+                    "delegated_name": name,
+                }
+            )
+            mirrored += 1
+    return mirrored
+
+
+def parked_child(run, name: str) -> str | None:
+    """The run of a child of this name whose asks the lead has decided."""
+    if run is None or not getattr(run, "enabled", False):
+        return None
+    for approval in reversed(run.record.get("approvals") or []):
+        if (
+            approval.get("delegated_name") == name
+            and approval.get("delegated_run_id")
+            and approval.get("status") in {"approved", "denied", "used"}
+        ):
+            return approval["delegated_run_id"]
+    for request in reversed(run.record.get("budget_requests") or []):
+        if (
+            request.get("delegated_name") == name
+            and request.get("delegated_run_id")
+            and request.get("status") in {"granted", "denied"}
+        ):
+            return request["delegated_run_id"]
+    return None
+
+
+async def finished_child(run, name: str, memory_router):
+    """A child of this name this call already ran to completion: its record
+    and run id, or None."""
+    call = current_tool_call()
+    if run is None or not getattr(run, "enabled", False) or call is None or memory_router is None:
+        return None
+    for noted in reversed(run.record.get("delegations") or []):
+        if noted["name"] == name and noted["tool_call_id"] == call.tool_call_id:
+            try:
+                record = await memory_router.get_run_state(noted["child_run_id"])
+            except Exception:  # noqa: BLE001
+                return None
+            if record is not None and record.get("status") == "completed":
+                return record, noted["child_run_id"]
+            return None
+    return None
+
+
+def _last_assistant_text(record: dict) -> str:
+    for message in reversed((record.get("context") or {}).get("messages") or []):
+        if message.get("role") == "assistant" and message.get("content"):
+            return str(message["content"])
+    return ""

@@ -183,6 +183,10 @@ FOUNDATION_EVENT_TYPES = frozenset(
         "final_answer",
         "final_state",
         "runtime_error",
+        # The normalizer's own notes on a trace: not errors of the run. As
+        # runtime_error they fired alerts on healthy runs (the rc7 gate, E7-3).
+        "missing_evidence",
+        "capture_gaps",
         "uncaught_exception",
         "telemetry_error",
         "policy_request_created",

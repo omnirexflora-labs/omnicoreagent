@@ -842,6 +842,9 @@ def _pending_calls(record: dict[str, Any], catalog: Any) -> tuple[list, set[str]
     sibling was still running, when the process stopped, took effect but its
     result was lost. It too runs again only if its tool is idempotent (found by
     the durability audit of 2026-09-28: recovery charged a card twice).
+    Idempotent means both when the call was made (recorded on the call) and
+    now: a deploy that flips a tool's flag between the crash and the resume
+    cannot rerun an old call.
     """
     from omnicoreagent.core.model_protocol import ToolRequest
 
@@ -865,7 +868,8 @@ def _pending_calls(record: dict[str, Any], catalog: Any) -> tuple[list, set[str]
         for approval in record.get("approvals", [])
         if approval.get("edited_arguments") is not None
     }
-    states = {c["tool_call_id"]: c["state"] for c in record.get("tool_calls", [])}
+    calls_by_id = {c["tool_call_id"]: c for c in record.get("tool_calls", [])}
+    states = {call_id: c["state"] for call_id, c in calls_by_id.items()}
     pending, unknown = [], set()
     for call in messages[turn_index]["metadata"]["tool_calls"]:
         if call["id"] in answered:
@@ -876,8 +880,11 @@ def _pending_calls(record: dict[str, Any], catalog: Any) -> tuple[list, set[str]
             arguments = json.dumps(edited[call["id"]])
         pending.append(ToolRequest(call["id"], function.get("name"), arguments))
         if states.get(call["id"]) in {"started", "interrupted", "completed"}:
+            # Idempotent when the call was made AND now: a record from before
+            # the flag was kept (0.5.0rc7) says nothing, so it is not rerun.
             binding = catalog.bindings.get(str(function.get("name")).lower())
-            if binding is None or not binding.idempotent:
+            was = calls_by_id.get(call["id"], {}).get("idempotent", False)
+            if binding is None or not binding.idempotent or not was:
                 unknown.add(call["id"])
     return pending, unknown
 

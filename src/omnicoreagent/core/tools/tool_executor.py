@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from omnicoreagent.core.budgets import BudgetExhaustedForRun, RunAwaitingBudget
 from typing import Any
 
 from omnicoreagent.core.tools.base_tool_handler import BaseToolHandler
@@ -27,7 +28,11 @@ class ToolExecutor:
         try:
             result = await self.tool_handler.call(tool_name, tool_args)
             normalized = self._normalize_result(tool_name, tool_args, result)
-
+        except (BudgetExhaustedForRun, RunAwaitingBudget):
+            # A budget spent inside the tool (spawn_subagents charges its
+            # workers) stops the run, as one spent before it does; as a tool
+            # error the run went on to end "success" (the rc7 gate, B7-6).
+            raise
         except Exception as e:
             normalized = {
                 "tool_name": tool_name,

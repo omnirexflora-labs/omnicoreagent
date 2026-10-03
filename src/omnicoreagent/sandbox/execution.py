@@ -325,7 +325,7 @@ class SandboxExecutionService:
         except BaseException as exc:
             await self._emit(
                 "sandbox_exec_failed",
-                input={"command": list(spec.command)},
+                input={"command": self._recorded(list(spec.command))},
                 metadata={**facts, "duration_ms": _elapsed_ms(started)},
                 error=exc,
                 duration_ms=_elapsed_ms(started),
@@ -333,7 +333,7 @@ class SandboxExecutionService:
             raise
         await self._emit(
             "sandbox_exec_completed" if result.ok else "sandbox_exec_failed",
-            input={"command": list(spec.command)},
+            input={"command": self._recorded(list(spec.command))},
             output={"stdout": result.stdout, "stderr": result.stderr},
             metadata={
                 **facts,
@@ -349,6 +349,17 @@ class SandboxExecutionService:
             duration_ms=_elapsed_ms(started),
         )
         return result
+
+    def _recorded(self, command: list[str]) -> list[str]:
+        """The command as the trace keeps it: whole under full capture; the
+        program and a marker under the default, as a call's arguments are
+        (the rc7 gate, E7-2)."""
+        from omnicoreagent.core.telemetry.recorder import redacts_governed_arguments
+
+        recorder = getattr(self.governance_engine, "telemetry_recorder", None)
+        if len(command) > 1 and redacts_governed_arguments(recorder, True):
+            return [str(command[0]), f"[REDACTED] ({len(command) - 1} argument(s))"]
+        return [str(part) for part in command]
 
     async def _emit(self, event_type: str, **fields: Any) -> None:
         from omnicoreagent.sandbox.telemetry import emit_sandbox_event

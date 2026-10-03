@@ -227,7 +227,8 @@ bridge](/docs/core-concepts/execution#files-between-the-workspace-and-the-sandbo
 
 - No network unless the policy allows it (the dev profiles ask).
 - Read-only root, unprivileged user, all capabilities dropped, no privilege
-  escalation, memory, CPU and process limits.
+  escalation, a process limit; memory and CPU limits when the manifest's
+  `resources` sets them.
 - An in-memory working directory, removed with the container.
 - Only the environment you set; never your credentials.
 - Never mounted, whatever the policy says: the Docker socket, system

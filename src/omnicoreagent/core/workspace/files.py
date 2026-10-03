@@ -125,7 +125,7 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
                 f"Current contents:\n{self.view('')}"
             )
         except ValueError as e:
-            return str(e)
+            return FileOpFailed(str(e))
         except Exception as e:
             return FileOpFailed(f"Error listing workspace files: {e}")
 
@@ -144,7 +144,7 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
 
             return f"Contents of file {self._location(path)}:\n{content}"
         except ValueError as e:
-            return str(e)
+            return FileOpFailed(str(e))
         except Exception as e:
             return FileOpFailed(f"Error reading workspace file: {e}")
 
@@ -193,7 +193,7 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
 
             return FileOpFailed(f"Invalid mode '{mode}'. Allowed modes: create, append, overwrite.")
         except ValueError as e:
-            return str(e)
+            return FileOpFailed(str(e))
         except Exception as e:
             return FileOpFailed(f"Error writing workspace file: {e}")
 
@@ -213,7 +213,7 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
             )
             return f"Replaced '{old_str}' with '{new_str}' in {self._location(path)}"
         except ValueError as e:
-            return str(e)
+            return FileOpFailed(str(e))
         except Exception as e:
             return FileOpFailed(f"Error replacing workspace file text: {e}")
 
@@ -232,7 +232,7 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
             self.storage.write_text(path, updated, **self._storage_kwargs())
             return f"Inserted text at line {insert_line} in {self._location(path)}"
         except ValueError as e:
-            return str(e)
+            return FileOpFailed(str(e))
         except Exception as e:
             return FileOpFailed(f"Error inserting workspace file text: {e}")
 
@@ -255,7 +255,7 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
             self.storage.delete(path, **self._storage_kwargs())
             return f"Deleted: {self._location(path)}"
         except ValueError as e:
-            return str(e)
+            return FileOpFailed(str(e))
         except Exception as e:
             return FileOpFailed(f"Error deleting workspace file: {e}")
 
@@ -284,7 +284,7 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
             self.storage.rename(old_path, new_path, **self._storage_kwargs())
             return f"Renamed {old_location} -> {new_location}"
         except ValueError as e:
-            return str(e)
+            return FileOpFailed(str(e))
         except Exception as e:
             return FileOpFailed(f"Error renaming workspace file: {e}")
 
@@ -320,7 +320,7 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
                 return f"No files matched pattern '{pattern}' under {root or '.'}."
             return "Matched files:\n" + "\n".join(sorted(matches))
         except ValueError as e:
-            return str(e)
+            return FileOpFailed(str(e))
         except Exception as e:
             return FileOpFailed(f"Error matching workspace files: {e}")
 
@@ -382,6 +382,6 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
                 result += f"\nSkipped {skipped} unreadable files."
             return result
         except ValueError as e:
-            return str(e)
+            return FileOpFailed(str(e))
         except Exception as e:
             return FileOpFailed(f"Error searching workspace files: {e}")

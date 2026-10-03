@@ -218,6 +218,10 @@ async def test_a_paused_and_resumed_run_reads_as_one_trajectory(tmp_path):
     assert story["run_id"] == paused["run_id"] and story["status"] == "completed"
     assert [s["status"] for s in story["segments"]] == ["suspended", "completed"]
     assert story["segments"][0]["trajectory"]["request"]["message"] == "tidy up"
+    # The rc7 gate (E7-1): a paused segment had final None, and every reader
+    # written from the docs crashed on its first paused run.
+    final = story["segments"][0]["trajectory"]["final"]
+    assert final["type"] == "final_state" and final["output"]["status"] == "suspended"
     assert story["totals"]["model_calls"]["total"] == 3
     assert story["totals"]["tool_calls"]["total"] == 3
     assert story["approvals"][0]["approver"] == "alice"

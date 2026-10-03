@@ -440,7 +440,7 @@ a list has every field, `None` when it does not apply.
 | `request` | The user message and its capture state. |
 | `harness` | The run's header (below). |
 | `steps` | Each step (below). |
-| `final` | The terminal event: `type` (`final_answer`, `runtime_error` or `final_state`), `output`, `error`, and `final_model_response_event_id`. |
+| `final` | The terminal event: `type` (`final_answer`, `runtime_error` or `final_state`), `output`, `error`, and `final_model_response_event_id`. A segment that paused (an approval, a budget, `interrupt`) has a `final_state` whose `output.status` is `suspended` or `interrupted`. `None` only for a segment whose process stopped before it could record an end. |
 | `totals` | The run's totals (below). |
 | `outcomes` | What the run turned out to be worth, attached later ([Outcomes and training](/docs/how-to-guides/outcomes-and-training)). |
 | `capture_gaps` | Each record whose payload is not all there: `type`, `id`, `state`. |
