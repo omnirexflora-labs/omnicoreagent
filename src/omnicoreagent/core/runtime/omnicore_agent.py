@@ -783,8 +783,13 @@ class OmniCoreAgent:
         if not self._initialized:
             # Before the trace: set-up (the model client, tools, MCP servers)
             # took 7-50 s inside a first run's trace with no span to say so,
-            # and against its deadline (the rc7 gate, E7-4).
-            await self.initialize()
+            # and against its deadline (the rc7 gate, E7-4). A set-up that
+            # fails is tried again inside the trace below, so the failure is
+            # recorded on the run as before.
+            try:
+                await self.initialize()
+            except Exception:  # noqa: BLE001 - recorded by the attempt in the trace
+                pass
         # Set once this run starts finalizing its own trace. A telemetry
         # failure after that point has already restored the parent context,
         # so the error handlers below must not record anything more.
@@ -858,6 +863,9 @@ class OmniCoreAgent:
                                 )
                             },
                         )
+
+            if not self._initialized:
+                await self.initialize()  # failed before the trace: recorded here
 
             # The run's durable record lives in the chosen memory store.
             lease_seconds = int(self.agent_config.get("run_lease_seconds") or 60)
