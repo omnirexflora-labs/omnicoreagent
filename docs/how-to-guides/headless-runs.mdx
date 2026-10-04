@@ -446,9 +446,8 @@ The [command line reference](/docs/reference/cli) is generated from the code.
     `--timeout 2` against a model call that takes several seconds. The run
     is recorded as `timeout` in its trace and its record, and `result.json`
     has `"error": "run exceeded its deadline"`. Give it the time a real run
-    needs. The deadline covers the whole run, including the agent's set-up
-    (loading the model client and connecting MCP servers), which can take
-    tens of seconds on a cold start.
+    needs. The deadline starts once the agent is set up (its tools, MCP
+    servers and model client loaded), so a cold start does not spend it.
   </Accordion>
 
   <Accordion title="Exit 1: the budget was denied">

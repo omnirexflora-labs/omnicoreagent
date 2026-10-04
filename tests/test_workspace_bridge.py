@@ -523,3 +523,25 @@ async def test_the_file_limit_is_reported_and_counts_only_what_moves(tmp_path):
     assert sum("not copied back" in r for r in reasons.values()) == 2, reasons
     # The next command moves the rest, since what is in place no longer counts.
     assert len(second.metadata["workspace"]["written"]) == 2, second.metadata["workspace"]
+
+
+
+async def test_a_sandbox_lost_between_commands_is_opened_afresh(tmp_path):
+    # The rc8 gate (D): a sandbox that died between two commands made the
+    # next command's copy-in raise Docker's own NotFound; a command that
+    # finds its sandbox gone mid-run was already handled.
+    import asyncio
+
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+    storage.write_text("a.txt", "one")
+    async with _scope(storage).active() as scope:
+        await _sh(scope, "cat a.txt")
+        runtime = scope.service.governance_engine.sandbox_runtime
+        (container,) = runtime._containers.values()
+        await asyncio.to_thread(container.remove, force=True)
+        storage.write_text("b.txt", "two")  # something to copy in
+
+        result = await _sh(scope, "cat a.txt b.txt && echo three > c.txt")
+
+    assert result.exit_code == 0 and result.stdout == "onetwo"
+    assert storage.read_text("c.txt") == "three\n"
