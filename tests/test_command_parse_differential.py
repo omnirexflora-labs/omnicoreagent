@@ -90,6 +90,10 @@ CORPUS = [
     "unset 'a[$(rm -rf target)]'",
     'echo "a[$(rm -rf target)]"',
     "nice rm -rf target",
+    # A shell reading commands from its input (the rc8 gate, area S).
+    "echo 'rm -rf target' | sh",
+    "printf 'rm -rf target' | bash",
+    "echo 'rm -rf target' | sh -s",
 ]
 
 
