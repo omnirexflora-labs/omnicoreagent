@@ -1,4 +1,5 @@
 import asyncio
+from omnicoreagent.core.budgets import BudgetExhaustedForRun, RunAwaitingBudget
 from typing import Any
 
 from omnicoreagent.core.budgets import current_budgets
@@ -289,6 +290,8 @@ class GovernedToolRunner:
                         span.span_id, status=SpanStatus.CANCELLED
                     )
                 raise
+            except (BudgetExhaustedForRun, RunAwaitingBudget):
+                raise  # the run's to handle, not a failed call (B7-6)
             except Exception as exc:
                 # Authority a tool asks for while it runs (a sandbox's
                 # network) is decided like the call's own: an ask waits for a

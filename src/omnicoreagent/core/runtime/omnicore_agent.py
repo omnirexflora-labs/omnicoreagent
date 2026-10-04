@@ -780,6 +780,16 @@ class OmniCoreAgent:
                     raise ValueError(problem)
                 else:
                     retry_of = existing
+        if not self._initialized:
+            # Before the trace: set-up (the model client, tools, MCP servers)
+            # took 7-50 s inside a first run's trace with no span to say so,
+            # and against its deadline (the rc7 gate, E7-4). A set-up that
+            # fails is tried again inside the trace below, so the failure is
+            # recorded on the run as before.
+            try:
+                await self.initialize()
+            except Exception:  # noqa: BLE001 - recorded by the attempt in the trace
+                pass
         # Set once this run starts finalizing its own trace. A telemetry
         # failure after that point has already restored the parent context,
         # so the error handlers below must not record anything more.
@@ -855,7 +865,7 @@ class OmniCoreAgent:
                         )
 
             if not self._initialized:
-                await self.initialize()
+                await self.initialize()  # failed before the trace: recorded here
 
             # The run's durable record lives in the chosen memory store.
             lease_seconds = int(self.agent_config.get("run_lease_seconds") or 60)
@@ -1672,9 +1682,16 @@ class OmniCoreAgent:
             arguments=arguments,
         )
         if decided.get("delegated_run_id"):
-            # The ask was a worker's, mirrored here: the decision is theirs too.
+            # The ask was a child's, mirrored here: the decision is theirs
+            # too, recorded where the child keeps its runs (a named child may
+            # have its own store; a spawned worker shares the lead's).
+            child = next(
+                (c for c in self.sub_agents or [] if getattr(c, "name", None) == decided.get("delegated_name")),
+                None,
+            )
+            store = getattr(child, "memory_router", None) or self.memory_router
             await decide(
-                self.memory_router,
+                store,
                 decided["delegated_run_id"],
                 decided["delegated_approval_id"],
                 decision=decision,
@@ -1781,6 +1798,22 @@ class OmniCoreAgent:
         # The decision is recorded on the run; the run's own trace records it
         # when it continues, as an approval's decision is.
         await update_from_outside(self.memory_router, run_id, decide)
+        if request.get("delegated_run_id"):
+            # The request was a worker's, mirrored here: the decision is
+            # theirs too, and the grant is already on the ledger they share.
+            child_request_id = request.get("delegated_request_id")
+
+            def decide_child(stored: dict[str, Any]) -> None:
+                for item in stored.get("budget_requests", []):
+                    if item["request_id"] == child_request_id:
+                        item.update(
+                            status="granted" if granted else "denied",
+                            approver=approver,
+                            note=note,
+                            amount=given if granted else 0.0,
+                        )
+
+            await update_from_outside(self.memory_router, request["delegated_run_id"], decide_child)
         return {
             "run_id": run_id,
             "request_id": request["request_id"],

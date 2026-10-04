@@ -282,6 +282,32 @@ async def test_an_approved_sandbox_network_holds_for_the_rest_of_the_run():
 
 
 @pytest.mark.asyncio
+async def test_an_approved_mount_image_and_resources_hold_for_the_rest_of_the_run():
+    # The rc7 gate (D F1): a run with a mount and the network on paused on
+    # the mount, then the network, then the mount again: only the network
+    # and environment approvals held for the run.
+    from omnicoreagent.sandbox.execution import _sandbox_scope_request
+
+    def mount():
+        return _sandbox_scope_request(
+            "sandbox.filesystem.mount", actor="agent", path="/srv/data", risk_level="high",
+            metadata={"mode": "read_only"},
+        )
+
+    agent, tracker, engine = await _setup()
+    with pytest.raises(ApprovalRequiredError):
+        await _ask(engine, tracker, mount())
+    (pending,) = (await agent.get_run("run_approve"))["approvals"]
+    await agent.resolve_approval("run_approve", pending["approval_id"], decision="approve", approver="alice")
+    await tracker.reload()
+
+    for _ in range(2):
+        decision = await _ask(engine, tracker, mount())
+        assert decision.effect.value == "allow" or decision.approval_id
+    assert len((await agent.get_run("run_approve"))["approvals"]) == 1
+
+
+@pytest.mark.asyncio
 async def test_a_second_call_asking_the_same_question_waits_on_the_same_approval():
     # The 0.5.0rc3 gate: two execute calls in one turn both needed the
     # sandbox network. Only the first was recorded as waiting; the second was

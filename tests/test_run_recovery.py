@@ -176,6 +176,36 @@ async def test_a_finished_call_whose_result_was_not_saved_is_not_run_again(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_a_tool_made_idempotent_after_the_crash_does_not_rerun_an_old_call(tmp_path):
+    # Whether an interrupted call may run again was read from the tool
+    # catalog at resume only. A deploy between the crash and the resume that
+    # flipped the tool to idempotent would rerun a call made when it was not
+    # (found comparing with pi-durable, 2026-10-02, which stores the replay
+    # policy with the intent). Both the recorded flag and the current one
+    # must say idempotent.
+    ledger = tmp_path / "ledger"
+    model = RecordingModel(*TURNS, "recovered")
+    agent = await _agent(model, _tools(ledger, flaky_idempotent=False))
+    await _crash(agent)
+    await asyncio.sleep(1.2)
+    record = await agent.get_run("run_crash")
+    assert [c["idempotent"] for c in record["tool_calls"] if c["tool_call_id"] == "r1"] == [False]
+
+    redeployed = OmniCoreAgent(
+        name="recoverable", system_instruction="Do the work.", model_config=_MODEL,
+        local_tools=_tools(ledger, flaky_idempotent=True), memory_router=agent.memory_router,
+        agent_config={"guardrail_mode": "off", "enable_workspace_files": False, "run_lease_seconds": 1},
+    )
+    await redeployed.initialize()
+    redeployed.llm_connection = model
+    await redeployed.resume("run_crash")
+
+    assert ledger.read_text().splitlines() == ["charge 5", "report"], "not run again"
+    result = next(m for m in model.calls[-1] if m.get("tool_call_id") == "r1")
+    assert "unknown" in json.dumps(result)
+
+
+@pytest.mark.asyncio
 async def test_an_interrupted_idempotent_call_runs_again(tmp_path):
     ledger = tmp_path / "ledger"
     model = RecordingModel(*TURNS, "recovered")

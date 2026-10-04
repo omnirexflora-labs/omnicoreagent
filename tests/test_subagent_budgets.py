@@ -113,6 +113,65 @@ async def test_workers_spend_the_leads_budgets(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_granted_worker_continues_when_the_lead_resumes(tmp_path):
+    # The rc7 gate (F): a worker that ran out of budget was parked, the lead
+    # paused on its own next call, and after the grant the lead resumed
+    # without the worker and reported success with the work undone. The
+    # worker's request is mirrored on the lead's run, the grant reaches it,
+    # and the lead's delegation resumes the worker.
+    budgets = {"request": [{"meter": "model_calls", "limit": 2, "on_exhausted": "pause"}]}
+    lead = _lead(tmp_path, budgets)
+    await lead.initialize()
+    workers = [{"name": "w0", "role": "r", "task": "t", "output_path": "w0/out.md"}]
+    lead.llm_connection = Scripted([("s1", "spawn_subagents", {"subagents": workers})], "all done")
+    worker_calls: list = []
+    _script_workers(lead, worker_calls)
+    try:
+        paused = await lead.run("go", session_id="lead-session")
+        assert paused["status"] == "awaiting_budget", paused.get("status")
+        request = paused["budget_request"]
+        assert request["delegated_name"] == "w0" and request["delegated_run_id"]
+        worker_before = await lead.get_run(request["delegated_run_id"])
+        assert worker_before["status"] == "awaiting_budget"
+
+        await lead.grant_budget(paused["run_id"], amount=10, approver="bob")
+        result = await lead.resume(paused["run_id"])
+        worker_after = await lead.get_run(request["delegated_run_id"])
+        status = await lead.budget_status(paused["run_id"])
+    finally:
+        await lead.cleanup()
+
+    assert result["status"] == "success" and result["response"] == "all done"
+    assert worker_after["status"] == "completed", "the same worker finished, resumed"
+    assert (tmp_path / "ws" / "files" / "w0" / "out.md").read_text() == "b"
+    assert len(worker_after["trace_ids"]) == 2, "the worker's run resumed, it did not start over"
+    spent = {e["scope"]: e["spent"] for e in status if e["meter"] == "model_calls"}
+    # lead 1, worker 1, then (the scripted model replays from its first
+    # turn on the resumed worker) worker 3, lead 1: every call on one ledger.
+    assert spent["request"] == 1 + len(worker_calls) + 1, status
+
+
+@pytest.mark.asyncio
+async def test_spawning_past_a_subagent_runs_limit_ends_the_run(tmp_path):
+    # The rc7 gate (B7-6): the subagent_runs charge happens inside the spawn
+    # tool, so its refusal came back as a tool error and the run went on to
+    # end "success"; model_calls and tool_calls refusals end the run.
+    budgets = {"request": [{"meter": "subagent_runs", "limit": 2, "on_exhausted": "terminate"}]}
+    lead = _lead(tmp_path, budgets)
+    await lead.initialize()
+    workers = [{"name": f"w{i}", "role": "r", "task": "t", "output_path": f"w{i}/out.md"} for i in range(3)]
+    lead.llm_connection = Scripted([("s1", "spawn_subagents", {"subagents": workers})], "all done")
+    _script_workers(lead, [])
+    try:
+        result = await lead.run("go", session_id="lead-session")
+    finally:
+        await lead.cleanup()
+
+    assert result["status"] == "error", result.get("status")
+    assert "subagent_runs" in str(result)
+
+
+@pytest.mark.asyncio
 async def test_a_worker_that_runs_out_asks_once_on_the_leads_run(tmp_path):
     budgets = {"request": [{"meter": "model_calls", "limit": 2, "on_exhausted": "pause"}]}
     lead = _lead(tmp_path, budgets)

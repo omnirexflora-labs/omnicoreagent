@@ -351,6 +351,7 @@ class RunTracker:
         provider: str | None,
         arguments: Any,
         parent_tool_call_id: str | None = None,
+        idempotent: bool = False,
     ) -> None:
         async with self._lock:
             entry = {
@@ -360,6 +361,11 @@ class RunTracker:
                 "tool_name": tool_name,
                 "provider": provider,
                 "arguments_digest": arguments_digest(arguments),
+                # Whether the tool was idempotent when the call was made: at
+                # resume this and the current flag must both say so before
+                # the call runs again, so a deploy that flips the flag cannot
+                # rerun an old call.
+                "idempotent": bool(idempotent),
                 "step": self.record["step"],
                 "state": "started",
                 "outcome": None,
@@ -397,6 +403,17 @@ class RunTracker:
             if budgets:
                 # What the run spent, per scope, kept once its own counter is gone.
                 self.record["budgets"] = budgets
+            await self._save()
+
+    async def note_delegation(self, *, tool_call_id: str, name: str, child_run_id: str) -> None:
+        """Which child run a delegation of this call started: a finished
+        worker is not run again when the call runs again after a pause."""
+        async with self._lock:
+            noted = [
+                d for d in self.record.get("delegations", [])
+                if not (d["tool_call_id"] == tool_call_id and d["name"] == name)
+            ]
+            self.record["delegations"] = [*noted, {"tool_call_id": tool_call_id, "name": name, "child_run_id": child_run_id}]
             await self._save()
 
     async def add_approval(self, approval: dict[str, Any]) -> None:

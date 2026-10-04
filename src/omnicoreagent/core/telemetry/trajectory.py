@@ -219,6 +219,22 @@ def build_trajectory(
                     }
                 )
             (step["model_calls"] if step else other_events).append(entry)
+        elif kind in {"run_suspended", "run_interrupted"} and not final:
+            # A segment that paused ends here: readers index final["type"]
+            # as the docs show, and got None on every paused run (the rc7
+            # gate, E7-1).
+            final = {
+                "event_id": take(event),
+                "type": "final_state",
+                "output": {
+                    "status": "suspended" if kind == "run_suspended" else "interrupted",
+                    **(event.output or {}),
+                    **{k: v for k, v in (event.metadata or {}).items() if k in {"budget_request", "approvals", "reason"}},
+                },
+                "output_capture": _capture(event.output_capture),
+                "error": None,
+                "final_model_response_event_id": None,
+            }
         elif kind in _TERMINAL_EVENTS and not final:
             final = {
                 "event_id": take(event),

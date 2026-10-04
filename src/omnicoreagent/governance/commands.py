@@ -36,7 +36,20 @@ MAX_COMMAND_CHARS = 10_000
 SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ksh", "mksh", "ash", "busybox"})
 # Programs that run text given to them as a command: what they run is not
 # the words a rule sees, so the line is unreadable.
-_RUNS_TEXT = frozenset({"eval", "source", ".", "exec", "command", "builtin"})
+_RUNS_TEXT = frozenset({
+    "eval", "source", ".", "exec", "command", "builtin",
+    # Builtins that run, or arrange to run, a string they are given: `trap
+    # 'rm -rf x' EXIT`, `alias ls='rm -rf x'`, `hash -p ./rm ls`, `mapfile -C
+    # 'rm'`, `let 'a[$(rm)]=1'` each ran rm through a line read as plain
+    # (the rc7 gate, area S).
+    "trap", "alias", "hash", "fc", "bind", "complete", "compgen", "mapfile",
+    "readarray", "let", "read", "enable",
+})
+# Inside quotes these are text to the shell, but bash runs them again when
+# the word reaches an arithmetic context: `printf -v 'a[$(rm)]' x`, `test -v
+# 'a[$(rm)]'` (the rc7 gate, area S). A literal word that spells a
+# substitution is not plain.
+_SUBSTITUTION = re.compile(r"\$\(|`")
 # bash keywords read as a program by the grammar, which run the command after
 # them: `time rm` and `coproc rm` run rm (found running the corpus under bash).
 _KEYWORDS = frozenset({"time", "coproc", "function", "select"})
@@ -249,12 +262,16 @@ def _word(node, source: bytes) -> str:
             raise _Unreadable("a brace expansion")
         return raw
     if kind == "raw_string":
+        if _SUBSTITUTION.search(raw):
+            raise _Unreadable("a command substitution inside quotes")
         return raw[1:-1]
     if kind == "string":
         if any(child.is_named and child.type != "string_content" for child in node.children):
             raise _Unreadable("an expansion inside quotes")
         if "\\" in raw:
             raise _Unreadable("an escape")
+        if _SUBSTITUTION.search(raw):
+            raise _Unreadable("a command substitution inside quotes")
         return raw[1:-1]
     if kind == "concatenation":
         return "".join(_word(child, source) for child in node.children)
