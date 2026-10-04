@@ -1807,12 +1807,10 @@ class OmniCoreAgent:
         # The decision is recorded on the run; the run's own trace records it
         # when it continues, as an approval's decision is.
         await update_from_outside(self.memory_router, run_id, decide)
-        if request.get("delegated_run_id"):
-            # The request was a worker's, mirrored here: the decision is
-            # theirs too, and the grant is already on the ledger they share.
-            child_request_id = request.get("delegated_request_id")
-
-            def decide_child(stored: dict[str, Any]) -> None:
+        for waiting in request.get("delegated") or []:
+            # The request was workers', mirrored here: the decision is theirs
+            # too, and the grant is already on the ledger they share.
+            def decide_child(stored: dict[str, Any], child_request_id=waiting.get("request_id")) -> None:
                 for item in stored.get("budget_requests", []):
                     if item["request_id"] == child_request_id:
                         item.update(
@@ -1822,7 +1820,7 @@ class OmniCoreAgent:
                             amount=given if granted else 0.0,
                         )
 
-            await update_from_outside(self.memory_router, request["delegated_run_id"], decide_child)
+            await update_from_outside(self.memory_router, waiting["run_id"], decide_child)
         return {
             "run_id": run_id,
             "request_id": request["request_id"],

@@ -885,7 +885,7 @@ def _waiting_for_budget(tool_call_id: str) -> dict | None:
             request
             for request in run.record.get("budget_requests", [])
             if request.get("status") == "pending"
-            and request.get("delegated_run_id")
+            and request.get("delegated")
             and request.get("for") == tool_call_id
         ),
         None,

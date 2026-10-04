@@ -1023,7 +1023,11 @@ async def park_child(run, *, call, name: str, child_run_id: str | None, result: 
             )
             mirrored += 1
     if status == "awaiting_budget":
-        already = {r.get("delegated_request_id") for r in run.record.get("budget_requests") or []}
+        already = {
+            d.get("request_id")
+            for r in run.record.get("budget_requests") or []
+            for d in r.get("delegated") or []
+        }
         for entry in child_record.get("budget_requests") or []:
             if entry.get("status") != "pending" or entry["request_id"] in already:
                 continue
@@ -1053,12 +1057,11 @@ def parked_child(run, name: str) -> str | None:
         ):
             return approval["delegated_run_id"]
     for request in reversed(run.record.get("budget_requests") or []):
-        if (
-            request.get("delegated_name") == name
-            and request.get("delegated_run_id")
-            and request.get("status") in {"granted", "denied"}
-        ):
-            return request["delegated_run_id"]
+        if request.get("status") not in {"granted", "denied"}:
+            continue
+        for waiting in request.get("delegated") or []:
+            if waiting.get("name") == name:
+                return waiting["run_id"]
     return None
 
 

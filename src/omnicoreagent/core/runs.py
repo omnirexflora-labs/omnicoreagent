@@ -450,11 +450,29 @@ class RunTracker:
             # doubled the shortfall (the 0.5.0rc6 gate).
             key = request.get("for") or "model"
             share = {"needed": request.get("needed") or 0, "shortfall": request.get("shortfall") or 0}
+            # Every worker waiting on this budget, so each is resumed, not
+            # only the first: two workers stopped by one budget merged into
+            # one request and the second restarted from scratch (the rc8
+            # gate, B7-2).
+            delegated = (
+                {
+                    "name": request["delegated_name"],
+                    "run_id": request["delegated_run_id"],
+                    "request_id": request.get("delegated_request_id"),
+                }
+                if request.get("delegated_run_id")
+                else None
+            )
             if waiting is None:
                 waiting = dict(request)
                 waiting["refusals"] = {key: share}
+                waiting["delegated"] = [delegated] if delegated else []
                 requests.append(waiting)
             else:
+                if delegated and delegated["run_id"] not in {
+                    d["run_id"] for d in waiting.setdefault("delegated", [])
+                }:
+                    waiting["delegated"].append(delegated)
                 refusals = waiting.setdefault(
                     "refusals",
                     {"earlier": {"needed": waiting.get("needed") or 0,

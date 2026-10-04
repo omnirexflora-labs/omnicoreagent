@@ -130,13 +130,14 @@ async def test_a_granted_worker_continues_when_the_lead_resumes(tmp_path):
         paused = await lead.run("go", session_id="lead-session")
         assert paused["status"] == "awaiting_budget", paused.get("status")
         request = paused["budget_request"]
-        assert request["delegated_name"] == "w0" and request["delegated_run_id"]
-        worker_before = await lead.get_run(request["delegated_run_id"])
+        (waiting,) = request["delegated"]
+        assert waiting["name"] == "w0" and waiting["run_id"]
+        worker_before = await lead.get_run(waiting["run_id"])
         assert worker_before["status"] == "awaiting_budget"
 
         await lead.grant_budget(paused["run_id"], amount=10, approver="bob")
         result = await lead.resume(paused["run_id"])
-        worker_after = await lead.get_run(request["delegated_run_id"])
+        worker_after = await lead.get_run(waiting["run_id"])
         status = await lead.budget_status(paused["run_id"])
     finally:
         await lead.cleanup()
@@ -149,6 +150,37 @@ async def test_a_granted_worker_continues_when_the_lead_resumes(tmp_path):
     # lead 1, worker 1, then (the scripted model replays from its first
     # turn on the resumed worker) worker 3, lead 1: every call on one ledger.
     assert spent["request"] == 1 + len(worker_calls) + 1, status
+
+
+@pytest.mark.asyncio
+async def test_every_worker_stopped_by_one_budget_resumes(tmp_path):
+    # The rc8 gate (B7-2): two workers stopped by the same budget merged into
+    # one request that named only the first; on resume the second started
+    # over and repeated its first step.
+    budgets = {"request": [{"meter": "model_calls", "limit": 3, "on_exhausted": "pause"}]}
+    lead = _lead(tmp_path, budgets)
+    await lead.initialize()
+    workers = [{"name": f"w{i}", "role": "r", "task": "t", "output_path": f"w{i}/out.md"} for i in range(2)]
+    lead.llm_connection = Scripted([("s1", "spawn_subagents", {"subagents": workers})], "all done")
+    worker_calls: list = []
+    _script_workers(lead, worker_calls)
+    try:
+        paused = await lead.run("go", session_id="lead-session")
+        assert paused["status"] == "awaiting_budget", paused.get("status")
+        record = await lead.get_run(paused["run_id"])
+        (request,) = [r for r in record["budget_requests"] if r["status"] == "pending"]
+        assert {d["name"] for d in request["delegated"]} == {"w0", "w1"}, request
+        await lead.grant_budget(paused["run_id"], amount=20, approver="bob")
+        result = await lead.resume(paused["run_id"])
+        runs = [await lead.get_run(d["run_id"]) for d in request["delegated"]]
+    finally:
+        await lead.cleanup()
+
+    assert result["status"] == "success"
+    assert [r["status"] for r in runs] == ["completed", "completed"]
+    assert all(len(r["trace_ids"]) == 2 for r in runs), "each worker resumed, none started over"
+    for i in range(2):
+        assert (tmp_path / "ws" / "files" / f"w{i}" / "out.md").read_text() == "b"
 
 
 @pytest.mark.asyncio
