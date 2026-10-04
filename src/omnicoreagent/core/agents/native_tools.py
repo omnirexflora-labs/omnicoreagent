@@ -532,6 +532,7 @@ async def execute_native_turn(
                 await current_run().tool_finished(
                     tool_call_id=request.id, outcome=None, state="awaiting_budget"
                 )
+                await current_run().note_continuation(request.id)
                 awaiting_budget.append(mirrored)
             else:
                 await _record_tool_outcome(request.id, result)

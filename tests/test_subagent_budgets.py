@@ -184,6 +184,53 @@ async def test_every_worker_stopped_by_one_budget_resumes(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_tool_calls_grant_of_the_shortfall_lets_the_worker_finish(tmp_path):
+    # The rc8 gate (C): the lead's spawn call, run again to continue its
+    # parked worker, was charged as a new tool call and spent the grant the
+    # worker was waiting for; granting the shortfall never converged.
+    budgets = {"request": [{"meter": "tool_calls", "limit": 2, "on_exhausted": "pause"}]}
+    lead = _lead(tmp_path, budgets)
+    await lead.initialize()
+    workers = [{"name": "w0", "role": "r", "task": "t", "output_path": "w0/out.md"}]
+    lead.llm_connection = Scripted([("s1", "spawn_subagents", {"subagents": workers})], "all done")
+    # One script for the worker across its pause, as a real model's turns
+    # continue: a fresh script per creation replays the first turn.
+    worker_model = Scripted(
+        [("a", "write_file", {"path": "w0/a.txt", "content": "a"})],
+        [("b", "write_file", {"path": "w0/out.md", "content": "b"})],
+        "worker done",
+    )
+    factory = lead._subagent_factory
+    original = factory.create_subagent
+
+    def create(**kw):
+        agent = original(**kw)
+        init = agent.initialize
+
+        async def initialize():
+            await init()
+            agent.llm_connection = worker_model
+
+        agent.initialize = initialize
+        return agent
+
+    factory.create_subagent = create
+    try:
+        result = await lead.run("go", session_id="lead-session")
+        rounds = 0
+        while result["status"] == "awaiting_budget" and rounds < 4:
+            rounds += 1
+            await lead.grant_budget(result["run_id"], approver="bob")  # the shortfall
+            result = await lead.resume(result["run_id"])
+    finally:
+        await lead.cleanup()
+
+    assert result["status"] == "success", (result.get("status"), rounds)
+    assert rounds == 1, f"one grant of the shortfall is enough; took {rounds}"
+    assert (tmp_path / "ws" / "files" / "w0" / "out.md").read_text() == "b"
+
+
+@pytest.mark.asyncio
 async def test_spawning_past_a_subagent_runs_limit_ends_the_run(tmp_path):
     # The rc7 gate (B7-6): the subagent_runs charge happens inside the spawn
     # tool, so its refusal came back as a tool error and the run went on to

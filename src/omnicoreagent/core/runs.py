@@ -405,6 +405,28 @@ class RunTracker:
                 self.record["budgets"] = budgets
             await self._save()
 
+    async def note_continuation(self, tool_call_id: str) -> None:
+        """This call was paused with its worker, and runs again on resume to
+        continue it: that run is not a new call, so it is not charged again.
+        Charged, it spent the grant its worker was waiting for, and a
+        tool_calls budget granted its shortfall never converged (the rc8
+        gate, C)."""
+        async with self._lock:
+            pending = self.record.setdefault("continuations", [])
+            if tool_call_id not in pending:
+                pending.append(tool_call_id)
+            await self._save()
+
+    async def take_continuation(self, tool_call_id: str) -> bool:
+        """Whether this dispatch continues a paused call (once)."""
+        async with self._lock:
+            pending = self.record.get("continuations") or []
+            if tool_call_id not in pending:
+                return False
+            pending.remove(tool_call_id)
+            await self._save()
+            return True
+
     async def note_delegation(self, *, tool_call_id: str, name: str, child_run_id: str) -> None:
         """Which child run a delegation of this call started: a finished
         worker is not run again when the call runs again after a pause."""
