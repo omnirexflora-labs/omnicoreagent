@@ -274,16 +274,38 @@ class OmniCoreAgent:
         if self._only_tools is not None:
             self.agent.tool_runtime_registry.only_tools = set(self._only_tools)
 
-    async def _warm_up_model_client(self) -> None:
-        """Load the model client off the event loop. Done before a run's
-        trace starts: `import litellm` took 15-60 s in a fresh process and
-        sat in the trace between the user's message and the next event, and
-        against the run's deadline (the rc8 gate, E7-4). A model connection
-        of the application's own may have no async warm_up, or a plain one."""
+    async def _warm_up_model_client(self, *, in_trace: bool = False) -> None:
+        """Load the model client off the event loop, before the heartbeat.
+
+        A first load (`import litellm`) took 15-60 s in a fresh process and
+        sat unexplained in the trace between the user's message and the next
+        event (the rc8 gate, E7-4): in a run's trace it is its own span. It
+        stays in the trace, so a run stopped while it loads keeps that trace
+        on its record (the 0.5.0rc3 gate). A model connection of the
+        application's own may have no async warm_up, or a plain one."""
+        from omnicoreagent.core import llm
+
         warm_up = getattr(self.llm_connection, "warm_up", None)
-        warmed = warm_up() if callable(warm_up) else None
-        if inspect.isawaitable(warmed):
-            await warmed
+        if not callable(warm_up):
+            return
+        span = None
+        if in_trace and not getattr(llm, "_LITELLM_LOADED", True) and self.telemetry_recorder is not None:
+            span = await self.telemetry_recorder.start_span(
+                name="model.client.load",
+                kind="runtime.control",
+                actor=self._telemetry_actor(),
+                input={"purpose": "load the model client"},
+            )
+        try:
+            warmed = warm_up()
+            if inspect.isawaitable(warmed):
+                await warmed
+        except BaseException:
+            if span is not None:
+                await self.telemetry_recorder.end_span(span.span_id, status="cancelled")
+            raise
+        if span is not None:
+            await self.telemetry_recorder.end_span(span.span_id, status="ok")
 
     async def _check_worker_profiles(self) -> None:
         """A profile names only tools and MCP servers this agent has: a
@@ -801,7 +823,6 @@ class OmniCoreAgent:
                 await self.initialize()
             except Exception:  # noqa: BLE001 - recorded by the attempt in the trace
                 pass
-        await self._warm_up_model_client()
         # Set once this run starts finalizing its own trace. A telemetry
         # failure after that point has already restored the parent context,
         # so the error handlers below must not record anything more.
@@ -908,7 +929,7 @@ class OmniCoreAgent:
             # A model connection of the application's own may have no async
             # warm_up, or a plain one.
             run_tracker.attach_trace(trace_context.trace_id)
-            await self._warm_up_model_client()  # loaded above; immediate now
+            await self._warm_up_model_client(in_trace=True)
             await run_tracker.start(trace_context.trace_id)
             # Keeps the heartbeat fresh during long model or tool calls.
             keep_alive = asyncio.create_task(run_tracker.keep_alive())
