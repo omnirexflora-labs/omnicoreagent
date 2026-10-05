@@ -131,7 +131,6 @@ services remain opt-in.
 | **The harness** (this page) | The loop around the model: tools, memory, context, workspace, guardrails, events, sub-agents. |
 | **OmniCoreAgent** | The agent runtime: the harness, plus control, durability and the record ([How it fits together](/docs/core-concepts/how-it-fits-together)). |
 | **OmniServe** | Part of OmniCoreAgent (`omniserve run`): the same agent over REST and SSE. |
-| **OmniDaemon** | A separate project: event-driven, supervised, process-isolated agents running as services. |
 
 ---
 
@@ -145,8 +144,7 @@ The harness stays focused on the loop around the model. That keeps it clean:
   budget.
 - Cloud workspace storage is used when the S3 or R2 backend is installed and
   configured.
-- HTTP/SSE serving is OmniServe's, in the same package; distributed process
-  supervision is OmniDaemon's, a separate project.
+- HTTP/SSE serving is OmniServe's, in the same package.
 
 Control, durability and the record are layers of the runtime beside the
 harness, not inside the loop.

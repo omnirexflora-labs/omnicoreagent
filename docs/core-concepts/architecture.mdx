@@ -249,9 +249,8 @@ OmniCoreAgent is the agent runtime; its code runs in your process. Beyond it:
 
 - Use **OmniServe** (part of this package, `omniserve run`) when you need
   REST/SSE access to an agent.
-- Use **OmniDaemon**, a separate project, when you need event-driven,
-  supervised, process-isolated agents running as autonomous infrastructure
-  services.
+- Use **background runs** when the agent should work on a schedule or without
+  a caller waiting ([Background agents](/docs/core-concepts/background-agents)).
 - Use your own application infrastructure when you only need a direct script or a
   direct function call around one model request.
 

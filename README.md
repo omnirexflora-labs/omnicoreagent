@@ -287,7 +287,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Design notes and plans live in
 ## License and author
 
 MIT — see [LICENSE](LICENSE). Built by [Abiola Adeshina](https://github.com/Abiorh001)
-([@abiorhmangana](https://x.com/abiorhmangana)), with
-[OmniMemory](https://github.com/omnirexflora-labs/omnimemory) and
-[OmniDaemon](https://github.com/omnirexflora-labs/OmniDaemon) in the same family.
+([@abiorhmangana](https://x.com/abiorhmangana)).
 Built on [LiteLLM](https://github.com/BerriAI/litellm), [FastAPI](https://fastapi.tiangolo.com/) and [Pydantic](https://docs.pydantic.dev/).
