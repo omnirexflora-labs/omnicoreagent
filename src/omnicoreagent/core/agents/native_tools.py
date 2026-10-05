@@ -532,6 +532,7 @@ async def execute_native_turn(
                 await current_run().tool_finished(
                     tool_call_id=request.id, outcome=None, state="awaiting_budget"
                 )
+                await current_run().note_continuation(request.id)
                 awaiting_budget.append(mirrored)
             else:
                 await _record_tool_outcome(request.id, result)
@@ -885,7 +886,7 @@ def _waiting_for_budget(tool_call_id: str) -> dict | None:
             request
             for request in run.record.get("budget_requests", [])
             if request.get("status") == "pending"
-            and request.get("delegated_run_id")
+            and request.get("delegated")
             and request.get("for") == tool_call_id
         ),
         None,

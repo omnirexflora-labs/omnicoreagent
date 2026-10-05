@@ -405,6 +405,28 @@ class RunTracker:
                 self.record["budgets"] = budgets
             await self._save()
 
+    async def note_continuation(self, tool_call_id: str) -> None:
+        """This call was paused with its worker, and runs again on resume to
+        continue it: that run is not a new call, so it is not charged again.
+        Charged, it spent the grant its worker was waiting for, and a
+        tool_calls budget granted its shortfall never converged (the rc8
+        gate, C)."""
+        async with self._lock:
+            pending = self.record.setdefault("continuations", [])
+            if tool_call_id not in pending:
+                pending.append(tool_call_id)
+            await self._save()
+
+    async def take_continuation(self, tool_call_id: str) -> bool:
+        """Whether this dispatch continues a paused call (once)."""
+        async with self._lock:
+            pending = self.record.get("continuations") or []
+            if tool_call_id not in pending:
+                return False
+            pending.remove(tool_call_id)
+            await self._save()
+            return True
+
     async def note_delegation(self, *, tool_call_id: str, name: str, child_run_id: str) -> None:
         """Which child run a delegation of this call started: a finished
         worker is not run again when the call runs again after a pause."""
@@ -450,11 +472,29 @@ class RunTracker:
             # doubled the shortfall (the 0.5.0rc6 gate).
             key = request.get("for") or "model"
             share = {"needed": request.get("needed") or 0, "shortfall": request.get("shortfall") or 0}
+            # Every worker waiting on this budget, so each is resumed, not
+            # only the first: two workers stopped by one budget merged into
+            # one request and the second restarted from scratch (the rc8
+            # gate, B7-2).
+            delegated = (
+                {
+                    "name": request["delegated_name"],
+                    "run_id": request["delegated_run_id"],
+                    "request_id": request.get("delegated_request_id"),
+                }
+                if request.get("delegated_run_id")
+                else None
+            )
             if waiting is None:
                 waiting = dict(request)
                 waiting["refusals"] = {key: share}
+                waiting["delegated"] = [delegated] if delegated else []
                 requests.append(waiting)
             else:
+                if delegated and delegated["run_id"] not in {
+                    d["run_id"] for d in waiting.setdefault("delegated", [])
+                }:
+                    waiting["delegated"].append(delegated)
                 refusals = waiting.setdefault(
                     "refusals",
                     {"earlier": {"needed": waiting.get("needed") or 0,

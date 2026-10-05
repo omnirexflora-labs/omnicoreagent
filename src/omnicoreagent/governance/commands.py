@@ -204,7 +204,7 @@ _WHY = {
     "redirected_statement": "a redirect",
     "variable_assignment": "a variable set before the command",
     "subshell": "a subshell",
-    "compound_statement": "a { ... } group",
+    "compound_statement": "a { ... } group or (( ... ))",
     "function_definition": "a function",
     "for_statement": "a loop",
     "while_statement": "a loop",
@@ -242,6 +242,15 @@ def _simple(argv: Sequence[str], text: str) -> SimpleCommand:
         raise _Unreadable(f"the shell keyword `{program}`")
     if program in SHELLS and any(a.startswith("-") and "c" in a[1:] for a in argv[1:] if not a.startswith("--")):
         raise _Unreadable(f"`{program} -c` runs text as a command")
+    if program in SHELLS and (
+        not any(not a.startswith("-") for a in argv[1:])
+        or any(a.startswith("-") and not a.startswith("--") and "s" in a[1:] for a in argv[1:])
+    ):
+        # A shell given no script reads its commands from its input: `... |
+        # sh` ran whatever the pipe fed it (the rc8 gate, area S). A shell
+        # given a script file runs a file, as `python x.py` does: readable,
+        # and what the script does is the sandbox's to contain.
+        raise _Unreadable(f"`{program}` reads commands from its input")
     return SimpleCommand(argv=argv, program=program, bare="/" not in argv[0], text=text)
 
 

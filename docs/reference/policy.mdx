@@ -104,7 +104,8 @@ Command rules decide which commands run without asking. They are not a
 security boundary: what a command can touch is decided by the
 [sandbox](/docs/how-to-guides/sandbox-providers) it runs in. An allowed
 program can do anything its own options allow, and `sudo rm` is a command
-named `sudo`, not `rm`.
+named `sudo`, not `rm`; `sh build.sh` runs a script as `python x.py`
+does; and `git -c alias.x='!rm -rf build' x` is a command named `git`.
 </Warning>
 
 Every command an agent runs reaches the policy as `process.exec` on `sh` (the
@@ -137,8 +138,9 @@ words joined by `&&`, `||`, `;`, `|` or a newline) is split into its commands.
 Anything else makes the whole command **unreadable**: a redirect, `$(...)` or
 backticks, a variable or `~`, a glob, a brace, an escape, a leading
 `NAME=value`, a subshell, a group, a heredoc, a function or loop, a command
-in the background, or a program that runs text as a command (`eval`,
-`source`, `exec`, `sh -c`).
+in the background, a program that runs text as a command (`eval`,
+`source`, `exec`, `sh -c`, `trap`, `alias`), or a shell reading
+commands from its input (`... | sh`).
 
 How a command is decided:
 

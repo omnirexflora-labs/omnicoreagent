@@ -70,6 +70,8 @@ def test_a_plain_chain_is_split_into_its_commands(text, programs):
         "cat <<EOF\nx\nEOF", "eval 'rm -rf x'", "source ./x.sh", "sh -c 'rm -rf x'",
         "bash -lc 'rm -rf x'", "rm -rf x &", "{rm,-rf,x}", "time rm -rf x", "! rm x",
         "$'rm' -rf x", "r\\\nm -rf x", "x" * 10_001,
+        # A shell reading commands from its input (the rc8 gate, S).
+        "echo 'rm -rf x' | sh", "cat script.sh | bash", "bash", "sh -s", "bash -s -- a",
     ],
 )
 def test_anything_else_is_unreadable(text):

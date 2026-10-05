@@ -481,8 +481,17 @@ async def _charge_before_the_call(budgets, single_tool=None) -> None:
     runs once a person tops the budget up; recorded as started, it was an
     unknown outcome and never ran (the 0.5.0rc5 gate).
     """
+    from omnicoreagent.core.runs import current_run
     from omnicoreagent.governance.calls import on_behalf_of
 
+    run = current_run()
+    if (
+        single_tool is not None
+        and run is not None
+        and getattr(run, "enabled", False)
+        and await run.take_continuation(single_tool.tool_call_id)
+    ):
+        return  # continues a call already counted (a parked delegation)
     try:
         if single_tool is not None:
             # Named, so a refusal repeated after a crash counts once.

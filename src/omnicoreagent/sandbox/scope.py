@@ -66,7 +66,16 @@ class ExecutionScope:
     async def execute(self, command: list[str], **spec: Any) -> SandboxExecResult:
         session = await self.session()
         bridge = self.workspace_bridge
-        copied_in = await bridge.push(self.service, session) if bridge is not None else []
+        try:
+            copied_in = await bridge.push(self.service, session) if bridge is not None else []
+        except Exception:  # noqa: BLE001 - the sandbox went away between commands
+            # It died after the last command (out of memory, removed, a
+            # provider outage): copying in raised the provider's own error
+            # (the rc8 gate, D). Opened afresh once, as a command that finds
+            # its sandbox lost does; a second failure is a real one.
+            await self._drop(session, lost=True)
+            session = await self.session()
+            copied_in = await bridge.push(self.service, session)
         result = await self.service.execute(SandboxCommandSpec(command=command, **spec), session=session)
         if result.metadata.get("session_terminated"):
             # The sandbox is gone (it died, or was stopped for ignoring its
@@ -74,7 +83,17 @@ class ExecutionScope:
             await self._drop(session, lost=bool(result.metadata.get("session_lost")))
             return result
         if bridge is not None:
-            sync = await bridge.pull(self.service, session)
+            try:
+                sync = await bridge.pull(self.service, session)
+            except Exception as exc:  # noqa: BLE001 - lost after the command ran
+                # The command finished; its sandbox did not survive to give
+                # its files back. Said so, and the next command opens afresh.
+                await self._drop(session, lost=True)
+                result.metadata["workspace"] = {
+                    "written": [],
+                    "skipped": [{"path": "*", "reason": f"the sandbox was lost before its files were copied back ({type(exc).__name__})"}],
+                }
+                return result
             result.metadata["workspace"] = sync
             await self._record_sync(session, copied_in, sync)
         return result

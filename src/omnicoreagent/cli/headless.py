@@ -332,6 +332,24 @@ async def _execute_headless(agent: Any, request: HeadlessRequest) -> HeadlessOut
     result: dict[str, Any] = {}
     restore_signals = _interrupt_on_signals(agent, run_id)
     try:
+        # Set-up (tools, MCP servers, the model client) before the deadline
+        # starts: --timeout is for the work, and a cold `import litellm` alone
+        # spent a 15 s one (the rc8 gate, E7-4). After the signal handlers, so
+        # a Ctrl-C during it still says nothing ran. A set-up that fails is
+        # recorded by the run.
+        if not getattr(agent, "_initialized", True) and callable(getattr(agent, "initialize", None)):
+            try:
+                await agent.initialize()
+            except Exception:  # noqa: BLE001 - the run records it
+                pass
+        warm = getattr(agent, "_warm_up_model_client", None)
+        if callable(warm):
+            try:
+                await warm()
+            except Exception:  # noqa: BLE001 - the first model call reports it
+                pass
+        if request.timeout and request.timeout > 0:
+            deadline = time.monotonic() + request.timeout
         result = await bounded(start())
         rounds = 0
         budget_denied = False
