@@ -545,3 +545,34 @@ async def test_a_sandbox_lost_between_commands_is_opened_afresh(tmp_path):
 
     assert result.exit_code == 0 and result.stdout == "onetwo"
     assert storage.read_text("c.txt") == "three\n"
+
+
+
+async def test_a_sandbox_lost_after_its_command_is_said_and_replaced(tmp_path):
+    # The rc9 gate (D): a container removed after the command ran and
+    # before its files came back left the dead session cached: the copy-back
+    # said only "could not list the sandbox files" and the next command
+    # failed with "Sandbox session ... is not open".
+    import asyncio
+
+    storage = LocalWorkspaceStorage(tmp_path / "files")
+    async with _scope(storage).active() as scope:
+        await _sh(scope, "true")
+        runtime = scope.service.governance_engine.sandbox_runtime
+        service = scope.service
+        original = service.execute
+
+        async def execute_then_lose(spec, **kw):
+            result = await original(spec, **kw)
+            if (spec.metadata or {}).get("purpose") != "workspace_sync":
+                for container in list(runtime._containers.values()):
+                    await asyncio.to_thread(container.remove, force=True)
+            return result
+
+        service.execute = execute_then_lose
+        lost = await _sh(scope, "echo hi > out.txt")
+        service.execute = original
+        after = await _sh(scope, "echo again")
+
+    assert "lost" in lost.metadata["workspace"]["skipped"][0]["reason"]
+    assert after.exit_code == 0 and after.stdout.strip() == "again"

@@ -195,6 +195,14 @@ class WorkspaceBridge:
         )
         spec.authority_request = sync_authority_request(spec)
         listing = await service.execute(spec, session=session)
+        if listing.metadata.get("session_terminated"):
+            # Lost after the command ran: said so, and the scope opens a
+            # fresh sandbox for the next command (the rc9 gate, D).
+            return {
+                "written": written,
+                "skipped": [{"path": "*", "reason": "the sandbox was lost before its files were copied back"}],
+                "session_lost": True,
+            }
         if listing.exit_code != 0:
             return {"written": written, "skipped": [{"path": ".", "reason": "could not list the sandbox files"}]}
         runtime = service._runtime()

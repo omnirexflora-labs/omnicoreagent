@@ -94,6 +94,35 @@ get without setting one, `full`, keeps the values (personal data redacted).
   docs, read 2026-09-29. Pydantic AI's `cost_limit` cell is corrected: it is
   checked after each response.
 
+### Known issues
+
+These come from the 0.5.0 release testing. None breaks a core promise on a normal path. Each is
+planned for 0.5.1.
+
+- **A worker whose lead crashed stays `running`.** A spawned worker, left behind by a lead process
+  that died, keeps status `running` until someone resumes or abandons it (`abandon_run`, Python
+  only). The lead's own record, and what the model is told, are correct.
+- **The first run in a fresh process starts slowly.** Loading the model client can take 15–60 s on
+  a cold or loaded machine. It shows in the trace as a `model.client.load` span, and the headless
+  `--timeout` starts after it.
+- **A very small budget pauses on every call.** With a limit as low as one tool call, each call
+  pauses on its own, so a person grants each one in turn.
+- **A folder operation blocked by an ask rule cannot be approved as a whole.** Deleting, moving or
+  clearing a folder that holds a file covered by an *ask* rule is refused, and the message says the
+  policy "does not allow" it. Act on the files one by one.
+- **`read_skill_file` can read a sibling skill's files.** Its path check is by prefix: `../other`
+  inside the skills folder is not refused. Paths outside the skills folder are.
+- **The `local` provider refuses some settings late.** A `network_policy` of `deny`, or an `image`,
+  is refused at the first command rather than when the agent is built. The message says why.
+- **The generated `.dockerignore` is broad and narrow at once.** It leaves out any folder named
+  `workspace` (including a Python package of that name), and of credential files it leaves out only
+  `.env*`. Review it before building an image.
+- **Copying many files into a fresh Docker sandbox is slow**, at about 0.4 s per file.
+- **Two agents in one process sharing one telemetry store** share the first agent's
+  `retention_days`.
+- **After a crash and resume, the dead segment shows `running`** in trace listings until retention
+  removes it. The run's own record says `completed`.
+
 ## 0.4.4
 
 *Not published: tagged and tested, never uploaded. Its fixes ship in 0.5.0,
