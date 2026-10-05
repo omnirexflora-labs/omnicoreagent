@@ -124,26 +124,20 @@ services remain opt-in.
 
 ---
 
-## OmniCoreAgent, OmniServe, And OmniDaemon
+## Where the harness sits
 
-These are separate layers:
-
-| Layer | Purpose |
+| | What it is |
 |-------|---------|
-| **OmniCoreAgent** | In-process agent harness: model loop, tools, memory, context, workspace, guardrails, events, subagents. |
-| **OmniServe** | HTTP/SSE serving layer for exposing an OmniCoreAgent instance as an API. |
-| **OmniDaemon** | Event-driven runtime for supervised, process-isolated agents running as autonomous services. |
-
-Keeping these boundaries clear matters. OmniCoreAgent should stay focused on the
-agent harness. Serving and event-driven infrastructure should live outside the
-core loop.
+| **The harness** (this page) | The loop around the model: tools, memory, context, workspace, guardrails, events, sub-agents. |
+| **OmniCoreAgent** | The agent runtime: the harness, plus control, durability and the record ([How it fits together](/docs/core-concepts/how-it-fits-together)). |
+| **OmniServe** | Part of OmniCoreAgent (`omniserve run`): the same agent over REST and SSE. |
+| **OmniDaemon** | A separate project: event-driven, supervised, process-isolated agents running as services. |
 
 ---
 
 ## Boundaries
 
-OmniCoreAgent stays focused on the in-process agent harness. That boundary keeps
-the core runtime clean:
+The harness stays focused on the loop around the model. That keeps it clean:
 
 - MCP brings external MCP server tools into the same runtime surface as local
   tools, workspace tools, skills, and harness tools.
@@ -151,11 +145,11 @@ the core runtime clean:
   budget.
 - Cloud workspace storage is used when the S3 or R2 backend is installed and
   configured.
-- Distributed process supervision belongs in OmniDaemon, while HTTP/SSE serving
-  belongs in OmniServe.
+- HTTP/SSE serving is OmniServe's, in the same package; distributed process
+  supervision is OmniDaemon's, a separate project.
 
-The result is a complete, open agent harness whose production pieces are already
-integrated and testable.
+Control, durability and the record are layers of the runtime beside the
+harness, not inside the loop.
 
 ## Normal, deep and background execution
 

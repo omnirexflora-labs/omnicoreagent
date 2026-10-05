@@ -15,7 +15,7 @@ setting turns what on. Every other page goes deeper into one piece.
 | Layer | What it is | What it gives you | Read |
 |---|---|---|---|
 | **The harness** | the loop around the model | your tools and MCP servers, context and session memory, a workspace of files, code mode, skills, sub-agents and worker profiles | [Agent harness](/docs/core-concepts/agent-harness) |
-| **Control** | decided before every action | a policy that allows, asks a person, or refuses each action; approvals; budgets; a sandbox that is the boundary for commands | [Security model](/docs/core-concepts/security-model) |
+| **Control** | decided before every action | a policy that allows, asks a person, or refuses each action (on by default with the `permissive-dev` profile, which asks no one; choose `interactive-dev` or `strict-production` to be asked); approvals; budgets when you set them; a sandbox that is the boundary for commands | [Security model](/docs/core-concepts/security-model) |
 | **Durability** | a record every run keeps | pause for a person and resume; survive a crash without redoing work; another process takes over a dead run | [Durable runs](/docs/core-concepts/durable-runs) |
 | **The record** | the evidence of every run | one trace per run, readable start to finish, private by default, exported where you want it | [Read a run](/docs/how-to-guides/read-a-run) |
 
@@ -24,10 +24,12 @@ give that agent real work: you know what it may do before it does it, a crash
 does not make it do something twice, and afterwards you can see exactly what
 happened.
 
-You reach all four the same way: an `OmniCoreAgent` object in Python, the
-`omnicoreagent run` command for scripts and CI
-([Headless runs](/docs/how-to-guides/headless-runs)), or OmniServe for HTTP
-([OmniServe](/docs/how-to-guides/omniserve)).
+You reach all four the same way, with the same agent object: in your Python
+code, from the `omnicoreagent run` command for scripts and CI
+([Headless runs](/docs/how-to-guides/headless-runs)), served over HTTP by
+OmniServe (`omniserve run`, part of this package; [OmniServe](/docs/how-to-guides/omniserve)),
+or on a schedule as a background run
+([Background agents](/docs/core-concepts/background-agents)).
 
 ## One run, through every layer
 
@@ -37,21 +39,25 @@ What happens when your code calls `await agent.run("Refund order 1042")`:
   <Step title="Set-up (first run only)">
     The model client loads and the tools are assembled: yours, your MCP
     servers', the workspace file tools, and, when switched on, `execute`, code
-    mode, skills and `spawn_subagents`. The policy is loaded and hashed. In a
-    fresh process, loading the model client can take seconds; the trace shows
-    it as a `model.client.load` span.
+    mode, skills and `spawn_subagents`. There is an `execute` tool only when a
+    sandbox is configured: a fresh agent has none. The policy is loaded and
+    hashed.
   </Step>
   <Step title="The run starts its record and its trace">
     **Durability:** a run record is saved in the memory store with status
     `running`, and a heartbeat keeps it marked alive. **The record:** a trace
     starts with the request and a header (model, tools, policy hash,
-    settings).
+    settings). In a fresh process, loading the model client can take seconds;
+    the trace shows it as a `model.client.load` span. **Control:** the
+    guardrail screens the request for prompt injection (`guardrail_mode`:
+    `full`, the default, also screens every tool result; `input_only`; `off`).
   </Step>
   <Step title="The harness takes a step">
     The context is built from the system instruction, the session's history
-    and the run so far, kept under a token budget. **Control:** the budget is
-    checked before the model is called; if the run cannot afford the call, it
-    pauses for a person or ends. Then the model answers, or asks for tools.
+    and the run so far, kept under a token budget. **Control:** if budgets are
+    set, the call's cost is checked and held before the model is called; a run
+    that cannot afford it pauses for a person or ends, as the budget says.
+    Then the model answers, or asks for tools.
   </Step>
   <Step title="Each tool call is decided before it runs">
     **Control:** the call becomes a capability (for example
@@ -59,7 +65,9 @@ What happens when your code calls `await agent.run("Refund order 1042")`:
     command), and the policy decides. Allowed, it runs. Refused, the model is
     told why. Asked, the run **pauses** (`awaiting_approval`) until a person
     decides. **Durability:** a call is recorded as started before it runs and
-    as finished after.
+    as finished after. A command runs in the sandbox, with the workspace files
+    copied in before it and its new files copied back after, each copy decided
+    by the same file rules as `read_file` and `write_file`.
   </Step>
   <Step title="Steps repeat until the answer">
     Results go back to the model, the guardrail screens them, large ones are
@@ -81,8 +89,9 @@ question pauses its lead too, and the lead's decision reaches the worker.
 
 ### When the process dies
 
-Another process calls `resume(run_id)` once the dead process's heartbeat has
-lapsed. What happens to the call that was running:
+With a store that keeps run state (all the built-in ones: SQLite, PostgreSQL,
+Redis, MongoDB), another process calls `resume(run_id)` once the dead
+process's heartbeat has lapsed. What happens to the call that was running:
 
 | The call was | On resume |
 |---|---|
@@ -93,6 +102,8 @@ lapsed. What happens to the call that was running:
 
 ## Where each feature sits
 
+Settings are keys of `agent_config` unless written with `=` (a constructor argument).
+
 | Feature | Layer | Switched on by |
 |---|---|---|
 | Your Python tools | harness | `local_tools=` |
@@ -101,17 +112,18 @@ lapsed. What happens to the call that was running:
 | Code mode (`run_code`) | harness | `code_mode` |
 | Skills | harness | `enable_agent_skills` |
 | Sub-agents you name | harness | `sub_agents=` |
-| Workers the lead spawns, and their profiles | harness | `enable_subagents`, `worker_profiles` |
+| Workers the lead spawns, and their profiles | harness | `enable_subagents`, `worker_profiles` ([Sub-agents](/docs/core-concepts/sub-agents#worker-profiles-the-right-model-for-each-worker)) |
 | Session memory, context limits | harness | `memory_config`, `context_management` |
-| Policy, approvals | control | on by default (`governance_config`) |
+| Policy, approvals | control | on by default (`governance_config`; the default profile asks no one) |
 | Budgets | control | `governance_config["budgets"]` |
-| Shell commands in a sandbox (`execute`) | control | `governance_config["sandbox_config"]` |
+| Shell commands in a sandbox (`execute`) | control | `governance_config["sandbox_config"]` (or `sandbox_runtime`) |
+| Files in and out of the sandbox | control | the workspace bridge (`governance_config["workspace_bridge"]`) |
 | Prompt-injection guardrail | control | on by default (`guardrail_mode`) |
-| Pause, resume, crash recovery | durability | always; a durable store (`memory_router`) to survive a restart |
-| Background and scheduled runs | durability | OmniServe or the background manager |
+| Pause, resume, crash recovery | durability | with the built-in stores; a durable one (`memory_router=`) to survive a restart |
+| Background and scheduled runs | durability | OmniServe, or the background manager in your code |
 | Trace and trajectory | the record | always |
 | Exporters (OTLP, JSONL, …) | the record | `telemetry_exporters=` |
-| Personal-data redaction | the record | on for the record by default (`privacy_config`) |
+| Personal-data redaction | the record | on for the record by default, not for what the model sees (`privacy_config`) |
 
 Every setting is in the [agent settings reference](/docs/reference/agent-config).
 
@@ -121,9 +133,10 @@ Every setting is in the [agent settings reference](/docs/reference/agent-config)
 |---|---|---|
 | The loop, the policy, the record | your process | it is your process |
 | Your Python tools | your process | the policy decides whether they run, not what they do |
-| MCP tools | the MCP server | the server |
-| Shell commands (`execute`) | the sandbox provider | the sandbox ([what each provider enforces](/docs/core-concepts/security-model#what-stops-harm)) |
-| Code mode programs | Monty, in your process | Monty; each tool a program calls is decided by the policy |
+| MCP tools | the MCP server (a stdio server is a process on your machine) | nothing but the server itself; the policy decides whether each call is made |
+| Shell commands (`execute`) | the sandbox provider | the sandbox ([what each provider enforces](/docs/core-concepts/security-model#what-stops-harm)); except `local`, which runs on your machine and is not a sandbox, and a runtime of your own, which is trusted |
+| Skill scripts | the sandbox, if one is configured; otherwise your machine | the sandbox, or nothing |
+| Code mode programs | Monty, in a separate worker process (`omnicoreagent[codemode]`) | Monty: no files, network or environment, with time and memory limits; each tool a program calls is decided by the policy |
 
 ## Next
 
