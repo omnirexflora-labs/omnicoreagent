@@ -6,11 +6,13 @@ icon: 'sitemap'
 
 # Architecture
 
-OmniCoreAgent is an agent harness: everything added around a model to make it
-usable for real autonomous work. The model is only one part of the system. The
-harness owns prompt assembly, the reasoning loop, tool resolution, parallel tool
-execution, observation formatting, loop detection, memory, workspace files,
-events, and serving integration.
+OmniCoreAgent is an agent runtime, and this page is how its code is laid out.
+For what each layer does for you, read
+[How it fits together](/docs/core-concepts/how-it-fits-together) first. The
+harness part of the code owns prompt assembly, the reasoning loop, tool
+resolution, parallel tool execution, observation formatting, loop detection,
+memory, workspace files, events, and serving integration; governance, durable
+runs and telemetry sit beside it.
 
 The architecture is intentionally modular so each layer can be tested and changed
 without turning the root agent class into a dump of unrelated behavior.
@@ -243,14 +245,14 @@ These rules keep the architecture clean:
 
 ## Runtime Boundaries
 
-OmniCoreAgent is the in-process agent harness. The surrounding production
-boundaries are handled by the layer designed for that job:
+OmniCoreAgent is the agent runtime; its code runs in your process. Beyond it:
 
-- Use **OmniServe** when you need REST/SSE access to an agent.
-- Use **OmniDaemon** when you need event-driven, supervised, process-isolated
-  agents running as autonomous infrastructure services.
+- Use **OmniServe** (part of this package, `omniserve run`) when you need
+  REST/SSE access to an agent.
+- Use **background runs** when the agent should work on a schedule or without
+  a caller waiting ([Background agents](/docs/core-concepts/background-agents)).
 - Use your own application infrastructure when you only need a direct script or a
   direct function call around one model request.
 
-This separation keeps OmniCoreAgent focused: it builds the agent harness cleanly,
-then integrates with the right outer runtime when the deployment needs it.
+This keeps the runtime focused on running one agent's work well, and lets the
+deployment choose how it is reached.

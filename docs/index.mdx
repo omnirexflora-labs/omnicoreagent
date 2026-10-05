@@ -22,12 +22,16 @@ mode: 'wide'
 **Every action checked before it runs. Every run survives a crash without silently redoing anything. Every step on the record.**
 
 An agent that does real work (writes code, runs commands, changes systems,
-calls APIs) needs more around it than a loop and tools. **OmniCoreAgent** is the
-runtime around the model: it knows up front what the agent may and may not do,
-it carries a run through pauses and crashes, and it keeps every step, so you
-can trace everything the agent did. It is a **runtime and harness**, used
-through a **Python SDK**: one agent object, from a first script to a governed
-background worker on a server, and onto a benchmark.
+calls APIs) needs more around it than a loop and tools.
+OmniCoreAgent is an **agent runtime** for Python. It includes the **harness**,
+the loop, tools, context, workspace and sub-agents around the model, and adds
+what running an agent for real needs: a policy on every action, a sandbox as
+the boundary for its commands, runs that survive a crash, budgets, and a record
+of every step. You use it from Python, from the command line, or as an HTTP
+server: one agent object, from a first script to a governed background worker,
+and onto a benchmark.
+[How it fits together](/docs/core-concepts/how-it-fits-together) walks one run
+through every layer.
 
 <Frame>
   <img src="/assets/how-a-run-works.svg" alt="How a run works: your app calls OmniCoreAgent, which governs every action with a policy, a budget and a sandbox, talks to the model and to tools, and keeps the evidence of the run." />
@@ -56,12 +60,6 @@ And what every runtime for real work needs: sandboxes that are not given your
 keys, human approval, MCP, sub-agents, scheduled runs, an HTTP server, and the
 same agent on [Harbor and Terminal-Bench](/docs/how-to-guides/harbor).
 [How it compares](/docs/comparison).
-
-| | What it means here |
-|---|---|
-| **Runtime** | What executes and keeps the work: runs and their state, the durable record, workers, sandboxes, persistence. |
-| **Harness** | What surrounds the model and controls each step: the loop, context, tool execution, approvals, budgets, recovery, telemetry. |
-| **SDK** | What you write against: `OmniCoreAgent`, `ToolRegistry`, the configuration, the methods, the CLI and the HTTP API. |
 
 ## Start in three steps
 

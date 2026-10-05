@@ -1,19 +1,21 @@
 ---
 title: Agent Harness
-description: 'What OmniCoreAgent adds around a model to make it useful for long-running autonomous work'
+description: 'The harness layer of the runtime: the loop, tools, context, workspace and delegation around the model'
 icon: 'layer-group'
 ---
 
 # Agent Harness
 
-An LLM is not an agent by itself. A useful agent needs runtime behavior around
-the model: tools, memory, context control, a workspace, guardrails, events,
-delegation, and a serving boundary.
+An LLM is not an agent by itself. The **harness** is the loop around the
+model that makes it one: tools, memory, context control, a workspace,
+guardrails, events and delegation, already assembled. You choose the model and
+the tools.
 
-That runtime is the agent harness.
-
-OmniCoreAgent is built as an open Python agent harness. You still choose the
-model and the tools, but the execution system around them is already assembled.
+The harness is one layer of OmniCoreAgent, the agent runtime. Around it, the
+runtime adds control (a policy on every action, a sandbox, budgets), durability
+(runs that survive a crash) and the record of every run.
+[How it fits together](/docs/core-concepts/how-it-fits-together) shows all four
+layers; this page is the harness.
 
 ```text
 model
@@ -122,26 +124,19 @@ services remain opt-in.
 
 ---
 
-## OmniCoreAgent, OmniServe, And OmniDaemon
+## Where the harness sits
 
-These are separate layers:
-
-| Layer | Purpose |
+| | What it is |
 |-------|---------|
-| **OmniCoreAgent** | In-process agent harness: model loop, tools, memory, context, workspace, guardrails, events, subagents. |
-| **OmniServe** | HTTP/SSE serving layer for exposing an OmniCoreAgent instance as an API. |
-| **OmniDaemon** | Event-driven runtime for supervised, process-isolated agents running as autonomous services. |
-
-Keeping these boundaries clear matters. OmniCoreAgent should stay focused on the
-agent harness. Serving and event-driven infrastructure should live outside the
-core loop.
+| **The harness** (this page) | The loop around the model: tools, memory, context, workspace, guardrails, events, sub-agents. |
+| **OmniCoreAgent** | The agent runtime: the harness, plus control, durability and the record ([How it fits together](/docs/core-concepts/how-it-fits-together)). |
+| **OmniServe** | Part of OmniCoreAgent (`omniserve run`): the same agent over REST and SSE. |
 
 ---
 
 ## Boundaries
 
-OmniCoreAgent stays focused on the in-process agent harness. That boundary keeps
-the core runtime clean:
+The harness stays focused on the loop around the model. That keeps it clean:
 
 - MCP brings external MCP server tools into the same runtime surface as local
   tools, workspace tools, skills, and harness tools.
@@ -149,11 +144,10 @@ the core runtime clean:
   budget.
 - Cloud workspace storage is used when the S3 or R2 backend is installed and
   configured.
-- Distributed process supervision belongs in OmniDaemon, while HTTP/SSE serving
-  belongs in OmniServe.
+- HTTP/SSE serving is OmniServe's, in the same package.
 
-The result is a complete, open agent harness whose production pieces are already
-integrated and testable.
+Control, durability and the record are layers of the runtime beside the
+harness, not inside the loop.
 
 ## Normal, deep and background execution
 

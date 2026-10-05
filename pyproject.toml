@@ -13,14 +13,14 @@ bump = true
 [project]
 name = "omnicoreagent"
 dynamic = ["version"]
-description = "Give your agent real work. Keep control. Every action checked before it runs. Every run survives a crash without silently redoing anything. Every step on the record."
+description = "An agent runtime for Python. Give your agent real work. Keep control: every action checked before it runs, every run survives a crash without silently redoing anything, every step on the record."
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [{ name = "Abiola Adeshina", email = "abiolaadedayo1993@gmail.com" }]
 requires-python = ">=3.12,<3.15"
 
 keywords = [
     "agent",
-    "agent-harness",
+    "agent-runtime", "agent-harness",
     "ai",
     "ai-agents",
     "automation",

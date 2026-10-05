@@ -24,6 +24,7 @@
   <a href="./engineering/validation/production-proving.md">Proof</a> ·
   <a href="https://docs-omnicoreagent.omnirexfloralabs.com/docs/comparison">How it compares</a> ·
   <a href="./AGENTS.md">For your coding agent</a> ·
+  <a href="https://docs-omnicoreagent.omnirexfloralabs.com/docs/changelog#known-issues">Known issues</a> ·
   <a href="https://docs-omnicoreagent.omnirexfloralabs.com/docs/getting-started/use-docs-with-ai-tools">Ask AI</a>
 </p>
 
@@ -35,18 +36,23 @@ the agent can do real things — the policy that says what it may do, the
 sandbox its code runs in, the record that survives a crash, the budget that
 stops it spending, and the evidence a person can read afterwards.
 
-OmniCoreAgent is that runtime and harness, used through a Python SDK. One
-agent object, from a first script to a governed background worker on a
-server — and onto a benchmark.
+OmniCoreAgent is an **agent runtime** for Python. It includes the **harness**,
+the loop, tools, context, workspace and sub-agents around the model, and adds
+what running an agent for real needs: a policy on every action, a sandbox as
+the boundary for its commands, runs that survive a crash, budgets, and a record
+of every step. You use it from Python, from the command line, or as an HTTP
+server: one agent object, from a first script to a governed background worker,
+and onto a benchmark.
 
-| | What it means here |
-|---|---|
-| **Runtime** | What executes and keeps the work: runs and their state, the durable record, workers, sandboxes, persistence. |
-| **Harness** | What surrounds the model and controls each step: the loop, context, tool execution, approvals, budgets, recovery, telemetry. |
-| **SDK** | What you write against: `OmniCoreAgent`, `ToolRegistry`, the configuration, the methods, the CLI and the HTTP API. |
+| Layer | What it is | What it gives you |
+|---|---|---|
+| **The harness** | the loop around the model | tools (yours and MCP), context and memory, a workspace, code mode, skills, sub-agents and worker profiles |
+| **Control** | decided before every action | a policy (allow, ask a person, or refuse), approvals, budgets, a sandbox that is the boundary for commands |
+| **Durability** | a record every run keeps | pause and resume, survive a crash without redoing work, take over from a dead process |
+| **The record** | the evidence of every run | one trace per run, readable start to finish, private by default, exported where you want it |
 
-The words overlap, and "agent framework" is fair too; they are three views of
-one thing.
+[How it fits together](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/how-it-fits-together)
+walks one run through all four.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/omnirexflora-labs/omnicoreagent/main/assets/how-a-run-works.svg" alt="How a run works: your app calls OmniCoreAgent, which governs every action with a policy, a budget and a sandbox, talks to the model and to tools, and keeps the evidence of the run — the trajectory, outcomes and training records — exported to OTLP, LangSmith, Opik, JSONL and Harbor." width="900"/>
@@ -175,12 +181,12 @@ omnicoreagent harbor results jobs
 |---|---|---|
 | **Tools** | Your Python functions, and MCP servers (stdio, SSE, streamable HTTP, OAuth) through one catalog; parallel batches; loop detection by call signature; tool retrieval for large tool sets. | [Local tools](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/local-tools), [MCP](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/mcp) |
 | **Code mode** | A `run_code` tool: the model writes a short Python program that calls your tools, loops and computes, run in [Monty](https://github.com/pydantic/monty) — every call inside it governed and traced, and a call that needs approval pauses the program itself. | [Code mode](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/code-mode) |
-| **Governance** | A policy — allow, ask, deny — over every capability the agent has: each tool, each MCP server, the sandbox, the network, delegation, background runs. `ask` pauses the run for a person. Hashed, so it cannot widen at runtime. | [Security model](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/security-model), [Policies](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/policies), [Approvals](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/approvals) |
-| **Execution** | An `execute` tool whose commands run in a sandbox — Docker, E2B, Modal, Daytona, Vercel, your own, or `local` where a container is already the boundary — with no network unless the policy allows it, none of your process's keys and tokens, and the workspace bridged in and out. A sandbox that dies is reported and replaced. | [Execution](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/execution), [Providers](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/sandbox-providers) |
-| **Durable runs** | Every run has a record: its step, its tool calls, its approvals. A run pauses for an approval or a top-up and resumes where it stopped; with a durable memory store, a run whose process died continues from its checkpoint; a call that was interrupted is never silently repeated. | [Durable runs](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/durable-runs) |
+| **Governance** | A policy — allow, ask, deny — over every capability the agent has: each tool, each MCP server, the sandbox, the network, delegation, background runs. `ask` pauses the run for a person. Shell commands can be matched by prefix rules you write (ask before `git push`, refuse `rm`); with such rules, a command they cannot read in full is never allowed by a rule: it is asked about (refused in `strict`). Hashed, so it cannot widen at runtime. | [Security model](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/security-model), [Policies](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/policies), [Approvals](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/approvals) |
+| **Execution** | An `execute` tool whose commands run in a sandbox — Docker, E2B, Modal, Daytona, Vercel, your own, or `local` where a container is already the boundary — with no network unless the policy allows it, none of your process's keys and tokens, and the workspace bridged in and out. The sandbox is the boundary: a manifest setting the chosen provider does not enforce is refused (when the agent is built, for a built-in provider), never approved and then ignored; `local` is not a sandbox. A sandbox that dies is reported and replaced. | [Execution](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/execution), [Providers](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/sandbox-providers) |
+| **Durable runs** | Every run has a record: its step, its tool calls, its approvals. A run pauses for an approval or a top-up and resumes where it stopped; with a durable memory store, a run whose process died continues from its checkpoint; a call that was interrupted is never silently repeated unless its tool was idempotent when it was made and still is. | [Durable runs](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/durable-runs) |
 | **Budgets** | Limits in dollars, tokens, calls, sandbox seconds, per request, session, agent, or application, per day or month; each model call is priced and held before it is made; a run that runs out waits for a person. | [Budgets](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/budgets) |
 | **Memory and context** | Session memory in memory, Redis, Postgres/SQL, or MongoDB; context managed before each model call; large tool outputs offloaded to workspace files. | [Memory](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/memory), [Context](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/context-engineering), [Stores and scale](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/stores-and-scale) |
-| **Sub-agents** | Workers spawned by the lead under the same policy and budgets, each with its own trace linked to the parent's. | [Sub-agents](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
+| **Sub-agents** | Workers spawned by the lead, each with its own trace linked to the parent's, spending the lead's one budget. With worker profiles the lead picks the kind of worker for each task: its model, reasoning effort, tools and narrower rules. A worker's approval or budget request pauses the lead. | [Sub-agents](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
 | **Background work** | Scheduled and manual tasks with a durable task store (Redis, MongoDB, SQL), leases, retries, recovery after a restart, one run per task at a time. | [Background agents](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/background-agents) |
 | **Telemetry** | One trace per run, readable end to end — every model call, tool call, sandbox command, approval and budget decision — complete by default (`capture: "default"` leaves model prompts out), personal data redacted from the record (never from the run); exported to OTLP, LangSmith, Opik or JSONL. | [Read a run](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/read-a-run), [Telemetry](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/observability), [Privacy](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/privacy) |
 | **Serving** | `omniserve run --agent agent.py`: REST and SSE for runs, approvals, budgets, background tasks, traces; auth, rate limits, metrics; your own pages beside the API. | [OmniServe](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/omniserve) |
@@ -281,7 +287,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Design notes and plans live in
 ## License and author
 
 MIT — see [LICENSE](LICENSE). Built by [Abiola Adeshina](https://github.com/Abiorh001)
-([@abiorhmangana](https://x.com/abiorhmangana)), with
-[OmniMemory](https://github.com/omnirexflora-labs/omnimemory) and
-[OmniDaemon](https://github.com/omnirexflora-labs/OmniDaemon) in the same family.
+([@abiorhmangana](https://x.com/abiorhmangana)).
 Built on [LiteLLM](https://github.com/BerriAI/litellm), [FastAPI](https://fastapi.tiangolo.com/) and [Pydantic](https://docs.pydantic.dev/).
