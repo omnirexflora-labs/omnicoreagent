@@ -15,7 +15,7 @@ setting turns what on. Every other page goes deeper into one piece.
 | Layer | What it is | What it gives you | Read |
 |---|---|---|---|
 | **The harness** | the loop around the model | your tools and MCP servers, context and session memory, a workspace of files, code mode, skills, sub-agents and worker profiles | [Agent harness](/docs/core-concepts/agent-harness) |
-| **Control** | decided before every action | a policy that allows, asks a person, or refuses each action (on by default with the `permissive-dev` profile, which asks no one; choose `interactive-dev` or `strict-production` to be asked); approvals; budgets when you set them; a sandbox that is the boundary for commands | [Security model](/docs/core-concepts/security-model) |
+| **Control** | decided before every action | a policy that allows, asks a person, or refuses each action (on by default with the `permissive-dev` profile, which asks only before a sandbox's network is turned on or host files are mounted into it; choose `interactive-dev` or `strict-production` to be asked more); approvals; budgets when you set them; a sandbox that is the boundary for commands | [Security model](/docs/core-concepts/security-model) |
 | **Durability** | a record every run keeps | pause for a person and resume; survive a crash without redoing work; another process takes over a dead run | [Durable runs](/docs/core-concepts/durable-runs) |
 | **The record** | the evidence of every run | one trace per run, readable start to finish, private by default, exported where you want it | [Read a run](/docs/how-to-guides/read-a-run) |
 
@@ -55,7 +55,8 @@ What happens when your code calls `await agent.run("Refund order 1042")`:
   <Step title="The harness takes a step">
     The context is built from the system instruction, the session's history
     and the run so far, kept under a token budget. **Control:** if budgets are
-    set, the call's cost is checked and held before the model is called; a run
+    set, the call is checked before the model is called (its cost held when its
+    price is known, otherwise the call counted); a run
     that cannot afford it pauses for a person or ends, as the budget says.
     Then the model answers, or asks for tools.
   </Step>
@@ -67,7 +68,9 @@ What happens when your code calls `await agent.run("Refund order 1042")`:
     decides. **Durability:** a call is recorded as started before it runs and
     as finished after. A command runs in the sandbox, with the workspace files
     copied in before it and its new files copied back after, each copy decided
-    by the same file rules as `read_file` and `write_file`.
+    by the same file rules as `read_file` and `write_file`. A file an ask rule
+    covers, a hidden, binary or oversized file, and anything past the file
+    limit is skipped, and the model is told.
   </Step>
   <Step title="Steps repeat until the answer">
     Results go back to the model, the guardrail screens them, large ones are
@@ -114,7 +117,7 @@ Settings are keys of `agent_config` unless written with `=` (a constructor argum
 | Sub-agents you name | harness | `sub_agents=` |
 | Workers the lead spawns, and their profiles | harness | `enable_subagents`, `worker_profiles` ([Sub-agents](/docs/core-concepts/sub-agents#worker-profiles-the-right-model-for-each-worker)) |
 | Session memory, context limits | harness | `memory_config`, `context_management` |
-| Policy, approvals | control | on by default (`governance_config`; the default profile asks no one) |
+| Policy, approvals | control | on by default (`governance_config`; the default profile asks rarely) |
 | Budgets | control | `governance_config["budgets"]` |
 | Shell commands in a sandbox (`execute`) | control | `governance_config["sandbox_config"]` (or `sandbox_runtime`) |
 | Files in and out of the sandbox | control | the workspace bridge (`governance_config["workspace_bridge"]`) |
