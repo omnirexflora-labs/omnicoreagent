@@ -6,11 +6,13 @@ icon: 'sitemap'
 
 # Architecture
 
-OmniCoreAgent is an agent harness: everything added around a model to make it
-usable for real autonomous work. The model is only one part of the system. The
-harness owns prompt assembly, the reasoning loop, tool resolution, parallel tool
-execution, observation formatting, loop detection, memory, workspace files,
-events, and serving integration.
+OmniCoreAgent is an agent runtime, and this page is how its code is laid out.
+For what each layer does for you, read
+[How it fits together](/docs/core-concepts/how-it-fits-together) first. The
+harness part of the code owns prompt assembly, the reasoning loop, tool
+resolution, parallel tool execution, observation formatting, loop detection,
+memory, workspace files, events, and serving integration; governance, durable
+runs and telemetry sit beside it.
 
 The architecture is intentionally modular so each layer can be tested and changed
 without turning the root agent class into a dump of unrelated behavior.

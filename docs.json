@@ -101,6 +101,7 @@
                     {
                         "group": "How It Works",
                         "pages": [
+                            "docs/core-concepts/how-it-fits-together",
                             "docs/core-concepts/agent-harness",
                             "docs/core-concepts/architecture"
                         ]

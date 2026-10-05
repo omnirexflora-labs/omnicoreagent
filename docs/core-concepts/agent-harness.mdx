@@ -1,19 +1,21 @@
 ---
 title: Agent Harness
-description: 'What OmniCoreAgent adds around a model to make it useful for long-running autonomous work'
+description: 'The harness layer of the runtime: the loop, tools, context, workspace and delegation around the model'
 icon: 'layer-group'
 ---
 
 # Agent Harness
 
-An LLM is not an agent by itself. A useful agent needs runtime behavior around
-the model: tools, memory, context control, a workspace, guardrails, events,
-delegation, and a serving boundary.
+An LLM is not an agent by itself. The **harness** is the loop around the
+model that makes it one: tools, memory, context control, a workspace,
+guardrails, events and delegation, already assembled. You choose the model and
+the tools.
 
-That runtime is the agent harness.
-
-OmniCoreAgent is built as an open Python agent harness. You still choose the
-model and the tools, but the execution system around them is already assembled.
+The harness is one layer of OmniCoreAgent, the agent runtime. Around it, the
+runtime adds control (a policy on every action, a sandbox, budgets), durability
+(runs that survive a crash) and the record of every run.
+[How it fits together](/docs/core-concepts/how-it-fits-together) shows all four
+layers; this page is the harness.
 
 ```text
 model
