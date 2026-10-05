@@ -94,6 +94,10 @@ class ExecutionScope:
                     "skipped": [{"path": "*", "reason": f"the sandbox was lost before its files were copied back ({type(exc).__name__})"}],
                 }
                 return result
+            if sync.pop("session_lost", False):
+                result.metadata["workspace"] = sync
+                await self._drop(session, lost=True)
+                return result
             result.metadata["workspace"] = sync
             await self._record_sync(session, copied_in, sync)
         return result
