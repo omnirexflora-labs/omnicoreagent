@@ -33,6 +33,26 @@ async def test_one_grant_covers_the_calls_it_pays_for_in_sequence():
 
 
 @pytest.mark.asyncio
+async def test_a_grant_without_an_amount_is_only_the_shortfall_of_the_call_that_stopped():
+    # The cause of the 0.5.0 known issue. Nothing is per call in the ledger: a
+    # grant raises the run's limit, and later calls draw on it. A grant that
+    # names no amount is sized to the one call that stopped, and a run that
+    # stops one call at a time asks again for each. Naming an amount (above)
+    # is how a person pays for the rest of the work.
+    agent = await _agent(PricedModel(_call(1), _call(2), _call(3), _call(4)), budgets=ONE_TOOL_CALL)
+    result = await agent.run("go", session_id="grant-default")
+    pauses = 0
+    while result["status"] == "awaiting_budget":
+        pauses += 1
+        assert pauses < 10
+        assert result["budget_request"]["shortfall"] == 1
+        await agent.grant_budget(result["run_id"], approver="ops@example.com")
+        result = await agent.resume(result["run_id"])
+
+    assert pauses == 3 and result["status"] == "success"
+
+
+@pytest.mark.asyncio
 async def test_one_grant_covers_the_calls_of_one_turn():
     turn = ModelTurn(
         tool_calls=tuple(ToolRequest(f"call_{n}", "lookup", '{"key": "a"}') for n in range(4))

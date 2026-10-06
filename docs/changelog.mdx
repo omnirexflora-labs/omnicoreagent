@@ -29,6 +29,13 @@ Every release, with its notes, is also on
   is now counted when it is allowed to run: one that is waiting, denied or refused by a rule is not
   counted, and a call the budget cannot afford still does not run.
 
+- **A very small budget no longer pauses on every call, once a grant names its amount.** Nothing in
+  the ledger is per call: a grant raises the run's limit and later calls draw on it (a limit of
+  one tool call plus a grant of 3 runs four calls). The pause came from the default: a grant with
+  no `amount` is the shortfall of the one call that stopped, so a run that stops one call at a
+  time asked again at each. That default is unchanged (a grant never gives more than was asked),
+  and the budget docs now say to name an `amount` for the work still to do.
+
 ## 0.5.0
 
 *September 2026 · Python 3.12+*

@@ -235,10 +235,14 @@ as well.
 Then, from this process or any other sharing the memory store:
 
 - `await agent.grant_budget(run_id, approver="alice", amount=..., note=...)`
-  adds to that one budget. Without `amount`, the grant is exactly the
-  `shortfall`: enough for the call that stopped, so the run may stop again at
-  its next call. The policy is not changed; the grant is recorded with the
-  approver's name.
+  adds to that one budget. A grant belongs to the run, not to the call that
+  stopped: it raises the run's limit by `amount`, and every later call draws on
+  it until it is used up. Without `amount`, the grant is exactly the
+  `shortfall`, enough for the call that stopped and nothing more, so a run
+  that stops one call at a time (a limit of one tool call, say) asks again at
+  each. Name an `amount` that covers the work still to do, and the run asks
+  once. The policy is not changed; the grant is recorded with the approver's
+  name.
 - `await agent.deny_budget(run_id, approver="alice", note=...)` refuses it.
 - `await agent.resume(run_id)` then continues a granted run, or ends a denied
   one cleanly.
