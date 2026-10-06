@@ -231,6 +231,50 @@ print(json.dumps({"args": sys.argv[1:]}))
             or "not found" in result["message"].lower()
         )
 
+    def _sibling(self):
+        sibling = self.skills_root / "other-skill"
+        sibling.mkdir()
+        (sibling / "SKILL.md").write_text("---\nname: other-skill\ndescription: x\n---\n")
+        (sibling / "secret.txt").write_text("sibling secret")
+        return sibling
+
+    def test_read_skill_file_refuses_sibling_skill(self):
+        """0.5.0 known issue: a string-prefix check let ../other-skill/x through."""
+        self._sibling()
+        # The prefix hole was a sibling whose name starts with this skill's name.
+        evil = self.skills_root / "test-skill-evil"
+        evil.mkdir()
+        (evil / "x").write_text("sibling secret")
+        tool = self.registry.get_tool("read_skill_file")
+        for path in ("../other-skill/secret.txt", "../test-skill-evil/x"):
+            result = tool.function("test-skill", path)
+            assert result["status"] == "error"
+            assert "outside" in result["message"].lower()
+            assert "sibling secret" not in json.dumps(result)
+
+    def test_read_skill_file_refuses_absolute_path(self):
+        sibling = self._sibling()
+        tool = self.registry.get_tool("read_skill_file")
+        result = tool.function("test-skill", str(sibling / "secret.txt"))
+        assert result["status"] == "error"
+        assert "outside" in result["message"].lower()
+
+    def test_read_skill_file_refuses_symlink_to_sibling(self):
+        sibling = self._sibling()
+        (self.skill_dir / "link.txt").symlink_to(sibling / "secret.txt")
+        tool = self.registry.get_tool("read_skill_file")
+        result = tool.function("test-skill", "link.txt")
+        assert result["status"] == "error"
+        assert "outside" in result["message"].lower()
+
+    def test_read_skill_file_reads_nested_file(self):
+        (self.skill_dir / "references").mkdir()
+        (self.skill_dir / "references" / "GUIDE.md").write_text("guide body")
+        tool = self.registry.get_tool("read_skill_file")
+        result = tool.function("test-skill", "references/GUIDE.md")
+        assert result["status"] == "success"
+        assert result["data"] == "guide body"
+
     def test_run_skill_script_success(self):
         """Test running a skill script."""
         tool = self.registry.get_tool("run_skill_script")
