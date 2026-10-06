@@ -856,6 +856,7 @@ class OmniCoreAgent:
                     input={"message": query},
                 )
             else:
+                await self._close_dead_segments(run_id, trace_context.trace_id)
                 await self.telemetry_recorder.emit_event(
                     "run_resumed",
                     actor=self._telemetry_actor(),
@@ -1597,6 +1598,38 @@ class OmniCoreAgent:
                 await flush()
         except Exception as exc:  # noqa: BLE001 - the record holds it regardless.
             runtime_logger().warning(f"Outcome of {run_id} not written to its trace: {exc}")
+
+    async def _close_dead_segments(self, run_id: str, current_trace_id: str) -> None:
+        """Close the earlier segments of a resumed run that never ended.
+
+        A process killed mid-segment cannot end its own trace. The run's record
+        said `completed` once a later segment finished it, but the trace
+        listing showed the killed segment as `running` with no end until
+        retention removed it (0.5.0, run_b6638561). The resume closes it as
+        `interrupted`, ended at its last event. A resume happens only after
+        the lease lapsed or a person decided, so no live process owns the
+        segment. A failure here never stops the resume.
+        """
+        try:
+            for trace in await self.telemetry_store.list_traces(TraceFilter(run_id=run_id)):
+                if (
+                    trace.trace_id == current_trace_id
+                    or trace.status != TraceStatus.RUNNING
+                    or trace.ended_at is not None
+                ):
+                    continue
+                # The last event is the last thing the segment is known to
+                # have done, so the segment ends there.
+                moments = [e.timestamp for e in trace.events if e.timestamp]
+                await self.telemetry_store.update_trace(
+                    trace.trace_id,
+                    {
+                        "status": TraceStatus.INTERRUPTED.value,
+                        "ended_at": max(moments, default=trace.started_at),
+                    },
+                )
+        except Exception as exc:  # noqa: BLE001 - the record holds the truth regardless.
+            runtime_logger().warning(f"Earlier segments of {run_id} not closed: {exc}")
 
     async def abandon_run(self, run_id: str, *, status: str, reason: str) -> Dict[str, Any] | None:
         """Close a run this agent did not finish itself.

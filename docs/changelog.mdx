@@ -31,6 +31,11 @@ Every release, with its notes, is also on
 - **An approved call the budget then refuses is not asked about again.** When an approved call
   resumed and the budget had nothing left, the person's approval was already marked used, so after
   a grant the same call asked a second time. The approval is now kept until the call runs.
+- **After a crash and resume, the dead segment no longer shows `running`.** When a run resumes,
+  its earlier trace segments that never ended are closed with the new trace status `interrupted`
+  and an end time equal to their last event. Listings filtered by `status=running` no longer
+  return them, and the run's own record is unchanged. `interrupted` is a new value of the trace
+  `status` filter.
 
 - **A very small budget no longer pauses on every call, once a grant names its amount.** Nothing in
   the ledger is per call: a grant raises the run's limit and later calls draw on it (a limit of
@@ -151,8 +156,6 @@ planned for 0.5.1.
 - **Copying many files into a fresh Docker sandbox is slow**, at about 0.4 s per file.
 - **Two agents in one process sharing one telemetry store** share the first agent's
   `retention_days`.
-- **After a crash and resume, the dead segment shows `running`** in trace listings until retention
-  removes it. The run's own record says `completed`.
 
 ## 0.4.4
 

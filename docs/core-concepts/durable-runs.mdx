@@ -535,13 +535,14 @@ print("tool calls:", story["totals"]["tool_calls"])
 
 ```text
 status: completed | attempt: 1
-  trace_d80546f3f35e4811af5bf2092e041301 running True
+  trace_d80546f3f35e4811af5bf2092e041301 interrupted True
   trace_ec36eb4aa0b0423c94df381b016c24cb completed True
 tool calls: {'total': 3, 'by_outcome': {'success': 2, 'error': 0, 'rejected': 0, 'timeout': 0, 'cancelled': 1, 'denied': 0, 'awaiting_approval': 0}}
 ```
 
-The first segment stays `running`: its process died before it could end its
-trace. The two views count the interrupted call differently, on purpose: the
+The first segment is `interrupted`: its process died before it could end its
+trace, so the resume closed it, ended at its last event. (Until a run resumes,
+the dead segment still reads `running`.) The two views count the interrupted call differently, on purpose: the
 run record says what is known of its effect (`unknown`: it started and no
 result came back), and the trajectory's totals say how its span ended
 (`cancelled`, or `timeout` when a deadline stopped it). Each segment's steps are in `segment["trajectory"]["steps"]`; `totals`

@@ -432,7 +432,7 @@ a list has every field, `None` when it does not apply.
 | Field | What it holds |
 |---|---|
 | `trace_id`, `run_id`, `session_id`, `agent_id`, `parent_trace_id` | Identity; a child run names its parent. |
-| `status` | The segment: `completed`, `failed`, `cancelled`, `timeout`, `suspended` (paused for a person or a budget, or stopped by an interrupt; the run's own status then says `interrupted`), `running`, and others. |
+| `status` | The segment: `completed`, `failed`, `cancelled`, `timeout`, `suspended` (paused for a person or a budget, or stopped by an interrupt; the run's own status then says `interrupted`), `interrupted` (a segment whose process died, closed by the resume that followed, ended at its last event), `running`, and others. |
 | `evidence_status`, `incomplete` | `complete`; `partial` when there is a capture gap or a write was lost (`incomplete` is then `True`); `unknown` for a trace recorded before this was kept. |
 | `execution_surface` | How the run was entered: `interactive` (your code), `serve`, `background`, `headless` (the CLI). |
 | `versions` | Content hashes of the agent, prompt, tool schemas, memory, telemetry and privacy settings: any change to them changes these. |
