@@ -105,17 +105,24 @@ def make_background_manager(tmp_path, *, lease_seconds=30):
 
 def test_background_api_runs_task_and_exposes_events_and_workspace(tmp_path):
     agent = ServedAgent()
-    agent.delay_seconds = 0.35
+    # The run must outlive one heartbeat (lease_seconds / 4 = 3s) so the events
+    # show a periodic heartbeat. The lease and request timeout are generous
+    # beyond that: on a busy machine the event loop stalls for seconds, a
+    # one-second lease then lapses (a lapsed lease cannot be refreshed, by
+    # design), recovery fails the run as "lease expired" (max_retries is 0),
+    # and a two-second request timeout answers 504. This failed 1 to 4 runs in
+    # 100 under CPU load on 0.5.0 and 0.5.1 alike (2026-10-06).
+    agent.delay_seconds = 3.5
     manager = make_background_manager(
         tmp_path,
-        lease_seconds=1,
+        lease_seconds=12,
     )
     server = OmniServe(
         agent,
         OmniServeConfig(
             background_agent_id="served",
             background_start_worker=True,
-            request_timeout=2,
+            request_timeout=60,
         ),
         background_manager=manager,
     )
@@ -171,7 +178,8 @@ def test_background_api_runs_task_and_exposes_events_and_workspace(tmp_path):
         )
         assert run_response.status_code == 200
         run = run_response.json()
-        assert run["status"] == "completed"
+        # Show the whole record: a bare status hid the cause of a load-only failure.
+        assert run["status"] == "completed", f"run record: {run!r}"
         assert run["result_preview"].startswith("completed:background:served:daily_report")
 
         latest = client.get(f"/background/runs/{run['run_id']}")
