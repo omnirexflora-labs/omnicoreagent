@@ -2032,7 +2032,42 @@ def test_the_generated_build_leaves_env_files_out_of_the_image(tmp_path, monkeyp
     ignore = (tmp_path / ".dockerignore").read_text().splitlines()
     # In any folder: Docker applies ".env" only at the build context's root,
     # and an agent in a subfolder had its .env copied in (the 0.5.0rc5 gate).
-    assert "**/.env" in ignore and "**/.env.*" in ignore and "**/workspace" in ignore
+    assert "**/.env" in ignore and "**/.env.*" in ignore
+
+
+def test_the_generated_ignore_leaves_out_the_root_workspace_not_a_package_of_that_name(
+    tmp_path, monkeypatch
+):
+    # The 0.5.0 file had `**/workspace`, so src/workspace/ (a Python package)
+    # was missing from the image.
+    monkeypatch.delenv("OMNICOREAGENT_WORKSPACE_DIR", raising=False)
+    result = _generate(tmp_path, monkeypatch)
+
+    assert result.exit_code == 0, result.output
+    ignore = (tmp_path / ".dockerignore").read_text().splitlines()
+    assert "/workspace" in ignore
+    assert not any(line.rstrip("/").endswith("workspace") and line != "/workspace" for line in ignore)
+
+
+def test_the_generated_ignore_follows_the_configured_workspace(tmp_path, monkeypatch):
+    monkeypatch.setenv("OMNICOREAGENT_WORKSPACE_DIR", "./data/agent_files")
+    result = _generate(tmp_path, monkeypatch)
+
+    assert result.exit_code == 0, result.output
+    ignore = (tmp_path / ".dockerignore").read_text().splitlines()
+    assert "/data/agent_files" in ignore and "/workspace" not in ignore
+
+
+def test_the_generated_ignore_leaves_out_common_credential_files(tmp_path, monkeypatch):
+    result = _generate(tmp_path, monkeypatch)
+
+    assert result.exit_code == 0, result.output
+    ignore = (tmp_path / ".dockerignore").read_text().splitlines()
+    for pattern in (
+        ".env", ".env.*", "*.pem", "*.key", "*.p12", "id_rsa*", "id_ed25519*",
+        ".netrc", ".npmrc", ".pypirc", "credentials*.json", ".aws", ".ssh",
+    ):
+        assert f"**/{pattern}" in ignore, pattern
 
 
 def test_an_existing_dockerignore_is_kept_and_a_missing_env_rule_is_named(tmp_path, monkeypatch):

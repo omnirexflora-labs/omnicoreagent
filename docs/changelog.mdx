@@ -13,6 +13,12 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- **The generated `.dockerignore` is no longer broad and narrow at once.** It left out any folder
+  named `workspace` (including a Python package of that name). It now leaves out only the workspace
+  folder you configured (`OMNICOREAGENT_WORKSPACE_DIR`, default `./workspace`), anchored at the build
+  context's root. It also leaves out, in any folder, `.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`,
+  `id_rsa*`, `id_ed25519*`, `.netrc`, `.npmrc`, `.pypirc`, `credentials*.json`, `.aws` and `.ssh`
+  (before, `.env*` only). An existing `.dockerignore` is still kept as it is.
 - **The `local` provider refuses `network_policy: deny` and `image` when the agent is built.** It
   refused them at the first command, after a person had been asked to approve the call. A
   `sandbox_manifest` that asks for either, or says nothing about the network (the default is
@@ -177,9 +183,6 @@ planned for 0.5.1.
 - **`read_skill_file` can read a sibling skill's files.** Its path check is by prefix, so a sibling
   whose name starts with the skill's own name (`../my-skill-extra/file` from `my-skill`) is not
   refused. Paths outside the skills folder are. Fixed in 0.5.1.
-- **The generated `.dockerignore` is broad and narrow at once.** It leaves out any folder named
-  `workspace` (including a Python package of that name), and of credential files it leaves out only
-  `.env*`. Review it before building an image.
 - **Copying many files into a fresh Docker sandbox is slow**, at about 0.4 s per file.
 
 ## 0.4.4

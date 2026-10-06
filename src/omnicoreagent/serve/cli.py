@@ -7,6 +7,7 @@ Usage:
     omniserve config --show
 """
 
+import os
 import sys
 import importlib.util
 from collections.abc import Sequence
@@ -389,19 +390,59 @@ def _quote_docker_env_value(value: str) -> str:
     return f'"{escaped}"'
 
 
-_DOCKERIGNORE = """\
-# Written by omniserve generate-dockerfile: the image copies the build context.
-# "**/" so a .env next to an agent in a subfolder stays out too.
-**/.env
-**/.env.*
-**/.git
-**/.venv
-**/venv
-**/__pycache__
-**/*.pyc
-**/workspace
-**/.omnicoreagent
-"""
+# Credential files, in any folder ("**/" because Docker applies a bare pattern
+# only at the build context's root: the 0.5.0rc5 gate, an agent's app/.env went
+# into the image).
+_CREDENTIAL_PATTERNS = (
+    "**/.env",
+    "**/.env.*",
+    "**/*.pem",
+    "**/*.key",
+    "**/*.p12",
+    "**/id_rsa*",
+    "**/id_ed25519*",
+    "**/.netrc",
+    "**/.npmrc",
+    "**/.pypirc",
+    "**/credentials*.json",
+    "**/.aws",
+    "**/.ssh",
+)
+
+
+def _workspace_ignore_pattern(cwd: Path) -> str:
+    """The configured workspace folder, anchored at the build context's root.
+
+    The 0.5.0 file left out every folder named ``workspace``, so a Python
+    package of that name was missing from the image. Only the workspace the
+    agent is configured to use is left out. One outside the build context
+    (absolute, or ``..``) is not in it, so it needs no rule.
+    """
+    from omnicoreagent.core.workspace.config import DEFAULT_WORKSPACE_DIR
+
+    configured = os.environ.get("OMNICOREAGENT_WORKSPACE_DIR") or DEFAULT_WORKSPACE_DIR
+    try:
+        relative = (cwd / configured).resolve().relative_to(cwd.resolve())
+    except ValueError:
+        return ""
+    return f"/{relative.as_posix()}" if relative.parts else ""
+
+
+def _dockerignore_content(cwd: Path) -> str:
+    lines = [
+        "# Written by omniserve generate-dockerfile: the image copies the build context.",
+        "**/.git",
+        "**/.venv",
+        "**/venv",
+        "**/__pycache__",
+        "**/*.pyc",
+        "**/.omnicoreagent",
+        *_CREDENTIAL_PATTERNS,
+    ]
+    workspace = _workspace_ignore_pattern(cwd)
+    if workspace:
+        lines.append(workspace)
+    return "\n".join(lines) + "\n"
 
 
 def _install_line() -> str:
@@ -529,7 +570,7 @@ def generate_dockerfile(file_path: str, output_dir: str):
     # holds LLM_API_KEY went into it (the 0.5.0rc4 gate).
     ignore_path = Path.cwd() / ".dockerignore"
     if not ignore_path.exists():
-        ignore_path.write_text(_DOCKERIGNORE, encoding="utf-8")
+        ignore_path.write_text(_dockerignore_content(Path.cwd()), encoding="utf-8")
         console.print(f"[bold green]✓ Generated {ignore_path}[/bold green] (keeps .env and secrets out of the image)")
     elif not any(
         line.strip() in {"**/.env", "**/.env*"}

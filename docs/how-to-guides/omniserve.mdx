@@ -792,8 +792,9 @@ docker run -p 8000:8000 -e LLM_API_KEY omnicoreagent-serve
 
 It also writes a `.dockerignore` in the directory you run it from (the build
 context), if there is none, that
-keeps every `.env` and workspace folder, in any subfolder, out of the image
-(the image copies the build context); an existing one that does not exclude
+keeps credential files (`.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa*`, `.netrc`, `credentials*.json`
+and the like, in any subfolder) and the configured workspace folder (at the root only) out of the
+image (the image copies the build context); an existing one that does not exclude
 `**/.env` is named. The
 generated Dockerfile installs `omnicoreagent[serve]`, pinned to the
 release that generated it (`==0.5.0`), on
