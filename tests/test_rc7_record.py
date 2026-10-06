@@ -23,7 +23,10 @@ def test_the_approval_summary_follows_the_capture_policy_in_the_trace():
         metadata={"command": {"summary": ["printf token=secret-xyz > note.txt", "cat note.txt"], "opaque": True}},
     )
     kept = _recorded_approval(_recorder("full"), request)
-    assert kept["metadata"]["command"]["summary"][0].startswith("printf token=secret-xyz")
+    # Full capture keeps the text and redacts a credential in it, as a
+    # sandbox command's record does.
+    assert kept["metadata"]["command"]["summary"] == ["printf token=[REDACTED] > note.txt", "cat note.txt"]
+    assert "secret-xyz" not in str(kept)
     private = _recorded_approval(_recorder("default"), request)
     assert private["metadata"]["command"]["summary"] == ["[REDACTED] (2 command(s))"]
     assert "secret-xyz" not in str(private)

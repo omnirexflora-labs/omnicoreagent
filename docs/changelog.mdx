@@ -24,6 +24,12 @@ Every release, with its notes, is also on
   text, with credentials in it (`--api-key=...`, `TOKEN=...`, `Authorization: Bearer ...`) redacted;
   under the default capture it still holds the name and `argc` only. The outcome's `output` now
   carries `exit_code` under both.
+- **An approval's command text follows the same secret rule as a sandbox command.** Under
+  `capture="full"` the approval events in the trace kept a shell command's summary verbatim, so
+  `printf token=...` carried its credential. They now keep the text with `key=value` credentials
+  redacted, as the sandbox command's own record does; under the default capture the summary is
+  still replaced by its count. The approval shown to the person and the run's own record are
+  unchanged.
 - **`read_skill_file` no longer reads a sibling skill's files.** The requested path is resolved,
   symlinks followed, and must sit inside the skill's own folder; otherwise it is refused with a
   message naming the skill.
