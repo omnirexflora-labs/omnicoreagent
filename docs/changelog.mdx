@@ -181,8 +181,14 @@ These come from the 0.5.0 release testing. None breaks a core promise on a norma
 planned for 0.5.1.
 
 - **The first run in a fresh process starts slowly.** Loading the model client can take 15–60 s on
-  a cold or loaded machine. It shows in the trace as a `model.client.load` span, and the headless
-  `--timeout` starts after it.
+  a cold or loaded machine. Measured in 0.5.1, it is `import litellm` (about 3,000 modules; about
+  9 s of CPU on a warm bytecode cache and about 20 s on a cold one, on the test machine), which
+  OmniCoreAgent does not control. It is already off the event loop, on a worker thread, and shows in
+  the trace as a `model.client.load` span; the headless `--timeout` starts after it. What is ours
+  is light: `import omnicoreagent` takes about 10 ms, building an agent and initializing it
+  well under a second, with `litellm` and `openai` not yet loaded. OmniServe and background
+  workers load it while they start, so only a short script or a headless run pays for it on its
+  first run.
 - **A very small budget pauses on every call.** With a limit as low as one tool call, each call
   pauses on its own, so a person grants each one in turn.
 - **`read_skill_file` can read a sibling skill's files.** Its path check is by prefix, so a sibling

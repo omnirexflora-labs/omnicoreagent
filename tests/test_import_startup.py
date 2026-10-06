@@ -392,3 +392,35 @@ print(json.dumps({
         "decouple_loaded": False,
         "rich_loaded": False,
     }
+
+
+def test_building_and_initializing_an_agent_leaves_the_model_client_to_the_warm_up(tmp_path):
+    # The 0.5.0 known issue (a first run starting 15-60 s late) is `import
+    # litellm`, about 3,000 modules. Everything of ours before it stays light:
+    # building and initializing an agent must not pay for it on the event
+    # loop; the warm-up does, on a worker thread, as its own trace span.
+    result = _run_import_probe(
+        tmp_path,
+        """
+import asyncio
+import json
+import os
+import sys
+
+os.environ["LLM_API_KEY"] = "placeholder"
+from omnicoreagent import OmniCoreAgent
+
+agent = OmniCoreAgent(
+    name="probe",
+    system_instruction="x",
+    model_config={"provider": "openai", "model": "gpt-4o-mini"},
+)
+asyncio.run(agent.initialize())
+print(json.dumps({
+    "litellm_loaded": "litellm" in sys.modules,
+    "openai_loaded": "openai" in sys.modules,
+}))
+""",
+    )
+
+    assert result == {"litellm_loaded": False, "openai_loaded": False}
