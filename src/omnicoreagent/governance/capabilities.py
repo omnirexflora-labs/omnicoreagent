@@ -54,7 +54,7 @@ CAPABILITIES: dict[str, str] = {
     "process.exec": "Run a command: in the sandbox (execution surface sandbox), or on the host with the local provider (surface host). Target: resource (the command's name).",
     "sandbox.image.use": "Start the sandbox from an image named in the manifest. Target: resource (the image).",
     "sandbox.filesystem.mount": "Mount a host directory into the sandbox. Target: path, resource (the source).",
-    "sandbox.workspace.sync": "The runtime's own listing of the sandbox's files after a command, to copy what changed back to the workspace. Not an agent command: command rules do not judge it. Target: resource (the program).",
+    "sandbox.workspace.sync": "The runtime's own listing of the sandbox's files after a command, to copy what changed back to the workspace. Not an agent command: command rules do not judge it. With no rule of its own it follows the decision for the command that triggered it; a rule you write for it (allow, ask or deny) decides instead. Each file it copies back is still decided by the workspace file rules. Target: resource (the program).",
     "sandbox.filesystem.cwd": "Run a command in a working directory the manifest or call names. Target: path.",
     "sandbox.network.configure": "Turn the sandbox's network on, or allow or deny a host in it. Target: host.",
     "sandbox.environment.set": "Set plain environment variables in the sandbox (their names are in the request, not the target).",

@@ -89,6 +89,9 @@ POLICY = {
             {"rule_id": "sandbox", "capability": "sandbox.execute"},
             {"rule_id": "sandbox_process", "capability": "process.exec",
              "constraints": {"sandbox_required": True}},
+            # No rule for sandbox.workspace.sync: since 0.5.1 the runtime's own
+            # listing after a command follows the command's decision (found
+            # filming this app, 2026-10-05, when every listing was denied).
             # The sandbox clones the repository and installs it, so it has the
             # network. Nothing secret is in it: the steward's tokens stay in
             # this process.

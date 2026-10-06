@@ -10,7 +10,14 @@ from uuid import uuid4
 from omnicoreagent.governance.commands import attach_command
 from omnicoreagent.governance.calls import tool_call_metadata
 from omnicoreagent.governance.capabilities import secret_authority_request
-from omnicoreagent.governance.models import AuthorityRequest, AuthorityTarget
+from omnicoreagent.governance.models import (
+    AuthorityRequest,
+    AuthorityTarget,
+    PolicyDecision,
+    PolicyEffect,
+    ReasonCode,
+)
+from omnicoreagent.governance.telemetry import emit_policy_decision, emit_policy_request
 from omnicoreagent.sandbox.base import SandboxRuntime
 from omnicoreagent.sandbox.errors import SandboxUnsupportedError
 from omnicoreagent.sandbox.models import (
@@ -45,6 +52,10 @@ class SandboxCommandSpec:
     timeout_seconds: int | None = None
     environment: dict[str, str] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Set only by the runtime for its own listing after a command: the
+    # command's authority (``SandboxAuthorityContext.to_metadata()``). Without
+    # an explicit rule of its own, the listing follows that decision.
+    follows_decision: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.command, str) or not isinstance(self.command, list | tuple):
@@ -250,9 +261,10 @@ class SandboxExecutionService:
         if spec.manifest is not None:
             raise ValueError("A command in an open session uses the session's manifest")
         runtime = self._runtime()
-        decision = await self.governance_engine.authorize_sandboxed(
-            _sandbox_authority_request(spec, _surface(runtime))
-        )
+        request = _sandbox_authority_request(spec, _surface(runtime))
+        decision = await self._follow_command_decision(spec, request)
+        if decision is None:
+            decision = await self.governance_engine.authorize_sandboxed(request)
         authority = SandboxAuthorityContext.from_policy_decision(decision)
         started, commands = self._session_started.get(session.session_id, (time.monotonic(), 0))
         self._session_started[session.session_id] = (started, commands + 1)
@@ -268,6 +280,52 @@ class SandboxExecutionService:
             "authority": authority.to_metadata(),
         }
         return result
+
+    async def _follow_command_decision(
+        self, spec: SandboxCommandSpec, request: AuthorityRequest
+    ) -> PolicyDecision | None:
+        """The runtime's listing after a command, decided as its command was.
+
+        Found filming the steward (2026-10-05): a strict policy that allowed
+        sandbox commands but had no rule for ``sandbox.workspace.sync`` denied
+        the listing after every command, and no file came back. The listing
+        only reads the sandbox the command already ran in, so it adds no
+        reach; every file it copies back is still decided by the workspace
+        file rules. When a rule names the sync (allow, ask or deny) that rule
+        decides, exactly as before. Only when no rule matches, the case a mode
+        decides, does it follow the command. Returns None when it does not.
+        """
+        follows = spec.follows_decision
+        if follows is None or request.capability != "sandbox.workspace.sync" or request.actor != "runtime":
+            return None
+        engine = self.governance_engine
+        evaluator = getattr(engine, "evaluator", None)
+        policy = getattr(engine, "policy", None)
+        if evaluator is None or policy is None:
+            return None
+        try:
+            matched = evaluator.evaluate(policy, request)
+        except Exception:  # noqa: BLE001 - the engine's own path fails closed and says why.
+            return None
+        if matched.reason_code != ReasonCode.UNKNOWN_CAPABILITY:
+            return None
+        command = follows.get("authority_request_id")
+        decision = PolicyDecision(
+            effect=PolicyEffect.ALLOW,
+            request_id=request.request_id,
+            policy_id=matched.policy_id,
+            policy_hash=matched.policy_hash,
+            reason_code=ReasonCode.FOLLOWS_COMMAND,
+            reason=(
+                f"Allowed: no rule names {request.capability}, so it follows the decision for "
+                f"the command that triggered it (request {command}, {follows.get('reason_code')})."
+            ),
+            metadata={"follows_request_id": command, "follows_decision_id": follows.get("decision_id")},
+        )
+        recorder = getattr(engine, "telemetry_recorder", None)
+        await emit_policy_request(recorder, request)
+        await emit_policy_decision(recorder, decision, request=request)
+        return decision
 
     def _refuse_mount_over_policy(self, manifest: SandboxManifest) -> None:
         """A sandbox must not be able to write the policy that governs it."""

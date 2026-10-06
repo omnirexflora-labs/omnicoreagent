@@ -174,14 +174,25 @@ class WorkspaceBridge:
     # --- sandbox -> workspace -------------------------------------------------
 
     async def pull(
-        self, service: "SandboxExecutionService", session: "SandboxSession"
+        self,
+        service: "SandboxExecutionService",
+        session: "SandboxSession",
+        *,
+        after: dict[str, Any] | None = None,
     ) -> dict[str, list]:
-        """Copy files the last command created or changed back into the workspace."""
+        """Copy files the last command created or changed back into the workspace.
+
+        ``after`` is that command's authority (its metadata ``authority``): the
+        listing follows its decision unless a rule names the sync.
+        """
         async with self._sync_lock:
-            return await self._pull(service, session)
+            return await self._pull(service, session, after)
 
     async def _pull(
-        self, service: "SandboxExecutionService", session: "SandboxSession"
+        self,
+        service: "SandboxExecutionService",
+        session: "SandboxSession",
+        after: dict[str, Any] | None = None,
     ) -> dict[str, list]:
         from omnicoreagent.sandbox.execution import SandboxCommandSpec
 
@@ -192,6 +203,7 @@ class WorkspaceBridge:
             command=["sh", "-c", _LIST_SCRIPT, str(self.max_file_bytes)],
             timeout_seconds=LIST_TIMEOUT_SECONDS,
             metadata={"purpose": "workspace_sync"},
+            follows_decision=after,
         )
         spec.authority_request = sync_authority_request(spec)
         listing = await service.execute(spec, session=session)

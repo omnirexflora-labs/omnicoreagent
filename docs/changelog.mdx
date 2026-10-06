@@ -16,6 +16,13 @@ Every release, with its notes, is also on
 - **`read_skill_file` no longer reads a sibling skill's files.** The requested path is resolved,
   symlinks followed, and must sit inside the skill's own folder; otherwise it is refused with a
   message naming the skill.
+- **A strict policy no longer silently denies the sandbox's own file listing.** After a sandbox
+  command, the runtime lists the sandbox's files to copy what changed back to the workspace
+  (`sandbox.workspace.sync`). A custom `mode: strict` policy with no rule for it denied the listing
+  on every command, and nothing came back. With no rule of its own the listing now follows the
+  decision for its command (allowed, or approved), and the trace says so (`follows_command`). A rule
+  you write for it still decides, and each file copied back is still decided by the workspace file
+  rules. When a rule refuses the listing, the model is told why instead of "the sandbox was lost".
 
 ## 0.5.0
 

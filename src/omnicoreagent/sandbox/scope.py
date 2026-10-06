@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
+from omnicoreagent.governance.errors import PolicyDeniedError, UnknownCapabilityError
 from omnicoreagent.sandbox.execution import SandboxCommandSpec, SandboxExecutionService
 from omnicoreagent.sandbox.models import SandboxExecResult, SandboxManifest, SandboxSession
 
@@ -84,7 +85,20 @@ class ExecutionScope:
             return result
         if bridge is not None:
             try:
-                sync = await bridge.pull(self.service, session)
+                sync = await bridge.pull(
+                    self.service, session, after=result.metadata.get("authority")
+                )
+            except (PolicyDeniedError, UnknownCapabilityError) as exc:
+                # A rule the user wrote refuses the runtime's listing (or the
+                # policy has one that does): the sandbox is fine, so it is kept
+                # and the model is told why nothing came back, not that it was
+                # "lost". Before 0.5.1 a strict policy with no rule did this
+                # silently on every command.
+                result.metadata["workspace"] = {
+                    "written": [],
+                    "skipped": [{"path": "*", "reason": f"the policy refused the runtime's listing of the sandbox's files (sandbox.workspace.sync), so nothing was copied back: {exc}"}],
+                }
+                return result
             except Exception as exc:  # noqa: BLE001 - lost after the command ran
                 # The command finished; its sandbox did not survive to give
                 # its files back. Said so, and the next command opens afresh.
