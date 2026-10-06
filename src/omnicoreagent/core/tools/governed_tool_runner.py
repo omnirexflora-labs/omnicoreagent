@@ -412,6 +412,10 @@ class GovernedToolRunner:
                     covered.append(path)
         if not asked:
             return requests
+        # Sorted, so the person reads the same list on every machine: the walk
+        # follows the file system's own order, which differs between hosts
+        # (the 0.5.1 server suite listed secret17 first).
+        covered.sort()
         shown = covered[:_COVERED_FILES_SHOWN]
         if len(covered) > len(shown):
             shown.append(f"and {len(covered) - len(shown)} more")
