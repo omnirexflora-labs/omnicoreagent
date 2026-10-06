@@ -24,6 +24,13 @@ Every release, with its notes, is also on
   text, with credentials in it (`--api-key=...`, `TOKEN=...`, `Authorization: Bearer ...`) redacted;
   under the default capture it still holds the name and `argc` only. The outcome's `output` now
   carries `exit_code` under both.
+- **A folder operation under an ask rule asks once.** Deleting, moving or clearing a folder that
+  holds a file covered by an *ask* rule was refused, and the message said the policy "does not
+  allow" it. The operation now asks a person once and lists the covered files (the first ten, then
+  "and N more"; the pending approval carries them as `covered_files`). Approving lets the operation
+  run, and the covered files count as approved for that operation only; denying changes nothing.
+  A *deny* rule on any file inside still refuses the whole operation, without asking. Where nobody
+  can be asked (`approval_mode="fail"`) the message says the call needs a person's approval.
 - **An approval's command text follows the same secret rule as a sandbox command.** Under
   `capture="full"` the approval events in the trace kept a shell command's summary verbatim, so
   `printf token=...` carried its credential. They now keep the text with `key=value` credentials
@@ -161,9 +168,6 @@ planned for 0.5.1.
   `--timeout` starts after it.
 - **A very small budget pauses on every call.** With a limit as low as one tool call, each call
   pauses on its own, so a person grants each one in turn.
-- **A folder operation blocked by an ask rule cannot be approved as a whole.** Deleting, moving or
-  clearing a folder that holds a file covered by an *ask* rule is refused, and the message says the
-  policy "does not allow" it. Act on the files one by one.
 - **`read_skill_file` can read a sibling skill's files.** Its path check is by prefix, so a sibling
   whose name starts with the skill's own name (`../my-skill-extra/file` from `my-skill`) is not
   refused. Paths outside the skills folder are. Fixed in 0.5.1.

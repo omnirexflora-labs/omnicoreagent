@@ -32,6 +32,7 @@ WORKSPACE_COMMAND_TOOL_NAMES = frozenset(
 )
 
 WORKSPACE_TOOL_MARKER = "_omnicoreagent_builtin_workspace_tool"
+FOLDER_CALLS_ATTRIBUTE = "_omnicoreagent_folder_calls"
 
 
 class WorkspaceFilesTool:
@@ -132,6 +133,7 @@ def _register_workspace_tool(
     description: str,
     inputSchema: dict | None = None,
     function: Callable[..., Any],
+    folder_calls: Callable[[str, dict], list[tuple[str, dict]]] | None = None,
 ) -> None:
     existing = registry.get_tool(name)
     if existing and registry.get_tool_provider(name) != "workspace":
@@ -143,6 +145,9 @@ def _register_workspace_tool(
 
     function = _reporting_failures(function)
     setattr(function, WORKSPACE_TOOL_MARKER, True)
+    # How the governed tool runner learns which files a folder operation
+    # covers, to ask once for the whole of it (0.5.1, B5).
+    setattr(function, FOLDER_CALLS_ATTRIBUTE, folder_calls)
     registry.register_tool(
         name=name,
         description=description,
@@ -174,6 +179,7 @@ def build_tool_registry_workspace_files(
     workspace_config: WorkspaceConfig | dict | None = None,
     privacy_filter: PrivacyFilter | None = None,
     allows: Any = None,
+    effect: Any = None,
 ) -> ToolRegistry:
     """
     Register workspace file commands in a ToolRegistry.
@@ -193,6 +199,8 @@ def build_tool_registry_workspace_files(
     # Search and listing show only what the policy would let the agent read;
     # a folder is deleted or moved only if each file under it could be.
     workspace_files.files_backend.allows = allows
+    workspace_files.files_backend.effect = effect
+    folder_calls = workspace_files.files_backend.folder_calls
 
     def grep_tool(
         pattern: str,
@@ -379,6 +387,7 @@ def build_tool_registry_workspace_files(
             "additionalProperties": False,
         },
         function=lambda path: workspace_files.delete(path),
+        folder_calls=folder_calls,
     )
 
     _register_workspace_tool(
@@ -407,6 +416,7 @@ def build_tool_registry_workspace_files(
             "additionalProperties": False,
         },
         function=lambda old_path, new_path: workspace_files.rename(old_path, new_path),
+        folder_calls=folder_calls,
     )
 
     _register_workspace_tool(
@@ -416,6 +426,7 @@ def build_tool_registry_workspace_files(
         Clear all workspace files.
         """,
         function=lambda: workspace_files.clear(),
+        folder_calls=folder_calls,
     )
 
     _register_workspace_tool(

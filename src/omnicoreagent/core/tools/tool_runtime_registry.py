@@ -19,6 +19,7 @@ def build_tool_registry_workspace_files(
     workspace_config: WorkspaceConfig | dict | None = None,
     privacy_filter: PrivacyFilter | None = None,
     allows: Any = None,
+    effect: Any = None,
 ):
     from omnicoreagent.core.workspace.tools import (
         build_tool_registry_workspace_files as build_workspace_files_tool,
@@ -31,6 +32,7 @@ def build_tool_registry_workspace_files(
         workspace_config=workspace_config,
         privacy_filter=privacy_filter,
         allows=allows,
+        effect=effect,
     )
 
 
@@ -142,6 +144,7 @@ class ToolRuntimeRegistry:
                 workspace_config=self.workspace_config,
                 privacy_filter=self.privacy_filter,
                 allows=self._allows if self.governance_engine is not None else None,
+                effect=self._effect if self.governance_engine is not None else None,
             )
 
         if self.tool_offloader.config.enabled:
@@ -191,6 +194,28 @@ class ToolRuntimeRegistry:
             build_code_mode_tool(registry, config=self.code_mode, functions=signatures)
 
         return registry
+
+    def _effect(self, tool_name: str, tool_args: dict) -> str:
+        """What the policy would decide for this workspace call: "allow", "ask"
+        or "deny". A folder operation is refused for a file under a deny rule,
+        and for one under an ask rule unless a person approved the operation
+        as a whole (0.5.1, B5). A policy that cannot say is a deny."""
+        from omnicoreagent.governance.capabilities import tool_authority_requests
+        from omnicoreagent.governance.models import PolicyEffect
+
+        engine = self.governance_engine
+        try:
+            effects = {
+                engine.evaluator.evaluate(engine.policy, request).effect
+                for request in tool_authority_requests(
+                    tool_name=tool_name, tool_args=tool_args, tool_provider="workspace"
+                )
+            }
+        except Exception:
+            return "deny"
+        if PolicyEffect.DENY in effects or not effects <= {PolicyEffect.ALLOW, PolicyEffect.ASK}:
+            return "deny"
+        return "ask" if PolicyEffect.ASK in effects else "allow"
 
     def _allows(self, tool_name: str, tool_args: dict) -> bool:
         """Whether the policy would allow this workspace call without asking.

@@ -2946,6 +2946,9 @@ def _public_approval(approval: dict[str, Any], record: dict[str, Any]) -> dict[s
         # For a shell command: the commands it would run, one per line. The
         # target alone says only `sh` (the 0.5.0rc1 gate).
         "command": approval.get("command"),
+        # For a folder operation: the files under an ask rule that this one
+        # question covers, the first few and "and N more".
+        "covered_files": approval.get("covered_files"),
         "risk_level": approval.get("risk_level"),
         "reason": approval.get("reason"),
         "expires_at": approval.get("expires_at"),

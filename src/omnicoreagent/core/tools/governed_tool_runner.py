@@ -357,12 +357,79 @@ class GovernedToolRunner:
                 actor=self.agent_name,
                 tool_call_id=single_tool.tool_call_id,
             )
+            requests = self._with_folder_coverage(single_tool, requests)
             await self.governance_engine.authorize_all(requests)
         except (GovernanceError, ValueError) as exc:
             if isinstance(exc, GovernanceError):
                 return exc
             return ToolArgumentsInvalid(str(exc))
         return None
+
+    def _with_folder_coverage(self, single_tool: ToolCallResult, requests: list) -> list:
+        """Decide a folder operation by the files under it, before it runs.
+
+        Deleting, moving or clearing a folder touches each file in it. A deny
+        rule on one of them refuses the whole operation (its request is added,
+        so the policy's own reason is what the model reads). Files under an ask
+        rule are asked about once, as one approval that lists them, carried by
+        the folder's own request if that asks, else by the first covered file's;
+        once it is approved the files count as approved for this operation only
+        (0.5.1, B5: such a folder was refused with "does not allow", though a
+        person could have approved it)."""
+        from omnicoreagent.core.workspace.files import (
+            APPROVED_FOLDER_OPERATIONS,
+            folder_operation_key,
+        )
+        from omnicoreagent.core.workspace.tools import FOLDER_CALLS_ATTRIBUTE
+        from omnicoreagent.governance.models import PolicyEffect
+
+        if single_tool.tool_provider != "workspace" or not requests:
+            return requests
+        tool = _registered_tool(single_tool)
+        folder_calls = getattr(getattr(tool, "function", None), FOLDER_CALLS_ATTRIBUTE, None)
+        if folder_calls is None:
+            return requests
+        APPROVED_FOLDER_OPERATIONS.set(frozenset())
+        engine = self.governance_engine
+        asked: list = []
+        covered: list[str] = []
+        for file_tool, file_args in folder_calls(single_tool.tool_name, single_tool.tool_args):
+            for request in tool_authority_requests(
+                tool_name=file_tool,
+                tool_args=file_args,
+                tool_provider="workspace",
+                actor=self.agent_name,
+                tool_call_id=single_tool.tool_call_id,
+            ):
+                effect = engine.evaluator.evaluate(engine.policy, request).effect
+                if effect == PolicyEffect.ALLOW:
+                    continue
+                if effect != PolicyEffect.ASK:
+                    return [*requests, request]
+                asked.append(request)
+                path = file_args.get("path") or file_args.get("old_path")
+                if path not in covered:
+                    covered.append(path)
+        if not asked:
+            return requests
+        shown = covered[:_COVERED_FILES_SHOWN]
+        if len(covered) > len(shown):
+            shown.append(f"and {len(covered) - len(shown)} more")
+        carrier = next(
+            (r for r in requests if engine.evaluator.evaluate(engine.policy, r).effect == PolicyEffect.ASK),
+            None,
+        )
+        extra = []
+        if carrier is None:
+            carrier = asked[0]
+            carrier.metadata["arguments_digest"] = requests[0].metadata.get("arguments_digest")
+            extra = [carrier]
+        carrier.metadata["covered_files"] = shown
+        carrier.metadata["covered_count"] = len(covered)
+        APPROVED_FOLDER_OPERATIONS.set(
+            frozenset({folder_operation_key(single_tool.tool_name, single_tool.tool_args)})
+        )
+        return [*requests, *extra]
 
     def _governance_error_result(
         self, *, single_tool: ToolCallResult, governance_error: GovernanceError
@@ -390,6 +457,17 @@ class GovernedToolRunner:
             ),
             "governance": getattr(governance_error, "metadata", {}),
         }
+
+
+# How many covered files an approval lists before saying "and N more".
+_COVERED_FILES_SHOWN = 10
+
+
+def _registered_tool(single_tool: ToolCallResult) -> Any:
+    """The registry entry a call will run, when its executor is a local one."""
+    registry = getattr(getattr(single_tool.tool_executor, "tool_handler", None), "local_tools", None)
+    get_tool = getattr(registry, "get_tool", None)
+    return get_tool(single_tool.tool_name) if callable(get_tool) else None
 
 
 def _tool_telemetry_shape(single_tool: ToolCallResult) -> dict[str, Any]:
