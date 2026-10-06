@@ -49,7 +49,9 @@ class TelemetryConfig:
     storage_path: str | None = None
     # Finished traces older than this are pruned automatically, and so is a
     # trace still running with no activity for this long (its process died;
-    # reported as abandoned). ``None`` keeps every trace.
+    # reported as abandoned). ``None`` keeps every trace. Agents in one process
+    # that share a store (the same file) must give the same value: the second
+    # one is refused when it opens the store, naming both.
     retention_days: int | None = 7
     # The same for offloaded payloads, on their own window; a payload a kept
     # trace still refers to is never pruned.

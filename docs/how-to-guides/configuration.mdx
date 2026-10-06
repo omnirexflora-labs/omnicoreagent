@@ -413,7 +413,7 @@ keeps and for how long:
 | `storage` | `"auto"` | On local disk, in `telemetry/` under the workspace directory, even when the workspace is S3 or R2. `"memory"` keeps traces in the process only. |
 | `storage_path` | none | Another file for the trace log. |
 | `capture` | `"full"` | Keep the whole trajectory, model input and output included (redacted). `"default"` leaves model prompts and responses out. A `record_*` setting you give wins over either. |
-| `retention_days` | `7` | Finished traces older than this are removed, once per agent before its first run; `None` keeps all. |
+| `retention_days` | `7` | Finished traces older than this are removed, once per agent before its first run; `None` keeps all. Agents sharing one store (the same `storage_path`) must give the same value; a different one is refused when the second agent initializes. |
 | `max_payload_bytes` | `64000` | A larger payload is truncated, or kept whole elsewhere with `offload_large_payloads`. |
 | `redact_keys` | `api_key`, `token`, `password`, ... | Keys whose values are replaced with `[REDACTED]`. |
 

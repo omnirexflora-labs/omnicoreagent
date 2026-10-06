@@ -24,6 +24,12 @@ Every release, with its notes, is also on
   text, with credentials in it (`--api-key=...`, `TOKEN=...`, `Authorization: Bearer ...`) redacted;
   under the default capture it still holds the name and `argc` only. The outcome's `output` now
   carries `exit_code` under both.
+- **Two agents sharing one telemetry store must agree on `retention_days`.** The store is one
+  object per file in a process, so the second agent silently got the first one's window (a warning
+  was logged and its value ignored). A second, different value is now refused when that agent
+  opens the store (`initialize()`), with a message naming both values; the same value is fine, and
+  `None` (keep every trace) counts as a value. Give such agents the same `retention_days`, or a
+  `storage_path` each.
 - **A folder operation under an ask rule asks once.** Deleting, moving or clearing a folder that
   holds a file covered by an *ask* rule was refused, and the message said the policy "does not
   allow" it. The operation now asks a person once and lists the covered files (the first ten, then
@@ -175,8 +181,6 @@ planned for 0.5.1.
   `workspace` (including a Python package of that name), and of credential files it leaves out only
   `.env*`. Review it before building an image.
 - **Copying many files into a fresh Docker sandbox is slow**, at about 0.4 s per file.
-- **Two agents in one process sharing one telemetry store** share the first agent's
-  `retention_days`.
 
 ## 0.4.4
 

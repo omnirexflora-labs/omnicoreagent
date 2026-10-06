@@ -477,7 +477,7 @@ separately.
 
 | Setting | Default | Removes |
 |---|---|---|
-| `retention_days` | `7` | Finished traces older than this, and **abandoned** traces: a trace still `running` with no activity for this long, because the process that recorded it died. A long run still working is never touched. |
+| `retention_days` | `7` | Finished traces older than this, and **abandoned** traces: a trace still `running` with no activity for this long, because the process that recorded it died. A long run still working is never touched.Agents in one process that share a store must give the same value: a different one is refused when the second agent initializes, naming both. |
 | `payload_retention_days` | `7` | Offloaded payloads older than this, except any a kept trace still refers to. |
 
 `None` keeps everything. Retention runs once per agent, when it starts its

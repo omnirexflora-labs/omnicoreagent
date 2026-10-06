@@ -1139,10 +1139,15 @@ _SHARED_JSONL_STORES: "weakref.WeakValueDictionary[Path, JsonlTelemetryStore]" =
 )
 
 
+# "No retention asked for": a caller that only wants the store at this path
+# takes the window it already has. `None` is a value (keep every trace).
+_RETENTION_UNSET: Any = object()
+
+
 def shared_jsonl_telemetry_store(
     path: str | Path,
     *,
-    retention_days: int | None = None,
+    retention_days: int | None = _RETENTION_UNSET,
     archive: bool = True,
     archive_index: Any = None,
     archive_bodies: Any = None,
@@ -1161,6 +1166,8 @@ def shared_jsonl_telemetry_store(
     resolved = Path(path).expanduser().resolve()
     store = _SHARED_JSONL_STORES.get(resolved)
     if store is None:
+        if retention_days is _RETENTION_UNSET:
+            retention_days = None
         from omnicoreagent.core.telemetry.archive import TelemetryArchive
 
         store = JsonlTelemetryStore(
@@ -1177,13 +1184,16 @@ def shared_jsonl_telemetry_store(
             ),
         )
         _SHARED_JSONL_STORES[resolved] = store
-    elif store.retention_days != retention_days:
-        logger.warning(
-            "Telemetry store %s is already open with retention_days=%s; "
-            "ignoring retention_days=%s",
-            resolved,
-            store.retention_days,
-            retention_days,
+    elif retention_days is not _RETENTION_UNSET and store.retention_days != retention_days:
+        # The store is one object per file, so its window is the first agent's.
+        # The second agent's own value was logged and then ignored: it kept
+        # traces for the wrong number of days without a word (0.5.1, B8).
+        raise ValueError(
+            f"Telemetry store {resolved} is already open with "
+            f"retention_days={store.retention_days}, and this agent asks for "
+            f"retention_days={retention_days}. Agents sharing one store share one "
+            "retention window: give them the same retention_days, or a different "
+            "telemetry_config storage_path each."
         )
     return store
 
