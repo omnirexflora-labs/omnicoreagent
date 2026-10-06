@@ -796,10 +796,14 @@ def _validate_governance_config(value: dict[str, Any]):
             policy_from_mapping(value["policy"])
         except PolicyLoadError as exc:
             raise ValueError(str(exc)) from exc
-    if value.get("sandbox_manifest") is not None:
+    if value.get("sandbox_manifest") is not None or sandbox_config is not None:
         from omnicoreagent.sandbox.factory import sandbox_manifest_from_config
+        from omnicoreagent.sandbox.models import SandboxManifest
 
-        manifest = sandbox_manifest_from_config(value["sandbox_manifest"])
+        # With no manifest the runtime opens each sandbox with the default one
+        # (network `deny`), so `local` with no manifest failed at its first
+        # command, after a person had been asked (0.5.1).
+        manifest = sandbox_manifest_from_config(value.get("sandbox_manifest")) or SandboxManifest()
         named = sandbox_config if isinstance(sandbox_config, str) else (
             sandbox_config.get("provider") if isinstance(sandbox_config, dict) else None
         )

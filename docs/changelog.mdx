@@ -16,7 +16,7 @@ Every release, with its notes, is also on
 - **The `local` provider refuses `network_policy: deny` and `image` when the agent is built.** It
   refused them at the first command, after a person had been asked to approve the call. A
   `sandbox_manifest` that asks for either, or says nothing about the network (the default is
-  `deny`), now fails at construction with the same message the other providers give. Its other
+  `deny`), or no manifest at all, now fails at construction with the same message the other providers give. Its other
   behaviour is unchanged.
 - **A sandbox command is in the record under `capture="full"`.** The `sandbox_exec_started` event
   carried only the program name and `argc`, and `sandbox_exec_completed` kept the exit code in its

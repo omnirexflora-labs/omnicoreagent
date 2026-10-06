@@ -159,3 +159,33 @@ def test_local_refuses_an_image_when_the_agent_is_built():
 @pytest.mark.parametrize("provider", ["docker", "e2b", "daytona", "modal", "vercel", "http"])
 def test_an_image_is_still_accepted_where_the_provider_applies_one(provider):
     _build(provider, {"network_policy": {"default": "deny"}, "image": "python:3.12"})
+
+
+# 0.5.1 follow-up: with no `sandbox_manifest` at all the runtime uses the
+# default one, whose network is `deny`, so `local` failed at the first command
+# though a manifest that said so was refused when the agent was built.
+
+
+def _build_without_manifest(provider: str) -> None:
+    OmniCoreAgent(
+        name="sandboxed",
+        system_instruction="x",
+        model_config=MODEL,
+        agent_config={
+            "governance_config": {
+                "enabled": True,
+                "profile": "interactive-dev",
+                "sandbox_config": {"provider": provider},
+            }
+        },
+    )
+
+
+def test_local_with_no_manifest_is_refused_when_the_agent_is_built():
+    with pytest.raises(ValueError, match="local sandbox does not enforce network off.*allow"):
+        _build_without_manifest("local")
+
+
+@pytest.mark.parametrize("provider", ["docker", "e2b", "daytona", "modal", "vercel", "http"])
+def test_no_manifest_is_still_accepted_where_the_provider_cuts_the_network(provider):
+    _build_without_manifest(provider)

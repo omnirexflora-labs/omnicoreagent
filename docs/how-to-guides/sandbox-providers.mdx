@@ -403,7 +403,7 @@ ask. A deny rule always wins over an allow, so this cannot be done from
 
 **What it refuses.** A manifest must ask for what `local` really gives: network
 `allow` and filesystem `allow`, with no host or path lists. A manifest
-that leaves the network at its default (none) is refused when the agent is built,
+that leaves the network at its default (none), or no manifest at all, is refused when the agent is built,
 as are an image, a workspace mount, CPU, memory or GPU limits, a sandbox lifetime, and secret references.
 
 **What it enforces.** Each command's time limit (the command and everything it
@@ -533,7 +533,7 @@ isolates commands.
   </Accordion>
 
   <Accordion title="The local sandbox cannot restrict the network">
-    `local` with a `sandbox_manifest` that leaves the network at its default (`deny`). Building the
+    `local` with no `sandbox_manifest`, or one that leaves the network at its default (`deny`). Building the
     agent fails with:
 
     ```text
