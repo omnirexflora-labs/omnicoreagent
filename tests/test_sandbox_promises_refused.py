@@ -46,7 +46,11 @@ def test_denied_hosts_are_refused_where_no_provider_blocks_them(provider):
 @pytest.mark.parametrize("provider", ["docker", "e2b", "daytona", "modal", "vercel", "local", "http"])
 def test_secret_refs_are_refused_where_no_provider_delivers_them(provider):
     with pytest.raises(ValueError, match="secret_refs"):
-        _build(provider, {"environment": {"secret_refs": ["STRIPE_KEY"]}})
+        # `local` also needs a network of allow, or it is refused for that first.
+        _build(
+            provider,
+            {"network_policy": {"default": "allow"}, "environment": {"secret_refs": ["STRIPE_KEY"]}},
+        )
 
 
 def test_a_host_allowlist_on_daytona_is_refused():
@@ -132,3 +136,26 @@ def test_a_filesystem_policy_is_refused_with_what_to_use_instead():
 
 def test_the_local_provider_needs_no_filesystem_setting():
     _build("local", {"network_policy": {"default": "allow"}})
+
+
+# B6 (0.5.1 plan): `local` refused a network of `deny` and an image only at
+# the first command, after a person had been asked to approve it; the other
+# providers refuse what they do not apply when the agent is built.
+
+
+def test_local_refuses_network_deny_when_the_agent_is_built():
+    with pytest.raises(ValueError, match="local sandbox does not enforce network off.*allow"):
+        _build("local", {"network_policy": {"default": "deny"}})
+    # A manifest that says nothing about the network gets the default, deny.
+    with pytest.raises(ValueError, match="local sandbox does not enforce network off"):
+        _build("local", {"working_dir": "/tmp"})
+
+
+def test_local_refuses_an_image_when_the_agent_is_built():
+    with pytest.raises(ValueError, match="local sandbox does not enforce an image"):
+        _build("local", {"network_policy": {"default": "allow"}, "image": "python:3.12"})
+
+
+@pytest.mark.parametrize("provider", ["docker", "e2b", "daytona", "modal", "vercel", "http"])
+def test_an_image_is_still_accepted_where_the_provider_applies_one(provider):
+    _build(provider, {"network_policy": {"default": "deny"}, "image": "python:3.12"})

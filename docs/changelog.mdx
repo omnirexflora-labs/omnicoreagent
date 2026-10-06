@@ -13,6 +13,11 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- **The `local` provider refuses `network_policy: deny` and `image` when the agent is built.** It
+  refused them at the first command, after a person had been asked to approve the call. A
+  `sandbox_manifest` that asks for either, or says nothing about the network (the default is
+  `deny`), now fails at construction with the same message the other providers give. Its other
+  behaviour is unchanged.
 - **A sandbox command is in the record under `capture="full"`.** The `sandbox_exec_started` event
   carried only the program name and `argc`, and `sandbox_exec_completed` kept the exit code in its
   metadata but not beside `stdout` and `stderr`. Under `full`, the start event now holds the command
@@ -156,8 +161,6 @@ planned for 0.5.1.
 - **`read_skill_file` can read a sibling skill's files.** Its path check is by prefix, so a sibling
   whose name starts with the skill's own name (`../my-skill-extra/file` from `my-skill`) is not
   refused. Paths outside the skills folder are. Fixed in 0.5.1.
-- **The `local` provider refuses some settings late.** A `network_policy` of `deny`, or an `image`,
-  is refused at the first command rather than when the agent is built. The message says why.
 - **The generated `.dockerignore` is broad and narrow at once.** It leaves out any folder named
   `workspace` (including a Python package of that name), and of credential files it leaves out only
   `.env*`. Review it before building an image.
