@@ -65,7 +65,7 @@ class GovernedToolRunner:
                 # it ran after approval (0.5.1, A3).
                 budgets = current_budgets()
                 if budgets is not None and budgets.enabled:
-                    await _charge_before_the_call(budgets, single_tool)
+                    await _charge_once_allowed(budgets, single_tool)
                 # Authority the tool asks for while it runs (a sandbox's
                 # network, each command in it) is recorded against this call.
                 with on_behalf_of(single_tool.tool_call_id, single_tool.tool_name, single_tool.tool_provider):
@@ -168,7 +168,7 @@ class GovernedToolRunner:
                 # approval (0.5.1, A3).
                 budgets = current_budgets()
                 if budgets is not None and budgets.enabled:
-                    await _charge_before_the_call(budgets, single_tool)
+                    await _charge_once_allowed(budgets, single_tool)
                 if not telemetry_shape["single_event"]:
                     await telemetry_recorder.emit_event(
                         telemetry_shape["call_event"],
@@ -478,6 +478,19 @@ def _redact_tool_result_args(result: dict[str, Any]) -> dict[str, Any]:
     sanitized = dict(result)
     sanitized["args"] = "[REDACTED]"
     return sanitized
+
+
+async def _charge_once_allowed(budgets, single_tool) -> None:
+    """Charge a call that was allowed; if the budget refuses, keep its approval."""
+    from omnicoreagent.core.runs import current_run
+
+    try:
+        await _charge_before_the_call(budgets, single_tool)
+    except (BudgetExhaustedForRun, RunAwaitingBudget):
+        run = current_run()
+        if run is not None and getattr(run, "enabled", False):
+            await run.keep_approvals_for(single_tool.tool_call_id)
+        raise
 
 
 async def _charge_before_the_call(budgets, single_tool=None) -> None:

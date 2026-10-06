@@ -28,6 +28,9 @@ Every release, with its notes, is also on
   made by the number of approved writes (44 against 41 in one run, 40 against 37 in another). A call
   is now counted when it is allowed to run: one that is waiting, denied or refused by a rule is not
   counted, and a call the budget cannot afford still does not run.
+- **An approved call the budget then refuses is not asked about again.** When an approved call
+  resumed and the budget had nothing left, the person's approval was already marked used, so after
+  a grant the same call asked a second time. The approval is now kept until the call runs.
 
 - **A very small budget no longer pauses on every call, once a grant names its amount.** Nothing in
   the ledger is per call: a grant raises the run's limit and later calls draw on it (a limit of

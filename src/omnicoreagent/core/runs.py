@@ -450,6 +450,29 @@ class RunTracker:
                     approval.update(fields)
             await self._save()
 
+    async def keep_approvals_for(self, tool_call_id: str) -> None:
+        """Give back the approvals this call used, because it did not run.
+
+        A call that asked, was approved and resumed is authorized before it is
+        charged. When the budget then refused it, the person's yes had already
+        been marked used, so the grant and the next resume asked for the same
+        approval again (0.5.1, found checking A3). The decision stands until
+        the call runs.
+        """
+        async with self._lock:
+            changed = False
+            for approval in self.record.get("approvals", []):
+                if (
+                    approval.get("tool_call_id") == tool_call_id
+                    and approval.get("status") == "used"
+                    and approval.get("decision") == "approve"
+                    and approval.get("used_at")
+                ):
+                    approval.update(status="approved", used_at=None, used_for_approval_id=None)
+                    changed = True
+            if changed:
+                await self._save()
+
     async def add_budget_request(self, request: dict[str, Any]) -> dict[str, Any]:
         """Ask a person for more budget. A second refusal of the same budget
         and meter while one waits adds to it: two refused calls of one turn
