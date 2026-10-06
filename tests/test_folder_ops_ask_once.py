@@ -180,4 +180,8 @@ async def test_the_covered_files_are_listed_with_a_cap(tmp_path):
     text = json.dumps(approval)
     assert "docs/secret00.txt" in text and "docs/secret29.txt" not in text
     assert "and 20 more" in text
+    # The list and the target are in sorted order, whatever order the file
+    # system walks in (it differs between hosts; the 0.5.1 server suite).
+    assert approval["covered_files"][0] == "docs/secret00.txt"
+    assert approval["target"]["path"] == "docs/secret00.txt", approval["target"]
     await agent.cleanup()

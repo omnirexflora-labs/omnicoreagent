@@ -416,6 +416,7 @@ class GovernedToolRunner:
         # follows the file system's own order, which differs between hosts
         # (the 0.5.1 server suite listed secret17 first).
         covered.sort()
+        asked.sort(key=lambda request: str(request.target.path or ""))
         shown = covered[:_COVERED_FILES_SHOWN]
         if len(covered) > len(shown):
             shown.append(f"and {len(covered) - len(shown)} more")
