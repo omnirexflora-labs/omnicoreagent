@@ -13,6 +13,11 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- **Copying many files into a fresh Docker sandbox is one archive.** Each file was its own `mkdir`
+  and `put_archive` (about 0.3 s a file on the test machine), so 200 workspace files took 61 s;
+  they now go in as one tar stream, in 0.8 s. The same files are copied, with the same paths and
+  modes, and the sandbox user owns them. One path outside the working directory now refuses the
+  whole copy before anything is written.
 - **The generated `.dockerignore` is no longer broad and narrow at once.** It left out any folder
   named `workspace` (including a Python package of that name). It now leaves out only the workspace
   folder you configured (`OMNICOREAGENT_WORKSPACE_DIR`, default `./workspace`), anchored at the build
@@ -183,7 +188,6 @@ planned for 0.5.1.
 - **`read_skill_file` can read a sibling skill's files.** Its path check is by prefix, so a sibling
   whose name starts with the skill's own name (`../my-skill-extra/file` from `my-skill`) is not
   refused. Paths outside the skills folder are. Fixed in 0.5.1.
-- **Copying many files into a fresh Docker sandbox is slow**, at about 0.4 s per file.
 
 ## 0.4.4
 

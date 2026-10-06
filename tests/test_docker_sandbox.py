@@ -151,6 +151,22 @@ async def test_files_move_in_and_out_and_stay_inside_the_working_directory(sessi
 
 
 @pytest.mark.asyncio
+async def test_many_uploaded_files_arrive_in_nested_folders_and_the_command_user_can_change_them(session_of):
+    runtime = _runtime()
+    session = await session_of(runtime)
+    files = {f"/workspace/a/b{i % 4}/f{i}.txt": f"n{i}".encode() for i in range(40)}
+
+    await runtime.upload_files(session.session_id, files)
+    result = await _run(
+        runtime, session, "sh", "-c",
+        "ls -R a | grep -c '\\.txt$' && echo more >> a/b1/f1.txt && cat a/b1/f1.txt",
+    )
+
+    assert result.ok, result.stderr
+    assert result.stdout.split() == ["40", "n1more"]
+
+
+@pytest.mark.asyncio
 async def test_only_the_manifest_environment_reaches_the_container(session_of, monkeypatch):
     monkeypatch.setenv("HOST_ONLY_SECRET", "never-inside")
     runtime = _runtime()
