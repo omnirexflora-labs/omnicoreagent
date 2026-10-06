@@ -13,6 +13,12 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- **A sandbox command is in the record under `capture="full"`.** The `sandbox_exec_started` event
+  carried only the program name and `argc`, and `sandbox_exec_completed` kept the exit code in its
+  metadata but not beside `stdout` and `stderr`. Under `full`, the start event now holds the command
+  text, with credentials in it (`--api-key=...`, `TOKEN=...`, `Authorization: Bearer ...`) redacted;
+  under the default capture it still holds the name and `argc` only. The outcome's `output` now
+  carries `exit_code` under both.
 - **`read_skill_file` no longer reads a sibling skill's files.** The requested path is resolved,
   symlinks followed, and must sit inside the skill's own folder; otherwise it is refused with a
   message naming the skill.

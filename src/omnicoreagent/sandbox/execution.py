@@ -365,7 +365,19 @@ class SandboxExecutionService:
             "decision_id": authority.decision_id,
             "matched_rule_ids": list(authority.matched_rule_ids),
         }
-        await self._emit("sandbox_exec_started", metadata=facts)
+        # The command text is kept only where the capture policy keeps tool
+        # arguments (full capture); under the default, the facts above (name,
+        # argc) are the whole record. The 0.5.0 start event had no text at all,
+        # so a run recorded under capture="full" could not show what it ran.
+        from omnicoreagent.core.telemetry.recorder import redacts_governed_arguments
+
+        recorder = getattr(self.governance_engine, "telemetry_recorder", None)
+        keep_text = not (len(spec.command) > 1 and redacts_governed_arguments(recorder, True))
+        await self._emit(
+            "sandbox_exec_started",
+            input={"command": self._recorded(list(spec.command))} if keep_text else None,
+            metadata=facts,
+        )
         started = time.monotonic()
         try:
             result = await runtime.execute(
@@ -392,7 +404,9 @@ class SandboxExecutionService:
         await self._emit(
             "sandbox_exec_completed" if result.ok else "sandbox_exec_failed",
             input={"command": self._recorded(list(spec.command))},
-            output={"stdout": result.stdout, "stderr": result.stderr},
+            # The exit code is in the output as well as the metadata: a reader of
+            # the output saw stdout and stderr but not the status the model saw.
+            output={"exit_code": result.exit_code, "stdout": result.stdout, "stderr": result.stderr},
             metadata={
                 **facts,
                 "exit_code": result.exit_code,
@@ -417,7 +431,15 @@ class SandboxExecutionService:
         recorder = getattr(self.governance_engine, "telemetry_recorder", None)
         if len(command) > 1 and redacts_governed_arguments(recorder, True):
             return [str(command[0]), f"[REDACTED] ({len(command) - 1} argument(s))"]
-        return [str(part) for part in command]
+        config = getattr(recorder, "config", None)
+        if config is None:
+            return [str(part) for part in command]
+        # A command is a list of words, which key-based redaction cannot read:
+        # a credential inside one (`--api-key=...`, `GITHUB_TOKEN=...`, an
+        # `Authorization: Bearer ...` header) is found as it is in free text.
+        from omnicoreagent.core.telemetry.redaction import redact_sensitive_text
+
+        return [redact_sensitive_text(str(part), config) for part in command]
 
     async def _emit(self, event_type: str, **fields: Any) -> None:
         from omnicoreagent.sandbox.telemetry import emit_sandbox_event

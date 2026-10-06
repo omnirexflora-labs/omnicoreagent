@@ -168,3 +168,56 @@ async def test_the_trajectory_shows_each_execution_under_its_tool_call_and_total
     # The session lifecycle is in the trajectory too, not dropped.
     lifecycle = [e["event_type"] for e in trajectory["other_events"]]
     assert "sandbox_session_closed" in lifecycle
+
+
+async def _one_command(config: TelemetryConfig, command: list[str]):
+    async def run(service):
+        session = await service.open_session()
+        await service.execute(SandboxCommandSpec(command=command, timeout_seconds=5), session=session)
+        await service.close_session(session)
+
+    return await _recorded(config, run)
+
+
+_TOKEN = "sk-live-abcdef0123456789abcdef"
+
+
+@pytest.mark.asyncio
+async def test_full_capture_records_the_command_text_when_it_starts_redacted_for_secrets():
+    # The 0.5.0 steward runs ran under capture="full" and the start event had
+    # no command text, so a watcher read commands from the model's tool-call
+    # arguments instead.
+    events = await _one_command(
+        TelemetryConfig(capture="full"), ["echo", "hi", f"--api-key={_TOKEN}", f"GITHUB_TOKEN={_TOKEN}", f"Authorization: Bearer {_TOKEN}"]
+    )
+    started = next(e for e in events if e.event_type == "sandbox_exec_started")
+
+    assert started.input is not None
+    assert started.input["command"][:2] == ["echo", "hi"]
+    assert _TOKEN not in json.dumps(started.model_dump(), default=str)
+    assert started.metadata["command_name"] == "echo" and started.metadata["argc"] == 5
+
+
+@pytest.mark.asyncio
+async def test_default_capture_records_the_name_and_argc_only_when_it_starts():
+    events = await _one_command(TelemetryConfig(capture="default"), ["echo", "hi", "private-argument"])
+    started = next(e for e in events if e.event_type == "sandbox_exec_started")
+
+    assert started.metadata["command_name"] == "echo" and started.metadata["argc"] == 3
+    assert "private-argument" not in json.dumps(started.model_dump(), default=str)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("config", [TelemetryConfig(capture="default"), TelemetryConfig(capture="full")])
+async def test_the_outcome_carries_the_exit_code_with_its_output_under_every_capture(config):
+    async def run(service):
+        session = await service.open_session()
+        await service.execute(SandboxCommandSpec(command=["fail"]), session=session)
+        await service.execute(SandboxCommandSpec(command=["echo", "x"]), session=session)
+        await service.close_session(session)
+
+    events = await _recorded(config, run)
+    outcomes = [e for e in events if e.event_type in {"sandbox_exec_completed", "sandbox_exec_failed"}]
+
+    assert [e.metadata["exit_code"] for e in outcomes] == [3, 0]
+    assert [e.output["exit_code"] for e in outcomes] == [3, 0]

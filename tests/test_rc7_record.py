@@ -38,7 +38,10 @@ def test_a_sandbox_commands_text_follows_the_capture_policy_in_the_trace():
         return SandboxExecutionService(SimpleNamespace(telemetry_recorder=_recorder(capture)))
 
     command = ["sh", "-c", "printf token=secret-xyz > note.txt"]
-    assert service("full")._recorded(command) == command
+    # Under full capture the text is kept, with a credential in it redacted as
+    # it is in free text (0.5.1: the start event carries it too).
+    assert service("full")._recorded(command) == ["sh", "-c", "printf token=[REDACTED] > note.txt"]
+    assert service("full")._recorded(["ls", "-l"]) == ["ls", "-l"]
     assert service("default")._recorded(command) == ["sh", "[REDACTED] (2 argument(s))"]
 
 
