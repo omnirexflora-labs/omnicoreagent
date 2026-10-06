@@ -208,7 +208,11 @@ def test_background_api_runs_task_and_exposes_events_and_workspace(tmp_path):
         assert [item["sequence"] for item in replayed_events] == list(
             range(1, len(replayed_events) + 1)
         )
-        assert event_names[:3] == [
+        # A claimed run's heartbeat starts with the claim, so on a slow tick a
+        # heartbeat can land before "started"; the lifecycle order is what this
+        # checks. It failed 3 to 5 runs in 100, on 0.5.0 as well (2026-10-06).
+        lifecycle = [name for name in event_names if name != "background_run_heartbeat"]
+        assert lifecycle[:3] == [
             "background_run_queued",
             "background_run_claimed",
             "background_run_started",
