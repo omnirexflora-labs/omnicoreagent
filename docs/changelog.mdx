@@ -23,6 +23,11 @@ Every release, with its notes, is also on
   decision for its command (allowed, or approved), and the trace says so (`follows_command`). A rule
   you write for it still decides, and each file copied back is still decided by the workspace file
   rules. When a rule refuses the listing, the model is told why instead of "the sandbox was lost".
+- **The `tool_calls` budget counts a call once.** A call that asked for approval was counted when
+  it asked and again when it ran after approval and resume, so the meter ran ahead of the calls
+  made by the number of approved writes (44 against 41 in one run, 40 against 37 in another). A call
+  is now counted when it is allowed to run: one that is waiting, denied or refused by a rule is not
+  counted, and a call the budget cannot afford still does not run.
 
 ## 0.5.0
 

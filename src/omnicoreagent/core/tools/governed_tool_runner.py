@@ -54,15 +54,18 @@ class GovernedToolRunner:
         outcome = telemetry_outcome if telemetry_outcome is not None else {}
         if telemetry_recorder is None:
             async with stop_after(deadline_seconds):
-                budgets = current_budgets()
-                if budgets is not None and budgets.enabled:
-                    await _charge_before_the_call(budgets, single_tool)
                 governance_error = await self._authorize_single_tool(single_tool)
                 if governance_error is not None:
                     return self._governance_error_result(
                         single_tool=single_tool,
                         governance_error=governance_error,
                     )
+                # Charged once the call is allowed to run, not before: a call
+                # that asked and waited was charged at the ask and again when
+                # it ran after approval (0.5.1, A3).
+                budgets = current_budgets()
+                if budgets is not None and budgets.enabled:
+                    await _charge_before_the_call(budgets, single_tool)
                 # Authority the tool asks for while it runs (a sandbox's
                 # network, each command in it) is recorded against this call.
                 with on_behalf_of(single_tool.tool_call_id, single_tool.tool_name, single_tool.tool_provider):
@@ -116,10 +119,6 @@ class GovernedToolRunner:
         # recorded as a timeout rather than left unfinished.
         async with stop_after(deadline_seconds) as own_limit:
             try:
-                # A call that the run cannot afford is not made.
-                budgets = current_budgets()
-                if budgets is not None and budgets.enabled:
-                    await _charge_before_the_call(budgets, single_tool)
                 governance_error = await self._authorize_single_tool(single_tool)
                 if governance_error is not None:
                     result = self._governance_error_result(
@@ -163,6 +162,13 @@ class GovernedToolRunner:
                         },
                     )
                     return result
+                # A call that the run cannot afford is not made. Charged here,
+                # once the call is allowed to run: a call that asked and
+                # waited was charged at the ask and again when it ran after
+                # approval (0.5.1, A3).
+                budgets = current_budgets()
+                if budgets is not None and budgets.enabled:
+                    await _charge_before_the_call(budgets, single_tool)
                 if not telemetry_shape["single_event"]:
                     await telemetry_recorder.emit_event(
                         telemetry_shape["call_event"],

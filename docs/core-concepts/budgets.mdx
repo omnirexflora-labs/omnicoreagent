@@ -144,7 +144,7 @@ agent_config = {
 | `model_cost_usd` | Dollars, from the provider's published prices | before each call (held), settled after |
 | `model_calls` | Model calls | before each call |
 | `model_tokens` | Tokens in and out | before each call (its input must fit), counted after |
-| `tool_calls` | Tool calls | as each is authorized |
+| `tool_calls` | Tool calls | once, when each runs |
 | `sandbox_seconds` | Seconds a sandbox session is open | before each command, and when the session closes |
 | `subagent_runs` | Workers started with `spawn_subagents` | as each starts |
 

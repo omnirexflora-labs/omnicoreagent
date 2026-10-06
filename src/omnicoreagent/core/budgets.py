@@ -48,7 +48,7 @@ METER_DESCRIPTIONS = {
     "model_cost_usd": "Dollars spent on model calls, priced from the provider's published rates. Each call's price is held before it is made.",
     "model_tokens": "Tokens in and out of model calls.",
     "model_calls": "Model calls.",
-    "tool_calls": "Tool calls, counted as each is authorized.",
+    "tool_calls": "Tool calls, counted once, when each runs (a call waiting for approval is not counted until it does).",
     "sandbox_seconds": "Seconds sandbox sessions were open.",
     "subagent_runs": "Workers started with spawn_subagents.",
 }
