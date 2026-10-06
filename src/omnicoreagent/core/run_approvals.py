@@ -189,6 +189,9 @@ class RunApprovalResolver:
                 # For a shell command: the commands it would run, which the
                 # person deciding reads (the target alone says only `sh`).
                 "command": _command_for_approver(metadata.get("command")),
+                # For a folder operation: the files under an ask rule that the
+                # one question covers.
+                "covered_files": metadata.get("covered_files"),
                 "created_at": now.isoformat(),
                 "expires_at": (approval.expires_at or now + DEFAULT_APPROVAL_TTL).isoformat(),
                 "approver": None,

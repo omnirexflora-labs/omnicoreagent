@@ -54,15 +54,18 @@ class GovernedToolRunner:
         outcome = telemetry_outcome if telemetry_outcome is not None else {}
         if telemetry_recorder is None:
             async with stop_after(deadline_seconds):
-                budgets = current_budgets()
-                if budgets is not None and budgets.enabled:
-                    await _charge_before_the_call(budgets, single_tool)
                 governance_error = await self._authorize_single_tool(single_tool)
                 if governance_error is not None:
                     return self._governance_error_result(
                         single_tool=single_tool,
                         governance_error=governance_error,
                     )
+                # Charged once the call is allowed to run, not before: a call
+                # that asked and waited was charged at the ask and again when
+                # it ran after approval (0.5.1, A3).
+                budgets = current_budgets()
+                if budgets is not None and budgets.enabled:
+                    await _charge_once_allowed(budgets, single_tool)
                 # Authority the tool asks for while it runs (a sandbox's
                 # network, each command in it) is recorded against this call.
                 with on_behalf_of(single_tool.tool_call_id, single_tool.tool_name, single_tool.tool_provider):
@@ -116,10 +119,6 @@ class GovernedToolRunner:
         # recorded as a timeout rather than left unfinished.
         async with stop_after(deadline_seconds) as own_limit:
             try:
-                # A call that the run cannot afford is not made.
-                budgets = current_budgets()
-                if budgets is not None and budgets.enabled:
-                    await _charge_before_the_call(budgets, single_tool)
                 governance_error = await self._authorize_single_tool(single_tool)
                 if governance_error is not None:
                     result = self._governance_error_result(
@@ -163,6 +162,13 @@ class GovernedToolRunner:
                         },
                     )
                     return result
+                # A call that the run cannot afford is not made. Charged here,
+                # once the call is allowed to run: a call that asked and
+                # waited was charged at the ask and again when it ran after
+                # approval (0.5.1, A3).
+                budgets = current_budgets()
+                if budgets is not None and budgets.enabled:
+                    await _charge_once_allowed(budgets, single_tool)
                 if not telemetry_shape["single_event"]:
                     await telemetry_recorder.emit_event(
                         telemetry_shape["call_event"],
@@ -351,12 +357,84 @@ class GovernedToolRunner:
                 actor=self.agent_name,
                 tool_call_id=single_tool.tool_call_id,
             )
+            requests = self._with_folder_coverage(single_tool, requests)
             await self.governance_engine.authorize_all(requests)
         except (GovernanceError, ValueError) as exc:
             if isinstance(exc, GovernanceError):
                 return exc
             return ToolArgumentsInvalid(str(exc))
         return None
+
+    def _with_folder_coverage(self, single_tool: ToolCallResult, requests: list) -> list:
+        """Decide a folder operation by the files under it, before it runs.
+
+        Deleting, moving or clearing a folder touches each file in it. A deny
+        rule on one of them refuses the whole operation (its request is added,
+        so the policy's own reason is what the model reads). Files under an ask
+        rule are asked about once, as one approval that lists them, carried by
+        the folder's own request if that asks, else by the first covered file's;
+        once it is approved the files count as approved for this operation only
+        (0.5.1, B5: such a folder was refused with "does not allow", though a
+        person could have approved it)."""
+        from omnicoreagent.core.workspace.files import (
+            APPROVED_FOLDER_OPERATIONS,
+            folder_operation_key,
+        )
+        from omnicoreagent.core.workspace.tools import FOLDER_CALLS_ATTRIBUTE
+        from omnicoreagent.governance.models import PolicyEffect
+
+        if single_tool.tool_provider != "workspace" or not requests:
+            return requests
+        tool = _registered_tool(single_tool)
+        folder_calls = getattr(getattr(tool, "function", None), FOLDER_CALLS_ATTRIBUTE, None)
+        if folder_calls is None:
+            return requests
+        APPROVED_FOLDER_OPERATIONS.set(frozenset())
+        engine = self.governance_engine
+        asked: list = []
+        covered: list[str] = []
+        for file_tool, file_args in folder_calls(single_tool.tool_name, single_tool.tool_args):
+            for request in tool_authority_requests(
+                tool_name=file_tool,
+                tool_args=file_args,
+                tool_provider="workspace",
+                actor=self.agent_name,
+                tool_call_id=single_tool.tool_call_id,
+            ):
+                effect = engine.evaluator.evaluate(engine.policy, request).effect
+                if effect == PolicyEffect.ALLOW:
+                    continue
+                if effect != PolicyEffect.ASK:
+                    return [*requests, request]
+                asked.append(request)
+                path = file_args.get("path") or file_args.get("old_path")
+                if path not in covered:
+                    covered.append(path)
+        if not asked:
+            return requests
+        # Sorted, so the person reads the same list on every machine: the walk
+        # follows the file system's own order, which differs between hosts
+        # (the 0.5.1 server suite listed secret17 first).
+        covered.sort()
+        asked.sort(key=lambda request: str(request.target.path or ""))
+        shown = covered[:_COVERED_FILES_SHOWN]
+        if len(covered) > len(shown):
+            shown.append(f"and {len(covered) - len(shown)} more")
+        carrier = next(
+            (r for r in requests if engine.evaluator.evaluate(engine.policy, r).effect == PolicyEffect.ASK),
+            None,
+        )
+        extra = []
+        if carrier is None:
+            carrier = asked[0]
+            carrier.metadata["arguments_digest"] = requests[0].metadata.get("arguments_digest")
+            extra = [carrier]
+        carrier.metadata["covered_files"] = shown
+        carrier.metadata["covered_count"] = len(covered)
+        APPROVED_FOLDER_OPERATIONS.set(
+            frozenset({folder_operation_key(single_tool.tool_name, single_tool.tool_args)})
+        )
+        return [*requests, *extra]
 
     def _governance_error_result(
         self, *, single_tool: ToolCallResult, governance_error: GovernanceError
@@ -384,6 +462,17 @@ class GovernedToolRunner:
             ),
             "governance": getattr(governance_error, "metadata", {}),
         }
+
+
+# How many covered files an approval lists before saying "and N more".
+_COVERED_FILES_SHOWN = 10
+
+
+def _registered_tool(single_tool: ToolCallResult) -> Any:
+    """The registry entry a call will run, when its executor is a local one."""
+    registry = getattr(getattr(single_tool.tool_executor, "tool_handler", None), "local_tools", None)
+    get_tool = getattr(registry, "get_tool", None)
+    return get_tool(single_tool.tool_name) if callable(get_tool) else None
 
 
 def _tool_telemetry_shape(single_tool: ToolCallResult) -> dict[str, Any]:
@@ -472,6 +561,19 @@ def _redact_tool_result_args(result: dict[str, Any]) -> dict[str, Any]:
     sanitized = dict(result)
     sanitized["args"] = "[REDACTED]"
     return sanitized
+
+
+async def _charge_once_allowed(budgets, single_tool) -> None:
+    """Charge a call that was allowed; if the budget refuses, keep its approval."""
+    from omnicoreagent.core.runs import current_run
+
+    try:
+        await _charge_before_the_call(budgets, single_tool)
+    except (BudgetExhaustedForRun, RunAwaitingBudget):
+        run = current_run()
+        if run is not None and getattr(run, "enabled", False):
+            await run.keep_approvals_for(single_tool.tool_call_id)
+        raise
 
 
 async def _charge_before_the_call(budgets, single_tool=None) -> None:

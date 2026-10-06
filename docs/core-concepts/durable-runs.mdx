@@ -27,6 +27,7 @@ stateDiagram-v2
     running --> awaiting_budget: a budget ran out
     running --> interrupted: interrupt()
     running --> cancelled: task cancelled, or abandon_run()
+    running --> abandoned: a worker whose lead run ended and whose process is gone
     awaiting_approval --> running: resolve_approval(), resume()
     awaiting_budget --> running: grant_budget(), resume()
     interrupted --> running: resume()
@@ -481,6 +482,12 @@ resume: Run run_stale is cancelled; only a waiting or stopped run can resume
 A run that has already ended is left as it is: `abandon_run` returns its record
 unchanged.
 
+Workers the run started with `spawn_subagents` are settled when the run ends,
+whether it finishes (after a resume, say), is cancelled or is abandoned. A worker
+still `running` whose own heartbeat is older than its lease has lost its process
+and its lead, so it becomes `abandoned`, with an error naming the lead's run.
+A worker whose heartbeat is current is never touched.
+
 ## Run again with the same run ID
 
 Calling `run(query, run_id=...)` with the ID of a finished run (`completed`,
@@ -519,6 +526,7 @@ the same moments in two vocabularies:
 | (raises) | `cancelled` | The task running it was cancelled, or `abandon_run(status="cancelled")`. |
 | — | `timeout` | A deadline passed: OmniServe's request timeout, a background task's `timeout_seconds`, the headless CLI's `--timeout`, or `abandon_run(status="timeout")`. The record's error is `The run's deadline passed`. |
 | — | `running` | Running now, or its process died (the heartbeat says which). |
+| — | `abandoned` | A worker started by `spawn_subagents` whose process died and whose lead run has ended. The record's error names the lead's run. |
 
 ## One story per run
 
@@ -535,13 +543,14 @@ print("tool calls:", story["totals"]["tool_calls"])
 
 ```text
 status: completed | attempt: 1
-  trace_d80546f3f35e4811af5bf2092e041301 running True
+  trace_d80546f3f35e4811af5bf2092e041301 interrupted True
   trace_ec36eb4aa0b0423c94df381b016c24cb completed True
 tool calls: {'total': 3, 'by_outcome': {'success': 2, 'error': 0, 'rejected': 0, 'timeout': 0, 'cancelled': 1, 'denied': 0, 'awaiting_approval': 0}}
 ```
 
-The first segment stays `running`: its process died before it could end its
-trace. The two views count the interrupted call differently, on purpose: the
+The first segment is `interrupted`: its process died before it could end its
+trace, so the resume closed it, ended at its last event. (Until a run resumes,
+the dead segment still reads `running`.) The two views count the interrupted call differently, on purpose: the
 run record says what is known of its effect (`unknown`: it started and no
 result came back), and the trajectory's totals say how its span ended
 (`cancelled`, or `timeout` when a deadline stopped it). Each segment's steps are in `segment["trajectory"]["steps"]`; `totals`

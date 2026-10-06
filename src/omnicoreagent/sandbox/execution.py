@@ -10,7 +10,14 @@ from uuid import uuid4
 from omnicoreagent.governance.commands import attach_command
 from omnicoreagent.governance.calls import tool_call_metadata
 from omnicoreagent.governance.capabilities import secret_authority_request
-from omnicoreagent.governance.models import AuthorityRequest, AuthorityTarget
+from omnicoreagent.governance.models import (
+    AuthorityRequest,
+    AuthorityTarget,
+    PolicyDecision,
+    PolicyEffect,
+    ReasonCode,
+)
+from omnicoreagent.governance.telemetry import emit_policy_decision, emit_policy_request
 from omnicoreagent.sandbox.base import SandboxRuntime
 from omnicoreagent.sandbox.errors import SandboxUnsupportedError
 from omnicoreagent.sandbox.models import (
@@ -45,6 +52,10 @@ class SandboxCommandSpec:
     timeout_seconds: int | None = None
     environment: dict[str, str] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Set only by the runtime for its own listing after a command: the
+    # command's authority (``SandboxAuthorityContext.to_metadata()``). Without
+    # an explicit rule of its own, the listing follows that decision.
+    follows_decision: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.command, str) or not isinstance(self.command, list | tuple):
@@ -250,9 +261,10 @@ class SandboxExecutionService:
         if spec.manifest is not None:
             raise ValueError("A command in an open session uses the session's manifest")
         runtime = self._runtime()
-        decision = await self.governance_engine.authorize_sandboxed(
-            _sandbox_authority_request(spec, _surface(runtime))
-        )
+        request = _sandbox_authority_request(spec, _surface(runtime))
+        decision = await self._follow_command_decision(spec, request)
+        if decision is None:
+            decision = await self.governance_engine.authorize_sandboxed(request)
         authority = SandboxAuthorityContext.from_policy_decision(decision)
         started, commands = self._session_started.get(session.session_id, (time.monotonic(), 0))
         self._session_started[session.session_id] = (started, commands + 1)
@@ -268,6 +280,52 @@ class SandboxExecutionService:
             "authority": authority.to_metadata(),
         }
         return result
+
+    async def _follow_command_decision(
+        self, spec: SandboxCommandSpec, request: AuthorityRequest
+    ) -> PolicyDecision | None:
+        """The runtime's listing after a command, decided as its command was.
+
+        Found filming the steward (2026-10-05): a strict policy that allowed
+        sandbox commands but had no rule for ``sandbox.workspace.sync`` denied
+        the listing after every command, and no file came back. The listing
+        only reads the sandbox the command already ran in, so it adds no
+        reach; every file it copies back is still decided by the workspace
+        file rules. When a rule names the sync (allow, ask or deny) that rule
+        decides, exactly as before. Only when no rule matches, the case a mode
+        decides, does it follow the command. Returns None when it does not.
+        """
+        follows = spec.follows_decision
+        if follows is None or request.capability != "sandbox.workspace.sync" or request.actor != "runtime":
+            return None
+        engine = self.governance_engine
+        evaluator = getattr(engine, "evaluator", None)
+        policy = getattr(engine, "policy", None)
+        if evaluator is None or policy is None:
+            return None
+        try:
+            matched = evaluator.evaluate(policy, request)
+        except Exception:  # noqa: BLE001 - the engine's own path fails closed and says why.
+            return None
+        if matched.reason_code != ReasonCode.UNKNOWN_CAPABILITY:
+            return None
+        command = follows.get("authority_request_id")
+        decision = PolicyDecision(
+            effect=PolicyEffect.ALLOW,
+            request_id=request.request_id,
+            policy_id=matched.policy_id,
+            policy_hash=matched.policy_hash,
+            reason_code=ReasonCode.FOLLOWS_COMMAND,
+            reason=(
+                f"Allowed: no rule names {request.capability}, so it follows the decision for "
+                f"the command that triggered it (request {command}, {follows.get('reason_code')})."
+            ),
+            metadata={"follows_request_id": command, "follows_decision_id": follows.get("decision_id")},
+        )
+        recorder = getattr(engine, "telemetry_recorder", None)
+        await emit_policy_request(recorder, request)
+        await emit_policy_decision(recorder, decision, request=request)
+        return decision
 
     def _refuse_mount_over_policy(self, manifest: SandboxManifest) -> None:
         """A sandbox must not be able to write the policy that governs it."""
@@ -307,7 +365,19 @@ class SandboxExecutionService:
             "decision_id": authority.decision_id,
             "matched_rule_ids": list(authority.matched_rule_ids),
         }
-        await self._emit("sandbox_exec_started", metadata=facts)
+        # The command text is kept only where the capture policy keeps tool
+        # arguments (full capture); under the default, the facts above (name,
+        # argc) are the whole record. The 0.5.0 start event had no text at all,
+        # so a run recorded under capture="full" could not show what it ran.
+        from omnicoreagent.core.telemetry.recorder import redacts_governed_arguments
+
+        recorder = getattr(self.governance_engine, "telemetry_recorder", None)
+        keep_text = not (len(spec.command) > 1 and redacts_governed_arguments(recorder, True))
+        await self._emit(
+            "sandbox_exec_started",
+            input={"command": self._recorded(list(spec.command))} if keep_text else None,
+            metadata=facts,
+        )
         started = time.monotonic()
         try:
             result = await runtime.execute(
@@ -334,7 +404,9 @@ class SandboxExecutionService:
         await self._emit(
             "sandbox_exec_completed" if result.ok else "sandbox_exec_failed",
             input={"command": self._recorded(list(spec.command))},
-            output={"stdout": result.stdout, "stderr": result.stderr},
+            # The exit code is in the output as well as the metadata: a reader of
+            # the output saw stdout and stderr but not the status the model saw.
+            output={"exit_code": result.exit_code, "stdout": result.stdout, "stderr": result.stderr},
             metadata={
                 **facts,
                 "exit_code": result.exit_code,
@@ -359,7 +431,15 @@ class SandboxExecutionService:
         recorder = getattr(self.governance_engine, "telemetry_recorder", None)
         if len(command) > 1 and redacts_governed_arguments(recorder, True):
             return [str(command[0]), f"[REDACTED] ({len(command) - 1} argument(s))"]
-        return [str(part) for part in command]
+        config = getattr(recorder, "config", None)
+        if config is None:
+            return [str(part) for part in command]
+        # A command is a list of words, which key-based redaction cannot read:
+        # a credential inside one (`--api-key=...`, `GITHUB_TOKEN=...`, an
+        # `Authorization: Bearer ...` header) is found as it is in free text.
+        from omnicoreagent.core.telemetry.redaction import redact_sensitive_text
+
+        return [redact_sensitive_text(str(part), config) for part in command]
 
     async def _emit(self, event_type: str, **fields: Any) -> None:
         from omnicoreagent.sandbox.telemetry import emit_sandbox_event

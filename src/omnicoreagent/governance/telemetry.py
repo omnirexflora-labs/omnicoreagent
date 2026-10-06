@@ -175,11 +175,18 @@ def _recorded_approval(recorder: Any, request: ApprovalRequest) -> dict[str, Any
 
     plain = to_plain(request)
     command = ((plain.get("metadata") or {}).get("command") or {}) if isinstance(plain, dict) else {}
-    if command.get("summary") and redacts_governed_arguments(recorder, True):
-        plain["metadata"] = {
-            **plain["metadata"],
-            "command": {**command, "summary": [f"[REDACTED] ({len(command['summary'])} command(s))"]},
-        }
+    if not command.get("summary"):
+        return plain
+    if redacts_governed_arguments(recorder, True):
+        summary = [f"[REDACTED] ({len(command['summary'])} command(s))"]
+    else:
+        # Under full capture the text is kept, with a ``key=value`` credential
+        # redacted as the sandbox command's own record does (0.5.1: the
+        # approval summary kept ``printf token=...`` verbatim).
+        from omnicoreagent.core.telemetry.redaction import redact_sensitive_text
+
+        summary = [redact_sensitive_text(str(line), recorder.config) for line in command["summary"]]
+    plain["metadata"] = {**plain["metadata"], "command": {**command, "summary": summary}}
     return plain
 
 

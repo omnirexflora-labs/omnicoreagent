@@ -50,6 +50,9 @@ class TraceStatus(str, Enum):
     PARTIAL = "partial"
     # The run is waiting for a person; it continues in a new trace segment.
     SUSPENDED = "suspended"
+    # A segment whose process died. The run resumed in a later segment, which
+    # closed this one at its last event (0.5.1: it showed `running` for good).
+    INTERRUPTED = "interrupted"
 
 
 class CaptureState(str, Enum):

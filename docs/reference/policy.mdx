@@ -27,7 +27,8 @@ until someone decides ([durable runs](/docs/core-concepts/durable-runs)); the
 
 A decision is recorded in the run's trace with its `effect` and `reason_code`
 (`matched_allow`, `matched_ask`, `matched_deny`, `unknown_capability`,
-`approved` when a person allowed an ask, and others).
+`approved` when a person allowed an ask, `follows_command` for the runtime's own
+listing after a sandbox command, and others).
 
 Two capabilities are decided when the agent connects, not during a run:
 `mcp.server.start` and `mcp.server.connect`. There is no run to pause then, so
@@ -192,7 +193,7 @@ and invisible characters shown; the approval is bound to that exact text.
 | `sandbox.image.use` | Start the sandbox from an image named in the manifest. Target: resource (the image). |
 | `sandbox.network.configure` | Turn the sandbox's network on, or allow or deny a host in it. Target: host. |
 | `sandbox.resources.set` | Set the sandbox's CPU, memory, disk or time limits. |
-| `sandbox.workspace.sync` | The runtime's own listing of the sandbox's files after a command, to copy what changed back to the workspace. Not an agent command: command rules do not judge it. Target: resource (the program). |
+| `sandbox.workspace.sync` | The runtime's own listing of the sandbox's files after a command, to copy what changed back to the workspace. Not an agent command: command rules do not judge it. With no rule of its own it follows the decision for the command that triggered it; a rule you write for it (allow, ask or deny) decides instead. Each file it copies back is still decided by the workspace file rules. Target: resource (the program). |
 | `secret.read` | Read a secret's value. |
 | `secret.use` | Use a secret without reading it: brokered into a command, never shown to the model. |
 | `skill.files.read` | Read a skill's instructions and files. |

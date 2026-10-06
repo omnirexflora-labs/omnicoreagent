@@ -9,6 +9,87 @@ icon: 'clock-rotate-left'
 Every release, with its notes, is also on
 [GitHub Releases](https://github.com/omnirexflora-labs/omnicoreagent/releases).
 
+## Unreleased (0.5.1)
+
+### Fixed
+
+- **Copying many files into a fresh Docker sandbox is one archive.** Each file was its own `mkdir`
+  and `put_archive` (about 0.3 s a file on the test machine), so 200 workspace files took 61 s;
+  they now go in as one tar stream, in 0.8 s. The same files are copied, with the same paths and
+  modes, and the sandbox user owns them. One path outside the working directory now refuses the
+  whole copy before anything is written.
+- **The generated `.dockerignore` is no longer broad and narrow at once.** It left out any folder
+  named `workspace` (including a Python package of that name). It now leaves out only the workspace
+  folder you configured (`OMNICOREAGENT_WORKSPACE_DIR`, default `./workspace`), anchored at the build
+  context's root. It also leaves out, in any folder, `.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`,
+  `id_rsa*`, `id_ed25519*`, `.netrc`, `.npmrc`, `.pypirc`, `credentials*.json`, `.aws` and `.ssh`
+  (before, `.env*` only). An existing `.dockerignore` is still kept as it is.
+- **The `local` provider refuses `network_policy: deny` and `image` when the agent is built.** It
+  refused them at the first command, after a person had been asked to approve the call. A
+  `sandbox_manifest` that asks for either, or says nothing about the network (the default is
+  `deny`), or no manifest at all, now fails at construction with the same message the other providers give. Its other
+  behaviour is unchanged.
+- **A sandbox command is in the record under `capture="full"`.** The `sandbox_exec_started` event
+  carried only the program name and `argc`, and `sandbox_exec_completed` kept the exit code in its
+  metadata but not beside `stdout` and `stderr`. Under `full`, the start event now holds the command
+  text, with credentials in it (`--api-key=...`, `TOKEN=...`, `Authorization: Bearer ...`) redacted;
+  under the default capture it still holds the name and `argc` only. The outcome's `output` now
+  carries `exit_code` under both.
+- **Two agents sharing one telemetry store must agree on `retention_days`.** The store is one
+  object per file in a process, so the second agent silently got the first one's window (a warning
+  was logged and its value ignored). A second, different value is now refused when that agent
+  opens the store (`initialize()`), with a message naming both values; the same value is fine, and
+  `None` (keep every trace) counts as a value. Give such agents the same `retention_days`, or a
+  `storage_path` each.
+- **A folder operation under an ask rule asks once.** Deleting, moving or clearing a folder that
+  holds a file covered by an *ask* rule was refused, and the message said the policy "does not
+  allow" it. The operation now asks a person once and lists the covered files (the first ten, then
+  "and N more"; the pending approval carries them as `covered_files`). Approving lets the operation
+  run, and the covered files count as approved for that operation only; denying changes nothing.
+  A *deny* rule on any file inside still refuses the whole operation, without asking. Where nobody
+  can be asked (`approval_mode="fail"`) the message says the call needs a person's approval.
+- **An approval's command text follows the same secret rule as a sandbox command.** Under
+  `capture="full"` the approval events in the trace kept a shell command's summary verbatim, so
+  `printf token=...` carried its credential. They now keep the text with `key=value` credentials
+  redacted, as the sandbox command's own record does; under the default capture the summary is
+  still replaced by its count. The approval shown to the person and the run's own record are
+  unchanged.
+- **`read_skill_file` no longer reads a sibling skill's files.** The requested path is resolved,
+  symlinks followed, and must sit inside the skill's own folder; otherwise it is refused with a
+  message naming the skill.
+- **A strict policy no longer silently denies the sandbox's own file listing.** After a sandbox
+  command, the runtime lists the sandbox's files to copy what changed back to the workspace
+  (`sandbox.workspace.sync`). A custom `mode: strict` policy with no rule for it denied the listing
+  on every command, and nothing came back. With no rule of its own the listing now follows the
+  decision for its command (allowed, or approved), and the trace says so (`follows_command`). A rule
+  you write for it still decides, and each file copied back is still decided by the workspace file
+  rules. When a rule refuses the listing, the model is told why instead of "the sandbox was lost".
+- **The `tool_calls` budget counts a call once.** A call that asked for approval was counted when
+  it asked and again when it ran after approval and resume, so the meter ran ahead of the calls
+  made by the number of approved writes (44 against 41 in one run, 40 against 37 in another). A call
+  is now counted when it is allowed to run: one that is waiting, denied or refused by a rule is not
+  counted, and a call the budget cannot afford still does not run.
+- **An approved call the budget then refuses is not asked about again.** When an approved call
+  resumed and the budget had nothing left, the person's approval was already marked used, so after
+  a grant the same call asked a second time. The approval is now kept until the call runs.
+- **After a crash and resume, the dead segment no longer shows `running`.** When a run resumes,
+  its earlier trace segments that never ended are closed with the new trace status `interrupted`
+  and an end time equal to their last event. Listings filtered by `status=running` no longer
+  return them, and the run's own record is unchanged. `interrupted` is a new value of the trace
+  `status` filter.
+- **A worker whose lead crashed no longer stays `running`.** When a lead run ends (finished after
+  a resume, cancelled or abandoned with `abandon_run`), the workers it started with
+  `spawn_subagents` that are still `running` with a lapsed lease are marked with the new run
+  status `abandoned`, and the error names the lead's run. A worker whose lease is alive is never
+  touched. `abandoned` is also a value of the `status` filter of `list_runs` and `GET /runs`.
+
+- **A very small budget no longer pauses on every call, once a grant names its amount.** Nothing in
+  the ledger is per call: a grant raises the run's limit and later calls draw on it (a limit of
+  one tool call plus a grant of 3 runs four calls). The pause came from the default: a grant with
+  no `amount` is the shortfall of the one call that stopped, so a run that stops one call at a
+  time asked again at each. That default is unchanged (a grant never gives more than was asked),
+  and the budget docs now say to name an `amount` for the work still to do.
+
 ## 0.5.0
 
 *September 2026 · Python 3.12+*
@@ -99,29 +180,20 @@ get without setting one, `full`, keeps the values (personal data redacted).
 These come from the 0.5.0 release testing. None breaks a core promise on a normal path. Each is
 planned for 0.5.1.
 
-- **A worker whose lead crashed stays `running`.** A spawned worker, left behind by a lead process
-  that died, keeps status `running` until someone resumes or abandons it (`abandon_run`, Python
-  only). The lead's own record, and what the model is told, are correct.
 - **The first run in a fresh process starts slowly.** Loading the model client can take 15–60 s on
-  a cold or loaded machine. It shows in the trace as a `model.client.load` span, and the headless
-  `--timeout` starts after it.
+  a cold or loaded machine. Measured in 0.5.1, it is `import litellm` (about 3,000 modules; about
+  9 s of CPU on a warm bytecode cache and about 20 s on a cold one, on the test machine), which
+  OmniCoreAgent does not control. It is already off the event loop, on a worker thread, and shows in
+  the trace as a `model.client.load` span; the headless `--timeout` starts after it. What is ours
+  is light: `import omnicoreagent` takes about 10 ms, building an agent and initializing it
+  well under a second, with `litellm` and `openai` not yet loaded. OmniServe and background
+  workers load it while they start, so only a short script or a headless run pays for it on its
+  first run.
 - **A very small budget pauses on every call.** With a limit as low as one tool call, each call
   pauses on its own, so a person grants each one in turn.
-- **A folder operation blocked by an ask rule cannot be approved as a whole.** Deleting, moving or
-  clearing a folder that holds a file covered by an *ask* rule is refused, and the message says the
-  policy "does not allow" it. Act on the files one by one.
-- **`read_skill_file` can read a sibling skill's files.** Its path check is by prefix: `../other`
-  inside the skills folder is not refused. Paths outside the skills folder are.
-- **The `local` provider refuses some settings late.** A `network_policy` of `deny`, or an `image`,
-  is refused at the first command rather than when the agent is built. The message says why.
-- **The generated `.dockerignore` is broad and narrow at once.** It leaves out any folder named
-  `workspace` (including a Python package of that name), and of credential files it leaves out only
-  `.env*`. Review it before building an image.
-- **Copying many files into a fresh Docker sandbox is slow**, at about 0.4 s per file.
-- **Two agents in one process sharing one telemetry store** share the first agent's
-  `retention_days`.
-- **After a crash and resume, the dead segment shows `running`** in trace listings until retention
-  removes it. The run's own record says `completed`.
+- **`read_skill_file` can read a sibling skill's files.** Its path check is by prefix, so a sibling
+  whose name starts with the skill's own name (`../my-skill-extra/file` from `my-skill`) is not
+  refused. Paths outside the skills folder are. Fixed in 0.5.1.
 
 ## 0.4.4
 

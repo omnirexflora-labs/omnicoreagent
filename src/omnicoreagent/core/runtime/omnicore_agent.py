@@ -98,7 +98,7 @@ def _without_changed_continuation(original: Any, redacted: Any) -> Any:
     return {**redacted, "model_message": stored, "continuation_dropped": dropped}
 
 # A run in one of these has ended; nothing from outside reopens or rewrites it.
-_ENDED_RUN_STATUSES = frozenset({"completed", "failed", "cancelled", "timeout"})
+_ENDED_RUN_STATUSES = frozenset({"completed", "failed", "cancelled", "timeout", "abandoned"})
 
 class OmniCoreAgent:
     """
@@ -856,6 +856,7 @@ class OmniCoreAgent:
                     input={"message": query},
                 )
             else:
+                await self._close_dead_segments(run_id, trace_context.trace_id)
                 await self.telemetry_recorder.emit_event(
                     "run_resumed",
                     actor=self._telemetry_actor(),
@@ -1032,6 +1033,7 @@ class OmniCoreAgent:
                 usage=formatted_response.get("metric"),
                 budgets=budgets_spent,
             )
+            await self._settle_workers(run_id)
             run_summary = await self._run_summary(trace_context.trace_id)
             await self.telemetry_recorder.emit_event(
                 "final_answer",
@@ -1315,6 +1317,7 @@ class OmniCoreAgent:
                     budgets=budgets_spent,
                 )
             )
+            await complete_despite_cancellation(self._settle_workers(run_tracker.run_id))
         except Exception as record_exc:
             runtime_logger().warning(
                 f"Could not record run {run_tracker.run_id} as {status}: "
@@ -1598,6 +1601,38 @@ class OmniCoreAgent:
         except Exception as exc:  # noqa: BLE001 - the record holds it regardless.
             runtime_logger().warning(f"Outcome of {run_id} not written to its trace: {exc}")
 
+    async def _close_dead_segments(self, run_id: str, current_trace_id: str) -> None:
+        """Close the earlier segments of a resumed run that never ended.
+
+        A process killed mid-segment cannot end its own trace. The run's record
+        said `completed` once a later segment finished it, but the trace
+        listing showed the killed segment as `running` with no end until
+        retention removed it (0.5.0, run_b6638561). The resume closes it as
+        `interrupted`, ended at its last event. A resume happens only after
+        the lease lapsed or a person decided, so no live process owns the
+        segment. A failure here never stops the resume.
+        """
+        try:
+            for trace in await self.telemetry_store.list_traces(TraceFilter(run_id=run_id)):
+                if (
+                    trace.trace_id == current_trace_id
+                    or trace.status != TraceStatus.RUNNING
+                    or trace.ended_at is not None
+                ):
+                    continue
+                # The last event is the last thing the segment is known to
+                # have done, so the segment ends there.
+                moments = [e.timestamp for e in trace.events if e.timestamp]
+                await self.telemetry_store.update_trace(
+                    trace.trace_id,
+                    {
+                        "status": TraceStatus.INTERRUPTED.value,
+                        "ended_at": max(moments, default=trace.started_at),
+                    },
+                )
+        except Exception as exc:  # noqa: BLE001 - the record holds the truth regardless.
+            runtime_logger().warning(f"Earlier segments of {run_id} not closed: {exc}")
+
     async def abandon_run(self, run_id: str, *, status: str, reason: str) -> Dict[str, Any] | None:
         """Close a run this agent did not finish itself.
 
@@ -1641,7 +1676,49 @@ class OmniCoreAgent:
 
         await update_from_outside(self.memory_router, run_id, close)
         await self._remove_run_sandboxes(run_id)
+        await self._settle_workers(run_id)
         return await self.get_run(run_id)
+
+    async def _settle_workers(self, lead_run_id: str) -> None:
+        """Mark the workers of an ended lead run that nothing will resume.
+
+        A lead process that died left the workers it had started `running`,
+        and they stayed so until someone abandoned each by hand (the 0.5.0
+        known issue). Once the lead's run has ended, a worker still `running`
+        whose own lease has lapsed has no process and no lead to resume it, so
+        it is marked `abandoned` and the reason names the lead's run. A worker
+        with a live lease is never touched: its process is still working. A
+        failure here never changes how the lead ended.
+        """
+        from omnicoreagent.core.runs import lease_expired, update_from_outside
+
+        try:
+            lead = await self._run_record(lead_run_id)
+            if lead is None or lead.get("status") not in _ENDED_RUN_STATUSES:
+                return
+            for delegation in lead.get("delegations") or []:
+                child_id = delegation.get("child_run_id")
+                child = await self._run_record(child_id) if child_id else None
+                if child is None or child.get("status") != "running" or not lease_expired(child):
+                    continue
+
+                def close(current: dict[str, Any]) -> None:
+                    # Read again under the version: it may have been taken over.
+                    if current.get("status") != "running" or not lease_expired(current):
+                        return
+                    current["status"] = "abandoned"
+                    current["error"] = {
+                        "type": "LeadRunEnded",
+                        "message": (
+                            f"Its lead run {lead_run_id} ended while this worker's "
+                            f"process was gone"
+                        ),
+                    }
+
+                await update_from_outside(self.memory_router, child_id, close)
+                await self._remove_run_sandboxes(child_id)
+        except Exception as exc:  # noqa: BLE001 - the lead's own record is already written.
+            runtime_logger().warning(f"Workers of {lead_run_id} not settled: {exc}")
 
     async def _remove_run_sandboxes(self, run_id: str) -> None:
         """Remove sandboxes a dead process of this run left running.
@@ -2869,6 +2946,9 @@ def _public_approval(approval: dict[str, Any], record: dict[str, Any]) -> dict[s
         # For a shell command: the commands it would run, one per line. The
         # target alone says only `sh` (the 0.5.0rc1 gate).
         "command": approval.get("command"),
+        # For a folder operation: the files under an ask rule that this one
+        # question covers, the first few and "and N more".
+        "covered_files": approval.get("covered_files"),
         "risk_level": approval.get("risk_level"),
         "reason": approval.get("reason"),
         "expires_at": approval.get("expires_at"),
@@ -2933,7 +3013,7 @@ def _add_totals(total: Any, segment: Any) -> Any:
 _FINISHED_RUN_STATUSES = frozenset({"completed", "blocked", "failed", "cancelled"})
 # What run retention may remove: every status a run ends in, including a run
 # ended from outside as timed out. Waiting and running runs are never listed.
-_PRUNABLE_RUN_STATUSES = frozenset({*_FINISHED_RUN_STATUSES, "timeout"})
+_PRUNABLE_RUN_STATUSES = frozenset({*_FINISHED_RUN_STATUSES, "timeout", "abandoned"})
 _UNFINISHED_TRACE_STATUSES = frozenset({"running", "suspended"})
 
 

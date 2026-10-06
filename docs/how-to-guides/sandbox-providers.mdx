@@ -402,9 +402,9 @@ ask. A deny rule always wins over an allow, so this cannot be done from
 `permissive-dev`.
 
 **What it refuses.** A manifest must ask for what `local` really gives: network
-`allow` and filesystem `allow`, with no host or path lists. The default
-manifest asks for no network, so it is refused; so are an image, a workspace
-mount, CPU, memory or GPU limits, a sandbox lifetime, and secret references.
+`allow` and filesystem `allow`, with no host or path lists. A manifest
+that leaves the network at its default (none), or no manifest at all, is refused when the agent is built,
+as are an image, a workspace mount, CPU, memory or GPU limits, a sandbox lifetime, and secret references.
 
 **What it enforces.** Each command's time limit (the command and everything it
 started are killed); the output cap; the host environment is not passed, only
@@ -533,10 +533,11 @@ isolates commands.
   </Accordion>
 
   <Accordion title="The local sandbox cannot restrict the network">
-    `local` with the default manifest. The first command's call fails with:
+    `local` with no `sandbox_manifest`, or one that leaves the network at its default (`deny`). Building the
+    agent fails with:
 
     ```text
-    The local sandbox cannot restrict the network; set sandbox_manifest.network_policy to {'default': 'allow'} with no host lists, or use an isolating provider such as docker
+    The local sandbox does not enforce network off: local runs on the host and cannot cut its network; set network_policy default 'allow' with no host lists, or use an isolating provider such as docker
     ```
 
     Give it the manifest shown above.

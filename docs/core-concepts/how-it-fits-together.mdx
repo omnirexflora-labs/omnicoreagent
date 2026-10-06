@@ -48,7 +48,10 @@ What happens when your code calls `await agent.run("Refund order 1042")`:
     `running`, and a heartbeat keeps it marked alive. **The record:** a trace
     starts with the request and a header (model, tools, policy hash,
     settings). In a fresh process, loading the model client can take seconds;
-    the trace shows it as a `model.client.load` span. **Control:** the
+    the trace shows it as a `model.client.load` span. The time is the model
+    library's own import (`litellm`, about 3,000 modules: seconds on a warm
+    machine, tens of seconds on a cold or busy one); it runs off the event
+    loop, and OmniServe and background workers do it while they start. **Control:** the
     guardrail screens the request for prompt injection (`guardrail_mode`:
     `full`, the default, also screens every tool result; `input_only`; `off`).
   </Step>

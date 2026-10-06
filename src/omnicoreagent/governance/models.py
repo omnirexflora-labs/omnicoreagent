@@ -58,6 +58,9 @@ class ReasonCode(str, Enum):
     # A shell command whose effect could not be proven (a parse error, eval,
     # piping into a shell...): no command rule could allow it.
     COMMAND_OPAQUE = "command_opaque"
+    # The runtime's own listing of a sandbox after a command, allowed because
+    # the command that triggered it was: no rule matched it, none was needed.
+    FOLLOWS_COMMAND = "follows_command"
 
 
 class PolicySource(str, Enum):

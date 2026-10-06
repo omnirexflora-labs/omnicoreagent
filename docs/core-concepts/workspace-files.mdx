@@ -190,7 +190,11 @@ is under the files directory), and so is a path that goes through a link on
 local disk. Under governance, `grep`, `glob` and `ls` show only files the
 policy lets the agent read, and a folder is deleted, moved or cleared only if
 the policy would allow that for each file in it: with deletes denied on
-`prod/*`, `delete_file("prod")` is refused. They work the same on local disk,
+`prod/*`, `delete_file("prod")` is refused. If a file in the folder is under an
+*ask* rule instead, the operation asks a person once, listing those files
+(`covered_files` on the pending approval, the first ten and "and N more"); if
+the person approves, the operation runs and those files count as approved for
+that operation only, and if they deny, nothing changes. They work the same on local disk,
 S3 and R2. Their names are reserved while workspace files are on, so give your
 own tools other names. Under governance each is a capability —
 `workspace.files.read`, `.write`, `.delete`, `.move`, `.clear` — that a policy

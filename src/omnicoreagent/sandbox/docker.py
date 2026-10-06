@@ -314,6 +314,32 @@ class DockerSandboxRuntime(SandboxRuntime):
         if not await asyncio.to_thread(container.put_archive, directory, archive.getvalue()):
             raise OSError(f"Could not write {path} in the sandbox")
 
+    async def upload_files(self, session_id: str, files: dict[str, bytes]) -> None:
+        """Copy several files in as one archive: one `mkdir` and one `put_archive`.
+
+        Each file used to be its own `mkdir` and `put_archive`, about 0.3 s a
+        file, so a fresh sandbox given 200 workspace files took a minute (the
+        0.5.0 known issue). Every path is checked before anything is written.
+        """
+        if not files:
+            return
+        container = self._container(session_id)
+        resolved = {self._inside_workdir(session_id, path): content for path, content in files.items()}
+        # Extracted at the working directory: the root file system is read-only.
+        workdir = self._sessions[session_id].manifest.working_dir
+        directories = sorted({posixpath.dirname(path) for path in resolved})
+        await asyncio.to_thread(container.exec_run, ["mkdir", "-p", *directories])
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w") as tar:
+            for path, content in resolved.items():
+                info = tarfile.TarInfo(name=posixpath.relpath(path, workdir))
+                info.size = len(content)
+                # Owned by the sandbox user, so its commands can change the file.
+                info.uid, info.gid, info.mode = self.uid, self.gid, 0o644
+                tar.addfile(info, io.BytesIO(content))
+        if not await asyncio.to_thread(container.put_archive, workdir, archive.getvalue()):
+            raise OSError("Could not write the files in the sandbox")
+
     async def read_file(self, session_id: str, path: str) -> bytes:
         container = self._container(session_id)
         path = self._inside_workdir(session_id, path)

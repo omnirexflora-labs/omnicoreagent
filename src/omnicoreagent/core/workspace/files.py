@@ -1,5 +1,6 @@
 import json
 import fnmatch
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +13,36 @@ from omnicoreagent.core.workspace.storage import WorkspaceStorage
 
 
 
+# The folder operations a person approved as a whole, as ``folder_operation_key``:
+# the governed tool runner sets it for the one call it just authorized, so the
+# files under an ask rule inside that folder count as approved for that
+# operation and no other (0.5.1, B5: such a folder was refused with "does not
+# allow", though a person could have approved it).
+APPROVED_FOLDER_OPERATIONS: ContextVar[frozenset[str]] = ContextVar(
+    "omnicoreagent_approved_folder_operations", default=frozenset()
+)
+
+
+def folder_operation_key(tool_name: str, tool_args: dict) -> str:
+    return f"{tool_name}:{json.dumps(tool_args, sort_keys=True, default=str)}"
+
+
 class FileOpFailed(str):
     """A file operation's result that is a failure (not found, already
     exists, a storage error). It is still the text the caller reads; the
     workspace tools report it as an error rather than a success."""
+
+def _folder_refusal(doing: str, verb: str, where: str, file_path: str, why: str) -> str:
+    if why == "asks":
+        return (
+            f"Refused: {doing} {where} would {verb} {file_path}, which the policy asks "
+            "a person about, and this operation was not approved as a whole."
+        )
+    return (
+        f"Refused: {doing} {where} would {verb} {file_path}, which the policy "
+        f"does not allow {verb[:-1]}ing. {verb.capitalize()} only the files you may."
+    )
+
 
 class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
     """File operations rooted inside the active workspace storage."""
@@ -27,6 +54,11 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
     # may not read; a folder is deleted or moved only if each file under it
     # could be.
     allows: Any = None
+    # What the policy would decide for a workspace call, as
+    # effect(tool_name, tool_args) -> "allow", "ask" or "deny" (set when
+    # governed). A folder operation is refused for a file under a deny rule;
+    # one under an ask rule needs the operation to have been approved.
+    effect: Any = None
 
     def __init__(self, storage: WorkspaceStorage):
         self.storage = storage
@@ -75,16 +107,55 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
     def _may_read(self, path: str) -> bool:
         return self.allows is None or bool(self.allows("read_file", {"path": str(path)}))
 
-    def _protected_below(self, path: str | None, call) -> str | None:
-        """The first file under a folder that the policy would not let this
-        call touch on its own, as call(file) -> (tool_name, tool_args)."""
+    def folder_calls(self, tool_name: str, tool_args: dict) -> list[tuple[str, dict]]:
+        """The per-file calls a folder operation makes (delete_file, move_file,
+        clear_files), or none when it is not a folder operation. The governed
+        tool runner decides them before the operation runs."""
+        try:
+            if tool_name == "delete_file":
+                path = tool_args.get("path")
+                if not self._list_directory(path):
+                    return []
+                return [("delete_file", {"path": f}) for f in self._walk_files(path, readable_only=False)]
+            if tool_name == "move_file":
+                old_path, new_path = tool_args.get("old_path"), tool_args.get("new_path")
+                if not self._list_directory(old_path):
+                    return []
+                return [
+                    ("move_file", args)
+                    for args in (self._moved(f, old_path, new_path) for f in self._walk_files(old_path, readable_only=False))
+                ]
+            if tool_name == "clear_files":
+                return [("delete_file", {"path": f}) for f in self._walk_files(None, readable_only=False)]
+        except Exception:
+            return []  # the operation itself reports a path it cannot read
+        return []
+
+    @staticmethod
+    def _moved(file_path: str, old_path: str, new_path: str) -> dict:
+        base = old_path.rstrip("/")
+        tail = file_path[len(base) + 1 :] if file_path.startswith(base + "/") else Path(file_path).name
+        return {"old_path": file_path, "new_path": f"{new_path.rstrip('/')}/{tail}"}
+
+    def _refused_below(self, operation: tuple[str, dict], path: str | None, call) -> tuple[str, str] | None:
+        """The first file under a folder that this operation may not touch, as
+        (file, why), or None. ``call(file)`` gives the per-file call. A deny
+        rule always refuses. An ask rule refuses unless a person approved this
+        very operation as a whole (the runner asked once, naming the files)."""
         if self.allows is None:
             return None
+        approved = folder_operation_key(*operation) in APPROVED_FOLDER_OPERATIONS.get()
+        asks: tuple[str, str] | None = None
         for file_path in self._walk_files(path, readable_only=False):
             tool_name, tool_args = call(file_path)
-            if not self.allows(tool_name, tool_args):
-                return file_path
-        return None
+            if self.allows(tool_name, tool_args):
+                continue
+            decided = self.effect(tool_name, tool_args) if self.effect is not None else "deny"
+            if decided != "ask":
+                return file_path, "denies"
+            if not approved and asks is None:
+                asks = (file_path, "asks")
+        return asks
 
     def ls(self, path: str | None = None) -> str:
         try:
@@ -243,14 +314,11 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
             if not exists and not has_children:
                 return FileOpFailed(f"Path not found: {path}")
             if has_children:
-                protected = self._protected_below(
-                    path, lambda f: ("delete_file", {"path": f})
+                protected = self._refused_below(
+                    ("delete_file", {"path": path}), path, lambda f: ("delete_file", {"path": f})
                 )
                 if protected is not None:
-                    return FileOpFailed(
-                        f"Refused: deleting {path} would delete {protected}, which the "
-                        "policy does not allow deleting. Delete only the files you may."
-                    )
+                    return FileOpFailed(_folder_refusal("deleting", "delete", path, *protected))
 
             self.storage.delete(path, **self._storage_kwargs())
             return f"Deleted: {self._location(path)}"
@@ -266,18 +334,14 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
                 return FileOpFailed(f"Path not found: {old_path}")
 
             if has_children:
-                base = old_path.rstrip("/")
-
                 def as_moved(f: str) -> tuple[str, dict]:
-                    tail = f[len(base) + 1 :] if f.startswith(base + "/") else Path(f).name
-                    return "move_file", {"old_path": f, "new_path": f"{new_path.rstrip('/')}/{tail}"}
+                    return "move_file", self._moved(f, old_path, new_path)
 
-                protected = self._protected_below(old_path, as_moved)
+                protected = self._refused_below(
+                    ("move_file", {"old_path": old_path, "new_path": new_path}), old_path, as_moved
+                )
                 if protected is not None:
-                    return FileOpFailed(
-                        f"Refused: moving {old_path} would move {protected}, which the "
-                        "policy does not allow moving."
-                    )
+                    return FileOpFailed(_folder_refusal("moving", "move", old_path, *protected))
 
             old_location = self._location(old_path)
             new_location = self._location(new_path)
@@ -291,12 +355,11 @@ class WorkspaceFilesBackend(AbstractWorkspaceFilesBackend):
     def clear(self) -> str:
         try:
             root = self._location()
-            protected = self._protected_below(None, lambda f: ("delete_file", {"path": f}))
+            protected = self._refused_below(
+                ("clear_files", {}), None, lambda f: ("delete_file", {"path": f})
+            )
             if protected is not None:
-                return FileOpFailed(
-                    f"Refused: clearing the workspace would delete {protected}, which "
-                    "the policy does not allow deleting."
-                )
+                return FileOpFailed(_folder_refusal("clearing", "delete", "the workspace", *protected))
             self.storage.clear()
             return f"All workspace files cleared in {root}"
         except Exception as e:

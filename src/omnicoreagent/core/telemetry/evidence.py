@@ -1162,6 +1162,7 @@ def _map_trace_status(value: Any) -> TraceStatus:
         "aborted_safety_guard": TraceStatus.ABORTED_SAFETY_GUARD,
         "partial": TraceStatus.PARTIAL,
         "suspended": TraceStatus.SUSPENDED,
+        "interrupted": TraceStatus.INTERRUPTED,
     }.get(value, TraceStatus.RUNNING)
 
 
@@ -1179,4 +1180,5 @@ def _known_trace_status(value: Any) -> bool:
         "aborted_safety_guard",
         "partial",
         "suspended",
+        "interrupted",
     }

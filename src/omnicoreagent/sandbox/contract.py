@@ -20,25 +20,31 @@ WORKSPACE_MOUNT = "a workspace mount (workspace_mount)"
 SECRETS = "delivering secrets (environment.secret_refs)"
 CPU = "a CPU limit (resources.cpu)"
 MEMORY = "a memory limit (resources.memory)"
+IMAGE = "an image (image)"
 GPU = "a GPU (resources.gpu)"
 LIFETIME = "a sandbox lifetime (resources.timeout_seconds)"
 
 # What each built-in provider applies. `http` forwards to your own service,
 # which is trusted to apply what it is sent; it is not sent a mount or a
-# lifetime. `local` is not a sandbox: it refuses every setting itself and
-# runs commands on the host (sandbox/local_process.py).
+# lifetime. `local` is not a sandbox: it applies none of them and runs
+# commands on the host (sandbox/local_process.py). Until 0.5.1 it refused a
+# network of `deny` and an image only at the first command, after a person had
+# been asked to approve it; the table now refuses them when the agent is built.
 ENFORCES: dict[str, frozenset[str]] = {
-    "docker": frozenset({NETWORK_OFF, WORKSPACE_MOUNT, CPU, MEMORY}),
-    "e2b": frozenset({NETWORK_OFF}),
+    "docker": frozenset({IMAGE, NETWORK_OFF, WORKSPACE_MOUNT, CPU, MEMORY}),
+    "e2b": frozenset({IMAGE, NETWORK_OFF}),
     # Daytona's network_allow_list takes IP ranges, not host names.
-    "daytona": frozenset({NETWORK_OFF, CPU, MEMORY}),
-    "modal": frozenset({NETWORK_OFF, ALLOWED_HOSTS, CPU, MEMORY}),
-    "vercel": frozenset({NETWORK_OFF, CPU, MEMORY}),
-    "http": frozenset({NETWORK_OFF, ALLOWED_HOSTS, DENIED_HOSTS, CPU, MEMORY, GPU}),
+    "daytona": frozenset({IMAGE, NETWORK_OFF, CPU, MEMORY}),
+    "modal": frozenset({IMAGE, NETWORK_OFF, ALLOWED_HOSTS, CPU, MEMORY}),
+    "vercel": frozenset({IMAGE, NETWORK_OFF, CPU, MEMORY}),
+    "http": frozenset({IMAGE, NETWORK_OFF, ALLOWED_HOSTS, DENIED_HOSTS, CPU, MEMORY, GPU}),
     "local": frozenset(),
 }
 
 _ADVICE = {
+    NETWORK_OFF: "local runs on the host and cannot cut its network; set network_policy default "
+    "'allow' with no host lists, or use an isolating provider such as docker",
+    IMAGE: "local runs on the host and has no image; remove it, or use a provider that runs one",
     ALLOWED_HOSTS: "use network_policy default 'deny' or 'allow', or a provider that enforces one (modal, http)",
     DENIED_HOSTS: "use network_policy default 'deny' with allowed_hosts on a provider that enforces them, "
     "or the http provider with a service that does",
@@ -58,12 +64,16 @@ def asked_for(manifest: Any) -> list[str]:
     network = manifest.network_policy
     resources = manifest.resources
     wanted: list[str] = []
-    if str(getattr(network.default, "value", network.default)) == "deny":
-        wanted.append(NETWORK_OFF)
+    if manifest.image:
+        wanted.append(IMAGE)
     if network.allowed_hosts:
         wanted.append(ALLOWED_HOSTS)
     if network.denied_hosts:
         wanted.append(DENIED_HOSTS)
+    # After the host lists: where both are refused (local), the list is the
+    # more specific thing to tell a person.
+    if str(getattr(network.default, "value", network.default)) == "deny":
+        wanted.append(NETWORK_OFF)
     if manifest.workspace_mount is not None:
         wanted.append(WORKSPACE_MOUNT)
     if manifest.environment.secret_refs:
@@ -86,8 +96,6 @@ def check_enforced(provider: str, manifest: Any, enforces: frozenset[str] | None
     if enforces is None or manifest is None:
         return
     for setting in asked_for(manifest):
-        if setting == NETWORK_OFF and provider == "local":
-            continue  # local refuses it itself, saying it runs on the host
         if setting not in enforces:
             raise ValueError(
                 f"The {provider} sandbox does not enforce {setting}: {_ADVICE.get(setting, 'remove it')}"

@@ -188,6 +188,13 @@ it back to the workspace. That listing is governed too, as
 `sandbox.workspace.sync` (part of `sandbox.*`), and it is not judged as a
 command the agent asked for, so [rules on shell
 commands](/docs/reference/policy#rules-on-shell-commands) do not apply to it.
+If no rule names it, as in a strict policy that allows commands but not the
+sync, it follows the decision for the command that triggered it: the trace
+shows an allow with the reason `follows_command` and the command's request id,
+not a rule match. A rule you write for it still decides, so a `deny` rule stops
+the copy-back (the model is told so, and the command's files stay in the
+sandbox). Every file it copies back is still decided by the workspace file
+rules, below.
 Leave out `sandbox.*` and the sandbox cannot start; leave out the
 `process.exec` rule and every command is refused. `sandbox.network.configure`
 is part of `sandbox.*` here: to keep the network behind a person, add an

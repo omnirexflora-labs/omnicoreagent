@@ -213,10 +213,17 @@ def build_skill_tools(
 
         target = (skill_root / file_path).resolve()
 
-        if not str(target).startswith(str(skill_root)):
+        # A string prefix check let "../test-skill-evil/x" pass for the skill
+        # "test-skill": any sibling whose name starts with this skill's name
+        # (0.5.0 known issue). The resolved path, symlinks followed, must be
+        # inside this skill's own folder, as the workspace tools require.
+        if not target.is_relative_to(skill_root.resolve()):
             return {
                 "status": "error",
-                "message": "Access outside skill directory is not allowed",
+                "message": (
+                    f"Access outside the '{skill_name}' skill directory is not allowed: "
+                    f"{file_path}"
+                ),
             }
 
         if not target.exists():
