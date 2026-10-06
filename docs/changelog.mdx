@@ -36,6 +36,11 @@ Every release, with its notes, is also on
   and an end time equal to their last event. Listings filtered by `status=running` no longer
   return them, and the run's own record is unchanged. `interrupted` is a new value of the trace
   `status` filter.
+- **A worker whose lead crashed no longer stays `running`.** When a lead run ends (finished after
+  a resume, cancelled or abandoned with `abandon_run`), the workers it started with
+  `spawn_subagents` that are still `running` with a lapsed lease are marked with the new run
+  status `abandoned`, and the error names the lead's run. A worker whose lease is alive is never
+  touched. `abandoned` is also a value of the `status` filter of `list_runs` and `GET /runs`.
 
 - **A very small budget no longer pauses on every call, once a grant names its amount.** Nothing in
   the ledger is per call: a grant raises the run's limit and later calls draw on it (a limit of
@@ -134,9 +139,6 @@ get without setting one, `full`, keeps the values (personal data redacted).
 These come from the 0.5.0 release testing. None breaks a core promise on a normal path. Each is
 planned for 0.5.1.
 
-- **A worker whose lead crashed stays `running`.** A spawned worker, left behind by a lead process
-  that died, keeps status `running` until someone resumes or abandons it (`abandon_run`, Python
-  only). The lead's own record, and what the model is told, are correct.
 - **The first run in a fresh process starts slowly.** Loading the model client can take 15–60 s on
   a cold or loaded machine. It shows in the trace as a `model.client.load` span, and the headless
   `--timeout` starts after it.

@@ -34,6 +34,8 @@ RUN_STATUSES = (
     "failed",
     "cancelled",
     "timeout",
+    # A worker its lead's run outlived, whose own process was gone.
+    "abandoned",
 )
 
 _CURRENT: ContextVar["RunTracker | None"] = ContextVar("omnicoreagent_run", default=None)
