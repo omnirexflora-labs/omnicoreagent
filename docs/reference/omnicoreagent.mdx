@@ -61,18 +61,16 @@ The application's, session's and agent's counters are read from the ledger (they
 ### `claim_orphaned_runs`
 
 ```python
-async def claim_orphaned_runs(
-    *, limit: int = 10, max_recoveries: int = 3, decided_grace_seconds: float = 30.0
-) -> List[Dict[str, Any]]: ...
+async def claim_orphaned_runs(*, limit: int = 10, max_recoveries: int = 3, decided_grace_seconds: float = 30.0) -> List[Dict[str, Any]]: ...
 ```
 
 Take over this agent's runs that nobody is working on, and say which.
 
-An orphan is a run still `running` whose heartbeat is older than its lease, started by this agent (by name) and not by a background supervisor, which recovers its own. A decided run is one waiting for an approval or a budget decision that a person has made, and that nobody has resumed for `decided_grace_seconds`; its claim is recorded with `trigger` `orphan_sweep`, the `cause` an explicit resume gives, and the `decision`. A run with a decision still pending is left waiting. If a client's `resume` races the claim, the version check lets one win, and the other raises `ValueError` (`409` over HTTP).
+Two kinds of run are taken. An orphan is a run still `running` whose heartbeat is older than its lease, started by this agent (by name) and not by a background supervisor, which recovers its own. A decided run is one waiting for an approval or a budget decision that a person has made, and that nobody has resumed for `decided_grace_seconds` (the client that should have called `resume` was refused or is gone). A run with a decision still pending is left waiting.
 
-Each run is claimed with the record's own version check: the claim writes a new owner and a fresh heartbeat, and a second process that read the same record fails the check and skips it, so a run is never resumed twice. A decided run is claimed as `running`, so a later `resume` is refused. Each claim is then given to `resume_claimed`. A run claimed `max_recoveries` times and still not finished is ended `failed` instead (it is probably what kills its process).
+Each run is claimed with the record's own version check: the claim writes a new owner and a fresh heartbeat, and a second process that read the same record fails the check and skips it, so a run is never resumed twice. A client's `resume` that read the record before the claim fails its first save the same way and is refused. Each claim is then given to `resume_claimed`. An orphan claimed `max_recoveries` times and still not finished is ended `failed` instead (it is probably what kills its process); a decided run's claim does not count.
 
-Added after the support desk chaos run (2026-10-07), where runs whose process died stayed `running` until someone called `resume`, and extended after the ramp at 100 users, where 119 approved runs waited for a resume that the admission limit had answered `503`.
+Orphans were added after the support desk chaos run (2026-10-07), where runs whose process died stayed `running` until someone called `resume`. Decided runs were added after the ramp at 100 users the same day, where 119 approved runs waited for a resume that the admission limit had answered 503.
 
 ### `cleanup`
 
