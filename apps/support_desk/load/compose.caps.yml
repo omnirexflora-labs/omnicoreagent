@@ -1,0 +1,20 @@
+# Caps for the other containers of the stack, for a shared machine.
+#
+# compose.yml already caps the desk at 2 CPUs and 4 GB: that is the instance the
+# plan's numbers are for. These caps keep its neighbours (the database, the
+# cache, the fake model) from taking more than their share of a box that has
+# other work on it. They are generous: none of them should be the bottleneck.
+#
+#   docker compose -p <name> -f apps/support_desk/compose.yml \
+#     -f apps/support_desk/load/compose.caps.yml up -d
+
+services:
+  postgres:
+    cpus: 1
+    mem_limit: 1g
+  redis:
+    cpus: 0.5
+    mem_limit: 256m
+  fakeprovider:
+    cpus: 1
+    mem_limit: 512m
