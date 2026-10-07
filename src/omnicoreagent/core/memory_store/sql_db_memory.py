@@ -1294,7 +1294,30 @@ class DatabaseMessageStore(AbstractMemoryStore):
 
         released = 0
 
+        # Each statement is a network round trip on a remote database, and a
+        # transaction is several of them. Where the database can answer a
+        # DELETE or an UPDATE with the row it changed (``RETURNING``:
+        # PostgreSQL, SQLite 3.35+), the SELECT before and the SELECT after
+        # are not sent: a refund run made 72 budget statements in 11
+        # transactions (the support desk ramp, 2026-10-07).
+        dialect = session.bind.dialect
+        delete_returning = bool(getattr(dialect, "delete_returning", False))
+        update_returning = bool(getattr(dialect, "update_returning", False))
+
         def remove_hold(hold_id: str) -> bool:
+            if delete_returning:
+                # The hold row is what arbitrates two settlers: only the one
+                # whose DELETE removes it gets the row back.
+                held = session.execute(
+                    delete(StorageBudgetHold)
+                    .where(StorageBudgetHold.hold_id == hold_id)
+                    .returning(StorageBudgetHold.meter, StorageBudgetHold.amount)
+                    .execution_options(synchronize_session=False)
+                ).first()
+                if held is None:
+                    return False
+                delta(held.meter)[1] -= float(held.amount)
+                return True
             held = session.execute(
                 select(StorageBudgetHold.meter, StorageBudgetHold.amount).where(
                     StorageBudgetHold.hold_id == hold_id
@@ -1316,7 +1339,17 @@ class DatabaseMessageStore(AbstractMemoryStore):
             if settle.get("spend") is not None and (removed or settle.get("even_if_released")):
                 delta(settle["meter"])[0] += float(settle["spend"])
         wanted = list(change.get("release_runs") or [])
-        if wanted:
+        if wanted and delete_returning:
+            # The holds those runs left, removed and counted in one statement.
+            for gone in session.execute(
+                delete(StorageBudgetHold)
+                .where(StorageBudgetHold.key == key, StorageBudgetHold.run_id.in_(wanted))
+                .returning(StorageBudgetHold.meter, StorageBudgetHold.amount)
+                .execution_options(synchronize_session=False)
+            ).all():
+                delta(gone.meter)[1] -= float(gone.amount)
+                released += 1
+        elif wanted:
             standing = session.execute(
                 select(StorageBudgetHold.hold_id).where(
                     StorageBudgetHold.key == key, StorageBudgetHold.run_id.in_(wanted)
@@ -1340,6 +1373,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
 
         table = StorageBudgetMeter
         refused_meter = None
+        totals: dict[str, float] = {}
         for meter in sorted(deltas):
             spent, reserved, granted = deltas[meter]
             if not (spent or reserved or granted):
@@ -1359,10 +1393,26 @@ class DatabaseMessageStore(AbstractMemoryStore):
                 statement = statement.where(
                     table.spent + table.reserved + fit <= limit + table.granted
                 )
-            if session.execute(statement).rowcount == 0:
+            # A meter whose spend changes answers with its new total.
+            returning = update_returning and bool(spent)
+            if returning:
+                statement = statement.returning(table.spent).execution_options(
+                    synchronize_session=False
+                )
+
+            def run(statement=statement, returning=returning) -> bool:
+                result = session.execute(statement)
+                if not returning:
+                    return result.rowcount != 0
+                row = result.first()
+                if row is not None:
+                    totals[meter] = float(row[0])
+                return row is not None
+
+            if not run():
                 # Either the row does not exist yet, or the change does not fit.
                 self._ensure_meter_row(session, key, meter)
-                if session.execute(statement).rowcount == 0:
+                if not run():
                     refused_meter = meter
                     break
         if refused_meter is not None:
@@ -1390,12 +1440,12 @@ class DatabaseMessageStore(AbstractMemoryStore):
                 )
             )
         session.flush()
-        spent_meters = [m for m, d in deltas.items() if d[0]]
-        totals: dict[str, float] = {}
-        if spent_meters:
+        # Only a database that cannot return the new total still has to read it.
+        unread = [m for m, d in deltas.items() if d[0] and m not in totals]
+        if unread:
             for meter, spent in session.execute(
                 select(table.meter, table.spent).where(
-                    table.key == key, table.meter.in_(spent_meters)
+                    table.key == key, table.meter.in_(unread)
                 )
             ):
                 totals[meter] = float(spent)

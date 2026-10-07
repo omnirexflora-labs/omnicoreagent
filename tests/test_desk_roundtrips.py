@@ -66,6 +66,18 @@ def test_the_refund_scenario_stays_under_its_round_trip_ceiling(counted, capsys)
         assert actual <= ceiling, f"{caller}: {actual} transactions, ceiling {ceiling}\n{counted['methods']}"
 
 
+# Statements per run, by who asked. Each is a round trip on a remote database,
+# and a transaction is several of them; RETURNING took a refund run's budget
+# statements from 72 to 52 (the support desk ramp, 2026-10-07).
+STATEMENT_CEILING = {"budgets": 52, "messages": 7, "run_state": 21, "total": 80}
+
+
+def test_the_refund_scenario_stays_under_its_statement_ceiling(counted):
+    for caller, ceiling in STATEMENT_CEILING.items():
+        actual = counted["total_statements"] if caller == "total" else counted["statements"][caller]
+        assert actual <= ceiling, f"{caller}: {actual} statements, ceiling {ceiling}"
+
+
 def test_every_store_call_is_one_transaction_at_most_once_per_attempt(counted):
     # A store call that opens two transactions is a round trip someone could
     # have saved: the counts of calls and transactions stay together.

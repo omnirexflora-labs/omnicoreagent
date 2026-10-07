@@ -193,3 +193,56 @@ async def test_a_refusal_raises_budget_exhausted_through_the_single_key_calls_to
     key = _keys()[0]
     with pytest.raises(BudgetExhausted):
         await ledger.charge(key, "tool_calls", 6, limit=5)
+
+
+async def _lifecycle(store):
+    """A call's hold, its settling, and a dead run's hold swept: what a run does."""
+    ledger = BudgetLedger(store)
+    request, session, application = _keys()
+    run = f"run_{uuid4().hex[:6]}"
+    holds = [(key, _hold(amount=1.0, limit=10.0, run_id=run)) for key in (request, session, application)]
+    reserved = await ledger.apply_many(holds)
+    settled = await ledger.apply_many(
+        [
+            (
+                key,
+                {
+                    "settle": {
+                        "id": change["hold"]["id"],
+                        "meter": "model_cost_usd",
+                        "spend": 0.25,
+                        "even_if_released": True,
+                    },
+                    "add": [["model_tokens", 40.0]],
+                },
+            )
+            for key, change in holds[:2]
+        ]
+    )
+    await ledger.apply_many([(application, _hold(amount=2.0, limit=10.0, run_id="run_dead"))])
+    swept = await ledger.apply_many([(application, {"release_runs": ["run_dead"]})])
+    return (
+        [r["totals"] for r in reserved],
+        [r["totals"] for r in settled],
+        swept[0]["released"],
+        await ledger.usage(session),
+        await ledger.reserved(application),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_database_without_returning_gives_the_same_answers(tmp_path):
+    # PostgreSQL and SQLite 3.35+ answer an UPDATE or a DELETE with the row it
+    # changed, so the transaction sends no SELECT before or after; a database
+    # that cannot (MySQL) is asked the long way. Both must say the same.
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    with_returning = _sql_store(tmp_path / "a")
+    dialect = with_returning._sql_manager.get_engine().dialect
+    assert dialect.update_returning and dialect.delete_returning
+    expected = await _lifecycle(with_returning)
+
+    without = _sql_store(tmp_path / "b")
+    plain = without._sql_manager.get_engine().dialect
+    plain.update_returning = plain.delete_returning = False
+    assert await _lifecycle(without) == expected

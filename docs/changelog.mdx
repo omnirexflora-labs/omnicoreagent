@@ -149,6 +149,12 @@ Every release, with its notes, is also on
   waits up to the switch interval: sampled on a loaded machine, ID generation was a fifth of the
   event loop's busy time. One read of the same source now serves 256 IDs (a forked child starts a
   new block). IDs are as random as before and keep the version-4 shape.
+- **A budget transaction sends fewer statements.** On a remote database each statement is a round
+  trip, and a transaction is several. Where the database can answer a `DELETE` or an `UPDATE` with
+  the row it changed (PostgreSQL, SQLite 3.35 and later), a hold is removed in one statement (not a
+  `SELECT` and a `DELETE`), and a meter's new total comes back with its `UPDATE` (not a `SELECT`
+  afterwards). A refund run's budget statements went from 72 to 52. Other databases are asked the
+  long way and give the same answers.
 - **Budget storage layout.** SQL stores gain the tables `budget_meters`, `budget_holds` and
   `budget_grants`; Redis and MongoDB keep counters under new keys (`omnicoreagent_budget2:`,
   `<collection>_budgets`). Counters written by 0.5.x are moved on first touch; do not run 0.5.x and
