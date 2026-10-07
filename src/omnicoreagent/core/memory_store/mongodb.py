@@ -34,6 +34,7 @@ class MongoDb(AbstractMemoryStore):
         self.db = None
         self.collection = None
         self._initialized = False
+        self._connect_lock = asyncio.Lock()
         self.memory_config: dict[str, Any] = {}
         self.summary_config: dict[str, Any] = {}
         self.summarize_fn: Callable = None
@@ -41,10 +42,21 @@ class MongoDb(AbstractMemoryStore):
         self._legacy_budgets_moved: set[str] = set()
 
     async def _ensure_connected(self):
-        """Ensure MongoDB connection is established"""
+        """Ensure MongoDB connection is established, once.
+
+        Every call that arrived before the first finished its ping opened a
+        client of its own, and all but the last were leaked: fifty concurrent
+        first calls opened fifty connections (found merging the P6 tracks,
+        2026-10-07). The calls now take turns, and a later one finds the
+        connection made.
+        """
         if self._initialized:
             return
+        async with self._connect_lock:
+            if not self._initialized:
+                await self._connect()
 
+    async def _connect(self):
         try:
             collection_name = self.collection_name
             self.client = AsyncIOMotorClient(self.uri)

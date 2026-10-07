@@ -82,6 +82,9 @@ Every release, with its notes, is also on
   process that lost the claim could remove the winner's sandbox; it now does so
   only after winning the save. New `release_claim(claim)` on the agent for a
   claim you will not resume.
+- **MongoDB opens one connection, not one per concurrent first call.** Fifty
+  calls arriving before the first connection was ready each opened a client,
+  and all but one were leaked. The calls now wait for a single connect.
 
 ### Changed
 
