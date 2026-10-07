@@ -8,10 +8,12 @@ at every output seam.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 import re
+import threading
 from typing import Any
 
 
@@ -164,8 +166,21 @@ class PrivacyFilter:
         "credit_card": "[REDACTED_CREDIT_CARD]",
     }
 
+    # What the patterns find in a text depends only on the text and on which
+    # categories are on. The same messages were redacted again at every
+    # boundary and every step: 14-28% of the event loop's time on the support
+    # desk ramp (2026-10-07). A redaction is kept by a digest of the text, so
+    # the cache holds no raw text, only what was already redacted; it is
+    # bounded, and dropped when the categories change. Short texts are
+    # scanned outright: hashing them costs about as much as the patterns.
+    _CACHE_ENTRIES = 8192
+    _CACHE_MIN_CHARS = 128
+
     def __init__(self, config: PrivacyConfig | dict[str, Any] | None = None):
         self.config = PrivacyConfig.from_value(config)
+        self._cache: OrderedDict[bytes, str] = OrderedDict()
+        self._cache_lock = threading.Lock()
+        self._cache_categories: tuple[str, ...] | None = None
 
     @classmethod
     def from_value(cls, value: "PrivacyFilter | PrivacyConfig | dict[str, Any] | None") -> "PrivacyFilter":
@@ -203,6 +218,28 @@ class PrivacyFilter:
             raise ValueError(f"Unknown privacy boundary: {boundary}")
         if not self.config.enabled or not self._enabled_for(boundary):
             return value
+        if len(value) < self._CACHE_MIN_CHARS:
+            return self._scan(value, boundary)
+        categories = tuple(self.config.categories)
+        digest = hashlib.blake2b(value.encode("utf-8", "surrogatepass"), digest_size=16).digest()
+        with self._cache_lock:
+            if categories != self._cache_categories:
+                self._cache.clear()
+                self._cache_categories = categories
+            known = self._cache.get(digest)
+            if known is not None:
+                self._cache.move_to_end(digest)
+                return known
+        redacted = self._scan(value, boundary)
+        with self._cache_lock:
+            if categories == self._cache_categories:
+                self._cache[digest] = redacted
+                while len(self._cache) > self._CACHE_ENTRIES:
+                    self._cache.popitem(last=False)
+        return redacted
+
+    def _scan(self, value: str, boundary: str) -> str:
+        """The patterns, applied to one text (see the cache in ``redact_text``)."""
         redacted = value
         for category in ("email", "ssn", "credit_card", "phone"):
             if category not in self.config.categories:
