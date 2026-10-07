@@ -9,6 +9,37 @@ icon: 'clock-rotate-left'
 Every release, with its notes, is also on
 [GitHub Releases](https://github.com/omnirexflora-labs/omnicoreagent/releases).
 
+## Unreleased
+
+### Fixed
+
+- **A crowd of runs on one budget no longer fails.** Every budget change was a read, a change in
+  Python and a versioned write of one JSON row per budget key, holding every in-flight run's hold.
+  On the support desk ramp (100 concurrent runs on one application budget) the row conflicted
+  constantly, the retries ran out, and 46 runs failed with `Could not record the budget change`,
+  reported as `provider_error` with `error: null`; ten of them had already issued a refund. Each
+  change is now one atomic operation in the store: a guarded `UPDATE ... SET spent = spent + x`
+  in SQL (one row per key and meter, one row per hold), a Lua script in Redis, a filtered
+  `find_one_and_update` in MongoDB, a lock-free in-process step in memory. The limit check and the
+  hold are one step, so no more than the limit is ever held or spent. 200 concurrent runs on one key
+  now finish with the exact total and no hold left.
+- **A charge for work already done never fails the run.** If the store cannot take the charge for a
+  model call or the seconds a sandbox ran, it is tried again for up to 15 seconds and then kept as
+  unrecorded: on the run record (`unrecorded_charges`), as a `budget_charge_unrecorded` trace event
+  and as `unrecorded` in `budget_status` and `GET /runs/{run_id}/budget`. A hold before a call can
+  still refuse the call. Holds a run could not release are released when it ends.
+- **Redis waits for a free connection** instead of raising `MaxConnectionsError` when more than 20
+  operations are in flight.
+
+### Changed
+
+- **Budget storage layout.** SQL stores gain the tables `budget_meters`, `budget_holds` and
+  `budget_grants`; Redis and MongoDB keep counters under new keys (`omnicoreagent_budget2:`,
+  `<collection>_budgets`). Counters written by 0.5.x are moved on first touch; do not run 0.5.x and
+  this version against the same store at once. A custom memory store that implements budgets must
+  now implement `apply_budget_change`, `get_budget_grant_history` and `list_budget_holds` (see
+  `AbstractMemoryStore`); without them, budgets are off for that store, as before.
+
 ## 0.5.1
 
 *October 2026 · Python 3.12+*
