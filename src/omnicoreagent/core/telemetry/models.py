@@ -4,16 +4,59 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
 import json
+import os
+import threading
 from typing import Any
-from uuid import uuid4
+from uuid import UUID
 
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class _IdBytes:
+    """Random bytes for IDs, read from the system in blocks.
+
+    Every event and span has an ID, about forty to a step, and ``uuid4()``
+    asked the operating system for sixteen bytes each time. A thread back from
+    a system call has to win the interpreter lock again, and with the database
+    threads busy that waits up to the switch interval: on a loaded machine ID
+    generation was a fifth of the event loop's busy time (the support desk
+    ramp, 2026-10-07). One read of the same source now serves 256 IDs. A
+    forked child drops the block it inherited, so two processes never hand out
+    the same bytes.
+    """
+
+    BLOCK = 4096
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._block = b""
+        self._at = 0
+        if hasattr(os, "register_at_fork"):
+            os.register_at_fork(after_in_child=self._forget)
+
+    def _forget(self) -> None:
+        self._lock = threading.Lock()
+        self._block = b""
+        self._at = 0
+
+    def take(self, size: int = 16) -> bytes:
+        with self._lock:
+            if self._at + size > len(self._block):
+                self._block = os.urandom(self.BLOCK)
+                self._at = 0
+            chunk = self._block[self._at : self._at + size]
+            self._at += size
+            return chunk
+
+
+_id_bytes = _IdBytes()
+
+
 def telemetry_id(prefix: str) -> str:
-    return f"{prefix}_{uuid4().hex}"
+    # The same shape ``uuid4().hex`` had: random, with the version-4 bits set.
+    return f"{prefix}_{UUID(bytes=_id_bytes.take(), version=4).hex}"
 
 
 class ActorType(str, Enum):

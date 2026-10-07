@@ -143,6 +143,12 @@ Every release, with its notes, is also on
   byte for byte what they were. A resumed run still records its run configuration in its own trace:
   each segment's trace is read on its own (the trajectory header and the version metadata are per
   trace), so it is made cheap instead of skipped.
+- **Telemetry IDs no longer cost a system call each.** An event or span gets an ID (about forty to a
+  step), and `uuid4()` asked the operating system for random bytes every time. A thread returning
+  from a system call has to win the interpreter lock back, which with the database threads busy
+  waits up to the switch interval: sampled on a loaded machine, ID generation was a fifth of the
+  event loop's busy time. One read of the same source now serves 256 IDs (a forked child starts a
+  new block). IDs are as random as before and keep the version-4 shape.
 - **Budget storage layout.** SQL stores gain the tables `budget_meters`, `budget_holds` and
   `budget_grants`; Redis and MongoDB keep counters under new keys (`omnicoreagent_budget2:`,
   `<collection>_budgets`). Counters written by 0.5.x are moved on first touch; do not run 0.5.x and
