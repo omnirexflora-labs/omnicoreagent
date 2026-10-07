@@ -43,9 +43,10 @@ STORES = {
 }
 
 RUNS = 200
-# A SQLite commit waits for the disk (about 40 ms here), so its crowd does one
-# round; the others do three.
-ROUNDS = {"sqlite": 1}
+# A commit on SQLite waits for the disk and a round trip to Postgres or MongoDB
+# waits for the network (tens of milliseconds on a busy machine), so their crowds
+# do one round of five changes each; the others do three.
+ROUNDS = {"sqlite": 1, "postgres": 1, "mongodb": 1}
 DEFAULT_ROUNDS = 3
 
 

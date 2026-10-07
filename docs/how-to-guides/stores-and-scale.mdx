@@ -138,8 +138,9 @@ disk:
 ./workspace/telemetry/traces.jsonl
 ```
 
-`agent.db` holds three tables: `messages` (session history), `run_states`
-(run records) and `budget_states` (budget counters). The traces are the
+`agent.db` holds, among others, `messages` (session history), `run_states`
+(run records), and `budget_meters`, `budget_holds` and `budget_grants` (budget
+counters, the holds on them, and top-ups). The traces are the
 `workspace/telemetry/` files.
 
 <Note>

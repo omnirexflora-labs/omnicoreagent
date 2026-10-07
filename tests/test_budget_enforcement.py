@@ -403,7 +403,8 @@ async def test_a_request_with_two_budgeted_meters_makes_few_store_round_trips():
     from omnicoreagent.core.memory_store.in_memory import InMemoryStore
 
     counts = {"get": 0, "save": 0}
-    original_get, original_save = InMemoryStore.get_budget_state, InMemoryStore.save_budget_state
+    # A write is now one apply_budget_change call (it was a read and a save).
+    original_get, original_save = InMemoryStore.get_budget_state, InMemoryStore.apply_budget_change
 
     async def counted_get(self, *args, **kwargs):
         counts["get"] += 1
@@ -413,7 +414,7 @@ async def test_a_request_with_two_budgeted_meters_makes_few_store_round_trips():
         counts["save"] += 1
         return await original_save(self, *args, **kwargs)
 
-    InMemoryStore.get_budget_state, InMemoryStore.save_budget_state = counted_get, counted_save
+    InMemoryStore.get_budget_state, InMemoryStore.apply_budget_change = counted_get, counted_save
     try:
         agent = await _agent(
             PricedModel(ModelTurn(tool_calls=(ToolRequest("c1", "lookup", '{"key": "a"}'),))),
@@ -428,14 +429,14 @@ async def test_a_request_with_two_budgeted_meters_makes_few_store_round_trips():
         counts["get"] = counts["save"] = 0
         await agent.run("go", session_id="round-trips")
     finally:
-        InMemoryStore.get_budget_state, InMemoryStore.save_budget_state = original_get, original_save
+        InMemoryStore.get_budget_state, InMemoryStore.apply_budget_change = original_get, original_save
 
     # Two model calls (hold + settle each) and one tool call: five writes at
     # most, and no read that is not the read before a write.
     assert counts["save"] <= 5, f"{counts['save']} budget writes for one request"
-    # One read per write, plus the read that settles the request's counter
-    # onto its record when the run ends.
-    assert counts["get"] <= counts["save"] + 1, f"{counts['get']} reads for {counts['save']} writes"
+    # A write no longer needs a read before it; the only read is the one that
+    # settles the request's counter onto its record when the run ends.
+    assert counts["get"] <= 1, f"{counts['get']} budget reads for one request"
 
 
 # --- audit A8: a request's budget counter does not outlive the request ---------

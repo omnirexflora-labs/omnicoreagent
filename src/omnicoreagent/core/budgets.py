@@ -571,6 +571,10 @@ class RunBudgets:
         # the store, even after waiting (see ``_after_the_work``). They stay on
         # the run's record, in its trace and in its budget status.
         self.unrecorded: list[dict[str, Any]] = []
+        # Set when a hold may have been left standing (a commit or a release
+        # that could not be written), so the run's end looks for it; otherwise
+        # it costs the store a write for nothing.
+        self._holds_may_stand = False
         # Budgets a person has already refused for this run: asking again
         # would be asking the same person the same question.
         self.refused = refused or set()
@@ -790,6 +794,7 @@ class RunBudgets:
             try:
                 await self.ledger.release(reservation)
             except Exception as exc:
+                self._holds_may_stand = True
                 logger.warning(
                     f"Could not release a budget hold on {reservation.key} "
                     f"({type(exc).__name__}: {exc}); it is released when the run ends"
@@ -835,6 +840,7 @@ class RunBudgets:
         error = f"{type(exc).__name__}: {exc}"[:300]
         records = [{**entry, "error": error, "at": at} for entry in entries]
         self.unrecorded.extend(records)
+        self._holds_may_stand = True
         logger.error(
             f"Could not record {len(records)} budget charge(s) for run {self.run_id} after "
             f"the work was done ({error}); the run goes on and the charge is kept as unrecorded"
@@ -882,10 +888,11 @@ class RunBudgets:
         seen: set[str] = set()
         # A hold whose commit could not be written is still standing; the run
         # is over, so nothing of its own may stay held.
-        try:
-            await self.release_stale()
-        except Exception as exc:
-            logger.warning(f"Could not release the holds of run {self.run_id}: {exc}")
+        if self._holds_may_stand:
+            try:
+                await self.release_stale()
+            except Exception as exc:
+                logger.warning(f"Could not release the holds of run {self.run_id}: {exc}")
         for meter in METERS:
             for scope, key, _ in self.limits(meter):
                 if key in seen:
