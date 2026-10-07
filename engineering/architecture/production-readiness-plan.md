@@ -87,3 +87,37 @@ or 0.6.0, by what changed) and the app published.
    maintainer's jobs, as agreed.
 3. **Live spend.** A hard cap of $3, used only for P2's live proof. The fake provider covers
    everything else.
+
+## P6: what the first server ramp found, and the fixes (approved 2026-10-07)
+
+Server ramp, measured on the capped 2-core instance with the fake provider (0.8–3 s per call):
+
+- **Throughput and latency.** Throughput topped out at 3–4.5 requests a second. Chat p50 latency was 4 s at 10 users and 37 s at 100. Runtime overhead per step, p95, was 240 ms at 10 users and 18 s at 100.
+- **Event loop.** The worst stall was 852 ms.
+- **Failures.** 46 runs failed. All of them failed on the same error: `RuntimeError: Could not record the budget change for application:…`. Each was mislabelled `provider_error`, with `error: null` in the run record. In ten of them the refund had already been written.
+- **Profile** (py-spy, 30 users):
+  - About 45% of samples were the SQL memory store's per-operation work: `do_ping` on every checkout, plus a commit and a rollback each time.
+  - Postgres connections were pinned at 13.
+  - About 5% was `_close_dead_segments`, which lists traces on every resume.
+
+**Track 1: budgets (decision a).**
+- Each budget change becomes one atomic statement: `spent = spent + x` guarded by the limit, in SQL, Redis and Mongo, and atomically in SQLite and in memory.
+- Holds become rows of their own, not one shared JSON blob.
+- A charge that cannot be recorded after the work ran never fails the run. It is retried, logged, and visible.
+- Hammer test: 200 concurrent runs against one budget, no failure, exact total.
+
+**Track 2: throughput.**
+- An admission limit per process.
+  - The default is derived from the CPUs the process actually has, with one optional setting.
+  - When the limit is reached, a request waits briefly for a slot, then gets `503` with `Retry-After`.
+  - The default number is set from the knee measured after this track.
+- The SQL store stops pinging on every checkout and drops the needless commit and rollback per operation, and its pool is sized properly.
+- `_close_dead_segments` is made cheap: it does not list traces on every resume.
+
+**Track 3: resilience.**
+- Provider 500s are retried, and `Retry-After` is respected.
+- A failed run's record carries its real error and the right cause.
+- A user message is never lost when the memory store fails mid-request.
+- Orphaned runs (dead process, lapsed lease) are picked up automatically by the server.
+
+**Then.** Observability: the `/prometheus` count/sum bug, plus run, model, budget and approval metrics, and why a run resumed. After that, the ramp, the soak and the chaos runs again, compared with the numbers above.
