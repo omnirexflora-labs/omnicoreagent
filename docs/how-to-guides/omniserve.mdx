@@ -542,7 +542,10 @@ public_paths = ["/steward/"]    # served without a token; "/steward/*" for a dir
 
 Everything else these routers serve needs the bearer token when auth is on.
 [apps/steward](https://github.com/omnirexflora-labs/omnicoreagent/tree/main/apps/steward)
-is a complete application served this way.
+is a complete application served this way, and
+[apps/support_desk](https://github.com/omnirexflora-labs/omnicoreagent/tree/main/apps/support_desk)
+is a small deployment of one agent for many customers: Postgres, Redis, budgets, a
+refund that waits for a person's approval, and a fake model provider to test it with.
 
 ## How it works
 
