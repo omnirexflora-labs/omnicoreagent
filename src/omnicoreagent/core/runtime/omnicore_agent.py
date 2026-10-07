@@ -14,6 +14,7 @@ from omnicoreagent.core.budgets import (
     active_budgets,
 )
 from omnicoreagent.core.runs import (
+    ClaimHeartbeat,
     RunInterrupted,
     RunStateConflict,
     RunStateUnsupported,
@@ -214,6 +215,8 @@ class OmniCoreAgent:
         # Runs this process is executing now: the orphan sweep never claims
         # one of its own, whatever its heartbeat says.
         self._active_run_ids: set[str] = set()
+        # Heartbeats of claimed orphans whose resume has not started its own.
+        self._claim_heartbeats: dict[str, ClaimHeartbeat] = {}
         self._run_retention_last: Dict[str, Any] | None = None
         self._run_retention_automatic_runs = 0
         # A caller-chosen store is never silently replaced by a background
@@ -930,9 +933,6 @@ class OmniCoreAgent:
 
             # The run's durable record lives in the chosen memory store.
             lease_seconds = int(self.agent_config.get("run_lease_seconds") or 60)
-            if _resume is not None or retry_of is not None:
-                # What a dead attempt of this run left running goes first.
-                await self._remove_run_sandboxes(run_id)
             if _resume is not None:
                 run_tracker = RunTracker.from_record(
                     self.memory_router, _resume, lease_seconds=lease_seconds
@@ -968,7 +968,21 @@ class OmniCoreAgent:
             # warm_up, or a plain one.
             run_tracker.attach_trace(trace_context.trace_id)
             await self._warm_up_model_client(in_trace=True)
+            claim_beat = self._claim_heartbeats.pop(run_id, None)
+            if claim_beat is not None:
+                # The claim kept the lease alive through the slow start; the
+                # tracker's first save continues from the version it left.
+                claimed_version = await claim_beat.stop()
+                if claimed_version is not None:
+                    run_tracker.adopt_version(claimed_version)
             await run_tracker.start(trace_context.trace_id)
+            if _resume is not None or retry_of is not None:
+                # What a dead attempt of this run left running goes only now,
+                # once this process has won the version-checked save that makes
+                # the run its own. Before it, a second process that lost the
+                # race removed the winner's sandbox (found merging the P6
+                # tracks, 2026-10-07).
+                await self._remove_run_sandboxes(run_id)
             # Keeps the heartbeat fresh during long model or tool calls.
             keep_alive = asyncio.create_task(run_tracker.keep_alive())
 
@@ -1561,6 +1575,11 @@ class OmniCoreAgent:
                 f"Claimed orphaned run {run_id} (owner {cause.get('previous_owner')}, "
                 f"orphaned {cause.get('orphaned_seconds')}s)"
             )
+            # The claim's lease starts now, but the resume can take longer than
+            # a lease to start (a cold model client took 74 s against 60 s).
+            beat = ClaimHeartbeat(self.memory_router, claimed, lease_seconds=lease_seconds)
+            beat.start()
+            self._claim_heartbeats[run_id] = beat
             claims.append({"run_id": run_id, "record": claimed, "cause": cause})
         return claims
 
@@ -1570,14 +1589,26 @@ class OmniCoreAgent:
         call that did not finish becomes ``unknown_outcome`` unless its tool
         is idempotent."""
         record = claim["record"]
-        return await self.run(
-            None,
-            session_id=record["session_id"],
-            run_id=claim["run_id"],
-            on_event=on_event,
-            _resume=record,
-            _resume_cause=claim["cause"],
-        )
+        try:
+            return await self.run(
+                None,
+                session_id=record["session_id"],
+                run_id=claim["run_id"],
+                on_event=on_event,
+                _resume=record,
+                _resume_cause=claim["cause"],
+            )
+        finally:
+            # The run took the heartbeat over when it started; if it failed
+            # before that, the claim's heartbeat must not outlive it.
+            await self.release_claim(claim)
+
+    async def release_claim(self, claim: Dict[str, Any]) -> None:
+        """Stop keeping a claim's lease alive (a claim nobody will resume, or
+        one the run has taken over). Safe to call more than once."""
+        beat = self._claim_heartbeats.pop(claim["run_id"], None)
+        if beat is not None:
+            await beat.stop()
 
     async def steer(
         self, run_id: str, message: str, *, sender: Optional[str] = None

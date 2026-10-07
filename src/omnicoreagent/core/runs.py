@@ -90,6 +90,62 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class ClaimHeartbeat:
+    """Keeps a claimed run's lease alive until its resume has taken over.
+
+    A sweeper claims an orphan by writing a new owner and a fresh heartbeat,
+    then the resume initializes the agent and loads the model client before
+    the run's own heartbeat starts. A cold load took about 74 s against a
+    default lease of 60 s, so a second sweeper found the lease lapsed and
+    claimed the run again (found merging the P6 tracks, 2026-10-07). This
+    refreshes the heartbeat on the claim's version until ``stop`` hands the
+    latest version to the run's tracker, whose first save then continues from
+    it.
+    """
+
+    def __init__(self, store: Any, record: dict[str, Any], *, lease_seconds: int) -> None:
+        self.store = store
+        self.run_id = record["run_id"]
+        self.record = {key: value for key, value in record.items() if key != "version"}
+        self.version: int = record["version"]
+        self.lease_seconds = lease_seconds
+        self.lost = False
+        self._lock = asyncio.Lock()
+        self._task: asyncio.Task | None = None
+
+    def start(self) -> None:
+        self._task = asyncio.create_task(self._beat(), name=f"claim-heartbeat-{self.run_id}")
+
+    async def _beat(self) -> None:
+        interval = max(self.lease_seconds / 3, 0.1)
+        while True:
+            await asyncio.sleep(interval)
+            async with self._lock:
+                self.record["heartbeat_at"] = self.record["updated_at"] = _now()
+                try:
+                    self.version = await self.store.save_run_state(
+                        dict(self.record), expected_version=self.version
+                    )
+                except RunStateConflict:
+                    # Another process took the run; it is theirs now.
+                    self.lost = True
+                    logger.warning(f"Claim on run {self.run_id} was taken by another process")
+                    return
+                except Exception as exc:  # noqa: BLE001 - the next beat tries again.
+                    logger.warning(f"Heartbeat for claimed run {self.run_id} failed: {exc}")
+
+    async def stop(self) -> int | None:
+        """Stop beating; the version the record now has, or None if the claim
+        was lost. Waits for a beat in flight, so the version is never stale."""
+        async with self._lock:
+            task, self._task = self._task, None
+            if task is not None:
+                task.cancel()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+        return None if self.lost else self.version
+
+
 class RunTracker:
     """Saves one run's record as the run progresses."""
 
@@ -213,6 +269,11 @@ class RunTracker:
             "error": None,
         }
         return tracker
+
+    def adopt_version(self, version: int) -> None:
+        """Continue from a newer version of the record that this process itself
+        wrote (a claim's heartbeats), so the first save still matches it."""
+        self._version = version
 
     async def _save(self) -> None:
         if not self.enabled:

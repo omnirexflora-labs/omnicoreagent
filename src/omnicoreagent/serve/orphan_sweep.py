@@ -44,6 +44,9 @@ class OrphanSweeper:
         self.recovered = 0
         self._loop_task: asyncio.Task | None = None
         self._resuming: set[asyncio.Task] = set()
+        # Claims whose resume has not finished: a claim's lease is kept alive
+        # until its run takes over, so one nobody resumes must be let go.
+        self._claims: dict[str, dict[str, Any]] = {}
 
     async def start(self) -> None:
         if self._loop_task is None:
@@ -58,6 +61,17 @@ class OrphanSweeper:
         await asyncio.gather(*tasks, return_exceptions=True)
         self._loop_task = None
         self._resuming.clear()
+        for claim in list(self._claims.values()):
+            await self._release(claim)
+        self._claims.clear()
+
+    async def _release(self, claim: dict[str, Any]) -> None:
+        release = getattr(self.agent, "release_claim", None)
+        if release is not None:
+            try:
+                await release(claim)
+            except Exception as exc:  # noqa: BLE001 - nothing more to do for it.
+                logger.warning(f"OmniServe: could not release claim {claim['run_id']}: {exc}")
 
     async def sweep_once(self) -> int:
         """Claim orphaned runs up to the free slots and resume each in its own
@@ -70,6 +84,7 @@ class OrphanSweeper:
         )
         self.sweeps += 1
         for claim in claims:
+            self._claims[claim["run_id"]] = claim
             task = asyncio.create_task(
                 self._resume(claim), name=f"omniserve-recover-{claim['run_id']}"
             )
@@ -94,6 +109,9 @@ class OrphanSweeper:
             logger.warning(
                 f"OmniServe: recovered run {run_id} failed ({type(exc).__name__}: {exc})"
             )
+        finally:
+            self._claims.pop(run_id, None)
+            await self._release(claim)
 
     async def _loop(self) -> None:
         # Replicas started together must not sweep together: the first sweep

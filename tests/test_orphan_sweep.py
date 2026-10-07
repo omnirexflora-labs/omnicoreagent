@@ -185,6 +185,8 @@ async def test_a_run_that_keeps_killing_its_process_is_given_up_on(tmp_path):
         await asyncio.sleep(1.2)
         claims = await survivor.claim_orphaned_runs(max_recoveries=3)
         assert len(claims) == 1, attempt
+        # The process dies right after claiming: its heartbeat stops with it.
+        await survivor.release_claim(claims[0])
     await asyncio.sleep(1.2)
 
     assert await survivor.claim_orphaned_runs(max_recoveries=3) == []

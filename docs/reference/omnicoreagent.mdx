@@ -342,6 +342,14 @@ Record what a run turned out to be worth, whenever that is known.
 
 A run's own result is not its outcome: a pull request is merged an hour later, a customer accepts an answer the next day, CI runs the tests afterwards. `source` says who is reporting it (`github`, `reviewer`, an evaluator's name), `reward` is the number a trainer or an evaluator uses, `label` is what it is called, and `detail` is anything else worth keeping. A run may gather several. The outcome goes on the run's record and into its trace.
 
+### `release_claim`
+
+```python
+async def release_claim(claim: Dict[str, Any]) -> None: ...
+```
+
+Stop keeping a claim's lease alive (a claim nobody will resume, or one the run has taken over). Safe to call more than once.
+
 ### `resolve_approval`
 
 ```python

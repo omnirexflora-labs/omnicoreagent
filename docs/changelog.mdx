@@ -73,6 +73,15 @@ Every release, with its notes, is also on
   in WAL mode with a 30 second busy timeout. `DatabaseMessageStore("sqlite://")`
   (in memory) failed on pool arguments SQLite's in-memory pool rejects; it now
   uses one shared connection that sessions take in turn.
+- **A slow resume no longer lets a second sweeper claim the same run.** A
+  claimed orphan's lease started at the claim, but the resume can take longer
+  than a lease to start (a cold model client took 74 s against 60 s), and a
+  second sweeper then claimed the run again. The claim now keeps the lease
+  alive until the run's own heartbeat takes over. Separately, `resume` removed
+  the dead attempt's sandboxes before it saved the run as its own, so a
+  process that lost the claim could remove the winner's sandbox; it now does so
+  only after winning the save. New `release_claim(claim)` on the agent for a
+  claim you will not resume.
 
 ### Changed
 

@@ -484,6 +484,13 @@ for claim in await agent.claim_orphaned_runs():
   left waiting, and a background run is left to its supervisor.
 - A run is claimed through its record's own version check, so two replicas
   never resume the same run, and a live run is never taken from its owner.
+- A claim keeps the run's lease alive with heartbeats until the resumed run's
+  own heartbeat takes over, so a slow start (a cold model client can take over
+  a minute) never lets a second sweeper claim the run. If you claim runs
+  yourself and do not resume one, call `agent.release_claim(claim)`.
+- A resume removes the sandboxes a dead attempt left only after it has saved
+  the run as its own, so a process that lost the claim never removes the
+  winner's sandbox.
 - A recovered run continues under the rules above: completed calls never run
   again, and a call that did not finish becomes `unknown_outcome` unless its
   tool is idempotent.
