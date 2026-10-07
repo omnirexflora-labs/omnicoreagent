@@ -97,7 +97,7 @@ class Desk:
         self.records.append(record)
         return record
 
-    async def call(self, kind: str, method: str, path: str, *, expect=(200,), record=True, **kwargs):
+    async def call(self, kind: str, method: str, path: str, *, expect=(200,), record=True, detail="", check=None, **kwargs):
         """Make one request. Returns ``(json_or_None, error_or_None)``; never raises."""
         t0, started = time.time(), time.perf_counter()
         try:
@@ -119,8 +119,10 @@ class Desk:
             error = None if http in expect else f"http_{http}"
             if error is None and body is None and response.content:
                 error = "bad_json"
+            if error is None and check is not None and body is not None:
+                error = check(body)
         if record:
-            self._note(kind, t0, started, http, error)
+            self._note(kind, t0, started, http, error, detail)
         return body, error
 
     async def quiet(self, method: str, path: str, **kwargs):
@@ -160,7 +162,7 @@ class Desk:
             error = "stream_without_complete"
         if error is None and complete.get("status") != "success":
             error = f"run_{complete.get('status')}"
-        self._note(kind, t0, started, http, error)
+        self._note(kind, t0, started, http, error, session)
         if first is not None and error is None:
             self.records.append(Record(kind + "_first_byte", t0, first, http, None, self.stage))
         return complete, error
@@ -188,6 +190,12 @@ class Job:
     attempt: Attempt
     approval_id: str
     done: asyncio.Future = field(default_factory=lambda: asyncio.get_running_loop().create_future())
+
+
+def _run_ended_well(body: dict) -> str | None:
+    """A chat's answer is an error unless the run finished or paused for a person."""
+    status = body.get("status")
+    return None if status in ("success", "awaiting_approval") else f"run_{status}"
 
 
 class Load:
@@ -250,11 +258,11 @@ class Load:
                 body = {"decision": attempt.decision, "approver": "dana", "note": "load test"}
                 if attempt.decision == "deny":
                     body["note"] = "Outside the return window."
-                decided = await self._retry("approve", "POST", f"/runs/{attempt.run_id}/approvals/{job.approval_id}", json=body)
+                decided = await self._retry("approve", "POST", f"/runs/{attempt.run_id}/approvals/{job.approval_id}", session=attempt.session, json=body)
                 if decided is None:
                     attempt.outcome = "approve_failed"
                     continue
-                resumed = await self._retry("resume", "POST", f"/runs/{attempt.run_id}/resume", tries=2)
+                resumed = await self._retry("resume", "POST", f"/runs/{attempt.run_id}/resume", session=attempt.session, tries=2)
                 if resumed is not None and resumed.get("status") == "success":
                     attempt.outcome = "completed"
                 else:
@@ -264,11 +272,11 @@ class Load:
                 if not job.done.done():
                     job.done.set_result(attempt.outcome)
 
-    async def _retry(self, kind, method, path, *, tries=3, **kwargs):
+    async def _retry(self, kind, method, path, *, session, tries=3, **kwargs):
         # A person whose click failed clicks again. A repeated approve or
         # resume is safe: the runtime answers 409 for a decision already made.
         for attempt in range(tries):
-            body, error = await self.desk.call(kind, method, path, expect=(200,), **kwargs)
+            body, error = await self.desk.call(kind, method, path, expect=(200,), detail=session, **kwargs)
             if error is None:
                 return body
             if error == "http_409":
@@ -302,10 +310,10 @@ class Load:
         if stream:
             body, error = await self.desk.stream_chat(kind, query, session)
         else:
-            body, error = await self.desk.call(kind, "POST", "/run/sync", json={"query": query, "session_id": session})
-            if error is None and body.get("status") not in ("success", "awaiting_approval"):
-                error = f"run_{body.get('status')}"
-                self.desk.records[-1].error = error
+            body, error = await self.desk.call(
+                kind, "POST", "/run/sync", detail=session, check=_run_ended_well,
+                json={"query": query, "session_id": session},
+            )
         run_id = (body or {}).get("run_id")
         self._track(run_id, session, kind)
         if run_id is None:
@@ -566,7 +574,8 @@ def check_ledger(attempts: list[Attempt], ledger: list[dict], baseline_ids: set)
                 "unrequested": [], "issued_but_run_not_completed": []}
     for attempt in attempts:
         n = counts.get((attempt.order_id, attempt.cents), 0)
-        who = {"run_id": attempt.run_id, "order_id": attempt.order_id, "cents": attempt.cents, "outcome": attempt.outcome}
+        who = {"run_id": attempt.run_id, "session": attempt.session, "order_id": attempt.order_id,
+               "cents": attempt.cents, "outcome": attempt.outcome}
         if n > 1:
             problems["duplicated"].append({**who, "rows": n})
         if attempt.decision == "approve" and attempt.outcome == "completed" and n != 1:
