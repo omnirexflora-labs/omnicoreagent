@@ -736,6 +736,10 @@ background API and its worker run with an in-memory task store.
 | `OMNICOREAGENT_SERVE_REQUEST_LOGGING` | `true` | Log each request; adds `X-Process-Time` |
 | `OMNICOREAGENT_SERVE_LOG_LEVEL` | `INFO` | `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG` or `TRACE` |
 | `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` | `300` | Seconds a request may take; `0` turns it off |
+| `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_ENABLED` | `true` | Resume this agent's runs whose process died ([Durable runs](/docs/core-concepts/durable-runs)); `false` leaves them for an explicit `resume` |
+| `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_INTERVAL_SECONDS` | `30` | Seconds between sweeps, each varying by up to 25% |
+| `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_MAX_CONCURRENT` | `2` | Recovered runs resumed at once |
+| `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_MAX_RECOVERIES` | `3` | Recoveries of one run before it is ended `failed` |
 | `OMNICOREAGENT_BACKGROUND_ENABLED` | `true` | Mount the background routes |
 | `OMNICOREAGENT_BACKGROUND_AGENT_ID` | `default` | The served agent's background id |
 | `OMNICOREAGENT_BACKGROUND_START_WORKER` | `true` | Run the scheduler and worker in this process |

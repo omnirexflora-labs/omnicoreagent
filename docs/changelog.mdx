@@ -90,6 +90,19 @@ Every release, with its notes, is also on
   segments listed every trace of the run through `list_traces`, which walks every trace in the
   store; about 5% of a 30-user profile, growing with the store. It now reads only the segments
   the run's record names. The result is the same.
+- **OmniServe resumes the interactive runs a dead process left behind.** Until
+  now a run whose process died (a killed container, a lost store connection)
+  stayed `running` with a lapsed lease until someone called `resume(run_id)`.
+  The server now sweeps for them on start and every 30 seconds (each wait
+  varies by up to a quarter, so replicas do not sweep together), claims a run
+  through its record's own version check (two replicas never take one run),
+  and resumes it under the durable rules: a call that did not finish becomes
+  `unknown_outcome` unless its tool is idempotent. Runs waiting for a person
+  and background runs are left alone; a run recovered three times and still
+  not finished is ended `failed`. The trace says why (`run_resumed`, see
+  above). To keep the earlier behaviour, set
+  `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_ENABLED=false`. Without OmniServe,
+  `agent.claim_orphaned_runs()` and `agent.resume_claimed(claim)` do the same.
 
 ## 0.5.1
 

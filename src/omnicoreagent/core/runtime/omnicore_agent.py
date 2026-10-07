@@ -15,10 +15,12 @@ from omnicoreagent.core.budgets import (
 )
 from omnicoreagent.core.runs import (
     RunInterrupted,
+    RunStateConflict,
     RunStateUnsupported,
     RunSuspended,
     RunTracker,
     current_run,
+    lease_expired,
     resume_cause,
     supports_run_state,
 )
@@ -69,6 +71,7 @@ from omnicoreagent.core.telemetry import (
     export_trace_to_many,
     set_telemetry_context,
 )
+from omnicoreagent.core.telemetry.context import current_telemetry_context
 
 
 
@@ -208,6 +211,9 @@ class OmniCoreAgent:
         self._telemetry_retention_last: dict[str, Any] | None = None
         self._telemetry_retention_automatic_runs = 0
         self._run_retention_started = False
+        # Runs this process is executing now: the orphan sweep never claims
+        # one of its own, whatever its heartbeat says.
+        self._active_run_ids: set[str] = set()
         self._run_retention_last: Dict[str, Any] | None = None
         self._run_retention_automatic_runs = 0
         # A caller-chosen store is never silently replaced by a background
@@ -846,7 +852,12 @@ class OmniCoreAgent:
             else streaming.current_delivery.get()
         )
         delivery_token = streaming.current_delivery.set(delivery)
+        # Who started this run: a background supervisor recovers its own runs,
+        # so the orphan sweep must be able to tell them from interactive ones.
+        started_by = current_telemetry_context()
+        surface = (started_by.execution_surface if started_by else None) or "interactive"
         try:
+            self._active_run_ids.add(run_id)
             trace_context = await self.telemetry_recorder.start_trace(
                 name="agent.run",
                 kind="agent.run",
@@ -940,6 +951,7 @@ class OmniCoreAgent:
                     lease_seconds=lease_seconds,
                 )
             if _resume is None:
+                run_tracker.record["surface"] = surface
                 # The request is part of the run from its first save. If the
                 # memory store fails before the message reaches the session
                 # history, a resume still has it (the support desk chaos run,
@@ -1222,6 +1234,7 @@ class OmniCoreAgent:
             raise
 
         finally:
+            self._active_run_ids.discard(run_id)
             if keep_alive is not None:
                 keep_alive.cancel()
             streaming.current_delivery.reset(delivery_token)
@@ -1471,6 +1484,99 @@ class OmniCoreAgent:
             raise ValueError(problem)
         return await self.run(
             None, session_id=record["session_id"], run_id=run_id, on_event=on_event, _resume=record
+        )
+
+    async def claim_orphaned_runs(
+        self, *, limit: int = 10, max_recoveries: int = 3
+    ) -> List[Dict[str, Any]]:
+        """Take over this agent's runs whose process died, and say which.
+
+        An orphan is a run still ``running`` whose heartbeat is older than its
+        lease, started by this agent (by name) and not by a background
+        supervisor, which recovers its own. A run waiting for an approval or a
+        budget decision is not an orphan and is left waiting.
+
+        Each run is claimed with the record's own version check: the claim
+        writes a new owner and a fresh heartbeat, and a second process that
+        read the same record fails the check and skips it, so a run is never
+        resumed twice. Each claim is then given to ``resume_claimed``. A run
+        claimed ``max_recoveries`` times and still not finished is ended
+        ``failed`` instead (it is probably what kills its process).
+
+        Added after the support desk chaos run (2026-10-07), where runs whose
+        process died stayed ``running`` until someone called ``resume``.
+        """
+        from uuid import uuid4
+
+        if not self._initialized:
+            await self.initialize()
+        if not supports_run_state(self.memory_router):
+            return []
+        try:
+            running = await self.memory_router.list_run_states(None, "running", 1000)
+        except RunStateUnsupported:
+            return []
+        lease_seconds = int(self.agent_config.get("run_lease_seconds") or 60)
+        claims: List[Dict[str, Any]] = []
+        for record in running:
+            if len(claims) >= limit:
+                break
+            run_id = record["run_id"]
+            if (
+                record.get("agent_name") != self.name
+                or run_id in self._active_run_ids
+                or record.get("surface") == "background"
+                or not lease_expired(record)
+            ):
+                continue
+            recoveries = int(record.get("recovery_count") or 0)
+            if recoveries >= max_recoveries:
+                await self.abandon_run(
+                    run_id,
+                    status="failed",
+                    reason=(
+                        f"recovered {recoveries} times and still did not finish; "
+                        "it is probably what stops its process"
+                    ),
+                )
+                continue
+            # What the run looked like before the claim rewrites its lease.
+            cause = {"trigger": "orphan_sweep", **resume_cause(record)}
+            claimed = {key: value for key, value in record.items() if key != "version"}
+            now = datetime.now(timezone.utc).isoformat()
+            claimed.update(
+                owner=f"owner_sweep_{uuid4().hex}",
+                heartbeat_at=now,
+                updated_at=now,
+                lease_seconds=lease_seconds,
+                recovery_count=recoveries + 1,
+            )
+            try:
+                claimed["version"] = await self.memory_router.save_run_state(
+                    dict(claimed), expected_version=record["version"]
+                )
+            except RunStateConflict:
+                continue  # another process claimed it first
+            runtime_logger().info(
+                f"Claimed orphaned run {run_id} (owner {cause.get('previous_owner')}, "
+                f"orphaned {cause.get('orphaned_seconds')}s)"
+            )
+            claims.append({"run_id": run_id, "record": claimed, "cause": cause})
+        return claims
+
+    async def resume_claimed(self, claim: Dict[str, Any], on_event: Any = None) -> Dict[str, Any]:
+        """Continue a run ``claim_orphaned_runs`` returned, with the same
+        durable rules as ``resume``: completed calls never run again, and a
+        call that did not finish becomes ``unknown_outcome`` unless its tool
+        is idempotent."""
+        record = claim["record"]
+        return await self.run(
+            None,
+            session_id=record["session_id"],
+            run_id=claim["run_id"],
+            on_event=on_event,
+            _resume=record,
+            _resume_cause=claim["cause"],
         )
 
     async def steer(

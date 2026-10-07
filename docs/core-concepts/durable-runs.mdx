@@ -464,6 +464,42 @@ resume: success | Q2 revenue was 410, Q3 revenue was 455, and the change from Q2
 Both work from any process that shares the store: they write to the record,
 and the run reads it at each step.
 
+## Runs a dead process left behind
+
+By itself, nothing resumes a run whose process died: an interactive run stays
+`running`, with a lapsed lease, until something calls `resume(run_id)`
+(background runs have a supervisor that does). A server does it for you:
+**OmniServe sweeps for these runs** on start and then every
+`OMNICOREAGENT_SERVE_ORPHAN_SWEEP_INTERVAL_SECONDS` (30 by default, each wait
+varying by up to a quarter, the first one a few seconds at most, so replicas do
+not sweep together). Without OmniServe, the same two calls are yours:
+
+```python
+for claim in await agent.claim_orphaned_runs():
+    await agent.resume_claimed(claim)
+```
+
+- An orphan is a run of this agent that is `running` and whose heartbeat is
+  older than its lease. A run waiting for an approval or a budget decision is
+  left waiting, and a background run is left to its supervisor.
+- A run is claimed through its record's own version check, so two replicas
+  never resume the same run, and a live run is never taken from its owner.
+- A recovered run continues under the rules above: completed calls never run
+  again, and a call that did not finish becomes `unknown_outcome` unless its
+  tool is idempotent.
+- Its trace says why: the `run_resumed` event has `cause`
+  `recovered_after_lapsed_lease`, `trigger` `orphan_sweep`, the dead
+  `previous_owner`, and `orphaned_seconds`.
+- A run recovered `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_MAX_RECOVERIES` times (3)
+  and still not finished is ended `failed`: it is probably what stops its
+  process.
+- At most `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_MAX_CONCURRENT` (2) recovered runs
+  work at once.
+
+To keep the earlier behaviour, where a person or your own code resumes every
+orphan, set `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_ENABLED=false`
+(`OmniServeConfig(orphan_sweep_enabled=False)`).
+
 ## End a run nobody will resume
 
 `abandon_run(run_id, status=, reason=)` closes a run from outside: one that

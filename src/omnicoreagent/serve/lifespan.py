@@ -14,6 +14,8 @@ from fastapi import FastAPI
 
 from omnicoreagent.core.logging import logger
 
+from .orphan_sweep import OrphanSweeper
+
 if TYPE_CHECKING:
     from omnicoreagent.background import BackgroundAgentManager
     from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent as AgentType
@@ -72,6 +74,19 @@ async def agent_lifespan(app: FastAPI):
             if config.background_start_worker:
                 await background_manager.start()
 
+        app.state.orphan_sweeper = None
+        if config.orphan_sweep_enabled and hasattr(agent, "claim_orphaned_runs"):
+            # Runs whose process died are resumed here; an interactive run
+            # otherwise waits for someone to call resume (see orphan_sweep).
+            app.state.orphan_sweeper = OrphanSweeper(
+                agent,
+                interval_seconds=config.orphan_sweep_interval_seconds,
+                max_concurrent=config.orphan_sweep_max_concurrent,
+                max_recoveries=config.orphan_sweep_max_recoveries,
+                run_timeout=config.request_timeout,
+            )
+            await app.state.orphan_sweeper.start()
+
         app.state.omniserve_startup_complete = True
         logger.info(f"OmniServe: Agent '{agent_name}' is ready")
 
@@ -83,6 +98,10 @@ async def agent_lifespan(app: FastAPI):
 
         cleanup_error: BaseException | None = None
         active_exception = sys.exc_info()[0] is not None
+
+        sweeper = getattr(app.state, "orphan_sweeper", None)
+        if sweeper is not None:
+            await sweeper.stop()
 
         if background_manager is not None:
             try:

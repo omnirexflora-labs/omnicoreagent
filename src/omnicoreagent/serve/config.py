@@ -243,6 +243,25 @@ class OmniServeConfig(BaseModel):
         description="Start the background scheduler/worker during OmniServe lifespan",
     )
 
+    # Orphaned runs. A run whose process died stays `running` with a lapsed
+    # lease; with the sweep on (the default) the server resumes such runs of
+    # its agent by itself, instead of waiting for someone to call `resume`.
+    orphan_sweep_enabled: bool = Field(
+        default=True,
+        description="Resume this agent's runs whose process died (lapsed lease)",
+    )
+    orphan_sweep_interval_seconds: float = Field(
+        default=30.0,
+        description="Seconds between sweeps for orphaned runs (each wait varies by up to 25%)",
+    )
+    orphan_sweep_max_concurrent: int = Field(
+        default=2, description="Recovered runs this server resumes at once"
+    )
+    orphan_sweep_max_recoveries: int = Field(
+        default=3,
+        description="Recoveries of one run before it is ended failed instead",
+    )
+
     @model_validator(mode="after")
     def apply_env_overrides(self) -> "OmniServeConfig":
         """
@@ -344,6 +363,16 @@ class OmniServeConfig(BaseModel):
         if (val := _get_env_bool(background_prefix, "START_WORKER")) is not None:
             self.background_start_worker = val
 
+        # Orphaned runs
+        if (val := _get_env_bool(serve_prefix, "ORPHAN_SWEEP_ENABLED")) is not None:
+            self.orphan_sweep_enabled = val
+        if (val := _get_env_float(serve_prefix, "ORPHAN_SWEEP_INTERVAL_SECONDS")) is not None:
+            self.orphan_sweep_interval_seconds = val
+        if (val := _get_env_int(serve_prefix, "ORPHAN_SWEEP_MAX_CONCURRENT")) is not None:
+            self.orphan_sweep_max_concurrent = val
+        if (val := _get_env_int(serve_prefix, "ORPHAN_SWEEP_MAX_RECOVERIES")) is not None:
+            self.orphan_sweep_max_recoveries = val
+
         self.api_prefix = normalize_api_prefix(self.api_prefix)
         self.log_level = self.log_level.upper()
         self._validate_server_config()
@@ -351,6 +380,7 @@ class OmniServeConfig(BaseModel):
         self._validate_auth_config()
         self._validate_rate_limit_config()
         self._validate_admission_config()
+        self._validate_orphan_sweep_config()
         return self
 
     def _validate_server_config(self) -> None:
@@ -372,6 +402,23 @@ class OmniServeConfig(BaseModel):
             raise ValueError(
                 "OMNICOREAGENT_SERVE_AUTH_TOKEN is required when "
                 "OMNICOREAGENT_SERVE_AUTH_ENABLED=true"
+            )
+
+    def _validate_orphan_sweep_config(self) -> None:
+        if not self.orphan_sweep_enabled:
+            return
+        if self.orphan_sweep_interval_seconds <= 0:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_ORPHAN_SWEEP_INTERVAL_SECONDS must be greater "
+                "than 0 when the orphan sweep is enabled"
+            )
+        if self.orphan_sweep_max_concurrent < 1:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_ORPHAN_SWEEP_MAX_CONCURRENT must be at least 1"
+            )
+        if self.orphan_sweep_max_recoveries < 1:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_ORPHAN_SWEEP_MAX_RECOVERIES must be at least 1"
             )
 
     def _validate_rate_limit_config(self) -> None:
