@@ -19,6 +19,7 @@ from omnicoreagent.core.runs import (
     RunSuspended,
     RunTracker,
     current_run,
+    resume_cause,
     supports_run_state,
 )
 from omnicoreagent.core.runtime import (
@@ -759,6 +760,7 @@ class OmniCoreAgent:
         tags: Optional[List[str]] = None,
         provenance: Optional[Dict[str, Any]] = None,
         _resume: Optional[Dict[str, Any]] = None,
+        _resume_cause: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run the agent with a query and optional session ID.
@@ -863,6 +865,11 @@ class OmniCoreAgent:
                     "run_resumed",
                     actor=self._telemetry_actor(),
                     metadata={
+                        # Why: the state the run was left in, and who resumed
+                        # it. A sweeper passes the cause it read before it
+                        # claimed the run, since claiming rewrites the lease.
+                        "trigger": "explicit",
+                        **(_resume_cause or resume_cause(_resume)),
                         "previous_trace_ids": list(_resume.get("trace_ids") or []),
                         "step": _resume.get("step"),
                         "approvals": [

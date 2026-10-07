@@ -17,7 +17,7 @@ import asyncio
 import inspect
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -602,6 +602,39 @@ def lease_expired(record: dict[str, Any], now: datetime | None = None) -> bool:
     lease = record.get("lease_seconds") or 60
     age = ((now or datetime.now(timezone.utc)) - datetime.fromisoformat(heartbeat)).total_seconds()
     return age > lease
+
+
+def resume_cause(record: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
+    """Why a run is being resumed, read from the record it resumes from.
+
+    The cause is the state the run was left in: a decided approval
+    (``approval``), a budget decision (``budget_grant`` or ``budget_denied``),
+    a stop that was asked for (``interrupted``), or a process that stopped
+    refreshing its lease (``recovered_after_lapsed_lease``, with the owner it
+    had and how long the run sat orphaned). Added after the support desk
+    chaos run (2026-10-07), where a resumed run's trace did not say which.
+    """
+    status = record.get("status")
+    if status == "awaiting_approval":
+        return {"cause": "approval"}
+    if status == "awaiting_budget":
+        requests = record.get("budget_requests") or []
+        granted = any(request.get("status") == "granted" for request in requests)
+        return {"cause": "budget_grant" if granted else "budget_denied"}
+    if status == "interrupted":
+        return {"cause": "interrupted"}
+    heartbeat = record.get("heartbeat_at")
+    if status == "running" and heartbeat:
+        lease = record.get("lease_seconds") or 60
+        expired = datetime.fromisoformat(heartbeat) + timedelta(seconds=lease)
+        orphaned = ((now or datetime.now(timezone.utc)) - expired).total_seconds()
+        return {
+            "cause": "recovered_after_lapsed_lease",
+            "previous_owner": record.get("owner"),
+            "lease_expired_at": expired.isoformat(),
+            "orphaned_seconds": max(0, round(orphaned, 3)),
+        }
+    return {"cause": "explicit"}
 
 
 def not_resumable(record: dict[str, Any], run_id: str) -> str | None:

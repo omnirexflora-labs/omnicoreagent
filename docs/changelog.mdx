@@ -45,6 +45,10 @@ Every release, with its notes, is also on
   privacy-redacted) and its `termination_reason` on `get_run` and `list_runs`.
   `provider_error` is reserved for the model provider; a fault in the runtime
   or a component it uses is `internal_error`.
+- **`run_resumed` says why.** The event carries `cause` (`approval`,
+  `budget_grant`, `budget_denied`, `interrupted`,
+  `recovered_after_lapsed_lease`) and `trigger`; a recovered run adds the
+  `previous_owner`, `lease_expired_at` and `orphaned_seconds`.
 
 ### Changed
 
