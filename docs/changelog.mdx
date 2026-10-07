@@ -56,6 +56,12 @@ Every release, with its notes, is also on
   resume puts it back in the history, a record with no request is refused
   (`RunRequestLost`, the run ends `failed`), and a failed memory read is tried
   again twice before the run fails with the store's error.
+- **Budget writes in the SQL store survive a dropped connection.** With the
+  per-checkout ping gone, a restarted database failed the first budget
+  statement on each pooled connection. Budget reads, the legacy-counter move
+  and budget changes now retry once on a fresh connection. A change is retried
+  only if its transaction had not begun to commit, so a charge that did
+  commit is never applied twice.
 
 ### Changed
 

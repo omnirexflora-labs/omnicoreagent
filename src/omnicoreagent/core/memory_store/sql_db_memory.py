@@ -954,14 +954,14 @@ class DatabaseMessageStore(AbstractMemoryStore):
                     StorageBudgetState,
                 ):
                     session.execute(delete(table).where(table.key == key))
-                session.commit()
+                self._commit(session)
             except Exception:
-                session.rollback()
+                self._rollback_quietly(session)
                 raise
             finally:
                 self._release_session(session)
 
-        await asyncio.to_thread(_delete)
+        await asyncio.to_thread(self._with_retry, _delete)
 
     async def get_budget_state(self, key: str) -> dict | None:
         await self._move_legacy_budget(key)
@@ -987,7 +987,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(_get)
+        return await asyncio.to_thread(self._with_retry, _get)
 
     async def get_budget_grant_history(self, key: str) -> list[dict]:
         await self._move_legacy_budget(key)
@@ -1014,7 +1014,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(_get)
+        return await asyncio.to_thread(self._with_retry, _get)
 
     async def list_budget_holds(self, key: str) -> list[dict]:
         await self._move_legacy_budget(key)
@@ -1038,25 +1038,38 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(_list)
+        return await asyncio.to_thread(self._with_retry, _list)
 
     async def apply_budget_change(self, key: str, change: dict) -> dict:
         await self._move_legacy_budget(key)
-        return await asyncio.to_thread(self._apply_budget_change, key, change)
+        return await asyncio.to_thread(
+            self._with_retry, lambda: self._apply_budget_change(key, change)
+        )
 
     def _apply_budget_change(self, key: str, change: dict) -> dict:
+        """The change, once, however many times the database aborts it.
+
+        A dropped connection is retried by ``_with_retry`` around this method,
+        and only while the transaction has not begun to commit (``_commit``
+        marks that point). The guarded UPDATEs add to a counter, so a change
+        that did commit and is run again would be charged twice; the same
+        reason the retry never follows a COMMIT.
+        """
         for attempt in range(_BUDGET_TRANSACTION_TRIES):
+            # A commit that failed on a lock applied nothing; the attempt that
+            # follows starts with a clean mark.
+            self._retry_state.committing = False
             session = self._get_session()
             try:
                 with _budget_write_lock(session):
                     try:
                         result = self._budget_transaction(session, key, change)
                         if result["refused"] is None:
-                            session.commit()
+                            self._commit(session)
                         else:
                             session.rollback()
                     except Exception:
-                        session.rollback()
+                        self._rollback_quietly(session)
                         raise
                 if result["refused"] is not None:
                     result["refused"] = self._describe_refusal(session, key, change)
@@ -1250,7 +1263,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
     async def _move_legacy_budget(self, key: str) -> None:
         if self._legacy_budgets_gone or key in self._legacy_budgets_moved:
             return
-        await asyncio.to_thread(self._move_legacy_budget_sync, key)
+        await asyncio.to_thread(self._with_retry, lambda: self._move_legacy_budget_sync(key))
 
     def _move_legacy_budget_sync(self, key: str) -> None:
         session = self._get_session()
@@ -1311,9 +1324,9 @@ class DatabaseMessageStore(AbstractMemoryStore):
                                     granted_at=entry.get("granted_at"),
                                 )
                             )
-                    session.commit()
+                    self._commit(session)
                 except Exception:
-                    session.rollback()
+                    self._rollback_quietly(session)
                     raise
                 self._legacy_budgets_moved.add(key)
         finally:
@@ -1337,7 +1350,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
                 if expected_version is None:
                     session.add(StorageBudgetState(key=key, version=version, data=data))
                     try:
-                        session.commit()
+                        self._commit(session)
                     except IntegrityError:
                         session.rollback()
                         raise RunStateConflict(f"Budget {key} already exists") from None
@@ -1350,7 +1363,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
                     )
                     .values(version=version, data=data)
                 )
-                session.commit()
+                self._commit(session)
                 if result.rowcount != 1:
                     raise RunStateConflict(
                         f"Budget {key} changed since version {expected_version}"
@@ -1359,4 +1372,4 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(_save)
+        return await asyncio.to_thread(self._with_retry, _save)
