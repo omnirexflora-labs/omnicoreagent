@@ -115,6 +115,14 @@ Every release, with its notes, is also on
   transactions need a replica set; their calls are asynchronous and cheap, and each is already
   atomic. A custom store may offer `apply_budget_changes`, `get_budget_states` and set
   `batches_budget_changes = True` (see `AbstractMemoryStore`); without them nothing changes.
+- **A step boundary is one write, not a read and a write.** Each step began by reading the run's
+  record to look for steering messages and a request to stop, then saved the new step number. The
+  save already names the version it read and, finding another writer, merges their inbox and stop
+  request, so the read told nothing the save did not: three reads per refund run. The boundary is
+  now the save alone. A run asked to stop keeps its step number, a steering message is delivered
+  once, and a run another process has taken over still cannot begin a step. The end of a run no
+  longer reads its own record back to look for workers when it started none, and an ID made by
+  `generate_run_id()` is not looked up before its run (nothing can be stored under it yet).
 - **Budget storage layout.** SQL stores gain the tables `budget_meters`, `budget_holds` and
   `budget_grants`; Redis and MongoDB keep counters under new keys (`omnicoreagent_budget2:`,
   `<collection>_budgets`). Counters written by 0.5.x are moved on first touch; do not run 0.5.x and

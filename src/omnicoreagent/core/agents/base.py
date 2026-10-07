@@ -628,7 +628,7 @@ class BaseReactAgent:
                 if run is not None:
                     # Step boundary: take messages steered to this run, and
                     # stop here if someone asked the run to.
-                    steered, stop = await run.check_external()
+                    steered, stop = await run.begin_step(current_steps + 1)
                     if stop:
                         interrupted = RunInterrupted("Run interrupted at a step boundary")
                         interrupted.usage = run_usage
@@ -642,7 +642,9 @@ class BaseReactAgent:
                             telemetry_recorder=telemetry_recorder,
                         )
                 current_steps += 1
-                if run is not None:
+                if run is not None and steered:
+                    # The step number was saved at the boundary; this save
+                    # carries the steering messages just added to the record.
                     await run.step(current_steps)
                 step_span = None
                 if telemetry_recorder is not None:

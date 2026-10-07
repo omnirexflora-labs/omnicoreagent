@@ -334,18 +334,46 @@ class RunTracker:
                 return [], False
             if stored["version"] != self._version:
                 await self._merge_external()
-            waiting = [m for m in self.record.get("inbox", []) if not m.get("delivered")]
-            delivered = [dict(m) for m in waiting]
-            for message in waiting:
-                # The text now lives in the run's history (redacted as history
-                # is); the inbox keeps only a digest of it.
-                message["delivered"] = True
-                message["delivered_at"] = _now()
-                message["content_digest"] = arguments_digest(message.get("content"))
-                message["content"] = None
-            if waiting:
-                await self._save()
+            delivered = await self._take_inbox()
             return delivered, bool(self.record.get("interrupt_requested"))
+
+    async def begin_step(self, number: int) -> tuple[list[dict[str, Any]], bool]:
+        """The step boundary: save the new step number, and answer what
+        ``check_external`` does (steered messages, whether to stop).
+
+        The boundary was a read of the record and then a save of the step. The
+        save names the version it read, and one that finds another writer
+        merges their inbox and stop request before it goes on (``_save``), so
+        the read told nothing the save did not: a refund run on the support
+        desk made three of them for nothing (2026-10-07). A run asked to stop
+        keeps its step number: it never began this one.
+        """
+        if not self.enabled:
+            return [], False
+        async with self._lock:
+            previous = self.record["step"]
+            self.record["step"] = number
+            await self._save()
+            if self.record.get("interrupt_requested"):
+                self.record["step"] = previous
+                return [], True
+            return await self._take_inbox(), False
+
+    async def _take_inbox(self) -> list[dict[str, Any]]:
+        """Mark the waiting steering messages delivered, so they arrive once.
+        The lock is held."""
+        waiting = [m for m in self.record.get("inbox", []) if not m.get("delivered")]
+        delivered = [dict(m) for m in waiting]
+        for message in waiting:
+            # The text now lives in the run's history (redacted as history
+            # is); the inbox keeps only a digest of it.
+            message["delivered"] = True
+            message["delivered_at"] = _now()
+            message["content_digest"] = arguments_digest(message.get("content"))
+            message["content"] = None
+        if waiting:
+            await self._save()
+        return delivered
 
     def attach_trace(self, trace_id: str | None) -> None:
         """Name this segment's trace on the record before anything is saved,

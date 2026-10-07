@@ -216,6 +216,8 @@ class OmniCoreAgent:
         # Runs this process is executing now: the orphan sweep never claims
         # one of its own, whatever its heartbeat says.
         self._active_run_ids: set[str] = set()
+        # Run IDs made by ``generate_run_id`` and not yet run.
+        self._fresh_run_ids: set[str] = set()
         # Heartbeats of claimed orphans whose resume has not started its own.
         self._claim_heartbeats: dict[str, ClaimHeartbeat] = {}
         self._run_retention_last: Dict[str, Any] | None = None
@@ -402,7 +404,14 @@ class OmniCoreAgent:
 
     def generate_run_id(self) -> str:
         """Generate a unique run ID inside a session."""
-        return f"run_{uuid.uuid4().hex}"
+        run_id = f"run_{uuid.uuid4().hex}"
+        # A run ID made here cannot exist in the store yet, so the run that
+        # starts with it need not look for one (see ``run``). Bounded: an ID
+        # made and never run is forgotten.
+        if len(self._fresh_run_ids) > 4096:
+            self._fresh_run_ids.clear()
+        self._fresh_run_ids.add(run_id)
+        return run_id
 
     def _ensure_telemetry(self) -> None:
         """Attach default telemetry components."""
@@ -810,12 +819,16 @@ class OmniCoreAgent:
             await self._apply_run_retention(trigger="automatic")
 
         run_id = run_id or self.generate_run_id()
+        # An ID this agent just made has no record to find: no read to know it.
+        # Taken out of the set so a second run with the same ID does read.
+        fresh_run_id = run_id in self._fresh_run_ids
+        self._fresh_run_ids.discard(run_id)
         trace_context = None
         run_tracker = None
         keep_alive = None
         run_budgets = None
         retry_of = None
-        if _resume is None and supports_run_state(self.memory_router):
+        if _resume is None and not fresh_run_id and supports_run_state(self.memory_router):
             # A known run ID: recover a run whose process died, refuse one that
             # is still live, or start a finished or failed one again. Read from
             # the router directly: initializing here would put an
@@ -1099,7 +1112,7 @@ class OmniCoreAgent:
                 error=run_error if trace_status != TraceStatus.COMPLETED else None,
                 termination_reason=formatted_response.get("termination_reason"),
             )
-            await self._settle_workers(run_id)
+            await self._settle_workers(run_id, run_tracker)
             run_summary = await self._run_summary(trace_context.trace_id)
             await self.telemetry_recorder.emit_event(
                 "final_answer",
@@ -1391,7 +1404,7 @@ class OmniCoreAgent:
                     termination_reason="internal_error" if status == "failed" else status,
                 )
             )
-            await complete_despite_cancellation(self._settle_workers(run_tracker.run_id))
+            await complete_despite_cancellation(self._settle_workers(run_tracker.run_id, run_tracker))
         except Exception as record_exc:
             runtime_logger().warning(
                 f"Could not record run {run_tracker.run_id} as {status}: "
@@ -1966,7 +1979,7 @@ class OmniCoreAgent:
         await self._settle_workers(run_id)
         return await self.get_run(run_id)
 
-    async def _settle_workers(self, lead_run_id: str) -> None:
+    async def _settle_workers(self, lead_run_id: str, tracker: Any = None) -> None:
         """Mark the workers of an ended lead run that nothing will resume.
 
         A lead process that died left the workers it had started `running`,
@@ -1980,6 +1993,13 @@ class OmniCoreAgent:
         from omnicoreagent.core.runs import lease_expired, update_from_outside
 
         try:
+            if tracker is not None and tracker.enabled and not tracker.record.get("delegations"):
+                # The run that just ended wrote its own record, delegations
+                # included, and named none: there is no worker to settle, and
+                # reading the record back only to learn that cost a database
+                # round trip at the end of every run (the support desk ramp,
+                # 2026-10-07).
+                return
             lead = await self._run_record(lead_run_id)
             if lead is None or lead.get("status") not in _ENDED_RUN_STATUSES:
                 return

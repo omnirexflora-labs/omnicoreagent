@@ -32,9 +32,9 @@ from test_fake_provider import running_fake_provider  # noqa: E402
 CEILING = {
     "budgets": 11,
     "messages": 7,
-    "run_state": 26,
+    "run_state": 21,
     "other": 0,
-    "total": 44,
+    "total": 39,
 }
 
 
