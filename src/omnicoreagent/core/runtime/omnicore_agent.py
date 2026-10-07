@@ -2272,13 +2272,9 @@ class OmniCoreAgent:
             }
         )
         if self.telemetry_recorder is None:
-            await self.memory_router.store_message(
-                role, stored_content, stored_metadata, session_id
+            await self._write_history(
+                run, role, stored_content, stored_metadata, session_id
             )
-            if run is not None:
-                await run.add_message(
-                    {"role": role, "content": stored_content, "metadata": stored_metadata}
-                )
             return
         span = await self.telemetry_recorder.start_span(
             name="memory.write",
@@ -2291,13 +2287,9 @@ class OmniCoreAgent:
             },
         )
         try:
-            await self.memory_router.store_message(
-                role, stored_content, stored_metadata, session_id
+            await self._write_history(
+                run, role, stored_content, stored_metadata, session_id
             )
-            if run is not None:
-                await run.add_message(
-                    {"role": role, "content": stored_content, "metadata": stored_metadata}
-                )
             await self.telemetry_recorder.emit_event(
                 "memory_write",
                 actor=TelemetryActor(type=ActorType.MEMORY),
@@ -2322,6 +2314,27 @@ class OmniCoreAgent:
                 error={"type": exc.__class__.__name__, "message": str(exc)},
             )
             raise
+
+    async def _write_history(
+        self,
+        run: Any,
+        role: str,
+        content: str,
+        metadata: dict | None,
+        session_id: str | None,
+    ) -> None:
+        """Write one message to the session's history and to the run's record.
+
+        A store that fails raises, and the run fails with its error. The
+        message goes on the run's record first, so a failed history write does
+        not also lose what the model said (a lost answer cannot be asked for
+        again; the record is what a person reads to see what happened).
+        """
+        if run is not None:
+            await run.add_message(
+                {"role": role, "content": content, "metadata": metadata}
+            )
+        await self.memory_router.store_message(role, content, metadata, session_id)
 
     async def _read_session_messages(
         self, session_id: str, agent_name: str | None

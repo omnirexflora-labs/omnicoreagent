@@ -606,13 +606,15 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        def _store():
-            try:
-                self._with_retry(_store_once)
-            except Exception as e:
-                logger.error(f"Failed to store message: {e}")
-
-        await asyncio.to_thread(_store)
+        # A failed write is raised, not logged: a message that was never stored
+        # would look stored, and the run would carry on without it (found
+        # merging the P6 tracks, 2026-10-07). The run fails with the store's
+        # error, and its record still holds the message.
+        try:
+            await asyncio.to_thread(self._with_retry, _store_once)
+        except Exception as e:
+            logger.error(f"Failed to store message: {e}")
+            raise
 
     async def get_messages(
         self, session_id: str = None, agent_name: str | None = None

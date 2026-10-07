@@ -192,7 +192,10 @@ class RedisMemoryStore(AbstractMemoryStore):
             logger.debug(f"Stored message for session {session_id}")
 
         except Exception as e:
+            # Raised, not swallowed: a message that was never stored must not
+            # look stored (found merging the P6 tracks, 2026-10-07).
             logger.error(f"Failed to store message: {e}")
+            raise
         finally:
             if self._connection_manager and client:
                 self._connection_manager.release_client()

@@ -135,7 +135,10 @@ class MongoDb(AbstractMemoryStore):
             }
             await self.collection.insert_one(message)
         except Exception as e:
+            # Raised, not swallowed: a message that was never stored must not
+            # look stored (found merging the P6 tracks, 2026-10-07).
             logger.error(f"Failed to store message: {e}")
+            raise
 
     async def get_messages(self, session_id: str = None, agent_name: str = None):
         try:

@@ -131,7 +131,9 @@ async def test_a_write_is_not_retried_after_its_commit_began(store, monkeypatch)
 
     monkeypatch.setattr(Session, "commit", commit_then_drop)
 
-    await store.store_message("user", "once", {"agent_name": "a"}, "s1")
+    # The failure reaches the caller (a failed write is never swallowed).
+    with pytest.raises(OperationalError):
+        await store.store_message("user", "once", {"agent_name": "a"}, "s1")
 
     assert calls["n"] == 1
     monkeypatch.undo()

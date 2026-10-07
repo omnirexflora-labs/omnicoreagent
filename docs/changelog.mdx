@@ -62,6 +62,12 @@ Every release, with its notes, is also on
   and budget changes now retry once on a fresh connection. A change is retried
   only if its transaction had not begun to commit, so a charge that did
   commit is never applied twice.
+- **A message the store could not write is an error.** The SQL, Redis and
+  MongoDB stores logged a failed `store_message` and returned, so a request or
+  an answer that was in no history looked stored. The write now raises and the
+  run fails with the store's error. The message goes on the run's record
+  first, so a failed history write does not also lose the answer. A custom
+  memory store should raise from `store_message` too.
 
 ### Changed
 
