@@ -58,6 +58,20 @@ Every budget covering a run: its limit, what a person granted on top of it, what
 
 The application's, session's and agent's counters are read from the ledger (they are shared, and live on); a finished run's own counter is the one settled on its record. Empty when nothing is budgeted.
 
+### `claim_orphaned_runs`
+
+```python
+async def claim_orphaned_runs(*, limit: int = 10, max_recoveries: int = 3) -> List[Dict[str, Any]]: ...
+```
+
+Take over this agent's runs whose process died, and say which.
+
+An orphan is a run still `running` whose heartbeat is older than its lease, started by this agent (by name) and not by a background supervisor, which recovers its own. A run waiting for an approval or a budget decision is not an orphan and is left waiting.
+
+Each run is claimed with the record's own version check: the claim writes a new owner and a fresh heartbeat, and a second process that read the same record fails the check and skips it, so a run is never resumed twice. Each claim is then given to `resume_claimed`. A run claimed `max_recoveries` times and still not finished is ended `failed` instead (it is probably what kills its process).
+
+Added after the support desk chaos run (2026-10-07), where runs whose process died stayed `running` until someone called `resume`.
+
 ### `cleanup`
 
 ```python
@@ -346,10 +360,18 @@ async def resume(run_id: str, on_event: Any = None) -> Dict[str, Any]: ...
 
 Continue a run: one waiting for approval once every approval is decided (see `resolve_approval`), or one whose process stopped (its heartbeat is older than `run_lease_seconds`). Completed tool calls never run again.
 
+### `resume_claimed`
+
+```python
+async def resume_claimed(claim: Dict[str, Any], on_event: Any = None) -> Dict[str, Any]: ...
+```
+
+Continue a run `claim_orphaned_runs` returned, with the same durable rules as `resume`: completed calls never run again, and a call that did not finish becomes `unknown_outcome` unless its tool is idempotent.
+
 ### `run`
 
 ```python
-async def run(query: str, session_id: Optional[str] = None, run_id: Optional[str] = None, on_event: Any = None, *, tags: Optional[List[str]] = None, provenance: Optional[Dict[str, Any]] = None, _resume: Optional[Dict[str, Any]] = None) -> Dict[str, Any]: ...
+async def run(query: str, session_id: Optional[str] = None, run_id: Optional[str] = None, on_event: Any = None, *, tags: Optional[List[str]] = None, provenance: Optional[Dict[str, Any]] = None, _resume: Optional[Dict[str, Any]] = None, _resume_cause: Optional[Dict[str, Any]] = None) -> Dict[str, Any]: ...
 ```
 
 Run the agent with a query and optional session ID.
