@@ -27,6 +27,11 @@ def stable_message_digest(
     record = message_record(message)
     if canonicalizer is not None:
         record = canonicalizer(record)
+    return record_digest(record)
+
+
+def record_digest(record: Any) -> str:
+    """The digest of a message record that is already in its canonical form."""
     encoded = json.dumps(
         record,
         sort_keys=True,
@@ -51,10 +56,10 @@ def context_evidence(
     records = [message_record(message) for message in messages]
     if canonicalizer is not None:
         records = [canonicalizer(record) for record in records]
-    message_digests = [
-        stable_message_digest(message, canonicalizer=canonicalizer)
-        for message in messages
-    ]
+    # Each message is put in canonical form once, and its digest is taken from
+    # that: ``stable_message_digest`` would work the same form out again, so
+    # every message was redacted twice for nothing.
+    message_digests = [record_digest(record) for record in records]
     role_counts: dict[str, int] = {}
     for record in records:
         role = str(record.get("role", "unknown"))

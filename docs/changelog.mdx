@@ -134,6 +134,15 @@ Every release, with its notes, is also on
   content handled again at every step. A text's token count and a text's redaction are now kept by
   a digest of the content (never the text) in bounded caches, so the cache holds integers and
   already-redacted text. What is counted and redacted is unchanged.
+- **A message's privacy-safe digest form is worked out once per trace.** Each step digested the whole
+  context again, and each message was redacted, scrubbed and masked three times over (the context
+  events, the model call's evidence, each message's own digest): about 19% of the event loop on the
+  support desk ramp. The form is kept for the length of its trace, bounded, and dropped when a
+  credential is registered or the redaction policy changes; a message is also put in canonical form
+  once, not twice, when a model call's context is described. The digests the trace records are
+  byte for byte what they were. A resumed run still records its run configuration in its own trace:
+  each segment's trace is read on its own (the trajectory header and the version metadata are per
+  trace), so it is made cheap instead of skipped.
 - **Budget storage layout.** SQL stores gain the tables `budget_meters`, `budget_holds` and
   `budget_grants`; Redis and MongoDB keep counters under new keys (`omnicoreagent_budget2:`,
   `<collection>_budgets`). Counters written by 0.5.x are moved on first touch; do not run 0.5.x and

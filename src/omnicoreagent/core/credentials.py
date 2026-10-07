@@ -111,6 +111,13 @@ def _masks_a_secret(token: str, ordered: tuple[str, ...]) -> bool:
     return len(tail) >= 4 and any(secret.endswith(tail[-4:]) for secret in ordered)
 
 
+def credentials_snapshot() -> tuple[str, ...]:
+    """What is registered now. The registry is replaced, never changed in
+    place, so two equal snapshots mean no credential was added between them;
+    a cache of scrubbed content keeps this beside it."""
+    return _ordered
+
+
 def scrub_credentials(value: Any) -> Any:
     """A copy of ``value`` with every registered credential replaced."""
     ordered = _ordered

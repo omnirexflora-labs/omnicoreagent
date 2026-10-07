@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import hashlib
+import json
 from collections.abc import AsyncIterator
 from dataclasses import replace
 import asyncio
 from typing import Any
 
 from omnicoreagent.core.continuation import mask_opaque
-from omnicoreagent.core.credentials import scrub_credentials
+from omnicoreagent.core.credentials import credentials_snapshot, scrub_credentials
 from omnicoreagent.core.telemetry.context import (
     TelemetryContext,
     current_entry_surface,
@@ -237,11 +239,72 @@ class TelemetryRecorder:
         key = context.trace_id if context is not None else ""
         return self._context_recordings.setdefault(key, ContextRecording())
 
-    def canonicalize_for_digest(self, value: Any) -> Any:
-        """Return the representation used for privacy-safe context hashes."""
+    # The privacy-safe form of a message is worked out again at every step for
+    # content that has not changed: the whole context, three times over (the
+    # context events, the call's evidence, each message's own digest). Kept for
+    # the length of the trace (the support desk ramp, 2026-10-07: this was
+    # about 10% of the event loop). Bounded by entries and by the characters of
+    # the content it stands for; keyed by a digest of the content; dropped with
+    # the trace; and dropped whenever what the form depends on changes.
+    _CANONICAL_ENTRIES = 4096
+    _CANONICAL_CHARS = 24_000_000
+    _CANONICAL_MIN_CHARS = 64
 
+    def _canonicalize(self, value: Any) -> Any:
         privacy_safe = self.privacy_filter.redact(scrub_credentials(mask_opaque(value)), boundary="telemetry")
         return redact_sensitive_payload(privacy_safe, self.config)
+
+    def _canonical_token(self) -> tuple:
+        """Everything the privacy-safe form depends on, apart from the content."""
+        privacy = self.privacy_filter.config
+        return (
+            id(self.privacy_filter),
+            privacy.enabled,
+            privacy.redact_telemetry,
+            tuple(privacy.categories),
+            tuple(sorted(str(key).lower() for key in self.config.redact_keys)),
+            # A credential registered after the form was kept must be scrubbed
+            # from it: the registry is replaced, never changed in place.
+            credentials_snapshot(),
+        )
+
+    def canonicalize_for_digest(self, value: Any) -> Any:
+        """Return the representation used for privacy-safe context hashes.
+
+        The result is shared with the next caller who asks about the same
+        content, so it is not to be changed.
+        """
+        context = self.current_context()
+        if context is None:
+            return self._canonicalize(value)
+        try:
+            raw = json.dumps(
+                value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str
+            )
+        except (TypeError, ValueError):
+            return self._canonicalize(value)
+        size = len(raw)
+        if size < self._CANONICAL_MIN_CHARS or size > self._CANONICAL_CHARS // 4:
+            return self._canonicalize(value)
+        recording = self.context_recording()
+        token = self._canonical_token()
+        digest = hashlib.blake2b(raw.encode("utf-8", "surrogatepass"), digest_size=16).digest()
+        memo = recording.canonical
+        if recording.canonical_token != token:
+            memo.clear()
+            recording.canonical_chars = 0
+            recording.canonical_token = token
+        known = memo.get(digest)
+        if known is not None:
+            memo.move_to_end(digest)
+            return known[0]
+        form = self._canonicalize(value)
+        memo[digest] = (form, size)
+        recording.canonical_chars += size
+        while len(memo) > self._CANONICAL_ENTRIES or recording.canonical_chars > self._CANONICAL_CHARS:
+            _, (_, evicted) = memo.popitem(last=False)
+            recording.canonical_chars -= evicted
+        return form
 
     async def start_trace(
         self,
