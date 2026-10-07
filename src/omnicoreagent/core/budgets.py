@@ -270,19 +270,9 @@ class BudgetLedger:
         call settles or is released.
         """
         reservation = Reservation(key, meter, float(amount), f"hold_{uuid4().hex}", run_id)
-        extra = [[m, float(a), lim] for m, a, lim in (also or []) if a]
-        if not self.enabled or (amount == 0 and not extra):
+        change = hold_change(reservation, limit, also)
+        if not self.enabled or change is None:
             return reservation, {}
-        change: dict[str, Any] = {"guard": extra}
-        if amount:
-            change["hold"] = {
-                "id": reservation.reservation_id,
-                "meter": meter,
-                "amount": float(amount),
-                "run_id": run_id,
-                "limit": limit,
-                "held_at": datetime.now(timezone.utc).isoformat(),
-            }
         result = await self._apply(key, change)
         return reservation, _totals_or_refusal(key, result)
 
@@ -303,39 +293,88 @@ class BudgetLedger:
         """
         if not self.enabled:
             return {}
-        spend = float(reservation.amount if actual is None else actual)
-        extra = [[m, float(a)] for m, a, _ in (also or []) if a]
-        result = await self._apply(
-            reservation.key,
-            {
-                "settle": {
-                    "id": reservation.reservation_id,
-                    "meter": reservation.meter,
-                    "spend": spend,
-                    # A hold already released by a lease sweep is not spent
-                    # again, unless the real cost is known: that call happened.
-                    "even_if_released": actual is not None,
-                },
-                "add": extra,
-            },
-        )
+        result = await self._apply(reservation.key, settle_change(reservation, actual, also))
         return dict((result or {}).get("totals") or {})
 
     async def release(self, reservation: Reservation) -> None:
         """Give the held budget back; nothing is spent."""
         if not self.enabled:
             return
-        await self._apply(
-            reservation.key,
-            {
-                "settle": {
-                    "id": reservation.reservation_id,
-                    "meter": reservation.meter,
-                    "spend": None,
-                    "even_if_released": False,
-                }
-            },
-        )
+        await self._apply(reservation.key, release_change(reservation))
+
+    # --- one call, every scope ----------------------------------------------
+
+    @property
+    def batches(self) -> bool:
+        """Whether the store applies several keys' changes as one step."""
+        return self.enabled and bool(getattr(self.store, "batches_budget_changes", False))
+
+    async def apply_many(self, changes: list[tuple[str, dict]]) -> list[dict[str, Any]]:
+        """Apply the changes of one call, one per key, in as few store calls as
+        the store allows. Answers one result per change, in order (as
+        ``apply_budget_change`` does); a result with ``refused`` set is the
+        first refusal, in the order given, and then nothing was applied on a
+        store that batches. This never raises for a refusal; see
+        ``apply_many_or_raise``.
+
+        A store that cannot apply several keys together is asked one key at a
+        time, as before. If a later key refuses, the holds the earlier keys
+        took are given back, so no refused call leaves a hold standing; the
+        earlier keys' guarded spends stand, as they always did there.
+        """
+        nothing = {"refused": None, "totals": {}, "released": 0}
+        if not self.enabled or not changes:
+            return [dict(nothing) for _ in changes]
+        if self.batches:
+            try:
+                return list(await self.store.apply_budget_changes(changes))
+            except Exception as exc:
+                if not self._is_unsupported(exc):
+                    raise
+                return [dict(nothing) for _ in changes]
+        results: list[dict[str, Any]] = []
+        for key, change in changes:
+            result = await self._apply(key, change) or dict(nothing)
+            results.append(result)
+            if result.get("refused"):
+                for (held_key, held_change), _ in zip(changes, results[:-1]):
+                    hold = held_change.get("hold")
+                    if hold and hold.get("amount"):
+                        await self._apply(
+                            held_key,
+                            {
+                                "settle": {
+                                    "id": hold["id"],
+                                    "meter": hold["meter"],
+                                    "spend": None,
+                                    "even_if_released": False,
+                                }
+                            },
+                        )
+                break
+        results.extend(dict(nothing) for _ in range(len(changes) - len(results)))
+        return results
+
+    async def apply_many_or_raise(self, changes: list[tuple[str, dict]]) -> list[dict[str, Any]]:
+        """``apply_many``, raising ``BudgetExhausted`` for a refusal."""
+        results = await self.apply_many(changes)
+        for (key, _), result in zip(changes, results):
+            _totals_or_refusal(key, result)
+        return results
+
+    async def states_many(self, keys: list[str]) -> dict[str, dict[str, Any]]:
+        """Several counters from one read where the store allows it."""
+        if not self.enabled or not keys:
+            return {key: {} for key in keys}
+        if self.batches:
+            try:
+                states = await self.store.get_budget_states(list(keys))
+                return {key: states.get(key) or {} for key in keys}
+            except Exception as exc:
+                if not self._is_unsupported(exc):
+                    raise
+                return {key: {} for key in keys}
+        return {key: await self._state(key) for key in keys}
 
     async def granted(self, key: str) -> dict[str, float]:
         """What a person has added to this budget beyond its policy limit."""
@@ -430,6 +469,60 @@ class BudgetLedger:
             if self._is_unsupported(exc):
                 return None
             raise
+
+
+def hold_change(
+    reservation: Reservation,
+    limit: float | None,
+    also: list[tuple[str, float, float | None]] | None = None,
+) -> dict[str, Any] | None:
+    """The change that holds one reservation and charges ``also`` with it, or
+    None when there is nothing to hold or charge."""
+    extra = [[m, float(a), lim] for m, a, lim in (also or []) if a]
+    if reservation.amount == 0 and not extra:
+        return None
+    change: dict[str, Any] = {"guard": extra}
+    if reservation.amount:
+        change["hold"] = {
+            "id": reservation.reservation_id,
+            "meter": reservation.meter,
+            "amount": float(reservation.amount),
+            "run_id": reservation.run_id,
+            "limit": limit,
+            "held_at": datetime.now(timezone.utc).isoformat(),
+        }
+    return change
+
+
+def settle_change(
+    reservation: Reservation,
+    actual: float | None,
+    also: list[tuple[str, float, float | None]] | None = None,
+) -> dict[str, Any]:
+    """The change that spends a reservation at its real cost and counts ``also``."""
+    return {
+        "settle": {
+            "id": reservation.reservation_id,
+            "meter": reservation.meter,
+            "spend": float(reservation.amount if actual is None else actual),
+            # A hold already released by a lease sweep is not spent again,
+            # unless the real cost is known: that call happened.
+            "even_if_released": actual is not None,
+        },
+        "add": [[m, float(a)] for m, a, _ in (also or []) if a],
+    }
+
+
+def release_change(reservation: Reservation) -> dict[str, Any]:
+    """The change that gives a reservation back and spends nothing."""
+    return {
+        "settle": {
+            "id": reservation.reservation_id,
+            "meter": reservation.meter,
+            "spend": None,
+            "even_if_released": False,
+        }
+    }
 
 
 def _totals_or_refusal(key: str, result: dict[str, Any] | None) -> dict[str, float]:
@@ -612,33 +705,58 @@ class RunBudgets:
         """
         await self.charge_many([(meter, amount)], after_the_work=True)
 
-    async def charge_many(
-        self, charges: list[tuple[str, float]], *, after_the_work: bool = False
-    ) -> None:
-        """Spend several meters at once: one write per budget key they share."""
+    def _by_key(
+        self, charges: list[tuple[str, float]]
+    ) -> dict[str, list[tuple[BudgetScope, Any, float]]]:
+        """The meters to charge, grouped by the budget key that governs each."""
         by_key: dict[str, list[tuple[BudgetScope, Any, float]]] = {}
         for meter, amount in charges:
             for scope, key, limit in self.limits(meter):
                 by_key.setdefault(key, []).append((scope, limit, float(amount)))
+        return by_key
+
+    @staticmethod
+    def _guard_change(entries: list[tuple[BudgetScope, Any, float]]) -> dict[str, Any] | None:
+        wanted = [[lim.meter, amount, lim.limit] for _, lim, amount in entries if amount]
+        return {"guard": wanted} if wanted else None
+
+    @staticmethod
+    def _entry_for(
+        entries: list[tuple[BudgetScope, Any, float]], exhausted: BudgetExhausted
+    ) -> tuple[BudgetScope, Any]:
+        """Which scope and limit a refusal came from."""
+        return next((scope, limit) for scope, limit, _ in entries if limit.meter == exhausted.meter)
+
+    async def charge_many(
+        self, charges: list[tuple[str, float]], *, after_the_work: bool = False
+    ) -> None:
+        """Spend several meters at once: one store call for every budget key
+        they share, where the store applies several keys together."""
+        by_key = self._by_key(charges)
+        changes: list[tuple[str, dict[str, Any]]] = []
+        groups: list[list[dict[str, Any]]] = []
         for key, entries in by_key.items():
-            wanted = [(limit.meter, amount, limit.limit) for _, limit, amount in entries]
-            try:
-                if after_the_work:
-                    totals = await self._after_the_work(
-                        lambda: self.ledger.charge_many(key, wanted),
-                        [self._unrecorded_entry(s, key, lim.meter, a) for s, lim, a in entries],
-                    )
-                    if totals is None:
-                        continue
-                else:
-                    totals = await self.ledger.charge_many(key, wanted)
-            except BudgetExhausted as exhausted:
-                scope, limit = next(
-                    (scope, limit) for scope, limit, _ in entries if limit.meter == exhausted.meter
+            change = self._guard_change(entries)
+            if change is not None:
+                changes.append((key, change))
+                groups.append(
+                    [self._unrecorded_entry(s, key, lim.meter, a) for s, lim, a in entries]
                 )
-                raise await self._stop(scope, key, limit, exhausted) from None
-            for scope, limit, _ in entries:
-                await self._warn_if_near(scope, limit, key, totals.get(limit.meter))
+        if not changes:
+            return
+        try:
+            if after_the_work:
+                results = await self._apply_after_the_work(changes, groups)
+            else:
+                results = await self.ledger.apply_many_or_raise(changes)
+        except BudgetExhausted as exhausted:
+            scope, limit = self._entry_for(by_key[exhausted.key], exhausted)
+            raise await self._stop(scope, exhausted.key, limit, exhausted) from None
+        for (key, _), result in zip(changes, results):
+            if result is None:
+                continue
+            for scope, limit, _ in by_key[key]:
+                await self._warn_if_near(scope, limit, key, result["totals"].get(limit.meter))
 
     async def record_many(self, charges: list[tuple[str, float]]) -> None:
         """Record what was already spent, on every budget that covers the run.
@@ -646,21 +764,46 @@ class RunBudgets:
         Never refused, even past a limit: the next spend is what is stopped
         (``check_room``). Crossing a warning line is still reported.
         """
-        by_key: dict[str, list[tuple[BudgetScope, Any, float]]] = {}
-        for meter, amount in charges:
-            for scope, key, limit in self.limits(meter):
-                by_key.setdefault(key, []).append((scope, limit, float(amount)))
+        by_key = self._by_key(charges)
+        changes: list[tuple[str, dict[str, Any]]] = []
+        groups: list[list[dict[str, Any]]] = []
         for key, entries in by_key.items():
-            totals = await self._after_the_work(
-                lambda: self.ledger.record_many(
-                    key, [(limit.meter, amount) for _, limit, amount in entries]
-                ),
-                [self._unrecorded_entry(s, key, lim.meter, a) for s, lim, a in entries],
-            )
-            if totals is None:
+            wanted = [[lim.meter, amount] for _, lim, amount in entries if amount]
+            if wanted:
+                changes.append((key, {"add": wanted}))
+                groups.append(
+                    [self._unrecorded_entry(s, key, lim.meter, a) for s, lim, a in entries]
+                )
+        if not changes:
+            return
+        results = await self._apply_after_the_work(changes, groups)
+        for (key, _), result in zip(changes, results):
+            if result is None:
                 continue
-            for scope, limit, _ in entries:
-                await self._warn_if_near(scope, limit, key, totals.get(limit.meter))
+            for scope, limit, _ in by_key[key]:
+                await self._warn_if_near(scope, limit, key, result["totals"].get(limit.meter))
+
+    async def _apply_after_the_work(
+        self, changes: list[tuple[str, dict[str, Any]]], groups: list[list[dict[str, Any]]]
+    ) -> list[dict[str, Any] | None]:
+        """Write one call's changes for work that already happened (see
+        ``_after_the_work``): all keys in one write where the store applies
+        them together, so a retry never repeats a key that already landed;
+        one key at a time, each retried on its own, where it does not.
+        A result is None for a write that was kept as unrecorded."""
+        if self.ledger.batches or len(changes) == 1:
+            flat = [entry for group in groups for entry in group]
+            results = await self._after_the_work(
+                lambda: self.ledger.apply_many_or_raise(changes), flat
+            )
+            return list(results) if results is not None else [None] * len(changes)
+        out: list[dict[str, Any] | None] = []
+        for change, group in zip(changes, groups):
+            single = await self._after_the_work(
+                lambda change=change: self.ledger.apply_many_or_raise([change]), group
+            )
+            out.append(None if single is None else single[0])
+        return out
 
     async def check_room(self, meter: str, amount: float) -> None:
         """Stop before a spend that cannot fit, on every budget that covers
@@ -677,56 +820,42 @@ class RunBudgets:
     ) -> list[Reservation]:
         """Hold what a spend could cost, on every budget that covers the run.
 
-        ``also`` charges other meters in the same writes (a model call holds
-        its cost and counts itself at once).
+        ``also`` charges other meters in the same write (a model call holds
+        its cost and counts itself at once). Every scope's hold and charge go
+        to the store as one call: all of them, or none when any scope refuses.
         """
+        extra_by_key = self._by_key(also or [])
         held: list[Reservation] = []
-        extra_by_key: dict[str, list[tuple[BudgetScope, Any, float]]] = {}
-        for other, other_amount in also or []:
-            for scope, key, limit in self.limits(other):
-                extra_by_key.setdefault(key, []).append((scope, limit, float(other_amount)))
-        governing = self.limits(meter)
-        keys_with_hold = {key for _, key, _ in governing}
-        for scope, key, limit in governing:
+        changes: list[tuple[str, dict[str, Any]]] = []
+        plan: list[tuple[BudgetScope, Any, list[tuple[BudgetScope, Any, float]]] | None] = []
+        for scope, key, limit in self.limits(meter):
             extra = extra_by_key.pop(key, [])
-            try:
-                reservation, totals = await self.ledger.reserve_and_charge(
-                    key,
-                    meter,
-                    amount,
-                    limit=limit.limit,
-                    run_id=self.run_id,
-                    also=[(lim.meter, a, lim.limit) for _, lim, a in extra],
-                )
-            except BudgetExhausted as exhausted:
-                await self.release(held)  # hold nothing when the call cannot run
-                if exhausted.meter != meter:
-                    scope, limit = next(
-                        (s, lim) for s, lim, _ in extra if lim.meter == exhausted.meter
-                    )
-                raise await self._stop(scope, key, limit, exhausted) from None
+            reservation = Reservation(key, meter, float(amount), f"hold_{uuid4().hex}", self.run_id)
             held.append(reservation)
-            for other_scope, other_limit, _ in extra:
-                await self._warn_if_near(
-                    other_scope, other_limit, key, totals.get(other_limit.meter)
-                )
+            change = hold_change(
+                reservation, limit.limit, [(lim.meter, a, lim.limit) for _, lim, a in extra]
+            )
+            if change is not None:
+                changes.append((key, change))
+                plan.append((scope, limit, extra))
         # Meters in ``also`` whose keys hold nothing are charged on their own.
         for key, entries in extra_by_key.items():
-            if key in keys_with_hold:
-                continue
-            try:
-                totals = await self.ledger.charge_many(
-                    key, [(lim.meter, a, lim.limit) for _, lim, a in entries]
-                )
-            except BudgetExhausted as exhausted:
-                await self.release(held)
-                scope, limit = next(
-                    (s, lim) for s, lim, _ in entries if lim.meter == exhausted.meter
-                )
-                raise await self._stop(scope, key, limit, exhausted) from None
-            for other_scope, other_limit, _ in entries:
+            change = self._guard_change(entries)
+            if change is not None:
+                changes.append((key, change))
+                plan.append((None, None, entries))  # type: ignore[arg-type]
+        try:
+            results = await self.ledger.apply_many_or_raise(changes)
+        except BudgetExhausted as exhausted:
+            index = next(i for i, (key, _) in enumerate(changes) if key == exhausted.key)
+            scope, limit, extra = plan[index]  # type: ignore[misc]
+            if scope is None or exhausted.meter != meter:
+                scope, limit = self._entry_for(extra, exhausted)
+            raise await self._stop(scope, exhausted.key, limit, exhausted) from None
+        for (key, _), (_, _, extra), result in zip(changes, plan, results):  # type: ignore[misc]
+            for other_scope, other_limit, _ in extra:
                 await self._warn_if_near(
-                    other_scope, other_limit, key, totals.get(other_limit.meter)
+                    other_scope, other_limit, key, result["totals"].get(other_limit.meter)
                 )
         return held
 
@@ -738,65 +867,72 @@ class RunBudgets:
         also: list[tuple[str, float]] | None = None,
     ) -> None:
         """Settle each hold at its real cost; ``also`` counts other meters in
-        the same writes. The totals the writes return are what is checked for
+        the same write. All scopes settle in one store call where the store
+        allows it. The totals the write returns are what is checked for
         warnings, rather than reading the key back."""
-        extra_by_key: dict[str, list[tuple[BudgetScope, Any, float]]] = {}
-        for other, other_amount in also or []:
-            for scope, key, limit in self.limits(other):
-                extra_by_key.setdefault(key, []).append((scope, limit, float(other_amount)))
+        extra_by_key = self._by_key(also or [])
         governing = {key: (scope, limit) for scope, key, limit in self.limits(held[0].meter)} if held else {}
+        changes: list[tuple[str, dict[str, Any]]] = []
+        groups: list[list[dict[str, Any]]] = []
+        plan: list[tuple[Any, list[tuple[BudgetScope, Any, float]]]] = []
         for reservation in held:
             extra = extra_by_key.pop(reservation.key, [])
-            totals = await self._after_the_work(
-                lambda: self.ledger.commit(
-                    reservation,
-                    actual=actual,
-                    also=[(lim.meter, a, lim.limit) for _, lim, a in extra],
-                ),
-                [
-                    self._unrecorded_entry(
-                        governing[reservation.key][0]
-                        if reservation.key in governing
-                        else BudgetScope(reservation.key.split(":", 1)[0]),
-                        reservation.key,
-                        reservation.meter,
-                        actual,
+            changes.append(
+                (
+                    reservation.key,
+                    settle_change(
+                        reservation, actual, [(lim.meter, a, lim.limit) for _, lim, a in extra]
                     ),
+                )
+            )
+            scope = (
+                governing[reservation.key][0]
+                if reservation.key in governing
+                else BudgetScope(reservation.key.split(":", 1)[0])
+            )
+            groups.append(
+                [
+                    self._unrecorded_entry(scope, reservation.key, reservation.meter, actual),
                     *[self._unrecorded_entry(s, reservation.key, lim.meter, a) for s, lim, a in extra],
-                ],
+                ]
             )
-            if totals is None:
-                continue
-            if reservation.key in governing:
-                scope, limit = governing[reservation.key]
-                await self._warn_if_near(scope, limit, reservation.key, totals.get(limit.meter))
-            for other_scope, other_limit, _ in extra:
-                await self._warn_if_near(
-                    other_scope, other_limit, reservation.key, totals.get(other_limit.meter)
-                )
+            plan.append((governing.get(reservation.key), extra))
         for key, entries in extra_by_key.items():
-            totals = await self._after_the_work(
-                lambda: self.ledger.record_many(key, [(lim.meter, a) for _, lim, a in entries]),
-                [self._unrecorded_entry(s, key, lim.meter, a) for s, lim, a in entries],
-            )
-            if totals is None:
+            wanted = [[lim.meter, a] for _, lim, a in entries if a]
+            if wanted:
+                changes.append((key, {"add": wanted}))
+                groups.append([self._unrecorded_entry(s, key, lim.meter, a) for s, lim, a in entries])
+                plan.append((None, entries))
+        if not changes:
+            return
+        results = await self._apply_after_the_work(changes, groups)
+        for (key, _), (own, extra), result in zip(changes, plan, results):
+            if result is None:
                 continue
-            for other_scope, other_limit, _ in entries:
-                await self._warn_if_near(
-                    other_scope, other_limit, key, totals.get(other_limit.meter)
-                )
+            totals = result["totals"]
+            if own is not None:
+                scope, limit = own
+                await self._warn_if_near(scope, limit, key, totals.get(limit.meter))
+            for other_scope, other_limit, _ in extra:
+                await self._warn_if_near(other_scope, other_limit, key, totals.get(other_limit.meter))
 
     async def release(self, held: list[Reservation]) -> None:
         """Give holds back. A hold that cannot be given back now is left for
         ``release_stale`` (the run's end does it): this runs while a failed
         call is being reported, and must not replace that report."""
-        for reservation in held:
+        if not held:
+            return
+        if self.ledger.batches:
+            groups = [held]
+        else:
+            groups = [[reservation] for reservation in held]
+        for group in groups:
             try:
-                await self.ledger.release(reservation)
+                await self.ledger.apply_many([(r.key, release_change(r)) for r in group])
             except Exception as exc:
                 self._holds_may_stand = True
                 logger.warning(
-                    f"Could not release a budget hold on {reservation.key} "
+                    f"Could not release a budget hold on {', '.join(r.key for r in group)} "
                     f"({type(exc).__name__}: {exc}); it is released when the run ends"
                 )
 
@@ -863,15 +999,17 @@ class RunBudgets:
         this, a run killed during a model call held its worst case on the
         day's counter until the day ended.
         """
-        released = 0
-        seen: set[str] = set()
+        keys: list[str] = []
         for meter in METERS:
             for _, key, _ in self.limits(meter):
-                if key in seen:
-                    continue
-                seen.add(key)
-                released += await self.ledger.release_for_runs(key, run_ids=[self.run_id])
-        return released
+                if key not in keys:
+                    keys.append(key)
+        # Every scope's counter in one write: a resume does this before it
+        # goes on, and was three transactions for three scopes.
+        results = await self.ledger.apply_many(
+            [(key, {"release_runs": [self.run_id]}) for key in keys]
+        )
+        return sum(int(result.get("released") or 0) for result in results)
 
     async def settle(self) -> dict[str, dict[str, float]]:
         """The run is over: return what it spent per scope, and remove its own
@@ -893,21 +1031,25 @@ class RunBudgets:
                 await self.release_stale()
             except Exception as exc:
                 logger.warning(f"Could not release the holds of run {self.run_id}: {exc}")
+        governing: list[tuple[BudgetScope, str]] = []
         for meter in METERS:
             for scope, key, _ in self.limits(meter):
-                if key in seen:
-                    continue
-                seen.add(key)
-                # One read per counter, as ``spent`` does.
-                usage, grants = await self.ledger.usage_and_grants(key)
-                if usage:
-                    totals[scope.value] = usage
-                if scope is BudgetScope.REQUEST:
-                    # What a person granted this run goes on its record with
-                    # what it spent: the counter that held it is removed.
-                    for grant_meter, amount in grants.items():
-                        granted[grant_meter] = granted.get(grant_meter, 0.0) + amount
-                    await self.ledger.delete(key)
+                if key not in seen:
+                    seen.add(key)
+                    governing.append((scope, key))
+        # One read for every counter, as ``spent`` does.
+        states = await self.ledger.states_many([key for _, key in governing])
+        for scope, key in governing:
+            usage = dict(states[key].get("meters") or {})
+            grants = dict(states[key].get("grants") or {})
+            if usage:
+                totals[scope.value] = usage
+            if scope is BudgetScope.REQUEST:
+                # What a person granted this run goes on its record with
+                # what it spent: the counter that held it is removed.
+                for grant_meter, amount in grants.items():
+                    granted[grant_meter] = granted.get(grant_meter, 0.0) + amount
+                await self.ledger.delete(key)
         if granted:
             totals["granted"] = {BudgetScope.REQUEST.value: granted}
         if self.unrecorded:
@@ -918,14 +1060,17 @@ class RunBudgets:
         """What this run has spent, per scope, for the run's totals."""
         totals: dict[str, dict[str, float]] = {}
         seen: set[str] = set()
+        governing: list[tuple[BudgetScope, str]] = []
         for meter in METERS:
             for scope, key, _ in self.limits(meter):
-                if key in seen:
-                    continue
-                seen.add(key)
-                usage = await self.ledger.usage(key)
-                if usage:
-                    totals[scope.value] = usage
+                if key not in seen:
+                    seen.add(key)
+                    governing.append((scope, key))
+        states = await self.ledger.states_many([key for _, key in governing])
+        for scope, key in governing:
+            usage = dict(states[key].get("meters") or {})
+            if usage:
+                totals[scope.value] = usage
         return totals
 
     async def _warn_if_near(self, scope: BudgetScope, limit: Any, key: str, spent: Any) -> None:

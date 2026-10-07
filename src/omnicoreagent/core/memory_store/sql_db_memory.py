@@ -1062,6 +1062,36 @@ class DatabaseMessageStore(AbstractMemoryStore):
 
         return await asyncio.to_thread(self._with_retry, _get)
 
+    async def get_budget_states(self, keys: list[str]) -> dict[str, dict | None]:
+        """Several counters from one read (the run's end reads all its scopes)."""
+        for key in keys:
+            await self._move_legacy_budget(key)
+
+        def _get():
+            session = self._get_session()
+            try:
+                rows = session.execute(
+                    select(
+                        StorageBudgetMeter.key,
+                        StorageBudgetMeter.meter,
+                        StorageBudgetMeter.spent,
+                        StorageBudgetMeter.reserved,
+                        StorageBudgetMeter.granted,
+                    ).where(StorageBudgetMeter.key.in_(list(keys)))
+                ).all()
+                counters: dict[str, dict[str, dict[str, float]]] = {key: {} for key in keys}
+                for key, meter, spent, reserved, granted in rows:
+                    counters[key][meter] = {
+                        "spent": spent,
+                        "reserved": reserved,
+                        "granted": granted,
+                    }
+                return {key: counters_view(key, counters[key]) for key in keys}
+            finally:
+                self._release_session(session)
+
+        return await asyncio.to_thread(self._with_retry, _get)
+
     async def get_budget_grant_history(self, key: str) -> list[dict]:
         await self._move_legacy_budget(key)
 
@@ -1113,14 +1143,33 @@ class DatabaseMessageStore(AbstractMemoryStore):
 
         return await asyncio.to_thread(self._with_retry, _list)
 
+    # A store that applies several keys' changes in one transaction says so,
+    # and the budget ledger then hands it a whole call's changes at once.
+    batches_budget_changes = True
+
     async def apply_budget_change(self, key: str, change: dict) -> dict:
-        await self._move_legacy_budget(key)
+        return (await self.apply_budget_changes([(key, change)]))[0]
+
+    async def apply_budget_changes(self, changes: list[tuple[str, dict]]) -> list[dict]:
+        """Every key's change of one call, in ONE transaction: all or none.
+
+        A model call holds its cost on the request, session and application
+        counters and settles all three afterwards. Applied one key at a time,
+        each was a thread hop, a connection checkout and a commit: 27 of the
+        60 transactions of a support desk refund run (the support desk
+        ramp, 2026-10-07). The answers come back in the order of ``changes``.
+        If any key refuses, nothing is applied on any key, and the refusal
+        reported is the first in the caller's order (the request scope is
+        listed first), whatever order the rows were locked in.
+        """
+        for key, _ in changes:
+            await self._move_legacy_budget(key)
         return await asyncio.to_thread(
-            self._with_retry, lambda: self._apply_budget_change(key, change)
+            self._with_retry, lambda: self._apply_budget_changes(changes)
         )
 
-    def _apply_budget_change(self, key: str, change: dict) -> dict:
-        """The change, once, however many times the database aborts it.
+    def _apply_budget_changes(self, changes: list[tuple[str, dict]]) -> list[dict]:
+        """The changes, once, however many times the database aborts them.
 
         A dropped connection is retried by ``_with_retry`` around this method,
         and only while the transaction has not begun to commit (``_commit``
@@ -1128,6 +1177,10 @@ class DatabaseMessageStore(AbstractMemoryStore):
         that did commit and is run again would be charged twice; the same
         reason the retry never follows a COMMIT.
         """
+        # Rows are locked in key order, so two calls that share two counters
+        # never wait on each other in opposite orders and deadlock. The sort is
+        # stable: a key listed twice keeps its changes in the caller's order.
+        order = sorted(range(len(changes)), key=lambda i: changes[i][0])
         for attempt in range(_BUDGET_TRANSACTION_TRIES):
             # A commit that failed on a lock applied nothing; the attempt that
             # follows starts with a clean mark.
@@ -1136,17 +1189,24 @@ class DatabaseMessageStore(AbstractMemoryStore):
             try:
                 with _budget_write_lock(session):
                     try:
-                        result = self._budget_transaction(session, key, change)
-                        if result["refused"] is None:
+                        results: list[dict | None] = [None] * len(changes)
+                        refused_at = None
+                        for index in order:
+                            key, change = changes[index]
+                            results[index] = self._budget_transaction(session, key, change)
+                            if results[index]["refused"] is not None:
+                                refused_at = index
+                                break
+                        if refused_at is None:
                             self._commit(session)
                         else:
                             session.rollback()
                     except Exception:
                         self._rollback_quietly(session)
                         raise
-                if result["refused"] is not None:
-                    result["refused"] = self._describe_refusal(session, key, change)
-                return result
+                if refused_at is not None:
+                    return self._describe_refusals(session, changes, refused_at)
+                return results  # type: ignore[return-value]
             except OperationalError as exc:
                 # A deadlock the database broke, or SQLite's file lock held by
                 # another process past its own wait: nothing was applied, so
@@ -1161,7 +1221,8 @@ class DatabaseMessageStore(AbstractMemoryStore):
                 time.sleep(0.01 * (attempt + 1) * (0.5 + random.random()))
             finally:
                 self._release_session(session)
-        raise RuntimeError(f"Could not record the budget change for {key}")  # pragma: no cover
+        keys = ", ".join(key for key, _ in changes)
+        raise RuntimeError(f"Could not record the budget change for {keys}")  # pragma: no cover
 
     def _budget_transaction(self, session, key: str, change: dict) -> dict:
         """The change as one transaction. Holds are removed first (the hold row
@@ -1311,22 +1372,41 @@ class DatabaseMessageStore(AbstractMemoryStore):
             except IntegrityError:
                 pass
 
-    def _describe_refusal(self, session, key: str, change: dict) -> dict:
-        """What the refused change ran into, for the error a person reads: the
-        first check that does not fit what the counter holds now."""
+    def _describe_refusals(
+        self, session, changes: list[tuple[str, dict]], found_at: int
+    ) -> list[dict]:
+        """What the refused call ran into, for the error a person reads: the
+        first check, in the caller's order, that does not fit what the
+        counters hold now. ``found_at`` is the change the row locks met first;
+        it is used when the counters have moved on and nothing refuses any more."""
         rows = session.execute(
             select(
+                StorageBudgetMeter.key,
                 StorageBudgetMeter.meter,
                 StorageBudgetMeter.spent,
                 StorageBudgetMeter.reserved,
                 StorageBudgetMeter.granted,
-            ).where(StorageBudgetMeter.key == key)
+            ).where(StorageBudgetMeter.key.in_(sorted({key for key, _ in changes})))
         ).all()
-        counters = {
-            meter: {"spent": spent, "reserved": reserved, "granted": granted}
-            for meter, spent, reserved, granted in rows
-        }
-        return refusal_for(budget_checks(change), counters) or _fallback_refusal(change)
+        counters: dict[str, dict[str, dict[str, float]]] = {}
+        for key, meter, spent, reserved, granted in rows:
+            counters.setdefault(key, {})[meter] = {
+                "spent": spent,
+                "reserved": reserved,
+                "granted": granted,
+            }
+        refusal, at = None, found_at
+        for index, (key, change) in enumerate(changes):
+            refusal = refusal_for(budget_checks(change), counters.get(key, {}))
+            if refusal is not None:
+                at = index
+                break
+        else:
+            refusal = _fallback_refusal(changes[found_at][1])
+        return [
+            {"refused": refusal if index == at else None, "totals": {}, "released": 0}
+            for index in range(len(changes))
+        ]
 
     # The two helpers below keep a counter written by 0.5.x readable. It was one
     # JSON document per key in ``budget_states``; the first time a key is

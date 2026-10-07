@@ -30,11 +30,11 @@ from test_fake_provider import running_fake_provider  # noqa: E402
 
 # Transactions per run, by who asked. See the git log for what lowered each.
 CEILING = {
-    "budgets": 27,
+    "budgets": 11,
     "messages": 7,
     "run_state": 26,
     "other": 0,
-    "total": 60,
+    "total": 44,
 }
 
 

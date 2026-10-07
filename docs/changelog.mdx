@@ -102,6 +102,19 @@ Every release, with its notes, is also on
 
 ### Changed
 
+- **A call's budgets go to the store in one transaction, not one per scope.** A model call holds
+  its cost on the request, session and application counters and settles all three afterwards, and
+  each was its own thread hop and commit: 27 of the 60 database transactions of one support desk
+  refund run (a lookup, a refund, an approval and a resume, with three budget scopes). SQL and the
+  in-memory store now apply every scope of a call together, all or none, locking rows in key order;
+  a refusal on any scope applies nothing, and the first refusal in scope order (request first) is
+  the one reported. The desk run now makes 11 budget transactions. Settling a request and
+  releasing a resumed run's old holds also take every scope in one call, and the end of a run reads
+  its counters in one read. Redis and MongoDB keep one call per key: Redis keeps each key under its
+  own hash tag, so one script cannot span keys on a cluster, and MongoDB's multi-document
+  transactions need a replica set; their calls are asynchronous and cheap, and each is already
+  atomic. A custom store may offer `apply_budget_changes`, `get_budget_states` and set
+  `batches_budget_changes = True` (see `AbstractMemoryStore`); without them nothing changes.
 - **Budget storage layout.** SQL stores gain the tables `budget_meters`, `budget_holds` and
   `budget_grants`; Redis and MongoDB keep counters under new keys (`omnicoreagent_budget2:`,
   `<collection>_budgets`). Counters written by 0.5.x are moved on first touch; do not run 0.5.x and

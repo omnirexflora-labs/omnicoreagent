@@ -188,6 +188,16 @@ class MemoryRouter:
     async def apply_budget_change(self, key: str, change: dict) -> dict:
         return await self.memory_store.apply_budget_change(key, change)
 
+    @property
+    def batches_budget_changes(self) -> bool:
+        return bool(getattr(self.memory_store, "batches_budget_changes", False))
+
+    async def apply_budget_changes(self, changes: list[tuple[str, dict]]) -> list[dict]:
+        return await self.memory_store.apply_budget_changes(changes)
+
+    async def get_budget_states(self, keys: list[str]) -> dict[str, dict | None]:
+        return await self.memory_store.get_budget_states(keys)
+
     async def get_budget_grant_history(self, key: str) -> list[dict]:
         return await self.memory_store.get_budget_grant_history(key)
 

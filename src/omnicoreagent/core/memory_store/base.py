@@ -113,6 +113,31 @@ class AbstractMemoryStore(ABC):
 
         raise RunStateUnsupported(type(self).__name__)
 
+    # A store that can apply the changes of several keys as ONE atomic step
+    # sets this and implements ``apply_budget_changes`` and ``get_budget_states``.
+    # SQL and the in-memory store do (one transaction, one lock). Redis keeps
+    # each key under its own hash tag, so one script cannot span the keys on a
+    # cluster, and MongoDB's multi-document transactions need a replica set;
+    # both keep the per-key contract, whose round trips are cheap (no thread
+    # hop) and each already atomic.
+    batches_budget_changes: bool = False
+
+    async def apply_budget_changes(self, changes: list[tuple[str, dict]]) -> list[dict]:
+        """Apply ``[(key, change), ...]`` as one atomic step: every change or
+        none. Answers one result per change, in order, each shaped like
+        ``apply_budget_change``'s; if any change is refused, nothing is applied
+        and the first refusal (in the order given) is the one reported. Keys
+        are locked in name order so two calls never deadlock each other."""
+        from omnicoreagent.core.runs import RunStateUnsupported
+
+        raise RunStateUnsupported(type(self).__name__)
+
+    async def get_budget_states(self, keys: list[str]) -> dict[str, dict | None]:
+        """Several counters from one read: ``{key: get_budget_state(key)}``."""
+        from omnicoreagent.core.runs import RunStateUnsupported
+
+        raise RunStateUnsupported(type(self).__name__)
+
     async def get_budget_grant_history(self, key: str) -> list[dict]:
         """Who granted what, and when, most recent last."""
         from omnicoreagent.core.runs import RunStateUnsupported

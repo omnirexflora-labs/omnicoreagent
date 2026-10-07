@@ -40,10 +40,16 @@ class _StoreDownAfterTheCall:
         return getattr(self._store, name)
 
     async def apply_budget_change(self, key, change):
-        if _after_the_call(change) and (self.failures is None or self.refused_writes < self.failures):
+        return (await self.apply_budget_changes([(key, change)]))[0]
+
+    async def apply_budget_changes(self, changes):
+        # A call's writes arrive together; the store is down for the lot.
+        if any(_after_the_call(change) for _, change in changes) and (
+            self.failures is None or self.refused_writes < self.failures
+        ):
             self.refused_writes += 1
             raise ConnectionError("the budget store is unreachable")
-        return await self._store.apply_budget_change(key, change)
+        return await self._store.apply_budget_changes(changes)
 
 
 async def _agent_with_flaky_store(failures: int | None):

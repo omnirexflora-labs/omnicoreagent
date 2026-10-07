@@ -5,8 +5,10 @@ import asyncio
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
 from omnicoreagent.core.budgets import (
     apply_to_counters,
+    budget_checks,
     counters_view,
     legacy_budget_parts,
+    refusal_for,
 )
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.memory_store.utils import utc_now_str
@@ -305,6 +307,32 @@ class InMemoryStore(AbstractMemoryStore):
             return apply_to_counters(
                 entry["counters"], entry["holds"], entry["history"], change
             )
+
+    batches_budget_changes = True
+
+    async def apply_budget_changes(self, changes: list[tuple[str, dict]]) -> list[dict]:
+        """Several keys' changes of one call: all of them or none (see the SQL
+        store). Every check is made before any change, in the caller's order,
+        under the one lock."""
+        with self._lock:
+            entries = [self._budget(key) for key, _ in changes]
+            for index, ((_, change), entry) in enumerate(zip(changes, entries)):
+                refused = refusal_for(budget_checks(change), entry["counters"])
+                if refused:
+                    return [
+                        {"refused": refused if i == index else None, "totals": {}, "released": 0}
+                        for i in range(len(changes))
+                    ]
+            return [
+                apply_to_counters(entry["counters"], entry["holds"], entry["history"], change)
+                for (_, change), entry in zip(changes, entries)
+            ]
+
+    async def get_budget_states(self, keys: list[str]) -> dict[str, dict | None]:
+        with self._lock:
+            return {
+                key: counters_view(key, copy.deepcopy(self._budget(key)["counters"])) for key in keys
+            }
 
     async def get_budget_grant_history(self, key: str) -> list[dict]:
         with self._lock:
