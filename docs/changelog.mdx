@@ -38,6 +38,13 @@ Every release, with its notes, is also on
   backoff and jitter; `Retry-After` is a floor (capped at 60 seconds), and a
   wait that would pass the run's deadline is not started. Other 4xx errors
   still fail at once.
+- **A failed run's record says why, under the right cause.** Failed runs read
+  `error: null`, with the cause only in the trace, and an internal error in
+  budget recording was labelled `provider_error`. Every run that ends `failed`
+  now records its `error` (type and message, credentials removed and
+  privacy-redacted) and its `termination_reason` on `get_run` and `list_runs`.
+  `provider_error` is reserved for the model provider; a fault in the runtime
+  or a component it uses is `internal_error`.
 
 ### Changed
 

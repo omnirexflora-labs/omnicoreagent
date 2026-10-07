@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from omnicoreagent.core.credentials import scrub_credentials
 from omnicoreagent.core.logging import logger
 from omnicoreagent.governance.hashing import arguments_digest
 
@@ -392,16 +393,27 @@ class RunTracker:
         status: str,
         *,
         usage: Any = None,
-        error: BaseException | None = None,
+        error: BaseException | dict[str, Any] | None = None,
         budgets: dict[str, Any] | None = None,
+        termination_reason: str | None = None,
     ) -> None:
         async with self._lock:
             self.record["status"] = status
+            if termination_reason is not None:
+                self.record["termination_reason"] = termination_reason
             if usage is not None:
                 # A resumed run adds this segment's usage to the earlier ones.
                 self.record["usage"] = _add_usage(self.record.get("usage") or {}, _usage_dict(usage))
             if error is not None:
-                self.record["error"] = {"type": type(error).__name__, "message": str(error)}
+                # Credentials the runtime holds never reach a record that
+                # GET /runs/{id} serves. A caller that holds more redaction
+                # (the privacy filter) passes the error already as a dict.
+                described = (
+                    dict(error)
+                    if isinstance(error, dict)
+                    else {"type": type(error).__name__, "message": str(error)}
+                )
+                self.record["error"] = scrub_credentials(described)
             if budgets:
                 # What the run spent, per scope, kept once its own counter is gone.
                 self.record["budgets"] = budgets

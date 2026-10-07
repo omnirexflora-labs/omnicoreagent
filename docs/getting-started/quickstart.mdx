@@ -74,7 +74,7 @@ your run.
     | `run_id`, `session_id`, `trace_id` | always | where to find this run again |
     | `agent_name` | always | the name of the agent that ran |
     | `metric` | finished | token usage (a `Usage`: `requests`, `request_tokens`, `response_tokens`, `total_tokens`, `total_time`) |
-    | `termination_reason` | finished | why it stopped: `stop`, `max_steps`, `provider_error`, … |
+    | `termination_reason` | finished | why it stopped: `stop`, `max_steps`, `provider_error` (the model provider failed), `internal_error` (the runtime did), … |
     | `approvals` | `awaiting_approval` | each call waiting for a person ([tour](/docs/getting-started/tour)) |
     | `budget_request` | `awaiting_budget` | what the run needs to carry on |
 

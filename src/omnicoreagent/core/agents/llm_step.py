@@ -87,6 +87,11 @@ class AgentLlmStepRunner:
             if telemetry_recorder is not None
             else None
         )
+        # Whether the failure being handled came from the model provider. The
+        # support desk chaos run (2026-10-07) labelled an internal error in
+        # budget recording `provider_error`, because everything after the
+        # call was inside this one handler.
+        calling_provider = False
         try:
             if self.limits_enabled:
                 self.usage_limits.check_before_request(usage=run_usage)
@@ -241,6 +246,7 @@ class AgentLlmStepRunner:
                         output=context_input,
                     )
 
+            calling_provider = True
             (
                 response,
                 model_call_span_id,
@@ -256,6 +262,7 @@ class AgentLlmStepRunner:
                 context_span_id=(context_span.span_id if context_span else None),
                 new_observation_event_ids=new_observation_ids,
             )
+            calling_provider = False
             session_state.delivered_observation_event_ids.update(new_observation_ids)
             if response is None:
                 raise ValueError("Provider returned no response")
@@ -304,7 +311,13 @@ class AgentLlmStepRunner:
 
             reason = account_error(e)
             wrong_model = model_error(e)
-            if reason is not None:
+            termination_reason = "provider_error" if calling_provider else "internal_error"
+            if not calling_provider:
+                error_message = (
+                    f"The run failed on an internal error ({type(e).__name__}: "
+                    f"{scrub_credentials(str(e))[:300]}); this is a fault in the runtime, not the model provider"
+                )
+            elif reason is not None:
                 error_message = (
                     f"The model call was refused: {reason}. Fix the account; "
                     "retrying will not help."
@@ -327,7 +340,14 @@ class AgentLlmStepRunner:
                     "answer": error_message,
                     "usage": run_usage,
                     "status": "error",
-                    "termination_reason": "provider_error",
+                    "termination_reason": termination_reason,
+                    # The run's record carries the cause too, so a failed run
+                    # no longer reads `error: null` with the reason only in
+                    # its trace.
+                    "error": {
+                        "type": type(e).__name__,
+                        "message": scrub_credentials(str(e))[:500],
+                    },
                 }
             )
 

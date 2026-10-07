@@ -85,6 +85,9 @@ def format_run_response(
                 normalized[key] = response[key]
         if response.get("_trace_status"):
             normalized["_trace_status"] = response["_trace_status"]
+        if response.get("error"):
+            # For the run's record; the caller removes it from the response.
+            normalized["_run_error"] = response["error"]
         return normalized
 
     return {"response": response, "session_id": session_id, "agent_name": agent_name}

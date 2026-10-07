@@ -1030,10 +1030,24 @@ class OmniCoreAgent:
             # The run is over: its spend goes on its record and its own budget
             # counter is removed, so a request leaves nothing behind.
             budgets_spent = await run_budgets.settle() if run_budgets is not None else None
+            run_error = formatted_response.pop("_run_error", None)
+            if trace_status != TraceStatus.COMPLETED and run_error is None:
+                # A run can end failed with no exception (a step limit, a
+                # refusal, a budget): its record still says why. The support
+                # desk chaos run (2026-10-07) found failed runs reading
+                # `error: null`.
+                run_error = {
+                    "type": "RunFailed",
+                    "message": str(formatted_response.get("response") or "")[:500],
+                }
+            if run_error is not None:
+                run_error = self.privacy_filter.redact(run_error, boundary="public")
             await run_tracker.finish(
                 "completed" if trace_status == TraceStatus.COMPLETED else "failed",
                 usage=formatted_response.get("metric"),
                 budgets=budgets_spent,
+                error=run_error if trace_status != TraceStatus.COMPLETED else None,
+                termination_reason=formatted_response.get("termination_reason"),
             )
             await self._settle_workers(run_id)
             run_summary = await self._run_summary(trace_context.trace_id)
@@ -1315,8 +1329,15 @@ class OmniCoreAgent:
                 run_tracker.finish(
                     status,
                     usage=usage if usage is not None else getattr(exc, "usage", None),
-                    error=exc,
+                    # Redacted as the response and the trace are.
+                    error=self.privacy_filter.redact(
+                        {"type": type(exc).__name__, "message": str(exc)},
+                        boundary="public",
+                    ),
                     budgets=budgets_spent,
+                    # An exception that reached here is not the provider's
+                    # (a provider's error ends the run in the model step).
+                    termination_reason="internal_error" if status == "failed" else status,
                 )
             )
             await complete_despite_cancellation(self._settle_workers(run_tracker.run_id))

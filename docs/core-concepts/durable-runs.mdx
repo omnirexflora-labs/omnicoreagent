@@ -93,6 +93,13 @@ tool calls' arguments as a digest, not in full. A call's `outcome` is
 `get_run(run_id)` reads the record and `list_runs(session_id=, status=, limit=100)`
 lists records, oldest first.
 
+A run that ends `failed` says why on its record: `error` holds the error's
+`type` and `message` (credentials removed, personal data redacted by your
+privacy settings), and `termination_reason` says whose fault it was.
+`provider_error` is an error from the model provider; `internal_error` is a
+fault inside the runtime or a component it uses (a store, a budget ledger);
+a run that stopped on a limit says `max_steps`, `resource_limit` and so on.
+
 The default store is in memory, so here the record dies with the process. To
 resume a run anywhere else, the store must be one both processes reach:
 SQLite, PostgreSQL, Redis or MongoDB ([Stores and
