@@ -53,6 +53,14 @@ Every release, with its notes, is also on
   `omniserve_runs_in_flight`, `omniserve_runs_waiting`, `omniserve_runs_limit` and
   `omniserve_runs_rejected_total`. Callers that sent more than the limit at once now see `503`
   and should retry.
+- **The SQL memory store does less per operation.** About 45% of a 30-user profile was its
+  per-operation work: a `SELECT 1` ping on every checkout, a `BEGIN` and a `ROLLBACK` around every
+  read, and a fixed 20+30 pool. It no longer pings; reads run on their own autocommit pool, so a
+  read sends one statement; the pool is 10 plus up to 22 overflow
+  (`OMNICOREAGENT_SQL_POOL_SIZE`, `OMNICOREAGENT_SQL_MAX_OVERFLOW`, or `pool_size` and
+  `max_overflow` on `DatabaseMessageStore`). A connection the server dropped is survived by running
+  the operation once more on a new connection, which loses no message; a write is never repeated
+  once its commit has begun. `clear_memory` also no longer blocks the event loop.
 - **Resuming a run no longer lists the telemetry store.** Closing a resumed run's dead trace
   segments listed every trace of the run through `list_traces`, which walks every trace in the
   store; about 5% of a 30-user profile, growing with the store. It now reads only the segments

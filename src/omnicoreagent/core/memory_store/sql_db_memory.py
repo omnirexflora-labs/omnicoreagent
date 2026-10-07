@@ -1,4 +1,5 @@
 import json
+import os
 import random
 import time
 from contextlib import nullcontext
@@ -25,7 +26,7 @@ from sqlalchemy import (
     cast,
     type_coerce,
 )
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.ext.mutable import MutableDict
@@ -57,6 +58,26 @@ def _agent_name_expression(session):
     return json_column["agent_name"].as_string()
 
 
+# Concurrent operations are bounded by the threads that run them
+# (`asyncio.to_thread`: at most min(32, CPUs + 4)), so a pool far beyond 32
+# connections only holds database connections nobody can use. The steady size
+# is small, and the overflow brings the total up to that bound. Both can be set
+# per store (`DatabaseMessageStore(db_url, pool_size=..., max_overflow=...)`) or
+# for the process (OMNICOREAGENT_SQL_POOL_SIZE, OMNICOREAGENT_SQL_MAX_OVERFLOW).
+DEFAULT_POOL_SIZE = 10
+DEFAULT_MAX_OVERFLOW = 22
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be an integer") from None
+
+
 DEFAULT_MAX_KEY_LENGTH = 128
 DEFAULT_MAX_VARCHAR_LENGTH = 256
 
@@ -70,6 +91,8 @@ class SQLConnectionManager:
         self._lock = threading.RLock()
         self._engine = None
         self._session_factory = None
+        self._read_session_factory = None
+        self._read_engine = None
         self._session_count = 0
         # Stores using this pool; the last to close disposes it.
         self.users = 0
@@ -81,16 +104,40 @@ class SQLConnectionManager:
             if self._engine is None:
                 try:
                     connection_kwargs = {
-                        "pool_size": 20,
-                        "max_overflow": 30,
+                        "pool_size": _env_int(
+                            "OMNICOREAGENT_SQL_POOL_SIZE", DEFAULT_POOL_SIZE
+                        ),
+                        "max_overflow": _env_int(
+                            "OMNICOREAGENT_SQL_MAX_OVERFLOW", DEFAULT_MAX_OVERFLOW
+                        ),
                         "pool_timeout": 30,
+                        # Idle connections are replaced before a server or
+                        # proxy idle timeout can drop them.
                         "pool_recycle": 1800,
-                        "pool_pre_ping": True,
+                        # No ping on checkout: it sent a SELECT 1 before every
+                        # operation, 16% of a 30-user profile (the support desk
+                        # ramp, 2026-10-07). A connection the server dropped is
+                        # survived by retrying the operation once (_with_retry),
+                        # which costs nothing while connections are healthy.
+                        "pool_pre_ping": False,
+                        # Reuse the warmest connection, so a quiet pool shrinks.
+                        "pool_use_lifo": True,
                         **kwargs,
                     }
 
                     self._engine = create_engine(db_url, **connection_kwargs)
                     self._session_factory = sessionmaker(bind=self._engine)
+                    # Reads are single statements. Run in a transaction, each
+                    # cost a BEGIN before it and a ROLLBACK after it, two round
+                    # trips of three. A pool of autocommit connections of their
+                    # own sends the statement alone. (Switching one pool's
+                    # connections to autocommit and back per checkout costs a
+                    # statement itself.)
+                    self._read_engine = create_engine(
+                        db_url,
+                        **{**connection_kwargs, "isolation_level": "AUTOCOMMIT"},
+                    )
+                    self._read_session_factory = sessionmaker(bind=self._read_engine)
 
                     logger.debug(f"[SQLManager] Created SQL connection pool: {db_url}")
 
@@ -98,8 +145,12 @@ class SQLConnectionManager:
                     logger.error(f"[SQLManager] Failed to create SQL engine: {e}")
                     raise
 
-    def get_session(self):
-        """Get a database session from the pool."""
+    def get_session(self, read_only: bool = False):
+        """Get a database session from the pool.
+
+        A ``read_only`` session runs each statement in autocommit and must
+        not be written through.
+        """
         with self._lock:
             if self._session_factory is None:
                 raise RuntimeError(
@@ -108,6 +159,8 @@ class SQLConnectionManager:
 
             self._session_count += 1
             logger.debug(f"[SQLManager] SQL session usage count: {self._session_count}")
+            if read_only:
+                return self._read_session_factory()
             return self._session_factory()
 
     def release_session(self):
@@ -135,13 +188,24 @@ class SQLConnectionManager:
         """Get the SQLAlchemy engine."""
         return self._engine
 
+    def dispose_pools(self) -> None:
+        """Replace the pools, closing the idle connections in them."""
+        with self._lock:
+            for engine in (self._engine, self._read_engine):
+                if engine is not None:
+                    engine.dispose()
+
     def close_all(self):
         """Close all connections."""
         with self._lock:
             if self._engine:
                 self._engine.dispose()
+                if self._read_engine is not None:
+                    self._read_engine.dispose()
                 self._engine = None
+                self._read_engine = None
                 self._session_factory = None
+                self._read_session_factory = None
                 self._session_count = 0
                 logger.debug("[SQLManager] Closed all SQL connections")
 
@@ -414,14 +478,74 @@ class DatabaseMessageStore(AbstractMemoryStore):
                     except Exception as e:
                         logger.debug(f"Column '{col_name}' may already exist: {e}")
 
-    def _get_session(self, fresh_for_background: bool = False):
+    def _get_session(self, fresh_for_background: bool = False, read_only: bool = False):
         """Get a database session from the connection manager."""
         if self._sql_manager is None:
             raise RuntimeError("Database not configured - no db_url provided")
         if fresh_for_background:
             return self._sql_manager.get_fresh_session()
         else:
-            return self._sql_manager.get_session()
+            return self._sql_manager.get_session(read_only=read_only)
+
+    _retry_state = threading.local()
+
+    def _commit(self, session) -> None:
+        """Commit, marking that a failure from here on cannot be retried.
+
+        A connection dropped during COMMIT leaves it unknown whether the write
+        landed, and writing it again could duplicate it. The statements are
+        sent first (flush), outside that window: a drop while sending them
+        wrote nothing and is safe to retry.
+        """
+        session.flush()
+        self._retry_state.committing = True
+        session.commit()
+        self._retry_state.committing = False
+
+    def _with_retry(self, operation: Callable[[], Any]) -> Any:
+        """Run one database operation, once more if its connection was dropped.
+
+        With no ping on checkout, a pooled connection the server has since
+        closed (a restart, an idle timeout, a failover) fails the first
+        statement that uses it. SQLAlchemy then discards it and the other
+        pooled connections older than the failure, so the second attempt gets a
+        fresh one. Only a dropped connection is retried, and not once a COMMIT
+        has begun (``_commit``). The operation opens its own session, so it
+        must be safe to run again from the start.
+        """
+        for attempt in (1, 2):
+            self._retry_state.committing = False
+            try:
+                return operation()
+            except Exception as exc:
+                if attempt == 2 or self._retry_state.committing:
+                    raise
+                if isinstance(exc, DBAPIError):
+                    # SQLAlchemy has already discarded the connection, and the
+                    # pooled ones older than it.
+                    dropped = exc.connection_invalidated
+                else:
+                    # The driver refused before SQLAlchemy could wrap it (a
+                    # connection it already knew was closed, when the read
+                    # session set its isolation level). Nothing invalidated
+                    # the rest of the pool, so replace it.
+                    engine = self._sql_manager.get_engine()
+                    dropped = engine is not None and engine.dialect.is_disconnect(
+                        exc, None, None
+                    )
+                    if dropped:
+                        self._sql_manager.dispose_pools()
+                if not dropped:
+                    raise
+                logger.warning(f"[SQLManager] Connection dropped, retrying once: {exc}")
+
+    def _rollback_quietly(self, session) -> None:
+        """Roll back after a failure; a dropped connection has nothing to undo."""
+        if session:
+            try:
+                session.rollback()
+            except Exception as e:  # noqa: BLE001 - the original error is the one to report.
+                logger.debug(f"Rollback after a failed operation also failed: {e}")
 
     def _release_session(self, session):
         """Release a session back to the pool."""
@@ -462,7 +586,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
         if metadata is None:
             metadata = {}
 
-        def _store():
+        def _store_once():
             session = None
             try:
                 session = self._get_session()
@@ -475,23 +599,28 @@ class DatabaseMessageStore(AbstractMemoryStore):
                     timestamp=utc_now_str(),
                 )
                 session.add(msg)
-                session.commit()
-            except Exception as e:
-                logger.error(f"Failed to store message: {e}")
-                if session:
-                    session.rollback()
+                self._commit(session)
+            except Exception:
+                self._rollback_quietly(session)
+                raise
             finally:
                 self._release_session(session)
+
+        def _store():
+            try:
+                self._with_retry(_store_once)
+            except Exception as e:
+                logger.error(f"Failed to store message: {e}")
 
         await asyncio.to_thread(_store)
 
     async def get_messages(
         self, session_id: str = None, agent_name: str | None = None
     ) -> list[dict[str, Any]]:
-        def _fetch_messages():
+        def _fetch_once():
             session = None
             try:
-                session = self._get_session(fresh_for_background=False)
+                session = self._get_session(fresh_for_background=False, read_only=True)
                 query = session.query(StorageMessage).filter(
                     StorageMessage.status == "active"
                 )
@@ -517,11 +646,15 @@ class DatabaseMessageStore(AbstractMemoryStore):
                     }
                     for m in messages
                 ]
+            finally:
+                self._release_session(session)
+
+        def _fetch_messages():
+            try:
+                return self._with_retry(_fetch_once)
             except Exception as e:
                 logger.error(f"Failed to get messages: {e}")
                 return []
-            finally:
-                self._release_session(session)
 
         result = await asyncio.to_thread(_fetch_messages)
 
@@ -594,38 +727,49 @@ class DatabaseMessageStore(AbstractMemoryStore):
     async def clear_memory(
         self, session_id: str = None, agent_name: str = None
     ) -> None:
-        session = None
-        try:
-            session = self._get_session(fresh_for_background=False)
+        # Run off the event loop like every other operation: this one used to
+        # block it for the whole delete.
+        def _clear_once():
+            session = None
+            try:
+                session = self._get_session(fresh_for_background=False)
 
-            if session_id and agent_name:
-                query = session.query(StorageMessage).filter(
-                    StorageMessage.session_id == session_id,
-                    _agent_name_expression(session) == agent_name,
-                )
-                query.delete()
-            elif session_id:
-                query = session.query(StorageMessage).filter(
-                    StorageMessage.session_id == session_id
-                )
-                query.delete()
-            elif agent_name:
-                query = session.query(StorageMessage).filter(
-                    _agent_name_expression(session) == agent_name
-                )
-                query.delete()
-            else:
-                session.query(StorageMessage).delete()
+                if session_id and agent_name:
+                    query = session.query(StorageMessage).filter(
+                        StorageMessage.session_id == session_id,
+                        _agent_name_expression(session) == agent_name,
+                    )
+                    query.delete()
+                elif session_id:
+                    query = session.query(StorageMessage).filter(
+                        StorageMessage.session_id == session_id
+                    )
+                    query.delete()
+                elif agent_name:
+                    query = session.query(StorageMessage).filter(
+                        _agent_name_expression(session) == agent_name
+                    )
+                    query.delete()
+                else:
+                    session.query(StorageMessage).delete()
 
-            session.commit()
-            logger.debug(
-                f"Cleared memory for session_id={session_id}, agent_name={agent_name}"
-            )
+                self._commit(session)
+                logger.debug(
+                    f"Cleared memory for session_id={session_id}, agent_name={agent_name}"
+                )
+            except Exception:
+                self._rollback_quietly(session)
+                raise
+            finally:
+                self._release_session(session)
 
-        except Exception as e:
-            logger.error(f"Failed to clear memory: {e}")
-        finally:
-            self._release_session(session)
+        def _clear():
+            try:
+                self._with_retry(_clear_once)
+            except Exception as e:
+                logger.error(f"Failed to clear memory: {e}")
+
+        await asyncio.to_thread(_clear)
 
     async def mark_messages_summarized(
         self,
@@ -647,7 +791,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
         if not message_ids:
             return
 
-        def _mark():
+        def _mark_once():
             session = None
             try:
                 session = self._get_session(fresh_for_background=False)
@@ -672,14 +816,19 @@ class DatabaseMessageStore(AbstractMemoryStore):
                         f"Marked {len(message_ids)} messages as summarized (inactive)"
                     )
 
-                session.commit()
+                self._commit(session)
 
-            except Exception as e:
-                logger.error(f"Failed to mark messages as summarized: {e}")
-                if session:
-                    session.rollback()
+            except Exception:
+                self._rollback_quietly(session)
+                raise
             finally:
                 self._release_session(session)
+
+        def _mark():
+            try:
+                self._with_retry(_mark_once)
+            except Exception as e:
+                logger.error(f"Failed to mark messages as summarized: {e}")
 
         await asyncio.to_thread(_mark)
 
@@ -694,7 +843,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
         version = (expected_version or 0) + 1
         data = json.dumps({**record, "version": version}, default=str)
 
-        def _save() -> int:
+        def _save_once() -> int:
             session = self._get_session()
             try:
                 if expected_version is None:
@@ -709,7 +858,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
                         )
                     )
                     try:
-                        session.commit()
+                        self._commit(session)
                     except IntegrityError:
                         session.rollback()
                         raise RunStateConflict(f"Run {run_id} already exists") from None
@@ -727,7 +876,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
                         data=data,
                     )
                 )
-                session.commit()
+                self._commit(session)
                 if result.rowcount != 1:
                     raise RunStateConflict(
                         f"Run {run_id} changed since version {expected_version}"
@@ -736,24 +885,24 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(_save)
+        return await asyncio.to_thread(self._with_retry, _save_once)
 
     async def get_run_state(self, run_id: str) -> dict | None:
         def _get():
-            session = self._get_session()
+            session = self._get_session(read_only=True)
             try:
                 row = session.get(StorageRunState, run_id)
                 return json.loads(row.data) if row is not None else None
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(_get)
+        return await asyncio.to_thread(self._with_retry, _get)
 
     async def list_run_states(
         self, session_id: str | None = None, status: str | None = None, limit: int = 100
     ) -> list[dict]:
         def _list():
-            session = self._get_session()
+            session = self._get_session(read_only=True)
             try:
                 query = session.query(StorageRunState)
                 if session_id is not None:
@@ -765,7 +914,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(_list)
+        return await asyncio.to_thread(self._with_retry, _list)
 
     async def delete_finished_run_states(self, *, before: str, statuses: tuple[str, ...]) -> int:
         def _delete() -> int:
@@ -777,12 +926,12 @@ class DatabaseMessageStore(AbstractMemoryStore):
                         StorageRunState.created_at < before,
                     )
                 )
-                session.commit()
+                self._commit(session)
                 return int(result.rowcount or 0)
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(_delete)
+        return await asyncio.to_thread(self._with_retry, _delete)
 
     # --- budgets -----------------------------------------------------------
     # One row per (key, meter) holding spent, reserved and granted; one row per
