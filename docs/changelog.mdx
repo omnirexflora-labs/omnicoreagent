@@ -31,6 +31,14 @@ Every release, with its notes, is also on
 - **Redis waits for a free connection** instead of raising `MaxConnectionsError` when more than 20
   operations are in flight.
 
+- **A provider 500 is retried, and `Retry-After` is obeyed.** Twelve 500s
+  failed twelve runs in the support desk chaos run, and a 429 asking for 3
+  seconds was retried after about 1. Transient provider errors (429, 500,
+  502, 503, 504, 529, timeouts, dropped connections) are retried with
+  backoff and jitter; `Retry-After` is a floor (capped at 60 seconds), and a
+  wait that would pass the run's deadline is not started. Other 4xx errors
+  still fail at once.
+
 ### Changed
 
 - **Budget storage layout.** SQL stores gain the tables `budget_meters`, `budget_holds` and
@@ -40,7 +48,6 @@ Every release, with its notes, is also on
   now implement `apply_budget_change`, `get_budget_grant_history` and `list_budget_holds` (see
   `AbstractMemoryStore`); without them, budgets are off for that store, as before.
 
-### Changed
 
 - **OmniServe takes only as many concurrent runs as its CPUs can serve.** On a 2-core container
   every request was accepted and all of them slowed down together (chat p50 37 s at 100 users;

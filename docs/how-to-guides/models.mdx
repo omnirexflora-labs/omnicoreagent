@@ -118,8 +118,12 @@ price table, not your invoice).
   `temperature` on a reasoning model — the call is retried once without it,
   the setting is not sent again to that model, and the retry is recorded on
   the model call (`facts["retries"]`, with the setting under `dropped`).
-- **Transient failures are retried** — rate limits, timeouts, connection
-  errors — up to three times with backoff. A wrong key, an empty account or an
+- **Transient failures are retried** — a 429, a 500, 502, 503, 504 or 529,
+  a timeout, a dropped connection — up to three times, with exponential
+  backoff and jitter. When the provider sends `Retry-After` (seconds or an
+  HTTP date), the wait is at least that long, up to 60 seconds. A wait that
+  would pass the run's deadline is not started: the run fails at once with
+  the provider's error. Any other 4xx, a wrong key, an empty account or an
   unknown model is not retried: the run ends at once with the reason. A
   streamed call is not retried, since its text was already delivered.
 

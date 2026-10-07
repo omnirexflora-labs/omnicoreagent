@@ -30,6 +30,8 @@ CANCEL_GRACE_SECONDS = 15.0
 class _StopReason:
     parent: _StopReason | None = None
     reason: str | None = None
+    # When this deadline fires, on the event loop's clock; None until set.
+    expires_at: float | None = None
 
 
 _STOP_REASON: ContextVar[_StopReason | None] = ContextVar(
@@ -48,6 +50,27 @@ def current_stop_reason() -> str | None:
     return None
 
 
+def time_remaining() -> float | None:
+    """Seconds until the nearest enclosing deadline, or None when there is none.
+
+    Work that would wait (a retry's backoff) asks this first, so it fails now
+    with its own error instead of sleeping until the deadline cancels it.
+    """
+    nearest = None
+    box = _STOP_REASON.get()
+    while box is not None:
+        if box.expires_at is not None:
+            nearest = box.expires_at if nearest is None else min(nearest, box.expires_at)
+        box = box.parent
+    if nearest is None:
+        return None
+    try:
+        now = asyncio.get_running_loop().time()
+    except RuntimeError:  # called from a thread with no loop: no deadline applies
+        return None
+    return max(0.0, nearest - now)
+
+
 async def run_with_timeout(awaitable: Awaitable[T], timeout: float | None) -> T:
     """Await ``awaitable`` with a deadline, recording a timeout as the stop reason.
 
@@ -57,6 +80,7 @@ async def run_with_timeout(awaitable: Awaitable[T], timeout: float | None) -> T:
     if timeout is None or timeout <= 0:
         return await awaitable
     box = _StopReason(parent=_STOP_REASON.get())
+    box.expires_at = asyncio.get_running_loop().time() + timeout
     token = _STOP_REASON.set(box)
     try:
         # The task copies the current context, so the run sees this box.
@@ -108,6 +132,7 @@ async def stop_after(timeout: float | None) -> AsyncIterator[None]:
         return
     task = asyncio.current_task()
     box = _StopReason(parent=_STOP_REASON.get())
+    box.expires_at = asyncio.get_running_loop().time() + timeout
     token = _STOP_REASON.set(box)
 
     def expire() -> None:
