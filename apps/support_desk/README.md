@@ -21,6 +21,7 @@ The plan: `engineering/architecture/production-readiness-plan.md`.
 | `Dockerfile` | The desk's image: the runtime with the `serve`, `postgres`, `redis`, `otel` extras. No secrets. |
 | `env.example` | A template for the settings. No secrets. |
 | `fakeprovider/` | A fake model provider that speaks the OpenAI API: scripted answers, set latency, injected faults. Its own container. |
+| `scale/` | Scale out: two 1-CPU replicas behind nginx, sharing the same stores. One process uses about one core; this uses two. See `scale/README.md`. |
 
 The desk's data is a small SQLite file, seeded on start: five orders, five
 help articles, and a refund ledger that only ever grows.

@@ -242,7 +242,7 @@ overrides the same value passed to `OmniServeConfig` in code.
     | `OMNICOREAGENT_SERVE_REQUEST_TIMEOUT` | `300` | Seconds; `0` turns the timeout off. |
     | `OMNICOREAGENT_SQL_POOL_SIZE` | `10` | Connections the SQL memory store keeps open (reads have their own pool of the same size). |
     | `OMNICOREAGENT_SQL_MAX_OVERFLOW` | `22` | Extra SQL memory-store connections allowed under load. |
-    | `OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS` | `16` x usable CPUs | Concurrent runs per process; `0` or `none` is unlimited. |
+    | `OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS` | `24` | Concurrent runs per process; `0` or `none` is unlimited. |
     | `OMNICOREAGENT_SERVE_RUN_ADMISSION_WAIT` | `5` | Seconds a request waits for a run slot before `503`. |
     | `OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED` | `false` | In-process rate limiting. |
     | `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per window, at least `1`. |

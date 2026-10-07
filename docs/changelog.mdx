@@ -171,10 +171,14 @@ Every release, with its notes, is also on
   `AbstractMemoryStore`); without them, budgets are off for that store, as before.
 
 
-- **OmniServe takes only as many concurrent runs as its CPUs can serve.** On a 2-core container
-  every request was accepted and all of them slowed down together (chat p50 37 s at 100 users;
-  throughput 3-4.5 requests a second). A process now admits `16 x` the CPUs it can use (read from
-  the container's CPU quota or affinity); a request over the limit waits up to 5 seconds for a
+- **OmniServe takes only as many concurrent runs as one process can serve well.** On a 2-core
+  container every request was accepted and all of them slowed down together (chat p50 37 s at 100
+  users; throughput 3-4.5 requests a second). A process now admits 24 concurrent runs, the knee
+  measured on a server: one process gave 5.1/s at 24 users and 5.5/s at its peak, then slowed down
+  (p95 22.8 s at 64), and it used about one core whatever the cap. The limit does not scale with
+  CPUs; scale out with one replica per core behind a load balancer sharing the store (two 1-CPU
+  replicas peaked at 9.4/s against 5.5/s for one process, with every refund done exactly once).
+  `apps/support_desk/scale/` has the example. A request over the limit waits up to 5 seconds for a
   slot, then gets `503` with `Retry-After` before any work starts. Only `/run`, `/run/sync`,
   `/runs/{run_id}/resume` and `/background/tasks/{task_id}/run` count; health, `/prometheus`,
   reads and approvals never wait. Set `OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS` (`0` or `none`

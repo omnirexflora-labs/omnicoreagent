@@ -731,7 +731,7 @@ background API and its worker run with an in-memory task store.
 | `OMNICOREAGENT_SERVE_TRUSTED_PROXIES` | none | Comma-separated proxy addresses; the client IP is read from `X-Forwarded-For` only on requests from these |
 | `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per window, at least `1` |
 | `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Window in seconds, at least `1` |
-| `OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS` | `16` x usable CPUs | Concurrent runs per process; `0` or `none` is unlimited. See [how many runs one process takes](#how-many-runs-one-process-takes) |
+| `OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS` | `24` | Concurrent runs per process; `0` or `none` is unlimited. See [how many runs one process takes](#how-many-runs-one-process-takes) |
 | `OMNICOREAGENT_SERVE_RUN_ADMISSION_WAIT` | `5` | Seconds a request waits for a run slot before `503` |
 | `OMNICOREAGENT_SERVE_REQUEST_LOGGING` | `true` | Log each request; adds `X-Process-Time` |
 | `OMNICOREAGENT_SERVE_LOG_LEVEL` | `INFO` | `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG` or `TRACE` |
@@ -794,14 +794,34 @@ For work longer than a request should last, use a background task.
 
 ### How many runs one process takes
 
-A process takes only as many concurrent runs as its CPUs can serve. Past that,
-every request is accepted and every one slows down together: on a 2-core
-container with a Postgres memory store, chat latency went from 4 s at 10 users
-to 37 s at 100. So there is a limit, and nothing to configure for it.
+A process takes 24 concurrent runs by default. Past that, a run waits for a slot
+instead of slowing every other run down. The number is per process. It does not
+grow with the CPU count: more CPUs means more processes (see
+[scale out](#scale-out-one-replica-per-core)).
 
-- **The default** is `16 x` the CPUs the process can really use: the container's
-  CPU quota (cgroup `cpu.max`) or its CPU affinity, not the host's core count.
-  The multiple is a starting point; it is set from the measured knee.
+**What was measured.** One OmniServe process on a 2-CPU cap, with the limit
+lifted, on the support desk app with a Postgres memory store. The model was the
+fake provider at 0.8 to 3 seconds a call. Users ask, ask for refunds, and wait
+for approval, then start again.
+
+| Concurrent users | Throughput | p95 |
+| --- | --- | --- |
+| 8 | 2.1/s | 7.5 s |
+| 16 | 4.0/s | 7.7 s |
+| 24 | 5.1/s | 8.9 s |
+| 32 | 5.5/s | 11.1 s |
+| 48 | 5.4/s | 17.2 s |
+| 64 | 5.0/s | 22.8 s |
+
+The knee is about 24. There the process gives about 93% of its peak throughput,
+and p95 is within 16% of idle. Past 32, throughput falls while latency climbs.
+A real model is usually slower than 0.8 to 3 seconds, so each run waits longer
+and uses less of the process: with a slower model, more runs fit before the knee.
+
+**Why one process stops at about one core.** The process used about 1.1 cores
+on a 2-CPU cap. One event loop runs on one thread, so a second core does not
+help it. Raising the cap does not raise the knee.
+
 - **Over the limit**, a request waits up to `OMNICOREAGENT_SERVE_RUN_ADMISSION_WAIT`
   (5 seconds) for a slot. If none frees, it gets `503` with a `Retry-After`
   header and `{"error": "ServerBusy", "max_concurrent_runs": N, ...}`. Nothing was
@@ -811,16 +831,56 @@ to 37 s at 100. So there is a limit, and nothing to configure for it.
   `/background/tasks/{task_id}/run`. A slot is held while the run executes (for
   `/run`, until the stream ends). Health, readiness, `/prometheus`, reads,
   approvals and steering never wait.
-- **To change it,** set `OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS` to a number, or
-  to `0` or `none` for no limit.
 - **To see it,** `/prometheus` has `omniserve_runs_in_flight`,
   `omniserve_runs_waiting`, `omniserve_runs_limit` and
   `omniserve_runs_rejected_total`.
 
-To serve more, run more processes (or replicas) that share the same memory,
-telemetry and task stores; each applies its own limit. For runs longer than a
-caller should hold a connection, submit then stream: start a background task
-run (`"wait": false`) and follow it from the events routes.
+#### Scale out: one replica per core
+
+Run one replica per core behind a load balancer, all sharing the same memory,
+telemetry and task stores. Each replica applies its own limit of 24.
+
+The same 2-core budget, split into two replicas of 1 CPU each, behind nginx
+(`least_conn`), sharing one Postgres:
+
+| Concurrent users | Throughput | p95 |
+| --- | --- | --- |
+| 24 | 6.2/s | 7.3 s |
+| 32 | 7.7/s | 8.1 s |
+| 48 | 9.4/s | 9.8 s |
+| 64 | 9.3/s | 13.7 s |
+
+The peak was 9.4/s against 5.5/s for one process: about 1.7 times the
+throughput on the same cores. Each replica bends at about 24, so the pair bends
+at about 48. In that run, 1,087 approved refunds made 1,087 ledger rows: each
+happened once, across both replicas.
+
+Durability is what makes this safe. A run's lease says which replica owns it.
+The orphan sweep resumes a run whose replica died. Saves are version-checked, so
+two replicas cannot overwrite each other's work. A request does not need to
+return to the replica that started the run.
+
+The support desk has a working example: `apps/support_desk/scale/`.
+
+#### When to change the limit
+
+- **Lower it** if p95 climbs while throughput is flat or falling. The process is
+  past its knee, and a smaller limit turns the extra waiting into a quick `503`
+  with `Retry-After`.
+- **Raise it** if the runs mostly wait on a slow model, `omniserve_runs_waiting`
+  is often above zero, and the process is well under one core. Raise it a step
+  at a time and measure.
+- **Set `0` or `none`** for no limit. Use it to find your own knee, not in
+  production.
+
+To find your own knee, set `OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS=0` and run
+the support desk's load harness at stages such as `--stages 8:120,16:120,24:120,32:120,48:120`
+(see `apps/support_desk/load/README.md`), with your model and your stores. The
+knee is the stage where throughput stops rising. Set the limit there.
+
+For runs longer than a caller should hold a connection, submit then stream:
+start a background task run (`"wait": false`) and follow it from the events
+routes.
 
 ## Deploy with Docker
 

@@ -1,0 +1,44 @@
+# Scale out: the desk's 2-core budget split into two 1-core replicas behind nginx.
+#
+#   docker compose -p support-desk-scale \
+#     -f apps/support_desk/compose.yml -f apps/support_desk/scale/compose.replicas.yml up -d --build
+#
+# Both replicas share the one Postgres and Redis, so leases, the orphan sweep and
+# version-checked saves keep every run owned by one replica at a time. Each
+# replica applies its own admission limit (the default, 24 concurrent runs); the
+# pair takes about 48. Relative paths are resolved from apps/support_desk/, where
+# the first -f file lives. See scale/README.md.
+
+services:
+  desk:
+    cpus: 1
+    mem_limit: 2g
+  desk2:
+    extends:
+      file: compose.yml
+      service: desk
+    cpus: 1
+    mem_limit: 2g
+    # Replace the base file's port list, or both replicas would bind the same
+    # host port.
+    ports: !override
+      - "127.0.0.1:${DESK_PORT2:-8801}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      fakeprovider:
+        condition: service_healthy
+  lb:
+    image: nginx:1.27-alpine
+    cpus: 0.5
+    mem_limit: 128m
+    ports:
+      - "127.0.0.1:${DESK_LB_PORT:-8810}:80"
+    volumes:
+      - ./scale/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - desk
+      - desk2
+    restart: unless-stopped
