@@ -100,6 +100,14 @@ Every release, with its notes, is also on
   calls arriving before the first connection was ready each opened a client,
   and all but one were leaked. The calls now wait for a single connect.
 
+- **A person's approval is not lost to the run's last heartbeat.** A run waiting for approval stops
+  its keep-alive as it returns, but a heartbeat already sent to the database can still land after
+  it and change the record's version between the moment the decision reads the record and the
+  moment it saves it. With 32 refund runs at once on Postgres, one decision in the benchmark failed
+  with `RunStateConflict: ... changed since version 11`, about a record the approver had not
+  touched. Deciding now reads the record again, checks the approval again (a decision another
+  person made meanwhile stands) and saves against the new version, up to ten times.
+
 ### Changed
 
 - **A call's budgets go to the store in one transaction, not one per scope.** A model call holds
