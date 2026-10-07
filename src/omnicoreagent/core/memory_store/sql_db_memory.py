@@ -8,6 +8,9 @@ from typing import Any, Callable
 import uuid
 import threading
 import asyncio
+import contextvars
+import functools
+from concurrent.futures import ThreadPoolExecutor
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
 from sqlalchemy import (
     Double,
@@ -61,10 +64,12 @@ def _agent_name_expression(session):
     return json_column["agent_name"].as_string()
 
 
-# Concurrent operations are bounded by the threads that run them
-# (`asyncio.to_thread`: at most min(32, CPUs + 4)), so a pool far beyond 32
-# connections only holds database connections nobody can use. The steady size
-# is small, and the overflow brings the total up to that bound. Both can be set
+# Concurrent operations are bounded by the threads that run them: one per
+# connection the pool can lend (``SQLConnectionManager.executor``), so a
+# connection never idles for want of a thread. A pool far beyond what the
+# process can use only holds database connections nobody needs, and each is a
+# server-side backend. The steady size is small, and the overflow brings the
+# total up to 32, the bound the default executor used to impose. Both can be set
 # per store (`DatabaseMessageStore(db_url, pool_size=..., max_overflow=...)`) or
 # for the process (OMNICOREAGENT_SQL_POOL_SIZE, OMNICOREAGENT_SQL_MAX_OVERFLOW).
 DEFAULT_POOL_SIZE = 10
@@ -128,7 +133,32 @@ class SQLConnectionManager:
         self._session_count = 0
         # Stores using this pool; the last to close disposes it.
         self.users = 0
+        # The threads the database calls run on, one per connection the pool
+        # can lend (see ``executor``).
+        self._executor: ThreadPoolExecutor | None = None
+        self._pool_slots = DEFAULT_POOL_SIZE + DEFAULT_MAX_OVERFLOW
         logger.debug("SQLConnectionManager initialized")
+
+    def executor(self) -> ThreadPoolExecutor:
+        """The threads database calls run on, sized to the connection pool.
+
+        Every call is a blocking driver call, so it hops to a thread. On the
+        event loop's default executor those threads were shared with every
+        other ``asyncio.to_thread`` in the process and capped at
+        ``min(32, CPUs + 4)``: 6 on a 2-core container, however many
+        connections the pool allowed, so database waits queued behind each
+        other and behind a tool's file read (the support desk ramp,
+        2026-10-07: 11% of samples were executor workers waiting, the event
+        loop busy 18% of the time). One thread per connection the pool can
+        lend (``pool_size + max_overflow``) never leaves a connection idle for
+        want of a thread, and never holds more threads than connections.
+        """
+        with self._lock:
+            if self._executor is None:
+                self._executor = ThreadPoolExecutor(
+                    max_workers=max(self._pool_slots, 1), thread_name_prefix="omnicore-sql"
+                )
+            return self._executor
 
     def initialize(self, db_url: str, **kwargs):
         """Initialize the SQL engine and session factory."""
@@ -157,8 +187,13 @@ class SQLConnectionManager:
                         **kwargs,
                     }
 
+                    self._pool_slots = int(connection_kwargs["pool_size"]) + int(
+                        connection_kwargs["max_overflow"]
+                    )
                     backend = make_url(db_url).get_backend_name()
                     if backend == "sqlite" and _sqlite_is_in_memory(db_url):
+                        # One connection, lent to one thread at a time.
+                        self._pool_slots = 1
                         self._initialize_sqlite_memory(db_url, connection_kwargs)
                         return
                     self._engine = create_engine(db_url, **connection_kwargs)
@@ -269,6 +304,9 @@ class SQLConnectionManager:
     def close_all(self):
         """Close all connections."""
         with self._lock:
+            if self._executor is not None:
+                self._executor.shutdown(wait=False)
+                self._executor = None
             if self._engine:
                 self._engine.dispose()
                 if self._read_engine is not None:
@@ -549,6 +587,19 @@ class DatabaseMessageStore(AbstractMemoryStore):
                     except Exception as e:
                         logger.debug(f"Column '{col_name}' may already exist: {e}")
 
+    async def _in_pool(self, function: Callable[..., Any], *args: Any) -> Any:
+        """Run a blocking database call on this database's own threads.
+
+        Like ``asyncio.to_thread`` it carries the caller's context variables
+        across, so what the runtime sets for a run is seen on the thread.
+        """
+        if self._sql_manager is None:
+            return await asyncio.to_thread(function, *args)
+        context = contextvars.copy_context()
+        return await asyncio.get_running_loop().run_in_executor(
+            self._sql_manager.executor(), functools.partial(context.run, function, *args)
+        )
+
     def _get_session(self, fresh_for_background: bool = False, read_only: bool = False):
         """Get a database session from the connection manager."""
         if self._sql_manager is None:
@@ -682,7 +733,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
         # merging the P6 tracks, 2026-10-07). The run fails with the store's
         # error, and its record still holds the message.
         try:
-            await asyncio.to_thread(self._with_retry, _store_once)
+            await self._in_pool(self._with_retry, _store_once)
         except Exception as e:
             logger.error(f"Failed to store message: {e}")
             raise
@@ -729,7 +780,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
                 logger.error(f"Failed to get messages: {e}")
                 return []
 
-        result = await asyncio.to_thread(_fetch_messages)
+        result = await self._in_pool(_fetch_messages)
 
         result, summary_msg, summarized_ids = await apply_summarization_logic(
             messages=result,
@@ -842,7 +893,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             except Exception as e:
                 logger.error(f"Failed to clear memory: {e}")
 
-        await asyncio.to_thread(_clear)
+        await self._in_pool(_clear)
 
     async def mark_messages_summarized(
         self,
@@ -903,7 +954,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             except Exception as e:
                 logger.error(f"Failed to mark messages as summarized: {e}")
 
-        await asyncio.to_thread(_mark)
+        await self._in_pool(_mark)
 
     # --- run state ---------------------------------------------------------
 
@@ -958,7 +1009,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(self._with_retry, _save_once)
+        return await self._in_pool(self._with_retry, _save_once)
 
     async def get_run_state(self, run_id: str) -> dict | None:
         def _get():
@@ -969,7 +1020,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(self._with_retry, _get)
+        return await self._in_pool(self._with_retry, _get)
 
     async def list_run_states(
         self, session_id: str | None = None, status: str | None = None, limit: int = 100
@@ -987,7 +1038,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(self._with_retry, _list)
+        return await self._in_pool(self._with_retry, _list)
 
     async def delete_finished_run_states(self, *, before: str, statuses: tuple[str, ...]) -> int:
         def _delete() -> int:
@@ -1004,7 +1055,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(self._with_retry, _delete)
+        return await self._in_pool(self._with_retry, _delete)
 
     # --- budgets -----------------------------------------------------------
     # One row per (key, meter) holding spent, reserved and granted; one row per
@@ -1034,7 +1085,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        await asyncio.to_thread(self._with_retry, _delete)
+        await self._in_pool(self._with_retry, _delete)
 
     async def get_budget_state(self, key: str) -> dict | None:
         await self._move_legacy_budget(key)
@@ -1060,7 +1111,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(self._with_retry, _get)
+        return await self._in_pool(self._with_retry, _get)
 
     async def get_budget_states(self, keys: list[str]) -> dict[str, dict | None]:
         """Several counters from one read (the run's end reads all its scopes)."""
@@ -1090,7 +1141,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(self._with_retry, _get)
+        return await self._in_pool(self._with_retry, _get)
 
     async def get_budget_grant_history(self, key: str) -> list[dict]:
         await self._move_legacy_budget(key)
@@ -1117,7 +1168,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(self._with_retry, _get)
+        return await self._in_pool(self._with_retry, _get)
 
     async def list_budget_holds(self, key: str) -> list[dict]:
         await self._move_legacy_budget(key)
@@ -1141,7 +1192,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(self._with_retry, _list)
+        return await self._in_pool(self._with_retry, _list)
 
     # A store that applies several keys' changes in one transaction says so,
     # and the budget ledger then hands it a whole call's changes at once.
@@ -1164,7 +1215,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
         """
         for key, _ in changes:
             await self._move_legacy_budget(key)
-        return await asyncio.to_thread(
+        return await self._in_pool(
             self._with_retry, lambda: self._apply_budget_changes(changes)
         )
 
@@ -1416,7 +1467,7 @@ class DatabaseMessageStore(AbstractMemoryStore):
     async def _move_legacy_budget(self, key: str) -> None:
         if self._legacy_budgets_gone or key in self._legacy_budgets_moved:
             return
-        await asyncio.to_thread(self._with_retry, lambda: self._move_legacy_budget_sync(key))
+        await self._in_pool(self._with_retry, lambda: self._move_legacy_budget_sync(key))
 
     def _move_legacy_budget_sync(self, key: str) -> None:
         session = self._get_session()
@@ -1525,4 +1576,4 @@ class DatabaseMessageStore(AbstractMemoryStore):
             finally:
                 self._release_session(session)
 
-        return await asyncio.to_thread(self._with_retry, _save)
+        return await self._in_pool(self._with_retry, _save)

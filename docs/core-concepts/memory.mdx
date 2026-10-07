@@ -112,7 +112,10 @@ that ships it. Another database SQLAlchemy supports needs its own driver
 installed.
 
 The SQL store keeps a pool of connections: 10 kept open and up to 22 more under
-load, which matches the most operations that can run at once. Set
+load. Its database calls run on threads of the store's own, one for each
+connection the pool can lend (10 + 22 by default), so a database wait never
+queues behind other work in the process, and never holds more threads than
+there are connections. Set
 `OMNICOREAGENT_SQL_POOL_SIZE` and `OMNICOREAGENT_SQL_MAX_OVERFLOW` to change
 them. Reads use their own pool of the same size, so up to twice as many
 connections can be open when both are busy. The pool does not test a

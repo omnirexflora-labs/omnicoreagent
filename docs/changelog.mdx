@@ -123,6 +123,12 @@ Every release, with its notes, is also on
   once, and a run another process has taken over still cannot begin a step. The end of a run no
   longer reads its own record back to look for workers when it started none, and an ID made by
   `generate_run_id()` is not looked up before its run (nothing can be stored under it yet).
+- **The SQL store's database calls run on their own threads.** They shared the event loop's default
+  executor with every other `asyncio.to_thread` in the process, capped at `min(32, CPUs + 4)` (6 on
+  a 2-core container) however many connections the pool allowed; on the support desk ramp most
+  active samples were database threads waiting. The store now has one thread for each connection its
+  pool can lend (`pool_size + max_overflow`), so database waits neither queue behind a tool's file
+  read nor hold it up. The caller's context variables still reach the thread.
 - **Budget storage layout.** SQL stores gain the tables `budget_meters`, `budget_holds` and
   `budget_grants`; Redis and MongoDB keep counters under new keys (`omnicoreagent_budget2:`,
   `<collection>_budgets`). Counters written by 0.5.x are moved on first touch; do not run 0.5.x and
