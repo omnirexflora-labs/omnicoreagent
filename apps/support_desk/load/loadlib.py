@@ -23,6 +23,7 @@ import statistics
 import subprocess
 import time
 from collections import Counter, defaultdict
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 import httpx
@@ -62,6 +63,71 @@ def summarize(values: list[float]) -> dict:
 # --- the client -------------------------------------------------------------------
 
 
+class RetryAfter:
+    """Retries a 503 that carries ``Retry-After``, as a real client does.
+
+    The ramp at 100 users (2026-10-07) found the admission limit answering
+    some resume calls 503 while this client gave up on the first, leaving 119
+    approved runs never resumed. Each wait is the header plus a little jitter,
+    so a crowd refused together does not return together; a request gives up
+    when the next wait would pass ``budget`` seconds in total. Three counts are
+    kept apart: 503s seen, requests that succeeded after a retry, and requests
+    that ended on a 503.
+    """
+
+    def __init__(self, *, budget: float = 60.0, jitter: float = 0.5, sleep=asyncio.sleep,
+                 clock=time.monotonic, rng=random) -> None:
+        self.budget, self.jitter = budget, jitter
+        self._sleep, self._clock, self._rng = sleep, clock, rng
+        self.seen_503 = self.succeeded_after_retry = self.gave_up = 0
+        self.by_kind: dict[str, dict[str, int]] = {}
+
+    def _count(self, kind: str | None, key: str) -> None:
+        setattr(self, key, getattr(self, key) + 1)
+        if kind is not None:
+            counts = self.by_kind.setdefault(kind, {"seen_503": 0, "succeeded_after_retry": 0, "gave_up": 0})
+            counts[key] += 1
+
+    @staticmethod
+    def _asked_to_wait(response) -> float | None:
+        try:
+            seconds = float(response.headers.get("Retry-After"))
+        except (TypeError, ValueError):
+            return None
+        return seconds if seconds >= 0 else None
+
+    async def run(self, send: Callable[[], Awaitable], *, kind: str | None = None):
+        """Call ``send`` until it is not refused with a retryable 503.
+
+        ``send`` returns anything with ``status_code`` and ``headers``.
+        Returns ``(response, retries)``.
+        """
+        began, retries = self._clock(), 0
+        while True:
+            response = await send()
+            if response.status_code != 503:
+                if retries and response.status_code < 400:
+                    self._count(kind, "succeeded_after_retry")
+                return response, retries
+            self._count(kind, "seen_503")
+            wait = self._asked_to_wait(response)
+            if wait is not None:
+                wait += self._rng.uniform(0, self.jitter)
+            if wait is None or self._clock() - began + wait > self.budget:
+                self._count(kind, "gave_up")
+                return response, retries
+            await self._sleep(wait)
+            retries += 1
+
+    def summary(self) -> dict:
+        return {
+            "seen_503": self.seen_503,
+            "succeeded_after_retry": self.succeeded_after_retry,
+            "gave_up": self.gave_up,
+            "by_kind": self.by_kind,
+        }
+
+
 @dataclass
 class Record:
     """One request, as the client saw it."""
@@ -73,6 +139,7 @@ class Record:
     error: str | None    # None when the request did what the harness expected
     stage: int = 0
     detail: str = ""
+    retries: int = 0     # how many times a 503 with Retry-After was waited out
 
 
 class Desk:
@@ -88,20 +155,24 @@ class Desk:
         )
         self.records: list[Record] = []
         self.stage = 0
+        self.retry = RetryAfter()
 
     async def close(self) -> None:
         await self.client.aclose()
 
-    def _note(self, kind, t0, started, http, error, detail="") -> Record:
-        record = Record(kind, t0, time.perf_counter() - started, http, error, self.stage, detail)
+    def _note(self, kind, t0, started, http, error, detail="", retries=0) -> Record:
+        record = Record(kind, t0, time.perf_counter() - started, http, error, self.stage, detail, retries)
         self.records.append(record)
         return record
 
     async def call(self, kind: str, method: str, path: str, *, expect=(200,), record=True, detail="", check=None, **kwargs):
         """Make one request. Returns ``(json_or_None, error_or_None)``; never raises."""
         t0, started = time.time(), time.perf_counter()
+        retries = 0
         try:
-            response = await self.client.request(method, path, **kwargs)
+            response, retries = await self.retry.run(
+                lambda: self.client.request(method, path, **kwargs), kind=kind
+            )
         except httpx.TimeoutException:
             error, http, body = "timeout", None, None
         except httpx.ConnectError:
@@ -122,7 +193,7 @@ class Desk:
             if error is None and check is not None and body is not None:
                 error = check(body)
         if record:
-            self._note(kind, t0, started, http, error, detail)
+            self._note(kind, t0, started, http, error, detail, retries)
         return body, error
 
     async def quiet(self, method: str, path: str, **kwargs):
@@ -136,12 +207,13 @@ class Desk:
         complete = None
         error = None
         http = None
-        try:
+        retries = 0
+
+        async def attempt():
+            nonlocal first, complete
+            first, complete = None, None
             async with self.client.stream("POST", "/run", json={"query": query, "session_id": session}) as response:
-                http = response.status_code
-                if http != 200:
-                    error = f"http_{http}"
-                else:
+                if response.status_code == 200:
                     event = None
                     async for line in response.aiter_lines():
                         if first is None:
@@ -150,6 +222,13 @@ class Desk:
                             event = line[7:].strip()
                         elif line.startswith("data: ") and event == "complete":
                             complete = json.loads(line[6:])
+                return response
+
+        try:
+            response, retries = await self.retry.run(attempt, kind=kind)
+            http = response.status_code
+            if http != 200:
+                error = f"http_{http}"
         except httpx.TimeoutException:
             error = "timeout"
         except httpx.ConnectError:
@@ -162,7 +241,7 @@ class Desk:
             error = "stream_without_complete"
         if error is None and complete.get("status") != "success":
             error = f"run_{complete.get('status')}"
-        self._note(kind, t0, started, http, error, session)
+        self._note(kind, t0, started, http, error, session, retries)
         if first is not None and error is None:
             self.records.append(Record(kind + "_first_byte", t0, first, http, None, self.stage))
         return complete, error
