@@ -480,8 +480,21 @@ for claim in await agent.claim_orphaned_runs():
 ```
 
 - An orphan is a run of this agent that is `running` and whose heartbeat is
-  older than its lease. A run waiting for an approval or a budget decision is
-  left waiting, and a background run is left to its supervisor.
+  older than its lease. A background run is left to its supervisor.
+- A **decided run** is one in `awaiting_approval` or `awaiting_budget` whose
+  every approval is `approved` or `denied` (or whose budget request is granted
+  or denied), that no live owner holds, and that nobody has resumed for
+  `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_DECIDED_GRACE_SECONDS` (30 by default) after
+  the last decision. The sweep resumes it exactly as `resume` would, so a
+  person's decision leads somewhere even when the client that should have
+  called `resume` was refused (a `503` from the admission limit) or is gone.
+  The support desk ramp at 100 users left 119 approved runs waiting like this.
+  A run with a decision still pending is left waiting, and so is a decided run
+  inside its grace period. Pass `decided_grace_seconds=` to
+  `claim_orphaned_runs` when you sweep yourself.
+- If a client's `resume` and the sweep arrive together, the record's version
+  check lets exactly one win. The other is told the run was taken (`409` over
+  HTTP, `ValueError` from `resume`), and a call runs once.
 - A run is claimed through its record's own version check, so two replicas
   never resume the same run, and a live run is never taken from its owner.
 - A claim keeps the run's lease alive with heartbeats until the resumed run's
@@ -496,10 +509,13 @@ for claim in await agent.claim_orphaned_runs():
   tool is idempotent.
 - Its trace says why: the `run_resumed` event has `cause`
   `recovered_after_lapsed_lease`, `trigger` `orphan_sweep`, the dead
-  `previous_owner`, and `orphaned_seconds`.
+  `previous_owner`, and `orphaned_seconds`. A decided run has the `cause` an
+  explicit resume gives (`approval`, `budget_grant` or `budget_denied`), the
+  same `trigger`, and `decision` (`approved`, `denied`, `granted`) with
+  `decided_at`.
 - A run recovered `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_MAX_RECOVERIES` times (3)
   and still not finished is ended `failed`: it is probably what stops its
-  process.
+  process. Resuming a decided run does not count as a recovery.
 - At most `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_MAX_CONCURRENT` (2) recovered runs
   work at once.
 

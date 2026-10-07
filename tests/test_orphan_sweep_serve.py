@@ -91,7 +91,7 @@ async def test_a_sweep_resumes_no_more_runs_than_it_has_slots_for(tmp_path):
         def __init__(self):
             self.limits = []
 
-        async def claim_orphaned_runs(self, *, limit, max_recoveries):
+        async def claim_orphaned_runs(self, *, limit, max_recoveries, decided_grace_seconds):
             self.limits.append(limit)
             return [{"run_id": f"run_{i}"} for i in range(limit)]
 
@@ -112,7 +112,7 @@ async def test_a_failing_sweep_does_not_end_the_loop():
     class Agent:
         calls = 0
 
-        async def claim_orphaned_runs(self, *, limit, max_recoveries):
+        async def claim_orphaned_runs(self, *, limit, max_recoveries, decided_grace_seconds):
             Agent.calls += 1
             raise RuntimeError("the store is down")
 
@@ -122,3 +122,27 @@ async def test_a_failing_sweep_does_not_end_the_loop():
     await sweeper.stop()
 
     assert Agent.calls >= 2
+
+
+def test_the_grace_period_for_decided_runs_is_a_setting(monkeypatch):
+    assert OmniServeConfig.model_fields["orphan_sweep_decided_grace_seconds"].default == 30.0
+    monkeypatch.setenv("OMNICOREAGENT_SERVE_ORPHAN_SWEEP_DECIDED_GRACE_SECONDS", "7")
+    assert OmniServeConfig().orphan_sweep_decided_grace_seconds == 7.0
+    monkeypatch.delenv("OMNICOREAGENT_SERVE_ORPHAN_SWEEP_DECIDED_GRACE_SECONDS")
+    with pytest.raises(ValueError, match="DECIDED_GRACE_SECONDS"):
+        OmniServeConfig(orphan_sweep_decided_grace_seconds=-1)
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_passes_its_grace_period_to_the_claim():
+    class Agent:
+        graces = []
+
+        async def claim_orphaned_runs(self, *, limit, max_recoveries, decided_grace_seconds):
+            Agent.graces.append(decided_grace_seconds)
+            return []
+
+    sweeper = OrphanSweeper(Agent(), decided_grace_seconds=12.5)
+    await sweeper.sweep_once()
+
+    assert Agent.graces == [12.5]

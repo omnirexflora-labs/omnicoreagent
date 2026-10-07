@@ -221,7 +221,8 @@ whether a tool's arguments are kept in full) follows your
 `trigger` is `explicit` (a call to `resume`) or `orphan_sweep` (the server's
 [sweeper](/docs/core-concepts/durable-runs)). A recovered run also carries
 `previous_owner`, `lease_expired_at` and `orphaned_seconds`, how long it sat
-with no process.
+with no process. A decided run the sweep resumed carries `decision` and
+`decided_at` instead.
 
 ## Look up a finished run
 

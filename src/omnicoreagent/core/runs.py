@@ -711,6 +711,51 @@ def resume_cause(record: dict[str, Any], now: datetime | None = None) -> dict[st
     return {"cause": "explicit"}
 
 
+def decided_waiting(
+    record: dict[str, Any], *, grace_seconds: float, now: datetime | None = None
+) -> dict[str, Any] | None:
+    """What a waiting run was decided as, when nobody has resumed it since.
+
+    A run waiting for approval or a budget is only picked up by the sweep when
+    every decision it waits on is made (``not_resumable`` is None) and the last
+    of them is older than the grace period, which leaves a client that is about
+    to resume the time to do it. Returns ``{"decision": ..., "decided_at": ...}``
+    (``approved``, ``denied``, ``granted``, ``expired`` or ``mixed``), or None.
+
+    Found by the support desk ramp at 100 users (2026-10-07): 119 runs sat in
+    ``awaiting_approval`` with their approval ``approved``, because the resume
+    that would continue them had been answered 503 and not retried.
+    """
+    status = record.get("status")
+    if status == "awaiting_approval":
+        decisions = record.get("approvals") or []
+    elif status == "awaiting_budget":
+        decisions = record.get("budget_requests") or []
+    else:
+        return None
+    if not decisions or not_resumable(record, record["run_id"]) is not None:
+        return None
+    # A decision recorded before decided_at existed counts from the run's last
+    # save.
+    stamps = [
+        datetime.fromisoformat(
+            item.get("decided_at") or record.get("updated_at") or record["created_at"]
+        )
+        for item in decisions
+        if item.get("status") != "pending"
+    ]
+    if not stamps:
+        return None
+    decided_at = max(stamps)
+    if ((now or datetime.now(timezone.utc)) - decided_at).total_seconds() < grace_seconds:
+        return None
+    outcomes = {item.get("status") for item in decisions if item.get("status") != "pending"}
+    return {
+        "decision": outcomes.pop() if len(outcomes) == 1 else "mixed",
+        "decided_at": decided_at.isoformat(),
+    }
+
+
 def not_resumable(record: dict[str, Any], run_id: str) -> str | None:
     """Why a run cannot be continued now, or None if it can.
 

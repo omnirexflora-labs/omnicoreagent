@@ -21,6 +21,7 @@ from omnicoreagent.core.runs import (
     RunSuspended,
     RunTracker,
     current_run,
+    decided_waiting,
     lease_expired,
     resume_cause,
     supports_run_state,
@@ -1496,32 +1497,55 @@ class OmniCoreAgent:
         problem = _not_resumable(record, run_id)
         if problem is not None:
             raise ValueError(problem)
-        return await self.run(
-            None, session_id=record["session_id"], run_id=run_id, on_event=on_event, _resume=record
-        )
+        try:
+            return await self.run(
+                None,
+                session_id=record["session_id"],
+                run_id=run_id,
+                on_event=on_event,
+                _resume=record,
+            )
+        except RunStateConflict:
+            # The version check lost: the orphan sweep (or another client)
+            # claimed the run between our read and our first save. The run is
+            # theirs and goes on there, so this caller is told so, as it is
+            # when it arrives after the claim (the route answers 409).
+            raise ValueError(
+                f"Run {run_id} was taken by another process while this resume started"
+            ) from None
 
     async def claim_orphaned_runs(
-        self, *, limit: int = 10, max_recoveries: int = 3
+        self,
+        *,
+        limit: int = 10,
+        max_recoveries: int = 3,
+        decided_grace_seconds: float = 30.0,
     ) -> List[Dict[str, Any]]:
-        """Take over this agent's runs whose process died, and say which.
+        """Take over this agent's runs that nobody is working on, and say which.
 
-        An orphan is a run still ``running`` whose heartbeat is older than its
-        lease, started by this agent (by name) and not by a background
-        supervisor, which recovers its own. A run waiting for an approval or a
-        budget decision is not an orphan and is left waiting.
+        Two kinds of run are taken. An orphan is a run still ``running`` whose
+        heartbeat is older than its lease, started by this agent (by name) and
+        not by a background supervisor, which recovers its own. A decided run
+        is one waiting for an approval or a budget decision that a person has
+        made, and that nobody has resumed for ``decided_grace_seconds`` (the
+        client that should have called ``resume`` was refused or is gone). A
+        run with a decision still pending is left waiting.
 
         Each run is claimed with the record's own version check: the claim
         writes a new owner and a fresh heartbeat, and a second process that
         read the same record fails the check and skips it, so a run is never
-        resumed twice. Each claim is then given to ``resume_claimed``. A run
-        claimed ``max_recoveries`` times and still not finished is ended
-        ``failed`` instead (it is probably what kills its process).
+        resumed twice. A client's ``resume`` that read the record before the
+        claim fails its first save the same way and is refused. Each claim is
+        then given to ``resume_claimed``. An orphan claimed ``max_recoveries``
+        times and still not finished is ended ``failed`` instead (it is
+        probably what kills its process); a decided run's claim does not count.
 
-        Added after the support desk chaos run (2026-10-07), where runs whose
-        process died stayed ``running`` until someone called ``resume``.
+        Orphans were added after the support desk chaos run (2026-10-07), where
+        runs whose process died stayed ``running`` until someone called
+        ``resume``. Decided runs were added after the ramp at 100 users the
+        same day, where 119 approved runs waited for a resume that the
+        admission limit had answered 503.
         """
-        from uuid import uuid4
-
         if not self._initialized:
             await self.initialize()
         if not supports_run_state(self.memory_router):
@@ -1556,32 +1580,81 @@ class OmniCoreAgent:
                 continue
             # What the run looked like before the claim rewrites its lease.
             cause = {"trigger": "orphan_sweep", **resume_cause(record)}
-            claimed = {key: value for key, value in record.items() if key != "version"}
-            now = datetime.now(timezone.utc).isoformat()
-            claimed.update(
-                owner=f"owner_sweep_{uuid4().hex}",
-                heartbeat_at=now,
-                updated_at=now,
-                lease_seconds=lease_seconds,
-                recovery_count=recoveries + 1,
-            )
+            claim = await self._claim_record(record, cause, recoveries + 1, lease_seconds)
+            if claim is not None:
+                claims.append(claim)
+        for status in ("awaiting_approval", "awaiting_budget"):
+            if len(claims) >= limit:
+                break
             try:
-                claimed["version"] = await self.memory_router.save_run_state(
-                    dict(claimed), expected_version=record["version"]
+                waiting = await self.memory_router.list_run_states(None, status, 1000)
+            except RunStateUnsupported:
+                break
+            for record in waiting:
+                if len(claims) >= limit:
+                    break
+                decided = decided_waiting(record, grace_seconds=decided_grace_seconds)
+                if (
+                    decided is None
+                    or record.get("agent_name") != self.name
+                    or record["run_id"] in self._active_run_ids
+                    or record.get("surface") == "background"
+                ):
+                    continue
+                # The cause is the one an explicit resume would record, plus
+                # the decision, so a trace says why nobody resumed it earlier.
+                cause = {
+                    "trigger": "orphan_sweep",
+                    **resume_cause(record),
+                    "decision": decided["decision"],
+                    "decided_at": decided["decided_at"],
+                }
+                claim = await self._claim_record(
+                    record, cause, int(record.get("recovery_count") or 0), lease_seconds
                 )
-            except RunStateConflict:
-                continue  # another process claimed it first
-            runtime_logger().info(
-                f"Claimed orphaned run {run_id} (owner {cause.get('previous_owner')}, "
-                f"orphaned {cause.get('orphaned_seconds')}s)"
-            )
-            # The claim's lease starts now, but the resume can take longer than
-            # a lease to start (a cold model client took 74 s against 60 s).
-            beat = ClaimHeartbeat(self.memory_router, claimed, lease_seconds=lease_seconds)
-            beat.start()
-            self._claim_heartbeats[run_id] = beat
-            claims.append({"run_id": run_id, "record": claimed, "cause": cause})
+                if claim is not None:
+                    claims.append(claim)
         return claims
+
+    async def _claim_record(
+        self, record: Dict[str, Any], cause: Dict[str, Any], recovery_count: int, lease_seconds: int
+    ) -> Optional[Dict[str, Any]]:
+        """Claim one run through the record's version check; None if another
+        process (or the client's own resume) got there first.
+
+        A waiting run is claimed as ``running``: that is what makes a client
+        resume arriving after the claim answer 409 (its heartbeat is current)
+        rather than start the run a second time.
+        """
+        from uuid import uuid4
+
+        run_id = record["run_id"]
+        claimed = {key: value for key, value in record.items() if key != "version"}
+        now = datetime.now(timezone.utc).isoformat()
+        claimed.update(
+            status="running",
+            owner=f"owner_sweep_{uuid4().hex}",
+            heartbeat_at=now,
+            updated_at=now,
+            lease_seconds=lease_seconds,
+            recovery_count=recovery_count,
+        )
+        try:
+            claimed["version"] = await self.memory_router.save_run_state(
+                dict(claimed), expected_version=record["version"]
+            )
+        except RunStateConflict:
+            return None  # another process claimed it first
+        runtime_logger().info(
+            f"Claimed run {run_id} ({cause.get('cause')}; owner {cause.get('previous_owner')}, "
+            f"orphaned {cause.get('orphaned_seconds')}s)"
+        )
+        # The claim's lease starts now, but the resume can take longer than
+        # a lease to start (a cold model client took 74 s against 60 s).
+        beat = ClaimHeartbeat(self.memory_router, claimed, lease_seconds=lease_seconds)
+        beat.start()
+        self._claim_heartbeats[run_id] = beat
+        return {"run_id": run_id, "record": claimed, "cause": cause}
 
     async def resume_claimed(self, claim: Dict[str, Any], on_event: Any = None) -> Dict[str, Any]:
         """Continue a run ``claim_orphaned_runs`` returned, with the same
@@ -2114,6 +2187,9 @@ class OmniCoreAgent:
                         approver=approver,
                         note=note,
                         amount=given if granted else 0.0,
+                        # The sweep waits a grace period from here for a
+                        # client to resume before it resumes the run itself.
+                        decided_at=datetime.now(timezone.utc).isoformat(),
                     )
 
         # The decision is recorded on the run; the run's own trace records it

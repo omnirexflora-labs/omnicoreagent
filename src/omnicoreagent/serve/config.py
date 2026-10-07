@@ -254,6 +254,13 @@ class OmniServeConfig(BaseModel):
         default=30.0,
         description="Seconds between sweeps for orphaned runs (each wait varies by up to 25%)",
     )
+    orphan_sweep_decided_grace_seconds: float = Field(
+        default=30.0,
+        description=(
+            "Seconds a run waits after its approval or budget decision before the sweep "
+            "resumes it for a client that never did"
+        ),
+    )
     orphan_sweep_max_concurrent: int = Field(
         default=2, description="Recovered runs this server resumes at once"
     )
@@ -368,6 +375,8 @@ class OmniServeConfig(BaseModel):
             self.orphan_sweep_enabled = val
         if (val := _get_env_float(serve_prefix, "ORPHAN_SWEEP_INTERVAL_SECONDS")) is not None:
             self.orphan_sweep_interval_seconds = val
+        if (val := _get_env_float(serve_prefix, "ORPHAN_SWEEP_DECIDED_GRACE_SECONDS")) is not None:
+            self.orphan_sweep_decided_grace_seconds = val
         if (val := _get_env_int(serve_prefix, "ORPHAN_SWEEP_MAX_CONCURRENT")) is not None:
             self.orphan_sweep_max_concurrent = val
         if (val := _get_env_int(serve_prefix, "ORPHAN_SWEEP_MAX_RECOVERIES")) is not None:
@@ -411,6 +420,10 @@ class OmniServeConfig(BaseModel):
             raise ValueError(
                 "OMNICOREAGENT_SERVE_ORPHAN_SWEEP_INTERVAL_SECONDS must be greater "
                 "than 0 when the orphan sweep is enabled"
+            )
+        if self.orphan_sweep_decided_grace_seconds < 0:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_ORPHAN_SWEEP_DECIDED_GRACE_SECONDS must be 0 or more"
             )
         if self.orphan_sweep_max_concurrent < 1:
             raise ValueError(

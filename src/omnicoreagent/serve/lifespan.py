@@ -76,13 +76,15 @@ async def agent_lifespan(app: FastAPI):
 
         app.state.orphan_sweeper = None
         if config.orphan_sweep_enabled and hasattr(agent, "claim_orphaned_runs"):
-            # Runs whose process died are resumed here; an interactive run
-            # otherwise waits for someone to call resume (see orphan_sweep).
+            # Runs whose process died, and runs a person decided that no client
+            # resumed, are resumed here; they otherwise wait for someone to
+            # call resume (see orphan_sweep).
             app.state.orphan_sweeper = OrphanSweeper(
                 agent,
                 interval_seconds=config.orphan_sweep_interval_seconds,
                 max_concurrent=config.orphan_sweep_max_concurrent,
                 max_recoveries=config.orphan_sweep_max_recoveries,
+                decided_grace_seconds=config.orphan_sweep_decided_grace_seconds,
                 run_timeout=config.request_timeout,
             )
             await app.state.orphan_sweeper.start()

@@ -9,7 +9,10 @@ desk chaos run (2026-10-07) left them waiting for someone to call
 
 It only ever calls ``agent.claim_orphaned_runs``, which takes a run through
 the record's own version check, so two replicas sweeping at once never resume
-the same run, and which leaves a run waiting for a person alone. A recovered
+the same run, and which leaves a run whose decision is still pending alone. A
+run whose person has decided, and which no client resumed within the grace
+period, is taken too: the ramp at 100 users (2026-10-07) left 119 approved
+runs waiting for a resume the admission limit had answered 503. A recovered
 run then continues under the durable rules ``resume`` has always used.
 """
 
@@ -33,12 +36,14 @@ class OrphanSweeper:
         interval_seconds: float = 30.0,
         max_concurrent: int = 2,
         max_recoveries: int = 3,
+        decided_grace_seconds: float = 30.0,
         run_timeout: float | None = None,
     ) -> None:
         self.agent = agent
         self.interval_seconds = interval_seconds
         self.max_concurrent = max_concurrent
         self.max_recoveries = max_recoveries
+        self.decided_grace_seconds = decided_grace_seconds
         self.run_timeout = run_timeout
         self.sweeps = 0
         self.recovered = 0
@@ -80,7 +85,9 @@ class OrphanSweeper:
         if free <= 0:
             return 0
         claims = await self.agent.claim_orphaned_runs(
-            limit=free, max_recoveries=self.max_recoveries
+            limit=free,
+            max_recoveries=self.max_recoveries,
+            decided_grace_seconds=self.decided_grace_seconds,
         )
         self.sweeps += 1
         for claim in claims:

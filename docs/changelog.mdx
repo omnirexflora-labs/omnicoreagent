@@ -13,6 +13,17 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- **An approved run no longer waits forever for a resume that never comes.** At 100 users the
+  admission limit answered some `POST /runs/{id}/resume` with `503`, the client did not retry, and
+  119 runs sat in `awaiting_approval` with their approval already `approved`. The orphan sweep
+  skipped every run waiting for a person. It now also resumes a run in `awaiting_approval` or
+  `awaiting_budget` whose every decision is made, that no live owner holds, and that has sat
+  unresumed for `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_DECIDED_GRACE_SECONDS` (30 by default). The claim
+  is the same version-checked claim, and the `run_resumed` event has `trigger` `orphan_sweep` and a
+  `cause` and `decision` naming what was decided. A client resume that arrives with the sweep loses
+  cleanly (`409`) and the tool runs once. A run with a decision still pending is left alone.
+  `claim_orphaned_runs` takes `decided_grace_seconds`.
+
 - **A crowd of runs on one budget no longer fails.** Every budget change was a read, a change in
   Python and a versioned write of one JSON row per budget key, holding every in-flight run's hold.
   On the support desk ramp (100 concurrent runs on one application budget) the row conflicted
