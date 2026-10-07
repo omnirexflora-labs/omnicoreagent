@@ -4,9 +4,10 @@ The support desk ramp (2026-10-07): on a 2-core container throughput topped
 out at 3-4.5 requests a second, while chat p50 grew from 4 s at 10 users to
 37 s at 100. Every request was accepted, so all of them slowed down together
 and the callers that gave up still held their runs. A process now admits as
-many concurrent runs as the CPUs it can actually use can serve. A request over
-the limit waits a short, bounded time for a slot, then is told to come back
-(503 with ``Retry-After``) before any work is done for it.
+many concurrent runs as one event loop can serve well: 24, the knee measured
+on a server. A request over the limit waits a short, bounded time for a slot,
+then is told to come back (503 with ``Retry-After``) before any work is done
+for it.
 
 Only routes that start or resume a run take a slot. Health, readiness,
 metrics, reads and approvals never wait here.
@@ -16,19 +17,20 @@ from __future__ import annotations
 
 import asyncio
 import math
-import os
 from collections import deque
-from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import Request
 
-# The starting multiple of CPUs. A run spends most of its time waiting on the
-# model, so one CPU serves many; the final number is set from the knee
-# measured after this change, not guessed.
-DEFAULT_RUNS_PER_CPU = 16
-
-_CGROUP_V2_CPU_MAX = Path("/sys/fs/cgroup/cpu.max")
+# The knee measured on a server (2026-10-07, support desk, fake model at 0.8
+# to 3 s a call, Postgres, one process on a 2-CPU cap, limit lifted). Throughput
+# was 5.1/s at 24 users, 5.5/s at 32 and 5.4/s at 48, then fell to 5.0/s at 64
+# while p95 climbed from 8.9 s to 22.8 s. At 24 the process gave about 93% of
+# its peak with p95 within 16% of idle. The process used about 1.1 cores: one
+# event loop cannot use a second core, so the number is per process and does
+# not grow with the CPU count. More CPUs means more processes behind a load
+# balancer (two 1-CPU replicas peaked at 9.4/s, 1.7x one process).
+DEFAULT_MAX_CONCURRENT_RUNS = 24
 
 
 class ServerBusyError(Exception):
@@ -43,32 +45,8 @@ class ServerBusyError(Exception):
         self.retry_after = retry_after
 
 
-def usable_cpus(
-    *, cpu_max_path: Path | str = _CGROUP_V2_CPU_MAX, affinity: int | None = None
-) -> int:
-    """The CPUs this process can really use.
-
-    ``os.cpu_count()`` reports the host, which is wrong in a container capped
-    at two cores (the cgroup quota) or pinned to some of them (affinity). The
-    smaller of the quota and the affinity wins.
-    """
-    if affinity is None:
-        try:
-            affinity = len(os.sched_getaffinity(0))
-        except (AttributeError, OSError):
-            affinity = os.cpu_count() or 1
-    cpus = max(1, affinity)
-    try:
-        quota, period = Path(cpu_max_path).read_text().split()[:2]
-        if quota != "max":
-            cpus = min(cpus, max(1, math.ceil(int(quota) / int(period))))
-    except (OSError, ValueError, ZeroDivisionError):
-        pass
-    return cpus
-
-
-def default_max_concurrent_runs(**kwargs) -> int:
-    return DEFAULT_RUNS_PER_CPU * usable_cpus(**kwargs)
+def default_max_concurrent_runs() -> int:
+    return DEFAULT_MAX_CONCURRENT_RUNS
 
 
 class RunSlot:

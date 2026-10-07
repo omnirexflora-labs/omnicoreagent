@@ -334,7 +334,7 @@ export LLM_API_KEY=your_api_key_here
 # export OMNICOREAGENT_SERVE_AUTH_TOKEN=change-me
 # export OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED=true
 # export OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS=100
-# Concurrent runs per process (default 16 x usable CPUs; 0 or none is unlimited)
+# Concurrent runs per process (default 24; 0 or none is unlimited)
 # export OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS=32
 
 # Optional background task persistence

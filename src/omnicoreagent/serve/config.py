@@ -25,7 +25,7 @@ Environment Variables (OVERRIDE code values):
     OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED: Enable rate limiting (default: false)
     OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS: Max requests per window (default: 100)
     OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW: Time window in seconds (default: 60)
-    OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS: Concurrent runs one process takes; 0 or none is unlimited (default: 16 x usable CPUs)
+    OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS: Concurrent runs one process takes; 0 or none is unlimited (default: 24)
     OMNICOREAGENT_SERVE_RUN_ADMISSION_WAIT: Seconds a request waits for a run slot before a 503 (default: 5)
     OMNICOREAGENT_SERVE_TRUSTED_PROXIES: Comma-separated proxy addresses whose X-Forwarded-For is trusted (default: none)
     OMNICOREAGENT_BACKGROUND_ENABLED: Enable background APIs (default: true)
@@ -198,13 +198,13 @@ class OmniServeConfig(BaseModel):
         description="Proxy addresses whose X-Forwarded-For is trusted",
     )
 
-    # Admission: how many runs one process takes at once. None means derived
-    # from the CPUs the process can use; 0 means unlimited. A request over
+    # Admission: how many runs one process takes at once. None means the
+    # default, 24, the knee measured on a server; 0 means unlimited. A request over
     # the limit waits this long for a slot, then gets 503 with Retry-After
     # (the support desk ramp, 2026-10-07).
     max_concurrent_runs: int | None = Field(
         default=None,
-        description="Concurrent runs per process; None derives it from CPUs, 0 is unlimited",
+        description="Concurrent runs per process; None uses the default of 24, 0 is unlimited",
     )
     run_admission_wait_seconds: float = Field(
         default=5.0, description="Seconds a request waits for a run slot before a 503"

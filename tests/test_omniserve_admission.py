@@ -3,7 +3,7 @@
 The support desk ramp (2026-10-07): on a 2-core container throughput topped
 out at 3-4.5 requests a second, and chat p50 was 37 s at 100 users. Every
 request was accepted and all of them slowed down together. A process now
-takes only as many runs as its CPUs can serve, makes the others wait a short
+takes only as many runs as one event loop can serve well, makes the others wait a short
 while, then tells them to retry.
 """
 
@@ -18,9 +18,8 @@ import pytest
 from omnicoreagent import OmniCoreAgent
 from omnicoreagent.serve import OmniServe, OmniServeConfig
 from omnicoreagent.serve.admission import (
-    DEFAULT_RUNS_PER_CPU,
+    DEFAULT_MAX_CONCURRENT_RUNS,
     default_max_concurrent_runs,
-    usable_cpus,
 )
 
 
@@ -203,36 +202,27 @@ async def test_an_sse_stream_holds_its_slot_until_it_ends(monkeypatch):
         assert app.state.run_admission.in_flight == 0
 
 
-def test_the_cgroup_cpu_limit_is_respected(tmp_path):
-    cpu_max = tmp_path / "cpu.max"
-    cpu_max.write_text("200000 100000\n")
-    assert usable_cpus(cpu_max_path=cpu_max, affinity=8) == 2
-    cpu_max.write_text("150000 100000\n")
-    assert usable_cpus(cpu_max_path=cpu_max, affinity=8) == 2  # rounds up
-    cpu_max.write_text("max 100000\n")
-    assert usable_cpus(cpu_max_path=cpu_max, affinity=8) == 8
-    assert usable_cpus(cpu_max_path=tmp_path / "missing", affinity=6) == 6
-    cpu_max.write_text("50000 100000\n")
-    assert usable_cpus(cpu_max_path=cpu_max, affinity=8) == 1
-    cpu_max.write_text("garbage")
-    assert usable_cpus(cpu_max_path=cpu_max, affinity=4) == 4
-    # The smaller of the two wins.
-    cpu_max.write_text("800000 100000\n")
-    assert usable_cpus(cpu_max_path=cpu_max, affinity=3) == 3
+def test_the_default_is_24_whatever_the_cpu_count(monkeypatch):
+    # The knee measured on a server (2026-10-07): one process on a 2-CPU cap
+    # peaked at 5.5 runs a second and used about 1.1 cores, so a bigger cap or
+    # more cores must not raise the limit. More CPUs means more processes.
+    assert DEFAULT_MAX_CONCURRENT_RUNS == 24
+    for cpus in (1, 2, 8, 64):
+        monkeypatch.setattr("os.cpu_count", lambda cpus=cpus: cpus)
+        monkeypatch.setattr(
+            "os.sched_getaffinity", lambda _pid, cpus=cpus: set(range(cpus)),
+            raising=False,
+        )
+        assert default_max_concurrent_runs() == 24
 
 
-def test_the_default_is_derived_from_the_cpus(tmp_path):
-    cpu_max = tmp_path / "cpu.max"
-    cpu_max.write_text("200000 100000\n")
-    assert (
-        default_max_concurrent_runs(cpu_max_path=cpu_max, affinity=8)
-        == 2 * DEFAULT_RUNS_PER_CPU
-    )
-    assert DEFAULT_RUNS_PER_CPU == 16
+def test_the_app_starts_with_24_runs_when_nothing_is_set():
+    app, _ = _server(None)
+    assert app.state.run_admission.limit == 24
 
 
 def test_the_setting_overrides_the_default(monkeypatch):
-    assert OmniServeConfig().max_concurrent_runs is None  # derived at startup
+    assert OmniServeConfig().max_concurrent_runs is None  # the default, 24, is applied at startup
     assert OmniServeConfig().run_admission_wait_seconds == 5.0
     monkeypatch.setenv("OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS", "7")
     monkeypatch.setenv("OMNICOREAGENT_SERVE_RUN_ADMISSION_WAIT", "1.5")
