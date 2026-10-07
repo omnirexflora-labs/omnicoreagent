@@ -1,7 +1,7 @@
 # Production readiness: one serious app, under load and failure
 
-Status: proposed (2026-10-07). It needs the maintainer's yes on the finish lines and the
-decisions at the end before any code changes.
+Status: approved (2026-10-07). The maintainer approved the finish lines, the server sharing
+(2 cores and 4 GB, alongside their jobs) and the $3 live cap.
 
 ## Why
 
