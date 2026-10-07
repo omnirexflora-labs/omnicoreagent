@@ -531,6 +531,16 @@ class RunTracker:
             await self._save()
             return dict(waiting)
 
+    async def add_unrecorded_charges(self, charges: list[dict[str, Any]]) -> None:
+        """Keep charges the budget store could not take after the work was done.
+
+        They are on the record so a person can see what the counters do not
+        show: ``/runs/{id}/budget`` lists them per budget.
+        """
+        async with self._lock:
+            self.record.setdefault("unrecorded_charges", []).extend(charges)
+            await self._save()
+
     async def reload(self) -> None:
         """Take the stored record as current (after someone else changed it)."""
         async with self._lock:

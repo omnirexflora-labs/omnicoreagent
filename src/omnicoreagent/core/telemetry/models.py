@@ -210,6 +210,7 @@ FOUNDATION_EVENT_TYPES = frozenset(
         "budget_denied",
         "budget_exhausted",
         "budget_cost_incomplete",
+        "budget_charge_unrecorded",
         "run_suspended",
         "run_resumed",
         "run_steered",

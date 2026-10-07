@@ -185,6 +185,15 @@ class MemoryRouter:
     async def save_budget_state(self, state: dict, expected_version: int | None) -> int:
         return await self.memory_store.save_budget_state(state, expected_version)
 
+    async def apply_budget_change(self, key: str, change: dict) -> dict:
+        return await self.memory_store.apply_budget_change(key, change)
+
+    async def get_budget_grant_history(self, key: str) -> list[dict]:
+        return await self.memory_store.get_budget_grant_history(key)
+
+    async def list_budget_holds(self, key: str) -> list[dict]:
+        return await self.memory_store.list_budget_holds(key)
+
     def get_memory_store_info(self) -> dict[str, Any]:
         """Get information about the current memory store."""
         return {

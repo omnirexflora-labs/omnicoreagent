@@ -1,4 +1,7 @@
 import json
+import random
+import time
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any, Callable
 import uuid
@@ -6,8 +9,10 @@ import threading
 import asyncio
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
 from sqlalchemy import (
+    Double,
     Integer,
     String,
+    select,
     update,
     delete,
     Text,
@@ -20,9 +25,17 @@ from sqlalchemy import (
     cast,
     type_coerce,
 )
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.ext.mutable import MutableDict
+from omnicoreagent.core.budgets import (
+    _GRANT_HISTORY_KEPT as GRANT_HISTORY_KEPT,
+    budget_checks,
+    counters_view,
+    legacy_budget_parts,
+    refusal_for,
+)
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.sql_schema import create_tables
 from omnicoreagent.core.memory_store.utils import utc_now_str
@@ -235,13 +248,78 @@ class StorageRunState(Base):
     data: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class StorageBudgetMeter(Base):
+    """What one meter of one budget key has spent, holds and was granted."""
+
+    __tablename__ = "budget_meters"
+    key: Mapped[str] = mapped_column(String(DEFAULT_MAX_KEY_LENGTH), primary_key=True)
+    meter: Mapped[str] = mapped_column(String(64), primary_key=True)
+    spent: Mapped[float] = mapped_column(Double, nullable=False, default=0.0)
+    reserved: Mapped[float] = mapped_column(Double, nullable=False, default=0.0)
+    granted: Mapped[float] = mapped_column(Double, nullable=False, default=0.0)
+
+
+class StorageBudgetHold(Base):
+    """One hold: budget set aside for a call that has not settled yet."""
+
+    __tablename__ = "budget_holds"
+    hold_id: Mapped[str] = mapped_column(String(DEFAULT_MAX_KEY_LENGTH), primary_key=True)
+    key: Mapped[str] = mapped_column(String(DEFAULT_MAX_KEY_LENGTH), index=True)
+    meter: Mapped[str] = mapped_column(String(64))
+    amount: Mapped[float] = mapped_column(Double, nullable=False)
+    run_id: Mapped[str | None] = mapped_column(
+        String(DEFAULT_MAX_KEY_LENGTH), nullable=True, index=True
+    )
+    held_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+
+class StorageBudgetGrant(Base):
+    """One top-up a person granted to a budget key."""
+
+    __tablename__ = "budget_grants"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(DEFAULT_MAX_KEY_LENGTH), index=True)
+    meter: Mapped[str] = mapped_column(String(64))
+    amount: Mapped[float] = mapped_column(Double, nullable=False)
+    approver: Mapped[str | None] = mapped_column(String(DEFAULT_MAX_VARCHAR_LENGTH), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    granted_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+
 class StorageBudgetState(Base):
-    """One budget counter; ``data`` holds its meters and reservations."""
+    """A budget counter in the 0.5.x shape: ``data`` holds its meters and
+    reservations. Nothing writes these now; one found is moved into
+    ``budget_meters`` and ``budget_holds`` the first time its key is touched."""
 
     __tablename__ = "budget_states"
     key: Mapped[str] = mapped_column(String(DEFAULT_MAX_KEY_LENGTH), primary_key=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     data: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+# SQLite has one writer at a time and, asked for the lock by a second
+# transaction that already read, gives up at once instead of waiting. Within a
+# process the budget writes take turns here, so threads queue instead of
+# failing; other databases lock rows, and need nothing.
+_sqlite_budget_lock = threading.Lock()
+# A budget transaction the database aborted (a deadlock, a busy file) applied
+# nothing, so it is run again, a few times.
+_BUDGET_TRANSACTION_TRIES = 6
+
+
+def _budget_write_lock(session):
+    return _sqlite_budget_lock if session.bind.dialect.name == "sqlite" else nullcontext()
+
+
+def _fallback_refusal(change: dict) -> dict:
+    meter, amount, limit = budget_checks(change)[0]
+    return {
+        "meter": meter,
+        "limit": float(limit or 0.0),
+        "used": 0.0,
+        "reserved": 0.0,
+        "requested": amount,
+    }
 
 
 class DatabaseMessageStore(AbstractMemoryStore):
@@ -264,6 +342,11 @@ class DatabaseMessageStore(AbstractMemoryStore):
         self.summarize_fn: Callable = None
 
         self._closed = False
+        # Counters left in the 0.5.x shape are looked for once per key; see
+        # ``_move_legacy_budget``.
+        self._legacy_budgets_moved: set[str] = set()
+        self._legacy_budgets_gone = False
+        self._legacy_budgets_looked_for_any = False
         if db_url:
             self._sql_manager = get_sql_manager(db_url)
             self._sql_manager.initialize(db_url, **kwargs)
@@ -702,30 +785,390 @@ class DatabaseMessageStore(AbstractMemoryStore):
         return await asyncio.to_thread(_delete)
 
     # --- budgets -----------------------------------------------------------
+    # One row per (key, meter) holding spent, reserved and granted; one row per
+    # hold; one row per grant. Every change to a counter is a single guarded
+    # UPDATE (``spent = spent + :x``, limit checked in the WHERE), so nothing is
+    # read, changed in Python and written back, and a crowd of runs on one
+    # application key queues on a row lock for the length of one statement
+    # instead of conflicting and retrying (the support desk ramp, 2026-10-07).
+    # Meters are rows, not columns: a new meter needs no schema change, and a
+    # run that touches the tool-call meter does not lock the cost meter.
 
     async def delete_budget_state(self, key: str) -> None:
         def _delete():
             session = self._get_session()
             try:
-                row = session.get(StorageBudgetState, key)
-                if row is not None:
-                    session.delete(row)
-                    session.commit()
+                for table in (
+                    StorageBudgetMeter,
+                    StorageBudgetHold,
+                    StorageBudgetGrant,
+                    StorageBudgetState,
+                ):
+                    session.execute(delete(table).where(table.key == key))
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
             finally:
                 self._release_session(session)
 
         await asyncio.to_thread(_delete)
 
     async def get_budget_state(self, key: str) -> dict | None:
+        await self._move_legacy_budget(key)
+
         def _get():
             session = self._get_session()
             try:
-                row = session.get(StorageBudgetState, key)
-                return json.loads(row.data) if row is not None else None
+                rows = session.execute(
+                    select(
+                        StorageBudgetMeter.meter,
+                        StorageBudgetMeter.spent,
+                        StorageBudgetMeter.reserved,
+                        StorageBudgetMeter.granted,
+                    ).where(StorageBudgetMeter.key == key)
+                ).all()
+                return counters_view(
+                    key,
+                    {
+                        meter: {"spent": spent, "reserved": reserved, "granted": granted}
+                        for meter, spent, reserved, granted in rows
+                    },
+                )
             finally:
                 self._release_session(session)
 
         return await asyncio.to_thread(_get)
+
+    async def get_budget_grant_history(self, key: str) -> list[dict]:
+        await self._move_legacy_budget(key)
+
+        def _get():
+            session = self._get_session()
+            try:
+                rows = session.execute(
+                    select(StorageBudgetGrant)
+                    .where(StorageBudgetGrant.key == key)
+                    .order_by(StorageBudgetGrant.id.desc())
+                    .limit(GRANT_HISTORY_KEPT)
+                ).scalars()
+                return [
+                    {
+                        "meter": row.meter,
+                        "amount": row.amount,
+                        "approver": row.approver,
+                        "note": row.note,
+                        "granted_at": row.granted_at,
+                    }
+                    for row in reversed(list(rows))
+                ]
+            finally:
+                self._release_session(session)
+
+        return await asyncio.to_thread(_get)
+
+    async def list_budget_holds(self, key: str) -> list[dict]:
+        await self._move_legacy_budget(key)
+
+        def _list():
+            session = self._get_session()
+            try:
+                rows = session.execute(
+                    select(StorageBudgetHold).where(StorageBudgetHold.key == key)
+                ).scalars()
+                return [
+                    {
+                        "id": row.hold_id,
+                        "meter": row.meter,
+                        "amount": row.amount,
+                        "run_id": row.run_id,
+                        "held_at": row.held_at,
+                    }
+                    for row in rows
+                ]
+            finally:
+                self._release_session(session)
+
+        return await asyncio.to_thread(_list)
+
+    async def apply_budget_change(self, key: str, change: dict) -> dict:
+        await self._move_legacy_budget(key)
+        return await asyncio.to_thread(self._apply_budget_change, key, change)
+
+    def _apply_budget_change(self, key: str, change: dict) -> dict:
+        for attempt in range(_BUDGET_TRANSACTION_TRIES):
+            session = self._get_session()
+            try:
+                with _budget_write_lock(session):
+                    try:
+                        result = self._budget_transaction(session, key, change)
+                        if result["refused"] is None:
+                            session.commit()
+                        else:
+                            session.rollback()
+                    except Exception:
+                        session.rollback()
+                        raise
+                if result["refused"] is not None:
+                    result["refused"] = self._describe_refusal(session, key, change)
+                return result
+            except OperationalError as exc:
+                # A deadlock the database broke, or SQLite's file lock held by
+                # another process past its own wait: nothing was applied, so
+                # the same change is safe to run again.
+                text_of_error = str(exc).lower()
+                if attempt + 1 >= _BUDGET_TRANSACTION_TRIES or not (
+                    "deadlock" in text_of_error
+                    or "database is locked" in text_of_error
+                    or "could not serialize" in text_of_error
+                ):
+                    raise
+                time.sleep(0.01 * (attempt + 1) * (0.5 + random.random()))
+            finally:
+                self._release_session(session)
+        raise RuntimeError(f"Could not record the budget change for {key}")  # pragma: no cover
+
+    def _budget_transaction(self, session, key: str, change: dict) -> dict:
+        """The change as one transaction. Holds are removed first (the hold row
+        is what arbitrates two settlers), then each meter is updated once, in
+        name order so two changes never wait on each other's rows."""
+        deltas: dict[str, list[float]] = {}  # meter -> spent, reserved, granted
+        limits: dict[str, list[float]] = {}  # meter -> [amount that must fit, limit]
+
+        def delta(meter: str) -> list[float]:
+            return deltas.setdefault(meter, [0.0, 0.0, 0.0])
+
+        def must_fit(meter: str, amount: float, limit: float | None) -> None:
+            if limit is None:
+                return
+            entry = limits.setdefault(meter, [0.0, float(limit)])
+            entry[0] += amount
+            entry[1] = min(entry[1], float(limit))
+
+        released = 0
+
+        def remove_hold(hold_id: str) -> bool:
+            held = session.execute(
+                select(StorageBudgetHold.meter, StorageBudgetHold.amount).where(
+                    StorageBudgetHold.hold_id == hold_id
+                )
+            ).first()
+            if held is None:
+                return False
+            gone = session.execute(
+                delete(StorageBudgetHold).where(StorageBudgetHold.hold_id == hold_id)
+            ).rowcount
+            if gone != 1:  # another settler took it
+                return False
+            delta(held.meter)[1] -= float(held.amount)
+            return True
+
+        settle = change.get("settle")
+        if settle:
+            removed = remove_hold(settle["id"])
+            if settle.get("spend") is not None and (removed or settle.get("even_if_released")):
+                delta(settle["meter"])[0] += float(settle["spend"])
+        wanted = list(change.get("release_runs") or [])
+        if wanted:
+            standing = session.execute(
+                select(StorageBudgetHold.hold_id).where(
+                    StorageBudgetHold.key == key, StorageBudgetHold.run_id.in_(wanted)
+                )
+            ).scalars().all()
+            for hold_id in standing:
+                if remove_hold(hold_id):
+                    released += 1
+        hold = change.get("hold")
+        if hold and hold.get("amount"):
+            delta(hold["meter"])[1] += float(hold["amount"])
+            must_fit(hold["meter"], float(hold["amount"]), hold.get("limit"))
+        for meter, amount, limit in change.get("guard") or []:
+            delta(meter)[0] += float(amount)
+            must_fit(meter, float(amount), limit)
+        for meter, amount in change.get("add") or []:
+            delta(meter)[0] += float(amount)
+        grant = change.get("grant")
+        if grant:
+            delta(grant["meter"])[2] += float(grant["amount"])
+
+        table = StorageBudgetMeter
+        refused_meter = None
+        for meter in sorted(deltas):
+            spent, reserved, granted = deltas[meter]
+            if not (spent or reserved or granted):
+                continue
+            statement = (
+                update(table)
+                .where(table.key == key, table.meter == meter)
+                .values(
+                    spent=table.spent + spent,
+                    reserved=table.reserved + reserved,
+                    granted=table.granted + granted,
+                )
+            )
+            if meter in limits:
+                fit, limit = limits[meter]
+                # The limit check and the change are this one statement.
+                statement = statement.where(
+                    table.spent + table.reserved + fit <= limit + table.granted
+                )
+            if session.execute(statement).rowcount == 0:
+                # Either the row does not exist yet, or the change does not fit.
+                self._ensure_meter_row(session, key, meter)
+                if session.execute(statement).rowcount == 0:
+                    refused_meter = meter
+                    break
+        if refused_meter is not None:
+            return {"refused": {"meter": refused_meter}, "totals": {}, "released": 0}
+        if hold and hold.get("amount"):
+            session.add(
+                StorageBudgetHold(
+                    hold_id=hold["id"],
+                    key=key,
+                    meter=hold["meter"],
+                    amount=float(hold["amount"]),
+                    run_id=hold.get("run_id"),
+                    held_at=hold.get("held_at"),
+                )
+            )
+        if grant:
+            session.add(
+                StorageBudgetGrant(
+                    key=key,
+                    meter=grant["meter"],
+                    amount=float(grant["amount"]),
+                    approver=grant.get("approver"),
+                    note=grant.get("note"),
+                    granted_at=grant.get("granted_at"),
+                )
+            )
+        session.flush()
+        spent_meters = [m for m, d in deltas.items() if d[0]]
+        totals: dict[str, float] = {}
+        if spent_meters:
+            for meter, spent in session.execute(
+                select(table.meter, table.spent).where(
+                    table.key == key, table.meter.in_(spent_meters)
+                )
+            ):
+                totals[meter] = float(spent)
+        return {"refused": None, "totals": totals, "released": released}
+
+    def _ensure_meter_row(self, session, key: str, meter: str) -> None:
+        values = {"key": key, "meter": meter, "spent": 0.0, "reserved": 0.0, "granted": 0.0}
+        dialect = session.bind.dialect.name
+        if dialect == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+
+            session.execute(dialect_insert(StorageBudgetMeter).values(values).on_conflict_do_nothing())
+        elif dialect == "sqlite":
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
+
+            session.execute(dialect_insert(StorageBudgetMeter).values(values).on_conflict_do_nothing())
+        elif dialect in ("mysql", "mariadb"):
+            from sqlalchemy.dialects.mysql import insert as dialect_insert
+
+            session.execute(dialect_insert(StorageBudgetMeter).values(values).prefix_with("IGNORE"))
+        else:
+            try:
+                with session.begin_nested():
+                    session.execute(StorageBudgetMeter.__table__.insert().values(values))
+            except IntegrityError:
+                pass
+
+    def _describe_refusal(self, session, key: str, change: dict) -> dict:
+        """What the refused change ran into, for the error a person reads: the
+        first check that does not fit what the counter holds now."""
+        rows = session.execute(
+            select(
+                StorageBudgetMeter.meter,
+                StorageBudgetMeter.spent,
+                StorageBudgetMeter.reserved,
+                StorageBudgetMeter.granted,
+            ).where(StorageBudgetMeter.key == key)
+        ).all()
+        counters = {
+            meter: {"spent": spent, "reserved": reserved, "granted": granted}
+            for meter, spent, reserved, granted in rows
+        }
+        return refusal_for(budget_checks(change), counters) or _fallback_refusal(change)
+
+    # The two helpers below keep a counter written by 0.5.x readable. It was one
+    # JSON document per key in ``budget_states``; the first time a key is
+    # touched its document is moved into rows, in one transaction that deletes
+    # the document first, so two workers moving it cannot both add it.
+
+    async def _move_legacy_budget(self, key: str) -> None:
+        if self._legacy_budgets_gone or key in self._legacy_budgets_moved:
+            return
+        await asyncio.to_thread(self._move_legacy_budget_sync, key)
+
+    def _move_legacy_budget_sync(self, key: str) -> None:
+        session = self._get_session()
+        try:
+            with _budget_write_lock(session):
+                row = session.get(StorageBudgetState, key)
+                if row is None:
+                    if len(self._legacy_budgets_moved) > 10_000:
+                        self._legacy_budgets_moved.clear()
+                    self._legacy_budgets_moved.add(key)
+                    if not self._legacy_budgets_looked_for_any:
+                        self._legacy_budgets_looked_for_any = True
+                        if session.execute(select(func.count()).select_from(StorageBudgetState)).scalar() == 0:
+                            # Nothing in the old shape anywhere: stop looking.
+                            self._legacy_budgets_gone = True
+                    return
+                try:
+                    data = json.loads(row.data)
+                    taken = session.execute(
+                        delete(StorageBudgetState).where(StorageBudgetState.key == key)
+                    ).rowcount
+                    if taken == 1:
+                        parts = legacy_budget_parts(data)
+                        table = StorageBudgetMeter
+                        for meter in sorted(parts["counters"]):
+                            values = parts["counters"][meter]
+                            statement = (
+                                update(table)
+                                .where(table.key == key, table.meter == meter)
+                                .values(
+                                    spent=table.spent + values["spent"],
+                                    reserved=table.reserved + values["reserved"],
+                                    granted=table.granted + values["granted"],
+                                )
+                            )
+                            if session.execute(statement).rowcount == 0:
+                                self._ensure_meter_row(session, key, meter)
+                                session.execute(statement)
+                        for hold_id, held in parts["holds"].items():
+                            session.add(
+                                StorageBudgetHold(
+                                    hold_id=hold_id,
+                                    key=key,
+                                    meter=held["meter"],
+                                    amount=held["amount"],
+                                    run_id=held.get("run_id"),
+                                    held_at=held.get("held_at"),
+                                )
+                            )
+                        for entry in parts["history"][-GRANT_HISTORY_KEPT:]:
+                            session.add(
+                                StorageBudgetGrant(
+                                    key=key,
+                                    meter=entry.get("meter"),
+                                    amount=float(entry.get("amount") or 0.0),
+                                    approver=entry.get("approver"),
+                                    note=entry.get("note"),
+                                    granted_at=entry.get("granted_at"),
+                                )
+                            )
+                    session.commit()
+                except Exception:
+                    session.rollback()
+                    raise
+                self._legacy_budgets_moved.add(key)
+        finally:
+            self._release_session(session)
 
     async def save_budget_state(self, state: dict, expected_version: int | None) -> int:
         from sqlalchemy.exc import IntegrityError
@@ -735,6 +1178,9 @@ class DatabaseMessageStore(AbstractMemoryStore):
         key = state["key"]
         version = (expected_version or 0) + 1
         data = json.dumps({**state, "version": version}, default=str)
+        # A document written now has not been looked at yet.
+        self._legacy_budgets_moved.discard(key)
+        self._legacy_budgets_gone = False
 
         def _save() -> int:
             session = self._get_session()

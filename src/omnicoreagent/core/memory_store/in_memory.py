@@ -3,6 +3,11 @@ import threading
 import uuid
 import asyncio
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
+from omnicoreagent.core.budgets import (
+    apply_to_counters,
+    counters_view,
+    legacy_budget_parts,
+)
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.memory_store.utils import utc_now_str
 from omnicoreagent.core.summarizer.summarizer_engine import (
@@ -25,7 +30,10 @@ class InMemoryStore(AbstractMemoryStore):
         self.summarize_fn: Callable | None = None
         self._lock = threading.RLock()
         self.run_states: dict[str, dict[str, Any]] = {}
+        # 0.5.x counters (one document per key), moved into ``budgets`` on
+        # first touch; and the current shape: counters, holds and grants per key.
         self.budget_states: dict[str, dict[str, Any]] = {}
+        self.budgets: dict[str, dict[str, Any]] = {}
 
     def set_memory_config(
         self,
@@ -262,12 +270,52 @@ class InMemoryStore(AbstractMemoryStore):
         return len(expired)
 
     async def delete_budget_state(self, key: str) -> None:
-        self.budget_states.pop(key, None)
+        with self._lock:
+            self.budget_states.pop(key, None)
+            self.budgets.pop(key, None)
+
+    def _budget(self, key: str) -> dict[str, Any]:
+        """One key's counters, holds and grants; the lock is held. A counter
+        left in the 0.5.x shape is moved in the first time it is touched."""
+        entry = self.budgets.get(key)
+        if entry is None:
+            entry = self.budgets[key] = {"counters": {}, "holds": {}, "history": []}
+        legacy = self.budget_states.pop(key, None)
+        if legacy is not None:
+            parts = legacy_budget_parts(legacy)
+            for meter, values in parts["counters"].items():
+                row = entry["counters"].setdefault(
+                    meter, {"spent": 0.0, "reserved": 0.0, "granted": 0.0}
+                )
+                for name, amount in values.items():
+                    row[name] += amount
+            entry["holds"].update(parts["holds"])
+            entry["history"].extend(parts["history"])
+        return entry
 
     async def get_budget_state(self, key: str) -> dict | None:
         with self._lock:
-            state = self.budget_states.get(key)
-            return copy.deepcopy(state) if state is not None else None
+            return counters_view(key, copy.deepcopy(self._budget(key)["counters"]))
+
+    async def apply_budget_change(self, key: str, change: dict) -> dict:
+        # No await inside: one change is atomic against every other task, and
+        # the lock makes it so against other threads too.
+        with self._lock:
+            entry = self._budget(key)
+            return apply_to_counters(
+                entry["counters"], entry["holds"], entry["history"], change
+            )
+
+    async def get_budget_grant_history(self, key: str) -> list[dict]:
+        with self._lock:
+            return copy.deepcopy(self._budget(key)["history"])
+
+    async def list_budget_holds(self, key: str) -> list[dict]:
+        with self._lock:
+            return [
+                {"id": hold_id, **copy.deepcopy(held)}
+                for hold_id, held in self._budget(key)["holds"].items()
+            ]
 
     async def save_budget_state(self, state: dict, expected_version: int | None) -> int:
         from omnicoreagent.core.runs import RunStateConflict

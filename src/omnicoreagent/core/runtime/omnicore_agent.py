@@ -1346,6 +1346,12 @@ class OmniCoreAgent:
         if budgets is None or not budgets.enabled:
             return []
         settled = record.get("budgets") or {}
+        # Charges the store could not take after the work was done: on the
+        # record, not in the counters, so they are shown beside them.
+        unrecorded: Dict[tuple, float] = {}
+        for charge in record.get("unrecorded_charges") or settled.get("unrecorded") or []:
+            slot = (charge.get("key"), charge.get("meter"))
+            unrecorded[slot] = unrecorded.get(slot, 0.0) + float(charge.get("amount") or 0.0)
         entries: List[Dict[str, Any]] = []
         for meter in METERS:
             for scope, key, limit in budgets.limits(meter):
@@ -1371,6 +1377,7 @@ class OmniCoreAgent:
                         "granted": granted,
                         "spent": spent,
                         "reserved": reserved.get(meter, 0.0),
+                        "unrecorded": unrecorded.get((key, meter), 0.0),
                         "remaining": max(
                             0.0, limit.limit + granted - spent - reserved.get(meter, 0.0)
                         ),

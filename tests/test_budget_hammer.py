@@ -43,14 +43,17 @@ STORES = {
 }
 
 RUNS = 200
-ROUNDS = 3
+# A SQLite commit waits for the disk (about 40 ms here), so its crowd does one
+# round; the others do three.
+ROUNDS = {"sqlite": 1}
+DEFAULT_ROUNDS = 3
 
 
-async def _one_run(store, key: str, run_number: int) -> None:
+async def _one_run(store, key: str, run_number: int, rounds: int) -> None:
     """What a run does to the shared key: a hold, a charge, a release, several times."""
     ledger = BudgetLedger(store)  # one per run, as each run has its own
     run_id = f"run_{run_number}"
-    for _ in range(ROUNDS):
+    for _ in range(rounds):
         hold = await ledger.reserve(key, "model_cost_usd", 0.5, limit=1e9, run_id=run_id)
         await ledger.commit(hold, actual=0.25, also=[("model_tokens", 100, None)])
         await ledger.charge(key, "tool_calls", 1, limit=1e9)
@@ -63,9 +66,11 @@ async def _one_run(store, key: str, run_number: int) -> None:
 async def test_two_hundred_runs_share_one_application_budget(backend, tmp_path):
     store = STORES[backend](tmp_path)
     key = f"application:hammer-{backend}-{uuid4().hex[:8]}:total"
+    rounds = ROUNDS.get(backend, DEFAULT_ROUNDS)
 
     outcomes = await asyncio.gather(
-        *(_one_run(store, key, number) for number in range(RUNS)), return_exceptions=True
+        *(_one_run(store, key, number, rounds) for number in range(RUNS)),
+        return_exceptions=True,
     )
 
     failures = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
@@ -73,9 +78,9 @@ async def test_two_hundred_runs_share_one_application_budget(backend, tmp_path):
     ledger = BudgetLedger(store)
     usage = await ledger.usage(key)
     # Quarter-dollars are exact in binary, so the sum is exact.
-    assert usage["model_cost_usd"] == RUNS * ROUNDS * 0.25
-    assert usage["model_tokens"] == RUNS * ROUNDS * 100
-    assert usage["tool_calls"] == RUNS * ROUNDS
+    assert usage["model_cost_usd"] == RUNS * rounds * 0.25
+    assert usage["model_tokens"] == RUNS * rounds * 100
+    assert usage["tool_calls"] == RUNS * rounds
     assert await ledger.reserved(key) == {}
     assert await store.list_budget_holds(key) == []
     await ledger.delete(key)
