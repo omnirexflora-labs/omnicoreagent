@@ -21,7 +21,12 @@ from omnicoreagent.core.types import (
 from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.core.tools.governed_tool_runner import GovernedToolRunner
 from omnicoreagent.core.budgets import BudgetExhaustedForRun, RunAwaitingBudget
-from omnicoreagent.core.runs import RunInterrupted, RunSuspended, current_run
+from omnicoreagent.core.runs import (
+    RunInterrupted,
+    RunRequestLost,
+    RunSuspended,
+    current_run,
+)
 from omnicoreagent.core.tools.tool_runtime_registry import ToolRuntimeRegistry
 from omnicoreagent.core.telemetry import ActorType, SpanStatus, TelemetryActor
 from omnicoreagent.core.logging import logger
@@ -421,6 +426,46 @@ class BaseReactAgent:
                 metadata={"steer_id": message["id"], "sender": message.get("sender")},
             )
 
+    async def _restore_request(
+        self,
+        resume: dict[str, Any],
+        *,
+        add_message_to_history: Callable,
+        session_id: str,
+    ) -> list[dict[str, Any]]:
+        """The user's request, when the run's context does not hold it.
+
+        A run whose store failed before the request was saved reaches a resume
+        with no user message. The record kept the request from its first save,
+        so it is put back into the context and the session history. A record
+        with neither is refused: answering would be answering nothing (the
+        support desk chaos run, 2026-10-07, run_69673b9e).
+        """
+        messages = resume["context"]["messages"]
+        if any(
+            message.get("role") == "user"
+            and (message.get("metadata") or {}).get("kind") != "steering"
+            for message in messages
+        ):
+            return []
+        request = resume.get("request")
+        if not request or not request.get("content"):
+            raise RunRequestLost(
+                f"Run {resume.get('run_id')} cannot be resumed: its request was never "
+                "stored (the memory store failed before it was saved), so there is "
+                "nothing to answer. Start the request again."
+            )
+        metadata = {"agent_name": self.agent_name, "recovered_request": True}
+        await add_message_to_history(
+            role="user",
+            content=request["content"],
+            session_id=session_id,
+            metadata=metadata,
+        )
+        # The write above also lands on the run's record, but this resume's
+        # context was read before it.
+        return [{"role": "user", "content": request["content"], "metadata": metadata}]
+
     async def _run(
         self,
         system_prompt: str,
@@ -462,7 +507,16 @@ class BaseReactAgent:
         if resume is not None:
             # The run's own context, never the shared session history.
             saved = resume["context"]
-            saved_messages = [*(saved.get("history") or []), *saved["messages"]]
+            restored = await self._restore_request(
+                resume,
+                add_message_to_history=add_message_to_history,
+                session_id=session_id,
+            )
+            saved_messages = [
+                *(saved.get("history") or []),
+                *saved["messages"],
+                *restored,
+            ]
 
             async def message_history(**_):
                 return [dict(message) for message in saved_messages]

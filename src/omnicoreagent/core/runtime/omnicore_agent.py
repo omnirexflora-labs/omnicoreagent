@@ -101,6 +101,13 @@ def _without_changed_continuation(original: Any, redacted: Any) -> Any:
 # A run in one of these has ended; nothing from outside reopens or rewrites it.
 _ENDED_RUN_STATUSES = frozenset({"completed", "failed", "cancelled", "timeout", "abandoned"})
 
+# Seconds to wait before each further try of a memory read that failed: the
+# store restarting (the support desk chaos run, 2026-10-07, Postgres "shutting
+# down") is over in a moment, and a read has no side effect to repeat. A run
+# whose store stays down fails with the store's error rather than going on
+# without its history.
+STORE_READ_RETRY_DELAYS = (0.5, 1.5)
+
 class OmniCoreAgent:
     """
     Public facade for the OmniCoreAgent runtime.
@@ -932,6 +939,15 @@ class OmniCoreAgent:
                     agent_version=self.agent_config.get("agent_version"),
                     lease_seconds=lease_seconds,
                 )
+            if _resume is None:
+                # The request is part of the run from its first save. If the
+                # memory store fails before the message reaches the session
+                # history, a resume still has it (the support desk chaos run,
+                # 2026-10-07, run_69673b9e answered a request nobody recorded).
+                run_tracker.record["request"] = {
+                    "content": self.privacy_filter.redact(query, boundary="memory"),
+                    "at": datetime.now(timezone.utc).isoformat(),
+                }
             # Load the model client off the event loop before the heartbeat
             # starts: imported on the loop at a process's first call, it froze
             # it for seconds to minutes, the heartbeat stalled and a second
@@ -2201,13 +2217,32 @@ class OmniCoreAgent:
             )
             raise
 
+    async def _read_session_messages(
+        self, session_id: str, agent_name: str | None
+    ) -> list[dict[str, Any]]:
+        """Read the session's history, trying again when the store errs.
+
+        Only reads are repeated: a read has nothing to duplicate, while a write
+        that failed after it committed would be stored twice. When the store
+        stays down the last error is raised and the run fails with it.
+        """
+        for delay in STORE_READ_RETRY_DELAYS:
+            try:
+                return await self.memory_router.get_messages(session_id, agent_name)
+            except Exception as exc:
+                runtime_logger().warning(
+                    f"Memory read failed ({exc.__class__.__name__}); trying again in {delay}s"
+                )
+                await asyncio.sleep(delay)
+        return await self.memory_router.get_messages(session_id, agent_name)
+
     async def _get_messages_with_telemetry(
         self,
         session_id: str,
         agent_name: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.telemetry_recorder is None:
-            messages = await self.memory_router.get_messages(session_id, agent_name)
+            messages = await self._read_session_messages(session_id, agent_name)
             await _keep_run_history(messages)
             return messages
         span = await self.telemetry_recorder.start_span(
@@ -2217,7 +2252,7 @@ class OmniCoreAgent:
             input={"session_id": session_id, "agent_name": agent_name},
         )
         try:
-            messages = await self.memory_router.get_messages(session_id, agent_name)
+            messages = await self._read_session_messages(session_id, agent_name)
             await _keep_run_history(messages)
             message_digests = [stable_message_digest(message) for message in messages]
             await self.telemetry_recorder.emit_event(

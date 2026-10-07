@@ -731,6 +731,22 @@ Methods, each in the [OmniCoreAgent reference](/docs/reference/omnicoreagent):
     ```
   </Accordion>
 
+  <Accordion title="RunRequestLost: … its request was never stored">
+    `resume` on a run whose request is on neither its record nor its history:
+
+    ```text
+    RunRequestLost: Run run_order_1042 cannot be resumed: its request was never stored
+    ```
+
+    A run keeps the user's request on its record from its first save, so a
+    resume after the memory store failed mid-request still has it. A record
+    written before that, whose message never reached the history, has
+    nothing to answer, so the resume refuses and the run ends `failed`. Start
+    the request again. A memory read that fails at the start of a run is
+    tried again (twice, over about two seconds) before the run fails with the
+    store's error.
+  </Accordion>
+
   <Accordion title="The model says a call's outcome is unknown">
     That call started and its process stopped before its result was saved,
     and its tool is not idempotent, so it was not run again. This is on

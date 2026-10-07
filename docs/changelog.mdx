@@ -49,6 +49,13 @@ Every release, with its notes, is also on
   `budget_grant`, `budget_denied`, `interrupted`,
   `recovered_after_lapsed_lease`) and `trigger`; a recovered run adds the
   `previous_owner`, `lease_expired_at` and `orphaned_seconds`.
+- **A request is never lost when the memory store fails at the start of a
+  run.** A run whose first memory read failed (Postgres restarting) was
+  resumed without the user's message and answered a refund request nobody had
+  recorded. The request is now on the run's record from its first save, a
+  resume puts it back in the history, a record with no request is refused
+  (`RunRequestLost`, the run ends `failed`), and a failed memory read is tried
+  again twice before the run fails with the store's error.
 
 ### Changed
 

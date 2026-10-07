@@ -58,6 +58,15 @@ class RunInterrupted(Exception):
     """Someone asked the run to stop at its next step boundary."""
 
 
+class RunRequestLost(RuntimeError):
+    """A run was resumed, but the request it was started with was never stored.
+
+    Found by the support desk chaos run (2026-10-07): a run whose first memory
+    read failed was resumed without the user's message and answered a request
+    nobody had recorded. Failing is the only honest outcome.
+    """
+
+
 class RunStateUnsupported(NotImplementedError):
     """The memory store does not keep run state."""
 
@@ -114,6 +123,10 @@ class RunTracker:
             "agent_version": agent_version,
             "status": "running",
             "step": 0,
+            # What the user asked, kept on the record from its first save, so a
+            # resume always has it even if the message never reached the
+            # session history (the store failed first).
+            "request": None,
             "trace_ids": [],
             "tool_calls": [],
             "usage": {},
