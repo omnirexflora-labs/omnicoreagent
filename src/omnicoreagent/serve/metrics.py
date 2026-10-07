@@ -29,6 +29,9 @@ class OmniServeMetrics:
         self.gauges: dict[str, float] = {
             "omniserve_active_requests": 0,
         }
+        # Callables returning ready-made exposition lines, for numbers some
+        # other part of the server owns (the run admission limit).
+        self.collectors: list[Callable[[], list[str]]] = []
 
     def inc_counter(self, name: str, value: int = 1) -> None:
         self.counters[name] = self.counters.get(name, 0) + value
@@ -66,6 +69,9 @@ class OmniServeMetrics:
             lines.append(f"{name}_count {count}")
             lines.append(f"{name}_sum {total:.6f}")
             lines.append(f"{name}_avg {total / count:.6f}")
+
+        for collect in self.collectors:
+            lines.extend(collect())
 
         return "\n".join(lines) + "\n"
 

@@ -25,6 +25,8 @@ Environment Variables (OVERRIDE code values):
     OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED: Enable rate limiting (default: false)
     OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS: Max requests per window (default: 100)
     OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW: Time window in seconds (default: 60)
+    OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS: Concurrent runs one process takes; 0 or none is unlimited (default: 16 x usable CPUs)
+    OMNICOREAGENT_SERVE_RUN_ADMISSION_WAIT: Seconds a request waits for a run slot before a 503 (default: 5)
     OMNICOREAGENT_SERVE_TRUSTED_PROXIES: Comma-separated proxy addresses whose X-Forwarded-For is trusted (default: none)
     OMNICOREAGENT_BACKGROUND_ENABLED: Enable background APIs (default: true)
     OMNICOREAGENT_BACKGROUND_AGENT_ID: Agent id used for the served agent (default: default)
@@ -196,6 +198,18 @@ class OmniServeConfig(BaseModel):
         description="Proxy addresses whose X-Forwarded-For is trusted",
     )
 
+    # Admission: how many runs one process takes at once. None means derived
+    # from the CPUs the process can use; 0 means unlimited. A request over
+    # the limit waits this long for a slot, then gets 503 with Retry-After
+    # (the support desk ramp, 2026-10-07).
+    max_concurrent_runs: int | None = Field(
+        default=None,
+        description="Concurrent runs per process; None derives it from CPUs, 0 is unlimited",
+    )
+    run_admission_wait_seconds: float = Field(
+        default=5.0, description="Seconds a request waits for a run slot before a 503"
+    )
+
     # Background execution
     background_enabled: bool = Field(
         default=True, description="Expose background execution endpoints"
@@ -293,6 +307,21 @@ class OmniServeConfig(BaseModel):
         if (val := _get_env_list(serve_prefix, "TRUSTED_PROXIES")) is not None:
             self.trusted_proxies = val
 
+        # Admission
+        if (val := _get_env(serve_prefix, "MAX_CONCURRENT_RUNS")) is not None:
+            if val.strip().lower() in {"none", "unlimited"}:
+                self.max_concurrent_runs = 0
+            else:
+                try:
+                    self.max_concurrent_runs = int(val)
+                except ValueError:
+                    raise ValueError(
+                        "OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS must be an "
+                        "integer, 0 or none"
+                    ) from None
+        if (val := _get_env_float(serve_prefix, "RUN_ADMISSION_WAIT")) is not None:
+            self.run_admission_wait_seconds = val
+
         # Background execution
         if (val := _get_env_bool(background_prefix, "ENABLED")) is not None:
             self.background_enabled = val
@@ -321,6 +350,7 @@ class OmniServeConfig(BaseModel):
         self._validate_log_level()
         self._validate_auth_config()
         self._validate_rate_limit_config()
+        self._validate_admission_config()
         return self
 
     def _validate_server_config(self) -> None:
@@ -356,6 +386,17 @@ class OmniServeConfig(BaseModel):
             raise ValueError(
                 "OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW must be at least 1 "
                 "when rate limiting is enabled"
+            )
+
+    def _validate_admission_config(self) -> None:
+        if self.max_concurrent_runs is not None and self.max_concurrent_runs < 0:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS must be 0 (unlimited) "
+                "or a positive number"
+            )
+        if self.run_admission_wait_seconds < 0:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_RUN_ADMISSION_WAIT must not be negative"
             )
 
     @classmethod

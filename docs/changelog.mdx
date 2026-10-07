@@ -40,6 +40,20 @@ Every release, with its notes, is also on
   now implement `apply_budget_change`, `get_budget_grant_history` and `list_budget_holds` (see
   `AbstractMemoryStore`); without them, budgets are off for that store, as before.
 
+### Changed
+
+- **OmniServe takes only as many concurrent runs as its CPUs can serve.** On a 2-core container
+  every request was accepted and all of them slowed down together (chat p50 37 s at 100 users;
+  throughput 3-4.5 requests a second). A process now admits `16 x` the CPUs it can use (read from
+  the container's CPU quota or affinity); a request over the limit waits up to 5 seconds for a
+  slot, then gets `503` with `Retry-After` before any work starts. Only `/run`, `/run/sync`,
+  `/runs/{run_id}/resume` and `/background/tasks/{task_id}/run` count; health, `/prometheus`,
+  reads and approvals never wait. Set `OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS` (`0` or `none`
+  for no limit) and `OMNICOREAGENT_SERVE_RUN_ADMISSION_WAIT`. `/prometheus` gains
+  `omniserve_runs_in_flight`, `omniserve_runs_waiting`, `omniserve_runs_limit` and
+  `omniserve_runs_rejected_total`. Callers that sent more than the limit at once now see `503`
+  and should retry.
+
 ## 0.5.1
 
 *October 2026 · Python 3.12+*

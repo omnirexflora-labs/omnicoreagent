@@ -3,8 +3,9 @@
 import asyncio
 from uuid import uuid4
 
-from fastapi import Query, APIRouter, HTTPException, Request
+from fastapi import Depends, Query, APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.runtime.deadline import (
@@ -13,6 +14,7 @@ from omnicoreagent.core.runtime.deadline import (
 )
 from omnicoreagent.core.telemetry import TraceStatus
 
+from ..admission import admit, run_slot
 from ..models import (
     ApprovalDecisionRequest,
     BudgetDecisionRequest,
@@ -60,14 +62,22 @@ def create_runs_router() -> APIRouter:
             f"query_length={len(body.query)}"
         )
 
+        # Before streaming starts, so a busy server can still answer 503.
+        slot = await admit(request)
         return StreamingResponse(
-            run_agent_stream(
-                agent,
-                body.query,
-                session_id,
-                timeout_seconds=config.request_timeout,
-                is_disconnected=request.is_disconnected,
+            # The slot is held while the stream is sent. The background
+            # release covers a client that left before the first byte, when
+            # the generator never starts and its own cleanup never runs.
+            slot.around(
+                run_agent_stream(
+                    agent,
+                    body.query,
+                    session_id,
+                    timeout_seconds=config.request_timeout,
+                    is_disconnected=request.is_disconnected,
+                )
             ),
+            background=BackgroundTask(slot.release),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -81,7 +91,8 @@ def create_runs_router() -> APIRouter:
         response_model=RunResponse,
         summary="Run agent (synchronous)",
         description="Run the agent with a query and return a JSON response.",
-        responses={500: {"model": ErrorResponse}},
+        responses={500: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        dependencies=[Depends(run_slot)],
     )
     async def run_agent_sync(request: Request, body: RunRequest) -> RunResponse:
         agent = get_agent(request)
@@ -375,7 +386,8 @@ def create_runs_router() -> APIRouter:
         response_model=RunResponse,
         summary="Resume a paused run",
         description="Continue a run once every approval it asked for is decided.",
-        responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+        responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        dependencies=[Depends(run_slot)],
     )
     async def resume_run(request: Request, run_id: str) -> RunResponse:
         agent = get_agent(request)
