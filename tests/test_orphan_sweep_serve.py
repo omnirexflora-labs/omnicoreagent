@@ -146,3 +146,35 @@ async def test_the_sweep_passes_its_grace_period_to_the_claim():
     await sweeper.sweep_once()
 
     assert Agent.graces == [12.5]
+
+
+@pytest.mark.asyncio
+async def test_a_backlog_is_swept_without_waiting_a_whole_interval_per_batch(monkeypatch):
+    # The ramp left 119 approved runs to resume with two slots. A sweep that
+    # waited its whole interval after every full batch would have taken an
+    # hour; a full batch means more are probably waiting, so the next sweep
+    # follows as soon as a slot frees.
+    monkeypatch.setattr("omnicoreagent.serve.orphan_sweep.random.uniform", lambda low, high: low)
+
+    class Agent:
+        waiting = [f"run_{i}" for i in range(6)]
+        resumed = []
+
+        async def claim_orphaned_runs(self, *, limit, max_recoveries, decided_grace_seconds):
+            batch, Agent.waiting = Agent.waiting[:limit], Agent.waiting[limit:]
+            return [{"run_id": run_id} for run_id in batch]
+
+        async def resume_claimed(self, claim):
+            await asyncio.sleep(0.05)
+            Agent.resumed.append(claim["run_id"])
+            return {"status": "success"}
+
+    sweeper = OrphanSweeper(Agent(), interval_seconds=60.0, max_concurrent=2)
+    await sweeper.start()
+    for _ in range(40):
+        if len(Agent.resumed) == 6:
+            break
+        await asyncio.sleep(0.1)
+    await sweeper.stop()
+
+    assert len(Agent.resumed) == 6

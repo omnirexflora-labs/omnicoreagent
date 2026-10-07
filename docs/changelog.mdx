@@ -22,7 +22,8 @@ Every release, with its notes, is also on
   is the same version-checked claim, and the `run_resumed` event has `trigger` `orphan_sweep` and a
   `cause` and `decision` naming what was decided. A client resume that arrives with the sweep loses
   cleanly (`409`) and the tool runs once. A run with a decision still pending is left alone.
-  `claim_orphaned_runs` takes `decided_grace_seconds`.
+  `claim_orphaned_runs` takes `decided_grace_seconds`. A sweep that fills every slot is followed
+  by the next as soon as a slot frees, so a backlog is not resumed two runs per interval.
 
 - **A crowd of runs on one budget no longer fails.** Every budget change was a read, a change in
   Python and a versioned write of one JSON row per budget key, holding every in-flight run's hold.

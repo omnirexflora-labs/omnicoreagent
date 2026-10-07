@@ -127,12 +127,24 @@ class OrphanSweeper:
         # later wait varies by a quarter either way.
         await asyncio.sleep(random.uniform(0, min(5.0, self.interval_seconds)))
         while True:
+            full = False
             try:
-                await self.sweep_once()
+                free = self.max_concurrent - len(self._resuming)
+                full = free > 0 and await self.sweep_once() == free
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 logger.warning(
                     f"OmniServe: orphan sweep failed ({type(exc).__name__}: {exc})"
                 )
+            if full and self._resuming:
+                # A full batch means more are probably waiting (the ramp at
+                # 100 users left 119 approved runs for two slots): sweep again
+                # as soon as a slot frees, not after a whole interval.
+                await asyncio.wait(
+                    set(self._resuming),
+                    timeout=self.interval_seconds,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                continue
             await asyncio.sleep(self.interval_seconds * random.uniform(0.75, 1.25))
