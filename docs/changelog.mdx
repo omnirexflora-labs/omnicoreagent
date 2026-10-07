@@ -68,6 +68,11 @@ Every release, with its notes, is also on
   run fails with the store's error. The message goes on the run's record
   first, so a failed history write does not also lose the answer. A custom
   memory store should raise from `store_message` too.
+- **SQLite takes concurrent runs, and `sqlite://` works.** Fifty runs saving
+  at once on a SQLite file raised `database is locked`. File databases now run
+  in WAL mode with a 30 second busy timeout. `DatabaseMessageStore("sqlite://")`
+  (in memory) failed on pool arguments SQLite's in-memory pool rejects; it now
+  uses one shared connection that sessions take in turn.
 
 ### Changed
 

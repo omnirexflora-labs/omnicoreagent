@@ -19,6 +19,7 @@ from sqlalchemy import (
     Text,
     DateTime,
     create_engine,
+    event,
     func,
     inspect,
     text,
@@ -26,6 +27,8 @@ from sqlalchemy import (
     cast,
     type_coerce,
 )
+from sqlalchemy.engine import make_url
+from sqlalchemy.pool import QueuePool
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.types import TypeDecorator
@@ -82,6 +85,35 @@ DEFAULT_MAX_KEY_LENGTH = 128
 DEFAULT_MAX_VARCHAR_LENGTH = 256
 
 
+# Arguments only a queue pool takes; SQLite's in-memory pool rejects them.
+_POOL_ONLY_ARGUMENTS = frozenset(
+    {"pool_size", "max_overflow", "pool_timeout", "pool_recycle", "pool_pre_ping", "pool_use_lifo"}
+)
+# How long a SQLite connection waits for another's write lock. SQLite's own
+# default wait is zero, and a 50-run crowd raised "database is locked" on it
+# (the P6 throughput run, 2026-10-07).
+SQLITE_BUSY_TIMEOUT_MS = 30_000
+
+
+def _sqlite_is_in_memory(db_url: str) -> bool:
+    url = make_url(db_url)
+    return url.database in (None, "", ":memory:") or "mode=memory" in str(url.query.get("uri", "")) or (
+        "mode=memory" in (url.database or "")
+    )
+
+
+def _sqlite_connected(dbapi_connection, _record) -> None:
+    """Let SQLite take concurrent runs: readers no longer block the writer and
+    a writer waits for the lock instead of failing at once."""
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+    finally:
+        cursor.close()
+
+
 class SQLConnectionManager:
     """
     SQL connection manager for efficient session management and connection pooling.
@@ -125,7 +157,13 @@ class SQLConnectionManager:
                         **kwargs,
                     }
 
+                    backend = make_url(db_url).get_backend_name()
+                    if backend == "sqlite" and _sqlite_is_in_memory(db_url):
+                        self._initialize_sqlite_memory(db_url, connection_kwargs)
+                        return
                     self._engine = create_engine(db_url, **connection_kwargs)
+                    if backend == "sqlite":
+                        event.listen(self._engine, "connect", _sqlite_connected)
                     self._session_factory = sessionmaker(bind=self._engine)
                     # Reads are single statements. Run in a transaction, each
                     # cost a BEGIN before it and a ROLLBACK after it, two round
@@ -137,6 +175,8 @@ class SQLConnectionManager:
                         db_url,
                         **{**connection_kwargs, "isolation_level": "AUTOCOMMIT"},
                     )
+                    if backend == "sqlite":
+                        event.listen(self._read_engine, "connect", _sqlite_connected)
                     self._read_session_factory = sessionmaker(bind=self._read_engine)
 
                     logger.debug(f"[SQLManager] Created SQL connection pool: {db_url}")
@@ -144,6 +184,37 @@ class SQLConnectionManager:
                 except Exception as e:
                     logger.error(f"[SQLManager] Failed to create SQL engine: {e}")
                     raise
+
+    def _initialize_sqlite_memory(self, db_url: str, connection_kwargs: dict) -> None:
+        """An in-memory SQLite database lives in one connection, so there is
+        one engine for reads and writes and one connection for both.
+
+        The pool arguments above (size, overflow, timeout, LIFO) are invalid
+        for the pool SQLite's in-memory URL gets by default (a per-thread
+        pool, where each thread would see its own empty database), and
+        ``DatabaseMessageStore("sqlite://")`` failed on them (the P6
+        throughput run, 2026-10-07). A queue pool of exactly one connection
+        keeps the database alive and lends it to one session at a time, so
+        threads take turns instead of interleaving transactions on it (a
+        StaticPool would hand the one connection to all of them at once).
+        """
+        extra = {
+            key: value
+            for key, value in connection_kwargs.items()
+            if key not in _POOL_ONLY_ARGUMENTS
+        }
+        engine = create_engine(
+            db_url,
+            poolclass=QueuePool,
+            pool_size=1,
+            max_overflow=0,
+            pool_timeout=connection_kwargs.get("pool_timeout", 30),
+            connect_args={"check_same_thread": False},
+            **extra,
+        )
+        self._engine = self._read_engine = engine
+        self._session_factory = self._read_session_factory = sessionmaker(bind=engine)
+        logger.debug(f"[SQLManager] Created in-memory SQLite engine: {db_url}")
 
     def get_session(self, read_only: bool = False):
         """Get a database session from the pool.
