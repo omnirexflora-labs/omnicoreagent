@@ -53,6 +53,10 @@ Every release, with its notes, is also on
   `omniserve_runs_in_flight`, `omniserve_runs_waiting`, `omniserve_runs_limit` and
   `omniserve_runs_rejected_total`. Callers that sent more than the limit at once now see `503`
   and should retry.
+- **Resuming a run no longer lists the telemetry store.** Closing a resumed run's dead trace
+  segments listed every trace of the run through `list_traces`, which walks every trace in the
+  store; about 5% of a 30-user profile, growing with the store. It now reads only the segments
+  the run's record names. The result is the same.
 
 ## 0.5.1
 

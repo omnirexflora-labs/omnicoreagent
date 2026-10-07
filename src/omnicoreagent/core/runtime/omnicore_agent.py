@@ -856,7 +856,9 @@ class OmniCoreAgent:
                     input={"message": query},
                 )
             else:
-                await self._close_dead_segments(run_id, trace_context.trace_id)
+                await self._close_dead_segments(
+                    run_id, trace_context.trace_id, list(_resume.get("trace_ids") or [])
+                )
                 await self.telemetry_recorder.emit_event(
                     "run_resumed",
                     actor=self._telemetry_actor(),
@@ -1608,7 +1610,12 @@ class OmniCoreAgent:
         except Exception as exc:  # noqa: BLE001 - the record holds it regardless.
             runtime_logger().warning(f"Outcome of {run_id} not written to its trace: {exc}")
 
-    async def _close_dead_segments(self, run_id: str, current_trace_id: str) -> None:
+    async def _close_dead_segments(
+        self,
+        run_id: str,
+        current_trace_id: str,
+        previous_trace_ids: list[str] | None = None,
+    ) -> None:
         """Close the earlier segments of a resumed run that never ended.
 
         A process killed mid-segment cannot end its own trace. The run's record
@@ -1618,9 +1625,28 @@ class OmniCoreAgent:
         `interrupted`, ended at its last event. A resume happens only after
         the lease lapsed or a person decided, so no live process owns the
         segment. A failure here never stops the resume.
+
+        The run's record names its segments (``previous_trace_ids``), so only
+        those are read. This ran on every resume through ``list_traces``,
+        which walks every trace in the store, and about 5% of a 30-user
+        profile went there, growing with the store (the support desk ramp,
+        2026-10-07). A record from before segments were named has none, and
+        only then is the run's listing used.
         """
         try:
-            for trace in await self.telemetry_store.list_traces(TraceFilter(run_id=run_id)):
+            if previous_trace_ids:
+                segments = [
+                    trace
+                    for trace in [
+                        await self.telemetry_store.get_trace(trace_id)
+                        for trace_id in dict.fromkeys(previous_trace_ids)
+                        if trace_id != current_trace_id
+                    ]
+                    if trace is not None
+                ]
+            else:
+                segments = await self.telemetry_store.list_traces(TraceFilter(run_id=run_id))
+            for trace in segments:
                 if (
                     trace.trace_id == current_trace_id
                     or trace.status != TraceStatus.RUNNING
