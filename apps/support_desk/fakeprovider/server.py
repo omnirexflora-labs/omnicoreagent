@@ -14,25 +14,27 @@ Routes:
     GET  /v1/models
     POST /_control              change settings: {"latency_min": 0.8, "rate_429": 0.1, ...}
     GET  /_stats                counters; ``POST /_control {"reset": true}`` zeroes them
+    GET  /_timings              one entry per request: arrival, conversation, status, Retry-After
     GET  /health
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import random
 import time
 import uuid
-from collections import Counter
+from collections import Counter, deque
 
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
-from .scenario import decide
+from .scenario import CLOCK, _text, decide
 
 # Each setting, its environment variable, and its type. The same names are the
 # keys of ``POST /_control``.
@@ -74,6 +76,9 @@ class Provider:
         self.steps: Counter = Counter()
         self.paths: Counter = Counter()
         self.statuses: Counter = Counter()
+        # One entry per request, newest last, bounded: what a chaos check reads
+        # to ask whether a client waited as long as ``Retry-After`` said.
+        self.timings: deque = deque(maxlen=50000)
         self.streams = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
@@ -99,6 +104,17 @@ class Provider:
     def latency(self) -> float:
         low, high = self.settings["latency_min"], self.settings["latency_max"]
         return self.random.uniform(low, max(low, high))
+
+
+def _conversation(messages: list[dict]) -> str:
+    """A short key for the conversation a request belongs to.
+
+    The first user message names it (the harness puts a unique tag in each
+    one), so two requests of one run share a key, and so does a retry.
+    """
+    first = next((m for m in messages if m.get("role") == "user"), None)
+    text = CLOCK.sub("", _text(first.get("content"))) if first else ""
+    return hashlib.sha1(text.encode()).hexdigest()[:12]
 
 
 def _tokens(value) -> int:
@@ -137,11 +153,17 @@ def create_app() -> Starlette:
             return _error(400, "invalid_request_error", "The body is not JSON.")
 
         fault = provider.fault()
+        timing = {
+            "t_in": time.time(), "conv": _conversation(body.get("messages") or []),
+            "fault": fault, "status": None, "retry_after": None, "t_out": None,
+        }
+        provider.timings.append(timing)
         await asyncio.sleep(provider.latency())
         if fault == "429":
             provider.faults["429"] += 1
             provider.statuses[429] += 1
             retry_after = provider.settings["retry_after"]
+            timing.update(status=429, retry_after=retry_after, t_out=time.time())
             return _error(
                 429, "rate_limit_exceeded", "Rate limit reached. Try again later.",
                 {"Retry-After": f"{retry_after:g}", "retry-after-ms": str(int(retry_after * 1000))},
@@ -149,9 +171,11 @@ def create_app() -> Starlette:
         if fault == "500":
             provider.faults["500"] += 1
             provider.statuses[500] += 1
+            timing.update(status=500, t_out=time.time())
             return _error(500, "server_error", "The server had an error while processing your request.")
         if fault == "timeout":
             provider.faults["timeout"] += 1
+            timing.update(status="hang")
             await asyncio.sleep(provider.settings["hang_seconds"])
 
         messages = body.get("messages") or []
@@ -172,6 +196,9 @@ def create_app() -> Starlette:
             "completion_tokens": _tokens(message) + 8,
         }
         usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
+        if timing["status"] is None:
+            timing.update(status=200)
+        timing["t_out"] = time.time()
         provider.prompt_tokens += usage["prompt_tokens"]
         provider.completion_tokens += usage["completion_tokens"]
         finish = "tool_calls" if step.tool_name else "stop"
@@ -258,6 +285,11 @@ def create_app() -> Starlette:
             "settings": provider.settings,
         })
 
+    async def timings(request: Request):
+        # ``?since=<epoch seconds>`` keeps a long run's answer small.
+        since = float(request.query_params.get("since", 0))
+        return JSONResponse({"timings": [t for t in provider.timings if t["t_in"] >= since]})
+
     async def health(request: Request):
         return JSONResponse({"status": "ok"})
 
@@ -266,6 +298,7 @@ def create_app() -> Starlette:
         Route("/v1/models", models),
         Route("/_control", control, methods=["POST"]),
         Route("/_stats", stats),
+        Route("/_timings", timings),
         Route("/health", health),
     ])
 

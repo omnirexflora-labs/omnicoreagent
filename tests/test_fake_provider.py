@@ -280,3 +280,20 @@ async def test_a_real_agent_retries_after_a_429_and_a_500(provider):
     stats = httpx.get(f"{provider}/_stats").json()
     assert stats["faults"].get("429", 0) >= 1, stats
     assert result["status"] == "success", result
+
+
+def test_timings_name_the_conversation_and_what_a_429_told_it_to_wait(provider):
+    # The chaos harness asks, from these, whether a client waited as long as
+    # Retry-After said: it needs the conversation, the status and the wait.
+    httpx.post(f"{provider}/_control", json={"rate_429": 1.0, "retry_after": 3})
+    _chat(provider, [{"role": "user", "content": "[CURRENT_DATETIME: now] hi ref a"}])
+    httpx.post(f"{provider}/_control", json={"rate_429": 0.0})
+    _chat(provider, [{"role": "user", "content": "hi ref a"}, {"role": "assistant", "content": "x"}])
+    _chat(provider, [{"role": "user", "content": "hi ref b"}])
+    rows = httpx.get(f"{provider}/_timings").json()["timings"]
+    assert [r["status"] for r in rows] == [429, 200, 200]
+    assert rows[0]["retry_after"] == 3 and rows[0]["t_out"] >= rows[0]["t_in"]
+    # The clock line the runtime adds does not change the conversation's key.
+    assert rows[0]["conv"] == rows[1]["conv"] != rows[2]["conv"]
+    later = httpx.get(f"{provider}/_timings", params={"since": rows[2]["t_in"]}).json()["timings"]
+    assert len(later) == 1

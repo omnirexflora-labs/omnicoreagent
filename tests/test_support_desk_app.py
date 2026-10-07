@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -189,3 +190,55 @@ def test_an_otlp_exporter_is_added_only_when_an_endpoint_is_set(monkeypatch):
     assert module.build_telemetry_exporters() == []
     monkeypatch.setenv("DESK_OTLP_ENDPOINT", "http://jaeger:4318")
     assert module.build_telemetry_exporters()[0]["endpoint"] == "http://jaeger:4318"
+
+
+def test_the_load_profile_lifts_the_dollar_budgets_and_turns_the_debug_routes_on(monkeypatch):
+    # Off by default: the desk a customer reaches has real limits and no debug routes.
+    monkeypatch.delenv("DESK_PROFILE", raising=False)
+    monkeypatch.delenv("DESK_DEBUG", raising=False)
+    plain = _load_desk()
+    assert plain.routers == [] and plain.build_budgets()["session"][0]["limit"] == 1.0
+    # The harness's profile: budgets that cannot stop a load run, and the routes.
+    monkeypatch.setenv("DESK_PROFILE", "load")
+    load = _load_desk()
+    budgets = load.build_budgets()
+    assert budgets["session"][0]["limit"] > 1e6 and budgets["application"][0]["limit"] > 1e6
+    assert {b["meter"]: b["limit"] for b in budgets["request"]}["tool_calls"] == 20
+    assert [r.prefix for r in load.routers] == ["/_debug"]
+
+
+def test_the_slow_tool_hooks_are_off_until_set(monkeypatch, tmp_path):
+    monkeypatch.setenv("DESK_DB", str(tmp_path / "desk.db"))
+    monkeypatch.delenv("DESK_TOOL_DELAY", raising=False)
+    monkeypatch.delenv("DESK_REFUND_HOLD", raising=False)
+    module = _load_desk()
+    module.seed_database()
+    started = time.monotonic()
+    module.lookup_order("1042")
+    module.issue_refund("1042", 1)
+    assert time.monotonic() - started < 0.5
+    module._tool_delay.update(seconds=0.3, refund_hold=0.3)
+    started = time.monotonic()
+    module.lookup_order("1042")
+    assert 0.3 <= time.monotonic() - started < 1.0
+    started = time.monotonic()
+    module.issue_refund("1042", 2)
+    # The hold comes after the ledger row is written: the crash window.
+    assert time.monotonic() - started >= 0.3 and len(module.refund_ledger()) == 2
+
+
+def test_the_lag_probe_sees_a_blocked_event_loop():
+    import asyncio
+
+    module = _load_desk()
+
+    async def scenario():
+        probe = module.LagProbe()
+        probe.read()
+        await asyncio.sleep(0.2)
+        time.sleep(0.4)  # a blocking call on the loop
+        await asyncio.sleep(0.2)
+        return probe.read(reset_window=False)
+
+    seen = asyncio.run(scenario())
+    assert seen["samples"] >= 1 and seen["window_max_ms"] >= 300 and seen["over_100ms"] >= 1

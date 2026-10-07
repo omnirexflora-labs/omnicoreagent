@@ -14,8 +14,10 @@ See ``engineering/architecture/production-readiness-plan.md``.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sqlite3
+import time
 from contextlib import closing
 from datetime import datetime, timezone
 
@@ -24,6 +26,15 @@ from omnicoreagent.core.tools.local_tools_registry import ToolRegistry
 from omnicoreagent.governance import PolicyEffect, PolicyRule, build_default_policy
 
 APPLICATION_ID = "support-desk"
+
+# ``DESK_PROFILE=load`` is the profile the load and chaos harnesses run the
+# desk under. The fake provider answers under a priced model name, so its runs
+# charge the budgets at real prices and a few hundred of them would stop the
+# load with budget pauses that say nothing about the runtime. The load profile
+# lifts the dollar limits (never the tool-call cap) and turns the debug
+# routes on. It is never the default.
+PROFILE = os.environ.get("DESK_PROFILE", "")
+LOAD_PROFILE = PROFILE == "load"
 
 # --- the data: a small seeded SQLite file ----------------------------------------
 
@@ -77,6 +88,29 @@ def refund_ledger() -> list[dict]:
         return [dict(row) for row in db.execute("SELECT id, order_id, amount, created_at FROM refunds ORDER BY id")]
 
 
+# --- test hooks (off by default) ---------------------------------------------------
+
+# A slow tool, for the chaos harness: ``DESK_TOOL_DELAY`` seconds before
+# ``lookup_order`` and ``search_kb`` answer. It can be changed while the desk
+# runs through ``POST /_debug/tool_delay`` (only when debug routes are on).
+# ``refund_hold`` (``DESK_REFUND_HOLD``) is the other hook: ``issue_refund``
+# waits that long *after* its ledger row is committed and before it returns.
+# That is the crash window that matters for a call that is not idempotent
+# (the effect happened, the run has not yet recorded it), so the chaos
+# harness kills the desk inside it.
+_tool_delay = {
+    "seconds": float(os.environ.get("DESK_TOOL_DELAY", "0") or 0),
+    "refund_hold": float(os.environ.get("DESK_REFUND_HOLD", "0") or 0),
+}
+
+
+def _slow() -> None:
+    # The tools run in a worker thread, so sleeping here holds up one tool
+    # call, not the event loop.
+    if _tool_delay["seconds"] > 0:
+        time.sleep(_tool_delay["seconds"])
+
+
 # --- the tools --------------------------------------------------------------------
 
 tools = ToolRegistry()
@@ -85,6 +119,7 @@ tools = ToolRegistry()
 @tools.register_tool(name="lookup_order", idempotent=True)
 def lookup_order(order_id: str) -> dict:
     """Look up an order by its id: who ordered it, what it is, its status and total."""
+    _slow()
     with closing(_connect()) as db:
         row = db.execute("SELECT * FROM orders WHERE order_id = ?", (str(order_id).removeprefix("ORD-"),)).fetchone()
         if row is None:
@@ -96,6 +131,7 @@ def lookup_order(order_id: str) -> dict:
 @tools.register_tool(name="search_kb", idempotent=True)
 def search_kb(query: str) -> dict:
     """Search the help articles. Returns the articles that mention the words of the query."""
+    _slow()
     words = [w for w in query.lower().replace("?", " ").split() if len(w) > 2]
     with closing(_connect()) as db:
         rows = [dict(r) for r in db.execute("SELECT topic, body FROM articles")]
@@ -117,6 +153,8 @@ def issue_refund(order_id: str, amount: float) -> dict:
             return {"issued": False, "reason": f"The amount must be above 0 and at most {row['total']:.2f}."}
         created_at = datetime.now(timezone.utc).isoformat()
         cursor = db.execute("INSERT INTO refunds (order_id, amount, created_at) VALUES (?, ?, ?)", (str(order_id), amount, created_at))
+    if _tool_delay["refund_hold"] > 0:
+        time.sleep(_tool_delay["refund_hold"])
     return {"issued": True, "refund_id": cursor.lastrowid, "order_id": str(order_id), "amount": amount}
 
 
@@ -140,6 +178,16 @@ def build_policy():
 
 
 def build_budgets() -> dict:
+    if LOAD_PROFILE:
+        return {
+            "application_id": APPLICATION_ID,
+            "application": [{"meter": "model_cost_usd", "limit": 1e9, "window": "day"}],
+            "session": [{"meter": "model_cost_usd", "limit": 1e9}],
+            "request": [
+                {"meter": "model_cost_usd", "limit": 1e9},
+                {"meter": "tool_calls", "limit": int(os.environ.get("DESK_REQUEST_TOOL_CALLS", "20"))},
+            ],
+        }
     return {
         "application_id": APPLICATION_ID,
         # What the whole desk may spend in a day.
@@ -212,7 +260,8 @@ def create_agent() -> OmniCoreAgent:
         memory_router=memory,
         agent_config={
             "max_steps": 10,
-            "tool_call_timeout": 30,
+            "tool_call_timeout": int(os.environ.get("DESK_TOOL_TIMEOUT", "30")),
+            "run_lease_seconds": int(os.environ.get("DESK_LEASE_SECONDS", "60")),
             "governance_config": {
                 "enabled": True,
                 "policy": build_policy(),
@@ -229,4 +278,95 @@ def create_agent() -> OmniCoreAgent:
     )
 
 
-__all__ = ["create_agent", "refund_ledger", "tools"]
+# --- debug routes (off by default) ----------------------------------------------------
+#
+# The harnesses need three things the runtime does not expose: the refund
+# ledger (to prove each refund happened exactly once), the event loop's lag (a
+# stall shows here first), and a way to slow the tools. They sit behind the
+# API token like every other route, and exist only when ``DESK_DEBUG=1`` or
+# the load profile is on.
+
+DEBUG = LOAD_PROFILE or os.environ.get("DESK_DEBUG") == "1"
+
+
+class LagProbe:
+    """Measures how late the event loop wakes a sleeping task.
+
+    A task that sleeps 50 ms and wakes 700 ms late proves something held the
+    loop for about 650 ms. It is a task on the server's own loop, started by
+    the first call to ``/_debug/lag`` (the harness makes it at the start).
+    """
+
+    INTERVAL = 0.05
+
+    def __init__(self) -> None:
+        self.task: asyncio.Task | None = None
+        self.reset_all()
+
+    def reset_all(self) -> None:
+        self.samples = 0
+        self.max_ms = 0.0
+        self.over_100ms = 0
+        self.over_500ms = 0
+        self.window_max_ms = 0.0
+        self.started_at = time.time()
+
+    def ensure_running(self) -> None:
+        if self.task is None or self.task.done():
+            self.started_at = time.time()
+            self.task = asyncio.get_running_loop().create_task(self._run())
+
+    async def _run(self) -> None:
+        while True:
+            before = time.perf_counter()
+            await asyncio.sleep(self.INTERVAL)
+            lag_ms = max(0.0, (time.perf_counter() - before - self.INTERVAL) * 1000)
+            self.samples += 1
+            self.max_ms = max(self.max_ms, lag_ms)
+            self.window_max_ms = max(self.window_max_ms, lag_ms)
+            self.over_100ms += lag_ms > 100
+            self.over_500ms += lag_ms > 500
+
+    def read(self, *, reset_window: bool = True) -> dict:
+        self.ensure_running()
+        view = {
+            "samples": self.samples, "max_ms": round(self.max_ms, 1),
+            "window_max_ms": round(self.window_max_ms, 1),
+            "over_100ms": self.over_100ms, "over_500ms": self.over_500ms,
+            "running_seconds": round(time.time() - self.started_at, 1),
+        }
+        if reset_window:
+            self.window_max_ms = 0.0
+        return view
+
+
+lag_probe = LagProbe()
+
+routers: list = []
+if DEBUG:
+    from fastapi import APIRouter, HTTPException
+
+    debug_router = APIRouter(prefix="/_debug", tags=["Debug"])
+
+    @debug_router.get("/lag")
+    async def debug_lag() -> dict:
+        return lag_probe.read()
+
+    @debug_router.get("/ledger")
+    async def debug_ledger() -> dict:
+        # The ledger is a SQLite read: a thread keeps it off the event loop.
+        return {"refunds": await asyncio.to_thread(refund_ledger)}
+
+    @debug_router.post("/tool_delay")
+    async def debug_tool_delay(body: dict) -> dict:
+        for key in _tool_delay:
+            if key in body:
+                _tool_delay[key] = float(body[key])
+        if "seconds" not in body and "refund_hold" not in body:
+            raise HTTPException(status_code=422, detail="Send seconds and/or refund_hold.")
+        return dict(_tool_delay)
+
+    routers.append(debug_router)
+
+
+__all__ = ["create_agent", "refund_ledger", "routers", "tools"]

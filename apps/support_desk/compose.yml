@@ -28,6 +28,14 @@ services:
       - DESK_BASE_URL
       - DESK_FAKE_URL=http://fakeprovider:9000/v1
       - DESK_DB=/app/data/desk.db
+      # The load and chaos profile and the test hooks (see load/README.md).
+      # Unset in the shell, they are off.
+      - DESK_PROFILE
+      - DESK_DEBUG
+      - DESK_TOOL_DELAY
+      - DESK_TOOL_TIMEOUT
+      - DESK_LEASE_SECONDS
+      - DESK_OTLP_ENDPOINT
       # memory, run state and budgets
       - DATABASE_URL=postgresql+psycopg2://desk:desk@postgres:5432/desk
       # background tasks and their leases
