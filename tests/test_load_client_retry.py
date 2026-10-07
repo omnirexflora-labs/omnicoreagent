@@ -160,3 +160,68 @@ async def test_the_desk_client_retries_a_503_on_every_kind_of_call():
     assert error is None and body == {"ok": 1}
     assert desk.records[-1].retries == 1
     assert desk.retry.summary()["succeeded_after_retry"] == 1
+
+
+class FakeDesk:
+    """A desk whose runs finish when told, standing in for the sweep."""
+
+    def __init__(self, statuses):
+        self.statuses = dict(statuses)
+
+    async def quiet(self, method, path, **kwargs):
+        return {"status": self.statuses[path.rsplit("/", 1)[1]]}, None
+
+
+def _attempt(run_id, decision="approve", outcome="not_completed"):
+    return loadlib.Attempt("2001", 100, f"s-{run_id}", decision, run_id=run_id, outcome=outcome)
+
+
+@pytest.mark.asyncio
+async def test_the_drain_waits_for_the_sweep_and_counts_a_resumed_run_as_completed():
+    clock = Clock()
+    attempts = [_attempt("run_a"), _attempt("run_b", "deny"), _attempt("run_c", outcome="completed")]
+    desk = FakeDesk({"run_a": "awaiting_approval", "run_b": "awaiting_approval"})
+
+    async def sleep(seconds):
+        await clock.sleep(seconds)
+        # The sweep resumes the runs a while after the grace period.
+        if clock.now >= 40:
+            desk.statuses.update(run_a="completed", run_b="completed")
+
+    drain = await loadlib.settle_by_sweep(
+        desk, attempts, grace=30, interval=30, poll=5, sleep=sleep, clock=clock.monotonic
+    )
+
+    assert [a.outcome for a in attempts] == ["completed"] * 3
+    assert attempts[0].recovered_by_sweep and attempts[1].recovered_by_sweep
+    assert not attempts[2].recovered_by_sweep
+    assert drain["recovered_by_sweep"] == 2 and drain["still_waiting"] == []
+    assert 40 <= drain["waited_seconds"] < 60
+
+
+@pytest.mark.asyncio
+async def test_a_run_nothing_completes_stays_not_completed_after_grace_plus_one_interval():
+    clock = Clock()
+    attempts = [_attempt("run_a")]
+    desk = FakeDesk({"run_a": "awaiting_approval"})
+
+    drain = await loadlib.settle_by_sweep(
+        desk, attempts, grace=30, interval=30, poll=5, sleep=clock.sleep, clock=clock.monotonic
+    )
+
+    assert attempts[0].outcome == "not_completed"
+    assert drain["still_waiting"] == ["run_a"]
+    assert 60 <= drain["waited_seconds"] <= 65, "gives up after grace plus one interval"
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_ended_without_completing_is_not_waited_for():
+    clock = Clock()
+    attempts = [_attempt("run_a")]
+    desk = FakeDesk({"run_a": "failed"})
+
+    drain = await loadlib.settle_by_sweep(
+        desk, attempts, grace=30, interval=30, poll=5, sleep=clock.sleep, clock=clock.monotonic
+    )
+
+    assert attempts[0].outcome == "not_completed" and drain["waited_seconds"] == 0

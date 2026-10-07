@@ -108,8 +108,16 @@ What it records:
   connections (`pg_stat_activity` for database `desk`) and the event-loop lag (the desk's lag probe: a task
   that sleeps 50 ms and records how late it wakes; the worst lag in each 5 s).
 - **Runtime overhead per step**, below.
+- **503s and `Retry-After`**: like a real client, the load client waits out a `503` that carries `Retry-After`
+  (the header plus up to half a second of jitter, giving up after 60 s for that request), on every kind of request.
+  The report keeps three counts apart: 503s seen, requests that succeeded after a retry, and requests that gave up.
 - **Correctness at the end**: every approved refund is in the ledger exactly once, nothing was refunded that was
-  denied, and no run is left `running`, `interrupted` or `awaiting_budget`, or waiting for a person.
+  denied, and no run is left `running`, `interrupted` or `awaiting_budget`, or waiting for a person. An approved
+  run whose resume never got through is not judged until the server's orphan sweep has had its time: after the
+  load stops the script waits up to the grace period plus one sweep interval (`--sweep-grace` and
+  `--sweep-interval`, 30 s each, the server's `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_DECIDED_GRACE_SECONDS` and
+  `..._INTERVAL_SECONDS`; every run that completes extends the wait). A run the sweep completes counts as
+  completed, and the report says how many; one still waiting after that is broken.
 
 ### How the runtime overhead is computed
 

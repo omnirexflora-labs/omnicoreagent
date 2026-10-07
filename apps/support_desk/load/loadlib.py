@@ -262,6 +262,9 @@ class Attempt:
     outcome: str = "pending"       # completed | not_completed | approve_failed | no_pause
     t_asked: float = 0.0
     t_done: float | None = None
+    # The staff's resume never got through (a 503 that outlasted the retries),
+    # and the server's orphan sweep resumed the run and finished it.
+    recovered_by_sweep: bool = False
 
 
 @dataclass
@@ -639,6 +642,45 @@ async def read_ledger(desk: Desk) -> list[dict] | None:
     return None if error else body["refunds"]
 
 
+async def settle_by_sweep(desk: "Desk", attempts: list[Attempt], *, grace: float, interval: float,
+                          poll: float = 5.0, sleep=asyncio.sleep, clock=time.monotonic) -> dict:
+    """Give the server's orphan sweep the time it needs before judging refunds.
+
+    An approved run whose resume the client could not get through is not
+    broken while the sweep can still resume it (the ramp at 100 users,
+    2026-10-07, left 119 such runs; the sweep now resumes a decided run after
+    ``grace`` seconds, on a sweep every ``interval``). Each attempt not yet
+    completed is read until its run completes (it is then counted completed,
+    and marked as recovered by the sweep), ends some other way (nothing will
+    complete it), or the wait reaches grace plus one interval. Every run that
+    completes extends the wait, so a long backlog is not cut short.
+    """
+    began = clock()
+    window = grace + interval
+    cutoff = began + window
+    pending = [a for a in attempts if a.run_id and a.outcome == "not_completed"]
+    recovered = 0
+    while pending:
+        answers = await asyncio.gather(*(desk.quiet("GET", f"/runs/{a.run_id}", timeout=60) for a in pending))
+        still = []
+        for attempt, (body, _) in zip(pending, answers):
+            status = (body or {}).get("status")
+            if status == "completed":
+                attempt.outcome, attempt.recovered_by_sweep, attempt.t_done = "completed", True, time.time()
+                recovered += 1
+                cutoff = clock() + window
+            elif status not in TERMINAL:
+                still.append(attempt)
+        pending = still
+        if not pending or clock() >= cutoff:
+            break
+        await sleep(min(poll, max(0.0, cutoff - clock())))
+    return {
+        "waited_seconds": round(clock() - began, 1), "recovered_by_sweep": recovered,
+        "still_waiting": [a.run_id for a in pending],
+    }
+
+
 def check_ledger(attempts: list[Attempt], ledger: list[dict], baseline_ids: set) -> dict:
     """Every approved refund is in the ledger exactly once; nothing else is.
 
@@ -671,6 +713,7 @@ def check_ledger(attempts: list[Attempt], ledger: list[dict], baseline_ids: set)
     approved_completed = sum(1 for a in attempts if a.decision == "approve" and a.outcome == "completed")
     return {
         "attempts": len(attempts), "approved_and_completed": approved_completed,
+        "completed_by_sweep": sum(1 for a in attempts if a.recovered_by_sweep),
         "ledger_rows_new": len(rows),
         "outcomes": {f"{d}/{o}": n for (d, o), n in Counter((a.decision, a.outcome) for a in attempts).items()},
         "problems": {k: v for k, v in problems.items() if v},

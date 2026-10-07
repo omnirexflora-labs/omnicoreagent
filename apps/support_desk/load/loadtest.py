@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from loadlib import (  # noqa: E402
     Desk, Load, Sampler, check_ledger, error_table, fake_get, find_stuck, find_waiting,
-    per_kind, prime_fake, read_ledger, runtime_overhead, summarize_resources, summarize,
+    per_kind, prime_fake, read_ledger, runtime_overhead, settle_by_sweep, summarize_resources, summarize,
 )
 
 MODES = {
@@ -64,6 +64,10 @@ def arguments() -> argparse.Namespace:
     p.add_argument("--deny-share", type=float, default=0.1, help="share of refunds the staff deny")
     p.add_argument("--think", default="1,3", help="a customer's pause between visits: min,max seconds")
     p.add_argument("--sample-interval", type=float, default=5.0)
+    p.add_argument("--sweep-grace", type=float, default=float(os.environ.get("OMNICOREAGENT_SERVE_ORPHAN_SWEEP_DECIDED_GRACE_SECONDS", 30)),
+                   help="the server's orphan_sweep_decided_grace_seconds: how long a decided, unresumed run waits for its client")
+    p.add_argument("--sweep-interval", type=float, default=float(os.environ.get("OMNICOREAGENT_SERVE_ORPHAN_SWEEP_INTERVAL_SECONDS", 30)),
+                   help="the server's orphan_sweep_interval_seconds")
     p.add_argument("--overhead-sample", type=int, default=200, help="runs whose trajectory is read for the overhead")
     p.add_argument("--seed", type=int, default=None)
     return p.parse_args()
@@ -127,7 +131,12 @@ async def main() -> int:
     await sampler.stop()
     sampler.samples.append(await sampler.sample())
 
-    # Correctness, once the load has stopped.
+    # Correctness, once the load has stopped. An approved run whose resume
+    # the client could not get through is the server's sweep to resume, so it
+    # is given the grace period plus one sweep interval before it is judged.
+    print(f"[load] waiting up to {args.sweep_grace + args.sweep_interval:.0f}s for the orphan sweep", flush=True)
+    sweep_drain = await settle_by_sweep(desk, load.attempts, grace=args.sweep_grace, interval=args.sweep_interval)
+    print(f"[load] sweep drain: {sweep_drain}", flush=True)
     ledger = await read_ledger(desk)
     ledger_check = (
         check_ledger(load.attempts, ledger, {r["id"] for r in baseline}) if ledger is not None
@@ -146,6 +155,8 @@ async def main() -> int:
 
     result = build_result(args, stages, boundaries, desk.records, sampler.samples, load, overhead,
                           ledger_check, stuck, waiting, fake, began, load_ended, drained)
+    result["retries"] = desk.retry.summary()
+    result["sweep_drain"] = sweep_drain
     (out / "result.json").write_text(json.dumps(result, indent=2, default=str))
     (out / "report.md").write_text(render_report(result))
     with open(out / "requests.ndjson", "w") as raw:
@@ -319,6 +330,15 @@ def render_report(r: dict) -> str:
     if r["first_byte_ms"]["n"]:
         fb = r["first_byte_ms"]
         lines.append(f"\nSSE time to first byte: n={fb['n']}, p50 {ms(fb['p50'])} ms, p95 {ms(fb['p95'])} ms.")
+    rt, drain = r.get("retries") or {}, r.get("sweep_drain") or {}
+    lines += ["", "## 503 and Retry-After", "",
+              f"The client waits out a 503 that carries `Retry-After` (the header plus a little jitter, up to 60 s per request). "
+              f"503s seen: {rt.get('seen_503', 0)}; requests that succeeded after a retry: {rt.get('succeeded_after_retry', 0)}; "
+              f"requests that gave up: {rt.get('gave_up', 0)}."]
+    for kind, v in (rt.get("by_kind") or {}).items():
+        lines.append(f"- `{kind}`: seen {v['seen_503']}, succeeded after a retry {v['succeeded_after_retry']}, gave up {v['gave_up']}")
+    lines += ["", f"After the load stopped the client waited {drain.get('waited_seconds', 0)} s for the orphan sweep: "
+              f"{drain.get('recovered_by_sweep', 0)} runs it resumed finished, {len(drain.get('still_waiting') or [])} still waiting."]
     lines += ["", "## Errors by kind", ""]
     lines.append("None." if not r["errors_by_kind"] else "\n".join(
         f"- `{error}`: {kinds}" for error, kinds in r["errors_by_kind"].items()))
@@ -338,7 +358,8 @@ def render_report(r: dict) -> str:
         for k, v in r["overhead"].items() if k.startswith("stage_"))]
     c = r["correctness"]
     lines += ["", "## Correctness", "",
-              f"- Refunds asked for: {c['ledger'].get('attempts')}; approved and completed: {c['ledger'].get('approved_and_completed')}; "
+              f"- Refunds asked for: {c['ledger'].get('attempts')}; approved and completed: {c['ledger'].get('approved_and_completed')} "
+              f"(of which resumed by the server's sweep: {c['ledger'].get('completed_by_sweep')}); "
               f"new ledger rows: {c['ledger'].get('ledger_rows_new')}. Outcomes: {c['ledger'].get('outcomes')}",
               f"- Ledger problems: {c['ledger'].get('problems') or 'none'}",
               f"- Runs left stuck (running, interrupted, awaiting budget): {len(c['stuck_runs'])}",
