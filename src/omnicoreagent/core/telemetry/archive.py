@@ -1,8 +1,10 @@
-"""An archive of finished traces: one body per trace and an index.
+"""An archive of finished traces: a body per trace and an index.
 
 Telemetry storage plan, T4. A finished trace is written once, as one body:
 the trace and each event's stream cursor. Bodies go through the workspace
-storage interface, so a local directory, S3 or R2. A SQLite index keeps one
+storage interface, so a local directory, S3 or R2. A local directory packs
+bodies into segment files (``segments.py``); a bucket keeps one object per
+trace. A SQLite index keeps one
 row per trace: what the trace is (run, parent, session, task, agent,
 workflow, model, status, start and end), its first and last stream cursor,
 the payloads it refers to, and its size. Listing narrows through the index
@@ -34,6 +36,12 @@ from omnicoreagent.core.telemetry.archive_index import (
     TelemetryIndex,
 )
 from omnicoreagent.core.telemetry.payloads import payload_references
+from omnicoreagent.core.telemetry.segments import (
+    SegmentWriter,
+    deletable_segments,
+    is_segment_body,
+    read_body,
+)
 
 def _value(value: Any) -> Any:
     return getattr(value, "value", value)
@@ -58,6 +66,7 @@ class TelemetryArchive:
         self.directory = Path(directory)
         self._bodies = bodies
         self._index = index
+        self._segment_writer: SegmentWriter | None = None
 
     @property
     def bodies(self) -> Any:
@@ -73,7 +82,23 @@ class TelemetryArchive:
             self._index = SqliteTelemetryIndex(self.directory)
         return self._index
 
+    def _local_root(self) -> Path | None:
+        """The directory bodies are packed into, or ``None`` for a bucket.
+
+        Whether to pack is decided by what the bodies storage is, not by a
+        setting: only a local directory has inodes to save and a file to
+        append to. A bucket has neither (an object cannot be appended to, so
+        packing there would cost a read-modify-write per trace), and a storage
+        this module does not know keeps its one-body-per-name contract.
+        """
+        from omnicoreagent.core.workspace.storage import LocalWorkspaceStorage
+
+        bodies = self.bodies
+        return bodies.root if isinstance(bodies, LocalWorkspaceStorage) else None
+
     def close(self) -> None:
+        if self._segment_writer is not None:
+            self._segment_writer.close()
         if self._index is not None:
             self._index.close()
 
@@ -91,7 +116,16 @@ class TelemetryArchive:
         # storing it would cost.
         plain = trace.model_dump()
         text = json.dumps({"trace": plain, "cursors": cursors})
-        self.bodies.write_text(body_name, text)
+        encoded = text.encode("utf-8")
+        root = self._local_root()
+        if root is not None:
+            if self._segment_writer is None:
+                self._segment_writer = SegmentWriter(root)
+            # Replacing a trace appends a new copy and repoints the row below;
+            # the old bytes are dead until their segment is swept.
+            body_name = self._segment_writer.append(encoded)
+        else:
+            self.bodies.write_text(body_name, text)
         values = list(cursors.values())
         row = {
             "trace_id": trace.trace_id,
@@ -110,7 +144,7 @@ class TelemetryArchive:
             "last_cursor": max(values) if values else None,
             "payload_references": json.dumps(sorted(payload_references(plain))),
             "body": body_name,
-            "bytes": len(text.encode("utf-8")),
+            "bytes": len(encoded),
         }
         self.index.put(row)
 
@@ -119,9 +153,34 @@ class TelemetryArchive:
 
     def _remove(self, trace_ids: set[str]) -> None:
         for body in self.index.remove(trace_ids):
+            # A segment body is a range inside a file shared with other
+            # traces: it is not deleted here, the sweep below does that.
+            if is_segment_body(body):
+                continue
             try:
                 self.bodies.delete(body)
             except (FileNotFoundError, OSError, ValueError):
+                pass
+        self._sweep_segments()
+
+    def _sweep_segments(self) -> None:
+        """Delete segments no row points into any more.
+
+        Only finished segments are offered (``deletable_segments``): never the
+        one this process is appending to, nor any written in the last hour or
+        so, whose writer may have a body in the file and not yet a row.
+        """
+        root = self._local_root()
+        if root is None:
+            return
+        keep = self._segment_writer.current if self._segment_writer else None
+        candidates = set(deletable_segments(root, keep=keep))
+        if not candidates:
+            return
+        for name in sorted(candidates - self.index.referenced_segments(candidates)):
+            try:
+                (root / name).unlink()
+            except (FileNotFoundError, OSError):
                 pass
 
     # --- reading ----------------------------------------------------------
@@ -139,7 +198,17 @@ class TelemetryArchive:
 
     def _read_body(self, trace_id: str) -> tuple[TelemetryTrace, dict[str, int]] | None:
         try:
-            data = json.loads(self.bodies.read_text(f"{trace_id}.json"))
+            body = self.index.body_of(trace_id)
+            if body is None:
+                return None
+            if is_segment_body(body):
+                root = self._local_root()
+                if root is None:
+                    return None  # packed locally, read through a bucket now
+                data = json.loads(read_body(root, body))
+            else:
+                # Written by 0.5.1 and earlier: a file named for its trace.
+                data = json.loads(self.bodies.read_text(body))
         except (FileNotFoundError, OSError, ValueError):
             return None
         cursors = {str(k): int(v) for k, v in (data.get("cursors") or {}).items()}

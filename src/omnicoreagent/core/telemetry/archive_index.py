@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from omnicoreagent.core.sql_schema import create_tables
+from omnicoreagent.core.telemetry.segments import SEGMENT_NAME_LENGTH
 
 # What a row holds: what the trace is, where its body is, the stream cursors
 # it spans, the payloads it refers to, and its size.
@@ -106,6 +107,15 @@ class TelemetryIndex(ABC):
     @abstractmethod
     def remove(self, trace_ids: set[str]) -> list[str]:
         """Drop these traces; return the body names they pointed at."""
+
+    @abstractmethod
+    def body_of(self, trace_id: str) -> str | None:
+        """The body name the trace's row holds, or ``None`` for no such row."""
+
+    @abstractmethod
+    def referenced_segments(self, segments: set[str]) -> set[str]:
+        """Of these segment names (``segments/<file>.seg``), the ones some row
+        still points into. A segment body is ``<segment>#<offset>:<length>``."""
 
     @abstractmethod
     def contains(self, trace_id: str) -> bool: ...
@@ -213,6 +223,19 @@ class SqliteTelemetryIndex(TelemetryIndex):
             if row is not None:
                 bodies.append(row[0])
         return bodies
+
+    def body_of(self, trace_id: str) -> str | None:
+        rows = self._query("SELECT body FROM traces WHERE trace_id = ?", (trace_id,))
+        return rows[0][0] if rows else None
+
+    def referenced_segments(self, segments: set[str]) -> set[str]:
+        # One scan, not one per segment: the segment's name is the first
+        # SEGMENT_NAME_LENGTH characters of a segment body.
+        rows = self._query(
+            "SELECT DISTINCT substr(body, 1, ?) FROM traces WHERE body LIKE 'segments/%'",
+            (SEGMENT_NAME_LENGTH,),
+        )
+        return segments & {row[0] for row in rows}
 
     def contains(self, trace_id: str) -> bool:
         return bool(self._query("SELECT 1 FROM traces WHERE trace_id = ?", (trace_id,)))
@@ -430,6 +453,26 @@ class SqlTelemetryIndex(TelemetryIndex):
             ]
             connection.execute(table.delete().where(table.c.trace_id.in_(sorted(trace_ids))))
         return bodies
+
+    def body_of(self, trace_id: str) -> str | None:
+        rows = self._read(
+            lambda table: table.select()
+            .with_only_columns(table.c.body)
+            .where(table.c.trace_id == trace_id)
+        )
+        return rows[0][0] if rows else None
+
+    def referenced_segments(self, segments: set[str]) -> set[str]:
+        # See the SQLite index: one scan over the segment name of each body.
+        from sqlalchemy import func
+
+        rows = self._read(
+            lambda table: table.select()
+            .with_only_columns(func.substr(table.c.body, 1, SEGMENT_NAME_LENGTH))
+            .where(table.c.body.startswith("segments/"))
+            .distinct()
+        )
+        return segments & {row[0] for row in rows}
 
     def contains(self, trace_id: str) -> bool:
         return bool(
