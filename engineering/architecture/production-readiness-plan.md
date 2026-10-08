@@ -227,3 +227,28 @@ millions of files a month in one directory. Two decisions follow.
    of event-loop CPU a step remains, most of it in the model client library and the telemetry write.
    Against model calls of 1 to 10 seconds it is a few percent of a run. The number and its cause go in
    the scale guide; the client library's cost is backlog.
+
+## P7: the final measurement (2026-10-08)
+
+On the capped 2-core container, from the branch with packed bodies and the observability fixes.
+
+| Check | Result | Verdict |
+|---|---|---|
+| Soak, 20 users × 30 min | 8,234 requests, 0 errors; 1,516 approved refunds, 1,516 ledger rows; memory +3.7% after warm-up (329 → 341 MiB); process memory (`anon`) flat at 314–315 MiB | PASS |
+| Remaining growth | kernel slab only, reclaimable: `memory.reclaim` took slab from 29.7 to 7.5 MiB and Docker's figure from 341 to 328 MiB; no new per-trace files (the old 57,920 stay readable) | explained |
+| Overhead per step, p95 | 162 ms at 20 users (from 182); 504 ms at 100 users on one process | MISS, documented (decision 2) |
+| Ramp 10 → 50 → 100 users, one process | every one of 2,669 runs completed; 825 refunds, 825 rows; 0 timeouts, 0 model errors (from `/prometheus`) | PASS on correctness |
+| Requests at 100 users | 0 runtime failures; 95 of 3,500 (2.7%) turned away by the admission limit after the client waited out `Retry-After`; 36 resumes answered `409` because the sweep had resumed the run first | see below |
+| Chaos, 11 faults, operator on | 1,406 runs touched; 0 duplicated refunds; 0 stuck | PASS |
+| Chaos, 4 crash faults, no operator | 426 runs touched; every crashed run recovered by the server's sweep; 0 duplicates; 0 stuck | PASS (finish line 3) |
+
+**Finish line 1 and the admission limit.** "Zero failed requests at 100 users" was written before the
+admission limit existed. One process bends at about 24 concurrent runs; at 100 it sheds the excess with a
+`503` that started nothing and is safe to retry, which is the limit doing its job. The load report now
+counts those, and `409`s for a run the sweep already resumed, apart from failures (both were being counted
+as failures). The answer to 100 users is replicas: two 1-CPU replicas measured 1.7 times one process.
+
+**Provider failures after a side effect.** In the 429 and 500 rounds, two runs issued their refund and then
+failed when the model kept failing past its retries. Each refund happened once, and each failed run's record
+names its cause (`provider_error`, with the provider's message) and `side_effects: issue_refund, success`:
+explainable from the record alone, as finish line 4 asks.
