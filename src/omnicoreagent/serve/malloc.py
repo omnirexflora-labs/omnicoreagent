@@ -28,6 +28,10 @@ DEFAULT_ARENAS = 2
 _M_ARENA_MAX = -8  # glibc's <malloc.h>
 _SETTING = "OMNICOREAGENT_SERVE_MALLOC_ARENAS"
 
+# What the last call asked for and glibc accepted, so a deployment can say
+# whether the cap took effect (the support desk's census reads it).
+applied_arenas: int | None = None
+
 
 def limit_malloc_arenas(*, libc: Any = None) -> int | None:
     """Ask glibc for at most N arenas; return N, or None when nothing was changed."""
@@ -51,4 +55,6 @@ def limit_malloc_arenas(*, libc: Any = None) -> int | None:
     if not mallopt(_M_ARENA_MAX, arenas):
         logger.debug("The allocator did not accept a cap of %s arenas", arenas)
         return None
+    global applied_arenas
+    applied_arenas = arenas
     return arenas

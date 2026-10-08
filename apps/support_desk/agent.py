@@ -342,6 +342,178 @@ class LagProbe:
 
 lag_probe = LagProbe()
 
+
+# --- the census (debug routes only) ---------------------------------------------------
+#
+# Soak 2 (2026-10-08) still grew about 25 KB a visit in the real stack, with
+# both earlier fixes in. The in-process measurements said nothing, so the desk
+# can now say what it holds: the objects by type, the size of every cache and
+# registry that is ours, the SQLAlchemy pools, and what the C allocator holds.
+# Taken twice in a soak and diffed, it names what grows per visit.
+
+# Per class: the attributes whose size is worth a number. Found by walking the
+# heap, not by reaching into the server, so a registry the desk cannot see
+# from here is still counted.
+_REGISTRIES = {
+    "AgentSessionStateStore": ["states"],
+    "OmniCoreAgent": ["_active_run_ids", "_fresh_run_ids", "_claim_heartbeats"],
+    "TelemetryRecorder": [
+        "_span_parent_contexts", "_span_sources", "_incomplete_trace_ids",
+        "_trace_templates", "_trace_span_ids", "_context_recordings",
+    ],
+    "InMemoryTelemetryStore": [
+        "_traces", "_trace_sequences", "_event_index", "_event_cursors",
+        "_indexed_cursors", "_unsorted", "_subscribers",
+    ],
+    "JsonlTelemetryStore": ["_finished", "_pending"],
+    "PrivacyFilter": ["_cache"],
+    "RunAdmission": ["_waiters"],
+    "OrphanSweeper": ["_resuming", "_claims"],
+    "_SeenEvents": ["_ids", "_order"],
+}
+
+_ARENA_BYTES = 64 * 1024 * 1024  # glibc's HEAP_MAX_SIZE on 64-bit Linux
+
+
+def _mapped_arena_heaps() -> int | None:
+    """The 64 MB heaps glibc has mapped for its non-main arenas, or None off Linux.
+
+    A heap is a 64 MB-aligned stretch of address space of which the front is
+    readable and writable and the rest reserved (no access). The main arena
+    lives on the program break and is not counted.
+    """
+    try:
+        with open("/proc/self/maps") as maps:
+            rows = []
+            for line in maps:
+                parts = line.split()
+                low, high = (int(x, 16) for x in parts[0].split("-"))
+                rows.append((low, high, parts[1], len(parts) > 5))
+    except OSError:
+        return None
+    heaps = 0
+    for index, (low, high, perms, named) in enumerate(rows):
+        if named or perms != "rw-p" or low % _ARENA_BYTES:
+            continue
+        size = high - low
+        following = rows[index + 1] if index + 1 < len(rows) else None
+        if following and following[0] == high and following[2] == "---p":
+            size += following[1] - following[0]
+        if size == _ARENA_BYTES:
+            heaps += 1
+    return heaps
+
+
+def _allocator() -> dict:
+    import ctypes
+
+    from omnicoreagent.serve import malloc
+
+    view: dict = {
+        "malloc_arena_max_env": os.environ.get("MALLOC_ARENA_MAX"),
+        "mallopt_applied": getattr(malloc, "applied_arenas", "unknown"),
+        "malloc_arenas_mapped": _mapped_arena_heaps(),
+    }
+    try:
+        class Mallinfo2(ctypes.Structure):
+            _fields_ = [
+                (name, ctypes.c_size_t)
+                for name in (
+                    "arena", "ordblks", "smblks", "hblks", "hblkhd", "usmblks",
+                    "fsmblks", "uordblks", "fordblks", "keepcost",
+                )
+            ]
+
+        libc = ctypes.CDLL("libc.so.6")
+        libc.mallinfo2.restype = Mallinfo2
+        info = libc.mallinfo2()
+        # What malloc holds from the system, how much of it is handed out, and
+        # how much is free but kept: free-but-kept is fragmentation, not a leak.
+        view["malloc"] = {
+            "system_bytes": info.arena, "in_use_bytes": info.uordblks,
+            "free_bytes": info.fordblks, "mmapped_bytes": info.hblkhd,
+            "free_chunks": info.ordblks,
+        }
+    except (OSError, AttributeError):
+        view["malloc"] = None
+    return view
+
+
+def _rss_bytes() -> int:
+    try:
+        with open("/proc/self/statm") as statm:
+            return int(statm.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+    except (OSError, ValueError, IndexError):
+        import resource
+
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
+
+
+def _size_of(value) -> int | str:
+    try:
+        return len(value)
+    except TypeError:
+        return "no len"
+
+
+def take_census() -> dict:
+    """What this process holds right now, for a soak to diff."""
+    import gc
+    import sys
+    import threading
+    from collections import Counter
+
+    gc.collect()
+    objects = gc.get_objects()
+    by_type = Counter(type(o).__name__ for o in objects)
+    registries: dict = {}
+    pools: list = []
+    engines = 0
+    for obj in objects:
+        name = type(obj).__name__
+        attrs = _REGISTRIES.get(name)
+        if attrs and type(obj).__module__.startswith(("omnicoreagent", "support_desk")):
+            for attr in attrs:
+                size = _size_of(getattr(obj, attr, None))
+                if isinstance(size, int):
+                    key = f"{name}.{attr}"
+                    registries[key] = registries.get(key, 0) + size
+            registries[f"{name}.instances"] = registries.get(f"{name}.instances", 0) + 1
+        elif name in ("QueuePool", "NullPool", "StaticPool", "SingletonThreadPool"):
+            try:
+                pools.append({"pool": name, "status": obj.status()})
+            except Exception as exc:  # a pool mid-dispose still gets counted
+                pools.append({"pool": name, "status": f"{type(exc).__name__}"})
+        elif name == "Engine":
+            engines += 1
+    del objects
+
+    caches: dict = {}
+    from omnicoreagent.core.summarizer import tokenizer
+    from omnicoreagent.core.telemetry import redaction
+    from omnicoreagent.core.workspace import factory
+
+    caches["tokenizer._count_cache"] = len(tokenizer._count_cache)
+    caches["workspace.factory._backend_cache"] = len(factory._backend_cache)
+    for function in ("_key_words", "_decide_key"):
+        cached = getattr(redaction, function, None)
+        if cached is not None and hasattr(cached, "cache_info"):
+            caches[f"redaction.{function}"] = cached.cache_info().currsize
+    registries.update(caches)
+
+    return {
+        "rss_bytes": _rss_bytes(),
+        "allocated_blocks": sys.getallocatedblocks(),
+        "threads": threading.active_count(),
+        "allocator": _allocator(),
+        "gc_top": by_type.most_common(40),
+        "gc_total_objects": sum(by_type.values()),
+        "registries": registries,
+        "sql_pools": pools,
+        "sql_engines": engines,
+    }
+
+
 routers: list = []
 if DEBUG:
     from fastapi import APIRouter, HTTPException
@@ -356,6 +528,10 @@ if DEBUG:
     async def debug_ledger() -> dict:
         # The ledger is a SQLite read: a thread keeps it off the event loop.
         return {"refunds": await asyncio.to_thread(refund_ledger)}
+
+    @debug_router.get("/census")
+    async def debug_census() -> dict:
+        return take_census()
 
     @debug_router.post("/tool_delay")
     async def debug_tool_delay(body: dict) -> dict:

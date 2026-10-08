@@ -298,3 +298,20 @@ def test_many_sessions_leave_nothing_behind_in_the_process(desk):
     }
     # Sixty visits: anything kept per visit shows as 60 or more of its type.
     assert grown == {}, grown
+
+
+def test_the_census_route_exists_only_with_the_debug_routes_and_reports_what_the_desk_holds(
+    desk, monkeypatch
+):
+    """The soak's question is what grows per visit, so the desk can say what it holds."""
+    _, module = desk
+    # The fixture's desk was loaded without the debug routes: no census.
+    assert module.routers == []
+    monkeypatch.setenv("DESK_DEBUG", "1")
+    module = _load_desk()
+    assert [r.prefix for r in module.routers] == ["/_debug"]
+    census = module.take_census()
+    assert census["rss_bytes"] > 0 and census["allocated_blocks"] > 0
+    assert len(census["gc_top"]) <= 40
+    assert {"malloc_arena_max_env", "malloc_arenas_mapped"} <= set(census["allocator"])
+    assert "sql_pools" in census and "registries" in census
