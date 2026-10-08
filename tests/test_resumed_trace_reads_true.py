@@ -58,6 +58,48 @@ async def test_a_call_waiting_for_a_person_is_not_an_error_in_the_trajectory(tmp
     assert waiting["error"] is None
 
 
+@pytest.mark.asyncio
+async def test_a_resumed_runs_final_summary_covers_every_segment(tmp_path):
+    # The final_answer of a resumed run reported its last segment alone: one
+    # model call, 12 tokens and a fraction of the time for a run that took two
+    # segments, two calls and 24 tokens.
+    agent = await _approved_and_resumed(tmp_path)
+
+    (final,) = await _events(agent, "run_s1", "final_answer")
+    summary = final.metadata["run_summary"]
+    whole = summary["whole_run"]
+
+    assert whole["segments"] == 2
+    assert whole["steps"] == 2
+    assert whole["model_calls"]["total"] == 2
+    assert whole["tokens"]["total"] == 24
+    assert whole["duration_ms"] > summary["duration_ms"], "active time of both segments"
+    assert whole["elapsed_ms"] >= whole["duration_ms"], "from the first start, waiting included"
+    # And it agrees with the run story built from the stored segments.
+    story = await agent.get_run_trajectory("run_s1")
+    assert whole["tokens"]["total"] == story["totals"]["tokens"]["total"]
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_never_resumed_has_no_whole_run_summary():
+    from omnicoreagent.core.runtime.omnicore_agent import OmniCoreAgent
+    from test_execute_tool import _MODEL, ScriptedModel
+
+    agent = OmniCoreAgent(
+        name="plain",
+        system_instruction="x",
+        model_config=_MODEL,
+        agent_config={"guardrail_mode": "off", "enable_workspace_files": False},
+    )
+    await agent.initialize()
+    agent.llm_connection = ScriptedModel("done")
+    result = await agent.run("hi", session_id="plain")
+
+    (final,) = await _events(agent, result["run_id"], "final_answer")
+    assert "whole_run" not in final.metadata["run_summary"]
+    await agent.cleanup()
+
+
 def test_a_skipped_span_is_not_an_error_in_otlp():
     from opentelemetry.proto.trace.v1.trace_pb2 import Status
 

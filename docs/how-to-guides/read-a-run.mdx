@@ -532,6 +532,13 @@ had no known price); `model_latency_ms`; `model_retries`; `tool_calls`
 or the sandbox; `offloaded_results`; `duration_ms`; and
 `including_subagents` (tokens, cost, `cost_complete` with the children).
 
+These totals, and the `run_summary` on a segment's `final_answer` event, cover that segment
+alone. The `final_answer` of a resumed run also carries `run_summary["whole_run"]` with every
+segment added up: `segments` (and `segments_missing` for pruned traces), `steps`, `model_calls`,
+`tokens`, `estimated_cost_usd`, `cost_complete`, `model_latency_ms`, `including_subagents`,
+`duration_ms` (the time the segments ran) and `elapsed_ms` (from the first segment's start, the
+wait for a person included).
+
 `model_calls["total"]` counts every call the agent began, including one a
 budget stopped before it was sent (outcome `no_response`), so it can be
 higher than `usage["requests"]`, which counts only the calls that got a

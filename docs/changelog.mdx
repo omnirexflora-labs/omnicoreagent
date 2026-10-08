@@ -13,6 +13,13 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- **A resumed run's final summary covers the whole run.** The `run_summary` on its `final_answer`
+  event described the last segment only: a run that took two segments, two model calls and 24
+  tokens read as one call and 12 tokens. It now also carries `run_summary["whole_run"]`: every
+  segment's steps, model calls, tokens and cost, `duration_ms` (the time the segments ran) and
+  `elapsed_ms` (from the first start, the wait for a person included). `run_summary` itself is
+  still the final segment's.
+
 - **A resumed run's trace no longer asks twice, or reports a pause as an error.** The resumed
   segment recorded an `approval_request_created` event again, under a new id, for an approval the
   record already held; it is now recorded once, in the segment that paused (the decision is still
