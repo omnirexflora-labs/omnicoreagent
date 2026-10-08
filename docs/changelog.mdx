@@ -13,6 +13,15 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- **A call that began and then timed out is `unknown`, not a timeout.** A plain tool runs in a
+  thread that cannot be stopped; when `tool_call_timeout` fired on a non-idempotent call that had
+  already begun, its effect could land afterwards while the record said `timeout` and the model
+  told a customer "The refund was not issued" (the support desk chaos run). The call is now
+  `unknown` in the run record, the trace's `tool_error` event has `may_still_complete: true`, and
+  the model receives an `unknown_outcome` error that says to check before acting again or telling
+  the user it failed. A call that never began, an idempotent tool and an `async` tool keep
+  `timeout`.
+
 - **An approved run no longer waits forever for a resume that never comes.** At 100 users the
   admission limit answered some `POST /runs/{id}/resume` with `503`, the client did not retry, and
   119 runs sat in `awaiting_approval` with their approval already `approved`. The orphan sweep

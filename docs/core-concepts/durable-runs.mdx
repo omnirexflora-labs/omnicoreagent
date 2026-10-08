@@ -89,7 +89,7 @@ from and the messages it added), its approvals and budget requests, and the
 tool calls' arguments as a digest, not in full. A call's `outcome` is
 `success`, `error`, `denied` (refused by the policy or a person),
 `rejected` (invalid arguments), `timeout`, `cancelled`, or `unknown`
-(interrupted mid-call). `run()` returns the `run_id`;
+(interrupted mid-call, or begun and then past its time limit). `run()` returns the `run_id`;
 `get_run(run_id)` reads the record and `list_runs(session_id=, status=, limit=100)`
 lists records, oldest first.
 
@@ -311,6 +311,25 @@ service's idempotency key (Stripe's `Idempotency-Key`, a database row's
 unique id). Then a retry after a crash is a no-op at the service, and the tool
 can be declared `idempotent=True`. Tools get the id from
 `omnicoreagent.governance.calls.current_tool_call()`.
+
+### A call that runs past its time limit
+
+A plain (synchronous) tool runs in a worker thread, and a thread cannot be
+stopped. When `tool_call_timeout` fires on a call whose function **had already
+begun**, the thread carries on and its effect can land after the limit. For a
+tool that is not idempotent, that is the same situation as a crash in the
+middle of a call, and it is treated the same way: the call's `outcome` in the
+run record is `unknown`, the trace's `tool_error` event says
+`may_still_complete: true`, and the model receives an `unknown_outcome` error
+that says the call may still complete, and to check what it did before calling
+it again and before telling the user it failed. (The support desk chaos run of
+2026-10-07 had a model tell a customer "The refund was not issued" about a
+call of this kind.)
+
+Two cases keep the plain `timeout`: a call that never began (it was waiting
+for a worker thread, so cancelling it stopped it), and a call whose tool is
+idempotent. An `async` tool is cancelled at its next `await` and also keeps
+`timeout`; its message still says to check before calling again.
 
 ## What is guaranteed
 
