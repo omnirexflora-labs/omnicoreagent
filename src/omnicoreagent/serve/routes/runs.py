@@ -25,7 +25,7 @@ from ..models import (
     SteerRequest,
 )
 from ..serialization import normalize_run_result
-from ..sse import _public_error, run_agent_stream
+from ..sse import _public_error, run_agent_stream, run_side_effects
 from ..state import get_agent, get_agent_name, get_config, resolve_session_id
 from ..telemetry import build_run_kwargs, finish_serve_trace, start_serve_trace
 
@@ -128,6 +128,8 @@ def create_runs_router() -> APIRouter:
                 privacy_filter=getattr(agent, "privacy_filter", None),
             )
             normalized["run_id"] = normalized.get("run_id") or run_id
+            if normalized.get("status") == "error":
+                normalized["side_effects"] = await run_side_effects(agent, normalized["run_id"])
             # The request trace reports the agent's real outcome.
             await finish_serve_trace(
                 serve_trace,
@@ -157,7 +159,10 @@ def create_runs_router() -> APIRouter:
                 status=TraceStatus.TIMEOUT,
                 error={"type": "TimeoutError", "message": "Request timed out"},
             )
-            # The run keeps its record: name it, so the caller can look it up.
+            # The run keeps its record: name it, so the caller can look it up,
+            # and say what it already did, so a client does not start a new
+            # run that repeats it: resume this one.
+            found = await run_side_effects(agent, run_id)
             raise HTTPException(
                 status_code=504,
                 detail={
@@ -165,6 +170,7 @@ def create_runs_router() -> APIRouter:
                     "run_id": run_id,
                     "session_id": session_id,
                     "request_timeout_seconds": config.request_timeout,
+                    **({"side_effects": found} if found else {}),
                 },
             )
         except Exception as exc:
@@ -448,6 +454,8 @@ def _public_run(agent, record: dict) -> dict:
             # Whether a `running` run is alive, and which try this is: what
             # Durable runs reads from get_run, over HTTP too (the 0.5.0rc2 gate).
             "heartbeat_at", "lease_seconds", "attempt", "previous_attempts",
+            # What a run that timed out or failed already did.
+            "side_effects",
         )
     }
     view["approvals"] = [_public_view(agent, a, record) for a in record.get("approvals") or []]

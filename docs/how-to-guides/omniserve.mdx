@@ -594,7 +594,7 @@ to `api_prefix` (empty by default).
 | `POST` | `/run/sync` | Run and wait; the result as JSON |
 | `POST` | `/run` | Run and stream SSE events, ending with `complete` |
 | `GET` | `/runs` | Runs by `status` and `session_id`, oldest first (`limit`, up to 500): what waits for a person, what a crash left `running` (its `heartbeat_at` and `lease_seconds` say whether it is still alive; `attempt` which try it is). An unknown status is `422`. The answer is `{"runs": [...]}`, each as `GET /runs/{run_id}` returns it; a `running` run whose `heartbeat_at` is older than `lease_seconds` has no live process |
-| `GET` | `/runs/{run_id}` | The run's record: status, step, usage, tool call states, approvals (never its conversation) |
+| `GET` | `/runs/{run_id}` | The run's record: status, step, usage, tool call states, approvals, and for a run that timed out or failed its `side_effects` (never its conversation) |
 | `GET` | `/runs/{run_id}/trajectory` | The whole run as one story: every trace segment, totals, each tool call once, the approvals |
 | `POST` | `/runs/{run_id}/approvals/{approval_id}` | Decide an approval: `{"decision": "approve" \| "deny", "approver", "note"?, "arguments"?}` |
 | `POST` | `/runs/{run_id}/resume` | Continue a paused or interrupted run once it is decided |
@@ -784,6 +784,15 @@ SQL needs `omnicoreagent[postgres]` (SQLAlchemy, for SQLite too), Redis
   longer. The run is stopped; its record and trace remain.
 - `/run` (SSE) sends `event: error` with `"error": "Request timed out"`
   and closes the stream.
+- After a timeout or a failure, **look at `side_effects`** before doing
+  anything else. It is in the `504`'s `detail`, in the SSE `error` event (and
+  the `complete` event of a run that ended in `error`), in a `/run/sync`
+  answer with `status: error`, and in `GET /runs/{run_id}`: the calls the run
+  already made that may have changed something outside it, as
+  `{"tool_name", "tool_call_id", "outcome"}` with `outcome` `success` or
+  `unknown`. It lists only tools that are not idempotent, and never their
+  arguments. To continue, **resume** the run (`POST /runs/{run_id}/resume`): it
+  does not repeat a completed call. A new run starts over and can repeat them.
 - `/background/tasks/{task_id}/run` with `"wait": true` waits a little less
   than the timeout, then answers `504` with the `run_id`. The run is **not**
   stopped: it carries on in the background. A run that pauses for a person or
@@ -1021,8 +1030,13 @@ store for runs and readiness checks are on
     ```
 
     The run is stopped and its record says `timeout`
-    (`GET /runs/{run_id}`); the `run_id` finds its trajectory. `POST
-    /runs/{run_id}/resume` answers a timeout the same way.
+    (`GET /runs/{run_id}`); the `run_id` finds its trajectory. If the run had
+    already made a call that is not idempotent, `detail` also has
+    `"side_effects": [{"tool_name": "issue_refund", "tool_call_id": "call_1",
+    "outcome": "success"}]`: do not start a new run for the same request, which
+    would issue the refund again. `POST /runs/{run_id}/resume` continues the
+    timed-out run (it answers a timeout the same way if it takes too long
+    again).
 
     A background run waited on with `"wait": true`:
 

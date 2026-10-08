@@ -611,9 +611,42 @@ the same moments in two vocabularies:
 | `awaiting_budget` | `awaiting_budget` | Waiting for a budget top-up. |
 | `interrupted` | `interrupted` | Stopped by `interrupt`; `resume` continues it. |
 | (raises) | `cancelled` | The task running it was cancelled, or `abandon_run(status="cancelled")`. |
-| — | `timeout` | A deadline passed: OmniServe's request timeout, a background task's `timeout_seconds`, the headless CLI's `--timeout`, or `abandon_run(status="timeout")`. The record's error is `The run's deadline passed`. |
+| — | `timeout` | A deadline passed: OmniServe's request timeout, a background task's `timeout_seconds`, the headless CLI's `--timeout`, or `abandon_run(status="timeout")`. The record's error is `The run's deadline passed`. `resume(run_id)` continues it ([below](#a-run-that-ends-after-side-effects)). |
 | — | `running` | Running now, or its process died (the heartbeat says which). |
 | — | `abandoned` | A worker started by `spawn_subagents` whose process died and whose lead run has ended. The record's error names the lead's run. |
+
+### A run that ends after side effects
+
+A run that ends `timeout` or `failed` after it made calls that are not
+idempotent says so, on its record and in its error:
+
+```python
+run = await agent.get_run("run_support_7")
+print(run["status"], run["error"]["type"])
+print(run["side_effects"])
+```
+
+```text
+timeout TimeoutError
+[{'tool_name': 'issue_refund', 'tool_call_id': 'call_1', 'outcome': 'success'}]
+```
+
+`side_effects` lists each call of a tool that is not idempotent whose `outcome`
+is `success` (it completed) or `unknown` (it started and did not finish, or ran
+past its time limit). It names the tool and the call, never the arguments, and
+reads are left out. The same list is in the run's `error` and in everything
+OmniServe answers for the run ([OmniServe](/docs/how-to-guides/omniserve#the-request-timeout)).
+The support desk chaos run (2026-10-07) had a refund issued, then a deadline on
+the next model call; the client saw only the timeout.
+
+After a timeout or a failure, look at the side effects. To continue, **resume
+the run**: `resume(run_id)` (`POST /runs/{run_id}/resume` over HTTP) continues
+a `timeout` run as it does an interrupted one. Calls that completed are not run
+again, and a call whose outcome is unknown is handled by the rules above. A
+`failed` run cannot be resumed, and **a new run starts over**: it can repeat
+every call in the list. So `run(query, run_id=...)` on a finished, failed or
+timed-out run, which begins a new attempt, is not the way to continue; for a
+failed run, read the list and decide what the new run must not repeat.
 
 ## One story per run
 

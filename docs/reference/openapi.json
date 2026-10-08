@@ -1713,6 +1713,22 @@
             "title": "Session Id",
             "type": "string"
           },
+          "side_effects": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the run ended in error: the calls it already made that may have changed something (tool name, call id, outcome success or unknown). Resume the run; a new run can repeat them.",
+            "title": "Side Effects"
+          },
           "status": {
             "default": "success",
             "description": "Runtime outcome: success, error, cancelled, awaiting_approval, or awaiting_budget",

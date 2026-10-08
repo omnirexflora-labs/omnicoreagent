@@ -238,6 +238,12 @@ class RunTracker:
             "lease_seconds": lease_seconds,
             "interrupt_requested": False,
         }
+        if record.get("status") == "timeout":
+            # A timed-out run continued by resume() is running again: the
+            # deadline's error and side-effects list described the stop, and
+            # are rebuilt if it ends badly again.
+            tracker.record["error"] = None
+            tracker.record.pop("side_effects", None)
         return tracker
 
     @classmethod
@@ -516,6 +522,8 @@ class RunTracker:
                     else {"type": type(error).__name__, "message": str(error)}
                 )
                 self.record["error"] = scrub_credentials(described)
+            if status in SIDE_EFFECT_STATUSES:
+                note_side_effects(self.record)
             if budgets:
                 # What the run spent, per scope, kept once its own counter is gone.
                 self.record["budgets"] = budgets
@@ -782,6 +790,55 @@ def decided_waiting(
         "decision": outcomes.pop() if len(outcomes) == 1 else "mixed",
         "decided_at": decided_at.isoformat(),
     }
+
+
+# The statuses that end a run before its answer, where a client has to know
+# what the run already did: it may start a new run instead of resuming.
+SIDE_EFFECT_STATUSES = frozenset({"timeout", "failed"})
+
+
+def side_effects(record: dict[str, Any]) -> list[dict[str, str]]:
+    """The calls of a run that may have changed something outside it.
+
+    Only calls whose tool is not idempotent count: a read changes nothing. A
+    call that completed is ``success``; one that started and did not finish
+    (cancelled by a deadline, timed out, or cut off) is ``unknown``, the word
+    the durable-run rules use. A call that failed, was refused or never began
+    is left out. Arguments are not repeated: a call is named by its tool and
+    id. Found by the support desk chaos run (2026-10-07): a refund, then a
+    timeout, and a response that said nothing about the refund.
+    """
+    found = []
+    for call in record.get("tool_calls") or []:
+        if call.get("idempotent"):
+            continue
+        outcome = call.get("outcome")
+        state = call.get("state")
+        if outcome == "success":
+            kind = "success"
+        elif outcome in {"unknown", "cancelled", "timeout"} or state == "started":
+            kind = "unknown"
+        else:
+            continue
+        found.append(
+            {
+                "tool_name": call.get("tool_name"),
+                "tool_call_id": call.get("tool_call_id"),
+                "outcome": kind,
+            }
+        )
+    return found
+
+
+def note_side_effects(record: dict[str, Any]) -> None:
+    """Put the run's side effects on its record and on its error."""
+    found = side_effects(record)
+    if found:
+        record["side_effects"] = found
+        if isinstance(record.get("error"), dict):
+            record["error"] = {**record["error"], "side_effects": found}
+    else:
+        record.pop("side_effects", None)
 
 
 def not_resumable(record: dict[str, Any], run_id: str) -> str | None:

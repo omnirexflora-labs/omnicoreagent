@@ -19,10 +19,12 @@ from omnicoreagent.core.runs import (
     RunStateConflict,
     RunStateUnsupported,
     RunSuspended,
+    SIDE_EFFECT_STATUSES,
     RunTracker,
     current_run,
     decided_waiting,
     lease_expired,
+    note_side_effects,
     resume_cause,
     supports_run_state,
 )
@@ -1508,7 +1510,12 @@ class OmniCoreAgent:
         if record is None:
             raise LookupError(f"No run {run_id}")
         problem = _not_resumable(record, run_id)
-        if problem is not None:
+        # A run that hit its deadline is stopped, not finished: its record
+        # holds the calls it made and the conversation to that point, so it
+        # continues as an interrupted run does (the chaos run, 2026-10-07,
+        # had a client start a new run, which would repeat the refund the
+        # timed-out run had made). `run(run_id=)` still starts a new attempt.
+        if problem is not None and record["status"] != "timeout":
             raise ValueError(problem)
         try:
             return await self.run(
@@ -1966,6 +1973,8 @@ class OmniCoreAgent:
                 return
             current["status"] = status
             current["error"] = {"type": "RunEndedOutside", "message": reason}
+            if status in SIDE_EFFECT_STATUSES:
+                note_side_effects(current)
             if spent:
                 current["budgets"] = spent
             # A request no one will resume into is closed: granting it later

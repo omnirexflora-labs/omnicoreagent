@@ -96,6 +96,25 @@ def _public_error(agent: AgentType, error: BaseException) -> str:
     return message
 
 
+async def run_side_effects(agent: AgentType, run_id: str | None) -> list[dict] | None:
+    """What a run that ended badly already did, from its record.
+
+    The non-idempotent calls that completed or have an unknown outcome (see
+    ``side_effects`` in ``core.runs``), or None when there are none or the
+    record cannot be read. A client that sees ``timeout`` or ``error`` and
+    starts a new run instead of resuming could repeat them (the support desk
+    chaos run, 2026-10-07: a refund, then a deadline).
+    """
+    if not run_id:
+        return None
+    try:
+        record = await agent.get_run(run_id)
+    except Exception:  # noqa: BLE001 - the response is still sent without it.
+        return None
+    found = record.get("side_effects") if isinstance(record, dict) else None
+    return list(found) if isinstance(found, list) and found else None
+
+
 def format_sse_event(event_type: str, data: dict) -> str:
     """
     Format data as an SSE event string.
@@ -426,6 +445,10 @@ async def run_agent_stream(
                     **normalized,
                 }
                 complete_payload["run_id"] = normalized.get("run_id") or run_id
+                if normalized.get("status") == "error":
+                    found = await run_side_effects(agent, complete_payload["run_id"])
+                    if found:
+                        complete_payload["side_effects"] = found
 
                 from .routes.runs import serve_trace_status
 
@@ -468,12 +491,14 @@ async def run_agent_stream(
         serve_trace = None
         if closer is not None:
             closer.done = True
+        found = await run_side_effects(agent, run_id)
         yield format_sse_event(
             "error",
             {
                 "error": "Request timed out",
                 "session_id": session_id,
                 "run_id": run_id,
+                **({"side_effects": found} if found else {}),
             },
         )
 
@@ -487,12 +512,14 @@ async def run_agent_stream(
         serve_trace = None
         if closer is not None:
             closer.done = True
+        found = await run_side_effects(agent, run_id)
         yield format_sse_event(
             "error",
             {
                 "error": _public_error(agent, e),
                 "session_id": session_id,
                 "run_id": run_id,
+                **({"side_effects": found} if found else {}),
             },
         )
     finally:
