@@ -201,3 +201,29 @@ What was left alone, and why.
 Found on the way, not caused by this track: a person's approval could fail with `RunStateConflict` when
 the run's last heartbeat landed between `decide`'s read and its save. `decide` now reads again and
 re-checks, up to ten times.
+
+## P7: decisions after the third soak (approved 2026-10-08)
+
+The third soak left the process's own memory flat (`anon` at 339.2 MiB from minute 10 to 30) and the
+container growing 3.9%: kernel slab, one inode and dentry per trace body file. The same fact is an
+operational problem on its own: about 4.7 body files per visit, kept for the 30-day retention, is
+millions of files a month in one directory. Two decisions follow.
+
+1. **Trace bodies are packed into segment files, and export is documented for large deployments.**
+   - A local archive appends each body to a segment file, one per writer process per hour
+     (`bodies/segments/<hour>-<writer>.seg`). The index row's `body` names the segment and the body's
+     offset and length, so a read is one `pread`. Writers never share a segment, so a shared
+     `archive_bodies_path` needs no lock to append.
+   - Replacing a trace appends a new copy and repoints the row; the old bytes are dead until the
+     segment goes. Retention deletes a segment when no index row points into it any more.
+   - Old per-trace files (`bodies/<trace_id>.json`, written by 0.5.1 and earlier) are still read and
+     still pruned: a row whose `body` is a plain name is read the old way. Nothing is rewritten.
+   - Object storage keeps one object per trace. A bucket has no inodes and no append; packing there
+     would cost a read-modify-write per trace.
+   - The scale guide says a busy deployment exports traces (OTLP to Jaeger or Tempo) and shortens
+     local retention.
+2. **The overhead finish line is a measured MISS, documented, not chased.** Runtime overhead per step
+   is 81 ms p50 and 182 ms p95 at 10 users on the capped container (from 102 and 240 ms). About 100 ms
+   of event-loop CPU a step remains, most of it in the model client library and the telemetry write.
+   Against model calls of 1 to 10 seconds it is a few percent of a run. The number and its cause go in
+   the scale guide; the client library's cost is backlog.
