@@ -363,10 +363,12 @@ Decide an approval a run is waiting for.
 ### `resume`
 
 ```python
-async def resume(run_id: str, on_event: Any = None) -> Dict[str, Any]: ...
+async def resume(run_id: str, on_event: Any = None, *, trigger: str = 'explicit') -> Dict[str, Any]: ...
 ```
 
 Continue a run: one waiting for approval once every approval is decided (see `resolve_approval`), or one whose process stopped (its heartbeat is older than `run_lease_seconds`). Completed tool calls never run again.
+
+`trigger` says who resumed it, for the run's trace and the `omniserve_runs_resumed_total` metric: a person or client (`explicit`), or the background supervisor retrying (`background_retry`).
 
 ### `resume_claimed`
 
