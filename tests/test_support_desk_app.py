@@ -301,12 +301,13 @@ def test_many_sessions_leave_nothing_behind_in_the_process(desk):
 
 
 def test_the_census_route_exists_only_with_the_debug_routes_and_reports_what_the_desk_holds(
-    desk, monkeypatch
+    monkeypatch,
 ):
     """The soak's question is what grows per visit, so the desk can say what it holds."""
-    _, module = desk
-    # The fixture's desk was loaded without the debug routes: no census.
-    assert module.routers == []
+    monkeypatch.delenv("DESK_PROFILE", raising=False)
+    monkeypatch.delenv("DESK_DEBUG", raising=False)
+    # A desk loaded without the debug routes has no census.
+    assert _load_desk().routers == []
     monkeypatch.setenv("DESK_DEBUG", "1")
     module = _load_desk()
     assert [r.prefix for r in module.routers] == ["/_debug"]
