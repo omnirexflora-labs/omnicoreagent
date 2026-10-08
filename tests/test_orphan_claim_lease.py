@@ -20,7 +20,7 @@ import asyncio
 
 import pytest
 
-from omnicoreagent.core.runs import RunStateConflict
+from omnicoreagent.core.runs import RunStateConflict, lease_expired
 
 from test_orphan_sweep import _orphan, _survivor
 from test_run_recovery import _tools
@@ -39,14 +39,35 @@ class FakeSandboxRuntime:
 
 
 class SlowModel(RecordingModel):
-    """A model client whose first load takes longer than the lease."""
+    """A model client whose first load lasts until the test lets it finish,
+    so it is always longer than the lease, however loaded the machine is."""
 
-    def __init__(self, *turns, load_seconds):
+    def __init__(self, *turns):
         super().__init__(*turns)
-        self.load_seconds = load_seconds
+        self.loaded = asyncio.Event()
 
     async def warm_up(self):
-        await asyncio.sleep(self.load_seconds)
+        await self.loaded.wait()
+
+
+async def _lease_lapsed(router, run_id="run_orphan", *, within=30.0):
+    """Wait until the run's lease has really lapsed, as the claim sees it.
+
+    These tests used fixed sleeps of 1.3 to 1.8 s against a 1 s lease. Under
+    a loaded machine (the full suite) a heartbeat that was in flight when its
+    owner stopped landed late, the lease outlived the sleep, and the second
+    claimer found the run still held. Waiting on the record's own heartbeat
+    and lease is the condition the claim checks, and costs the lease and no
+    more.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + within
+    while loop.time() < deadline:
+        record = await router.get_run_state(run_id)
+        if record is not None and lease_expired(record):
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"the lease of {run_id} did not lapse within {within} s")
 
 
 def _with_sandbox(agent):
@@ -59,17 +80,23 @@ def _with_sandbox(agent):
 async def test_a_slow_start_never_lets_the_lease_lapse(tmp_path):
     dead = await _orphan(tmp_path)
     router = dead.memory_router
-    # Lease 1 s; the model client takes 2.5 s to load.
-    winner = await _survivor(router, SlowModel("recovered", load_seconds=2.5), _tools(tmp_path / "l1"))
+    # Lease 1 s; the model client loads until the test says so.
+    slow = SlowModel("recovered")
+    winner = await _survivor(router, slow, _tools(tmp_path / "l1"))
     rival = await _survivor(router, RecordingModel("rival"), _tools(tmp_path / "l2"))
-    await asyncio.sleep(1.3)
+    await _lease_lapsed(router)
 
     claims = await winner.claim_orphaned_runs()
     assert len(claims) == 1
     resuming = asyncio.create_task(winner.resume_claimed(claims[0]))
-    # Past the lease, while the winner is still loading its model client.
-    await asyncio.sleep(1.8)
+    # Past the lease, while the winner is still loading its model client:
+    # the time since the claim is measured, not assumed from a sleep.
+    loop = asyncio.get_running_loop()
+    claimed_at = loop.time()
+    while loop.time() - claimed_at < 1.8:
+        await asyncio.sleep(0.05)
     second_sweep = await rival.claim_orphaned_runs()
+    slow.loaded.set()
     result = await resuming
 
     assert second_sweep == [], "a second sweeper claimed a run whose start was only slow"
@@ -81,12 +108,12 @@ async def test_a_slow_start_never_lets_the_lease_lapse(tmp_path):
 async def test_an_abandoned_claim_stops_its_heartbeat(tmp_path):
     dead = await _orphan(tmp_path)
     survivor = await _survivor(dead.memory_router, RecordingModel("x"), _tools(tmp_path / "l1"))
-    await asyncio.sleep(1.3)
+    await _lease_lapsed(dead.memory_router)
     claims = await survivor.claim_orphaned_runs()
 
     await survivor.release_claim(claims[0])
 
-    await asyncio.sleep(1.5)
+    await _lease_lapsed(dead.memory_router)
     other = await _survivor(dead.memory_router, RecordingModel("y"), _tools(tmp_path / "l2"))
     assert [c["run_id"] for c in await other.claim_orphaned_runs()] == ["run_orphan"], (
         "a claim nobody resumed held the run's lease for good"
@@ -101,12 +128,12 @@ async def test_a_losing_claimer_never_touches_the_winners_sandbox(tmp_path):
     winner = await _survivor(router, RecordingModel("recovered"), _tools(tmp_path / "l2"))
     loser_sandboxes = _with_sandbox(loser)
     winner_sandboxes = _with_sandbox(winner)
-    await asyncio.sleep(1.3)
+    await _lease_lapsed(router)
     # The loser claimed first, then its lease lapsed (its heartbeat is stopped
     # here, as if the process stalled), and the winner claimed the run.
     stale = (await loser.claim_orphaned_runs())[0]
     await loser.release_claim(stale)
-    await asyncio.sleep(1.3)
+    await _lease_lapsed(router)
     winning = (await winner.claim_orphaned_runs())[0]
     assert winning["record"]["version"] > stale["record"]["version"]
 
@@ -134,7 +161,7 @@ async def test_the_dead_attempts_sandboxes_are_removed_after_the_run_is_ours(tmp
 
     sandboxes.cleanup_orphans = cleanup
     dead_owner = (await dead.get_run("run_orphan"))["owner"]
-    await asyncio.sleep(1.3)
+    await _lease_lapsed(dead.memory_router)
 
     await survivor.resume("run_orphan")
 

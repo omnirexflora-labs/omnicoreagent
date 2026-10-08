@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 
 from fastapi.testclient import TestClient
 import pytest
@@ -438,15 +439,27 @@ def test_background_api_wait_true_without_request_timeout_returns_retry_state(tm
 
 
 def test_background_api_wait_true_times_out_before_slow_inline_run_finishes(tmp_path):
-    agent = ServedAgent()
-    agent.delay_seconds = 2
+    # The run holds on a gate the test opens, not on a sleep: a fixed 2 s
+    # sleep against a 0.5 s wait was one slow claim away from the run
+    # finishing, or from the run not yet being claimed, in a loaded full-suite
+    # run. The wait is 1.5 s (request timeout 2 s, less the 0.5 s margin), and
+    # the run cannot finish inside it.
+    gate = threading.Event()
+
+    class HeldAgent(ServedAgent):
+        async def run(self, query, session_id=None, run_id=None):
+            self.calls.append({"query": query, "session_id": session_id, "run_id": run_id})
+            await asyncio.to_thread(gate.wait, 30)
+            return {"response": "released"}
+
+    agent = HeldAgent()
     manager = make_background_manager(tmp_path)
     server = OmniServe(
         agent,
         OmniServeConfig(
             background_agent_id="served",
             background_start_worker=False,
-            request_timeout=1,
+            request_timeout=2,
         ),
         background_manager=manager,
     )
@@ -462,17 +475,20 @@ def test_background_api_wait_true_times_out_before_slow_inline_run_finishes(tmp_
         )
         assert created.status_code == 200
 
-        run_response = client.post(
-            "/background/tasks/slow_inline/run",
-            json={"wait": True},
-        )
+        try:
+            run_response = client.post(
+                "/background/tasks/slow_inline/run",
+                json={"wait": True},
+            )
+        finally:
+            gate.set()
         assert run_response.status_code == 504
         timeout_detail = run_response.json()["detail"]
         assert timeout_detail["task_id"] == "slow_inline"
         assert timeout_detail["run_id"].startswith("run_")
         assert timeout_detail["status"] in {"claimed", "running"}
-        assert timeout_detail["wait_timeout_seconds"] == 0.5
-        assert timeout_detail["request_timeout_seconds"] == 1
+        assert timeout_detail["wait_timeout_seconds"] == 1.5
+        assert timeout_detail["request_timeout_seconds"] == 2
 
     assert len(agent.calls) == 1
 

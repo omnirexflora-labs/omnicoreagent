@@ -1247,6 +1247,10 @@ async def test_background_run_passes_run_id_to_kwargs_agent():
     )
 
     run = await manager.run_now("task", wait=True)
+    # Wait for the run to settle instead of trusting that the call above
+    # returned only at the end: on a loaded machine (the full suite) it has
+    # come back before the run finished. A settled run returns at once.
+    run = await manager.run_until_terminal(run.run_id, timeout_seconds=30)
 
     assert run.status == RunStatus.COMPLETED
     assert agent.calls[0]["run_id"] == run.run_id
