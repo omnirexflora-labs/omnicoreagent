@@ -238,6 +238,20 @@ Every release, with its notes, is also on
   above). To keep the earlier behaviour, set
   `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_ENABLED=false`. Without OmniServe,
   `agent.claim_orphaned_runs()` and `agent.resume_claimed(claim)` do the same.
+- **A server's memory no longer climbs with every visit from the C allocator.** In the 30-minute
+  soak the desk's memory rose 2.6 to 2.8 MiB a minute with no plateau. Most of it was glibc: each
+  thread that allocates gets an arena (up to eight a core), and OmniServe runs many (the database
+  calls, the telemetry writer, tool calls), so freed memory stayed in arenas. OmniServe now asks
+  for at most two arenas when it is built. `MALLOC_ARENA_MAX`, if you set it, wins, and
+  `OMNICOREAGENT_SERVE_MALLOC_ARENAS` changes the number (`0` leaves the allocator alone). It does
+  nothing off glibc.
+
+- **A session's state is released when its run ends.** The agent kept a `SessionState` for every
+  session that ever ran, with the last run's messages and its loop detector, for the life of the
+  process. In a 30-minute server soak of the support desk (20 users, 2,233 visits) memory rose
+  2.6 to 2.8 MiB a minute with no plateau. Locally the same flow left about 48 more allocated
+  blocks per visit (81 against 33). The store now drops the session when the run leaves, on every
+  exit: completed, failed, cancelled, suspended.
 
 ## 0.5.1
 

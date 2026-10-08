@@ -15,6 +15,7 @@ from omnicoreagent.core.logging import logger
 
 from .app_factory import create_omniserve_app
 from .config import OmniServeConfig, validate_server_bind_config
+from .malloc import limit_malloc_arenas
 from .state import get_agent_name
 
 if TYPE_CHECKING:
@@ -75,6 +76,8 @@ class OmniServe:
             description: Optional API description
             background_manager: Optional durable background manager to serve
         """
+        # Before the first threads exist: see serve/malloc.py.
+        limit_malloc_arenas()
         self.agent = agent
         self.config = config or OmniServeConfig()
         self.title = title or f"{get_agent_name(agent)} API"

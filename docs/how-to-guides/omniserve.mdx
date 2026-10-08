@@ -732,6 +732,7 @@ background API and its worker run with an in-memory task store.
 | `OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS` | `100` | Requests per window, at least `1` |
 | `OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW` | `60` | Window in seconds, at least `1` |
 | `OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS` | `24` | Concurrent runs per process; `0` or `none` is unlimited. See [how many runs one process takes](#how-many-runs-one-process-takes) |
+| `OMNICOREAGENT_SERVE_MALLOC_ARENAS` | `2` | Most glibc malloc arenas the process may use, so its many threads do not each hold freed memory; `0` leaves the allocator alone, and `MALLOC_ARENA_MAX` wins when set. |
 | `OMNICOREAGENT_SERVE_RUN_ADMISSION_WAIT` | `5` | Seconds a request waits for a run slot before `503` |
 | `OMNICOREAGENT_SERVE_REQUEST_LOGGING` | `true` | Log each request; adds `X-Process-Time` |
 | `OMNICOREAGENT_SERVE_LOG_LEVEL` | `INFO` | `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG` or `TRACE` |
