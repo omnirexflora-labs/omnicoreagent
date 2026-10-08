@@ -242,3 +242,45 @@ def test_the_lag_probe_sees_a_blocked_event_loop():
 
     seen = asyncio.run(scenario())
     assert seen["samples"] >= 1 and seen["window_max_ms"] >= 300 and seen["over_100ms"] >= 1
+
+
+def test_many_sessions_leave_nothing_behind_in_the_process(desk):
+    """Server soak, 2026-10-07: memory rose 2.6 to 2.8 MiB a minute with no plateau.
+
+    The agent kept a session's state (its messages and loop detector) for every
+    session that ever ran. After a warm-up, a crowd of new sessions doing the
+    desk's flows (a lookup, a help question, a refund through approval and
+    resume) must not leave their state, or anything else that counts per
+    session, in the heap. Counted in objects, not bytes: deterministic, and
+    the regex scans a byte tracer would slow down are not in the way.
+    """
+    import gc
+    from collections import Counter
+
+    client, _ = desk
+
+    def visit(number: int) -> None:
+        session = f"soak-{number}"
+        if number % 3 == 0:
+            _chat(client, "Where is order 1042?", session=session)
+        elif number % 3 == 1:
+            _chat(client, "What is your returns policy?", session=session)
+        else:
+            paused = _chat(client, "Please refund order 1042, $12.50.", session=session)
+            _decide(client, paused)
+            assert client.post(f"/runs/{paused['run_id']}/resume").status_code == 200
+
+    def census() -> Counter:
+        gc.collect()
+        return Counter(type(o).__name__ for o in gc.get_objects())
+
+    for number in range(12):
+        visit(number)
+    before = census()
+    for number in range(12, 72):
+        visit(number)
+    after = census()
+
+    grown = {name: after[name] - before[name] for name in after if after[name] - before[name] >= 30}
+    # Sixty visits: anything kept per visit shows as 60 or more of its type.
+    assert grown == {}, grown
