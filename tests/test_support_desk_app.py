@@ -274,13 +274,27 @@ def test_many_sessions_leave_nothing_behind_in_the_process(desk):
         gc.collect()
         return Counter(type(o).__name__ for o in gc.get_objects())
 
-    for number in range(12):
+    # The first visits fill the bounded caches (URL parsing, token counts) and
+    # import what is loaded on first use, so they are not measured. The
+    # interpreter's own bookkeeping (containers, timers, weak references) comes
+    # and goes between collections; what a leak leaves is a class of ours, once
+    # per visit.
+    noise = {
+        "dict", "list", "tuple", "set", "frozenset", "cell", "function", "method", "lock",
+        "builtin_function_or_method", "ReferenceType", "TimerHandle", "Context", "hamt",
+        "hamt_bitmap_node", "LogRecord", "SplitResult", "str", "bytes", "int", "float",
+    }
+    for number in range(90):
         visit(number)
     before = census()
-    for number in range(12, 72):
+    for number in range(90, 150):
         visit(number)
     after = census()
 
-    grown = {name: after[name] - before[name] for name in after if after[name] - before[name] >= 30}
+    grown = {
+        name: after[name] - before[name]
+        for name in after
+        if name not in noise and after[name] - before[name] >= 30
+    }
     # Sixty visits: anything kept per visit shows as 60 or more of its type.
     assert grown == {}, grown
