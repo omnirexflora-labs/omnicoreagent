@@ -412,7 +412,9 @@ def _tool_call(
         "tool_span_id": outcome_event.metadata.get("tool_span_id") if outcome_event else None,
         "result": outcome_event.output if outcome_event else None,
         "result_capture": _capture(outcome_event.output_capture) if outcome_event else None,
-        "error": _error(outcome_event) if outcome_event else None,
+        # A call waiting for a person did not fail; the governance list below
+        # holds the ask it is waiting on.
+        "error": _error(outcome_event) if outcome_event and outcome != "awaiting_approval" else None,
         "governance": [
             {
                 "event_id": event.event_id,

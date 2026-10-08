@@ -87,6 +87,31 @@ class RunApprovalResolver:
 
     is_static = False
 
+    def already_asked(self, approval: ApprovalRequest) -> bool:
+        """Whether this run's record already holds the question.
+
+        A resume asks the governed call again and the record answers it. That
+        is the same ask, not a new one, so the trace does not record it twice
+        (the support desk resumed runs showed each decided approval asked
+        again, under a new id, in the resumed segment).
+        """
+        run = current_run()
+        if run is None or not run.enabled:
+            return False
+        digest = request_digest(approval)
+        # Only a record that ``resolve`` would answer from. One already used
+        # for an earlier identical call is spent: a repeat of the call is a
+        # new question and is recorded as one.
+        return any(
+            r["request_digest"] == digest
+            and (
+                r["status"] != "used"
+                or (r.get("decision") == "approve" and r.get("capability") in _SESSION_SETUP)
+            )
+            and not (r["status"] == "expired" and r.get("used_at"))
+            for r in run.record.get("approvals", [])
+        )
+
     async def resolve(self, approval: ApprovalRequest) -> ApprovalResult | None:
         run = current_run()
         if run is None or not run.enabled:

@@ -13,6 +13,14 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- **A resumed run's trace no longer asks twice, or reports a pause as an error.** The resumed
+  segment recorded an `approval_request_created` event again, under a new id, for an approval the
+  record already held; it is now recorded once, in the segment that paused (the decision is still
+  an `approval_resolved` in the resumed one). A call waiting for a person now has `error: null` in
+  the trajectory (its outcome was already `awaiting_approval`), and an OTLP backend no longer sees
+  a skipped span (waiting for approval, or stopped by a budget) as an error: its status is unset
+  and it carries no `error.type`.
+
 - **`/prometheus` says what runs, models, budgets and approvals did.** A server under load
   showed only request counts. It now also counts runs finished by status and reason, runs resumed
   by trigger and cause (a client, the orphan sweep, a background retry), model calls, errors and

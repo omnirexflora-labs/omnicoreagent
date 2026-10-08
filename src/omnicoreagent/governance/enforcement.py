@@ -302,11 +302,13 @@ class GovernanceEngine:
             ),
             metadata=approval_metadata(request),
         )
-        await emit_approval_request(
-            self.telemetry_recorder,
-            approval,
-            strict=_decision_requires_strict_audit(decision),
-        )
+        already_asked = getattr(self.approval_resolver, "already_asked", None)
+        if already_asked is None or not already_asked(approval):
+            await emit_approval_request(
+                self.telemetry_recorder,
+                approval,
+                strict=_decision_requires_strict_audit(decision),
+            )
         if self.approval_resolver is None:
             decision.approval_id = approval.approval_id
             raise ApprovalRequiredError(
