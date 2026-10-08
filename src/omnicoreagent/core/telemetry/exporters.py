@@ -234,7 +234,9 @@ class OTelTraceMapper:
         attributes.update(_capture_attributes("span.output", span.output_capture))
         attributes.update(_payload_attributes("input", span.input))
         attributes.update(_payload_attributes("output", span.output))
-        if span.error:
+        # A skipped span waited for a person or was stopped by a budget: it is
+        # not a failure, and a backend alerting on error.type would page on it.
+        if span.error and span.status != SpanStatus.SKIPPED:
             attributes["error.type"] = span.error.type
             attributes["error.message"] = span.error.message
         if span.token_usage.prompt_tokens is not None:
@@ -272,7 +274,7 @@ class OTelTraceMapper:
             attributes["omnicoreagent.actor.name"] = event.actor.name
         if event.duration_ms is not None:
             attributes["omnicoreagent.duration_ms"] = event.duration_ms
-        if event.error:
+        if event.error and event.metadata.get("phase") != "approval":
             attributes["error.type"] = event.error.type
             attributes["error.message"] = event.error.message
         attributes.update(_prefix_mapping("omnicoreagent.event.metadata.", event.metadata))
@@ -641,7 +643,7 @@ def _to_otlp_status(status: str):
 
     if status == SpanStatus.OK.value:
         return Status(code=Status.STATUS_CODE_OK)
-    if status == SpanStatus.RUNNING.value:
+    if status in {SpanStatus.RUNNING.value, SpanStatus.SKIPPED.value}:
         return Status(code=Status.STATUS_CODE_UNSET)
     return Status(code=Status.STATUS_CODE_ERROR, message=status)
 

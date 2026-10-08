@@ -845,6 +845,26 @@ help it. Raising the cap does not raise the knee.
   `omniserve_runs_waiting`, `omniserve_runs_limit` and
   `omniserve_runs_rejected_total`.
 
+#### What a server under load reports
+
+`/prometheus` also counts what the runs did. Every figure only grows, since the process
+started; use `rate()` or `increase()` on it. Labels come from small fixed sets, never a run id,
+a session id or a tool argument.
+
+| Metric | Labels | Counts |
+|---|---|---|
+| `omniserve_request_duration_seconds` | `le` | A histogram of request time (`_bucket`, `_sum`, `_count`). |
+| `omniserve_runs_finished_total` | `status`, `reason` | Run segments that ended, by the run's status (`completed`, `failed`, `timeout`, `awaiting_approval`, `awaiting_budget`, `interrupted`, `blocked`) and its `termination_reason` (`stop`, `provider_error`, `max_steps`, `budget_exhausted`, ...; `none` when a pause has none). A run that pauses and resumes counts once per segment. |
+| `omniserve_runs_resumed_total` | `trigger`, `cause` | Resumes. `trigger` is `explicit` (a client called resume), `orphan_sweep` or `background_retry`; `cause` is why: `approval`, `budget_grant`, `budget_denied`, `interrupted`, `recovered_after_lapsed_lease`. |
+| `omniserve_model_calls_total` | `model` | Model calls made. |
+| `omniserve_model_errors_total` | `model` | Model calls that raised after the provider's own retries. |
+| `omniserve_model_retries_total` | `model` | Retries inside model calls (429s, timeouts). |
+| `omniserve_budget_refused_total` | `scope`, `meter`, `action` | Times a budget stopped a run. `action` is `pause` (waits for a person) or `stop`. |
+| `omniserve_approvals_requested_total` | `risk` | Approvals asked for. |
+| `omniserve_approvals_decided_total` | `decision` | Approvals decided: `approve`, `deny` or `expired`. |
+
+A label that would take a hundred distinct values is counted under `other`.
+
 #### Scale out: one replica per core
 
 Run one replica per core behind a load balancer, all sharing the same memory,

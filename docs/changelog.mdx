@@ -24,6 +24,36 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- **A resumed run's final summary covers the whole run.** The `run_summary` on its `final_answer`
+  event described the last segment only: a run that took two segments, two model calls and 24
+  tokens read as one call and 12 tokens. It now also carries `run_summary["whole_run"]`: every
+  segment's steps, model calls, tokens and cost, `duration_ms` (the time the segments ran) and
+  `elapsed_ms` (from the first start, the wait for a person included). `run_summary` itself is
+  still the final segment's.
+
+- **A resumed run's trace no longer asks twice, or reports a pause as an error.** The resumed
+  segment recorded an `approval_request_created` event again, under a new id, for an approval the
+  record already held; it is now recorded once, in the segment that paused (the decision is still
+  an `approval_resolved` in the resumed one). A call waiting for a person now has `error: null` in
+  the trajectory (its outcome was already `awaiting_approval`), and an OTLP backend no longer sees
+  a skipped span (waiting for approval, or stopped by a budget) as an error: its status is unset
+  and it carries no `error.type`.
+
+- **`/prometheus` says what runs, models, budgets and approvals did.** A server under load
+  showed only request counts. It now also counts runs finished by status and reason, runs resumed
+  by trigger and cause (a client, the orphan sweep, a background retry), model calls, errors and
+  retries by model, budget refusals, and approvals asked and decided
+  (`omniserve_runs_finished_total`, `omniserve_runs_resumed_total`, `omniserve_model_*_total`,
+  `omniserve_budget_refused_total`, `omniserve_approvals_*_total`). Labels are bounded sets; none
+  carries a run id, session id or tool argument. `OmniCoreAgent.resume()` takes a `trigger`
+  (default `explicit`) that the supervisor sets to `background_retry`.
+
+- **`/prometheus` request-duration counts keep growing.** `omniserve_request_duration_seconds_count`
+  and `_sum` were worked out from the last 1000 requests, so under load both stopped at 1000 and
+  `rate()` read zero. They now count since the server started, as a Prometheus histogram: `_bucket`
+  (with `le` bounds from 5 ms to 5 minutes), `_sum` and `_count`. The non-standard `_avg` line is
+  gone; use `_sum / _count`.
+
 - **The trace archive no longer leaves a lock file for every trace.** Local workspace storage
   kept one lock file per path and never removed it, so the support desk's archive made two files
   for each trace. In a server soak (2026-10-08) the Python heap was flat, but the container's

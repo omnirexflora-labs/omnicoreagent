@@ -28,6 +28,7 @@ from omnicoreagent.core.runs import (
     resume_cause,
     supports_run_state,
 )
+from omnicoreagent.core.metrics import COUNTERS
 from omnicoreagent.core.runtime import (
     builder,
     construction,
@@ -898,15 +899,20 @@ class OmniCoreAgent:
                 await self._close_dead_segments(
                     run_id, trace_context.trace_id, list(_resume.get("trace_ids") or [])
                 )
+                # Why: the state the run was left in, and who resumed it. A
+                # sweeper passes the cause it read before it claimed the run,
+                # since claiming rewrites the lease.
+                why = {"trigger": "explicit", **(_resume_cause or resume_cause(_resume))}
+                COUNTERS.inc(
+                    "omniserve_runs_resumed_total",
+                    trigger=why["trigger"],
+                    cause=why["cause"],
+                )
                 await self.telemetry_recorder.emit_event(
                     "run_resumed",
                     actor=self._telemetry_actor(),
                     metadata={
-                        # Why: the state the run was left in, and who resumed
-                        # it. A sweeper passes the cause it read before it
-                        # claimed the run, since claiming rewrites the lease.
-                        "trigger": "explicit",
-                        **(_resume_cause or resume_cause(_resume)),
+                        **why,
                         "previous_trace_ids": list(_resume.get("trace_ids") or []),
                         "step": _resume.get("step"),
                         "approvals": [
@@ -1501,11 +1507,18 @@ class OmniCoreAgent:
         except RunStateUnsupported:
             return None
 
-    async def resume(self, run_id: str, on_event: Any = None) -> Dict[str, Any]:
+    async def resume(
+        self, run_id: str, on_event: Any = None, *, trigger: str = "explicit"
+    ) -> Dict[str, Any]:
         """Continue a run: one waiting for approval once every approval is
         decided (see ``resolve_approval``), or one whose process stopped
         (its heartbeat is older than ``run_lease_seconds``). Completed tool
-        calls never run again."""
+        calls never run again.
+
+        ``trigger`` says who resumed it, for the run's trace and the
+        ``omniserve_runs_resumed_total`` metric: a person or client
+        (``explicit``), or the background supervisor retrying
+        (``background_retry``)."""
         record = await self._run_record(run_id)
         if record is None:
             raise LookupError(f"No run {run_id}")
@@ -1524,6 +1537,9 @@ class OmniCoreAgent:
                 run_id=run_id,
                 on_event=on_event,
                 _resume=record,
+                _resume_cause=(
+                    None if trigger == "explicit" else {"trigger": trigger, **resume_cause(record)}
+                ),
             )
         except RunStateConflict:
             # The version check lost: the orphan sweep (or another client)
@@ -2339,8 +2355,10 @@ class OmniCoreAgent:
             refused=refused,
         )
 
-    async def _run_summary(self, trace_id: str) -> Dict[str, Any]:
-        """Totals for the run so far, with its subagents' tokens and cost added."""
+    async def _run_summary(self, trace_id: str, *, whole_run: bool = True) -> Dict[str, Any]:
+        """Totals for this trace segment, with its subagents' tokens and cost
+        added; for a resumed run, ``whole_run`` adds the totals of every
+        segment (see ``_whole_run``)."""
         recorder = self.telemetry_recorder
         # Totals only read the trace; a copy of it would be most of the work.
         trace = await recorder.peek_trace(trace_id)
@@ -2370,9 +2388,60 @@ class OmniCoreAgent:
             "estimated_cost_usd": round(combined_cost, 10) if priced else None,
             "cost_complete": cost_complete,
         }
+        previous = next(
+            (
+                list(event.metadata.get("previous_trace_ids") or [])
+                for event in trace.events
+                if event.event_type == "run_resumed"
+            ),
+            [],
+        )
+        if whole_run and previous:
+            summary["whole_run"] = await self._whole_run(summary, trace, previous)
         return {
             "run_summary": summary,
             "final_model_response_event_id": final_model_response_event_id(trace),
+        }
+
+    async def _whole_run(
+        self, segment: Dict[str, Any], trace: TelemetryTrace, previous: List[str]
+    ) -> Dict[str, Any]:
+        """A resumed run's totals over all its segments.
+
+        The summary a segment ends with covers that segment alone, so a run
+        resumed once read as one model call and half its tokens and time
+        (found reading the support desk's resumed runs, 2026-10-08).
+        ``duration_ms`` is the time the segments were running, as the run
+        story sums it; ``elapsed_ms`` is from the first segment's start, the
+        wait for a person included.
+        """
+        recorder = self.telemetry_recorder
+        summaries: List[Dict[str, Any]] = []
+        starts = [trace.started_at]
+        for trace_id in previous:
+            earlier = await recorder.peek_trace(trace_id)
+            if earlier is None:
+                continue  # pruned; the count below says so
+            starts.append(earlier.started_at)
+            summaries.append((await self._run_summary(trace_id, whole_run=False))["run_summary"])
+        summaries.append(segment)
+        total: Dict[str, Any] = {}
+        for each in summaries:
+            total = _add_totals(total, each)
+        ended = trace.ended_at or datetime.now(timezone.utc)
+        return {
+            "segments": len(summaries),
+            "segments_missing": len(previous) + 1 - len(summaries),
+            # Step numbers continue across segments, so the last is the count.
+            "steps": segment["steps"],
+            "model_calls": total["model_calls"],
+            "tokens": total["tokens"],
+            "estimated_cost_usd": total["estimated_cost_usd"],
+            "cost_complete": all(each["cost_complete"] for each in summaries),
+            "model_latency_ms": total["model_latency_ms"],
+            "duration_ms": round(total["duration_ms"], 3),
+            "elapsed_ms": round((ended - min(starts)).total_seconds() * 1000, 3),
+            "including_subagents": total["including_subagents"],
         }
 
     def stream(
