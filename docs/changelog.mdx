@@ -13,6 +13,12 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- **`/prometheus` request-duration counts keep growing.** `omniserve_request_duration_seconds_count`
+  and `_sum` were worked out from the last 1000 requests, so under load both stopped at 1000 and
+  `rate()` read zero. They now count since the server started, as a Prometheus histogram: `_bucket`
+  (with `le` bounds from 5 ms to 5 minutes), `_sum` and `_count`. The non-standard `_avg` line is
+  gone; use `_sum / _count`.
+
 - **The trace archive no longer leaves a lock file for every trace.** Local workspace storage
   kept one lock file per path and never removed it, so the support desk's archive made two files
   for each trace. In a server soak (2026-10-08) the Python heap was flat, but the container's
