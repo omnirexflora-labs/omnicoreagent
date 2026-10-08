@@ -27,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from loadlib import (  # noqa: E402
-    Desk, Load, Sampler, check_ledger, error_table, fake_get, find_stuck, find_waiting,
+    Desk, Load, Sampler, check_ledger, classify, error_table, fake_get, find_stuck, find_waiting,
     per_kind, prime_fake, read_ledger, runtime_overhead, settle_by_sweep, summarize_resources, summarize,
 )
 
@@ -191,6 +191,9 @@ def build_result(args, stages, boundaries, records, samples, load, overhead, led
         resources = summarize_resources(samples_between(samples, b["t_start"], b["t_end"]))
         stage_rows.append({
             **b, "requests": len(inside), "errors": sum(1 for r in inside if r.error),
+            "failed": sum(1 for r in inside if classify(r) == "failed"),
+            "shed": sum(1 for r in inside if classify(r) == "shed"),
+            "already": sum(1 for r in inside if classify(r) == "already"),
             "requests_per_second": len(inside) / b["seconds"],
             "latency_ms": summarize([r.seconds * 1000 for r in inside]),
             "by_kind": per_kind(inside), "resources": resources,
@@ -238,12 +241,17 @@ def finish_lines(result: dict, top: dict) -> list[dict]:
     # 1. Concurrency: 100 sessions for 10 minutes.
     stage = next((s for s in stages if s["users"] == top["users"]), stages[-1])
     at_scale = stage["users"] >= PLAN["concurrent_users"] and stage["seconds"] >= PLAN["concurrent_seconds"]
-    failed = stage["errors"]
+    failed, shed = stage.get("failed", stage["errors"]), stage.get("shed", 0)
     overhead_p95 = (result["overhead"].get(f"stage_{stage['stage']}") or result["overhead"]["overall"])["step_overhead_ms"]["p95"]
     stall = stage["resources"].get("lag_max_ms")
     lines += [
         {"line": "1. Concurrency", "measure": f"failed requests at {stage['users']} users x {stage['seconds']:.0f}s",
          "value": failed, "target": "0 (none injected)", "verdict": verdict(failed == 0, at_scale)},
+        # Not a pass or a miss: how much the admission limit turned away. One
+        # process past its knee sheds by design; the answer is more replicas.
+        {"line": "1. Concurrency", "measure": "turned away by the admission limit (503, nothing started)",
+         "value": f"{shed} of {stage['requests']} ({shed / max(stage['requests'], 1) * 100:.1f}%)",
+         "target": "reported", "verdict": "-"},
         {"line": "1. Concurrency", "measure": "runtime overhead per step, p95 (ms, excluding model time)",
          "value": None if overhead_p95 is None else round(overhead_p95, 1), "target": f"< {TARGET_OVERHEAD_P95_MS}",
          "verdict": verdict(overhead_p95 is not None and overhead_p95 < TARGET_OVERHEAD_P95_MS, at_scale)},

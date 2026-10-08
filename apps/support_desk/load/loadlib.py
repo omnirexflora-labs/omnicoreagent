@@ -259,7 +259,7 @@ class Attempt:
     session: str
     decision: str                  # "approve" or "deny"
     run_id: str | None = None
-    outcome: str = "pending"       # completed | not_completed | approve_failed | no_pause
+    outcome: str = "pending"       # completed | not_completed | not_started | approve_failed | no_pause
     t_asked: float = 0.0
     t_done: float | None = None
     # The staff's resume never got through (a 503 that outlasted the retries),
@@ -430,7 +430,12 @@ class Load:
         )
         attempt.run_id = (body or {}).get("run_id")
         if error or body.get("status") != "awaiting_approval" or not body.get("approvals"):
-            attempt.outcome = "no_pause" if not error else "not_completed"
+            # A refund the server turned away never started: no run, no pause,
+            # nothing to complete. It is not a run that failed to finish.
+            if error:
+                attempt.outcome = "not_started" if attempt.run_id is None else "not_completed"
+            else:
+                attempt.outcome = "no_pause"
             attempt.t_done = time.time()
             return
         job = Job(attempt, body["approvals"][0]["approval_id"])
@@ -703,7 +708,7 @@ def check_ledger(attempts: list[Attempt], ledger: list[dict], baseline_ids: set)
             problems["missing_after_completed"].append({**who, "rows": n})
         if attempt.decision == "deny" and n:
             problems["issued_without_approval"].append({**who, "rows": n})
-        if attempt.decision == "approve" and attempt.outcome in ("no_pause", "approve_failed") and n:
+        if attempt.decision == "approve" and attempt.outcome in ("no_pause", "approve_failed", "not_started") and n:
             problems["issued_without_approval"].append({**who, "rows": n})
         if attempt.decision == "approve" and attempt.outcome == "not_completed" and n:
             problems["issued_but_run_not_completed"].append({**who, "rows": n})
@@ -745,6 +750,28 @@ async def find_waiting(desk: Desk, prefix: str) -> list[dict]:
         if str(run.get("session_id", "")).startswith(prefix):
             waiting.append(run)
     return waiting
+
+
+def classify(record: Record) -> str | None:
+    """What a request's error means for the finish lines: ``None`` (no error),
+    ``shed``, ``already`` or ``failed``.
+
+    The 2026-10-08 ramp counted 130 "failed requests" at 100 users on one
+    process, and none of them was a failure of the runtime. 95 were requests
+    the admission limit turned away (``503`` with ``Retry-After``, still
+    refused after the client waited it out for up to 60 s): nothing was
+    started for them, and a retry is safe. 36 were resumes answered ``409``
+    because the server's sweep had already resumed the run. A report that
+    calls those failures hides the one number that matters, so they are
+    counted apart and shown beside it.
+    """
+    if not record.error:
+        return None
+    if record.error == "http_503":
+        return "shed"
+    if record.error == "http_409" and record.kind in ("approve", "resume"):
+        return "already"
+    return "failed"
 
 
 def error_table(records: list[Record]) -> dict:

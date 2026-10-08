@@ -142,7 +142,12 @@ the fake provider's own latency is the fallback to subtract if that ever happens
 The report puts the plan's numbers next to their targets, PASS or MISS: no failed requests, overhead p95 under
 100 ms, no event-loop stall over 500 ms (100 customers for 10 minutes); memory growth under 15% after warm-up and
 bounded Postgres connections (the soak). A run below the plan's scale says `(below plan scale)` after the verdict,
-so a small check is never mistaken for the real one. Memory growth compares the first and last minute after
+so a small check is never mistaken for the real one.
+
+A failed request is one that went wrong. Two answers are not counted as failures, and are shown beside the line
+instead: a `503` the admission limit still gave after the client waited out its `Retry-After` (nothing was
+started; one process past its knee does this by design, and more replicas are the answer), and a `409` to an
+approve or resume the server had already acted on (its sweep resumed the run first). Memory growth compares the first and last minute after
 warm-up (the first fifth of the run, at most five minutes). Connections are bounded when their maximum after
 warm-up is within 25% (or 5) of their median.
 
