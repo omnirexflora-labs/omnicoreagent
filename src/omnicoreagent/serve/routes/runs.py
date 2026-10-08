@@ -13,6 +13,7 @@ from omnicoreagent.core.runtime.deadline import (
     run_with_timeout,
 )
 from omnicoreagent.core.telemetry import TraceStatus
+from omnicoreagent.core.runs import RunStateConflict
 
 from ..admission import admit, run_slot
 from ..models import (
@@ -251,7 +252,7 @@ def create_runs_router() -> APIRouter:
         "/runs/{run_id}/approvals/{approval_id}",
         summary="Decide an approval",
         description="Approve or deny an approval a paused run is waiting for.",
-        responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+        responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
     )
     async def decide_approval(
         request: Request, run_id: str, approval_id: str, body: ApprovalDecisionRequest
@@ -270,6 +271,16 @@ def create_runs_router() -> APIRouter:
             raise HTTPException(status_code=404, detail=str(exc)) from None
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
+        except RunStateConflict:
+            # The paused run's own writes kept changing its record while the
+            # decision was saved, and ``decide`` ran out of re-reads: nothing
+            # was saved, so the same decision can be sent again. It was a 500
+            # (found after the support desk soak, 2026-10-08).
+            raise HTTPException(
+                status_code=503,
+                detail="The run was changing while the decision was saved; nothing was saved. Send the same decision again.",
+                headers={"Retry-After": "1"},
+            ) from None
         return _public_view(agent, approval)
 
     @router.get(

@@ -143,6 +143,10 @@ Every release, with its notes, is also on
   blocks per visit (81 against 33). The store now drops the session when the run leaves, on every
   exit: completed, failed, cancelled, suspended.
 
+- **A decision that could not be saved is retryable, not a 500.** `POST /runs/{run_id}/approvals/{approval_id}`
+  answered 500 when the paused run's own writes kept changing its record past `decide`'s re-reads. Nothing
+  was saved in that case, so it now answers `503` with `Retry-After: 1`; send the same decision again.
+
 ### Changed
 
 - **A call's budgets go to the store in one transaction, not one per scope.** A model call holds
