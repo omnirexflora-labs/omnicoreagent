@@ -790,7 +790,7 @@ class BackgroundSupervisor:
                     # A retry after a deadline continues the same run. A new
                     # attempt would wipe its tool calls, and a refund the first
                     # attempt issued would be issued again.
-                    return await agent.resume(run.run_id)
+                    return await agent.resume(run.run_id, trigger="background_retry")
                 return await agent.run(**kwargs)
 
             # A deadline marks the run as timed out, not cancelled, in its trace.

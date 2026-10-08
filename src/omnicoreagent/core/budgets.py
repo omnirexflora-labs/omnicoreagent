@@ -38,6 +38,7 @@ from uuid import uuid4
 from contextvars import ContextVar
 
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.metrics import COUNTERS
 
 # The meters a budget can limit.
 METERS = (
@@ -1104,6 +1105,12 @@ class RunBudgets:
     ) -> Exception:
         """What to raise when a budget runs out: wait for a person, or end."""
         await self._record_exhausted(scope, limit, exhausted)
+        COUNTERS.inc(
+            "omniserve_budget_refused_total",
+            scope=scope.value,
+            meter=limit.meter,
+            action="pause" if limit.on_exhausted == "pause" else "stop",
+        )
         if limit.on_exhausted != "pause" or (key, limit.meter) in self.refused:
             return BudgetExhaustedForRun(exhausted, limit.on_exhausted)
         request = {

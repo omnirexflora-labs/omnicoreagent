@@ -23,6 +23,7 @@ from uuid import uuid4
 
 from omnicoreagent.core.credentials import scrub_credentials
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.metrics import COUNTERS
 from omnicoreagent.governance.hashing import arguments_digest
 
 RUN_STATUSES = (
@@ -528,6 +529,14 @@ class RunTracker:
                 # What the run spent, per scope, kept once its own counter is gone.
                 self.record["budgets"] = budgets
             await self._save()
+            # Counted once the record says it, so /prometheus never reads
+            # ahead of GET /runs/{id}. A segment that pauses counts too: the
+            # pauses are how many runs waited for a person.
+            COUNTERS.inc(
+                "omniserve_runs_finished_total",
+                status=status,
+                reason=termination_reason or "none",
+            )
 
     async def note_continuation(self, tool_call_id: str) -> None:
         """This call was paused with its worker, and runs again on resume to

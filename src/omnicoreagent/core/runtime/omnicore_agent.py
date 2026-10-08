@@ -28,6 +28,7 @@ from omnicoreagent.core.runs import (
     resume_cause,
     supports_run_state,
 )
+from omnicoreagent.core.metrics import COUNTERS
 from omnicoreagent.core.runtime import (
     builder,
     construction,
@@ -898,15 +899,20 @@ class OmniCoreAgent:
                 await self._close_dead_segments(
                     run_id, trace_context.trace_id, list(_resume.get("trace_ids") or [])
                 )
+                # Why: the state the run was left in, and who resumed it. A
+                # sweeper passes the cause it read before it claimed the run,
+                # since claiming rewrites the lease.
+                why = {"trigger": "explicit", **(_resume_cause or resume_cause(_resume))}
+                COUNTERS.inc(
+                    "omniserve_runs_resumed_total",
+                    trigger=why["trigger"],
+                    cause=why["cause"],
+                )
                 await self.telemetry_recorder.emit_event(
                     "run_resumed",
                     actor=self._telemetry_actor(),
                     metadata={
-                        # Why: the state the run was left in, and who resumed
-                        # it. A sweeper passes the cause it read before it
-                        # claimed the run, since claiming rewrites the lease.
-                        "trigger": "explicit",
-                        **(_resume_cause or resume_cause(_resume)),
+                        **why,
                         "previous_trace_ids": list(_resume.get("trace_ids") or []),
                         "step": _resume.get("step"),
                         "approvals": [
@@ -1501,11 +1507,18 @@ class OmniCoreAgent:
         except RunStateUnsupported:
             return None
 
-    async def resume(self, run_id: str, on_event: Any = None) -> Dict[str, Any]:
+    async def resume(
+        self, run_id: str, on_event: Any = None, *, trigger: str = "explicit"
+    ) -> Dict[str, Any]:
         """Continue a run: one waiting for approval once every approval is
         decided (see ``resolve_approval``), or one whose process stopped
         (its heartbeat is older than ``run_lease_seconds``). Completed tool
-        calls never run again."""
+        calls never run again.
+
+        ``trigger`` says who resumed it, for the run's trace and the
+        ``omniserve_runs_resumed_total`` metric: a person or client
+        (``explicit``), or the background supervisor retrying
+        (``background_retry``)."""
         record = await self._run_record(run_id)
         if record is None:
             raise LookupError(f"No run {run_id}")
@@ -1524,6 +1537,9 @@ class OmniCoreAgent:
                 run_id=run_id,
                 on_event=on_event,
                 _resume=record,
+                _resume_cause=(
+                    None if trigger == "explicit" else {"trigger": trigger, **resume_cause(record)}
+                ),
             )
         except RunStateConflict:
             # The version check lost: the orphan sweep (or another client)

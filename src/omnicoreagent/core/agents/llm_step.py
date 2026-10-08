@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from omnicoreagent.core.credentials import scrub_credentials
+from omnicoreagent.core.metrics import COUNTERS
 from omnicoreagent.core.continuation import continuation_summary
 from omnicoreagent.core.agents.llm_response import (
     extract_response_content,
@@ -502,15 +503,23 @@ class AgentLlmStepRunner:
                 else None
             )
             timing["started"] = time.perf_counter()
+            model_label = _model_label(llm_connection)
+            COUNTERS.inc("omniserve_model_calls_total", model=model_label)
             try:
                 response = await request()
-            except BaseException:
+            except BaseException as failure:
                 if held:
                     await budgets.release(held)  # nothing was spent
+                if isinstance(failure, Exception):
+                    COUNTERS.inc("omniserve_model_errors_total", model=model_label)
                 raise
             finally:
                 OUTPUT_TOKEN_CEILING.reset(ceiling_token)
                 MODEL_RETRY_OBSERVER.reset(retry_token)
+                if retries:
+                    COUNTERS.inc(
+                        "omniserve_model_retries_total", len(retries), model=model_label
+                    )
             normalized = normalize_model_turn(response)
             model_facts = self._model_call_facts(
                 llm_connection,
@@ -957,6 +966,15 @@ class AgentLlmStepRunner:
             "total_time": request_usage.total_time,
             "details": request_usage.details,
         }
+
+
+def _model_label(llm_connection: Any) -> str:
+    """The configured model's name: a small set an operator chose, never text
+    from a request."""
+    try:
+        return str((getattr(llm_connection, "llm_config", None) or {})["model"])
+    except (KeyError, TypeError):
+        return "unknown"
 
 
 def _standard_token_usage(tokens: dict[str, Any] | None) -> dict[str, Any] | None:

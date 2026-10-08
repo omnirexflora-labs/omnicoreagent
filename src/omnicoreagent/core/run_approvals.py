@@ -20,6 +20,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from omnicoreagent.core.metrics import COUNTERS
 from omnicoreagent.core.runs import RunStateConflict, current_run
 from omnicoreagent.governance.models import ApprovalRequest, ApprovalResult, to_plain
 
@@ -170,6 +171,7 @@ class RunApprovalResolver:
                     )
                 return None
         metadata = approval.metadata or {}
+        COUNTERS.inc("omniserve_approvals_requested_total", risk=approval.risk_level or "unknown")
         await run.add_approval(
             {
                 "approval_id": approval.approval_id,
@@ -294,6 +296,7 @@ async def _decide_once(
         approval.update(status="expired", decided_at=utc_now().isoformat())
         version = record.pop("version")
         await store.save_run_state(record, expected_version=version)
+        COUNTERS.inc("omniserve_approvals_decided_total", decision="expired")
         raise ValueError(
             f"Approval {approval_id} expired at {approval['expires_at']}; "
             f"resuming the run refuses the call"
@@ -325,4 +328,5 @@ async def _decide_once(
         approval["edited_arguments"] = dict(arguments)
     version = record.pop("version")
     await store.save_run_state(record, expected_version=version)
+    COUNTERS.inc("omniserve_approvals_decided_total", decision=decision)
     return approval

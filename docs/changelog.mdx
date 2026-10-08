@@ -13,6 +13,15 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- **`/prometheus` says what runs, models, budgets and approvals did.** A server under load
+  showed only request counts. It now also counts runs finished by status and reason, runs resumed
+  by trigger and cause (a client, the orphan sweep, a background retry), model calls, errors and
+  retries by model, budget refusals, and approvals asked and decided
+  (`omniserve_runs_finished_total`, `omniserve_runs_resumed_total`, `omniserve_model_*_total`,
+  `omniserve_budget_refused_total`, `omniserve_approvals_*_total`). Labels are bounded sets; none
+  carries a run id, session id or tool argument. `OmniCoreAgent.resume()` takes a `trigger`
+  (default `explicit`) that the supervisor sets to `background_retry`.
+
 - **`/prometheus` request-duration counts keep growing.** `omniserve_request_duration_seconds_count`
   and `_sum` were worked out from the last 1000 requests, so under load both stopped at 1000 and
   `rate()` read zero. They now count since the server started, as a Prometheus histogram: `_bucket`
