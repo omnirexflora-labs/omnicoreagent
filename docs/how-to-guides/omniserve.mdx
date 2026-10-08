@@ -888,6 +888,16 @@ the support desk's load harness at stages such as `--stages 8:120,16:120,24:120,
 (see `apps/support_desk/load/README.md`), with your model and your stores. The
 knee is the stage where throughput stops rising. Set the limit there.
 
+#### What the runtime adds to each step
+
+On the same 2-core container, with 10 concurrent users and a fake model, the
+runtime's own time per step (the step's time minus the model's) was 81 ms at
+p50 and 182 ms at p95. Most of it is CPU in the event loop: about 100 ms a
+step, mostly in the model client library and the telemetry write. A real model
+call takes 1 to 10 seconds, so the runtime is a few percent of a run. It is also
+why one process bends at about 24 concurrent runs: the event loop is the limit,
+not the database.
+
 For runs longer than a caller should hold a connection, submit then stream:
 start a background task run (`"wait": false`) and follow it from the events
 routes.
