@@ -87,3 +87,27 @@ def test_two_names_on_one_stripe_can_be_renamed_both_ways(tmp_path, monkeypatch)
     storage.delete("a.json")
     storage.clear()
     assert storage.list_files() == []
+
+
+def test_a_write_looks_up_its_temp_name_only_when_it_failed(tmp_path, monkeypatch):
+    """Looking up a name the write has already renamed away leaves the kernel a
+    negative entry for it, and every temp name is new: one for every body, never
+    reused (soak 3, 2026-10-08). Only a failed write needs to clean up."""
+    storage = LocalWorkspaceStorage(tmp_path / "bodies")
+    looked_up: list[str] = []
+    real_unlink = Path.unlink
+    monkeypatch.setattr(
+        Path, "unlink", lambda self, *a, **k: (looked_up.append(self.name), real_unlink(self, *a, **k))[1]
+    )
+
+    storage.write_text("trace.json", "{}")
+    assert looked_up == []
+
+    def refuse(self, target):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "replace", refuse)
+    with pytest.raises(OSError):
+        storage.write_text("other.json", "{}")
+    assert len(looked_up) == 1 and looked_up[0].endswith(".tmp")
+    assert [item.name for item in (tmp_path / "bodies").iterdir()] == ["trace.json"]

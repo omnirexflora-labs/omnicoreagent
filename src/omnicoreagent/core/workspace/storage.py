@@ -192,8 +192,13 @@ class LocalWorkspaceStorage:
         try:
             tmp_path.write_text(content, encoding="utf-8")
             tmp_path.replace(resolved)
-        finally:
+        except BaseException:
+            # Only a write that failed has a temp file to remove. Looking for
+            # the name after a rename that worked made the kernel remember a
+            # name that does not exist, and every temp name is new: one such
+            # entry for each body written, kept until memory is short.
             tmp_path.unlink(missing_ok=True)
+            raise
 
     def describe_root(self) -> str:
         contents = self.list_files()

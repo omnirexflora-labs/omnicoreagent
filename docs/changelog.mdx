@@ -19,7 +19,8 @@ Every release, with its notes, is also on
   memory still rose about 2 MiB a minute: the rest was the kernel's cache of the inodes and
   names of those files, which the container is charged for. A path now maps to one of 256 lock
   files, so the number of locks is fixed however many files are written. Old lock files are
-  left alone and can be deleted.
+  left alone and can be deleted. A write that worked also no longer looks for its temp file
+  afterwards, which had left the kernel a remembered name for every body.
 
 - **A background retry no longer repeats a side effect.** A task whose `retry_on` includes
   `timeout` or `exception` started a new attempt on a retry, and a new attempt wipes the run's
