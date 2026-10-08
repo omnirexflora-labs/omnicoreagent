@@ -370,7 +370,10 @@ async def test_three_processes_sharing_a_directory_do_not_corrupt_each_other(tmp
         root, bodies=LocalWorkspaceStorage(root / "shared"), index=SqliteTelemetryIndex(root)
     )
     segments = sorted((root / "shared" / "segments").glob("*.seg"))
-    assert len(segments) == 3, "writers never share a segment"
+    # Counted by writer, not by file: a run that crosses an hour starts a
+    # second segment for the same writer.
+    writers = {segment.stem.split("-", 1)[1] for segment in segments}
+    assert len(writers) == 3, "writers never share a segment"
     for start in (1, 1001, 2001):
         for number in range(start, start + 60):
             trace, _ = _trace(number)
