@@ -13,6 +13,14 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- **The trace archive no longer leaves a lock file for every trace.** Local workspace storage
+  kept one lock file per path and never removed it, so the support desk's archive made two files
+  for each trace. In a server soak (2026-10-08) the Python heap was flat, but the container's
+  memory still rose about 2 MiB a minute: the rest was the kernel's cache of the inodes and
+  names of those files, which the container is charged for. A path now maps to one of 256 lock
+  files, so the number of locks is fixed however many files are written. Old lock files are
+  left alone and can be deleted.
+
 - **A background retry no longer repeats a side effect.** A task whose `retry_on` includes
   `timeout` or `exception` started a new attempt on a retry, and a new attempt wipes the run's
   tool calls: a refund job that timed out after issuing the refund would issue it again. A retry

@@ -2,6 +2,7 @@ import hashlib
 import logging
 import shutil
 import tempfile
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -81,6 +82,8 @@ class WorkspaceStorage(Protocol):
 class LocalWorkspaceStorage:
     """Safe local storage rooted inside one workspace namespace."""
 
+    LOCK_STRIPES = 256
+
     def __init__(self, root: str | Path):
         from omnicoreagent.core.workspace.paths import register_workspace_root
 
@@ -154,9 +157,33 @@ class LocalWorkspaceStorage:
             return fallback
 
     def _lock(self, resolved: Path) -> FileLock:
-        """A lock for one path, kept outside the namespace so it is never listed."""
-        key = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:32]
-        return FileLock(self._lock_directory() / f"{key}.lock")
+        """A lock for one path, kept outside the namespace so it is never listed.
+
+        A path maps to one of ``LOCK_STRIPES`` lock files, not to a lock file of
+        its own. A file per path left a lock behind for every body ever written
+        and nothing removed it: in the support desk's soak (2026-10-08) the trace
+        archive made two files per trace, and the kernel's cache of their inodes
+        and names was what still grew, about 2 MiB a minute, once the Python heap
+        had stopped. Two paths that share a stripe wait for each other, which
+        costs a moment on a write that takes a few milliseconds.
+        """
+        key = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()
+        stripe = int(key[:8], 16) % self.LOCK_STRIPES
+        return FileLock(self._lock_directory() / f"stripe-{stripe:03d}.lock")
+
+    @contextmanager
+    def _hold(self, *paths: Path):
+        """The locks of several paths, taken in one fixed order.
+
+        Two paths on one stripe would otherwise be asked for twice, and a lock
+        asked for twice by the same thread waits for itself. A fixed order also
+        keeps two renames in opposite directions from waiting on each other.
+        """
+        locks = {str(lock.lock_file): lock for lock in map(self._lock, paths)}
+        with ExitStack() as held:
+            for name in sorted(locks):
+                held.enter_context(locks[name])
+            yield
 
     @staticmethod
     def _replace(resolved: Path, content: str) -> None:
@@ -275,7 +302,7 @@ class LocalWorkspaceStorage:
         if old_resolved == new_resolved:
             return old_resolved, new_resolved
         new_resolved.parent.mkdir(parents=True, exist_ok=True)
-        with self._lock(old_resolved), self._lock(new_resolved):
+        with self._hold(old_resolved, new_resolved):
             old_resolved.rename(new_resolved)
         return old_resolved, new_resolved
 
