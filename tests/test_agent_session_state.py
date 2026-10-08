@@ -70,3 +70,31 @@ async def test_state_context_rejects_invalid_state():
             new_state="running", session_id="chat1", debug=False
         ):
             pass
+
+
+@pytest.mark.asyncio
+async def test_a_session_left_idle_is_not_kept_after_its_run():
+    # Server soak, 2026-10-07: every session that ran left a SessionState, its
+    # loop detector and the last run's messages in the store for the life of
+    # the process, about 37 KB a visit and no plateau.
+    store = AgentSessionStateStore(agent_name="agent")
+    state = store.reset_for_run(session_id="chat1", debug=False)
+    async with store.state_context(
+        new_state=AgentState.RUNNING, session_id="chat1", debug=False
+    ):
+        state.messages.append(Message(role="user", content="hello"))
+        assert ("chat1", "agent") in store.states
+
+    assert store.states == {}
+    assert state.messages == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_run_releases_its_session_too():
+    store = AgentSessionStateStore(agent_name="agent")
+    with pytest.raises(RuntimeError):
+        async with store.state_context(
+            new_state=AgentState.RUNNING, session_id="chat1", debug=False
+        ):
+            raise RuntimeError("boom")
+    assert store.states == {}
