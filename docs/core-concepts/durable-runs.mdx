@@ -362,8 +362,11 @@ What a run does after its process dies, stated exactly. "Resume" means
 - **Sub-agents.** A delegation is a tool call that is not idempotent, so the
   rows above apply to it. A child run left behind by a parent that stopped is
   not resumed, except a worker waiting for an approval.
-- **Background retries** after a failure, a timeout or a cancellation are new
-  attempts from the first step; only a worker that died is resumed.
+- **Background retries.** A retry after a timeout resumes the same run, so
+  completed calls are not repeated. A retry after a failure starts over only if
+  the run made no non-idempotent call; otherwise the run ends `failed`, is not
+  retried, and lists its `side_effects` for a person. A worker that died is
+  resumed.
 
 ### What each store keeps when the machine loses power
 

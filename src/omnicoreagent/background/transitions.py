@@ -59,7 +59,11 @@ class BackgroundRunTransitions:
             return False
 
     async def mark_terminal(
-        self, run: BackgroundRun, status: RunStatus, error: str | None
+        self,
+        run: BackgroundRun,
+        status: RunStatus,
+        error: str | None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         latest = await self.task_store.get_run(run.run_id)
         if not latest:
@@ -72,7 +76,10 @@ class BackgroundRunTransitions:
             latest.run_id,
             {latest.status},
             status,
-            {"error": error},
+            {
+                "error": error,
+                **({"metadata": {**latest.metadata, **metadata}} if metadata else {}),
+            },
             self.worker_id,
             latest.lease_token,
         )

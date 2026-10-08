@@ -275,10 +275,16 @@ timeout | attempts: 2 | error: Run exceeded its 3 second deadline
 - An attempt that raises, or whose agent run ends with an error, or that
   times out, is retried while retries are left: the run goes `retrying`, then
   `queued` again after the delay. When none are left it ends `failed` or
-  `timeout`, with the `error`. A retry is a new attempt from the first step,
-  not a resume: the earlier attempt's tool calls can run again, so retry only
-  tasks whose tools are safe to repeat (see
-  [what is guaranteed](/docs/core-concepts/durable-runs#what-is-guaranteed)).
+  `timeout`, with the `error`. A retry never repeats a side effect:
+  - After a **timeout**, the retry **resumes the same run**. Calls that
+    completed are not run again, and a non-idempotent call that was cut off is
+    `unknown` (see [what is guaranteed](/docs/core-concepts/durable-runs#what-is-guaranteed)).
+  - After a **failure** (a run that cannot be resumed), the retry starts over
+    from the first step, but only if the run made no call of a tool that is not
+    idempotent. Otherwise it is **not retried**: it ends `failed`, its `error`
+    says it was not retried, and `run.metadata["side_effects"]` lists the calls
+    (tool name, call id, `success` or `unknown`) so a person decides whether to
+    run the task again.
 
 | `retry_policy` key | Default | |
 |---|---|---|

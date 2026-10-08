@@ -13,6 +13,14 @@ Every release, with its notes, is also on
 
 ### Fixed
 
+- **A background retry no longer repeats a side effect.** A task whose `retry_on` includes
+  `timeout` or `exception` started a new attempt on a retry, and a new attempt wipes the run's
+  tool calls: a refund job that timed out after issuing the refund would issue it again. A retry
+  after a timeout now resumes the same run (completed calls are not run again; a cut-off
+  non-idempotent call is `unknown`). A failed run cannot be resumed, so it is retried from the
+  start only if it made no non-idempotent call; otherwise it ends `failed` with an error saying it
+  was not retried, and `run.metadata["side_effects"]` lists the calls for a person to decide.
+
 - **A run that times out or fails after side effects says what already happened.** In the
   provider-hang rounds of the support desk chaos run, a refund was issued and the run then hit its
   deadline on the next model call; the client saw only `timeout`, and a client that started a new

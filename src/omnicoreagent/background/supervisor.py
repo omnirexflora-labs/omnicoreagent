@@ -13,6 +13,7 @@ from typing import Any
 from omnicoreagent.background.agent_specs import resolve_agent
 from omnicoreagent.background.errors import RunLeaseError, RunNotFoundError
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.runs import side_effects
 from omnicoreagent.background.event_log import BackgroundEventLog
 from omnicoreagent.background.models import (
     SETTLED_RUN_STATUSES,
@@ -410,7 +411,12 @@ class BackgroundSupervisor:
         except asyncio.TimeoutError as exc:
             try:
                 await self.handle_attempt_failure(
-                    running.task, running.run, running.attempt, "timeout", exc
+                    running.task,
+                    running.run,
+                    running.attempt,
+                    "timeout",
+                    exc,
+                    agent=running.agent,
                 )
             finally:
                 await self.cleanup_running_attempt(running)
@@ -418,7 +424,12 @@ class BackgroundSupervisor:
         except Exception as exc:
             try:
                 await self.handle_attempt_failure(
-                    running.task, running.run, running.attempt, "exception", exc
+                    running.task,
+                    running.run,
+                    running.attempt,
+                    "exception",
+                    exc,
+                    agent=running.agent,
                 )
             finally:
                 await self.cleanup_running_attempt(running)
@@ -775,6 +786,11 @@ class BackgroundSupervisor:
             async def invoke():
                 if getattr(agent, "mcp_tools", None):
                     await agent.connect_mcp_servers()
+                if await _timed_out_run(agent, run.run_id):
+                    # A retry after a deadline continues the same run. A new
+                    # attempt would wipe its tool calls, and a refund the first
+                    # attempt issued would be issued again.
+                    return await agent.resume(run.run_id)
                 return await agent.run(**kwargs)
 
             # A deadline marks the run as timed out, not cancelled, in its trace.
@@ -789,6 +805,7 @@ class BackgroundSupervisor:
         attempt: BackgroundAttempt,
         reason: str,
         exc: BaseException,
+        agent: Any = None,
     ) -> None:
         status = AttemptStatus.TIMEOUT if reason == "timeout" else AttemptStatus.FAILED
         if run.lease_token is not None:
@@ -807,6 +824,21 @@ class BackgroundSupervisor:
             reason in task.retry_policy.retry_on
             and spent <= task.retry_policy.max_retries
         )
+        if can_retry and reason != "timeout":
+            # A failed run cannot be resumed, so its retry starts over. That is
+            # safe only if the run changed nothing outside itself: a refund the
+            # failed attempt issued would be issued again. Such a run waits for
+            # a person, with the calls named.
+            found = await _failed_run_side_effects(agent, run.run_id)
+            if found:
+                await self.mark_terminal(
+                    run,
+                    RunStatus.FAILED,
+                    f"{exc} Not retried: the run has side effects "
+                    f"({_describe_effects(found)}); a person decides whether to run it again.",
+                    metadata={"side_effects": found},
+                )
+                return
         if can_retry:
             retry_delay = retry_delay_seconds(task, spent)
             if run.lease_token is not None:
@@ -853,9 +885,13 @@ class BackgroundSupervisor:
         await self.mark_terminal(run, terminal, str(exc))
 
     async def mark_terminal(
-        self, run: BackgroundRun, status: RunStatus, error: str | None
+        self,
+        run: BackgroundRun,
+        status: RunStatus,
+        error: str | None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
-        await self.transitions.mark_terminal(run, status, error)
+        await self.transitions.mark_terminal(run, status, error, metadata)
 
     async def heartbeat_until_finished(
         self, run_id: str, lease_token: str | None
@@ -922,6 +958,42 @@ class BackgroundSupervisor:
         self, attempt: BackgroundAttempt, run: BackgroundRun
     ) -> None:
         await self.transitions.mark_attempt_cancelled(attempt, run)
+
+
+async def _timed_out_run(agent: Any, run_id: str) -> bool:
+    """Whether the agent holds this run as one that ended at its deadline, and
+    can continue it. An agent without durable runs starts over, as before."""
+    if not callable(getattr(agent, "resume", None)):
+        return False
+    get_run = getattr(agent, "get_run", None)
+    if not callable(get_run):
+        return False
+    try:
+        record = await get_run(run_id)
+    except Exception:  # noqa: BLE001 - no record to read means start the attempt as usual.
+        return False
+    return isinstance(record, dict) and record.get("status") == "timeout"
+
+
+async def _failed_run_side_effects(agent: Any, run_id: str) -> list[dict[str, str]]:
+    """The calls a failed run made that cannot safely be made again, from the
+    agent's record of it. Empty when the agent keeps no record."""
+    get_run = getattr(agent, "get_run", None)
+    if not callable(get_run):
+        return []
+    try:
+        record = await get_run(run_id)
+    except Exception:  # noqa: BLE001 - no record to read: nothing known to protect.
+        return []
+    if not isinstance(record, dict):
+        return []
+    return side_effects(record)
+
+
+def _describe_effects(found: list[dict[str, str]]) -> str:
+    return ", ".join(
+        f"{item['tool_name']} {item['tool_call_id']}: {item['outcome']}" for item in found
+    )
 
 
 def _accepts_keyword(signature: inspect.Signature, name: str) -> bool:
