@@ -11,17 +11,6 @@ Every release, with its notes, is also on
 
 ## Unreleased
 
-### Changed
-
-- **A local trace archive packs bodies into segment files.** It kept one file per finished
-  trace, about 4.7 a visit for 30 days: millions of files, and kernel inode and name caches
-  that grew with them. Bodies are now appended to `bodies/segments/<hour>-<writer>.seg`, one
-  segment per process per hour, and a trace's index row records its offset and length. A segment
-  is deleted when no trace points into it. Archives written by 0.5.1 and earlier are still
-  read and pruned; nothing is rewritten. Object storage keeps one object per trace. For a busy
-  deployment, [export traces](/docs/how-to-guides/stores-and-scale#traces) and shorten
-  `retention_days`.
-
 ### Fixed
 
 - **A resumed run's final summary covers the whole run.** The `run_summary` on its `final_answer`
@@ -198,6 +187,15 @@ Every release, with its notes, is also on
   was saved in that case, so it now answers `503` with `Retry-After: 1`; send the same decision again.
 
 ### Changed
+
+- **A local trace archive packs bodies into segment files.** It kept one file per finished
+  trace, about 4.7 a visit for 30 days: millions of files, and kernel inode and name caches
+  that grew with them. Bodies are now appended to `bodies/segments/<hour>-<writer>.seg`, one
+  segment per process per hour, and a trace's index row records its offset and length. A segment
+  is deleted when no trace points into it. Archives written by 0.5.1 and earlier are still
+  read and pruned; nothing is rewritten. Object storage keeps one object per trace. For a busy
+  deployment, [export traces](/docs/how-to-guides/stores-and-scale#traces) and shorten
+  `retention_days`.
 
 - **A call's budgets go to the store in one transaction, not one per scope.** A model call holds
   its cost on the request, session and application counters and settles all three afterwards, and
