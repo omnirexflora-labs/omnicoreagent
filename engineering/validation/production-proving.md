@@ -435,6 +435,79 @@ Each line names the commit; the plan's execution log has the detail.
     failed, and the Harbor adapter fetches the encodings at install. The same
     trial then passed. (`src/omnicoreagent/core/summarizer/tokenizer.py`)
 
+## Under load and failure: the support desk (0.6.0)
+
+The steward proves the runtime doing real work; it does not prove it under a
+crowd. The second application, a **support desk** ([`apps/support_desk/`](../../apps/support_desk)),
+was built for that: customers ask about orders, ask for refunds, and wait while
+a person approves them; a refund is a non-idempotent write to a ledger. It ran
+on a 2-core, 4 GB container against a fake model provider, ramped to 100
+concurrent users, soaked for 30 minutes, and was hurt from outside in 11 ways
+(the desk killed mid-run and mid-refund, Postgres restarted and killed, Redis
+restarted, the provider answering 429 and 500, hanging, streaming slowly, tools
+slowed and timed out). The measurements and every decision are in the
+[production readiness plan](../architecture/production-readiness-plan.md).
+The first ramp failed 46 runs; the last one completed every run.
+
+55. **A crowd of runs on one budget failed them.** At 100 users, 46 runs failed
+    with "Could not record the budget change", ten of them after their refund
+    was issued. A budget change was a read, a change in Python and a
+    version-checked write, so concurrent runs conflicted. Each change is now one
+    guarded statement (`spent = spent + x` within the limit) in SQL, Redis and
+    MongoDB, and holds are rows of their own; 200 concurrent runs on one budget
+    now end with the exact total.
+56. **A charge for work already done could fail the run.** It is now retried,
+    logged and visible, and never fails a run whose work happened.
+57. **Redis raised `MaxConnectionsError`** past 20 concurrent budget calls. The
+    pool now waits for a free connection.
+58. **A provider 500 was not retried, and `Retry-After` was ignored.** 408, 429,
+    5xx and 529 are retried, honouring `Retry-After` within the run's deadline.
+59. **Failed runs read `provider_error` with `error: null`.** The record now holds
+    the real error under the right cause.
+60. **A Postgres outage at the start of a request lost the customer's message.**
+    A message the store could not write is now an error, never a silent loss.
+61. **An approved run whose client never resumed it waited forever,** and so did
+    the interactive runs of a process that died. The server now sweeps for them,
+    claims each with a version check, and resumes it; a slow resume keeps its
+    claim with a heartbeat, so a second sweeper cannot take the same run. With no
+    operator at all, every run crashed by the four process-killing faults was
+    recovered by the sweep alone.
+62. **A person's approval could be lost to the run's last heartbeat,** and a
+    decision that could not be saved for a conflict answered 500. The decision
+    is re-read and re-saved, and answers `503` with `Retry-After` if it still
+    cannot be.
+63. **A run that timed out after side effects did not say what had happened.**
+    Its record now carries `side_effects`; a started, non-idempotent call that
+    timed out is `unknown`, not a timeout; a timed-out run can be resumed; and a
+    background retry no longer repeats a side effect.
+64. **SQLite failed concurrent runs, and MongoDB opened a connection per
+    concurrent first call.** Both are fixed.
+65. **Memory climbed 2.8 MiB a minute without a plateau.** The agent kept every
+    session's state for the life of the process, and glibc opened an allocator
+    arena per thread. Session state is released when a run ends and OmniServe
+    caps the arenas at two; the process's own memory is now flat over 30 minutes.
+66. **The trace archive wrote a file per trace, and a lock file beside each:**
+    about 4.7 files a visit, millions a month, and kernel memory that grew with
+    them. Local bodies are now packed into one segment file per process per hour.
+67. **`/prometheus` request counts stopped at 1,000,** and nothing said what runs,
+    models, budgets or approvals did. The histogram is cumulative, and counters
+    for each are added. A resumed run's trace no longer records its approval
+    request twice.
+68. **Every request was admitted, and all of them slowed together:** chat p50 was
+    37 s at 100 users. A process now admits 24 concurrent runs (the measured
+    knee) and answers the rest `503` with `Retry-After`, nothing started; two
+    replicas on the same two cores served 1.7 times one process, each refund
+    exactly once across both.
+69. **The SQL memory store did a ping, a commit and a rollback per operation**
+    (about 45% of a 30-user profile), and resuming a run listed every trace in
+    the store. Both are gone; a refund run went from 60 database transactions
+    to 39.
+
+Still missed, measured and documented: the runtime's own time per step is
+162 ms at p95 against a 100 ms target, about 100 ms of it CPU in the model
+client library and the telemetry write
+([OmniServe guide](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/omniserve)).
+
 ## What it cost
 
 A read-the-repository run costs about two to eight cents on `gpt-5.6-terra`
@@ -448,15 +521,16 @@ rather than a defect.
 
 ## What is still open
 
-- The SQL task store is SQLite-only; the steward's task store is Redis.
-- A Postgres telemetry index, for several OmniServe processes sharing one
-  store, and storing the tool catalog once across traces (about 70 KB per
-  run for the steward) are deferred.
-- No backend prunes run history. A write no longer costs what the history
-  behind it weighs, but nothing removes old runs.
-- One process serves about 15 runs a second of the runtime's own work and
-  cannot be made to serve more by raising concurrency; more than one process
-  on one shared database is not proved yet (scale plan S4).
+- Storing the tool catalog once across traces (about 70 KB per run for the
+  steward) is deferred; within a trace it is recorded once.
+- The runtime's own CPU per step (about 100 ms, mostly the model client
+  library) is the limit on one process; more processes are the answer.
+
+Closed since this list was first written: the SQL task store takes PostgreSQL
+and MySQL; the telemetry index can be a shared database (`archive_index_url`);
+finished run records are pruned after 30 days (`run_retention_days`); and
+several processes on one shared database are proved by the support desk
+(findings 61 and 68).
 
 ## The traces
 

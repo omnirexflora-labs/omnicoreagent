@@ -76,5 +76,8 @@ Each fix has a test that fails without it.
 
 ## Known issues in 0.5.0
 
-These are listed for users in the [changelog](../../docs/changelog.mdx#known-issues). They are
+These are listed for users in the [changelog](../../docs/changelog.mdx#known-issues-in-050). They were
 deferred to 0.5.1 because none breaks a core promise on a normal path.
+
+*Status at 0.6.0:* the sibling-skill read and the small budget's repeated pauses were fixed in
+0.5.1; the slow first run is `import litellm` and still applies, listed under 0.6.0's known issues.

@@ -189,7 +189,7 @@ omnicoreagent harbor results jobs
 | **Sub-agents** | Workers spawned by the lead, each with its own trace linked to the parent's, spending the lead's one budget. With worker profiles the lead picks the kind of worker for each task: its model, reasoning effort, tools and narrower rules. A worker's approval or budget request pauses the lead. | [Sub-agents](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/sub-agents) |
 | **Background work** | Scheduled and manual tasks with a durable task store (Redis, MongoDB, SQL), leases, retries, recovery after a restart, one run per task at a time. | [Background agents](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/background-agents) |
 | **Telemetry** | One trace per run, readable end to end — every model call, tool call, sandbox command, approval and budget decision — complete by default (`capture: "default"` leaves model prompts out), personal data redacted from the record (never from the run); exported to OTLP, LangSmith, Opik or JSONL. | [Read a run](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/read-a-run), [Telemetry](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/observability), [Privacy](https://docs-omnicoreagent.omnirexfloralabs.com/docs/core-concepts/privacy) |
-| **Serving** | `omniserve run --agent agent.py`: REST and SSE for runs, approvals, budgets, background tasks, traces; auth, rate limits, metrics; your own pages beside the API. | [OmniServe](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/omniserve) |
+| **Serving** | `omniserve run --agent agent.py`: REST and SSE for runs, approvals, budgets, background tasks, traces; auth, rate limits, Prometheus metrics; an admission limit per process, replicas behind a load balancer on one shared store, and runs a dead process left behind resumed by the server; your own pages beside the API. | [OmniServe](https://docs-omnicoreagent.omnirexfloralabs.com/docs/how-to-guides/omniserve) |
 
 A governed agent, in one config:
 
@@ -237,8 +237,12 @@ own failures into work, and runs on a schedule — is its first application
 ([`apps/steward/`](./apps/steward)). Trials on Harbor are the second: tasks
 built so they can only be passed through the thing they prove, and tasks built
 to go wrong, each checked by reading how the trial ended, not only its reward.
-What broke along the way — **54 findings**, each with what happened, why, and
-what fixed it — is the
+A **support desk** ([`apps/support_desk/`](./apps/support_desk)) is the third: a
+crowd of customers asking for refunds a person approves, ramped to 100
+concurrent users, soaked for 30 minutes, and hurt in 11 ways (the server and its
+database killed mid-refund, the model provider failing), with every refund
+counted once. What broke along the way — **69 findings**, each with what
+happened, why, and what fixed it — is the
 [production proving write-up](./engineering/validation/production-proving.md).
 
 How this compares with the OpenAI Agents SDK, LangGraph, Pydantic AI, the
