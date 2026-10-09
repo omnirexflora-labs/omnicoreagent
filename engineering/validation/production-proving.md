@@ -461,7 +461,8 @@ The first ramp failed 46 runs; the last one completed every run.
 57. **Redis raised `MaxConnectionsError`** past 20 concurrent budget calls. The
     pool now waits for a free connection.
 58. **A provider 500 was not retried, and `Retry-After` was ignored.** 408, 429,
-    5xx and 529 are retried, honouring `Retry-After` within the run's deadline.
+    500, 502, 503, 504 and 529 are retried; `Retry-After` is a floor, capped at
+    60 s, and a wait that would pass the run's deadline is not started.
 59. **Failed runs read `provider_error` with `error: null`.** The record now holds
     the real error under the right cause.
 60. **A Postgres outage at the start of a request lost the customer's message.**
