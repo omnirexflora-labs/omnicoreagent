@@ -43,6 +43,11 @@ async def test_concurrent_runs_keep_the_ledger_and_the_process_clean(tmp_path):
 
     before, after = report["before"], report["after"]
     assert after["tasks"] <= before["tasks"]
-    assert after["fds"] <= before["fds"] + concurrency
+    # The agent opens its own stores once, on first use, and keeps them: the
+    # trace log, the archive index with its WAL and shared memory, and this
+    # process's segment of the archive (0.6.0). Those five are not per run;
+    # a descriptor leaked per run would show eight here, one per run.
+    agent_files = 5
+    assert after["fds"] <= before["fds"] + concurrency + agent_files
     # A run's trace is bounded by the run, not by how many ran beside it.
     assert report["telemetry_bytes_per_run"] < 1_000_000

@@ -9,9 +9,34 @@ icon: 'clock-rotate-left'
 Every release, with its notes, is also on
 [GitHub Releases](https://github.com/omnirexflora-labs/omnicoreagent/releases).
 
-## Unreleased
+## 0.6.0
+
+*October 2026 · Python 3.12+*
+
+Proved under load and failure, no new features. A support desk app ran at 100 concurrent users on a
+2-core container, soaked for 30 minutes, and was hurt in 11 ways; everything it broke is fixed below
+([what broke, and why](https://github.com/omnirexflora-labs/omnicoreagent/blob/main/engineering/validation/production-proving.md#under-load-and-failure-the-support-desk-060)).
+Most code runs unchanged. What now behaves differently:
+
+- **OmniServe admits 24 concurrent runs per process.** Past that a request waits up to 5 s, then gets
+  `503` with `Retry-After`, nothing started. `OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS=0` admits
+  everything, as before.
+- **OmniServe resumes runs nobody else will:** those a dead process left behind, and approved runs
+  no client resumed.
+- **Budgets move to new storage on first touch.** Do not run 0.5.x and 0.6.0 against the same store
+  at once. A custom memory store that implements budgets needs three new methods (below).
+- **A local trace archive writes segment files**, not a file per trace. Archives written by 0.5.x
+  are still read and pruned.
+- **`/prometheus`** request durations are a cumulative histogram, without the `_avg` line.
+
 
 ### Fixed
+
+- **The release includes the portable-evidence schema.** The sdist listed only `*.py` files, and the
+  wheel is built from it, so 0.5.x shipped without
+  `core/telemetry/schemas/portable-execution-evidence.schema.json`: validating or importing portable
+  evidence from an installed release raised `FileNotFoundError`. Every file in the package is now in
+  the release, and a test holds that. Found by running the test suite against the built 0.6.0 wheel.
 
 - **A resumed run's final summary covers the whole run.** The `run_summary` on its `final_answer`
   event described the last segment only: a run that took two segments, two model calls and 24
@@ -115,7 +140,7 @@ Every release, with its notes, is also on
 - **A provider 500 is retried, and `Retry-After` is obeyed.** Twelve 500s
   failed twelve runs in the support desk chaos run, and a 429 asking for 3
   seconds was retried after about 1. Transient provider errors (429, 500,
-  502, 503, 504, 529, timeouts, dropped connections) are retried with
+  502, 503, 504, 529, 408, timeouts, dropped connections) are retried with
   backoff and jitter; `Retry-After` is a floor (capped at 60 seconds), and a
   wait that would pass the run's deadline is not started. Other 4xx errors
   still fail at once.
@@ -306,12 +331,25 @@ Every release, with its notes, is also on
   `OMNICOREAGENT_SERVE_MALLOC_ARENAS` changes the number (`0` leaves the allocator alone). It does
   nothing off glibc.
 
-- **A session's state is released when its run ends.** The agent kept a `SessionState` for every
-  session that ever ran, with the last run's messages and its loop detector, for the life of the
-  process. In a 30-minute server soak of the support desk (20 users, 2,233 visits) memory rose
-  2.6 to 2.8 MiB a minute with no plateau. Locally the same flow left about 48 more allocated
-  blocks per visit (81 against 33). The store now drops the session when the run leaves, on every
-  exit: completed, failed, cancelled, suspended.
+
+### Known issues
+
+None breaks a core promise. Each is measured, and none is planned to change in a patch.
+
+- **The first run in a fresh process starts slowly.** Loading the model client takes 15–60 s on a
+  cold or loaded machine: it is `import litellm`, which OmniCoreAgent does not control. It runs off
+  the event loop and shows in the trace as a `model.client.load` span. OmniServe and background
+  workers load it while they start, so only a short script or a headless run pays for it.
+- **The runtime's own time per step is about 160 ms at p95.** Measured on a 2-core container at
+  20 users, excluding the model's time; about 100 ms of it is CPU in the model client library and
+  the telemetry write. Against model calls of 1 to 10 seconds it is a few percent of a run. It is
+  also why one process bends at about 24 concurrent runs: run more processes
+  ([how many runs one process takes](/docs/how-to-guides/omniserve#how-many-runs-one-process-takes)).
+- **A run can fail after a side effect when the model keeps failing.** If the provider still
+  answers 429 or 500 after every retry, the run fails with that error, after whatever its tools
+  already did. The work is never repeated, and the run's record lists it under `side_effects`
+  (for example `issue_refund`, `success`), so the failure is explainable from the record alone. A
+  failed run cannot be resumed; the caller starts a new one.
 
 ## 0.5.1
 
@@ -483,10 +521,10 @@ get without setting one, `full`, keeps the values (personal data redacted).
   docs, read 2026-09-29. Pydantic AI's `cost_limit` cell is corrected: it is
   checked after each response.
 
-### Known issues
+### Known issues in 0.5.0
 
-These come from the 0.5.0 release testing. None breaks a core promise on a normal path. Each is
-planned for 0.5.1.
+These came from the 0.5.0 release testing. None broke a core promise on a normal path. The current
+list is under [0.6.0](#known-issues).
 
 - **The first run in a fresh process starts slowly.** Loading the model client can take 15–60 s on
   a cold or loaded machine. Measured in 0.5.1, it is `import litellm` (about 3,000 modules; about
@@ -496,9 +534,10 @@ planned for 0.5.1.
   is light: `import omnicoreagent` takes about 10 ms, building an agent and initializing it
   well under a second, with `litellm` and `openai` not yet loaded. OmniServe and background
   workers load it while they start, so only a short script or a headless run pays for it on its
-  first run.
+  first run. *Still applies: see [0.6.0](#known-issues).*
 - **A very small budget pauses on every call.** With a limit as low as one tool call, each call
-  pauses on its own, so a person grants each one in turn.
+  pauses on its own, so a person grants each one in turn. *Fixed in 0.5.1 for a grant that names
+  its amount.*
 - **`read_skill_file` can read a sibling skill's files.** Its path check is by prefix, so a sibling
   whose name starts with the skill's own name (`../my-skill-extra/file` from `my-skill`) is not
   refused. Paths outside the skills folder are. Fixed in 0.5.1.

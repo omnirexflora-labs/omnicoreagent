@@ -147,6 +147,7 @@ include = [
     "/README.md",
     "/pyproject.toml",
     "/src/omnicoreagent/**/*.py",
+    "/src/omnicoreagent/**/*.json",
     "/cookbook/**/*.py",
 ]
 
